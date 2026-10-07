@@ -196,7 +196,7 @@ Live tests run from a filtered, non-elevated SSH token on each host and must pro
 
 - Use a unique current-upstream worktree; stage only owned files; never push to `main`.
 - Declare the real task class and recheck before review, shipment, installation, or live proof. A refusal stops work; it is not bypassed.
-- Installation/live proof is one host and one unproven outcome per session.
+- Installation/live proof verifies each host separately; continue authorized work when actual gates allow.
 - Every GitHub call goes through `bin/ai-gh`; CI waits use `bin/ai-pr-wait` with a bound.
 - Independent read-only exact-head security approval is mandatory before merge and again before each protected live-host installation.
 - Check runner idleness immediately before every host mutation. Do not stop, restart, replace, relabel, or reconfigure the runner service.

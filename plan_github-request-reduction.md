@@ -241,7 +241,7 @@ discovery errors, not evidence that GitHub capacity improved.
 **Locked:** preserve capabilities, safety checks and concurrent workers; source
 reduction precedes claims of completion; use existing `ai-gh`/waiters/BlockerWatch;
 no hidden fallback, quota bypass or automatic mutation retry; no secret-bearing
-telemetry; one live outcome per session; compare equivalent workloads.
+telemetry; continue authorized live outcomes when actual gates allow; compare equivalent workloads.
 
 **Selected direction:** separate bucket-aware admission from reusable read
 snapshots. Keep `ai-gh` a transparent CLI boundary for existing callers. Add opt-in
@@ -440,7 +440,7 @@ Use supported installers after backing up affected config. Preserve Claude, Code
 and ZCode parity; never overwrite a client's config through another client's setup.
 Resolve each installed launcher/symlink and actual script hash. Windows and Bash
 both need proof. A prose router change is not proof of installed executable routing.
-Each installation session owns one host's outcome and retains all capabilities.
+Verify each host’s installation outcome separately and retain all capabilities; continue authorized work when actual gates allow.
 
 Gate: checked matrix names host, client/scheduler, authenticated-principal class,
 script hash, installer evidence and representative live result. Every active source

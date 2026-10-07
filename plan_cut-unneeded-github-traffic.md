@@ -98,7 +98,7 @@ count `gh_api`/`gh_call` sites in the tick path; compare with a replay fixture
 - Disabling BlockerWatch, lengthening the 10-minute tick, lengthening the
   5-minute waiter floor, or dropping wakes/alarms/links to save calls.
 - A new webhook service, cloud broker, or remote coordinator.
-- Implementing more than one step per session (see STATUS).
+- Claiming completion without proving each authorized step (see STATUS).
 
 ## 5. Current state of the code
 
@@ -223,7 +223,7 @@ reopen them here.)
 - Snapshot miss ⇒ REST fallback. Never infer CLOSED from "not in the snapshot".
 - `issue_json` cache/budget stay file-based under `$ALARM_TICK` and are wiped
   after the scan (comment bodies must not linger).
-- One step / one unproven live outcome per session. Update STATUS as you go.
+- Continue authorized steps and verify each live outcome when actual gates allow. Update STATUS as you go.
 - Public repo: no raw transcripts, secrets, or private identifiers in reports.
 
 **OPEN (implementer's judgment within these criteria):**
@@ -465,7 +465,7 @@ inventory disposition only; do not pool with the user quota.
 - **Long waits** use bounded in-session `ai-pr-wait` / `ai-gh-wait` with an
   explicit `--timeout-minutes` deadline. If the wait outlives the turn, leave
   the issue/PR as the card (registration is OUT; #1183 child 3).
-- **One unproven live outcome per session.** If code lands without live proof,
+- **Verify each authorized live outcome.** If code lands without live proof,
   leave a `- [ ] live proof` checklist item on the same issue before the session
   ends (leftover-proof issues superseded 2026-09-29 by
   [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).

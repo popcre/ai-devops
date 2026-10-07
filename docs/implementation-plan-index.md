@@ -39,7 +39,7 @@ record merely to reduce the file count.
 | [`plan_typesafe-jev-decision-layer.md`](../plan_typesafe-jev-decision-layer.md) | [#643](https://github.com/popcre/ai-devops/issues/643) | Public-data pilots first; Jev never opens a gate or replaces review |
 | [`plan_typesafe-jev-advisory-integrations.md`](../plan_typesafe-jev-advisory-integrations.md) | [#643](https://github.com/popcre/ai-devops/issues/643) | Advisory integrations after decision-layer gates |
 | [`plan_typesafe-jev-spend-reduction.md`](../plan_typesafe-jev-spend-reduction.md) | (see plan STATUS) | Measured token substitution; key via `op run` only |
-| [`plan_workflow-efficiency.md`](../plan_workflow-efficiency.md) | [#650](https://github.com/popcre/ai-devops/issues/650) | One measured outcome per session; reuse existing repairs |
+| [`plan_workflow-efficiency.md`](../plan_workflow-efficiency.md) | [#650](https://github.com/popcre/ai-devops/issues/650) | Continue authorized outcomes when actual gates allow; reuse existing repairs |
 | [`plan_zcode-windows-support.md`](../plan_zcode-windows-support.md) | [#558](https://github.com/popcre/ai-devops/issues/558) | Follow the Claude/Codex per-client pattern; NO ZCode reviewer ever |
 
 ## Completed decision records
@@ -65,11 +65,11 @@ approach.
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
 | `plan_reviewer-system-repair.md` | Closed issue #34 and complete STATUS |
-| `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; one unproven live-proof outcome per session. **Resolve live state:** plan STATUS step 8 is 🟡 partial — installed-global proof and issue #511 closure remain (owner-gated). Do not treat as fully closed until that proof lands. |
+| `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; former one-outcome stopping limits were permanently revoked 2026-10-07 EDT. **Resolve live state:** plan STATUS step 8 is 🟡 partial — installed-global proof and issue #511 closure remain (owner-gated). Do not treat as fully closed until that proof lands. |
 | `plan_shared-db-complete-throughput-repair.md` | Closed issue #401; every in-scope row is live-proven, and repository transfer/merge-queue work remains separately owned by popcre/shared-db#2530 |
 | `plan_agent-self-cleanup.md` | All five steps done (live re-proof 2026-09-28 on PR #1029); residual extension tracked in #1018 |
 | `plan_self-healing-locks-and-settings-drift.md` | Steps 4–5 done (2026-09-28); drift check dispatch and live proof recorded |
-| `plan_split-ci-suite-manifest.md` | Steps 0–4 done (PR #1007, `9cf1bed3`); step 5 live proof moved to #1023 (one leftover proof per session) |
+| `plan_split-ci-suite-manifest.md` | Steps 0–4 done (PR #1007, `9cf1bed3`); step 5 live proof moved to #1023 (verify each authorized proof; former session limits revoked) |
 
 ## Superseded or reference-only records
 

@@ -330,7 +330,7 @@ Never write "add tests" without the names above.
 - Windows: wrappers need Git Bash (`C:\Program Files\Git\bin\bash.exe`), not WSL `bash`.
 - Do not add a new root `plan_*.md`. Do not re-run #168. Do not implement item 3 or item 9.
 - Do not use raw wall-clock asserts. Do not re-add prune/reconcile sweeps to doctor's check path.
-- One unproven live-behavior outcome per session (`plan_live-proof-session-sizing.md`).
+- Verify each authorized live-behavior outcome and continue when actual gates allow (`plan_live-proof-session-sizing.md`).
 - Private transcripts never enter the public repo or reviewer packets.
 - `docs/doc-reachability.md` may gate new Markdown — run the reachability tool if the index edit is large.
 

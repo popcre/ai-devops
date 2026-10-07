@@ -1,4 +1,4 @@
-# IMPLEMENTATION PLAN — one unproven live-proof outcome per session (2026-09-16)
+# IMPLEMENTATION PLAN — live-proof ownership and completion (2026-09-16; session limits revoked)
 
 **Tracking issue:** [popcre/ai-devops #511](https://github.com/popcre/ai-devops/issues/511)
 **Handoff:** retired 2026-09-16. The original handoff and the temporary PR #520 handoff were deleted after their obligations were incorporated here.
@@ -8,7 +8,14 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
 ## STATUS — read first
 
-> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** the leftover-proof **issue** rule below is deleted as process. A proof gap is a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Session-sizing honesty (one unproven outcome per session) is kept; only the issue minting is gone. Mentions of leftover-proof issues in this file are historical.
+> **Owner ruling, 2026-10-07 EDT:** automatic stopping after one child, phase,
+> or live-proof outcome is permanently revoked. Continue the authorized scope
+> and verify each outcome when actual dependencies, ownership, collision
+> controls and safety gates allow. All older session-count limits, refuse-bundle
+> instructions and stop-after-one instructions below are historical, not active
+> instructions. Proof gaps remain on the same issue; live proof is still required.
+
+> **Historical 2026-09-29 update:** [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) deleted leftover-proof issue creation. Its former retention of one-outcome session limits was superseded by the 2026-10-07 owner ruling above. A proof gap remains a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`); never open a leftover-proof issue.
 
 The original refuse-bundle work is complete. The source-rule follow-up merged through PR #520; acceptance now waits only on installed-global proof and issue closure. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
@@ -65,7 +72,7 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 
 **In this plan**
 
-- One standing rule: a session owns one unproven live-behavior outcome.
+- Historical scope, revoked 2026-10-07 EDT: one unproven outcome per session. Current instruction: verify and continue the authorized scope when actual gates allow.
 - Cheap tests so the phrase cannot be dropped or line-wrapped.
 - One sentence in the shared-db handover skill so leftover proofs are not bundled when filed.
 - Stop the #401 STATUS table from pointing several unproven steps at 3027, without stealing work from a live 3027 session.
@@ -188,7 +195,7 @@ git grep -n "Live proof owner (routed 2026-09-16): \[shared-db#3027\]" origin/ma
 - `templates/system/CLAUDE-global.md` — new bullet immediately after the **Start immediately.** bullet (after line 112 on `9b205e22`).
 - `templates/system/AGENTS-global-codex.md` — same place (after line 94 on `9b205e22`).
 
-**Insert this exact bullet, one line, do not wrap the marked phrase:**
+**Historical implementation, revoked 2026-10-07 EDT — never insert or restore this bullet:**
 
 ```
 - **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.

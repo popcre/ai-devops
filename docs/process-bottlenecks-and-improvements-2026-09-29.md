@@ -1,5 +1,11 @@
 # Process bottlenecks and improvements — decision document for the owner
 
+> **Owner ruling, 2026-10-07 EDT:** automatic one-child, one-phase and
+> one-live-outcome stopping limits are permanently revoked. Older recommendations
+> below imposing those limits are historical. Continue the authorized scope
+> when actual dependencies, ownership, collision controls and safety gates allow;
+> verify every outcome and keep genuine proof gaps on the same issue.
+
 **Date range of evidence:** 2026-09-08 through 2026-09-29 (some live state checked 2026-09-30). Human times in EST.
 **Written:** 2026-09-29/30. **Repository:** `popcre/ai-devops` (public).
 **Purpose:** This is a decision document, not an incident log. It answers four questions in plain language: what we are doing wrong, where work piles up, which steps we should delete, and how to stop sessions sitting around waiting on CI. It is built from two filtered transcript studies (a 1,306-session process remainder and a 309-session CI/rate-limit remainder), the shared-db process diagnosis already in this repository, and the STATUS of the plans that already own related work. Every recommendation says what to change, why, the payoff, and the rough cost. Where work is already owned, this document says so and forbids a parallel plan.
