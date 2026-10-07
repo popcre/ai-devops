@@ -69,7 +69,7 @@ approach.
 | `plan_shared-db-complete-throughput-repair.md` | Closed issue #401; every in-scope row is live-proven, and repository transfer/merge-queue work remains separately owned by popcre/shared-db#2530 |
 | `plan_agent-self-cleanup.md` | All five steps done (live re-proof 2026-09-28 on PR #1029); residual extension tracked in #1018 |
 | `plan_self-healing-locks-and-settings-drift.md` | Steps 4–5 done (2026-09-28); drift check dispatch and live proof recorded |
-| `plan_split-ci-suite-manifest.md` | Steps 0–4 done (PR #1007, `9cf1bed3`); step 5 live proof moved to #1023 (one leftover proof per session) |
+| `plan_split-ci-suite-manifest.md` | Steps 0–4 done (PR #1007, `9cf1bed3`); step 5 live proof moved to #1023 (verify each authorized proof; former session limits revoked) |
 
 ## Superseded or reference-only records
 
