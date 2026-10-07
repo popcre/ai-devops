@@ -125,7 +125,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.6'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.7'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -203,6 +203,19 @@ set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new autoq --prompt review) 2>"$TMP/newdup
 check 'new duplicate session never auto-requalifies' "test '$NEWDUP_RC' -ne 0 && grep -q 'session already exists' '$TMP/newdup.err' && ! grep -q 'requalifying automatically' '$TMP/newdup.err' && test ! -s '$MOCK_AGY_CALLS'"
 set +e; (cd "$TMP" && "$SCRIPT" new norepo --prompt review) 2>"$TMP/norepo.err"; NORREPO_RC=$?; set -e
 check 'non-repo cwd never auto-requalifies' "test '$NORREPO_RC' -ne 0 && grep -q 'Git repository' '$TMP/norepo.err' && ! grep -q 'requalifying automatically' '$TMP/norepo.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Governed SHA, base/assert refs, and reusable-session state also die before
+# paid requalification.
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new --governed-verdict notasha badsha --prompt review) 2>"$TMP/badsha.err"; BADSHA_RC=$?; set -e
+check 'bad governed SHA never auto-requalifies' "test '$BADSHA_RC' -ne 0 && grep -q 'governed verdict head' '$TMP/badsha.err' && ! grep -q 'requalifying automatically' '$TMP/badsha.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new badbase --base nosuchref --prompt review) 2>"$TMP/badbase.err"; BADBASE_RC=$?; set -e
+check 'bad base ref never auto-requalifies' "test '$BADBASE_RC' -ne 0 && grep -q 'base ref not found' '$TMP/badbase.err' && ! grep -q 'requalifying automatically' '$TMP/badbase.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askstale.err"; ASKSTALE_RC=$?; set -e
+check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -qE 'session requires recovery|configured model differs|working checkout changed' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Force model mismatch on the same reusable session.
+write_qualification 1.1.14 gemini-other; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askmodel.err"; ASKMODEL_RC=$?; set -e
+check 'ask model-mismatched session never auto-requalifies' "test '$ASKMODEL_RC' -ne 0 && grep -q 'configured model differs' '$TMP/askmodel.err' && ! grep -q 'requalifying automatically' '$TMP/askmodel.err' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification
 
 echo '== byte identity and exact identity gates'

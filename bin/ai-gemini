@@ -46,7 +46,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard gemini "$_AI_EVENT_SELF" "$@"
   unset _AI_EVENT_SELF
 fi
-VERSION=0.2.6
+VERSION=0.2.7
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 # Caller identity: explicit AI_GEMINI_CALLER wins; otherwise the harness is
@@ -225,34 +225,88 @@ auto_requalify(){
 }
 require_local_runtime(){ local a; a="$(agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
-# validate_request_source: non-consuming pre-check of the command, session
-# name, prompt source, repository location, and session existence so an
-# invalid request dies before auto_requalify can spend live qualification
-# allowance or change qualification state. Never reads stdin.
+# validate_request_source: non-consuming pre-check of the full request shape
+# so an invalid request dies before auto_requalify can spend live qualification
+# allowance or change qualification state. Covers command, governed SHA,
+# base/assert refs, session name, prompt source, repository location, session
+# uniqueness/existence, and reusable-session state. Never reads stdin.
 validate_request_source(){
   local cmd="${1:-}"
-  local -a args=("$@") idx=1
-  if [ "${args[idx]:-}" = --governed-verdict ]; then idx=$((idx+2)); fi
-  name_ok "${args[idx]:-}" || die 'invalid session name'
-  idx=$((idx+1))
-  case "${args[idx]:-}" in
+  local -a args=("$@") i n r id m frozen_model actual gov_sha=""
+  # --governed-verdict may appear before the session name (usage order).
+  i=1
+  while [ "$i" -lt "${#args[@]}" ]; do
+    if [ "${args[i]:-}" = --governed-verdict ]; then
+      gov_sha="${args[i+1]:-}"
+      break
+    fi
+    i=$((i+1))
+  done
+  if [ -n "$gov_sha" ]; then
+    case "$gov_sha" in
+      ????????????????????????????????????????) : ;;
+      *) die 'governed verdict head must be a 40-character commit SHA';;
+    esac
+    case "$gov_sha" in
+      *[!0-9a-f]*) die 'governed verdict head must be a 40-character commit SHA';;
+    esac
+  fi
+  # --base / --assert-head are already parsed into OPT_BASE / OPT_ASSERT_HEAD.
+  if [ -n "${OPT_BASE:-}" ]; then
+    git rev-parse --verify --quiet "${OPT_BASE}^{commit}" >/dev/null 2>&1 \
+      || die "base ref not found: $OPT_BASE"
+  fi
+  if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
+    case "$OPT_ASSERT_HEAD" in
+      ????????????????????????????????????????) : ;;
+      *) die 'asserted head must be a 40-character commit SHA';;
+    esac
+    case "$OPT_ASSERT_HEAD" in
+      *[!0-9a-f]*) die 'asserted head must be a 40-character commit SHA';;
+    esac
+    git rev-parse --verify --quiet "$OPT_ASSERT_HEAD^{commit}" >/dev/null 2>&1 \
+      || die "asserted head not found: $OPT_ASSERT_HEAD"
+  fi
+  # Session name is the first non-flag token after the command (and optional
+  # --governed-verdict SHA). Prompt source follows.
+  n=""
+  i=1
+  while [ "$i" -lt "${#args[@]}" ]; do
+    case "${args[i]:-}" in
+      --governed-verdict) i=$((i+2)); continue;;
+      --base|--assert-head) i=$((i+2)); continue;;
+      --prompt|--prompt-file) break;;
+      -*) die "unknown option: ${args[i]}";;
+      *) n="${args[i]}"; i=$((i+1)); break;;
+    esac
+    i=$((i+1))
+  done
+  name_ok "$n" || die 'invalid session name'
+  case "${args[i]:-}" in
     --prompt)
-      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt requires a value.';;
+      [ $((i+1)) -lt "${#args[@]}" ] || die '--prompt requires a value.';;
     --prompt-file)
-      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt-file requires a value.'
-      [ -f "${args[idx+1]}" ] || die 'prompt file not found';;
+      [ $((i+1)) -lt "${#args[@]}" ] || die '--prompt-file requires a value.'
+      [ -f "${args[i+1]}" ] || die 'prompt file not found';;
     *)
       [ ! -t 0 ] || die 'provide --prompt, --prompt-file, or standard input';;
   esac
-  # Full request shape before any paid requalification: repository location
-  # and session uniqueness/existence are checked here, not after auto_requalify.
-  local r id m
+  # Full request shape before any paid requalification: repository location,
+  # session uniqueness/existence, and reusable-session state are checked here,
+  # not after auto_requalify.
   r="$(root)"
   id="$(rid "$r")"
-  m="$(meta "$id" "${args[idx-1]:-}")"
+  m="$(meta "$id" "$n")"
   case "$cmd" in
-    new) [ ! -e "$m" ] || die 'session already exists';;
-    ask) [ -f "$m" ] || die 'session not found';;
+    new)
+      [ ! -e "$m" ] || die 'session already exists';;
+    ask)
+      [ -f "$m" ] || die 'session not found'
+      [ "$(jq -r .status "$m" 2>/dev/null)" = COMPLETE ] || die 'session requires recovery before reuse'
+      frozen_model="$(jq -r '.model // empty' "$m")"
+      [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'
+      actual="$(git -C "$r" rev-parse HEAD)"
+      [ "$actual" = "$(jq -r .head "$m")" ] || die 'working checkout changed; start a new review';;
   esac
 }
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
