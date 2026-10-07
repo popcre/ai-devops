@@ -13,7 +13,9 @@
 #        - exports OP_SERVICE_ACCOUNT_TOKEN from the locked-down file, and
 #        - resolves all op:// references in one `op run` invocation (never
 #          overwriting a value that is already set).
-#      and makes ~/.bashrc and ~/.profile source it (one include line).
+#      and makes ~/.bashrc and ~/.profile source it (one include line). Only
+#      interactive shells resolve automatically; noninteractive scripts can
+#      explicitly opt in with AI_DEVOPS_RESOLVE_SHELL_SECRETS=1.
 #      There is NO `claude` launcher/wrapper: every CLI in the session (claude,
 #      supabase, scripts, ...) is authorized by the exported environment, so
 #      nothing shadows or re-invokes `claude`. (This header previously described
@@ -21,7 +23,8 @@
 #      does, and the stale text caused a real misdiagnosis on 2026-07-16 — the
 #      launcher was reasoned about as a rollout risk that does not exist.)
 #      Cost to know: one shared refresh runs per interactive shell start, and the
-#      resolved secrets live in that shell's environment.
+#      resolved secrets live in that shell's environment. Noninteractive Codex
+#      launchers must not inherit them into shell snapshots or sandbox argv.
 #   5. Installs two MCP launchers (~/.config/ai-devops/mcp-launch.sh and
 #      mcp-remote-launch.sh) so each MCP server resolves its own secrets at
 #      launch, independent of whether the session sourced .bashrc.
@@ -208,6 +211,13 @@ info "Shell snippet -> $SHELLRC"
 read -r -d '' SHELLRC_BODY <<EOF
 # >>> ai-devops secrets (managed by setup-secrets.sh — do not edit by hand) >>>
 # POSIX sh + bash safe. Sourced from ~/.bashrc and ~/.profile.
+# Login shells used to launch Codex and other unattended tools must not inherit
+# every credential. An explicit script may opt in to the old behavior.
+case \$- in
+  *i*) ;;
+  *) [ "\${AI_DEVOPS_RESOLVE_SHELL_SECRETS:-0}" = 1 ] || { return 0 2>/dev/null || exit 0; } ;;
+esac
+unset AI_DEVOPS_RESOLVE_SHELL_SECRETS
 #
 # Load the vault-locked 1Password service-account token (vibe_coding vault
 # ONLY — it cannot read anything else) and resolve every central reference in
@@ -608,12 +618,9 @@ info "Token-free check: raw OP token inside ~/.claude/settings.json"
 # session leaked this exact token into its own transcript on 2026-07-16 by printing
 # settings.json.
 #
-# Safe to remove because the managed shellrc already exports OP_SERVICE_ACCOUNT_TOKEN
-# from $TOKEN_FILE in ~/.bashrc AND ~/.profile, so any shell-launched `claude` still
-# gets it. TRADE-OFF, know this: a claude launched WITHOUT shell init (non-interactive
-# `ssh host claude ...`, systemd, cron) would no longer see the token and will fail to
-# authenticate — loudly, not silently. If you need that, keep the entry and accept the
-# second copy.
+# Safe to remove because interactive shells load the service-account token
+# from the protected file. Noninteractive callers use the managed MCP launchers
+# or explicitly opt in when sourcing shellrc; they never rely on ambient secrets.
 CC_SETTINGS_TOKEN="$HOME/.claude/settings.json"
 if [ ! -f "$CC_SETTINGS_TOKEN" ]; then
   ok "no settings.json yet — nothing to clean"

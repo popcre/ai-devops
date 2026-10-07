@@ -23,6 +23,64 @@ else
   bad "setup-secrets shell syntax is valid"
 fi
 
+# Test the snippet the installer actually renders, with only synthetic values.
+# A login shell is noninteractive and must not fetch credentials for Codex.
+if [ -n "$PYTHON" ]; then
+  shellrc_tmp="$(mktemp -d)"
+  mkdir -p "$shellrc_tmp/bin"
+  TOKEN_FILE="$shellrc_tmp/token"
+  MCP_ENV="$shellrc_tmp/mcp.env"
+  printf 'synthetic-token\n' > "$TOKEN_FILE"
+  printf 'SYNTHETIC_KEY=op://test/fake/key\n' > "$MCP_ENV"
+  "$PYTHON" - "$SOURCE" <<'PY' > "$shellrc_tmp/render-source.sh"
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text()
+start = source.index("read -r -d '' SHELLRC_BODY <<EOF\n")
+end = source.index("\nEOF\n", start) + len("\nEOF")
+print(source[start:end])
+PY
+  . "$shellrc_tmp/render-source.sh" || true
+  printf '%s\n' "$SHELLRC_BODY" > "$shellrc_tmp/shellrc"
+  cat > "$shellrc_tmp/bin/op" <<'SH'
+#!/usr/bin/env bash
+[ -z "${OP_MARKER:-}" ] || printf called > "$OP_MARKER"
+while [ "$#" -gt 0 ]; do
+  [ "$1" != -- ] || { shift; break; }
+  shift
+done
+SYNTHETIC_KEY=synthetic-value "$@"
+SH
+  chmod 700 "$shellrc_tmp/bin/op"
+  if /usr/bin/env -i PATH="$shellrc_tmp/bin:/usr/bin:/bin" HOME="$shellrc_tmp" \
+      bash --noprofile --norc -c '. "$1"; [ -z "${OP_SERVICE_ACCOUNT_TOKEN+x}" ] && [ -z "${SYNTHETIC_KEY+x}" ]' _ "$shellrc_tmp/shellrc"; then
+    ok "noninteractive shell does not resolve credentials"
+  else
+    bad "noninteractive shell does not resolve credentials"
+  fi
+  if /usr/bin/env -i PATH="$shellrc_tmp/bin:/usr/bin:/bin" HOME="$shellrc_tmp" \
+      AI_DEVOPS_RESOLVE_SHELL_SECRETS=1 bash --noprofile --norc -c '. "$1"; [ "$OP_SERVICE_ACCOUNT_TOKEN" = synthetic-token ] && [ "$SYNTHETIC_KEY" = synthetic-value ] && [ -z "${AI_DEVOPS_RESOLVE_SHELL_SECRETS+x}" ]' _ "$shellrc_tmp/shellrc"; then
+    ok "explicit noninteractive opt-in still resolves credentials"
+  else
+    bad "explicit noninteractive opt-in still resolves credentials"
+  fi
+  if /usr/bin/env -i PATH="$shellrc_tmp/bin:/usr/bin:/bin" HOME="$shellrc_tmp" \
+      bash --noprofile --norc -ic '. "$1"; [ "$OP_SERVICE_ACCOUNT_TOKEN" = synthetic-token ] && [ "$SYNTHETIC_KEY" = synthetic-value ]' _ "$shellrc_tmp/shellrc" 2>/dev/null; then
+    ok "interactive shell still resolves credentials"
+  else
+    bad "interactive shell still resolves credentials"
+  fi
+  if /usr/bin/env -i PATH="$shellrc_tmp/bin:/usr/bin:/bin" HOME="$shellrc_tmp" \
+      OP_MARKER="$shellrc_tmp/direct-op" bash "$shellrc_tmp/shellrc" >/dev/null 2>&1 &&
+      [ ! -e "$shellrc_tmp/direct-op" ]; then
+    ok "direct noninteractive execution exits without resolving credentials"
+  else
+    bad "direct noninteractive execution exits without resolving credentials"
+  fi
+  rm -rf -- "$shellrc_tmp"
+fi
+
 # Bash does not parse Python heredoc bodies. Compile every embedded Python
 # block independently so a split string or similar defect cannot pass bash -n.
 if [ -n "$PYTHON" ] && "$PYTHON" - "$SOURCE" <<'PY'
