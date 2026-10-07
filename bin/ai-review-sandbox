@@ -230,6 +230,42 @@ generated_review_path() { # ROOT RELATIVE_PATH; never exclude source by prefix a
   return 1
 }
 
+# Sizes and digests for many regular files from one stat and one sha256sum per
+# chunk instead of a wc and a sha256sum per file: per-file processes were the
+# largest share of a review's cost on Windows (#1355). Chunks stay well under
+# the Windows command-line limit. Any failure, short answer, or unexpected
+# shape returns nonzero so the caller falls back to the per-file readers.
+FS_BYTES=(); FS_SHA=()
+file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
+  local -a chunk=(); local p line len=0 n
+  FS_BYTES=(); FS_SHA=()
+  [ "$#" -gt 0 ] || return 0
+  for p in "$@" ''; do
+    if [ -n "$p" ] && [ "$len" -lt 16000 ]; then chunk+=("$p"); len=$((len + ${#p} + 3)); continue; fi
+    if [ "${#chunk[@]}" -gt 0 ]; then
+      n="${#FS_BYTES[@]}"
+      while IFS= read -r line; do
+        line="${line%$'\r'}"
+        case "$line" in ''|*[!0-9]*) return 1 ;; esac
+        FS_BYTES+=("$line")
+      done < <(stat -c %s -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_BYTES[@]} - n ))" -eq "${#chunk[@]}" ] || return 1
+      local m="${#FS_SHA[@]}"
+      while IFS= read -r line; do
+        # Same field the per-file reader keeps, escape marker included.
+        line="${line%$'\r'}"; line="${line%% *}"; n="${line#\\}"
+        case "$n" in *[!0-9a-f]*) return 1 ;; esac
+        [ "${#n}" -eq 64 ] || return 1
+        FS_SHA+=("$line")
+      done < <(sha256sum -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_SHA[@]} - m ))" -eq "${#chunk[@]}" ] || return 1
+    fi
+    [ -n "$p" ] || break
+    chunk=("$p"); len=$((${#p} + 3))
+  done
+  [ "${#FS_SHA[@]}" -eq "$#" ] && [ "${#FS_BYTES[@]}" -eq "$#" ]
+}
+
 source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible tree identity
   local root="$1" output="$2" list diff rel kind bytes digest tree
   list="$(mktemp)"; diff="$(mktemp)"
@@ -249,29 +285,39 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
   printf 'head_tree\0%s\0tracked_diff_bytes\0%s\0tracked_diff_sha256\0%s\0' \
     "$tree" "$(n="$(wc -c < "$diff")"; printf '%s' "${n// /}")" "$(h="$(sha256sum "$diff")"; printf '%s' "${h%% *}")" >> "$output"
   test_progress || { rm -f "$list" "$diff"; return 1; }
+  local -a rels=() kinds=() files=(); local i f=0
   while IFS= read -r -d '' rel; do
     if generated_review_path "$root" "$rel"; then continue; fi
-    if [ -L "$root/$rel" ]; then
-      kind=symlink
+    if [ -L "$root/$rel" ]; then kinds+=(symlink)
+    elif [ -f "$root/$rel" ]; then
+      [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
+      kinds+=(file); files+=("$root/$rel")
+    else
+      rm -f "$list" "$diff"
+      return 1
+    fi
+    rels+=("$rel")
+  done < "$list"
+  file_stats "${files[@]+"${files[@]}"}" || { FS_BYTES=(); FS_SHA=(); }
+  for i in "${!rels[@]}"; do
+    rel="${rels[$i]}"; kind="${kinds[$i]}"
+    if [ "$kind" = symlink ]; then
       bytes="$(readlink -n "$root/$rel" | wc -c)" || { rm -f "$list" "$diff"; return 1; }
       digest="$(readlink -n "$root/$rel" | sha256sum)" || { rm -f "$list" "$diff"; return 1; }
       bytes="${bytes// /}"; digest="${digest%% *}"
-    elif [ -f "$root/$rel" ]; then
-      [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
-      kind=file
+    elif [ "${#FS_SHA[@]}" -gt 0 ]; then
+      bytes="${FS_BYTES[$f]}"; digest="${FS_SHA[$f]}"; f=$((f + 1))
+    else
       # Shell expansions trim the output: tr and cut processes per file are
       # a measurable share of every review on Windows (#1355).
       bytes="$(wc -c < "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
       digest="$(sha256sum "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
       bytes="${bytes// /}"; digest="${digest%% *}"
-    else
-      rm -f "$list" "$diff"
-      return 1
     fi
     printf 'path\0%s\0type\0%s\0bytes\0%s\0sha256\0%s\0' \
       "$rel" "$kind" "$bytes" "$digest" >> "$output"
     test_progress || { rm -f "$list" "$diff"; return 1; }
-  done < "$list"
+  done
   rm -f "$list" "$diff"
 }
 

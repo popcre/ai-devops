@@ -1253,6 +1253,29 @@ check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '
 check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
 
 # jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
+# #1355: the one-pass rule table and the per-question readers must agree. A
+# non-string rule match forces the readers without changing what applies.
+TABLE="$(mktemp -d)"; git init -q "$TABLE/r"; mkdir -p "$TABLE/r/.ai-devops" "$TABLE/r/src"
+printf '%s' '{"paths":[{"glob":"src/**","class":"shared-db"}],"gates":{"shared-db":{"required":["zz-proof","a-proof"],"forbidden_actions":["deploy"]},"prose":{"required":["r"]}}}' > "$TABLE/r/.ai-devops/task-gates.json"
+echo x > "$TABLE/r/src/a.sql"; echo y > "$TABLE/r/README.md"
+jq '.rules += [{"match":5}]' "$ROOT/config/task-gates.json" > "$TABLE/fallback.json"
+cp "$ROOT/config/task-gates.json" "$TABLE/fast.json"
+table_run(){ (cd "$TABLE/r" && for a in review deploy ship; do AI_TASK_GATES_FILE="$TABLE/$1.json" "$GATES" check --before "$a" 2>&1; echo "rc=$?"; done); }
+check 'one-pass rule table matches the per-question readers' \
+  "[ \"\$(table_run fast)\" = \"\$(table_run fallback)\" ] && table_run fast | grep -q 'a-proof'"
+rm -rf "$TABLE"
+
+# Install checks swap POLICY_FILE between revisions in one process; the rule
+# table must follow the swap or a revision is classified with another's globs.
+SWAP="$(mktemp -d)"
+cp "$ROOT/config/task-gates.json" "$SWAP/a.json"
+jq '.default.paths = [{"glob":"secret/**","class":"private-evidence"}] + .default.paths' "$ROOT/config/task-gates.json" > "$SWAP/b.json"
+mkdir -p "$SWAP/bin"; ln -s "$ROOT/tools" "$SWAP/tools"; sed '$d' "$GATES" > "$SWAP/bin/gates-functions"
+swap_probe(){ ( set +eu; source "$SWAP/bin/gates-functions"; CONSUMER_FILE="$SWAP/none.json"
+  for f in a b; do POLICY_FILE="$SWAP/$f.json"; load_policy; classify_paths local/x 'secret/k'; printf '%s ' "$OBSERVED_CLASS"; done ) 2>/dev/null; }
+check 'rule table follows a POLICY_FILE swap' "swap_probe | grep -Eq '^[a-z-]+ private-evidence \$' && [ \"\$(swap_probe | cut -d' ' -f1)\" != private-evidence ]"
+rm -rf "$SWAP"
+
 JQR_FN="$(sed -n '/^jqr(){$/,/^}$/p' "$GATES")"
 check 'jqr strips CR, keeps trailing blank lines, and returns jq status' "eval \"\$JQR_FN\"; a=\"\$(printf '[\"a\\\\r\",\"\",\"\"]' | jqr '.[]'; printf x)\"; [ \"\$a\" = \$'a\\n\\n\\nx' ] && ! printf 'nope' | jqr . >/dev/null 2>&1"
 

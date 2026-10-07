@@ -467,5 +467,22 @@ check "retained_sandbox_packet_has_full_evidence" \
 check "retained_sandbox_packet_rebinds_marker" \
   "[ \"\$(sed -n '3p' '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/.ai-review-packet')\" = retained ]"
 
+# #1355: batched stat/sha256sum must give the per-file reader's exact digest,
+# including escaped names, and a failing or CRLF-emitting stat must not change it.
+BATCH="$(mktemp -d)"; git init -q "$BATCH/r"
+( cd "$BATCH/r" && echo a > t && git add t && git -c user.name=t -c user.email=t@t commit -qm i \
+  && echo b >> t && printf x > '-lead' && printf y > $'new\nline' && printf z > 'back\slash' \
+  && : > empty && ln -s t link && mkdir d && for i in $(seq 1 400); do echo "$i" > "d/file_with_a_long_enough_name_$i"; done )
+mkdir -p "$BATCH/broken" "$BATCH/crlf"
+printf '#!/bin/sh\nexit 1\n' > "$BATCH/broken/stat"
+printf '#!/bin/sh\n%s "$@" | sed "s/$/\\r/"\n' "$(command -v stat)" > "$BATCH/crlf/stat"
+chmod +x "$BATCH/broken/stat" "$BATCH/crlf/stat"
+BATCH_FAST="$("$SCRIPT" digest "$BATCH/r")"
+check "batched_digest_matches_per_file_fallback" \
+  "[ -n '$BATCH_FAST' ] && [ \"\$(PATH='$BATCH/broken':\"\$PATH\" '$SCRIPT' digest '$BATCH/r')\" = '$BATCH_FAST' ]"
+check "batched_digest_tolerates_crlf_stat" \
+  "[ \"\$(PATH='$BATCH/crlf':\"\$PATH\" '$SCRIPT' digest '$BATCH/r')\" = '$BATCH_FAST' ]"
+rm -rf "$BATCH"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

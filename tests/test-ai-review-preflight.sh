@@ -97,6 +97,9 @@ echo health ok
 EOF
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
+# Like bin/ai-gemini: no detectable harness caller means refuse (installer
+# terminal). Preflight must name itself as the caller.
+[ "${AI_GEMINI_CALLER:-}" = preflight ] || { echo caller_identity_missing >&2; exit 2; }
 case "${1:-}" in
   qualify-live) [ "${MOCK_GEMINI_FAIL:-0}" = 0 ] || exit 70; [ "${MOCK_GEMINI_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; [ "${MOCK_GEMINI_MUTATE_RUNTIME:-0}" = 0 ] || printf '%064d\n' 0 | tr 0 b > "$MOCK_AGY_SHA_FILE"; printf 'QUALIFIED session=test model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/test\n' "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}" ;;
   doctor) if [ "${2:-}" = --live ]; then printf 'live\n' >> "$MOCK_GEMINI_LIVE_CONTACT"; printf 'QUALIFIED session=live model=gemini-3.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/live\n'; exit 0; fi; if [ "${2:-}" != --identity ] && [ "${MOCK_GEMINI_NORMAL_DOCTOR_FAIL:-0}" = 1 ]; then exit 124; fi; status=QUARANTINED; rc=3; [ "${2:-}" = --identity ] && { status=IDENTITY; rc=0; }; [ ! -f "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json" ] || { [ "${2:-}" = --identity ] || status=PASS; rc=0; }; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=test\n' "$status" "${MOCK_AGY_VERSION:-1.1.19}" "$(cat "$MOCK_AGY_SHA_FILE")" "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}"; exit "$rc" ;;
@@ -153,6 +156,7 @@ check "all active providers are registered" "for p in claude grok kimi glm muse 
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
+check "Gemini requalification works outside any AI harness (installer terminal)" "env -u AI_GEMINI_CALLER -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SANDBOX $SCRIPT qualify gemini"
 check "successful Gemini live qualification durably releases quarantine" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini qualification remains valid when network-dependent normal doctor is unavailable" "MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT qualify gemini && MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 # Old "failed requalification revokes the prior qualification" (delete-before-
@@ -178,6 +182,7 @@ printf '\n# wrapper changed\n' >> "$TMP/bin/gemini"
 check "Gemini wrapper drift invalidates qualification" "$SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 sed -i '$d' "$TMP/bin/gemini"
 check "Gemini can be requalified after wrapper drift" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
+check "Gemini standard check works outside any AI harness and does not quarantine" "env -u AI_GEMINI_CALLER -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SANDBOX $SCRIPT check gemini '$REPO' | grep -q 'health=ok' && $SCRIPT status gemini | jq -e '.usable==true'"
 check "Gemini live preflight performs a genuine live probe" "rm -f '$MOCK_GEMINI_LIVE_CONTACT'; $SCRIPT check gemini '$REPO' --live | grep -q 'allowance=live-verified' && test \"\$(wc -l < '$MOCK_GEMINI_LIVE_CONTACT')\" -eq 1"
 check "Qwen status enforces built-in quarantine until live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Qwen check cannot report healthy while credits block live qualification" "! $SCRIPT check qwen '$REPO' 2>&1 | grep -q 'health=ok'"

@@ -48,9 +48,9 @@ What it does (idempotent - safe to re-run):
      and all other settings keys are preserved untouched.
 
 IMPORTANT - Claude Desktop limitations you must know (verified):
-  - Claude Desktop does NOT expand ${VAR} in its config, and neither does
-    mcp-remote in --header. So tokens are resolved to real values by `op` at
-    launch (inside a launcher .cmd), not by placeholder substitution.
+  - Claude Desktop does NOT expand ${VAR} in its config. Pinned mcp-remote
+    expands header placeholders from its process environment. The launcher
+    resolves tokens through `op` and passes only the placeholder in argv.
   - MSIX sandbox does not inherit setx env vars and can strip `env` blocks, so
     the token is read from a file by the launcher, never set as a system var.
   - This script's Desktop-config step is BEST-EFFORT and could not be tested on
@@ -408,11 +408,10 @@ pwsh -NoProfile -File "$SecretLauncher" -Mode Stdio %*
 Set-Content -Path $Launcher -Value $launcherBody -Encoding ascii
 Ok "Wrote $Launcher"
 
-# A second launcher for REMOTE/HTTP MCP servers. mcp-remote does NOT expand
-# ${VAR} in --header, so the bearer token must be a real value before it runs.
-# The shared launcher decrypts the already-resolved environment IN MEMORY and
-# passes the selected value to mcp-remote. Args carry only the URL + reference;
-# token itself is never written to disk or into claude_desktop_config.json.
+# A second launcher for REMOTE/HTTP MCP servers. Pinned mcp-remote expands
+# ${VAR} in --header from its environment. The shared launcher decrypts the
+# selected value in memory and passes only a placeholder in argv. The token is
+# never written to disk or into claude_desktop_config.json.
 #   %1 = server URL,  %2 = op:// reference to the bearer token,
 #   %3+ = optional extra flags passed straight through to mcp-remote
 #         (devops/synology pass none, so EXTRA stays empty).
