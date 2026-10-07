@@ -311,7 +311,10 @@ test_process_alive() {
   local pid="$1"
   kill -0 "$pid" 2>/dev/null && return 0
   case "$(uname -s 2>/dev/null || true)" in
-    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$pid" '$1 == p { found=1 } END { exit !found }' ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Column 1 is the MSYS pid, column 4 the Win32 pid. The event guard
+      # records Win32 pids so process_alive can see them; accept either.
+      ps -W 2>/dev/null | awk -v p="$pid" '$1 == p || $4 == p { found=1 } END { exit !found }' ;;
     *) return 1 ;;
   esac
 }
