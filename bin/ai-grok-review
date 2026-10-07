@@ -13,7 +13,6 @@
 #   ai-grok-review ask <name> [--prompt T | --prompt-file F | stdin] [--max-turns N]
 #   ai-grok-review list | show <name> | transcript <name> | delete <name>
 #   ai-grok-review doctor [--live]
-#   ai-grok-review store-key [--if-missing]
 #
 # Model, permission set, --no-memory and --cwd are fixed when a session is
 # created and are deliberately NOT overridable per call: a stable request prefix
@@ -1049,8 +1048,10 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 # Turn execution
 # ---------------------------------------------------------------------------
 run_clean_env() { # NAME=VALUE... -- COMMAND...; `env -i` without putting values in argv
-  # Bash builtins set the environment, so a forwarded credential never appears
-  # on a process command line the way `env -i XAI_API_KEY=...` would.
+  # Bash builtins set the environment, so no forwarded value appears on a
+  # process command line. Only the listed names survive; a caller's exported
+  # XAI_API_KEY is never passed. Owner rule (2026-10-07): Grok runs only on the
+  # subscription OAuth login (~/.grok/auth.json) and never bills the paid API key.
   (
     local n
     for n in $(compgen -e); do unset "$n" 2>/dev/null || true; done
@@ -1058,65 +1059,6 @@ run_clean_env() { # NAME=VALUE... -- COMMAND...; `env -i` without putting values
     [ "$#" -gt 0 ] && shift
     exec "$@"
   )
-}
-
-GROK_KEY_STORE="${AI_GROK_KEY_STORE:-$HOME/.config/ai-devops/secrets/grok-xai-api-key}"
-GROK_KEY_REF="${AI_GROK_XAI_KEY_REF:-op://vibe_coding/grok xai x.ai/api key}"
-
-grok_key_store_ok() { # protected per-user store: absolute, unlinked, non-empty, owner-only
-  local path="$GROK_KEY_STORE" parent mode
-  case "$path" in /*) ;; *) return 1 ;; esac
-  [ -f "$path" ] && [ -s "$path" ] || return 1
-  while [ "$path" != / ]; do
-    [ ! -L "$path" ] || return 1
-    parent="$(dirname "$path")"; [ "$parent" != "$path" ] || return 1; path="$parent"
-  done
-  if [ -z "${SYSTEMROOT:-}" ]; then
-    mode="$(stat -c %a "$GROK_KEY_STORE" 2>/dev/null || stat -f %Lp "$GROK_KEY_STORE" 2>/dev/null)" || return 1
-    [ "$mode" = 600 ] && [ -O "$GROK_KEY_STORE" ] || return 1
-  fi
-}
-
-resolve_xai_api_key() { # print the API-key fallback; never logs the value
-  # Supported non-interactive credential (installed docs 02-authentication.md
-  # "API Key"), used only when no OAuth session file exists. The paid child runs
-  # in a cleared environment, so a caller's exported XAI_API_KEY was dropped
-  # (incident 20261002T170937Z-al8960ofc-grok-289826). Only this first-party
-  # variable is forwarded. Rotation rule 6: no 1Password during a review, so the
-  # key comes from the caller or the protected store written by `store-key`.
-  if [ -n "${XAI_API_KEY:-}" ]; then printf '%s' "$XAI_API_KEY"; return 0; fi
-  [ "${AI_GROK_TEST_MODE:-}" = 1 ] && [ -z "${AI_GROK_KEY_STORE:-}" ] && return 1
-  grok_key_store_ok || return 1
-  local key; key="$(tr -d '
-' < "$GROK_KEY_STORE")" || return 1
-  [ -n "$key" ] || return 1
-  printf '%s' "$key"
-}
-
-cmd_store_key() { # explicit maintenance: refresh the protected store from 1Password
-  [ "${1:-}" != 1 ] || { if grok_key_store_ok; then note "Grok protected key store is ready."; return 0; fi; }
-  local op_bin dir tmp ps helper
-  case "$GROK_KEY_REF" in op://vibe_coding/*) ;; *) die 'Grok key reference must be a vibe_coding 1Password reference.' ;; esac
-  op_bin="$(command -v op 2>/dev/null || true)"; [ -n "$op_bin" ] || die '1Password CLI is unavailable for the Grok key refresh.'
-  dir="$(dirname "$GROK_KEY_STORE")"
-  [ ! -L "$dir" ] && [ ! -L "$GROK_KEY_STORE" ] || die 'Grok key store path is linked; refusing to write through it.'
-  (umask 077; mkdir -p -- "$dir") && chmod 700 "$dir" || die 'could not create the Grok key store directory.'
-  tmp="$(umask 077; mktemp "$dir/.grok-key.XXXXXX")" || die 'could not reserve the Grok key store.'
-  chmod 600 "$tmp"
-  if [ -n "${SYSTEMROOT:-}" ]; then
-    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
-    helper="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/windows-private-file.ps1"
-    [ -n "$ps" ] && [ -f "$helper" ] || { rm -f "$tmp"; die 'cannot restrict the Grok key store on Windows.'; }
-    for target in "$dir:directory" "$tmp:file"; do
-      AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "${target%:*}")" AI_DEVOPS_PRIVATE_KIND="${target##*:}"         "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }' >/dev/null         || { rm -f "$tmp"; die 'could not restrict the Grok key store on Windows.'; }
-    done
-  fi
-  if ! "$op_bin" read "$GROK_KEY_REF" </dev/null > "$tmp" 2>/dev/null || [ ! -s "$tmp" ]; then
-    rm -f "$tmp"; die 'could not read the Grok key from 1Password.'
-  fi
-  mv -f -- "$tmp" "$GROK_KEY_STORE" || { rm -f "$tmp"; die 'could not install the Grok key store.'; }
-  grok_key_store_ok || die 'Grok key store is not owner-only after refresh.'
-  note 'Grok protected per-user key store refreshed.'
 }
 
 prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live reader
@@ -1223,6 +1165,8 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       grok_command=("$bash_bin" "$grok") ;;
   esac
   local isolated_home auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  # Subscription login only: never fall back to a pay-per-use xAI API key.
+  [ -s "$auth_source" ] || die "Grok subscription login is missing (no $auth_source). Run 'grok login'; reviews never use a paid xAI API key."
   isolated_home="$(grok_isolated_home)" && [ -n "$isolated_home" ] || die 'could not choose the isolated Grok home; refusing to run without credential isolation.'
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
   if [ -f "$auth_source" ]; then
@@ -1278,10 +1222,6 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   done
   if [ "${AI_GROK_TEST_MODE:-}" = 1 ]; then
     for n in $(compgen -e | grep -E '^(AI_GROK_TEST_|TMPDIR_FOR_TEST$)' || true); do base_env+=("$n=${!n}"); done
-  fi
-  if [ ! -s "$isolated_home/auth.json" ]; then
-    local xai_key; xai_key="$(resolve_xai_api_key)" && [ -n "$xai_key" ] && base_env+=("XAI_API_KEY=$xai_key")
-    unset xai_key
   fi
   local inspect inspect_rc=0 inspect_waited=0 inspect_stopped=0; inspect="$(mktemp)"
   prepare_active_stop_file
@@ -1720,9 +1660,6 @@ ai-grok-review $VERSION — Grok reviews in persistent, named sessions.
   ai-grok-review transcript <name>
   ai-grok-review delete <name>
   ai-grok-review doctor [--live]
-  ai-grok-review store-key [--if-missing]   refresh the protected xAI API-key store
-                                            from 1Password (maintenance only; used when
-                                            no ~/.grok/auth.json OAuth session exists)
 
 Options:
   --prompt TEXT        the brief (small briefs only; prefer --prompt-file)
@@ -1785,8 +1722,8 @@ cmd_doctor() {
   # The model catalogue can succeed without chat credentials. Check the same
   # credential source used by the isolated runtime without reading its contents.
   # Presence is not proof of validity; only --live can prove a chat round trip.
-  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ] && ! resolve_xai_api_key >/dev/null; then
-    echo "auth          : MISSING — no cached credentials, XAI_API_KEY, or protected key store. Run 'ai-grok-review store-key' (or 'grok login')."
+  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ]; then
+    echo "auth          : MISSING — no Grok subscription login (~/.grok/auth.json). Run 'grok login'. A paid XAI_API_KEY is never used."
     return 1
   elif "$grok" models >/dev/null 2>&1; then
     echo "auth          : PRESENT (model catalogue reachable; chat authentication unverified)"
@@ -2287,7 +2224,6 @@ while [ $# -gt 0 ]; do
     --live)         OPT_LIVE="--live"; shift ;;
     -h|--help)      usage; exit 0 ;;
     --*)            die "unknown option '$1'. This wrapper deliberately does not forward arbitrary grok flags; if you need a capability it lacks, say so rather than calling grok directly." ;;
-    --if-missing)   [ "$CMD" = store-key ] || die '--if-missing applies only to store-key'; ARG="--if-missing"; shift ;;
     *)              [ -z "$ARG" ] && ARG="$1" || die "unexpected argument '$1'"; shift ;;
   esac
 done
@@ -2309,8 +2245,6 @@ case "$CMD" in
   transcript) [ -n "$ARG" ] || die "usage: ai-grok-review transcript <name>"; cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-grok-review delete <name>"; cmd_delete "$ARG" ;;
   doctor)     cmd_doctor "$OPT_LIVE" ;;
-  store-key)  case "$ARG" in ''|--if-missing) ;; *) die 'store-key accepts only --if-missing' ;; esac
-              cmd_store_key "$([ "$ARG" = --if-missing ] && echo 1 || echo 0)" ;;
   -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
   *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
 esac
