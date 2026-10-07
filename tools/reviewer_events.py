@@ -1229,6 +1229,11 @@ def main():
                            os.environ.get("AI_" + provider.upper() + "_REVIEW_CALLER",
                                           "codex" if provider in {"claude", "codex", "gemini"} else "unknown"))}
         append(directory, event)
+        # child_pending closes the fork gap: from begin until note-child records
+        # the child PID, loss must refuse (the child may still publish).
+        pending = evidence_root(directory, event["run_id"]) / "child_pending"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text("pending\n")
         print(event["run_id"])
     elif operation == "note-child":
         require(len(sys.argv) == 5, "note-child requires provider, run_id and child pid")
