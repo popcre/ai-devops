@@ -860,7 +860,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
   else
-    out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+    out="$(AI_GEMINI_CALLER=preflight timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
   fi
   # A transient liveness timeout gets one bounded retry before it is recorded.
   # The retry is part of the timeout path: a timeout result alone never means
@@ -876,7 +876,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
       elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
     else
-      out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+      out="$(AI_GEMINI_CALLER=preflight timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
     fi
   fi
   set -e
