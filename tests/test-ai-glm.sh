@@ -857,10 +857,13 @@ check "idle unrecorded review sandbox is pruned"    "test ! -e '$PR_SB/glm-orpha
 check "a new unrecorded sandbox (review starting) is kept" "test -d '$PR_SB/glm-building-new-0123456789ab'"
 # An interrupt during a server delete finishes that review under its build lock, then stops.
 # "intrz" sorts after "intr" in every locale (en_US collation puts "intr2" first).
+# Parallel workers inherit ignored SIGINT. Restore its default only for this
+# signal-injection fixture so its child can install the production INT trap.
 PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALLS"
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
 pr_meta intr review "$PR_OLD"; pr_meta intrz review "$PR_OLD"
-AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" bash -c '
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" \
+  "$PYTHON" -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' bash -c '
   source "$AI_GLM_SOURCE"
   server_up(){ return 0; }
   permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
