@@ -127,9 +127,10 @@ the task needs the detail.
   proof`) and name it in the session's closing note. Do **not** open a
   leftover-proof issue, an "unproven step" issue, or a second ticket for that
   gap. One issue per application need; one named owner until the app works live.
-- **Multi-step work runs through one parent issue** whose body says: take the
-  first unticked child, do only that one, tick it, comment the next child on the
-  parent, and stop. Albert then hands every session just the parent number.
+- **Complete the authorized scope.** Track multi-step work on its existing
+  issue, verify each completed outcome, and continue through the remaining
+  authorized work. Completing one child or phase is never a reason to stop.
+  Respect actual dependencies, ownership, collision controls, and safety gates.
 - **Keep canonical checkouts landing-only.** Every write-capable task uses its
   own current-upstream worktree before editing. Do not edit a shared local
   checkout except for an explicit, serialized landing, installation, or recovery
