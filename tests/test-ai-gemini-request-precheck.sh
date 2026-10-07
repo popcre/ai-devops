@@ -22,7 +22,19 @@ export PATH="$TMP/bin:$PATH"
 cat > "$TMP/bin/agy" <<'EOF'
 #!/usr/bin/env bash
 set -e
-case "${1:-}" in --version) echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
+case "${1:-}" in
+  --version)
+    # Post-lock binding tests arm a substitution hook on the request's
+    # packet resolve; the first --version after that is where a concurrent
+    # delete/recreate would have swapped the same-named session.
+    if [ -n "${MOCK_AGY_HOOK:-}" ] && [ -n "${MOCK_AGY_HOOK_ARM:-}" ] && [ -e "$MOCK_AGY_HOOK_ARM" ]; then
+      rm -f "$MOCK_AGY_HOOK_ARM"
+      bash "$MOCK_AGY_HOOK"
+    fi
+    echo 1.1.14; exit;;
+  --help) echo --sandbox; exit;;
+  models) echo 'gemini-3.8-flash-high'; exit;;
+esac
 printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
 if [[ "$args" == *" /model "* ]]; then
@@ -44,7 +56,7 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
+ resolve) [ -z "${MOCK_AGY_HOOK_ARM:-}" ] || : > "$MOCK_AGY_HOOK_ARM"; exec "$REAL_REVIEW_PACKET" "$@" ;;
  build) p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; printf %s "$p" ;;
  verify) test -s "$2/MANIFEST.sha256" ;;
  path) printf %s "$2/.ai-review-$3" ;;
@@ -78,4 +90,48 @@ check 'record_qualification rejects an empty runtime version' "grep -q '\\[ -n \
 # Codex: a valid request under runtime-only drift must reach auto_requalify
 write_q 1.1.15; : > "$MOCK_AGY_CALLS"
 check 'valid request under runtime drift auto-requalifies' "(cd '$R' && '$SCRIPT' new autoreq --prompt review) 2>'$TMP/g.err' | grep -q '^PASS' && grep -q 'requalifying automatically' '$TMP/g.err'"
+# Codex 2026-10-07 MEDIUM: execution parses --governed-verdict from one fixed
+# position, so the pre-check must refuse a duplicate or any other placement
+# instead of accepting it and then running without governed output.
+write_q 1.1.15; : > "$MOCK_AGY_CALLS"
+check 'duplicate --governed-verdict never auto-requalifies' "! (cd '$R' && '$SCRIPT' new --governed-verdict 1111111111111111111111111111111111111111 --governed-verdict 2222222222222222222222222222222222222222 dup-gov --prompt review) 2>'$TMP/dup-gov.err' && grep -q 'may be given only once' '$TMP/dup-gov.err' && ! grep -q 'requalifying automatically' '$TMP/dup-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
+check 'misplaced --governed-verdict never auto-requalifies' "! (cd '$R' && '$SCRIPT' new mis-gov --governed-verdict 1111111111111111111111111111111111111111 --prompt review) 2>'$TMP/mis-gov.err' && grep -q 'must immediately follow' '$TMP/mis-gov.err' && ! grep -q 'requalifying automatically' '$TMP/mis-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
+check 'trailing --governed-verdict after the prompt never auto-requalifies' "! (cd '$R' && '$SCRIPT' new trail-gov --prompt review --governed-verdict 1111111111111111111111111111111111111111) 2>'$TMP/trail-gov.err' && grep -q 'must immediately follow' '$TMP/trail-gov.err' && ! grep -q 'requalifying automatically' '$TMP/trail-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
+write_q 1.1.14
+check 'a prompt value that looks like --governed-verdict is not a flag' "(cd '$R' && '$SCRIPT' new prompt-flag --prompt --governed-verdict) 2>'$TMP/prompt-flag.err' | grep -q '^PASS'"
+# Codex 2026-10-07 HIGH: the governed SHA and the requested base must be
+# revalidated after the session lock. The hook rewrites the binding in the
+# window between the pre-lock checks and lock acquisition, which is exactly
+# what a concurrent delete/recreate of the same-named session does.
+write_q 1.1.14
+RR="$TMP/repo-race"; make_repo "$RR"
+RR_SHA="$(git -C "$RR" rev-parse HEAD)"
+(cd "$RR" && "$SCRIPT" new --base "$RR_SHA" gov-race --prompt review) >/dev/null
+RR_META="$(find "$TMP/state/sessions" -name '*gov-race*.json' | head -1)"
+RR_IDENT="$(jq -r .review_dir "$RR_META")/.ai-review-$(jq -r .sandbox_tag "$RR_META")/identity.json"
+cat > "$TMP/hook-head.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired-a'
+jq --arg h '9999999999999999999999999999999999999999' '.head=\$h' '$RR_META' > '$RR_META.tmp' && mv '$RR_META.tmp' '$RR_META'
+EOF
+rm -f "$TMP/hook-fired-a"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-a" MOCK_AGY_HOOK="$TMP/hook-head.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" --governed-verdict "$RR_SHA" gov-race --prompt follow) >"$TMP/race-a.out" 2>"$TMP/race-a.err"; RACE_A_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'the substitution hook fired in the pre-lock window' "test -f '$TMP/hook-fired-a'"
+check 'post-lock governed SHA revalidation refuses a substituted session' "test '$RACE_A_RC' -ne 0 && test -f '$TMP/hook-fired-a' && grep -q 'governed verdict head must match the reviewed HEAD' '$TMP/race-a.err'"
+check 'a binding refusal does not mark the session for recovery' "test \"\$(jq -r .status '$RR_META')\" != RECOVERY_REQUIRED"
+(cd "$RR" && "$SCRIPT" new --base "$RR_SHA" base-race --prompt review) >/dev/null
+BR_META="$(find "$TMP/state/sessions" -name '*base-race*.json' | head -1)"
+BR_IDENT="$(jq -r .review_dir "$BR_META")/.ai-review-$(jq -r .sandbox_tag "$BR_META")/identity.json"
+cat > "$TMP/hook-base.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired-b'
+jq --arg b '8888888888888888888888888888888888888888' '.base=\$b' '$BR_IDENT' > '$BR_IDENT.tmp' && mv '$BR_IDENT.tmp' '$BR_IDENT'
+EOF
+rm -f "$TMP/hook-fired-b"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-b" MOCK_AGY_HOOK="$TMP/hook-base.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" base-race --prompt follow) >"$TMP/race-b.out" 2>"$TMP/race-b.err"; RACE_B_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'post-lock requested base revalidation refuses a substituted session' "test '$RACE_B_RC' -ne 0 && test -f '$TMP/hook-fired-b' && grep -q 'requested base differs from the sealed review identity' '$TMP/race-b.err'"
 printf 'ok tests\n'
