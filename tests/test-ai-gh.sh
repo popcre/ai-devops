@@ -192,6 +192,13 @@ done
 check 'same-principal credentials retain two distinct quota access contexts' "jq -se 'length == 2 and (map(.access_context) | all(. != null)) and (map(.access_context) | unique | length == 2) and (map(.principal) | unique | length == 1)' '$context_state/quota-measurements/'*.jsonl"
 check 'local context lookup adds no GitHub API request' "[ \$(grep -c '^start' '$context_log') -eq 4 ] && [ \$(wc -l < '$identity_log') -eq 2 ]"
 check 'quota history contains no token or numeric principal' "! grep -Eq 'ghp_fixtureA|ghp_fixtureB|55610577' '$context_state/quota-measurements/'*.jsonl"
+printf 'interrupted-write\n' > "$context_state/quota.graphql.tmp.ABC123"
+AI_GH_STATE_DIR="$context_state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+  FAKE_TOKEN=ghp_fixtureC AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1; context_rc=$?
+check 'interrupted quota temp file does not block credential rotation and stays preserved' "[ $context_rc -eq 0 ] && [ \$(cat '$context_state/quota.graphql.tmp.ABC123') = interrupted-write ] && [ \$(cat '$context_state/quota.graphql' | awk '{print \$2}') = 4000 ]"
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_TOKEN=ghp_fixtureA AI_GH_STATE_DIR="$context_state" \
+  AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1; context_rc=$?
+check 'credential restore also ignores preserved interrupted quota temp files' "[ $context_rc -eq 0 ] && [ \$(cat '$context_state/quota.graphql.tmp.ABC123') = interrupted-write ]"
 
 AI_GH_STATE_DIR="$TMP/context-missing-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
   FAKE_TOKEN=ghp_fixtureC FAKE_IDENTITY_STATUS=1 FAKE_LOG="$TMP/context-missing-calls" \
@@ -759,4 +766,12 @@ check 'malformed access context cannot enter a quota snapshot' "jq -e '.access_c
 gh_measure_quota_rows $'core\tbad\t100\t50\nsearch\t7\t30\t40\textra'
 check 'missing malformed and overlong quota rows remain unknown' "jq -e '.buckets.core == null and .buckets.graphql == null and .buckets.search == null' '$STATE/quota-observation.json'"
 
+for operation in bw.snapshot bw.alarm_issue bw.link_issue; do
+  AI_GH_STATE_DIR="$TMP/operation-label-state" AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION="$operation" \
+    AI_GH_REAL_GH="$FAKE" FAKE_MODE=graphql-pages "$GH" api graphql > "$TMP/operation-output" 2> "$TMP/operation-error"; operation_rc=$?
+  check "GraphQL retains the $operation caller operation and output" "[ $operation_rc -eq 0 ] && [ \$(wc -l < '$TMP/operation-output') -eq 2 ] && jq -se '.[-1].operation == \"$operation\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/operation-label-state/measurements/'*.jsonl"
+done
+AI_GH_STATE_DIR="$TMP/operation-label-state" AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot \
+  AI_GH_REAL_GH="$FAKE" FAKE_MODE=graphql-jq-scalar "$GH" api graphql --jq '.data.viewer.login' >/dev/null 2>&1; operation_rc=$?
+check 'transformed GraphQL retains the snapshot operation and classification' "[ $operation_rc -eq 0 ] && jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/operation-label-state/measurements/'*.jsonl"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
