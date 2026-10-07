@@ -159,7 +159,7 @@ def process_alive(pid):
 
 
 def _recorded_pids(rows, run_id, directory=None):
-    """Every PID that could still publish this invocation: owner and child."""
+    """Every PID that could still publish this invocation: owner, child, worker."""
     pids = []
     for row in rows:
         if row.get("run_id") != run_id:
@@ -167,14 +167,15 @@ def _recorded_pids(rows, run_id, directory=None):
         if row.get("event") == "started" and isinstance(row.get("owner_pid"), int):
             pids.append(row["owner_pid"])
     if directory is not None:
-        child_file = evidence_root(directory, run_id) / "child_pid"
-        if child_file.is_file():
-            try:
-                pid = int(child_file.read_text().strip())
-                if pid > 0 and pid not in pids:
-                    pids.append(pid)
-            except (ValueError, OSError):
-                pass
+        for name in ("child_pid", "worker_pid"):
+            sidecar = evidence_root(directory, run_id) / name
+            if sidecar.is_file():
+                try:
+                    pid = int(sidecar.read_text().strip())
+                    if pid > 0 and pid not in pids:
+                        pids.append(pid)
+                except (ValueError, OSError):
+                    pass
     return pids
 
 
@@ -1044,25 +1045,39 @@ def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
     Production report names do not share one shape: glm/grok/qwen use
     `{provider}-{name}-{key}.md`, gemini/muse/kimi embed the session name
     under a caller-prefixed sandbox tag, and codex writes
-    `codex-{mode}-{ts-pid-random}.md` with no separate key. Deriving the
-    name from the sandbox tag therefore misses live reports (false loss).
+    `codex-{mode}-{ts-pid-random}.md` with no separate key. Keys are
+    timestamps, 24-character Qwen hashes, or 32/64-character digests.
+    Deriving the name from the sandbox tag therefore misses live reports
+    (false loss). Kimi also writes its canonical `review-<stamp>.md` into
+    the durable job directory outside `.ai/reviews` before optional
+    mirroring — a report still sitting there is as recoverable as a mirror.
     Search every provider report that carries a timestamp or content-hash
-    key, and also any that embeds the evidence run_id — a sibling hit is a
-    safe refusal, never a false loss.
+    key, the Kimi canonical location, and any that embeds the evidence
+    run_id — a sibling hit is a safe refusal, never a false loss.
     """
-    reviews = source / ".ai" / "reviews"
-    if not reviews.is_dir():
-        return []
-    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{32}|[0-9a-f]{64})"
+    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{24}|[0-9a-f]{32}|[0-9a-f]{64})"
     patterns = [re.compile(re.escape(provider) + r"-.+" + key + r".*\.md")]
+    if provider == "kimi":
+        # Canonical artifact name from bin/ai-kimi render_review_artifact.
+        patterns.append(re.compile(r"review-" + key + r".*\.md"))
     if run_id is not None:
         patterns.append(re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md"))
     found = []
-    for path in reviews.iterdir():
+    def consider(path):
         if since is not None and path.stat().st_mtime < since:
-            continue
+            return
         if any(p.fullmatch(path.name) for p in patterns):
             found.append(path)
+    reviews = source / ".ai" / "reviews"
+    if reviews.is_dir():
+        for path in reviews.iterdir():
+            consider(path)
+    if provider == "kimi":
+        jobs = Path(os.environ.get("AI_KIMI_STATE_DIR") or
+                    (Path.home() / ".local/state/ai-devops/kimi")) / "jobs"
+        if jobs.is_dir():
+            for path in jobs.rglob("*"):
+                consider(path)
     return sorted(found)
 
 
@@ -1098,6 +1113,29 @@ def _proven_dead(directory, run_id, start=None):
     return all(not process_alive(p) for p in pids)
 
 
+def _detached_worker_gone(directory, run_id):
+    """True only when an async-submission's detached worker cannot publish again.
+
+    The launcher's exit is not the worker's death: the guard records
+    `finished` when the launcher exits while a durable Kimi worker is still
+    running and can publish the paid report. Proof requires a recorded
+    worker_pid that is no longer alive, or a terminal-job marker written by
+    the worker after its last publication. No recorded worker_pid cannot be
+    proven dead — fail closed.
+    """
+    root = evidence_root(directory, run_id)
+    if (root / "worker_terminal").is_file():
+        return True
+    worker_file = root / "worker_pid"
+    if not worker_file.is_file():
+        return False
+    try:
+        pid = int(worker_file.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    return pid > 0 and not process_alive(pid)
+
+
 def record_lost(directory, provider, run_id, sandbox, reason):
     start = invocation(directory, provider, run_id)
     if start.get("operation") != "local-reconciliation":
@@ -1108,9 +1146,13 @@ def record_lost(directory, provider, run_id, sandbox, reason):
                            for line in data.splitlines())
         if start.get("operation") == "async-submission":
             # A detached worker outlives the submitting supervisor (Kimi durable
-            # jobs). Supervisor death is not death of the publisher: refuse
-            # loss until the invocation itself is finished.
+            # jobs). Supervisor death is not death of the publisher: the
+            # launcher's finish row is not proof the worker is gone. Refuse
+            # loss until the invocation is finished AND the detached worker is
+            # proven terminal (worker_pid dead or a terminal-job marker).
             require(has_finished, "reviewer invocation is still active; loss not recorded")
+            require(_detached_worker_gone(directory, run_id),
+                    "detached worker may still publish; loss not recorded")
         else:
             require(has_finished or _proven_dead(directory, run_id, start),
                     "reviewer invocation is still active; loss not recorded")
@@ -1247,6 +1289,24 @@ def main():
         if pending.exists():
             pending.unlink()
         print(json.dumps({"run_id": sys.argv[3], "child_pid": child_pid}))
+    elif operation == "note-worker":
+        require(len(sys.argv) == 5, "note-worker requires provider, run_id and worker pid")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        worker_pid = int(sys.argv[4])
+        require(worker_pid > 0, "note-worker requires a positive pid")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "worker_pid").write_text(str(worker_pid) + "\n")
+        print(json.dumps({"run_id": sys.argv[3], "worker_pid": worker_pid}))
+    elif operation == "note-worker-terminal":
+        require(len(sys.argv) == 4, "note-worker-terminal requires provider and run_id")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        marker = root / "worker_terminal"
+        if not marker.exists():
+            publish(marker, {"schema_version": 1, "run_id": sys.argv[3], "marked_at": now()})
+        print(json.dumps({"run_id": sys.argv[3], "worker_terminal": True}))
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))

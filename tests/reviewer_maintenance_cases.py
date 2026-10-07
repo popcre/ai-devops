@@ -1650,7 +1650,8 @@ with event_lock(sys.argv[2]):
             events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
         self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
 
-    def test_async_submission_loss_allowed_after_finish(self):
+    def test_async_submission_refuses_loss_while_worker_may_live(self):
+        """The launcher's finish is not the detached worker's death."""
         rid = "d1" + "0" * 30
         row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
                "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
@@ -1658,8 +1659,54 @@ with event_lock(sys.argv[2]):
         self.write(row)
         events.require_report(self.root, "kimi", rid)
         self.write({**row, "event": "finished", "exit_code": 1})
+        # The detached worker recorded a live PID (this process) and can publish.
+        (self.root / "evidence" / rid / "worker_pid").write_text(str(os.getpid()) + "\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "detached worker"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_refuses_loss_when_worker_pid_unknown(self):
+        """Unknown worker_pid fails closed: the worker may still publish."""
+        rid = "d2" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "detached worker"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "worker state unknown")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_loss_allowed_when_worker_is_gone(self):
+        """Finished + recorded worker_pid dead (or terminal-job marker) is loss."""
+        rid = "d3" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        # 99999998 is never a live PID on this machine: worker proven dead.
+        (self.root / "evidence" / rid / "worker_pid").write_text("99999998\n")
         sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
         events.record_lost(self.root, "kimi", rid, sandbox, "worker finished without a report")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_async_submission_loss_allowed_on_terminal_job_marker(self):
+        """A terminal-job marker is proof the detached worker cannot publish."""
+        rid = "d4" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        (self.root / "evidence" / rid / "worker_terminal").write_text("terminal\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker job terminal, no report")
         self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
 
     def test_codex_legacy_loss_allowed_when_no_report_exists(self):
@@ -1688,6 +1735,36 @@ with event_lock(sys.argv[2]):
         sandbox, _ = self._lost_sandbox("gemini", name="gem-tag", reports=(report,))
         with self.assertRaises(events.Blocked):
             events.reconcile_lost(self.root, "gemini", sandbox, "report still on disk")
+
+    def test_qwen_24_char_hash_report_refuses_loss(self):
+        """Qwen truncates report hashes to 24 chars; the search must find them."""
+        rid = "a5" + "0" * 30
+        self._finished_lost_invocation("qwen", rid)
+        # Production Qwen report name: qwen-{name}-{first 24 of sha256}.md
+        report = "qwen-lost-test-0123456789abcdef01234567.md"
+        sandbox, _ = self._lost_sandbox("qwen", name="qwen-24", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "qwen", sandbox, "qwen 24-char report still on disk")
+
+    def test_kimi_canonical_report_outside_reviews_refuses_loss(self):
+        """Kimi writes the canonical report outside .ai/reviews before mirroring."""
+        rid = "a6" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="canonical")
+        state = self.root / "kimi-state"
+        canonical = state / "jobs" / "rid" / "caller--canonical" / "review-20261007T120000Z-1.md"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("# Kimi review — canonical\n")
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(state)
+        try:
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "kimi", sandbox, "canonical report still on disk")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
 
 
 if __name__ == "__main__":

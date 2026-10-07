@@ -1262,7 +1262,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
   if [ -n "$repo_lock" ] && [ -d "$repo_lock" ]; then printf '%s\n' "$$" > "$repo_lock/pid"; fi
   # The worker owns these transients after startup acknowledgement. Keep their
   # cleanup in the emergency EXIT path as well as each explicit terminal path.
-  trap 'cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
+  # Mark the detached job terminal before cleanup: after this point the worker
+  # publishes nothing more, so loss reconciliation may treat it as gone.
+  trap 'reviewer_event_evidence note-worker-terminal kimi >/dev/null 2>&1 || true; cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
   sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2
@@ -1270,6 +1272,10 @@ review_worker() { # JOB-DIR PROMPT-FILE
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
   record_diagnostic "$repo" "$diag_run" "$name" launch provider-started
   provider_started="$(date +%s)"
+  # Record the detached worker PID in the evidence store (Win32 pid on MSYS)
+  # so loss is refused while this worker can still publish the paid report.
+  worker_evidence_pid="$$"; [ ! -r "/proc/$$/winpid" ] || worker_evidence_pid="$(cat /proc/$$/winpid)"
+  reviewer_event_evidence note-worker kimi "$worker_evidence_pid" || exit 2
   reviewer_event_evidence require-report kimi || exit 2
   reviewer_event_evidence bind-sandbox kimi "$workdir" || exit 2
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
