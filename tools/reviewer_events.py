@@ -1084,35 +1084,28 @@ def lost_blockers(root):
 def _proven_dead(directory, run_id, start=None):
     """True only when a started-but-never-finished invocation is provably dead.
 
-    Age alone is NEVER sufficient while a live owner PID or child PID exists.
-    Proof requires either (1) every recorded PID is no longer alive, or
-    (2) no PID is recorded and the start is older than the dead-owner window
-    with no finished row.  Anything younger or still-alive stays fail-closed.
+    Age alone is NEVER proof of death. Proof requires every recorded PID
+    (owner and child) to be no longer alive. No recorded PID cannot be
+    proven dead from the process table — fail closed. A pending child
+    marker means the fork handshake has not completed and the child may
+    still publish — fail closed.
     """
-    DEAD_OWNER_WINDOW_SECONDS = 2 * 3600
     _, data = snapshot(directory / "events.jsonl", "jsonl")
     rows = [json.loads(line) for line in data.splitlines() if line.strip()]
     starts = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
     if len(starts) != 1 or any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows):
+        return False
+    root = evidence_root(directory, run_id)
+    if (root / "child_pending").exists():
         return False
     effective_start = start if start is not None else starts[0]
     pids = _recorded_pids(rows, run_id, directory)
     pid_owner = effective_start.get("owner_pid")
     if isinstance(pid_owner, int) and pid_owner > 0 and pid_owner not in pids:
         pids.append(pid_owner)
-    if pids:
-        # Any live PID blocks loss regardless of age.
-        if any(process_alive(p) for p in pids):
-            return False
-        # Every recorded PID is dead — proven-dead regardless of age.
-        return True
-    # No PID recorded at all: age window is the only signal.
-    try:
-        started = datetime.datetime.fromisoformat(starts[0]["timestamp"])
-    except (KeyError, ValueError):
+    if not pids:
         return False
-    age = (datetime.datetime.now(datetime.timezone.utc) - started).total_seconds()
-    return age > DEAD_OWNER_WINDOW_SECONDS
+    return all(not process_alive(p) for p in pids)
 
 
 def record_lost(directory, provider, run_id, sandbox, reason):
@@ -1248,6 +1241,9 @@ def main():
         root = evidence_root(directory, sys.argv[3])
         root.mkdir(parents=True, exist_ok=True)
         (root / "child_pid").write_text(str(child_pid) + "\n")
+        pending = root / "child_pending"
+        if pending.exists():
+            pending.unlink()
         print(json.dumps({"run_id": sys.argv[3], "child_pid": child_pid}))
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")

@@ -164,6 +164,11 @@ reviewer_event_guard(){
   event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
+  # child_pending closes the fork gap: from before the child exists until
+  # note-child has recorded its PID, loss must refuse (the child may publish).
+  pending_file="${AI_REVIEW_EVENT_DIR:-$HOME/.local/state/ai-devops/reviewer-events}/evidence/$event_id/child_pending"
+  mkdir -p "$(dirname "$pending_file")"
+  printf 'pending\n' > "$pending_file"
   # Forward only to this invocation's child; never search process names or
   # change another review's state. A killed supervisor leaves an unmatched start.
   trap 'received=TERM; observed_signal=TERM; [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true' TERM
@@ -173,7 +178,10 @@ reviewer_event_guard(){
   # dispositions before entering the wrapper so its cancellation traps work.
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   # Record the child so loss is refused while it can still publish.
-  env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child" >/dev/null 2>&1 || true
+  # Clear child_pending only after the PID is durably recorded.
+  if env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child" >/dev/null 2>&1; then
+    rm -f "$pending_file"
+  fi
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
   while true; do
     received=''

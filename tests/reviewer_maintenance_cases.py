@@ -1478,7 +1478,7 @@ with event_lock(sys.argv[2]):
         # Fresh start, no PID: fail-closed, wrapper may still be alive.
         with self.assertRaisesRegex(events.Blocked, "still active"):
             events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
-        # Age the started timestamp past the dead-owner window (2h), still no PID.
+        # Age alone is NEVER proof of death — even 3h with no PID stays fail-closed.
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         stale = (datetime.datetime.now(datetime.timezone.utc) -
                  datetime.timedelta(hours=3)).isoformat()
@@ -1486,8 +1486,34 @@ with event_lock(sys.argv[2]):
             if row.get("run_id") == rid and row.get("event") == "started":
                 row["timestamp"] = stale
         self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
-        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_child_pending_blocks_loss(self):
+        """Fork-handshake gap: child_pending present means a child may still publish."""
+        rid = "c5" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        (self.root / "evidence" / rid / "child_pending").write_text("pending\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "fork gap")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_child_pending_cleared_after_note_child(self):
+        """note-child records the PID and clears the pending marker."""
+        rid = "c6" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "child_pending").write_text("pending\n")
+        import subprocess, sys
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        subprocess.check_call([sys.executable, tool, "note-child", "glm", rid, "99999997"],
+                              env={**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)},
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertTrue((root / "child_pid").is_file())
+        self.assertFalse((root / "child_pending").exists())
 
     def test_live_owner_pid_blocks_loss_even_if_old(self):
         """Age alone must NEVER mark dead while a live owner PID exists."""
