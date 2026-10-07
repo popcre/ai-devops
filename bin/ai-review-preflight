@@ -284,7 +284,7 @@ gemini_live_qualified() {
   file="$(qualification_file gemini)"; [ -f "$file" ] || return 1
   wrapper="$(provider_wrapper gemini)"; [ -f "$wrapper" ] || return 1
   actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
-  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
+  set +e; out="$(AI_GEMINI_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
   [ "$rc" -eq 0 ] || return 1
   actual_agy="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=\([^ ]*\) agy_sha256=.*/\1/p')"
   actual_agy_sha="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
@@ -601,15 +601,15 @@ qualify_gemini() {
   prior_raw="$(cat "$file" 2>/dev/null || true)"
   prior_versions="$(qualification_versions gemini)"
   before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
-  set +e; before_doctor="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
+  set +e; before_doctor="$(AI_GEMINI_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   before_agy="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; before_agy_sha="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"; before_model="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
   [ -n "$before_agy" ] && [ -n "$before_agy_sha" ] && [ -n "$before_model" ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification could not identify the pre-canary runtime and model; the previous qualification version stays valid.\n' >&2; return 1; }
-  set +e; out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" qualify-live 2>&1)"; rc=$?; set -e
+  set +e; out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" qualify-live 2>&1)"; rc=$?; set -e
   [ "$rc" = 0 ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini live qualification failed; the previous qualification version stays valid.\n%s\n' "$out" >&2; return 1; }
   count="$(printf '%s\n' "$out" | grep -Ec '^QUALIFIED session=[^ ]+ model=[^ ]+ exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.+$' || true)"
   [ "$count" -eq 1 ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini live qualification did not return one exact QUALIFIED contract; the previous qualification version stays valid.\n' >&2; return 1; }
   model="$(printf '%s\n' "$out" | sed -n 's/^QUALIFIED session=[^ ]* model=\([^ ]*\) exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.*$/\1/p')"
-  set +e; doctor_out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
+  set +e; doctor_out="$(AI_GEMINI_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   agy_version="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; agy_sha="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
   [ -n "$agy_version" ] && [ -n "$model" ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification could not bind the runtime version and model; the previous qualification version stays valid.\n' >&2; return 1; }
   printf '%s\n' "$doctor_out" | grep -q " model=$model " || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification model disagrees with the wrapper doctor; the previous qualification version stays valid.\n' >&2; return 1; }
@@ -855,7 +855,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
   elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
-    if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    if [ "$provider" = gemini ]; then out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     # A StepCode live turn takes about 8-9s, too close to the 10s check budget.
     elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
@@ -872,7 +872,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
       if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
     elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
-      if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+      if [ "$provider" = gemini ]; then out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
     else
@@ -1233,7 +1233,7 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   if [ "$provider" = muse ]; then
     out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
   elif [ "$provider" = gemini ]; then
-    out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
   elif [ "$provider" = stepfun ]; then
     out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
   else
