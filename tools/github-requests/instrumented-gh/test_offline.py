@@ -20,6 +20,16 @@ def channel(**overrides):
 
 
 class OfflineContract(unittest.TestCase):
+    def test_builtin_scope_excludes_durable_and_arbitrary_children(self):
+        for args in (['api', 'private'], ['api', 'pages', '--paginate'], ['api', 'private', '-XGET'],
+                     ['auth', 'status'], ['pr', 'checks', '1'], ['workflow', 'view', '1']):
+            self.assertTrue(runner.eligible(args))
+        for args in ([], ['auth', 'setup-git'], ['auth', 'login'], ['skills', 'install'],
+                     ['codespace', 'ssh'], ['alias', 'set'], ['fixture-extension'],
+                     ['api', 'private', '-XPOST'], ['api', 'private', '--method=DELETE'],
+                     ['api', 'private', '-fquery=mutation'], ['pr', 'view', '1', '--web']):
+            self.assertFalse(runner.eligible(args))
+
     def test_completed_subset_remains_unknown_total(self):
         record = runner.validate(channel())
         self.assertTrue(record["complete"])
