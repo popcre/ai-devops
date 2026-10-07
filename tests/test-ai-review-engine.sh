@@ -454,6 +454,24 @@ EOF
 done
 unset _prov _mock _ov _prc _pstate
 
+# A door's out-of-credit exit (92, rotation rule 10) must survive the runner,
+# as ai-review-pool keeps it for wrappers; anything else is provider-failed.
+echo '== out of credit through the runner'
+CREDIT_DOOR="$TMP/credit-door.sh"
+cat > "$CREDIT_DOOR" <<'EOF'
+#!/usr/bin/env bash
+printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
+exit 92
+EOF
+set +e
+( cd "$MREPO" && AI_REVIEW_DOOR_STEPFUN="$CREDIT_DOOR" timeout 90 "$ENGINE" review --provider stepfun \
+    --name engine-credit --repo "$MREPO" --mode diff-review --caller codex ) >"$TMP/e2e-credit.out" 2>"$TMP/e2e-credit.err"
+_crc=$?
+set -e
+check "runner_keeps_door_out_of_credit_exit_92" "test '$_crc' -eq 92 && grep -q '^AI_REVIEWER_OUT_OF_CREDIT ' '$TMP/e2e-credit.err'"
+check "runner_books_out_of_credit_failure" "grep -Rqs '\"out-of-credit\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+unset _crc
+
 # --- --operation install-gate contract through the runner -------------------
 # A named installation operation must reach the reviewer request as the exact
 # approval line the install gate greps for, and the report must record it

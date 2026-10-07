@@ -571,10 +571,19 @@ $operation_request"
   rlc_capture door rlc_door_path "$provider"
   snapshot_before="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"
   rlc_note "step door-call"
-  if ! rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0; then
-    rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" provider-failed "$body_file" "$packet_dir" "$packet_sha"
+  local door_rc=0
+  rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 || door_rc=$?
+  if [ "$door_rc" -ne 0 ]; then
+    # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does
+    # for wrappers; the door has already printed both contract lines.
+    if [ "$door_rc" -eq 92 ]; then
+      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" out-of-credit "$body_file" "$packet_dir" "$packet_sha"
+    else
+      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" provider-failed "$body_file" "$packet_dir" "$packet_sha"
+    fi
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
     rm -f "$brief" "$body_file" "$identity_file"
+    [ "$door_rc" -ne 92 ] || { rlc_note "door $provider is out of credit."; exit 92; }
     rlc_die "door $provider exited nonzero; diagnostic retained in the lifecycle record."
   fi
   snapshot_after="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"

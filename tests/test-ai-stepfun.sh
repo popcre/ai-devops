@@ -342,7 +342,7 @@ STUB
     AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
-  check "door reports out of credit (exit 92) when StepFun refuses for quota" "[ '$drc' = 92 ] && grep -q AI_REVIEWER_OUT_OF_CREDIT '$RH/dout'"
+  check "door reports out of credit (exit 92) through the shared classifier" "[ '$drc' = 92 ] && grep -q '^AI_REVIEWER_OUT_OF_CREDIT provider=stepfun' '$RH/dout' && grep -q '^OUT OF CREDIT: ' '$RH/dout'"
   check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else

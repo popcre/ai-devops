@@ -41,6 +41,9 @@ SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
 # The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
 # shellcheck source=../stepfun-sandbox.sh
 source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+# reviewer_credit_scan: the shared out-of-credit classifier.
+# shellcheck source=../../reviewer_event_guard.sh
+source "$SF_ROOT/tools/reviewer_event_guard.sh"
 SF_OC_VERSION="$(tr -d ' \r\n' < "$SF_ROOT/config/opencode/version" 2>/dev/null || true)"
 
 # Model pins. StepCode uses the step/ id; the OpenCode profile pins
@@ -283,12 +286,7 @@ sf_rpc_turn() {
   eval "exec ${to_rpc}>&-" 2>/dev/null || true
   kill "$sf_pid" 2>/dev/null || true
   wait "$sf_pid" 2>/dev/null || true
-  if [ -z "$text" ]; then
-    # The runner reports exit 92 as out of credit; the provider error is in
-    # the agent_end error line (402 quota / insufficient balance).
-    grep -Eiq '^402: \{|quota_exceeded|insufficient_quota|insufficient balance' "$out.err" 2>/dev/null && return 92
-    return 1
-  fi
+  [ -n "$text" ] || return 1
   printf '%s\n' "$text" > "$log"
 }
 
@@ -306,7 +304,9 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them.\n\n'
+    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them.\n'
+    [ "$MODE" != review ] || printf 'Work in your current directory: it is a private writable copy of the review workdir, discarded afterwards; never write to the original path.\n'
+    printf '\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -318,10 +318,16 @@ main() {
   if [ "$engine" = opencode ]; then
     bin="$(resolve_opencode)" || { rm -f "$prompt_full"; exit 127; }
     if [ "$MODE" = implement ]; then agent="stepfun-implement"; else agent="stepfun-review"; fi
-    local xdg
+    local xdg oc_dir="$DOOR_WORKDIR" oc_scratch=""
     xdg="$(mktemp -d)"
     if ! install_opencode_profile "$xdg" "$agent"; then
       rm -rf "$xdg"; rm -f "$prompt_full"; exit 127
+    fi
+    # Review: the model works in a private copy, as on Linux, so its test
+    # runs never change the runner's sealed copy (snapshot drift).
+    if [ "$MODE" = review ]; then
+      oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"
+      cp -a "$DOOR_WORKDIR" "$oc_dir" || { rm -rf "$xdg" "$oc_scratch"; rm -f "$prompt_full"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     fi
     (
       export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
@@ -332,11 +338,11 @@ main() {
       printf '%s' "$(cat "$prompt_full")" \
         | timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
             --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
-            --dir "$(native_path "$DOOR_WORKDIR")" \
+            --dir "$(native_path "$oc_dir")" \
             > "$log" 2> "$out.err"
     )
     rc=$?
-    rm -rf "$xdg"
+    rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"
   else
     # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under the
     # shared bubblewrap launch (tools/lib/stepfun-sandbox.sh) with the system
@@ -390,8 +396,12 @@ main() {
   set -e
   SF_KEY=""
 
-  if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT stepfun door\n' >&2
+  # Out of credit: the one shared classifier reads the provider error lines
+  # (the agent_end errors land in $out.err), records the out-of-credit
+  # quarantine, and prints both contract lines; the runner keeps exit 92.
+  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err"; }; then
+    [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
+    [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
     rm -f "$prompt_full"
     exit 92
   fi
