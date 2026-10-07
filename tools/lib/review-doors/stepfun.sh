@@ -238,6 +238,54 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
   } > "$dest"
 }
 
+# sf_rpc_turn PROMPT: one StepCode turn in RPC mode inside the shared sandbox.
+# Uses main's bin, bwrap, timeout_bin, home_tmp, sandbox_args, log and out.
+# Writes the final assistant text to $log; declined commands and provider
+# errors go to $out.err. Returns 0 only when the model answered.
+sf_rpc_turn() {
+  local prompt="$1" line typ id method text="" sf_pid
+  : > "$log"; : > "$out.err"
+  coproc SF_RPC {
+    export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
+    export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
+    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
+      --mode rpc --no-session --model "$SF_STEP_MODEL" --approval-mode auto \
+      --no-extensions --no-skills --no-prompt-templates --no-themes \
+      --no-approve --no-update-check 2>>"$out.err"
+  }
+  sf_pid="$SF_RPC_PID"
+  local to_rpc="${SF_RPC[1]}" from_rpc="${SF_RPC[0]}"
+  jq -cn --arg m "$prompt" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
+  while IFS= read -r line <&"$from_rpc"; do
+    typ="$(jq -r '.type // empty' <<<"$line" 2>/dev/null || true)"
+    case "$typ" in
+      extension_ui_request)
+        id="$(jq -r '.id // empty' <<<"$line")"; method="$(jq -r '.method // empty' <<<"$line")"
+        case "$method" in
+          confirm)
+            jq -r '"Declined: " + ((.message // .title // "") | split("\n") | map(select(test("^(Dangerous|Blocked|Shell)"))) | first // "")' <<<"$line" | cut -c1-400 >>"$out.err"
+            jq -cn --arg id "$id" '{type:"extension_ui_response",id:$id,confirmed:false}' >&"$to_rpc" ;;
+          select|input|editor)
+            jq -cn --arg id "$id" '{type:"extension_ui_response",id:$id,cancelled:true}' >&"$to_rpc" ;;
+        esac ;;
+      agent_end)
+        jq -r '[.messages[]? | select(.role=="assistant") | .errorMessage // empty] | last // empty' <<<"$line" >>"$out.err" 2>/dev/null || true ;;
+      agent_settled)
+        jq -cn '{id:"door-text",type:"get_last_assistant_text"}' >&"$to_rpc" ;;
+      response)
+        case "$(jq -r '.id // empty' <<<"$line")" in
+          door-text) text="$(jq -r '.data.text // empty' <<<"$line")"; break ;;
+          door-prompt) [ "$(jq -r '.success' <<<"$line")" = true ] || { jq -r '.error // "prompt refused"' <<<"$line" >>"$out.err"; break; } ;;
+        esac ;;
+    esac
+  done
+  eval "exec ${to_rpc}>&-" 2>/dev/null || true
+  kill "$sf_pid" 2>/dev/null || true
+  wait "$sf_pid" 2>/dev/null || true
+  [ -n "$text" ] || return 1
+  printf '%s\n' "$text" > "$log"
+}
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -252,9 +300,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    # StepCode refuses dangerous or unanalysable commands when no person can
-    # confirm, and the refusal ends the turn with no report.
-    printf 'Shell rule: this harness refuses, without a person present, any command it cannot fully analyse or judges dangerous, and the refusal ends your turn with no report. Use plain literal commands only: run a test suite as `bash tests/NAME.sh` with no options; never use rm -rf, sed -i, eval, or inline-code options such as bash -c, bash -x, sh -c, python -c, or node -e. The copy is discarded afterwards, so cleanup is never needed.\n\n'
+    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them. The copy is discarded afterwards, so cleanup is never needed.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -310,38 +356,25 @@ main() {
     local scratch
     scratch="$(mktemp -d)"
     cp -a "$DOOR_WORKDIR" "$scratch/work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
-    # Two failures end a StepCode -p turn with no report and are re-run whole,
-    # as bin/ai-stepfun does: an HTTP 429 that outlasts StepCode's own retry
-    # (pause, then rerun), and the command guard refusing a command it will
-    # not run unattended (rerun once, naming the refused command).
-    local prompt_text attempt blocked guard_retried=0 rate_retries=0
+    # StepCode's command guard asks before any command it will not run
+    # unattended (rm -rf, unanalysable shell). In -p mode that question ends
+    # the whole turn with no report, so the turn runs in RPC mode and the door
+    # declines every such question: the model is told no and keeps reviewing.
+    # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
+    # pause, as bin/ai-stepfun does.
+    local prompt_text attempt rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    local -a sandbox_args=("${packet_bind[@]}" --ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR"
+      --bind "$scratch/work" "$scratch/work" --chdir "$scratch/work")
     prompt_text="$(cat "$prompt_full")"
-    for attempt in 1 2 3 4; do
-      (
-        export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
-        export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-        stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" \
-          "${packet_bind[@]}" \
-          --ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --bind "$scratch/work" "$scratch/work" --chdir "$scratch/work" -- \
-          -p --no-session --model "$SF_STEP_MODEL" \
-          --approval-mode auto --non-interactive-approval allow \
-          --no-extensions --no-skills --no-prompt-templates --no-themes \
-          --no-approve --no-update-check -- "$prompt_text"
-      ) < /dev/null > "$log" 2> "$out.err"
+    for attempt in 1 2 3; do
+      sf_rpc_turn "$prompt_text"
       rc=$?
       [ "$rc" -ne 0 ] || break
-      if grep -Eq '^429: \{' "$log" "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ]; then
-        rate_retries=$((rate_retries + 1))
-        printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
-        sleep "$rate_pause"
-        continue
-      fi
-      blocked="$(grep -m1 '^Blocked run_command:' "$out.err" 2>/dev/null | cut -c1-400 || true)"
-      [ -n "$blocked" ] && [ "$guard_retried" = 0 ] || break
-      guard_retried=1
-      printf 'stepfun door: the command guard ended the turn; retrying once (%s)\n' "$blocked" >&2
-      prompt_text="$prompt_text"$'\n\n'"A previous attempt at this review ended with no report because the harness refused this command: $blocked"$'\n'"Do not run that command or anything like it. Use plain literal commands only."
+      grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
+      rate_retries=$((rate_retries + 1))
+      printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      sleep "$rate_pause"
     done
     rm -rf "$home_tmp" "$scratch"
   fi

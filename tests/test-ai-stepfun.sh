@@ -26,6 +26,14 @@ STUB
 cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
 prompt="${@: -1}"; printf '%s\n' "$prompt" > "$STUB_ARGS.prompt"
 head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
@@ -224,6 +232,14 @@ if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind /usr /usr --symlink usr/bin /
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
 touch "$HOME/escape" 2>/dev/null
 [ -e "$HOME/.ssh/id_test" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
 STUB
@@ -238,6 +254,14 @@ STUB
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
 p="$(printf '%s\n' "$@" | sed -n 's/^Your evidence packet is at \(.*\)\/MANIFEST.md.*/\1/p')"
 : > ./written-by-model
 [ ! -r "$p/MANIFEST.md" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
@@ -249,13 +273,18 @@ STUB
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
   check "door leaves the runner's review copy unchanged (the model writes in a scratch copy)" "[ ! -e '$RH/dw/written-by-model' ]"
-  # StepCode's guard ends a non-interactive turn on a refused command; the door
-  # retries once and names the refused command to the model.
+  # StepCode's guard asks before a dangerous command; the door declines it
+  # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
-if [ ! -e ./tried ]; then : > ./tried; echo 'Blocked run_command: Dangerous command requires confirmation (recursive-force-remove)' >&2; exit 1; fi
-printf '%s\n' "$@" | grep -q 'harness refused this command: Blocked run_command' && echo STEPFUN-OK
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"extension_ui_request","id":"c1","method":"confirm","title":"Dangerous run_command","message":"Call: x\nDangerous command requires confirmation (recursive-force-remove): run_command command=rm -rf ./x"}'
+read -r resp; ans=""
+[ "$(jq -r '.id + ":" + (.confirmed|tostring)' <<<"$resp")" = 'c1:false' ] && ans=STEPFUN-OK
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
 STUB
   rm -f "$RH/dreport"
   drc=0
@@ -263,12 +292,17 @@ STUB
     AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
-  check "door retries once after the command guard ends a turn, naming the refused command" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'retrying once' '$RH/dout'"
+  check "door declines the command guard's question and the turn still reports" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
-if [ ! -e ./limited ]; then : > ./limited; echo '429: {"type":"rate_limited"}' >&2; exit 1; fi
-echo STEPFUN-OK
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+ans=STEPFUN-OK
+if [ ! -e ./limited ]; then : > ./limited; ans=""
+  echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'; fi
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
 STUB
   rm -f "$RH/dreport"; drc=0
   HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
