@@ -133,17 +133,40 @@ source "$AI_GLM_SOURCE"
 export AI_REVIEW_LIFECYCLE_DIR="$FIXTURE/lifecycle" AI_REVIEW_EVENT_DIR="$FIXTURE/events"
 export FIXTURE
 mkdir -p "$FIXTURE/repo" "$FIXTURE/packet"; chmod 700 "$FIXTURE/repo" "$FIXTURE/packet"
+# Match native Windows' refusal to spawn extensionless script helpers from
+# Python, even when this regression suite runs on Linux.
+mkdir -p "$FIXTURE/native-python"
+cat > "$FIXTURE/native-python/sitecustomize.py" <<'NATIVE_PY'
+import pathlib,subprocess
+original=subprocess.Popen
+def native_spawn(args,*rest,**kwargs):
+ if isinstance(args,(list,tuple)) and args and pathlib.Path(str(args[0])).is_file() and not pathlib.Path(str(args[0])).suffix:
+  raise OSError('native Python cannot spawn extensionless helpers')
+ return original(args,*rest,**kwargs)
+subprocess.Popen=native_spawn
+NATIVE_PY
+cat > "$FIXTURE/native-python/python3" <<'NATIVE_EXEC'
+#!/usr/bin/env bash
+PYTHONPATH="$FIXTURE/native-python${PYTHONPATH:+:$PYTHONPATH}" exec "$PYTHON" "$@"
+NATIVE_EXEC
+chmod 700 "$FIXTURE/native-python/python3"
+export PATH="$FIXTURE/native-python:$PATH"
 cat > "$FIXTURE/lifecycle-read" <<'FIXTURE_EXEC'
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+case "${OBSERVATION_HELPER_CASE:-}" in helper-error) exit 2;; helper-malformed) printf '{broken';exit 0;; esac
+"$PYTHON" - <<'IDENTITY_PY'
 import json,os
 print(json.dumps({'repository_key':'a'*64,'repository_root':os.environ['FIXTURE']+'/repo'}))
+IDENTITY_PY
 FIXTURE_EXEC
 cat > "$FIXTURE/packet-read" <<'FIXTURE_EXEC'
 #!/usr/bin/env bash
+case "${OBSERVATION_HELPER_CASE:-}" in helper-path-empty) exit 0;; helper-path-multiline) printf '%s\n%s' "$FIXTURE/packet" "$FIXTURE/repo";exit 0;; esac
 printf '%s' "$FIXTURE/packet"
 FIXTURE_EXEC
 chmod 700 "$FIXTURE/lifecycle-read" "$FIXTURE/packet-read"
 REVIEW_LIFECYCLE_BIN="$FIXTURE/lifecycle-read"; PACKET_BIN="$FIXTURE/packet-read"
+timeout(){ if [ "${OBSERVATION_HELPER_CASE:-}" = helper-timeout ];then return 124;fi;command timeout "$@"; }
 preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
 REVIEW_PREFLIGHT_BIN=preflight_fixture
 # Reconstructed public schema, never a claimed retained live assistant envelope.
@@ -199,7 +222,7 @@ api(){ exit 91; };send_prompt(){ exit 92; };require_review_server(){ exit 93; };
 if (recover_review_error "$meta") > "$FIXTURE/recovery.log" 2>&1;then exit 1;fi
 cmp "$receipt" "$FIXTURE/immutable-known"
 # The real pause component receives original expired time, never a fresh window.
-AI_REVIEWER_STATE_BASE="$FIXTURE/admission" "$WRAPPER_DIR/ai-review-preflight" pause glm out-of-credit --seconds 3600 --observed "$expected" > "$FIXTURE/expired.json"
+AI_REVIEW_QUARANTINE_DIR="$FIXTURE/admission" "$WRAPPER_DIR/ai-review-preflight" pause glm out-of-credit --seconds 3600 --observed "$expected" > "$FIXTURE/expired.json"
 jq -e '.status=="expired"' "$FIXTURE/expired.json" >/dev/null
 # Previously shipped v1 observation lacks provenance and remains immutable UNKNOWN.
 jq 'del(.original_observation,.captured_epoch) | .schema_version=1' "$FIXTURE/immutable-known" > "$receipt"
@@ -209,16 +232,25 @@ persist_review_error "$meta" "$msg" historical
 cmp "$receipt" "$FIXTURE/immutable-v1"
 [ "$(wc -l < "$FIXTURE/pauses")" = "$before" ]
 review_error_receipt "$meta" | jq -e '.observation_state=="unknown" and .observed_epoch==null' >/dev/null
-for case in wrong-head wrong-caller wrong-provider wrong-session wrong-run wrong-source wrong-required wrong-packet truncated ambiguous future out-of-bounds malformed-time missing-time wrong-manifest unprotected owner-readonly owner-executable missing duplicate symlink hardlink;do
+for case in wrong-head wrong-caller wrong-provider wrong-session wrong-run wrong-source wrong-required wrong-packet truncated ambiguous future out-of-bounds malformed-time missing-time wrong-manifest unprotected owner-readonly owner-executable missing duplicate symlink hardlink helper-error helper-malformed helper-timeout helper-path-empty helper-path-multiline;do
+ case "$case" in unprotected|owner-readonly|owner-executable)
+  # These exact Unix mode bits have no native Windows meaning. Keep the
+  # negatives on POSIX; all binding/file-identity cases still run on Windows.
+  if "$PYTHON" -c 'import os,sys;sys.exit(0 if os.name=="nt" else 1)';then
+   printf '  note %s is a POSIX mode-bit negative; unavailable on native Windows\n' "$case"
+   continue
+  fi;; esac
  # Reset only this owned fixture evidence; each receipt has a distinct path.
  rm -f "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.json" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.owned" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.linked"
  prepare "$case";meta="$FIXTURE/meta-$case.json";before="$(wc -l < "$FIXTURE/pauses")"
+ export OBSERVATION_HELPER_CASE="$case"
  persist_review_error "$meta" "$msg" historical
  jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null
  receipt="$(jq -r .remote_turn.error_path "$meta")"
  jq -e '.original_observation.state=="unknown" and .observed_epoch==null' "$receipt" >/dev/null
  [ "$(wc -l < "$FIXTURE/pauses")" = "$before" ]
 done
+[ -z "$(find "$FIXTURE" -maxdepth 1 -name '*.error-identity.*' -o -name '*.error-packet.*' -o -name '*.error-input.*')" ]
 OBSERVATION_CASES
   env AI_GLM_SOURCE="$AI_GLM" AI_GLM_TEST_SOURCE_ONLY=1 FIXTURE="$fixture" PYTHON="$PYTHON" bash "$fixture/cases.sh"
 }

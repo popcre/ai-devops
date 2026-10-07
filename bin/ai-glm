@@ -473,14 +473,31 @@ persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local 
 }
 
 review_error_receipt() { # META [ASSISTANT_JSON]; absent JSON verifies retained record
-  local meta="$1" msg="${2:-}" mode="${3:-live}" input="" result runtime rc=0
+  local meta="$1" msg="${2:-}" mode="${3:-live}" input="" result runtime rc=0 identity_capture="" packet_capture="" repository boundary name
   runtime="$(command -v python3 || command -v python)" || return 1
   if [ -n "$msg" ]; then
     input="$(mktemp "${meta}.error-input.XXXXXX")" || return 1
     chmod 600 "$input" && printf '%s' "$msg" > "$input" || { rm -f "$input"; return 1; }
   fi
-  result="$("$runtime" - "$WRAPPER_DIR/../tools" "$meta" "$input" "$mode" "$REVIEW_LIFECYCLE_BIN" "$PACKET_BIN" <<'ERROR_RECEIPT'
-import datetime,hashlib,json,os,re,stat,subprocess,sys,time
+  # Native Windows Python cannot execute extensionless Bash helpers. The
+  # already-running shell captures only bounded read-only identity/path output;
+  # Python still qualifies every retained binding before granting time authority.
+  if [ -n "$input" ] && [ "$mode" = historical ]; then
+    identity_capture="$(mktemp "${meta}.error-identity.XXXXXX")" || { rm -f "$input"; return 1; }
+    packet_capture="$(mktemp "${meta}.error-packet.XXXXXX")" || { rm -f "$input" "$identity_capture"; return 1; }
+    chmod 600 "$identity_capture" "$packet_capture" || { rm -f "$input" "$identity_capture" "$packet_capture"; return 1; }
+    repository="$(jq -er '.repository_root | select(type=="string" and length>0)' "$meta")" || repository=""
+    boundary="$(jq -er '.remote_turn.boundary_root | select(type=="string" and length>0)' "$meta")" || boundary=""
+    name="$(jq -er '.name | select(type=="string" and length>0)' "$meta")" || name=""
+    if [ -z "$repository" ] || ! timeout 10 bash "$REVIEW_LIFECYCLE_BIN" identity "$repository" > "$identity_capture" 2>/dev/null; then
+      : > "$identity_capture"
+    fi
+    if [ -z "$boundary" ] || [ -z "$name" ] || ! timeout 10 bash "$PACKET_BIN" path "$boundary" "glm-$name" > "$packet_capture" 2>/dev/null; then
+      : > "$packet_capture"
+    fi
+  fi
+  result="$("$runtime" - "$WRAPPER_DIR/../tools" "$meta" "$input" "$mode" "$identity_capture" "$packet_capture" <<'ERROR_RECEIPT'
+import datetime,hashlib,json,os,re,stat,sys,time
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from reviewer_maintenance import physical,publish,read_json,require
@@ -500,16 +517,18 @@ require(sys.argv[4] in ('live','historical'),'invalid internal observation mode'
 def utc_epoch(value):
     require(isinstance(value,str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',value),'invalid original observation time')
     return int(datetime.datetime.strptime(value,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp())
-def protected_json(path):
+def protected_bytes(path):
     path=physical(path); info=path.stat()
     require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=32768,'unsafe original observation evidence')
     if os.name!='nt': require(info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600,'unprotected original observation evidence')
+    return path.read_bytes()
+def protected_json(path):
     def unique(pairs):
         result={}
         for key,value in pairs:
             require(key not in result,'duplicate original observation field');result[key]=value
         return result
-    raw=path.read_bytes(); value=json.loads(raw,object_pairs_hook=unique)
+    raw=protected_bytes(path); value=json.loads(raw,object_pairs_hook=unique)
     return value,hashlib.sha256(raw).hexdigest()
 def observation_bounds(epoch):
     start=utc_epoch(t['started_at']); deadline=t.get('deadline_epoch')
@@ -519,7 +538,7 @@ def historical_observation():
     # An unavailable proof is UNKNOWN, while ERROR persistence remains supported.
     try:
         run=m.get('last_diagnostic_run_id'); require(isinstance(run,str) and re.fullmatch(r'[A-Za-z0-9._-]{1,128}',run),'unbound original diagnostic')
-        identity=json.loads(subprocess.run([sys.argv[5],'identity',m['repository_root']],check=True,capture_output=True,text=True,timeout=10).stdout)
+        identity,_=protected_json(sys.argv[5])
         key=identity.get('repository_key'); require(isinstance(key,str) and re.fullmatch(r'[0-9a-f]{64}',key),'unbound original repository key')
         root=physical(m['repository_root']);require(physical(identity.get('repository_root',''))==root,'original repository identity changed')
         diag_root=physical(os.environ.get('AI_REVIEW_LIFECYCLE_DIR',str(Path.home()/'.local/state/ai-devops/review-lifecycle')))
@@ -528,7 +547,9 @@ def historical_observation():
         from reviewer_events import evidence_root,location
         required,required_hash=protected_json(evidence_root(location(),t['original_invocation_id'])/'required.json')
         require(required=={'schema_version':1,'provider':'glm','caller':m['caller'],'run_id':t['original_invocation_id'],'head':t['head']},'original invocation evidence changed')
-        packet=physical(subprocess.run([sys.argv[6],'path',t['boundary_root'],'glm-'+m['name']],check=True,capture_output=True,text=True,timeout=10).stdout.strip())
+        packet_text=protected_bytes(sys.argv[6]).decode('utf-8').strip()
+        require(bool(packet_text) and '\n' not in packet_text and '\r' not in packet_text,'invalid original packet path')
+        packet=physical(packet_text)
         require((packet/'MANIFEST.sha256').read_text().strip()==t['packet_sha256'],'original packet changed')
         packet_identity,packet_hash=protected_json(packet/'identity.json')
         require(packet_identity.get('head')==t['head'] and packet_identity.get('base')==t['base'] and packet_identity.get('source_digest')==diag.get('source_digest') and isinstance(diag.get('source_digest'),str) and re.fullmatch(r'[0-9a-f]{64}',diag['source_digest']),'original source binding changed')
@@ -577,6 +598,8 @@ print(json.dumps({'path':str(target),'failure_class':value['failure_class'],'obs
 ERROR_RECEIPT
 )" || rc=$?
   [ -z "$input" ] || rm -f "$input"
+  [ -z "$identity_capture" ] || rm -f "$identity_capture"
+  [ -z "$packet_capture" ] || rm -f "$packet_capture"
   [ "$rc" -eq 0 ] || return "$rc"
   printf '%s' "$result"
 }
