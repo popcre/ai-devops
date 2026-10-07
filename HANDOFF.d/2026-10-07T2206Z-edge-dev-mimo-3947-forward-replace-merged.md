@@ -95,7 +95,7 @@ Two DeepSeek REVISE verdicts on merged head `f8b8b321…` make `assertExactDurab
 
 - GitHub `u2giants` via `gh` on `edge-dev`. Repo `popcre/shared-db`.
 - 1Password `vibe_coding`: DB password item `246sf23gymd64yudpmhswcnyle`; `op://vibe_coding/Supabase DB Password - shared POP database/password`.
-- Production project `qsllyeztdwjgirsysgai`; preview `mvpkijzfmfcxhnzqogzs`. Production pooler `aws-1-us-east-1`, preview `aws-0-us-east-1`.
+- Production/preview Supabase project refs: 1Password vault `vibe_coding` only (never in this public repo). Production pooler region `aws-1-us-east-1`, preview `aws-0-us-east-1`.
 - Worktrees: `C:\repos\shared-db-wt-3947-fwd-20261007` (forward PR), `C:\repos\shared-db\.claude\worktrees\3947-scraped-dedupe` (old fix, still live), `D:\repos\shared-db-review\*` review checkouts.
 - Reviewers that work: Muse, Gemini. Avoid DeepSeek/GLM/Qwen/StepFun for this issue.
 

@@ -37,7 +37,7 @@ Creations. Issue #3947 is a structural function-body change to
 `api.db_data_admin_scraped_source_inventory` (Scraped Properties display
 duplicates on the licensing admin UI). Claim-first under claim #3955.
 
-Production project `qsllyeztdwjgirsysgai`. Preview `mvpkijzfmfcxhnzqogzs`.
+Production and preview Supabase project refs live only in 1Password vault `vibe_coding` (item `246sf23gymd64yudpmhswcnyle` notes and the shared-db ops notes). Do not put project refs in this public repository.
 
 ---
 
@@ -303,8 +303,9 @@ before assuming Path B exists.
 - `ai-muse doctor` passes (Muse Code 1.4.2-R4684.1, `muse-spark-1.3-contributor`).
 - 1Password `vibe_coding`: DB password item `246sf23gymd64yudpmhswcnyle`;
   `op://vibe_coding/Supabase DB Password - shared POP database/password`.
-- Production project `qsllyeztdwjgirsysgai`; preview `mvpkijzfmfcxhnzqogzs`.
-  Production pooler `aws-1-us-east-1`, preview `aws-0-us-east-1`.
+- Production/preview Supabase project refs: 1Password vault `vibe_coding` only
+  (never in this public repo). Production pooler region `aws-1-us-east-1`,
+  preview `aws-0-us-east-1`.
 - Worktrees: `C:\repos\shared-db\.ai\worktrees\3947-fence` (used for governed
   reviews; live, do not delete),
   `C:\repos\shared-db-wt-3947-fwd-20261007` (forward PR worktree),
