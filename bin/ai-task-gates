@@ -370,6 +370,7 @@ windows_private_acl(){ # windows_private_acl NATIVE_PATH SID REQUIRE_PROTECTED
 }
 
 windows_current_sid(){
+  if [ -n "${WINDOWS_CURRENT_SID:-}" ]; then printf '%s' "$WINDOWS_CURRENT_SID"; return 0; fi
   powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n'
 }
 
@@ -380,6 +381,8 @@ private_state_directory(){
     MINGW*|MSYS*|CYGWIN*)
       command -v cygpath >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1
       win="$(cygpath -w "$dir")" || return 1
+      sid="$(windows_current_sid)"; case "$sid" in S-1-*) ;; *) return 1 ;; esac
+      windows_private_acl "$win" "$sid" yes && return 0
       sid="$(powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $Owner=(Get-Acl -LiteralPath $Path -ErrorAction Stop).GetOwner([Security.Principal.SecurityIdentifier]).Value; if ($Owner -ne $Sid) { exit 1 }; $Sid } catch { exit 1 } }' "$win" 2>/dev/null | tr -d '\r\n')"
       case "$sid" in S-1-*) ;; *) return 1 ;; esac
       icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1
@@ -394,19 +397,41 @@ private_state_directory(){
 
 STATE_ROOT_PRIVATE=0
 windows_private_ancestors(){
-  local dir="$1" profile win sid
-  profile="$(powershell.exe -NoProfile -NonInteractive -Command '$env:USERPROFILE' 2>/dev/null | tr -d '\r\n')"
-  [ -n "$profile" ] && profile="$(cygpath -u "$(cygpath -aw "$profile")")" || return 1
+  local dir="$1" profile win native_profile sid
+  [ -n "${USERPROFILE:-}" ] || return 1
+  profile="$(cygpath -u "$(cygpath -aw "$USERPROFILE")")" || return 1
   dir="$(cygpath -u "$(cygpath -aw "$dir")")" || return 1
   case "$dir" in "$profile"|"$profile"/*) ;; *) return 1 ;; esac
   sid="$(windows_current_sid)"; case "$sid" in S-1-*) ;; *) return 1 ;; esac
-  while :; do
-    [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
-    win="$(cygpath -w "$dir")" || return 1
-    windows_private_acl "$win" "$sid" no || return 1
-    [ "$dir" != "$profile" ] || break
-    dir="$(dirname "$dir")"
-  done
+  win="$(cygpath -w "$dir")" || return 1
+  native_profile="$(cygpath -w "$profile")" || return 1
+  powershell.exe -NoProfile -NonInteractive -Command '& {
+    param([string]$Path,[string]$Profile,[string]$Sid)
+    try {
+      $Path=[IO.Path]::GetFullPath($Path).TrimEnd("\")
+      $Profile=[IO.Path]::GetFullPath($Profile).TrimEnd("\")
+      if (-not ($Path.Equals($Profile,[StringComparison]::OrdinalIgnoreCase) -or $Path.StartsWith($Profile+"\",[StringComparison]::OrdinalIgnoreCase))) { exit 1 }
+      $Unsafe=[Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+      $Full=[Security.AccessControl.FileSystemRights]::FullControl
+      while ($true) {
+        $Item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }
+        $Acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $Owner=$Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($Owner -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }
+        $HasFull=$false
+        foreach ($Rule in $Acl.Access) {
+          $RuleSid=$Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+          if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }
+          if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544") -and (($Rule.FileSystemRights -band $Unsafe) -ne 0)) { exit 1 }
+          if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull=$true }
+        }
+        if (-not $HasFull) { exit 1 }
+        if ($Path.Equals($Profile,[StringComparison]::OrdinalIgnoreCase)) { break }
+        $Path=Split-Path -Parent $Path
+      }
+    } catch { exit 1 }
+  }' "$win" "$native_profile" "$sid" >/dev/null 2>&1
 }
 
 private_state_root(){
@@ -443,26 +468,52 @@ private_state_file(){
 }
 
 # A native ACL alone cannot authenticate bytes written before the directory
-# was sealed. DPAPI binds each new file to this Windows user and exact path.
+# was sealed. The signing key lives outside the historically broad ai-devops
+# tree, under a parent whose entire ancestor chain rejects foreign writers.
+WINDOWS_SEAL_KEY_PRIVATE=0
+windows_seal_key(){
+  local keydir="$HOME/.local/state/.ai-task-gates-seal" key="$HOME/.local/state/.ai-task-gates-seal/key.bin" win
+  [ "$WINDOWS_SEAL_KEY_PRIVATE" -eq 0 ] || return 0
+  if [ ! -d "$HOME/.local/state" ]; then
+    windows_private_ancestors "$HOME" || return 1
+    mkdir -p "$HOME/.local/state" || return 1
+  fi
+  windows_private_ancestors "$HOME/.local/state" || return 1
+  private_state_directory "$keydir" || return 1
+  if [ ! -e "$key" ] && [ ! -L "$key" ]; then
+    win="$(cygpath -w "$key")" || return 1
+    powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) try { $Bytes=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($Bytes); $Stream=[IO.File]::Open($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); try { $Stream.Write($Bytes,0,$Bytes.Length) } finally { $Stream.Dispose() } } catch { exit 1 } }' "$win" >/dev/null 2>&1 || [ -f "$key" ] || return 1
+  fi
+  private_state_file "$key" && [ "$(wc -c < "$key")" -eq 32 ] || return 1
+  WINDOWS_SEAL_KEY_PRIVATE=1
+}
+
+windows_file_mac(){ # WINDOWS_PATH DIGEST
+  local win_key
+  win_key="$(cygpath -w "$HOME/.local/state/.ai-task-gates-seal/key.bin")" || return 1
+  powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$KeyPath,[string]$Path,[string]$Digest) try { $Key=[IO.File]::ReadAllBytes($KeyPath); if ($Key.Length -ne 32) { exit 1 }; $Bytes=[Text.Encoding]::UTF8.GetBytes($Path+"`n"+$Digest); $Hmac=[System.Security.Cryptography.HMACSHA256]::new($Key); [Convert]::ToBase64String($Hmac.ComputeHash($Bytes)) } catch { exit 1 } }' "$win_key" "$1" "$2" | tr -d '\r\n'
+}
+
 windows_seal_file(){
-  local file="$1" seal="${1}.seal" tmp win digest
+  local file="$1" seal="${1}.seal" tmp win digest mac
   case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
-  private_state_file "$file" || return 1
+  private_state_file "$file" && windows_seal_key || return 1
   tmp="$(mktemp "$(dirname "$file")/.seal.XXXXXXXX")" || return 1
   win="$(cygpath -w "$file")" || return 1
   digest="$(sha256sum "$file" | cut -d' ' -f1)" || return 1
-  powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Digest) try { $Entropy=[Text.Encoding]::UTF8.GetBytes($Path); $Bytes=[Text.Encoding]::UTF8.GetBytes($Digest); [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($Bytes,$Entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)) } catch { exit 1 } }' "$win" "$digest" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  mac="$(windows_file_mac "$win" "$digest")" && [ -n "$mac" ] || { rm -f -- "$tmp"; return 1; }
+  printf '%s\n' "$mac" > "$tmp" || { rm -f -- "$tmp"; return 1; }
   chmod 0600 "$tmp" && mv -f -- "$tmp" "$seal" && private_state_file "$seal" || return 1
 }
 
 windows_verify_seal(){
-  local file="$1" seal="${1}.seal" win digest protected
-  private_state_file "$file" && private_state_file "$seal" || return 1
+  local file="$1" seal="${1}.seal" win digest protected actual
+  private_state_file "$file" && private_state_file "$seal" && windows_seal_key || return 1
   win="$(cygpath -w "$file")" || return 1
   digest="$(sha256sum "$file" | cut -d' ' -f1)" || return 1
   protected="$(tr -d '\r\n' < "$seal")" || return 1
   [ -n "$protected" ] || return 1
-  powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Digest,[string]$Protected) try { $Entropy=[Text.Encoding]::UTF8.GetBytes($Path); $Bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($Protected),$Entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser); if ([Text.Encoding]::UTF8.GetString($Bytes) -ne $Digest) { exit 1 } } catch { exit 1 } }' "$win" "$digest" "$protected" >/dev/null 2>&1
+  actual="$(windows_file_mac "$win" "$digest")" && [ -n "$actual" ] && [ "$actual" = "$protected" ]
 }
 
 state_field(){
@@ -1886,6 +1937,12 @@ main(){
   TASK_GATES_COMMAND="$command"
   case "$command" in
     start|status|end|explain|check|authorize-install|install-verify)
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+          WINDOWS_CURRENT_SID="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"
+          case "$WINDOWS_CURRENT_SID" in S-1-*) ;; *) fail_closed 'Windows user identity is unavailable.' ;; esac
+          ;;
+      esac
       private_state_root || fail_closed 'task state directory or parent is not private.' ;;
   esac
   case "$command" in

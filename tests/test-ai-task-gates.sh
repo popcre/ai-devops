@@ -14,7 +14,13 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    mkdir -p "$HOME/.local/state"
+    TMP="$(mktemp -d "$HOME/.local/state/task-gates-tests.XXXXXXXX")" ;;
+  *) TMP="$(mktemp -d)" ;;
+esac
+trap 'rm -rf "$TMP"' EXIT
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     # A custom state root must already have a private parent. This is a
@@ -211,7 +217,8 @@ cat > "$TMP/fake-os/powershell.exe" <<'EOF'
 case "$*" in
   *'$env:USERPROFILE'*) printf '%s\n' "$USERPROFILE" ;;
   *'GetCurrent().User.Value'*) printf 'S-1-5-21-1000\r\n' ;;
-  *'ProtectedData]::Protect'*) printf 'fake-seal\n' ;;
+  *'FileMode]::CreateNew'*) for path do :; done; head -c 32 /dev/zero > "$path" ;;
+  *'HMACSHA256'*) printf 'fake-seal\n' ;;
 esac
 EOF
     cat > "$TMP/fake-os/icacls" <<'EOF'
@@ -1306,7 +1313,7 @@ case "$(uname -s)" in
     sed -n '/^function Assert-PrivateInstallAuthority(/,/^}/p' "$ROOT/bin/install-ai-devops-windows.ps1" > "$auth_check"
     printf '\nAssert-PrivateInstallAuthority -IssuedPath $args[0] -ReadPath $args[1]\n' >> "$auth_check"
     check 'the Windows installer accepts a newly sealed private authority file' \
-      "powershell.exe -NoProfile -NonInteractive -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$state_entry')\" \"\$(cygpath -w '$state_entry')\""
+      "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$state_entry')\" \"\$(cygpath -w '$state_entry')\""
     cache_entry="$(find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f | head -1)"
     check 'the Windows explain cache entry has a private native ACL' \
       "[ -n '$cache_entry' ] && private_windows_acl '$cache_entry' no"
@@ -1328,7 +1335,7 @@ case "$(uname -s)" in
     unsafe_grandparent="$TMP/unsafe-grandparent"
     mkdir -p "$unsafe_grandparent/private"
     icacls "$(cygpath -w "$unsafe_grandparent")" /grant:r '*S-1-1-0:(OI)(CI)M' >/dev/null
-    icacls "$(cygpath -w "$unsafe_grandparent/private")" /inheritance:r >/dev/null
+    icacls "$(cygpath -w "$unsafe_grandparent/private")" /inheritance:r /grant:r "*${test_sid}:(OI)(CI)(F)" >/dev/null
     check 'a custom state grandparent with broad access is refused' \
       "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$unsafe_grandparent/private/task-gates' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
     old_state_root="$TMP/old-state"
@@ -1344,7 +1351,7 @@ case "$(uname -s)" in
     check 'a forged generation marker cannot authenticate changed task state' \
       "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' check --before review ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
     check 'the Windows installer refuses bytes that differ from the user seal' \
-      "! powershell.exe -NoProfile -NonInteractive -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$old_state_file')\" \"\$(cygpath -w '$old_state_file')\""
+      "! powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$old_state_file')\" \"\$(cygpath -w '$old_state_file')\""
     ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
     rm -f "$old_state_file.seal"
     check 'an old private Windows declaration without a user seal still needs reissue' \

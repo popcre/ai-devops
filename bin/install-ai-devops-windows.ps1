@@ -273,25 +273,46 @@ function Assert-PrivateInstallAuthority([string]$IssuedPath, [string]$ReadPath) 
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $allow = @($sid, 'S-1-5-18', 'S-1-5-32-544')
     $sealPath = "$IssuedPath.seal"
+    $keyDir = Join-Path $env:USERPROFILE '.local\state\.ai-task-gates-seal'
+    $keyPath = Join-Path $keyDir 'key.bin'
+    $privatePaths = @($ReadPath, $sealPath, $dir, (Split-Path -Parent $dir), $keyDir, $keyPath)
+    $unsafe = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
     $objects = @($ReadPath, $sealPath)
     while ($true) {
         $objects += $dir
         if ($dir.Equals($profile, [StringComparison]::OrdinalIgnoreCase)) { break }
         $dir = Split-Path -Parent $dir
     }
+    $objects += $keyPath
+    $keyAncestor = $keyDir
+    while ($true) {
+        $objects += $keyAncestor
+        if ($keyAncestor.Equals($profile, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $keyAncestor = Split-Path -Parent $keyAncestor
+    }
     foreach ($path in $objects) {
+        $mustBePrivate = $privatePaths -contains $path
         $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'Reviewed toolkit install authorization has a reparse point.'
         }
         $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
-        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) {
+        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allow -or
+            ($mustBePrivate -and $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid)) {
             throw 'Reviewed toolkit install authorization has a foreign owner.'
         }
         $hasFull = $false
         foreach ($rule in $acl.Access) {
             $ruleSid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-            if ($ruleSid -notin $allow -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                ($ruleSid -notin $allow -and ($mustBePrivate -or (($rule.FileSystemRights -band $unsafe) -ne 0)))) {
                 throw 'Reviewed toolkit install authorization has broad access.'
             }
             if ($ruleSid -eq $sid -and (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl)) {
@@ -301,10 +322,12 @@ function Assert-PrivateInstallAuthority([string]$IssuedPath, [string]$ReadPath) 
         if (-not $hasFull) { throw 'Reviewed toolkit install authorization lacks owner control.' }
     }
     $digest = (Get-FileHash -LiteralPath $ReadPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $protected = [Convert]::FromBase64String((Get-Content -Raw -LiteralPath $sealPath).Trim())
-    $entropy = [Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($IssuedPath))
-    $unsealed = [Security.Cryptography.ProtectedData]::Unprotect($protected, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-    if ([Text.Encoding]::UTF8.GetString($unsealed) -cne $digest) {
+    $key = [IO.File]::ReadAllBytes($keyPath)
+    if ($key.Length -ne 32) { throw 'Reviewed toolkit install authorization key is invalid.' }
+    $bytes = [Text.Encoding]::UTF8.GetBytes(([IO.Path]::GetFullPath($IssuedPath) + "`n" + $digest))
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($key)
+    $expected = [Convert]::ToBase64String($hmac.ComputeHash($bytes))
+    if ((Get-Content -Raw -LiteralPath $sealPath).Trim() -cne $expected) {
         throw 'Reviewed toolkit install authorization seal does not match its bytes.'
     }
 }
