@@ -19,7 +19,12 @@ Linked handoff (this session):
 | S1. Land BlockerWatch snapshot reuse (P5 REST savings) | Done 2026-10-01: live tick proof on edge-dev (workflow 0d51aa59). Snapshot reads 21 for 18 repos; dependents from index when present (26 propagate comments, 0 REST for those); wake REST only for non-OPEN blockers (48 calls); wakes/alarms/links all ran vs prior tick. Installed bin/ai-blocker-watch + bin/ai-gh byte-identical to origin/main. Caveats: ai-gh quota-state save-path bug and GraphQL telemetry label overwrite remain open defects. | — | Evidence on #868 (2026-10-01); four criteria shown from tick log + ai-gh telemetry |
 | S2. Share one PR status read across waiters (P4) | Accepted: PR #948 merged as f55c1a6 after exact-head review and Linux/Windows tests; edge-dev3 installed pair shared one OPEN refresh with independent deadlines at 11:45–11:46 AM EDT; #925 closed. | Codex issue #658 orchestrator | Live refresh and deadline proof passed; terminal and identity cases passed checked-in fixtures |
 | S3. Route leftover direct callers through ai-gh (P3) | PR #973 merged as 9cf87d4 after exact-head approval, focused tests, and green CI; S2 and shared-db consumer #3649 merged. Installed #931/#933 proof remains. | #931 and #933 scoped proof owners; installation | Caller inventory disposition, fail-closed static guard, focused bypass tests, and PR/CI passed; installed paths remain |
-| S4. Before/after traffic sample and de-stale parent STATUS | Open; parent STATUS updated provisionally on 2026-09-28, measured after-sample unavailable before installation. | Codex issue #658 orchestrator; S1-S3 installed | Dated comparable report under tests/verification/github-requests/ |
+| S4. Before/after traffic sample and de-stale parent STATUS | Open; October 7 bounded current sample recorded in existing P1 baseline, but workload-comparable baseline, total HTTP/GraphQL consumption and useful-work latency remain unknown. #1211/#1212 repairs and fleet installation are dependencies. | Codex chat 01a116aa-0400-7230-97d9-3fab73f00bd1 under #658 | Dated comparable report satisfying parent section 13; no savings inferred from call counts |
+
+October 7, 2026, 10:05 AM EDT: Albert explicitly authorized concurrent
+independent owners and continuing through programme closeout. Historical
+one-step/session stop instructions are superseded. Accepted S1/S2 proofs stay
+accepted; distinct new repairs, installation and measurement remain governed.
 
 **Start here:** read this STATUS and the
 [active programme handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
