@@ -102,7 +102,7 @@ def capacity_observation(data, provider, observation, now):
         'credential_profile_scope': profile, 'model_scope': model,
         'observed_epoch': observed, 'reset_at': reset,
         'next_check_epoch': max(now + 60, epoch) if epoch is not None else now + 3600,
-        'record_id': new_record_id()}
+        'record_id': (hold.get('record_id') if hold else None) or new_record_id()}
     return {'status': 'held', 'reset_at': reset}
 
 
@@ -590,6 +590,7 @@ def main():
                 reset = data.get('last_capacity_reset')
                 prior_attempt = data.get('reset_qualification_attempt')
                 if (not reset or data.get('capacity_hold') or data.get('global')
+                        or not args.run_id or reset.get('record_id') != args.run_id
                         or reset.get('failure_class') != 'allowance-exhausted'
                         or not reset.get('reset_at') or reset_epoch(reset['reset_at']) > now
                         or not re.fullmatch('[0-9a-f]{64}', args.expect_record)

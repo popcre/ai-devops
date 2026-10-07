@@ -17,17 +17,26 @@ spec.loader.exec_module(api)
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_qualified_reset_enrichment_preserves_failed_canary_record_identity(self):
+        import time
+        now=int(time.time())
+        data={'provider':'qwen','capacity_hold':{'provider':'qwen','failure_class':'allowance-exhausted','credential_profile_scope':None,'model_scope':None,'observed_epoch':now-10,'reset_at':None,'next_check_epoch':now,'record_id':'failed-canary'}}
+        observation={'provider':'qwen','state':'exhausted','observed_epoch':now,'reset_at':datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()}
+        self.assertEqual(api.capacity_observation(data,'qwen',observation,now)['status'],'held')
+        self.assertEqual(data['capacity_hold']['record_id'],'failed-canary')
     def test_due_reset_claim_once_preserves_stronger_holds_and_new_reset_can_retry(self):
         import time
         now=int(time.time())
         receipt={'provider':'qwen','failure_class':'allowance-exhausted','observed_epoch':now-60,'reset_at':datetime.datetime.fromtimestamp(now-1,datetime.timezone.utc).isoformat(),'record_id':'first'}
         data={'version':2,'provider':'qwen','global':None,'backoffs':{},'last_capacity_reset':receipt}
         api.publish(self.directory,'qwen',data)
-        command=[sys.executable,str(MODULE),'reset-qualification-claim','qwen','--directory',str(self.directory),'--expect-record','a'*64]
+        command=[sys.executable,str(MODULE),'reset-qualification-claim','qwen','--directory',str(self.directory),'--expect-record','a'*64,'--run-id','wrong']
         def claim():
             result=subprocess.run(command,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             return json.loads(result.stdout)
+        self.assertFalse(claim()['claimed'])
+        command[-1]='first'
         self.assertTrue(claim()['claimed'])
         self.assertEqual(claim()['reason'],'already-attempted')
         data=api.load(self.directory,'qwen')
@@ -37,6 +46,8 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(claim()['claimed'])
         data['global']=None
         api.publish(self.directory,'qwen',data)
+        self.assertFalse(claim()['claimed'])
+        command[-1]='second'
         self.assertTrue(claim()['claimed'])
     def test_subscription_quota_reset_never_lifts_prior_paid_funds_hold(self):
         import time

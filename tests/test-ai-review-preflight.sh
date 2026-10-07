@@ -50,6 +50,10 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
   if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+    receipt="$(mktemp)"
+    printf '{"provider":"qwen","failure_class":"allowance-exhausted"}\n' > "$receipt"
+    "${MOCK_ADMISSION_PYTHON}" "$MOCK_ADMISSION_TOOL" credit qwen --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record >/dev/null
+    rm -f "$receipt"
     printf 'AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=qwen code=quota_exhausted\n'
     printf 'ALLOWANCE EXHAUSTED: qwen; automatic return at provider reset; reset unavailable.\n'
     printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
@@ -105,6 +109,7 @@ export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
+export MOCK_ADMISSION_PYTHON="$(command -v python3 || command -v python)" MOCK_ADMISSION_TOOL="$ROOT/tools/reviewer_admission.py"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
 export MOCK_GEMINI_LIVE_CONTACT="$TMP/gemini-live-contact"
@@ -268,10 +273,15 @@ reset_now="$(date +%s)"
 reset_past="$(date -u -d '@'"$((reset_now-1))" +%FT%TZ)"
 reset_future="$(date -u -d '@'"$((reset_now+3600))" +%FT%TZ)"
 reset_state="$AI_REVIEW_QUARANTINE_DIR/qwen.json"
+reset_record="$(jq -r '.capacity_deferral.capacity_record_id' "$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json")"
 reset_fixture(){
-  jq -nc --arg at "$1" --argjson now "$reset_now" \
-    '{version:2,provider:"qwen",global:null,backoffs:{},capacity_hold:{provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-50),reset_at:$at,next_check_epoch:$now,record_id:"qualified-reset-fixture"}}' > "$reset_state"
+  jq -nc --arg at "$1" --arg id "$reset_record" --argjson now "$reset_now" \
+    '{version:2,provider:"qwen",global:null,backoffs:{},capacity_hold:{provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-50),reset_at:$at,next_check_epoch:$now,record_id:$id}}' > "$reset_state"
 }
+reset_fixture "$reset_past"
+jq '.capacity_hold.record_id="old-unrelated-receipt"' "$reset_state" > "$TMP/old-receipt.json"
+mv "$TMP/old-receipt.json" "$reset_state"
+check "old reset receipt cannot authorize a later same-byte deferral" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
 reset_fixture "$reset_future"
 check "capacity deferral before reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
 reset_fixture "$reset_past"

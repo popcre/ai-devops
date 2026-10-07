@@ -668,7 +668,7 @@ qualification_subject() { # exact current wrapper and local non-generating ident
 }
 
 reset_requalify() { # only a due reset of an exact capacity-deferred installation
-  local provider="$1" marker recorded subject claim
+  local provider="$1" marker recorded subject claim capacity_record
   case "$provider" in gemini|qwen) ;; *) return 0;; esac
   [ "$(registry_state "$provider")" = registered ] || return 0
   known_broken "$provider" && return 0
@@ -679,11 +679,13 @@ reset_requalify() { # only a due reset of an exact capacity-deferred installatio
   [ -f "$marker" ] && [ ! -L "$marker" ] || return 0
   recorded="$(jq -c '.capacity_deferral.subject // empty' "$marker")" || return 1
   [ -n "$recorded" ] || return 0
+  capacity_record="$(jq -r '.capacity_deferral.capacity_record_id // empty' "$marker")"
+  [ -n "$capacity_record" ] || return 0
   subject="$(qualification_subject "$provider")" || return 0
   [ "$subject" = "$recorded" ] || return 0
   # Expiration lifts only its own allowance hold, retaining the exact reset receipt.
   admission_store capacity-status "$provider" >/dev/null || return 1
-  claim="$(admission_store reset-qualification-claim "$provider" --expect-record "$(printf '%s' "$subject" | sha256sum | awk '{print $1}')")" || return 1
+  claim="$(admission_store reset-qualification-claim "$provider" --run-id "$capacity_record" --expect-record "$(printf '%s' "$subject" | sha256sum | awk '{print $1}')")" || return 1
   [ "$(printf '%s' "$claim" | jq -r .claimed)" = true ] || return 0
   requalify_provider "$provider"
 }
@@ -727,7 +729,7 @@ requalify_expected_file() { printf '%s/%s-requalify-marker.json' "$STATE_DIR" "$
 # is current or was just re-established, and 1 when a requalification attempt
 # failed (already recorded and surfaced by then).
 requalify_provider() { # PROVIDER
-  local provider="$1" file marker output rc qualify_output attempted_subject
+  local provider="$1" file marker output rc qualify_output attempted_subject attempt_started prior_capacity fresh_capacity
   if [ "$(registry_state "$provider")" != registered ]; then
     note "ai-review-preflight: $provider is not carried in the reviewer registry; automatic requalification skips it."
     return 0
@@ -753,6 +755,8 @@ requalify_provider() { # PROVIDER
   fi
   output="$(mktemp "${TMPDIR:-/tmp}/requalify.XXXXXX")"
   attempted_subject="$(qualification_subject "$provider")" || { rm -f "$output"; printf 'ai-review-preflight: %s exact current qualification identity is unavailable; no live canary submitted.\n' "$provider" >&2; return 1; }
+  prior_capacity="$(admission_store capacity-status "$provider" | jq -r '.record_id // empty')" || return 1
+  attempt_started="$(now_epoch)"
   set +e
   qualify_output="$(case "$provider" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; esac 2>&1)"
   rc=$?
@@ -772,8 +776,9 @@ requalify_provider() { # PROVIDER
   # installation for days or weeks until the provider's quota resets.
   if [ "$REQUALIFY_FAILURE_CLASS" = "provider-outage/capacity" ]; then
     [ "$(qualification_subject "$provider")" = "$attempted_subject" ] || return 1
-    write_atomic "$marker" "$(jq -nc --arg p "$provider" --argjson at "$(now_epoch)" --argjson subject "$attempted_subject" \
-      '{version:1,provider:$p,expected_epoch:$at,capacity_deferral:{subject:$subject,observed_epoch:$at}}')"
+    fresh_capacity="$(admission_store capacity-status "$provider")" || return 1
+    write_atomic "$marker" "$(jq -nc --arg p "$provider" --argjson at "$(now_epoch)" --argjson started "$attempt_started" --arg prior "$prior_capacity" --argjson hold "$fresh_capacity" --argjson subject "$attempted_subject" \
+      '{version:1,provider:$p,expected_epoch:$at} + (if ($hold.provider==$p and $hold.failure_class=="allowance-exhausted" and ($hold.record_id|type)=="string" and $hold.record_id!=$prior and $hold.observed_epoch >= $started and $hold.observed_epoch <= $at and ($at-$hold.observed_epoch)<=300) then {capacity_deferral:{subject:$subject,observed_epoch:$at,capacity_record_id:$hold.record_id}} else {} end)')"
     printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the installation step passes but the reviewer stays quarantined (NOT usable) until a later requalify succeeds.\n' "$provider" >&2
     return 0
   fi
