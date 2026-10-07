@@ -1345,11 +1345,9 @@ cmd_install_verify(){
   common="$(cd "$(git -C "$installed" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || blocked 'ai-task-gates: STOP. Installed Git ownership unavailable.'
   [ "$common" = "$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkout have different Git ownership.'
   [ "$(git -C "$candidate_root" rev-parse HEAD)" = "$target" ] || blocked 'ai-task-gates: STOP. Candidate source differs from pinned target.'
-  if [ "$phase" = preflight ]; then
-    [ "$(git -C "$candidate_root" rev-parse refs/remotes/origin/main 2>/dev/null)" = "$target" ] || blocked 'ai-task-gates: STOP. Target is not exact fetched origin/main.'
-  else
-    git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Installed target is not in fetched origin/main history.'
-  fi
+  # Every phase requires a merged release. A pinned target need not be the tip:
+  # later merges may land between exact-head review/authorization and install.
+  git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Target is not in fetched origin/main history.'
   if [ "$fixture" -eq 0 ]; then case "$origin_url" in
     https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
     *) blocked 'ai-task-gates: STOP. Unsupported installed origin.' ;;
@@ -1613,7 +1611,7 @@ cmd_authorize_install(){
     blocked 'ai-task-gates: STOP. Legacy migration is only for an unchanged checkout.'
   fi
   git -C "$TOPLEVEL" merge-base --is-ancestor "$start_head" "$target_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Pre-update HEAD is not ancestor of candidate.'
-  [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse refs/remotes/origin/main 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate is not exact fetched origin/main.'
+  git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate is not in fetched origin/main history.'
   [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
   if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then

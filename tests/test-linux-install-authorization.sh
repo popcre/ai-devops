@@ -260,6 +260,33 @@ TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/first-candidate/update.sh" \
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
   fail 'candidate updater skipped an installation stage'
 
+# origin/main may advance after review and authorization. The candidate updater
+# installs the exact pinned merged SHA, not the newer tip, and refuses a pinned
+# SHA that is not in fetched origin/main history.
+git -C "$TMP/src" commit -q --allow-empty -m 'later merge'
+git -C "$TMP/src" push -q origin main
+later="$(git -C "$TMP/src" rev-parse HEAD)"
+git clone -q -b main "$TMP/remote.git" "$TMP/moved"
+git -C "$TMP/moved" reset -q --hard "$before"
+git -C "$TMP/moved" worktree add -q --detach "$TMP/moved-candidate" "$target"
+git -C "$TMP/moved-candidate" -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m unmerged
+unmerged="$(git -C "$TMP/moved-candidate" rev-parse HEAD)"
+if "$TMP/moved-candidate/update.sh" --installed-checkout "$TMP/moved" \
+  --expected-head "$unmerged" >/dev/null 2>&1; then fail 'unmerged pinned SHA was accepted'; fi
+[ "$(git -C "$TMP/moved" rev-parse HEAD)" = "$before" ] || fail 'unmerged pin moved installed checkout'
+git -C "$TMP/moved-candidate" checkout -q --detach "$target"
+: > "$TEST_LOG"
+TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/moved-candidate/update.sh" \
+  --installed-checkout "$TMP/moved" --expected-head "$target" \
+  --reviewer-approval "$TMP/approval.json" >/dev/null ||
+  fail 'pinned merged SHA behind origin/main was refused'
+[ "$(git -C "$TMP/moved" rev-parse HEAD)" = "$target" ] ||
+  fail 'installed checkout did not advance exactly to the pinned SHA'
+[ "$(git -C "$TMP/moved" rev-parse refs/remotes/origin/main)" = "$later" ] ||
+  fail 'fetch did not observe the later origin/main'
+if "$TMP/moved-candidate/update.sh" --installed-checkout "$TMP/moved" \
+  --expected-head "$later" >/dev/null 2>&1; then fail 'candidate at a different SHA than the pin was accepted'; fi
+
 # Exercise the installer's actual routing backup/restore functions in an
 # isolated bin directory. A first install must restore launcher absence after
 # failure so the same pending authorization can be retried safely.

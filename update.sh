@@ -89,15 +89,25 @@ fi
 info 'Fetching origin main'
 git fetch --atomic --no-tags origin \
   refs/heads/main:refs/remotes/origin/main || exit 1
-target_head="$(git rev-parse refs/remotes/origin/main)" || exit 1
-[ "$target_head" = "$(git rev-parse FETCH_HEAD)" ] || {
+fetched_main="$(git rev-parse refs/remotes/origin/main)" || exit 1
+[ "$fetched_main" = "$(git rev-parse FETCH_HEAD)" ] || {
   warn 'fetched commit and origin/main differ'; exit 1;
 }
+# The installed target must be a merged release: the exact pinned SHA when the
+# caller pins one, otherwise the fetched tip. A pinned SHA need not be the tip;
+# later merges may land between review/authorization and this run, but the
+# pinned commit itself must already be in fetched origin/main history.
+if [ -n "$expected_head" ]; then
+  target_head="$expected_head"
+  git cat-file -e "$target_head^{commit}" 2>/dev/null &&
+    git merge-base --is-ancestor "$target_head" "$fetched_main" || {
+    warn 'explicitly approved commit is not in fetched origin/main history'; exit 1;
+  }
+else
+  target_head="$fetched_main"
+fi
 [ -z "$installed_checkout" ] || [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" = "$target_head" ] || {
-  warn 'candidate checkout is not the exact fetched target'; exit 1;
-}
-[ -z "$expected_head" ] || [ "$target_head" = "$expected_head" ] || {
-  warn 'fetched target differs from the explicitly approved commit'; exit 1;
+  warn 'candidate checkout is not the exact approved target'; exit 1;
 }
 git merge-base --is-ancestor "$previous_head" "$target_head" || {
   warn 'target is not a fast-forward of the installed checkout'; exit 1;
