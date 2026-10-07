@@ -48,7 +48,7 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(result['reason'],'wrong-provider')
         self.assertNotIn('capacity_hold',data)
 
-    def test_partial_refusals_never_shorten_reset_or_replace_unknown(self):
+    def test_partial_refusals_never_shorten_reset_and_precise_reset_enriches_unknown(self):
         import time
         now=int(time.time())
         def marker(delta):
@@ -59,8 +59,24 @@ class AdmissionTests(unittest.TestCase):
             return api.load(self.directory,'qwen')['capacity_hold']['reset_at']
         later=marker(7200)
         self.assertEqual(marker(3600),later)
-        self.assertIsNone(marker(None))
-        self.assertIsNone(marker(10800))
+        self.assertEqual(marker(None),later)
+        self.assertNotEqual(marker(10800),later)
+
+    def test_precise_reset_enriches_legacy_unknown_but_stale_marker_cannot(self):
+        import time
+        now=int(time.time())
+        hold={'provider':'qwen','failure_class':'allowance-exhausted','credential_profile_scope':None,'model_scope':None,'observed_epoch':now-1000,'reset_at':None,'next_check_epoch':now,'record_id':'old'}
+        api.publish(self.directory,'qwen',{'version':2,'provider':'qwen','global':None,'backoffs':{},'capacity_hold':hold})
+        reset=datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':reset,'observed_epoch':now-300}))
+        command=[sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record']
+        result=subprocess.run(command,capture_output=True,text=True)
+        self.assertEqual(result.returncode,3)
+        self.assertEqual(api.load(self.directory,'qwen')['capacity_hold'],hold)
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':reset,'observed_epoch':now}))
+        result=subprocess.run(command,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(api.load(self.directory,'qwen')['capacity_hold']['reset_at'],reset)
 
     def test_invalid_reset_never_becomes_expiry(self):
         for reset in (True, False, float('nan'), '2026-01-01T00:00:00', 'invalid', '2999-01-01T00:00:00Z'):

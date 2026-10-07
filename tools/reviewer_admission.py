@@ -241,8 +241,14 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
     for path in marker_paths:
         if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
             try:
+                marker_now = int(time.time())
+                if not 0 <= marker_now - int(path.stat().st_mtime) <= 120:
+                    continue
                 marker = json.loads(path.read_text())
                 if marker.get('provider') != provider:
+                    continue
+                marker_observed = marker.get('observed_epoch', int(path.stat().st_mtime))
+                if type(marker_observed) is not int or not 0 <= marker_now - marker_observed <= 120:
                     continue
                 if marker.get('failure_class') == 'allowance-exhausted' and provider in SUBSCRIPTIONS:
                     allowance = True
@@ -270,9 +276,9 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                 prior = data.get('capacity_hold')
                 if prior:
                     prior_reset = prior.get('reset_at')
-                    if not prior_reset or not reset:
-                        reset = None
-                    else:
+                    if prior_reset and not reset:
+                        reset = prior_reset
+                    elif prior_reset and reset:
                         reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
                 data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if allowance else 'out-of-credit',
                     'credential_profile_scope': (prior or {}).get('credential_profile_scope'),
