@@ -328,14 +328,18 @@ def verify_reports(directory, provider, run_id):
     try:
         start = invocation(directory, provider, run_id)
     except Blocked:
-        # A loss record whose identity matches required.json is terminal even
-        # with no ledger row (e.g. local-recovery fixtures).  This is verify
-        # only: record_lost still demands a ledger row for live accounting.
-        pre = _evidence_lost_identity(directory, provider, run_id)
-        if pre is not None:
-            root = evidence_root(directory, run_id)
-            if not any(root.glob("*.report.json")) and not lost_blockers(root):
-                return [run_id + "/evidence-lost"]
+        # Historical local-recovery fixtures may have no ledger row at all.
+        # A Blocked from duplicate/conflicting/wrong-provider rows must NOT
+        # take this path — that would bypass the unique-start safety check.
+        _, data = snapshot(directory / "events.jsonl", "jsonl")
+        has_any_row = any(json.loads(line).get("run_id") == run_id
+                          for line in data.splitlines() if line.strip())
+        if not has_any_row:
+            pre = _evidence_lost_identity(directory, provider, run_id)
+            if pre is not None:
+                root = evidence_root(directory, run_id)
+                if not any(root.glob("*.report.json")) and not lost_blockers(root):
+                    return [run_id + "/evidence-lost"]
         raise
     root = evidence_root(directory, run_id)
     if not (root / "required.json").exists():

@@ -149,7 +149,9 @@ reviewer_event_guard(){
   fi
   # Declining inherit (e.g. a qualify-live probe launched from an open review)
   # must begin its own invocation on a clean identity, never resume the outer run.
-  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID
+  # Drop the outer owner PID too: a fresh invocation must record THIS guard,
+  # not a stale/dead parent PID that would make the run look proven-dead.
+  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"

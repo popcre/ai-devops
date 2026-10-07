@@ -1637,6 +1637,25 @@ with event_lock(sys.argv[2]):
         with self.assertRaises(events.Blocked):
             events.verify_reports(self.root, "glm", rid)
 
+    def test_verify_rejects_historical_loss_when_ledger_row_exists(self):
+        """Corrupt/duplicate ledger rows must not fall through to fixture loss."""
+        rid = "b2" + "0" * 30
+        # Wrong-provider started row: invocation() is Blocked, but a row exists.
+        self.write({"schema_version": 1, "provider": "grok", "event": "started",
+                    "run_id": rid, "repo": str(self.toolkit), "head": self.sha,
+                    "caller": "codex", "timestamp": "same-time"})
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fixture", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
     def test_async_submission_refuses_loss_without_finish(self):
         """A detached worker outlives the supervisor: supervisor death is not loss."""
         rid = "d0" + "0" * 30
