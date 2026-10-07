@@ -77,6 +77,34 @@ The [bounded October 2–7 aggregate](tests/verification/github-requests/p1-base
 contains 1,065 receipts and 624 observed GraphQL points, but no comparable
 savings, whole-account totals or useful-work latency proof. #658 stays open.
 
+Update October 7, 2026, 12:25 PM EDT: the coordinator owns pending delivery
+of [#1401](https://github.com/popcre/ai-devops/pull/1401) (quota-state and
+category repair), [#1402](https://github.com/popcre/ai-devops/pull/1402)
+(Linux same-tick read sharing and credential-context binding),
+[#1407](https://github.com/popcre/ai-devops/pull/1407) (Linux HTTP-counter
+qualification), [#1408](https://github.com/popcre/ai-devops/pull/1408)
+(trusted Windows public-key diagnostic), and
+[#1414](https://github.com/popcre/ai-devops/pull/1414) (private completion-event
+evidence). Their exact-head reviews approve source; required checks, landing,
+installation and live acceptance remain separate. HTTP qualification is
+limited to observed constructor paths; total managed HTTP consumption remains
+unknown. Completion evidence deliberately rejects qualified source, clock and
+latency claims until separately reviewed adapters exist.
+
+The proposed partial installation design was rejected and remains unmerged.
+P7 uses the existing supported full installer, with complete exact-host scope,
+normal stages, current independent action approval, one-use authority and
+rollback evidence. No stage suppression or replacement routing is authorized.
+The active StepFun owner holds local Linux installation; the coordinator
+serializes around that ownership. Windows readiness is metadata-only. One
+unowned review brief is protected; no cleanup or installation occurred.
+Native Windows HTTP-channel qualification is owned by the fleet subagent;
+source/clock adapter design by the measurement subagent; host access,
+installation, merge decisions and section 13 acceptance by this coordinator.
+The owner-closed credential incident is not an open installation prerequisite;
+no further rotation, revocation or redaction is authorized by that incident.
+Historical samples remain unqualified for before/after savings. #658 stays open.
+
 **Start:** reconcile current upstream, read this STATUS and the
 [active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
 then finish the first actionable unproved outcome under #658. The original

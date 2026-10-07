@@ -26,6 +26,16 @@ independent owners and continuing through programme closeout. Historical
 one-step/session stop instructions are superseded. Accepted S1/S2 proofs stay
 accepted; distinct new repairs, installation and measurement remain governed.
 
+October 7, 2026, 12:25 PM EDT: source repairs and observation work are under
+reviewed PRs #1401, #1402, #1407, #1408 and #1414; landing and installed proof
+remain open. The existing full installation route is required; the rejected
+partial-installation proposal is not authority. Native Windows HTTP
+qualification and source/clock adapter design have separate subagent owners.
+The coordinator owns fleet access, installation serialization and S4/P8
+acceptance. Existing samples do not establish comparable savings or useful-work
+latency; unsupported network paths remain unknown. Detailed current ownership
+and limitations are in the parent plan's STATUS.
+
 **Start here:** read this STATUS and the
 [active programme handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
 before touching code. S2 is landed; finish the first actionable unproved outcome.
