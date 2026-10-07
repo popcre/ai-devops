@@ -55,7 +55,22 @@ check('the section-only lane uses its own label, never the qualified one', () =>
   assert.deepStrictEqual(cfg.section_windows, ['self-hosted', 'Windows', 'X64', cfg.section_label]);
   assert.ok(!cfg.section_windows.includes(cfg.qualified_label));
   assert.notStrictEqual(cfg.section_label, cfg.qualified_label);
-  assert.deepStrictEqual([...cfg.section_lane_order].sort((a, b) => a - b), Array.from({ length: cfg.windows_sections }, (_, k) => k + 1));
+  assert.ok(cfg.section_lane_order.length > 0);
+  assert.strictEqual(new Set(cfg.section_lane_order).size, cfg.section_lane_order.length);
+  for (const s of cfg.section_lane_order) assert.ok(Number.isInteger(s) && s >= 1 && s <= cfg.windows_sections);
+});
+check('a section outside section_lane_order never reaches a section-only host', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: cfg.windows_sections });
+  for (const w of p.windows_matrix) {
+    if (w.lane === 'section-self-hosted') assert.ok(cfg.section_lane_order.includes(w.section));
+  }
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, cfg.section_lane_order.length);
+});
+check('section-only hosts skip sections a qualified host already holds', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: cfg.section_lane_order[0], idleSection: 1 });
+  const taken = p.windows_matrix.filter(x => x.lane === 'section-self-hosted');
+  assert.ok(taken.length <= 1);
+  for (const w of taken) assert.ok(w.section > cfg.section_lane_order[0]);
 });
 check('one idle section-only host takes exactly one section, the first in section_lane_order', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: 1 });
