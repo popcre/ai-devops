@@ -178,26 +178,6 @@ def _recorded_pids(rows, run_id, directory=None):
     return pids
 
 
-def wrapper_proven_dead(start, rows=None, run_id=None, directory=None):
-    """A killed wrapper left PIDs that are all no longer alive.
-
-    Checks the owner PID and every recorded child PID.  No recorded PID
-    means death cannot be proven from the process alone; the caller falls
-    back to the dead-owner age window.  Any live PID fails closed.
-    """
-    pids = []
-    pid = start.get("owner_pid")
-    if isinstance(pid, int) and pid > 0:
-        pids.append(pid)
-    if rows is not None and run_id is not None:
-        for extra in _recorded_pids(rows, run_id, directory):
-            if extra not in pids:
-                pids.append(extra)
-    if not pids:
-        return False
-    return all(not process_alive(p) for p in pids)
-
-
 def require_report(directory, provider, run_id):
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
