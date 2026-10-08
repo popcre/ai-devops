@@ -498,8 +498,8 @@ jobs:
 
   reviewer-runner-availability:
     needs: [fast-classifier, manual-preflight]
-    # Samples ENVY (the qualified pool) for every event that runs the reviewer
-    # lane (#736). Busy or offline -> the fallback goes straight to Blacksmith.
+    # Samples the qualified pool only for an explicit full manual proof (#736).
+    # PR/schedule proofs go directly to hosted fallbacks.
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
