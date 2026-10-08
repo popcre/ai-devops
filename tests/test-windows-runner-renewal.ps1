@@ -283,7 +283,10 @@ try {
       Assert-True ((Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Access.Count -eq 0) 'precondition: icacls (OI)(CI) /T no longer empties file DACLs'
       Set-PayloadFileAcl -LiteralPath $dir -OperatorSid $me
       $sddl = (Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Sddl
-      foreach ($ace in @('(A;;FA;;;BA)', '(A;;FA;;;SY)', "(A;;0x1200a9;;;$me)")) { Assert-True ($sddl.Contains($ace)) "file ACL missing $ace in $sddl" }
+      # SDDL writes well-known SIDs as aliases (NETWORK SERVICE, the
+      # self-hosted runner account, is 'NS', not 'S-1-5-20').
+      $meSddl = ([Security.AccessControl.RawSecurityDescriptor]::new("O:$me")).GetSddlForm([Security.AccessControl.AccessControlSections]::Owner).Substring(2)
+      foreach ($ace in @('(A;;FA;;;BA)', '(A;;FA;;;SY)', "(A;;0x1200a9;;;$meSddl)")) { Assert-True ($sddl.Contains($ace)) "file ACL missing $ace in $sddl" }
       Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $dir 'f.ps1')).Trim() -eq 'payload') 'payload file not readable'
     } finally { & 'C:\Windows\System32\icacls.exe' $dir /reset /T /C | Out-Null }
   }
