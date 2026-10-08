@@ -34,6 +34,10 @@ LOCAL_OR_TEXT = {
     # App JWT sign-in and token minting: counted against no user allowance,
     # and ai-gh cannot sign as an app. The minted token then goes through ai-gh.
     "ai-gh-app-auth": {'API="https://api.github.com"'},
+    # Scheduled S4U renewal task (#1312): posts at most one failure comment per
+    # result per day as the pop-ai-watchers app; it cannot load ai-gh or the
+    # personal login, and it signs as the app like ai-gh-app-auth.
+    "renew-windows-runner-qualification.ps1": {"$script:GitHubApi = 'https://api.github.com'"},
     "ai-pr-wait": {'command -v gh >/dev/null 2>&1 || { printf \'ai-pr-wait: gh is not installed\\n\' >&2; exit 3; }'},
     "ai-private-config": {
         "[ -r /dev/tty ] || die 'GitHub CLI is not authenticated; run: gh auth login'",

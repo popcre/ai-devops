@@ -34,6 +34,7 @@ $script:FreshnessHours = 24
 $script:AlertRepo = 'popcre/ai-devops'
 $script:AlertIssue = 1312
 $script:AlertRepeatHours = 24
+$script:GitHubApi = 'https://api.github.com'
 $script:AppId = 5112061
 $script:AppKeyPath = [IO.Path]::Combine($(if ($env:AI_GH_APP_DIR) { $env:AI_GH_APP_DIR } else { [IO.Path]::Combine($env:USERPROFILE, '.ai-devops', 'github-app') }), 'pop-ai-watchers.pem')
 
@@ -88,15 +89,15 @@ function Get-AppInstallationToken {
   } finally { $rsa.Dispose() }
   $h = @{ Authorization = "Bearer $head.$body.$(ConvertTo-Base64Url $sig)"; Accept = 'application/vnd.github+json' }
   $owner = $script:AlertRepo.Split('/')[0]
-  $inst = Invoke-RestMethod -TimeoutSec 20 -Headers $h -Uri "https://api.github.com/orgs/$owner/installation"
-  return (Invoke-RestMethod -TimeoutSec 20 -Method Post -Headers $h -Uri "https://api.github.com/app/installations/$($inst.id)/access_tokens").token
+  $inst = Invoke-RestMethod -TimeoutSec 20 -Headers $h -Uri "$script:GitHubApi/orgs/$owner/installation"
+  return (Invoke-RestMethod -TimeoutSec 20 -Method Post -Headers $h -Uri "$script:GitHubApi/app/installations/$($inst.id)/access_tokens").token
 }
 
 function Send-IssueComment {
   param([Parameter(Mandatory)][string]$Body)
   $h = @{ Authorization = 'Bearer ' + (Get-AppInstallationToken); Accept = 'application/vnd.github+json' }
   $null = Invoke-RestMethod -TimeoutSec 20 -Method Post -Headers $h -ContentType 'application/json' `
-    -Uri "https://api.github.com/repos/$script:AlertRepo/issues/$script:AlertIssue/comments" -Body (@{ body = $Body } | ConvertTo-Json -Compress)
+    -Uri "$script:GitHubApi/repos/$script:AlertRepo/issues/$script:AlertIssue/comments" -Body (@{ body = $Body } | ConvertTo-Json -Compress)
 }
 
 function Send-FailureAlert {
