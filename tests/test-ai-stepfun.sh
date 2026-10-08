@@ -496,5 +496,34 @@ check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$T
 fi
 unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_OPENCODE_ROOT
 
+# The review door's OpenCode branch (Windows' only engine) uses the same shared
+# pacer and 429 cooldown as StepCode. Forced on Linux with a stub OpenCode.
+OD="$TMP/ocdoor"; mkdir -p "$OD/bin" "$OD/w" "$OD/p" "$OD/state"
+printf 'probe\n' > "$OD/p/MANIFEST.md"; printf 'say ok\n' > "$OD/prompt"
+cat > "$OD/bin/opencode" <<STUB
+#!/usr/bin/env bash
+N='$OD/n'; MODE="\$(cat '$OD/mode')"
+STUB
+cat >> "$OD/bin/opencode" <<'STUB'
+cat >/dev/null; n=$(cat "$N" 2>/dev/null || echo 0); echo $((n+1)) > "$N"
+if [ "$n" -eq 0 ] && [ "$MODE" = jsonl429 ]; then printf '{"type":"error","error":{"data":{"message":"HTTP 429 Too Many Requests","status":429}}}\n'; exit 1; fi
+if [ "$n" -eq 0 ] && [ "$MODE" = err429 ]; then echo 'RATE_LIMITED: HTTP 429 Too Many Requests' >&2; exit 1; fi
+if [ "$MODE" = textfail ]; then printf '{"type":"text","part":{"text":"quotes HTTP 429 rate_limited"}}\n'; exit 1; fi
+printf '{"type":"text","part":{"text":"STEPFUN-OK\\n## Verdict\\nAPPROVE"}}\n'
+STUB
+chmod +x "$OD/bin/opencode"
+oc_door(){ printf '%s' "$1" > "$OD/mode"; rm -f "$OD/n" "$OD/report"; rm -rf "$OD/state/pace"
+  AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$OD/bin/opencode" AI_STEPFUN_STATE_DIR="$OD/state" \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$OD/w" DOOR_PACKET_DIR="$OD/p" DOOR_PROMPT_FILE="$OD/prompt" \
+  DOOR_REPORT_OUT="$OD/report" DOOR_HEAD=abc123 bash "$ROOT/tools/lib/review-doors/stepfun.sh" review > "$OD/out" 2>&1; }
+oc_door ok; drc=$?
+check "OpenCode door turn takes a slot from the shared pacer" "[ $drc = 0 ] && [ \"\$(wc -l < '$OD/state/pace/starts')\" = 1 ]"
+for m in jsonl429 err429; do
+  oc_door "$m"; drc=$?
+  check "OpenCode door reruns the turn after a $m rate limit, through the shared cooldown" "[ $drc = 0 ] && grep -q STEPFUN-OK '$OD/report' && grep -q 'rate limit reached' '$OD/out' && [ \"\$(cat '$OD/n')\" = 2 ]"
+done
+oc_door textfail; drc=$?
+check "OpenCode door never reruns on a 429 quoted in assistant text" "[ $drc != 0 ] && [ \"\$(cat '$OD/n')\" = 1 ] && ! grep -q 'rate limit reached' '$OD/out'"
+
 printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
