@@ -330,14 +330,43 @@ export AI_TEST_PRIVATE_ARGS="$TMP/private-review-args"
 export AI_TEST_PRIVATE_TRACKED="$TMP/private-review-tracked"
 export AI_TEST_PRIVATE_EXPOSURE="$TMP/private-review-exposure"
 export AI_TEST_PRIVATE_SOURCE="$PRIVATE"
+PRIVATE_NATIVE=0
+if python3 -c 'import os; raise SystemExit(0 if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)'; then PRIVATE_NATIVE=1; fi
+private_rows(){ find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' -print 2>/dev/null | sort; }
+PRIVATE_ROWS_BEFORE="$(private_rows)"
 PRIVATE_HEAD="$(git -C "$PRIVATE" rev-parse HEAD)"
 PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
-check "private stub reaches an exact export but cannot create approval authority" "[ '$PRIVATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
+if [ "$PRIVATE_NATIVE" -eq 1 ]; then
+  check "private stub reaches an exact export but cannot create approval authority" "[ '$PRIVATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
+else
+  check "unsupported platform keeps exact selected export advisory without original lifecycle" "[ '$PRIVATE_RC' -eq 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ] && [ \"\$(private_rows)\" = \"\$PRIVATE_ROWS_BEFORE\" ] && printf '%s' \"\$PRIVATE_OUT\" | grep -q 'selected-code advisory review only'"
+fi
 check "private export hides raw rows, untracked prompts, Git history, and source path" "[ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
 check "private review compares synthetic base and exact synthetic head" "grep -qx -- '--base' '$AI_TEST_PRIVATE_ARGS' && grep -qx 'HEAD~1' '$AI_TEST_PRIVATE_ARGS' && grep -qx -- '--assert-head' '$AI_TEST_PRIVATE_ARGS'"
 rm -f "$AI_TEST_PRIVATE_ARGS"
+UNKNOWN_ROWS_BEFORE="$(private_rows)"
 UNKNOWN_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; UNKNOWN_RC=$?
-check "unknown implementing engine refuses before provider despite a valid selected export" "[ '$UNKNOWN_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q -- '--caller must be a safe non-empty identifier'"
+if [ "$PRIVATE_NATIVE" -eq 1 ]; then
+  check "unknown implementing engine refuses before provider despite a valid selected export" "[ '$UNKNOWN_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q -- '--caller must be a safe non-empty identifier'"
+else
+  printf '%s\n' "$UNKNOWN_OUT" > "$TMP/unknown-advisory-report.txt"
+  UNKNOWN_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/unknown-advisory-report.txt" 2>&1)"; UNKNOWN_GATE_RC=$?
+  check "unsupported unknown-engine advisory has no original lifecycle or database authority" "[ '$UNKNOWN_RC' -eq 0 ] && [ -e '$AI_TEST_PRIVATE_ARGS' ] && [ '$UNKNOWN_GATE_RC' -ne 0 ] && [ \"\$(private_rows)\" = \"\$UNKNOWN_ROWS_BEFORE\" ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q 'selected-code advisory review only'"
+fi
+# SIMULATED unsupported custody: only the honest front-door probe is unavailable.
+# The selected export, source postcheck and provider stub still execute normally.
+mkdir "$TMP/simulated-native-capability"
+cat > "$TMP/simulated-native-capability/python3" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [ "${2:-}" = 'import os; raise SystemExit(0 if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)' ]; then exit 1; fi
+EOF
+printf 'exec %q "$@"\n' "$PY3" >> "$TMP/simulated-native-capability/python3"
+chmod +x "$TMP/simulated-native-capability/python3"
+SIMULATED_ROWS_BEFORE="$(private_rows)"
+SIMULATED_OUT="$(cd "$PRIVATE" && PATH="$TMP/simulated-native-capability:$PATH" AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; SIMULATED_RC=$?
+printf '%s\n' "$SIMULATED_OUT" > "$TMP/simulated-advisory-report.txt"
+SIMULATED_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/simulated-advisory-report.txt" 2>&1)"; SIMULATED_GATE_RC=$?
+check "SIMULATED unsupported custody retains sealed advisory without original lifecycle or action authority" "[ '$SIMULATED_RC' -eq 0 ] && [ '$SIMULATED_GATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(private_rows)\" = \"\$SIMULATED_ROWS_BEFORE\" ] && printf '%s' \"\$SIMULATED_OUT\" | grep -q 'selected-code advisory review only' && [ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
 MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
 check "private review refuses a verdict when unselected source changes during provider work" "[ '$MUTATE_RC' -ne 0 ] && printf '%s' \"\$MUTATE_OUT\" | grep -q 'verdict refused'"
 check "a stale private result never prints an APPROVE token" "! printf '%s' \"\$MUTATE_OUT\" | grep -q 'VERDICT: APPROVE'"
@@ -406,7 +435,14 @@ if [ -s "$DEEPSEEK_STUB_CWD" ]; then
   NETWORK_META="$(find "$NETWORK_SNAPSHOT/.ai/deepseek-sessions" -maxdepth 1 -name '*.meta.json' -print -quit 2>/dev/null)"
   check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
   NETWORK_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -name '*.json' -exec jq -r --arg export "$NETWORK_SNAPSHOT" 'select(.code_only_export==$export and .status=="completed") | input_filename' {} \; | head -1)"
-  if [ -n "$NETWORK_STATE" ]; then
+  if [ "$PRIVATE_NATIVE" -eq 1 ]; then
+    check "native private review publishes a prospective original-source lifecycle" "[ -n '$NETWORK_STATE' ]"
+  else
+    printf '%s\n' "$NETWORK_OUT" > "$TMP/native-unavailable-advisory-report.txt"
+    ADVISORY_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/native-unavailable-advisory-report.txt" 2>&1)"; ADVISORY_GATE_RC=$?
+    check "unsupported private review keeps native packet proof without original action authority" "[ -z '$NETWORK_STATE' ] && [ '$ADVISORY_GATE_RC' -ne 0 ] && printf '%s' \"\$NETWORK_OUT\" | grep -q 'selected-code advisory review only'"
+  fi
+  if [ "$PRIVATE_NATIVE" -eq 1 ] && [ -n "$NETWORK_STATE" ]; then
     NETWORK_REPORT="$(jq -r .report_path "$NETWORK_STATE")"
     NETWORK_SESSION="$(jq -r .session_id "$NETWORK_STATE")"
     check "original lifecycle keeps selected scope and independent native identity" "jq -e --arg h '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' '.head==\$h and .code_only.original_head==\$h and .code_only.export_head==\$export and .code_only.paths==[\"src/loader.py\"] and .provider==\"deepseek\" and .implementer_engine==\"codex\" and .stale==false and .verdict==\"APPROVE\"' '$NETWORK_STATE' >/dev/null"
