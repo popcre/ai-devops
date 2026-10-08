@@ -337,6 +337,24 @@ try {
     Assert-True ($worker.Contains('$principalSid -cne $ExpectedOperatorSid')) 'worker compares the raw principal'
   }
 
+  # Live on EDGE-ALIEN: an S4U run-level-Limited task token for an admin
+  # account creates files owned by BUILTIN\Administrators, so the worker
+  # rejected the scheduled request (REQUEST_REJECTED). The client re-owns its
+  # own request to the caller's user SID.
+  Case 'Request_IsReownedToCallerAfterWrite' {
+    $clientText = Get-Content -Raw -LiteralPath (Join-Path $repo 'bin\invoke-windows-runner-maintenance.ps1')
+    $newRequest = [regex]::Match($clientText, 'function New-MaintenanceRequest[\s\S]*?\n}').Value
+    Assert-True ($newRequest.IndexOf('Set-RequestOwnerToCaller -LiteralPath $path') -gt $newRequest.IndexOf('$stream.Write(')) 'request not re-owned after it is written'
+    $setter = [regex]::Match($clientText, 'function Set-RequestOwnerToCaller[\s\S]*?\n}').Value
+    Assert-True ($setter.Contains('AccessControlSections]::Owner') -and $setter.Contains('WindowsIdentity]::GetCurrent().User')) 'owner change is not limited to the caller SID and owner section'
+    . (Join-Path $repo 'bin\invoke-windows-runner-maintenance.ps1')
+    $f = Join-Path $temp 'request-owner.json'; [IO.File]::WriteAllText($f, '{}')
+    $daclBefore = (Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access')
+    Set-RequestOwnerToCaller -LiteralPath $f
+    Assert-True ((Get-Acl -LiteralPath $f).GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) 'request not owned by the caller'
+    Assert-True ((Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access') -ceq $daclBefore) 'owner change altered the DACL'
+  }
+
   Case 'MaintenanceTask_StaysTriggerless' {
     # The elevated #262 task keeps its no-trigger contract; only the
     # unprivileged sibling is scheduled.
