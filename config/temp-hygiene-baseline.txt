@@ -1,0 +1,13 @@
+bin/ai-review-packet
+bin/ai-sync-memory
+bin/ai-reap-shared-db-worktrees
+bin/ai-devops
+bin/ai-deepseek
+bin/ai-task-gates
+bin/ai-grok-implement
+tools/lib/review-lifecycle-core.sh
+tools/lib/review-doors/deepseek.sh
+tools/lib/review-doors/gemini.sh
+tools/lib/review-doors/grok.sh
+tools/lib/review-doors/qwen.sh
+tools/github-requests/telemetry.sh

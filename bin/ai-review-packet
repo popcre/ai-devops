@@ -796,28 +796,39 @@ as a pass. If the change needs test evidence to judge, say so in your verdict."
   patch_bytes="$(wc -c < "$tmp_patch" | tr -d ' ')"
   if [ "$patch_bytes" -gt "$PATCH_MAX_BYTES" ]; then
     cp "$tmp_patch" "$pkt/$PATCH_FULL"
-    head -c "$PATCH_MAX_BYTES" "$tmp_patch" > "$pkt/$PATCH"
-    cat >> "$pkt/$PATCH" <<EOF
-
-*** SPLIT BY ai-review-packet ***
-This patch is $patch_bytes bytes. Read patch.part-000, patch.part-001, and the
-remaining numbered parts in manifest order. Do not open patch.full.diff through
-a bounded Read tool; it exists only as the complete sealed source. Nothing was discarded.
-EOF
     split -b "$PATCH_MAX_BYTES" -d -a 6 "$tmp_patch" "$pkt/patch.part-" \
       || { rm -f "$tmp_patch"; die "could not split the patch into directly readable parts"; }
-    local part_map="" part
+    # patch.diff becomes an INDEX holding no diff text at all. It once held the
+    # first PATCH_MAX_BYTES of the diff while the manifest and every reviewer
+    # wrapper called it "the complete diff": a 2026-10-08 final check found a
+    # packet presenting 409,879 of 1,358,078 bytes as complete. An index can
+    # never be mistaken for the whole change.
+    local part_map="" part part_count=0 full_sha
     for part in "$pkt"/patch.part-*; do
+      part_count=$((part_count + 1))
       part_map="$part_map
 - \`$(basename "$part")\`: $(wc -c < "$part" | tr -d ' ') bytes"
     done
-    split_note="**The patch was split.** It is $patch_bytes bytes. Read the numbered parts in this order:$part_map
+    full_sha="$(sha256sum "$tmp_patch" | awk '{print $1}')"
+    cat > "$pkt/$PATCH" <<EOF
+*** SPLIT BY ai-review-packet: THIS FILE CONTAINS NO DIFF TEXT ***
+The patch is $patch_bytes bytes (sha256 $full_sha), too large for one file.
+It is split into $part_count numbered parts in this directory. You have NOT seen
+the change until you have read EVERY part below, in order. Reviewing only some
+parts is reviewing an incomplete change; say so in your verdict if you could not
+read them all. Do not open $PATCH_FULL through a bounded Read tool; it is the
+complete sealed source the parts were cut from. Nothing was discarded.
+$part_map
+EOF
+    split_note="**The patch was split; \`$PATCH\` is only an index and holds no diff text.** The patch is $patch_bytes bytes in $part_count parts. You have not seen the change until you have read every part, in this order:$part_map
 
 \`$PATCH_FULL\` also holds the complete sealed patch. Nothing was discarded."
   else
     cp "$tmp_patch" "$pkt/$PATCH"
   fi
   rm -f "$tmp_patch"
+  local patch_where="The complete unified diff is in \`$PATCH\` in this directory."
+  [ -z "$split_note" ] || patch_where="The unified diff is NOT in \`$PATCH\` alone."
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   # --- identity ---------------------------------------------------------------
@@ -873,7 +884,7 @@ this file first.
 **This packet is a starting point, not a fence.** You have read and search
 access to every file in this directory. Open anything you need to confirm a
 finding, check a caller, or read a policy document. What you must NOT do is
-spend turns reconstructing the diff by hand — it is already in \`$PATCH\`.
+spend turns reconstructing the diff by hand — it is already in this packet (see section 4).
 
 ## 1. What is under review
 
@@ -919,7 +930,7 @@ $untracked
 
 ## 4. The patch
 
-The complete unified diff is in \`$PATCH\` in this directory. $split_note
+$patch_where $split_note
 
 ## 5. Test results
 
@@ -993,15 +1004,60 @@ EOF
 # Seal the complete inventory, not a concatenation of contents.  Each NUL-safe
 # record carries the relative path, byte length, and file digest, so renames,
 # empty files, and changed file boundaries are all detectable.
+# Sizes and digests for many regular files from one stat and one sha256sum per
+# chunk instead of a wc and a sha256sum per file: per-file processes were the
+# largest share of a review's cost on Windows (#1355). Chunks stay well under
+# the Windows command-line limit. Any failure, short answer, or unexpected
+# shape returns nonzero so the caller falls back to the per-file readers.
+FS_BYTES=(); FS_SHA=()
+file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
+  local -a chunk=(); local p line len=0 n
+  FS_BYTES=(); FS_SHA=()
+  [ "$#" -gt 0 ] || return 0
+  for p in "$@" ''; do
+    if [ -n "$p" ] && [ "$len" -lt 16000 ]; then chunk+=("$p"); len=$((len + ${#p} + 3)); continue; fi
+    if [ "${#chunk[@]}" -gt 0 ]; then
+      n="${#FS_BYTES[@]}"
+      while IFS= read -r line; do
+        line="${line%$'\r'}"
+        case "$line" in ''|*[!0-9]*) return 1 ;; esac
+        FS_BYTES+=("$line")
+      done < <(stat -c %s -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_BYTES[@]} - n ))" -eq "${#chunk[@]}" ] || return 1
+      local m="${#FS_SHA[@]}"
+      while IFS= read -r line; do
+        # Same field the per-file reader keeps, escape marker included.
+        line="${line%$'\r'}"; line="${line%% *}"; n="${line#\\}"
+        case "$n" in *[!0-9a-f]*) return 1 ;; esac
+        [ "${#n}" -eq 64 ] || return 1
+        FS_SHA+=("$line")
+      done < <(sha256sum -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_SHA[@]} - m ))" -eq "${#chunk[@]}" ] || return 1
+    fi
+    [ -n "$p" ] || break
+    chunk=("$p"); len=$((${#p} + 3))
+  done
+  [ "${#FS_SHA[@]}" -eq "$#" ] && [ "${#FS_BYTES[@]}" -eq "$#" ]
+}
+
 hash_packet() { # hash_packet PACKET_DIR
   local pkt="$1"
   ( cd "$pkt" || exit 1
-    while IFS= read -r -d '' file; do
-      printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
-        "${file#./}" "$(n="$(wc -c < "$file")"; printf '%s' "${n// /}")" \
-        "$(h="$(sha256sum "$file")"; printf '%s' "${h%% *}")"
+    local -a files=(); local file i
+    while IFS= read -r -d '' file; do files+=("$file"); done \
+      < <(find . -type f ! -path "./$HASHFILE" -print0 | LC_ALL=C sort -z)
+    file_stats "${files[@]+"${files[@]}"}" || { FS_BYTES=(); FS_SHA=(); }
+    for i in "${!files[@]}"; do
+      file="${files[$i]}"
+      if [ "${#FS_SHA[@]}" -gt 0 ]; then
+        printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' "${file#./}" "${FS_BYTES[$i]}" "${FS_SHA[$i]}"
+      else
+        printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
+          "${file#./}" "$(n="$(wc -c < "$file")"; printf '%s' "${n// /}")" \
+          "$(h="$(sha256sum "$file")"; printf '%s' "${h%% *}")"
+      fi
       test_progress || exit 1
-    done < <(find . -type f ! -path "./$HASHFILE" -print0 | LC_ALL=C sort -z)
+    done
   ) | sha256sum | cut -d' ' -f1
 }
 

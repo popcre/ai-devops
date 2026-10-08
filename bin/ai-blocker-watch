@@ -232,17 +232,110 @@ LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
 command -v jq >/dev/null || die "jq is required"
 # Windows jq and gh builds can end lines with CR; strip it so values compare cleanly.
-jq(){ command jq "$@" | tr -d '\r'; }
+# Only Windows builds add CR line endings; elsewhere a CR can reach stdout only
+# inside raw (-r/-j) text, because JSON output escapes it. So non-raw jq runs
+# off Windows skip the tr process: same bytes, one process fewer per call.
+case "${OSTYPE:-}" in msys*|cygwin*|win*) BW_CR=1 ;; *) BW_CR=0 ;; esac
+bw_raw(){ # true when any argument could ask jq or the GitHub CLI for raw text
+  local a; for a; do case "$a" in --raw-output*|--join-output|--jq|--jq=*|--template*|-[rjqt]*|-[a-zA-Z]*[rjqt]*) return 0 ;; esac; done; return 1
+}
+jq(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then command jq "$@"; else command jq "$@" | tr -d '\r'; fi; }
 [ -f "$CONFIG" ] || die "config not found: $CONFIG"
-cfg(){ jq -r "$1" "$CONFIG"; }
+# Config cache (#1355 fix 6): one jq pass per run reads every plain top-level
+# value, so the dozens of cfg calls a tick makes stop starting a jq (and a tr)
+# each. Only values whose `jq -r` text is provably the same are cached (scalars
+# without CR/TAB/LF and arrays of plain name strings); anything else, an unknown
+# key, or an unreadable config falls back to asking jq exactly as before.
+declare -A CFGV=() CFGT=()
+while IFS=$'\t' read -r _k _t _v; do
+  [ -n "$_k" ] || continue; CFGV[$_k]="$_v"; CFGT[$_k]="$_t"
+done < <(jq -r 'if type == "object" then (["-", "object", ""] | join("\t")), (to_entries[]
+  | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$"))
+  | (.value | type) as $t
+  | if $t == "string" and (.value | test("[\t\n\r]") | not) then [.key, $t, .value]
+    elif $t == "array" and all(.value[]; type == "string" and test("^[A-Za-z0-9_./-]+$")) then [.key, $t, (.value | join(" "))]
+    elif $t == "number" or $t == "boolean" or $t == "null" then [.key, $t, (.value | tojson)]
+    else [.key, "uncached", ""] end
+  | join("\t")) else empty end' "$CONFIG" 2>/dev/null || true)
+unset _k _t _v
+cfg(){ # cfg <jq path>: prints exactly what `jq -r <path> "$CONFIG"` prints
+  local k="${1#.}" alt=0 v t
+  case "$k" in *' // ""') k="${k% // \"\"}"; alt=1 ;; esac
+  case "$k" in *'[]') k="${k%'[]'}"; [ "$alt" = 0 ] && [ "${CFGT[$k]:-}" = array ] || k='' ;; esac
+  if [ "${1:0:1}" != . ] || [[ ! "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || [ "${CFGT[-]:-}" != object ] ||
+     [ "${CFGT[$k]:-}" = uncached ]; then
+    jq -r "$1" "$CONFIG"; return
+  fi
+  # A key the config does not have reads as null, as jq would read it.
+  t="${CFGT[$k]-null}"; v="${CFGV[$k]-null}"
+  if [ "$t" = array ]; then
+    [ "${1: -2}" = '[]' ] || { jq -r "$1" "$CONFIG"; return; }
+    [ -z "$v" ] || printf '%s\n' $v
+    return 0
+  fi
+  if [ "$alt" = 1 ] && { [ "$t" = null ] || { [ "$t" = boolean ] && [ "$v" = false ]; }; }; then v=''; fi
+  printf '%s\n' "$v"
+}
 mkdir -p "$WAITS" "$LOGS"; touch "$NOTIFIED"
 
-now_iso(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+# utc_fmt <strftime> [epoch]: what `date -u +<fmt>` (or -d @epoch) prints, from
+# bash's own printf when bash is 5+ (EPOCHSECONDS era), else from date.
+utc_fmt(){
+  if [ "${BASH_VERSINFO[0]}" -ge 5 ]; then TZ=UTC0 printf "%($1)T\n" "${2:--1}"
+  elif [ -n "${2:-}" ]; then date -u -d "@$2" "+$1"; else date -u "+$1"; fi
+}
+# utc_ago <n> <minutes|hours>: `date -u -d "-<n> <unit>" +%FT%TZ`; anything
+# but a plain small count still goes to date so failures stay the same.
+utc_ago(){
+  if [[ "$1" =~ ^[0-9]{1,9}$ ]] && [ -n "${EPOCHSECONDS:-}" ]; then
+    local m=60; [ "$2" = hours ] && m=3600
+    utc_fmt %Y-%m-%dT%H:%M:%SZ $(( EPOCHSECONDS - 10#$1 * m ))
+  else date -u -d "-$1 $2" +%Y-%m-%dT%H:%M:%SZ; fi
+}
+now_iso(){ utc_fmt %Y-%m-%dT%H:%M:%SZ; }
+# jfields <file> <jq expr>...: JF[i] = what "$(jq -r <expr> <file>)" would
+# print, from ONE jq run (#1355 fix 6). Plain strings come back directly;
+# anything whose -r text is not the plain string (numbers, objects, NUL or
+# control bytes) is re-read with its own jq. Returns nonzero, with JF unset,
+# when the combined read fails, so callers run their original per-field reads
+# and keep their exact failure handling.
+jfields(){
+  local f="$1" e prog='' out v; shift
+  unset JF; JF=()
+  for e; do
+    prog+="${prog:+, }(($e) | if type == \"string\" and (test(\"[\\u0000\\u0001\\u0002]\") | not) then gsub(\"\\r\"; \"\") elif . == null then \"null\" else \"\\u0002\" end), \"\\u0001\""
+  done
+  out="$(jq -j "$prog" "$f" 2>/dev/null)" || { JF=(); return 1; }
+  for e; do
+    v="${out%%$'\001'*}"; out="${out#*$'\001'}"
+    if [ "$v" = $'\002' ]; then v="$(jq -r "$e" "$f" 2>/dev/null)" || { JF=(); return 1; }; fi
+    while [ "${v: -1}" = $'\n' ]; do v="${v%$'\n'}"; done
+    JF+=("$v")
+  done
+}
+# Epoch seconds without a `date` process for GitHub's own timestamp shape
+# (YYYY-MM-DDTHH:MM:SSZ, a real calendar time from 1970 on); any other text is
+# handed to `date -d` exactly as before (#1355 fix 6). Fails as date fails.
+epoch_of(){
+  if [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z$ ]]; then
+    local y=$((10#${BASH_REMATCH[1]})) m=$((10#${BASH_REMATCH[2]})) d=$((10#${BASH_REMATCH[3]}))
+    local h=$((10#${BASH_REMATCH[4]})) mi=$((10#${BASH_REMATCH[5]})) s=$((10#${BASH_REMATCH[6]})) dim yy era yoe doy
+    dim=31; case "$m" in 4|6|9|11) dim=30 ;; 2) dim=$(( (y%4==0 && y%100!=0) || y%400==0 ? 29 : 28 )) ;; esac
+    if [ "$y" -ge 1970 ] && [ "$m" -ge 1 ] && [ "$m" -le 12 ] && [ "$d" -ge 1 ] && [ "$d" -le "$dim" ] &&
+       [ "$h" -lt 24 ] && [ "$mi" -lt 60 ] && [ "$s" -lt 60 ]; then
+      yy=$((y - (m <= 2))); era=$((yy / 400)); yoe=$((yy - era * 400))
+      doy=$(( (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1 ))
+      printf '%s\n' $(( (era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468) * 86400 + h * 3600 + mi * 60 + s ))
+      return 0
+    fi
+  fi
+  date -u -d "$1" +%s
+}
 parse_ref(){ # owner/repo#N -> "owner/repo N"
   [[ "$1" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)$ ]] || die "expected owner/repo#N, got: $1"
   printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
-gh_api(){ gh_call api "$@" | tr -d '\r'; }
+gh_api(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then gh_call api "$@"; else gh_call api "$@" | tr -d '\r'; fi; }
 
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
@@ -349,17 +442,18 @@ cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1
 # and reaps nothing.
 REAP_DIR="$HOME_DIR/reaped"; REAP_LOG="$HOME_DIR/reap.log"
 
-iso_epoch(){ date -u -d "$1" +%s 2>/dev/null || echo 0; }
+iso_epoch(){ epoch_of "$1" 2>/dev/null || echo 0; }
 
 reap_age_hours(){ # reap_age_hours <iso timestamp> -> whole hours since then (0 if unreadable)
   local ep now_e
-  ep="$(iso_epoch "$1")"; now_e="$(date -u +%s)"
+  ep="$(iso_epoch "$1")"; now_e="${EPOCHSECONDS:-$(date -u +%s)}"
   [ "$ep" -gt 0 ] 2>/dev/null || { printf 0; return; }
   printf '%s' "$(( (now_e - ep) / 3600 ))"
 }
 
+REAP_ACTIVITY='[.woken_at, .checked_at, .last_attempt_at, .active_writer_at, .registered_at] | map(select(. != null and . != "")) | first // ""'
 reap_last_activity(){ # reap_last_activity <wait json> -> best timestamp for age
-  jq -r '[.woken_at, .checked_at, .last_attempt_at, .active_writer_at, .registered_at] | map(select(. != null and . != "")) | first // ""' "$1" 2>/dev/null
+  jq -r "$REAP_ACTIVITY" "$1" 2>/dev/null
 }
 
 reap_is_candidate(){ # reap_is_candidate <state> <last activity iso> <ttl hours> -> 0 if reappable
@@ -386,17 +480,21 @@ worktree_has_unique_work(){ # worktree_has_unique_work <cwd> -> 0 when dirty (pr
 }
 
 reap_one(){ # reap_one <json path> <dry 0|1> -> 0 reaped, 1 kept
-  local f="$1" dry="$2" id state at age ttl reason dest
-  id="$(basename "$f" .json)"
-  state="$(jq -r '.state // ""' "$f" 2>/dev/null)"
-  at="$(reap_last_activity "$f")"
+  local f="$1" dry="$2" id state at age ttl reason dest cwd='' cwd_read=0
+  id="${f##*/}"; id="${id%.json}"
+  if jfields "$f" '.state // ""' "$REAP_ACTIVITY" '.cwd // ""'; then
+    state="${JF[0]}"; at="${JF[1]}"; cwd="${JF[2]}"; cwd_read=1
+  else
+    state="$(jq -r '.state // ""' "$f" 2>/dev/null)"
+    at="$(reap_last_activity "$f")"
+  fi
   ttl="$(cfgd .orphan_ttl_hours 24)"
   reap_is_candidate "$state" "$at" "$ttl" || return 1
   age="$(reap_age_hours "$at")"
   reason="terminal state '$state' idle ${age}h (ttl ${ttl}h)"
   [ "$state" != waking ] || reason="interrupted wake idle ${age}h (ttl ${ttl}h)"
-  local cwd preserved=""
-  cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
+  local preserved=""
+  [ "$cwd_read" = 1 ] || cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
   if worktree_has_unique_work "$cwd"; then preserved=" preserved unique work at $cwd"; fi
   if [ "$dry" = 1 ]; then
     note "would reap $id ($reason)$preserved"
@@ -471,7 +569,7 @@ propagate(){
   local start since repo n dep dr dn key
   start="$(now_iso)"
   if [ -s "$SCAN" ]; then since="$(cat "$SCAN")"
-  else since="$(date -u -d "-$(cfg .first_scan_lookback_minutes) minutes" +%Y-%m-%dT%H:%M:%SZ)"; fi
+  else since="$(utc_ago "$(cfg .first_scan_lookback_minutes)" minutes)"; fi
   # One search query per BATCH of repos, never one per repo: ai-gh already
   # throttles GitHub, and a per-repo loop costs one search per repo per tick.
   # GitHub caps a search q at 256 characters, so batches flush before the
@@ -550,12 +648,17 @@ $what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unkn
 
 wake(){ # wake <wait file>
   local f="$1" h s cwd ref r n state title prompt log arg
-  h="$(jq -r .harness "$f")"; s="$(jq -r .session "$f")"; cwd="$(jq -r .cwd "$f")"
-  ref="$(jq -r '.blocker // ""' "$f")"
   local until_at parked_issue parked_url main_checkout wid
-  until_at="$(jq -r '.until // ""' "$f")"; parked_issue="$(jq -r '.parked_issue // ""' "$f")"
-  parked_url="$(jq -r '.parked_url // ""' "$f")"; main_checkout="$(jq -r '.main_checkout // ""' "$f")"
-  wid="$(basename "$f" .json)"
+  if jfields "$f" .harness .session .cwd '.blocker // ""' '.until // ""' '.parked_issue // ""' '.parked_url // ""' '.main_checkout // ""'; then
+    h="${JF[0]}"; s="${JF[1]}"; cwd="${JF[2]}"; ref="${JF[3]}"
+    until_at="${JF[4]}"; parked_issue="${JF[5]}"; parked_url="${JF[6]}"; main_checkout="${JF[7]}"
+  else
+    h="$(jq -r .harness "$f")"; s="$(jq -r .session "$f")"; cwd="$(jq -r .cwd "$f")"
+    ref="$(jq -r '.blocker // ""' "$f")"
+    until_at="$(jq -r '.until // ""' "$f")"; parked_issue="$(jq -r '.parked_issue // ""' "$f")"
+    parked_url="$(jq -r '.parked_url // ""' "$f")"; main_checkout="$(jq -r '.main_checkout // ""' "$f")"
+  fi
+  wid="${f##*/}"; wid="${wid%.json}"
   # Released by whichever comes first: the blocker closing, or the time passing.
   local released="" why="" ispr="" merged="" meta=""
   title=""
@@ -580,7 +683,7 @@ wake(){ # wake <wait file>
   fi
   if [ -z "$released" ] && [ -n "$until_at" ]; then
     local now_e due_e
-    now_e="$(date -u +%s)"; due_e="$(date -u -d "$until_at" +%s 2>/dev/null || echo 0)"
+    now_e="${EPOCHSECONDS:-$(date -u +%s)}"; due_e="$(epoch_of "$until_at" 2>/dev/null || echo 0)"
     if [ "$due_e" -gt 0 ] && [ "$now_e" -ge "$due_e" ]; then
       released=time; why="the time you asked to be called back at, $until_at, has passed."
     fi
@@ -683,7 +786,7 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
     FAILED=1; return
   fi
   if [ "$DRY" = 1 ]; then note "would start a $mode $h session in $cwd (wait released: $why)"; return; fi
-  log="$LOGS/$wid-$(date -u +%Y%m%dT%H%M%S).log"
+  log="$LOGS/$wid-$(utc_fmt %Y%m%dT%H%M%S).log"
   local tmp="$f.tmp"
   jq --arg at "$(now_iso)" --arg m "$mode" '.state="waking" | .mode=$m | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
   note "$mode $h session $s in $cwd (wait released: $why); log $log"
@@ -737,10 +840,17 @@ open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|
     fi
     record_graphql_cost graphql.open_issue_snapshot "$out"
     if [ "$read_rc" -ne 0 ]; then SNAPERR[$repo]="could not list open issues in $repo"; break; fi
-    printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
+    # One jq per page (#1355 fix 6): validity, then hasNextPage, then the
+    # cursor, each read as the former separate calls read it.
+    local pinfo next
+    pinfo="$(printf '%s' "$out" | jq -r 'if (has("errors")|not) and (.data.repository != null) then "ok",
+      (try (.data.repository.issues.pageInfo.hasNextPage | if type == "string" then . else tojson end) catch ""),
+      (try (.data.repository.issues.pageInfo.endCursor | if type == "string" then . else tojson end) catch "") else empty end')" || pinfo=""
+    [ "${pinfo%%$'\n'*}" = ok ] || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
-    if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
-      cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
+    pinfo="${pinfo#ok$'\n'}"; next="${pinfo%%$'\n'*}"
+    if [ "$next" = true ]; then
+      cursor="${pinfo#*$'\n'}"; continue
     fi
     SNAPN[$repo]="$pages"; snapshot_index_build "$repo"; return 0
   done
@@ -795,8 +905,9 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
   [ -n "$node" ] || return 0 # the blocker is not open, so no scan here reads it
   local new
   for ((pg=1; pg<=SNAPN[$repo]; pg++)); do # rewrite only the page holding the issue
-    printf '%s' "${SNAP[$repo|$pg]}" | jq -e --argjson n "$2" 'any(.data.repository.issues.nodes[]; .number==$n)' >/dev/null || continue
-    new="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" '(.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b]')" || return 1
+    # One jq per page: the rewritten page when it holds the issue, else nothing.
+    new="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" 'if any(.data.repository.issues.nodes[]; .number==$n) then (.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b] else empty end')" || return 1
+    [ -n "$new" ] || continue
     SNAP["$repo|$pg"]="$new"
     break
   done
@@ -821,9 +932,9 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   local repo="$1" n="$2" out key="$1#$2" spent budget cachef read_rc=0
   # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
   cachef="$ALARM_TICK/cache/${key//\//@}"
-  if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
+  if [ -f "$cachef" ]; then IFS= read -r -d '' out < "$cachef" || true; printf '%s' "$out"; return 0; fi
   budget="$(cfgd .alarm_max_nodes 40)"
-  spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
+  spent=0; [ ! -f "$ALARM_TICK/agql" ] || { IFS= read -r -d '' spent < "$ALARM_TICK/agql" || true; }
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
   out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || read_rc=$?
@@ -871,7 +982,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
   rm -rf "$ALARM_TICK"
   (umask 077; mkdir -p "$ALARM_TICK/cache"; printf '0' > "$ALARM_TICK/agql")
   local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
-  cutoff="$(date -u -d "-$(cfgd .alarm_stall_hours 24) hours" +%Y-%m-%dT%H:%M:%SZ)"
+  cutoff="$(utc_ago "$(cfgd .alarm_stall_hours 24)" hours)"
   # Pass 1: the shared open-issue snapshot gives every OPEN blocker of an
   # OPEN issue (with assignees for free; owned ones drop out).
   local pg
@@ -895,22 +1006,31 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     rc=0; j="$(issue_json "$kr" "$kn")" || rc=$?
     if [ "$rc" -eq 1 ]; then note "alarm: node budget reached before $key; raise alarm_max_nodes"; afail=1; continue; fi
     if [ "$rc" -ne 0 ]; then note "alarm: could not read $key"; afail=1; continue; fi
-    marker="$(printf '%s' "$j" | jq -r '[(.data.repository.issue.comments.nodes[].body // ""), (.data.repository.issue.body // "")] | join("\n") | test("(?im)^[[:space:]]*owner[[:space:]]*[:=]")')"
-    [ "$marker" = true ] && continue
-    pr_open="$(printf '%s' "$j" | jq -r '[.data.repository.issue.timelineItems.nodes[].source.state] | any(. == "OPEN")')"
-    [ "$pr_open" = true ] && continue
-    alarmed="$(printf '%s' "$j" | jq -r --arg k "$key" 'any(.data.repository.issue.comments.nodes[].body; contains("ai-blocker-watch:unowned:" + $k))')"
-    # updatedAt counts this tool's own alarm comment as activity; look past it.
-    lastact="$(printf '%s' "$j" | jq -r '
-      .data.repository.issue as $i |
+    # One jq pass answers all four questions (#1355 fix 6). The answers come
+    # out in the order the checks run, so a failing expression stops the tick
+    # only where the former one-call-per-question code would have.
+    local -a ans=(); local jrc=0 jout
+    jout="$(printf '%s' "$j" | jq -r --arg k "$key" '
+      ([(.data.repository.issue.comments.nodes[].body // ""), (.data.repository.issue.body // "")] | join("\n") | test("(?im)^[[:space:]]*owner[[:space:]]*[:=]")),
+      ([.data.repository.issue.timelineItems.nodes[].source.state] | any(. == "OPEN")),
+      any(.data.repository.issue.comments.nodes[].body; contains("ai-blocker-watch:unowned:" + $k)),
+      (.data.repository.issue as $i |
       ($i.comments.nodes | map(select((.body // "") | contains("ai-blocker-watch:unowned:"))) | map(.createdAt) | max) as $ours |
       ($i.comments.nodes | map(select((.body // "") | (contains("ai-blocker-watch:unowned:") | not))) | map(.createdAt) | max) as $theirs |
-      if ($ours != null and ($i.updatedAt <= $ours) and ($theirs == null or $theirs < $ours)) then ($theirs // $i.createdAt) else $i.updatedAt end')"
+      if ($ours != null and ($i.updatedAt <= $ours) and ($theirs == null or $theirs < $ours)) then ($theirs // $i.createdAt) else $i.updatedAt end)')" || jrc=$?
+    mapfile -t ans <<<"$jout"
+    [ "${#ans[@]}" -ge 1 ] || exit "$((jrc ? jrc : 1))"; marker="${ans[0]}"
+    [ "$marker" = true ] && continue
+    [ "${#ans[@]}" -ge 2 ] || exit "$((jrc ? jrc : 1))"; pr_open="${ans[1]}"
+    [ "$pr_open" = true ] && continue
+    [ "${#ans[@]}" -ge 4 ] && [ "$jrc" -eq 0 ] || exit "$((jrc ? jrc : 1))"
+    alarmed="${ans[2]}"; lastact="${jout#*$'\n'*$'\n'*$'\n'}"
+    # updatedAt counts this tool's own alarm comment as activity; look past it.
     [[ "$lastact" > "$cutoff" ]] && continue
-    la_ep="$(date -u -d "$lastact" +%s 2>/dev/null || printf 0)"
+    la_ep="$(epoch_of "$lastact" 2>/dev/null || printf 0)"
     if [ "$la_ep" -eq 0 ]; then lastact="2000-01-01T00:00:00Z"; fi # unknown activity time reads as the oldest
     stall[$key]=1; salarmed[$key]="$alarmed"; sact[$key]="$lastact"
-    sage[$key]="$(( ( $(date -u +%s) - la_ep ) / 3600 ))h"
+    sage[$key]="$(( ( ${EPOCHSECONDS:-$(date -u +%s)} - la_ep ) / 3600 ))h"
     spar[$key]="${spar[$key]% }"
   done
   # Depth: a blocker holding up a chain 3+ levels deep idles the most sessions.
@@ -918,7 +1038,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     sdepth[$key]="$(depth_of "${key%#*}" "${key#*#}" "")"
   done
   local day body drepo title dnum sorted depth_prio line pri="" rest=""
-  day="$(date -u +%Y-%m-%d)"
+  day="$(utc_fmt %Y-%m-%d)"
   body="$HOME_DIR/digest-$day.md"
   drepo="$(cfgd .alarm_digest_repo popcre/ai-devops)"
   depth_prio="$(cfgd .alarm_depth_priority 3)"
@@ -1008,7 +1128,7 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
 scan_due(){
   local since elapsed full
   since="$(cat "$1" 2>/dev/null || printf '')"
-  elapsed="$(( $(date -u +%s) - $(date -u -d "${since:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || printf 0) ))"
+  elapsed="$(( ${EPOCHSECONDS:-$(date -u +%s)} - $(epoch_of "${since:-1970-01-01T00:00:00Z}" 2>/dev/null || printf 0) ))"
   full=$(( $2 * 60 ))
   [ "$elapsed" -ge "$full" ] || { [ "${3:-}" = early ] && [ $(( elapsed * 2 )) -ge "$full" ]; }
 }
@@ -1033,14 +1153,20 @@ maybe_alarm(){
 # author's to fix.
 links_on(){ [ "$(cfgd .links_enabled true)" = true ]; }
 
-parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = malformed fence
-  local content line cur nlines val
-  content="$(awk '
-    /^```db-work-scope[ \t]*$/ { n++; if (n > 1) exit 3; inf=1; next }
-    inf && /^```[ \t]*$/ { inf=0; next }
-    inf { print }
-    END { if (inf) exit 4 }
-  ')" || return 1
+parse_depends_on(){ # parse_depends_on <issue body, CRs removed> -> dep numbers, one per line; rc 1 = malformed fence
+  # Builtins only (#1355 fix 6): this runs once per open issue per links scan,
+  # so it must not start awk/grep/sed/tr. Same rules as the former awk pass:
+  # one db-work-scope fence at most, and it must close.
+  local content='' line cur nlines val n=0 inf=0 open_re='^```db-work-scope[ '$'\t'']*$' close_re='^```[ '$'\t'']*$'
+  local -a lines=()
+  [ -z "$1" ] || mapfile -t lines <<<"$1"
+  for line in ${lines[@]+"${lines[@]}"}; do
+    if [[ "$line" =~ $open_re ]]; then n=$((n+1)); [ "$n" -le 1 ] || return 1; inf=1; continue; fi
+    if [ "$inf" = 1 ] && [[ "$line" =~ $close_re ]]; then inf=0; continue; fi
+    [ "$inf" = 0 ] || content+="$line"$'\n'
+  done
+  [ "$inf" = 0 ] || return 1
+  while [ "${content: -1}" = $'\n' ]; do content="${content%$'\n'}"; done
   [ -n "$content" ] || return 0
   # Structural check, mirroring the queue tooling's line rules: list items are
   # legal only inside objects:/writes:/reads:; every other line must be a
@@ -1054,14 +1180,17 @@ parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = mal
     case "$line" in objects:|writes:|reads:) cur="${line%%:}"; continue ;; esac
     if [ -n "$cur" ]; then case "$line" in -\ *) continue ;; esac; fi
     cur=""
-    printf '%s\n' "$line" | grep -qE '^[a-z_]+:' || return 1
+    [[ "$line" =~ ^[a-z_]+: ]] || return 1
   done <<<"$content"
-  nlines="$(printf '%s\n' "$content" | grep -c '^depends_on:')"
+  nlines=0; val=''
+  while IFS= read -r line; do
+    case "$line" in depends_on:*) nlines=$((nlines+1)); [ "$nlines" -gt 1 ] || val="${line#depends_on:}" ;; esac
+  done <<<"$content"
   [ "$nlines" -le 1 ] || return 1
   [ "$nlines" -eq 1 ] || return 0
-  val="$(printf '%s\n' "$content" | sed -n 's/^depends_on:[[:space:]]*//p' | head -1)"
+  val="${val#"${val%%[![:space:]]*}"}"
   [ -n "$val" ] || return 0
-  printf '%s\n' "$val" | tr ',' '\n' | {
+  {
     local bad=0 tok
     while IFS= read -r tok; do
       tok="${tok#"${tok%%[![:space:]]*}"}"; tok="${tok%"${tok##*[![:space:]]}"}"
@@ -1073,7 +1202,7 @@ parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = mal
       esac
     done
     [ "$bad" -eq 0 ]
-  }
+  } <<<"${val//,/$'\n'}"
 }
 
 maintain_links(){ # maintain_links <dry 0|1>
@@ -1098,22 +1227,24 @@ maintain_links(){ # maintain_links <dry 0|1>
   local malformed=0 unresolvable=0 created=0
   # Pass 1: the shared open-issue snapshot gives every OPEN issue's
   # depends_on edges, plus an id map for same-repo resolution.
-  local pg num did b64 blocked deps dep
+  local pg num did body blocked deps dep
   for repo in $(cfg '.repos[]'); do
     open_snapshot "$repo" links || { lfail=1; continue; }
     for ((pg=1; pg<=SNAPN[$repo]; pg++)); do
       out="${SNAP[$repo|$pg]}"
-      while IFS=$'\t' read -r num did b64 blocked; do
+      # One NUL-framed record per issue ("number TAB id TAB blocked-by", then
+      # the body with CRs removed), so no per-issue base64/tr/awk is started.
+      while IFS=$'\t' read -r -d '' num did blocked && IFS= read -r -d '' body; do
         [ -n "$num" ] || continue
         [ "$did" = null ] || idmap["$repo#$num"]="$did"
-        deps="$(printf '%s' "$b64" | base64 -d 2>/dev/null | tr -d '\r' | parse_depends_on)" || { malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
+        deps="$(parse_depends_on "$body")" || { malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
         for dep in $deps; do
           if [ "$dep" = "$num" ]; then note "links: $repo#$num depends_on names itself; skipped"; malformed=$((malformed+1)); continue; fi
           case " $blocked " in *" $dep "*) continue ;; esac # link present → nothing to do
           [ -z "${eseen[$repo#$num>$dep]+set}" ] || continue
           eseen["$repo#$num>$dep"]=1; edges+=("$repo#$num $dep")
         done
-      done < <(printf '%s' "$out" | jq -r '.data.repository.issues.nodes[] | [(.number|tostring), (.databaseId|tostring), ((.body // "") | @base64), ([.blockedBy.nodes[].number | tostring] | join(" "))] | @tsv')
+      done < <(printf '%s' "$out" | jq -j '.data.repository.issues.nodes[] | "\(.number|tostring)\t\(.databaseId|tostring)\t\([.blockedBy.nodes[].number | tostring] | join(" "))\u0000\((.body // "") | gsub("[\r\u0000]"; ""))\u0000"')
     done
   done
   # Pass 2: create each missing link. The blocker's id comes from the
@@ -1168,7 +1299,7 @@ stuck_watchdog_scan(){
   [ -f "$script" ] && command -v node >/dev/null 2>&1 || { note "stuck watchdog: node or $script missing"; FAILED=1; return 0; }
   tok="$("$auth" token popcre 2>/dev/null)" || { note "stuck watchdog: no app token on this machine"; FAILED=1; return 0; }
   [ "$DRY" = 1 ] || rerun="$("$GH" auth token 2>/dev/null || true)"
-  log="$LOGS/stuck-watchdog-$(date -u +%Y%m%dT%H%M%S).log"
+  log="$LOGS/stuck-watchdog-$(utc_fmt %Y%m%dT%H%M%S).log"
   local -a args=(--json "$HOME_DIR/stuck-report.json"); [ "$DRY" = 1 ] && args+=(--dry-run)
   if GH_TOKEN="$tok" RERUN_TOKEN="$rerun" timeout 300 node "$script" "${args[@]}" >"$log" 2>&1; then
     [ "$DRY" = 1 ] || now_iso > "$last"

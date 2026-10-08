@@ -197,8 +197,22 @@ def main():
         rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "0"], env=env).returncode
         body = json.load(open(req))
         check("step continues with a tool result", rc == 10 and body["messages"][-2]["role"] == "tool")
-        check("last round withholds tools and demands an answer",
-              "tools" not in body and "budget exhausted" in body["messages"][-1]["content"])
+        check("last round keeps the tool list (cache prefix) and demands an answer",
+              body.get("tools") == t.TOOLS and body["messages"][-1]["content"] == t.FINAL_DEMAND)
+        final_msgs = body["messages"]
+        # A model that still calls a tool after the demand gets a refusal (the
+        # tool is not run) and the next request withholds tools to force an answer.
+        with open(resp, "w") as fh:
+            json.dump({"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}, fh)
+        rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"], env=env).returncode
+        body = json.load(open(req))
+        check("a tool call after the final demand is refused, then tools are withheld",
+              rc == 10 and "tools" not in body and body["messages"][-2]["content"].startswith("Error: tool budget")
+              and body["messages"][-1]["content"] == t.FINAL_DEMAND)
+        check("refusal round extends the final request's messages unchanged",
+              body["messages"][:len(final_msgs)] == final_msgs)
+        rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "2"], env=env).returncode
+        check("with tools withheld the loop ends", rc == 0)
         entry = json.loads(open(log).read().splitlines()[0])
         check("tool call is logged", entry["tool"] == "read_file" and entry["refused"] is False)
 
@@ -230,6 +244,28 @@ def main():
         rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"]).returncode
         check("a plain answer is still final", rc == 0)
 
+        # step (caller) passes sent: the request written by one step extends the
+        # previous one unchanged, even past the compaction budget.
+        with open(msgs, "w") as fh:
+            json.dump([{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}], fh)
+        subprocess.run([sys.executable, HELPER, "init", msgs, "m", req], check=True)
+        env = dict(os.environ, DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS="10", DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS="1")
+        prev_msgs, stable = None, True
+        for rnd in range(3):
+            calls = [{"id": f"p{rnd}{k}", "type": "function",
+                      "function": {"name": "read_file", "arguments": json.dumps(
+                          {"path": "big.txt", "start_line": 1, "end_line": 50})}}
+                     for k in range(2)]
+            with open(resp, "w") as fh:
+                json.dump({"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": calls}}]}, fh)
+            subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, str(rnd)], env=env)
+            cur_msgs = json.load(open(req))["messages"]
+            if prev_msgs is not None and cur_msgs[:len(prev_msgs)] != prev_msgs:
+                stable = False
+            prev_msgs = cur_msgs
+        check("step never rewrites already-sent messages", stable and any(
+            m.get("content") == t.COMPACT_STUB for m in prev_msgs))
+
         # compact_tool_messages stubs older tool results once over budget.
         cmsgs = [
             {"role": "system", "content": "sys"},
@@ -253,7 +289,7 @@ def main():
         saved_budget, saved_keep = t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS
         t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = 8000, 2
         try:
-            t.compact_tool_messages(cmsgs)
+            t.compact_tool_messages(cmsgs, 0)
             tool_msgs = [m for m in cmsgs if m.get("role") == "tool"]
             check("compaction stubs older tool results",
                   tool_msgs[0]["content"] == t.COMPACT_STUB and tool_msgs[1]["content"] == t.COMPACT_STUB
@@ -263,12 +299,12 @@ def main():
             check("compaction preserves tool_call_id pairing",
                   [m["tool_call_id"] for m in tool_msgs] == ["c0", "c1", "c2", "c3", "c4"])
             again = [dict(m) for m in cmsgs]
-            t.compact_tool_messages(cmsgs)
+            t.compact_tool_messages(cmsgs, 0)
             check("compaction stubs are stable across rounds", cmsgs == again)
             # Zero keep must not retain every result (Python -0: slice bug).
             t.COMPACT_KEEP_RESULTS = 0
             zero = [{"role": "tool", "tool_call_id": f"z{i}", "content": "Q" * 5000} for i in range(4)]
-            t.compact_tool_messages(zero)
+            t.compact_tool_messages(zero, 0)
             check("zero keep still compacts and keeps at least one result",
                   sum(1 for m in zero if m["content"] == t.COMPACT_STUB) == 3
                   and sum(1 for m in zero if m["content"].startswith("Q")) == 1)
@@ -279,9 +315,50 @@ def main():
                 {"role": "tool", "tool_call_id": "s1", "content": "E" * 5000},
             ]
             t.COMPACT_BUDGET_CHARS = 10
-            t.compact_tool_messages(short)
+            t.compact_tool_messages(short, 0)
             check("compaction never grows a short result",
                   short[0]["content"] == "tiny" and short[1]["content"].startswith("E"))
+            # test_prefix_stable_across_rounds: each round appends results and
+            # compacts; the previously sent request must be a byte-exact prefix.
+            t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = 24000, 4
+            convo = [{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}]
+            prev, broken = None, 0
+            for r in range(4):  # stays under COMPACT_CEILING_CHARS
+                sent = len(convo)
+                convo.append({"role": "assistant", "content": None, "tool_calls": []})
+                for k in range(6):
+                    convo.append({"role": "tool", "tool_call_id": f"r{r}{k}", "content": chr(65 + r) * 7000})
+                t.compact_tool_messages(convo, sent)
+                cur = json.dumps(convo)
+                if prev is not None and not cur.startswith(prev[:-1]):
+                    broken += 1
+                prev = cur
+            check("prefix stable across rounds (sent messages never rewritten)", broken == 0)
+            newest = convo[-6:]
+            check("new results beyond keep are stubbed while over budget",
+                  [m["content"] == t.COMPACT_STUB for m in newest] == [True, True, False, False, False, False])
+            # Ceiling: sent history past COMPACT_CEILING_CHARS is rewritten once, in a
+            # batch that leaves headroom; the context stays bounded.
+            saved_ceiling = t.COMPACT_CEILING_CHARS
+            t.COMPACT_CEILING_CHARS = 60000
+            try:
+                convo = [{"role": "user", "content": "q"}]
+                prev, broken, sizes = None, 0, []
+                for r in range(20):
+                    sent = len(convo)
+                    convo.append({"role": "assistant", "content": None, "tool_calls": []})
+                    for k in range(2):
+                        convo.append({"role": "tool", "tool_call_id": f"c{r}{k}", "content": "x" * 7000})
+                    t.compact_tool_messages(convo, sent)
+                    cur = json.dumps(convo)
+                    if prev is not None and not cur.startswith(prev[:-1]):
+                        broken += 1
+                    prev = cur
+                    sizes.append(sum(len(m["content"]) for m in convo if m.get("role") == "tool"))
+                check("ceiling bounds context with rare batched rewrites",
+                      max(sizes) <= t.COMPACT_CEILING_CHARS + 14000 and 1 <= broken <= 4)
+            finally:
+                t.COMPACT_CEILING_CHARS = saved_ceiling
         finally:
             t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = saved_budget, saved_keep
 

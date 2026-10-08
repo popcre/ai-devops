@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# ai-install-session-tmp — install session-owned temp cleanup on this Linux machine
+# (plan_session-temp-cleanup.md steps 3 and 5):
+#   * Claude Code SessionStart/SessionEnd hooks (bin/ai-session-tmp-hook), copied to
+#     ~/.config/ai-devops so settings never point into a movable checkout;
+#   * the backup sweeper as a systemd USER timer every 30 minutes.
+# Idempotent and strictly additive to ~/.claude/settings.json (backed up first).
+# Linux only; elsewhere it reports SKIP and exits 0.
+#
+# usage: ai-install-session-tmp [--check|--remove [--dry-run]] [--claude-home DIR] [--no-timer]
+set -u
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+claude_home="$HOME/.claude"; check_only=0; timer=1; remove=0; dry=0
+while (($#)); do
+  case "$1" in
+    --check) check_only=1; shift ;;
+    --claude-home) claude_home="$2"; shift 2 ;;
+    --no-timer) timer=0; shift ;;
+    --remove) remove=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$(uname -s)" != Linux ]; then echo "SKIP session temp cleanup is Linux-only for now"; exit 0; fi
+
+cfg_dir="$HOME/.config/ai-devops"
+settings="$claude_home/settings.json"
+marker='session-tmp-hook'
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+if (( remove )); then
+  # Strictly reverses this installer: our hook entries, copies, and timer only.
+  run() { if (( dry )); then echo "WOULD $*"; else "$@"; fi; }
+  if [ -f "$unit_dir/ai-session-tmp-sweep.timer" ]; then
+    echo "REMOVE sweep timer"
+    (( dry )) || systemctl --user disable --now ai-session-tmp-sweep.timer >/dev/null 2>&1 || true
+    run rm -f "$unit_dir/ai-session-tmp-sweep.timer" "$unit_dir/ai-session-tmp-sweep.service"
+    (( dry )) || systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+  if [ -f "$settings" ] && grep -qF "$marker" "$settings" && command -v jq >/dev/null 2>&1 \
+     && jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+    echo "REMOVE session temp hooks from $settings"
+    if (( ! dry )); then
+      tmp="$settings.tmp.$$"
+      jq --arg m "$marker" '
+        reduce ("SessionStart","SessionEnd") as $e (.;
+          if .hooks[$e] then .hooks[$e] |= map(select(((.hooks // []) | map(.command // "") | any(contains($m))) | not)) else . end)' \
+        "$settings" > "$tmp" && jq -e 'type == "object"' "$tmp" >/dev/null 2>&1 && mv "$tmp" "$settings" || { rm -f "$tmp"; exit 1; }
+    fi
+  fi
+  for f in session-tmp-hook session-tmp-sweep session-tmp.sh; do
+    [ -f "$cfg_dir/$f" ] && run rm -f "$cfg_dir/$f"
+  done
+  echo "OK session temp cleanup removed"
+  exit 0
+fi
+
+if (( check_only )); then
+  rc=0
+  for f in session-tmp-hook session-tmp-sweep session-tmp.sh; do
+    [ -f "$cfg_dir/$f" ] || { echo "ERROR $cfg_dir/$f not installed"; rc=1; }
+  done
+  cmp -s "$repo_root/tools/lib/session-tmp.sh" "$cfg_dir/session-tmp.sh" || { echo "ERROR installed session-tmp.sh differs from the checkout"; rc=1; }
+  grep -qF "$marker" "$settings" 2>/dev/null || { echo "ERROR session temp hook not registered in $settings"; rc=1; }
+  if (( timer )); then
+    [ -f "$unit_dir/ai-session-tmp-sweep.timer" ] || { echo "ERROR sweep timer not installed"; rc=1; }
+  fi
+  (( rc )) || echo "OK session temp cleanup installed"
+  exit "$rc"
+fi
+
+command -v jq >/dev/null 2>&1 || { echo "ERROR jq is required to edit settings.json safely" >&2; exit 1; }
+mkdir -p "$cfg_dir" "$claude_home"
+cp "$repo_root/tools/lib/session-tmp.sh" "$cfg_dir/session-tmp.sh" || exit 1
+cp "$repo_root/bin/ai-session-tmp-hook" "$cfg_dir/session-tmp-hook" || exit 1
+cp "$repo_root/bin/ai-session-tmp-sweep" "$cfg_dir/session-tmp-sweep" || exit 1
+chmod +x "$cfg_dir/session-tmp-hook" "$cfg_dir/session-tmp-sweep"
+
+[ -f "$settings" ] || printf '{}\n' > "$settings"
+if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+  echo "ERROR $settings is not a valid JSON object - refusing to touch it" >&2; exit 1
+fi
+for event in SessionStart SessionEnd; do
+  if jq -e --arg e "$event" --arg m "$marker" '(.hooks[$e] // []) | map(.hooks // []) | flatten
+        | map(.command // "") | any(contains($m))' "$settings" >/dev/null 2>&1; then
+    continue
+  fi
+  [ -f "$settings.aidevops.bak" ] || cp "$settings" "$settings.aidevops.bak"
+  arg=start; [ "$event" = SessionEnd ] && arg=end
+  cmd="bash \"\$HOME/.config/ai-devops/session-tmp-hook\" $arg 2>/dev/null || true"
+  tmp="$settings.tmp.$$"
+  if ! jq --arg e "$event" --arg cmd "$cmd" '
+        .hooks //= {} | .hooks[$e] //= [] |
+        .hooks[$e] += [{ hooks: [{ type: "command", command: $cmd, timeout: 10 }] }]' \
+        "$settings" > "$tmp" || ! jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"; echo "ERROR could not update $settings" >&2; exit 1
+  fi
+  mv "$tmp" "$settings"
+done
+echo "OK session temp hook registered in $settings"
+
+(( timer )) || exit 0
+mkdir -p "$unit_dir"
+cat > "$unit_dir/ai-session-tmp-sweep.service" <<EOF
+[Unit]
+Description=AI session temp root backup sweep (ai-devops)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash "%h/.config/ai-devops/session-tmp-sweep"
+EOF
+cat > "$unit_dir/ai-session-tmp-sweep.timer" <<'EOF'
+[Unit]
+Description=Run the AI session temp backup sweep every 30 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+if systemctl --user daemon-reload 2>/dev/null && systemctl --user enable --now ai-session-tmp-sweep.timer >/dev/null 2>&1; then
+  echo "OK sweep timer active"
+else
+  echo "WARN sweep timer written but systemd --user is unavailable here"
+fi

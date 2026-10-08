@@ -230,6 +230,42 @@ generated_review_path() { # ROOT RELATIVE_PATH; never exclude source by prefix a
   return 1
 }
 
+# Sizes and digests for many regular files from one stat and one sha256sum per
+# chunk instead of a wc and a sha256sum per file: per-file processes were the
+# largest share of a review's cost on Windows (#1355). Chunks stay well under
+# the Windows command-line limit. Any failure, short answer, or unexpected
+# shape returns nonzero so the caller falls back to the per-file readers.
+FS_BYTES=(); FS_SHA=()
+file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
+  local -a chunk=(); local p line len=0 n
+  FS_BYTES=(); FS_SHA=()
+  [ "$#" -gt 0 ] || return 0
+  for p in "$@" ''; do
+    if [ -n "$p" ] && [ "$len" -lt 16000 ]; then chunk+=("$p"); len=$((len + ${#p} + 3)); continue; fi
+    if [ "${#chunk[@]}" -gt 0 ]; then
+      n="${#FS_BYTES[@]}"
+      while IFS= read -r line; do
+        line="${line%$'\r'}"
+        case "$line" in ''|*[!0-9]*) return 1 ;; esac
+        FS_BYTES+=("$line")
+      done < <(stat -c %s -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_BYTES[@]} - n ))" -eq "${#chunk[@]}" ] || return 1
+      local m="${#FS_SHA[@]}"
+      while IFS= read -r line; do
+        # Same field the per-file reader keeps, escape marker included.
+        line="${line%$'\r'}"; line="${line%% *}"; n="${line#\\}"
+        case "$n" in *[!0-9a-f]*) return 1 ;; esac
+        [ "${#n}" -eq 64 ] || return 1
+        FS_SHA+=("$line")
+      done < <(sha256sum -- "${chunk[@]}" 2>/dev/null || echo x)
+      [ "$(( ${#FS_SHA[@]} - m ))" -eq "${#chunk[@]}" ] || return 1
+    fi
+    [ -n "$p" ] || break
+    chunk=("$p"); len=$((${#p} + 3))
+  done
+  [ "${#FS_SHA[@]}" -eq "$#" ] && [ "${#FS_BYTES[@]}" -eq "$#" ]
+}
+
 source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible tree identity
   local root="$1" output="$2" list diff rel kind bytes digest tree
   list="$(mktemp)"; diff="$(mktemp)"
@@ -249,29 +285,39 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
   printf 'head_tree\0%s\0tracked_diff_bytes\0%s\0tracked_diff_sha256\0%s\0' \
     "$tree" "$(n="$(wc -c < "$diff")"; printf '%s' "${n// /}")" "$(h="$(sha256sum "$diff")"; printf '%s' "${h%% *}")" >> "$output"
   test_progress || { rm -f "$list" "$diff"; return 1; }
+  local -a rels=() kinds=() files=(); local i f=0
   while IFS= read -r -d '' rel; do
     if generated_review_path "$root" "$rel"; then continue; fi
-    if [ -L "$root/$rel" ]; then
-      kind=symlink
+    if [ -L "$root/$rel" ]; then kinds+=(symlink)
+    elif [ -f "$root/$rel" ]; then
+      [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
+      kinds+=(file); files+=("$root/$rel")
+    else
+      rm -f "$list" "$diff"
+      return 1
+    fi
+    rels+=("$rel")
+  done < "$list"
+  file_stats "${files[@]+"${files[@]}"}" || { FS_BYTES=(); FS_SHA=(); }
+  for i in "${!rels[@]}"; do
+    rel="${rels[$i]}"; kind="${kinds[$i]}"
+    if [ "$kind" = symlink ]; then
       bytes="$(readlink -n "$root/$rel" | wc -c)" || { rm -f "$list" "$diff"; return 1; }
       digest="$(readlink -n "$root/$rel" | sha256sum)" || { rm -f "$list" "$diff"; return 1; }
       bytes="${bytes// /}"; digest="${digest%% *}"
-    elif [ -f "$root/$rel" ]; then
-      [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
-      kind=file
+    elif [ "${#FS_SHA[@]}" -gt 0 ]; then
+      bytes="${FS_BYTES[$f]}"; digest="${FS_SHA[$f]}"; f=$((f + 1))
+    else
       # Shell expansions trim the output: tr and cut processes per file are
       # a measurable share of every review on Windows (#1355).
       bytes="$(wc -c < "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
       digest="$(sha256sum "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
       bytes="${bytes// /}"; digest="${digest%% *}"
-    else
-      rm -f "$list" "$diff"
-      return 1
     fi
     printf 'path\0%s\0type\0%s\0bytes\0%s\0sha256\0%s\0' \
       "$rel" "$kind" "$bytes" "$digest" >> "$output"
     test_progress || { rm -f "$list" "$diff"; return 1; }
-  done < "$list"
+  done
   rm -f "$list" "$diff"
 }
 
@@ -306,26 +352,125 @@ gates_bin() {
 # clone, copy, or packet builder can expose a licensed repository. An empty or
 # unclassifiable inventory fails closed; Git's quoted display names are never
 # parsed as paths.
+# One privacy verdict per review (#1355). A reviewer front door gives each
+# review a private, short-lived scope directory (tools/reviewer_event_guard.sh).
+# In it a definite verdict is filed under a key over this exact inventory, the
+# source root and top level, the origin URL, the gate program and every
+# AI_TASK_GATES_* setting plus HOME; the record also lists every file the gate
+# itself named as an input (AI_TASK_GATES_INPUTS_TO: program, library, policy,
+# consumer declaration, recorded task state) with its hash. A record is reused
+# only while every one of those still matches. No scope, a gate that names no
+# inputs, or any unreadable input means the gate runs, as before. A same-user
+# process that can write the scope can equally edit those inputs; that is the
+# same boundary as the gate's own explain answer cache.
+PRIVACY_VERDICT_PY='
+import hashlib, os, stat, subprocess, sys
+VERSION = "ai-review-privacy-verdict-v1"
+def out(text):
+    sys.stdout.buffer.write(text.encode("ascii") + b"\n")
+def digest(path):
+    # Follow links, as the gate reads them; anything but a regular file is unusable.
+    if not os.path.lexists(path): return "absent"
+    if not os.path.isfile(path): raise OSError("not a regular file: " + path)
+    with open(path, "rb") as f: return hashlib.sha256(f.read()).hexdigest()
+def key_for(root, gates, inventory):
+    h = hashlib.sha256()
+    def put(b):
+        b = b if isinstance(b, bytes) else b.encode("utf-8", "surrogateescape")
+        h.update(len(b).to_bytes(8, "big")); h.update(b)
+    remote = subprocess.run(["git", "-C", root, "remote", "get-url", "origin"], capture_output=True)
+    top = subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], capture_output=True, check=True).stdout
+    put(VERSION); put(root); put(top); put(str(remote.returncode)); put(remote.stdout)
+    put(gates); put(digest(gates))
+    env = sorted((k, v) for k, v in os.environ.items()
+                 if (k.startswith("AI_TASK_GATES_") and k != "AI_TASK_GATES_INPUTS_TO") or k == "HOME")
+    for k, v in env: put(k); put(v)
+    put(inventory)
+    return h.hexdigest()
+def read_record(scope, key):
+    path = os.path.join(scope, key)
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode): return None
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino): return None
+        if hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o077): return None
+        data = os.read(fd, 1 << 16)
+        if len(data) >= 1 << 16: return None  # never trust a prefix of a long record
+    finally:
+        os.close(fd)
+    lines = data.decode("utf-8", "surrogateescape").split("\n")
+    head = lines[0].split(" ")
+    if len(head) != 3 or head[0] != VERSION or head[1] != key or head[2] not in ("private", "public"): return None
+    inputs = [l for l in lines[1:] if l]
+    if not inputs: return None
+    for line in inputs:
+        want, _, name = line.partition(" ")
+        if not name or digest(name) != want: return None
+    return head[2]
+mode, scope, root, gates = sys.argv[1:5]
+if mode == "lookup":
+    # stdin: git ls-files -z; writes the paths file, prints KEY [VERDICT].
+    names = [n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
+    if any("\n" in n or "\r" in n for n in names): sys.exit(2)
+    # Write bytes: a name outside the console code page (observed as U+F00A
+    # from MSYS filename mangling on Windows) must not crash classification,
+    # whose only two answers are a complete paths file and a refusal. The
+    # inventory is the real tracked+untracked set only — no phantom path is
+    # invented, so an empty repository classifies as none and fails closed.
+    data = b"\n".join([n.encode("utf-8", "surrogateescape") for n in names]) + b"\n"
+    with open(sys.argv[5], "wb") as f: f.write(data)
+    if not scope: sys.exit(0)
+    try:
+        key = key_for(root, gates, data)
+        verdict = read_record(scope, key) if os.path.lexists(os.path.join(scope, key)) else None
+    except Exception:
+        sys.exit(0)
+    out(key + (" " + verdict if verdict else ""))
+elif mode == "store":
+    # argv: KEY VERDICT PATHS_FILE INPUTS_FILE; stores only if the key still holds.
+    key, verdict, paths, inputs_file = sys.argv[5:9]
+    try:
+        with open(paths, "rb") as f: data = f.read()
+        if key_for(root, gates, data) != key: sys.exit(0)
+        with open(inputs_file, "rb") as f:
+            names = [n for n in f.read().decode("utf-8", "surrogateescape").split("\n") if n]
+        if not names or any(not os.path.isabs(n) for n in names): sys.exit(0)
+        body = VERSION + " " + key + " " + verdict + "\n" + "".join(digest(n) + " " + n + "\n" for n in names)
+        os.umask(0o077)
+        tmp = os.path.join(scope, ".tmp." + key + "." + str(os.getpid()))
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f: f.write(body.encode("utf-8", "surrogateescape"))
+        os.replace(tmp, os.path.join(scope, key))
+    except Exception:
+        try: os.unlink(tmp)
+        except Exception: pass
+'
+
 source_is_private() { # source_is_private ROOT; 0 private, 1 public, 2 unknown
-  local root="$1" paths decision python
+  local root="$1" paths inputs="" decision python scope hit key="" verdict="" rc=0
   python="$(command -v python3 || command -v python)" || return 2
-  paths="$(mktemp)" || return 2
-  if ! git -C "$root" ls-files -co --exclude-standard -z | "$python" -c '
-import sys
-names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
-if any("\n" in n or "\r" in n for n in names): sys.exit(2)
-# Write bytes: a name outside the console code page (observed as U+F00A from
-# MSYS filename mangling on Windows) must not crash classification, whose only
-# two answers are a complete paths file and a refusal. The inventory is the
-# real tracked+untracked set only — no phantom path is invented, so an empty
-# repository classifies as none and fails closed below.
-sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n in names]) + b"\n")
-' > "$paths"; then rm -f "$paths"; return 2; fi
   local gates_bin; gates_bin="$(gates_bin)"
   [ -x "$gates_bin" ] || return 2
-  decision="$(cd "$root" && "$gates_bin" explain --json --paths-from "$paths" 2>/dev/null)" \
+  scope="${AI_REVIEW_PRIVACY_SCOPE:-}"
+  case "$scope" in /*) [ -d "$scope" ] && [ ! -L "$scope" ] && [ -O "$scope" ] || scope="" ;; *) scope="" ;; esac
+  paths="$(mktemp)" || return 2
+  hit="$(git -C "$root" ls-files -co --exclude-standard -z \
+    | "$python" -c "$PRIVACY_VERDICT_PY" lookup "$scope" "$root" "$gates_bin" "$paths")" \
     || { rm -f "$paths"; return 2; }
-  rm -f "$paths"
+  key="${hit%% *}"
+  case "$key" in *[!0-9a-f]*) key="" ;; esac
+  [ "${#key}" -eq 64 ] || key=""
+  if [ -n "$key" ]; then
+    case "$hit" in
+      "$key private") rm -f "$paths"; return 0 ;;
+      "$key public") rm -f "$paths"; return 1 ;;
+    esac
+    inputs="$(mktemp)" || inputs=""
+  fi
+  decision="$(cd "$root" && AI_TASK_GATES_INPUTS_TO="$inputs" "$gates_bin" explain --json --paths-from "$paths" 2>/dev/null)" || rc=$?
+  if [ "$rc" -ne 0 ]; then rm -f "$paths" ${inputs:+"$inputs"}; return 2; fi
   # The privacy verdict is the classified change set, not the remote's shape:
   # both private classes are private (#702 — a formal review snapshots the whole
   # private repository), and an unresolved remote (local path, ssh alias, none)
@@ -333,9 +478,17 @@ sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n i
   # as the task gate itself does for the review action. "none" (empty
   # inventory) is NOT public: the comment above says an empty or unclassifiable
   # inventory fails closed, and the caller treats 2 as refuse-everything.
-  printf '%s' "$decision" | jq -e '.effective_class == "private-evidence" or .effective_class == "private-tooling"' >/dev/null 2>&1 && return 0
-  printf '%s' "$decision" | jq -e '.effective_class != "none" and (.effective_class|type=="string")' >/dev/null 2>&1 && return 1
-  return 2
+  if printf '%s' "$decision" | jq -e '.effective_class == "private-evidence" or .effective_class == "private-tooling"' >/dev/null 2>&1; then
+    verdict=private
+  elif printf '%s' "$decision" | jq -e '.effective_class != "none" and (.effective_class|type=="string")' >/dev/null 2>&1; then
+    verdict=public
+  fi
+  # Only a definite answer is filed; a failed store only loses the reuse.
+  if [ -n "$verdict" ] && [ -n "$inputs" ] && [ -s "$inputs" ]; then
+    "$python" -c "$PRIVACY_VERDICT_PY" store "$scope" "$root" "$gates_bin" "$key" "$verdict" "$paths" "$inputs" </dev/null || true
+  fi
+  rm -f "$paths" ${inputs:+"$inputs"}
+  case "$verdict" in private) return 0 ;; public) return 1 ;; *) return 2 ;; esac
 }
 
 require_public_source() { # ROOT

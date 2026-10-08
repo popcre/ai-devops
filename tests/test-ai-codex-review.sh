@@ -35,6 +35,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
   hang) sleep 3; printf '## Verdict\nAPPROVE\n';;
   signal) [ -z "${AI_CODEX_SIGNAL_READY:-}" ] || printf '%s\n' "$$" > "$AI_CODEX_SIGNAL_READY"; trap '[ -z "${AI_CODEX_SIGNAL_STOPPED:-}" ] || printf stopped > "$AI_CODEX_SIGNAL_STOPPED"; exit 143' HUP INT TERM; sleep 30;;
   slow) sleep 1; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
+  envspy) env > "$AI_CODEX_TEST_ARGS/env-spy"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   *) printf 'review saw complete snapshot\n\n## Verdict\nAPPROVE\n\n'; printf 'codex diagnostic after response\n' >&2;;
 esac
 EOF
@@ -74,6 +75,8 @@ check "missing_source_base_refused_before_provider" "cd '$R' && ! '$SCRIPT' diff
 IDENTITY_CALLS_AFTER="$(find "$TMP/args" -name 'args-*' | wc -l)"
 check "source_identity_refusals_submit_zero_provider_calls" "[ '$IDENTITY_CALLS_BEFORE' = '$IDENTITY_CALLS_AFTER' ]"
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
+# #1427: Codex reviews use the ChatGPT login only; API keys never reach it.
+check "codex_review_unsets_api_keys" "cd '$R' && OPENAI_API_KEY=fake-openai-1427 CODEX_API_KEY=fake-codex-1427 AI_CODEX_STUB_MODE=envspy '$SCRIPT' diff-review >/dev/null 2>&1 && test -s '$TMP/args/env-spy' && ! grep -q 'fake-.*-1427' '$TMP/args/env-spy'"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"
 check "review_runs_the_supplied_test_evidence_command" "cd '$R' && '$SCRIPT' diff-review --tests 'printf passed > \"\$AI_CODEX_TEST_MARKER\"' >/dev/null && grep -qx passed '$TMP/tests-ran'"
 check "review_rejects_a_missing_tests_command" "cd '$R' && ! '$SCRIPT' diff-review --tests >/dev/null 2>&1"

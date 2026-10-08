@@ -334,6 +334,39 @@ and runtime records under an administrator-owned directory, and leaves existing
 requests, results, audit, and replay records in place. Verify the installation
 and refresh the security evidence before full GitHub qualification.
 
+### Automatic renewal of the security evidence
+
+CI jobs refuse evidence older than 24 hours ("Administrator security preflight
+evidence is not fresh."). Issue #1312 keeps it fresh without a human by adding
+one unprivileged sibling task, `\AiDevOps\WindowsRunnerQualificationRenewal`,
+on top of the #262 boundary above. It adds no elevation path:
+
+- It runs as the operator's own S4U token at run level **Limited** (never
+  `Highest`), five minutes after startup and every 8 hours, and only calls the
+  unchanged #262 client for `refresh-qualification`. The elevated work is still
+  done only by the hash-pinned `\AiDevOps\WindowsRunnerMaintenance` task, which
+  keeps its no-trigger contract.
+- Every guard is unchanged, so a host whose TPM disappeared after a restart
+  (`Get-Tpm` `TpmPresent=False`) still FAILS and the existing evidence is left
+  untouched; the next 8-hour run retries.
+- Each run writes `C:\ProgramData\ai-devops\windows-runner-renewal\last-run.json`;
+  every non-`SUCCESS` run (including `SUCCESS` whose evidence is not then fresh,
+  recorded as `EVIDENCE_NOT_REFRESHED`) is also appended to `failures.jsonl` in
+  the same folder (bounded at 1 MiB, one rotation). The directory is readable by
+  every local user; the task's Last Run Result is non-zero on failure, and the
+  #262 `audit.jsonl` keeps its own record.
+
+Install only after the maintenance installation verifies, from an elevated
+checkout of current `main`; `-Verify` (elevated) re-verifies both layers and
+`-Remove` removes the task and payload but keeps the failure history:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-renewal.ps1 -Install -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\install-windows-runner-renewal.ps1 -Verify -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+Offline tests: `pwsh -NoProfile -File tests/test-windows-runner-renewal.ps1`.
+
 Restart the service after any machine-wide package or PATH change:
 
 ```powershell
@@ -375,12 +408,48 @@ gh workflow run windows-runner-qualification.yml -R popcre/ai-devops -f scope=se
 
 All 12 sections must pass, each within the same 40-minute ceiling the
 pull-request lane uses, plus the shared host gate and workspace cleanup. Remove
-the custom label afterwards. A sections pass admits the host through section 6
-exactly as a complete pass does.
+the custom label afterwards. A sections pass where every section also has clear headroom under the ceiling
+admits the host through section 6 exactly as a complete pass does; a host
+that is green only on some sections, or close to the ceiling, takes the
+section-only lane below instead and never gets the qualified label.
+
+### Section-only lane: one section at a time
+
+A host whose sections pass is still not automatically fit for the qualified
+pool: `ai-devops-windows-qualified` also draws the manual reviewer proof
+(`windows-reviewer-preferred`) and makes the host count toward the reviewer
+reserve. Owner (2026-10-06, #1312): "keep it for lighter jobs." and "set this
+machine up to take one test piece at a time". Such a host instead gets
+`ai-devops-windows-section` (and never the qualified label). The runner router
+(`tools/ci/runner-router.cjs`, `config/ci-runner-routing.json`) gives each idle
+section-only host at most one pull-request section, in `section_lane_order`,
+after the qualified hosts take theirs. A busy, offline or unknown host leaves
+the section on Blacksmith; nothing else in any workflow targets the label.
+
+```powershell
+gh api -X POST repos/popcre/ai-devops/actions/runners/<runner-id>/labels -f "labels[]=ai-devops-windows-section"
+```
+
+EDGE-ALIEN (i7-6700, 4 cores) is the first section-only host: the complete
+matrix hit the 150-minute ceiling (run 37487753427). Sections-scope runs
+37628253929 (2026-10-07) and 37725520505 (2026-10-08, after python3, Windows
+long paths and the GLM symlink-privilege test fix #1492) give its
+`section_lane_order`: sections 3, 4, 9, 10, 11, 6 and 1, each finished in 28
+minutes or less (at least 12 minutes of headroom). Sections 2, 5, 7, 8 and 12
+passed in 33-39 minutes (8 once timed out) and stay on Blacksmith. A section
+joins the order only after a measured pass with that headroom; evidence is
+recorded on #1312.
+
+EDGE-ALIEN's firmware TPM can vanish after a plain restart (it returns only
+after entering the BIOS or on some boots; BIOS 1.0.23 appears to be final).
+Without it the Administrator preflight fails with "TPM must be present and
+ready.", which blocks requalification but not the section lane itself.
 
 ## 6. Admit the host to ordinary CI
 
-Only after the exact qualification job (complete or sections scope) is green:
+Only after the exact qualification job is green (complete scope, or sections
+scope with clear headroom in every section as judged from its timings; otherwise
+use the section-only lane above):
 
 1. add `ai-devops-windows-qualified`;
 2. keep `ai-devops-windows` for future requalification;

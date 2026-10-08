@@ -64,9 +64,11 @@ write_stubs() {
   cat > "$TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
+  "auth token") printf 'fixture-repository-token\n' ;;
   "run list") cat "$STUB_DIR/runs" ;;
   "run view") cat "$STUB_DIR/jobs" ;;
   "api graphql")
+    if [[ "$*" == *statusCheckRollup* ]]; then cat "$STUB_DIR/cancel-policy"; exit 0; fi
     state="$STUB_DIR/queue_state"
     if [ -f "$STUB_DIR/queue-read" ] && [ -f "$STUB_DIR/queue-after" ]; then state="$STUB_DIR/queue-after"; fi
     if [ -f "$STUB_DIR/graph-errors" ]; then
@@ -77,6 +79,11 @@ case "$1 $2" in
         '{data:{repository:{pullRequest:{headRefOid:$head,baseRefOid:$base,mergeQueueEntry:{headCommit:{oid:$queue}}}}}}'
     fi
     : > "$STUB_DIR/queue-read" ;;
+  "api --paginate") cat "$STUB_DIR/cancel-jobs" ;;
+  api\ *)
+    if [[ "$*" == *actions/workflows/* ]]; then cat "$STUB_DIR/cancel-workflow"
+    elif [[ "$*" == *--jq* ]]; then jq -r .run_attempt "$STUB_DIR/cancel-run"
+    else cat "$STUB_DIR/cancel-run"; fi ;;
   *) exit 1 ;;
 esac
 STUB
@@ -259,6 +266,73 @@ for mutation in closure-pending closure-missing required-pending required-failed
   OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
   check "advisory allowance remains fail-closed for $mutation" "test '$RC' -eq 1"
 done
+
+# Real helper/cache/pager against exact same-run GitHub response fixtures.
+export AI_PR_WAIT_TEST_CONTEXT_KEY=merge-group-policy-test
+export AI_PR_WAIT_SNAPSHOT_DIR="$TMP/pr-cache"
+set_cancel_world() {
+  local jobs
+  jobs="$(printf 'verification-closure\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-offline\tsuccess\tcompleted\nwindows-reviewer-safety\tsuccess\tcompleted\nwindows-reviewer-preferred\tcancelled\tcompleted\n')"
+  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
+  jq -nc --arg head "$GOOD_HEAD" '{id:9001,head_sha:$head,head_repository:{full_name:"popcre/ai-devops"},repository:{full_name:"popcre/ai-devops"},event:"pull_request",status:"completed",conclusion:"cancelled",run_attempt:1,workflow_id:90}' > "$TMP/cancel-run"
+  jq -nc '{id:90,path:".github/workflows/verify.yml"}' > "$TMP/cancel-workflow"
+  printf '%s' "$jobs" | jq -Rsc --arg head "$GOOD_HEAD" 'split("\n")|map(select(length>0)|split("\t"))|to_entries|map({id:(.key+100),name:.value[0],conclusion:.value[1],status:.value[2],run_id:9001,run_attempt:1,head_sha:$head})|[{total_count:length,jobs:.}]' > "$TMP/cancel-jobs"
+  jq -nc --arg head "$GOOD_HEAD" '{data:{repository:{pullRequest:{state:"OPEN",isInMergeQueue:true,headRefOid:$head,commits:{nodes:[{commit:{oid:$head,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false,startCursor:null},nodes:[{name:"windows-reviewer-preferred",conclusion:"CANCELLED",status:"COMPLETED",detailsUrl:"https://github.com/popcre/ai-devops/actions/runs/9001/job/106",isRequired:false}]}}}}]}}}}}' > "$TMP/cancel-policy"
+}
+set_cancel_world
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+if [ "$RC" -ne 0 ]; then printf "new cancellation case: %s\n" "$OUT" >&2; fi
+check "completed run with genuine required successes and exact same-run nonrequired cancellation passes" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'non-required cancellations'"
+for mutation in required unknown duplicate wrong-job wrong-head wrong-run wrong-event wrong-workflow wrong-attempt missing-closure cancelled-safety failed-job incomplete-page group-change; do
+  set_cancel_world
+  case "$mutation" in
+    required) jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired=true' "$TMP/cancel-policy" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-policy" ;;
+    unknown) jq 'del(.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired)' "$TMP/cancel-policy" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-policy" ;;
+    duplicate) jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts |= (.nodes += [.nodes[0]]|.totalCount=2)' "$TMP/cancel-policy" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-policy" ;;
+    wrong-job) jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].detailsUrl="https://github.com/popcre/ai-devops/actions/runs/9001/job/999"' "$TMP/cancel-policy" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-policy" ;;
+    wrong-head) jq '.data.repository.pullRequest.commits.nodes[0].commit.oid="wrong"' "$TMP/cancel-policy" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-policy" ;;
+    wrong-run) jq '.id=9002' "$TMP/cancel-run" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-run" ;;
+    wrong-event) jq '.event="workflow_dispatch"' "$TMP/cancel-run" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-run" ;;
+    wrong-workflow) jq '.path=".github/workflows/foreign.yml"' "$TMP/cancel-workflow" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-workflow" ;;
+    wrong-attempt) jq '.[0].jobs[0].run_attempt=2' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    missing-closure) jq '.[0].jobs |= map(select(.name!="verification-closure"))|.[0].total_count=6' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    cancelled-safety) jq '.[0].jobs[5].conclusion="cancelled"' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    failed-job) jq '.[0].jobs[6].conclusion="failure"' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    incomplete-page) jq '.[0].total_count=8' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    group-change) printf '%s|changed|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after" ;;
+  esac
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "same-run advisory cancellation remains fail-closed for $mutation" "test '$RC' -eq 1"
+done
+
+# Exercise the real production context reader; no test context override.
+unset AI_PR_WAIT_TEST_CONTEXT_KEY
+export AI_PR_WAIT_SNAPSHOT_DIR="$TMP/production-cache"
+mkdir -m 700 -p "$TMP/production-state/identities"
+export AI_GH_STATE_DIR="$TMP/production-state"
+for identity in missing unknown; do
+  set_cancel_world
+  if [ "$identity" = unknown ]; then
+    fixture_hash="$(printf 'fixture-repository-token\n' | sha256sum | cut -d' ' -f1)"
+    fixture_key="$(printf '3 github.com %s' "$fixture_hash" | sha256sum | cut -d' ' -f1)"
+    printf 'unknown 1\n' > "$AI_GH_STATE_DIR/identities/$fixture_key"
+    printf '%064d\n' 0 > "$AI_GH_STATE_DIR/principal-salt"
+    chmod 600 "$AI_GH_STATE_DIR/identities/$fixture_key" "$AI_GH_STATE_DIR/principal-salt"
+  fi
+  # Live-shaped 35 jobs, preserving the six original mandatory successes.
+  jq --arg head "$GOOD_HEAD" '.[0].jobs += [range(107;135)|{id:.,name:("section-"+tostring),status:"completed",conclusion:"success",run_id:9001,run_attempt:1,head_sha:$head}]|.[0].total_count=35' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "production $identity identity uses uncached complete policy with 35 genuine-shaped jobs" "test '$RC' -eq 0 && test ! -e '$AI_PR_WAIT_SNAPSHOT_DIR'"
+  for mutation in unknown wrong-head; do
+    cp "$TMP/cancel-policy" "$TMP/restore-policy"
+    if [ "$mutation" = unknown ]; then jq 'del(.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired)' "$TMP/cancel-policy" > "$TMP/change"
+    else jq '.data.repository.pullRequest.headRefOid="wrong"' "$TMP/cancel-policy" > "$TMP/change"; fi
+    mv "$TMP/change" "$TMP/cancel-policy"
+    OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+    check "production $identity identity still refuses $mutation policy" "test '$RC' -eq 1"
+    mv "$TMP/restore-policy" "$TMP/cancel-policy"
+  done
+ done
 
 printf '\n%s passed, %s failed, 0 skipped\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

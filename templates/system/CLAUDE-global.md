@@ -109,9 +109,21 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   proof`) and name it in the session's closing note. Do **not** open a
   leftover-proof issue, an "unproven step" issue, or a second ticket for that
   gap. One issue per application need; one named owner until the app works live.
-- **Multi-step work runs through one parent issue** whose body says: take the
-  first unticked child, do only that one, tick it, comment the next child on the
-  parent, and stop.
+- **Complete the authorized scope.** Track multi-step work on its existing
+  issue, verify each completed outcome, and continue through the remaining
+  authorized work. Completing one child or phase is never a reason to stop.
+  Respect actual dependencies, ownership, collision controls, and safety gates.
+- **Own coordinator progress.** Before claiming agents are working, verify
+  with a fresh message or existing status view; otherwise report activity
+  unverified. Distinguish working, preparation complete but waiting, blocked
+  needing coordinator action, and complete. Check at meaningful transitions,
+  not on a polling schedule. Act on authorized actionable blockers and resume
+  ready work when dependencies clear; do not end an execution turn with either
+  untouched. Escalate material delays promptly with owner, impact and next safe
+  action. Keep decisions and messaging permissions within existing authority.
+  Preparation may legitimately leave agents idle; never invent busywork.
+  Stop when complete, genuinely externally blocked with exact state preserved,
+  or told to stop. Do not promise background execution the client cannot provide.
 - **Keep canonical checkouts landing-only.** Every write-capable task uses its
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository
@@ -231,6 +243,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 
 ## Work discipline
 
+- Put scratch files under `$TMPDIR` (your session's own temp folder, deleted
+  when the session ends), never hand-named `/tmp/<issue>-...` paths.
 - Keep routine tool output short; save long output to a scratch file and
   return only the decisive result.
 - **Never delegate a decision** (schema, merge, production, security). A

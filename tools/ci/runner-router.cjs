@@ -9,41 +9,94 @@
 // warpbuild-win2022-canary.yml. run() never throws: any lookup error keeps the
 // all-Blacksmith plan, so routing can only add capacity and never sends work
 // back to the GitHub-hosted queue.
+//
+// Section-only hosts (#1312; owner 2026-10-06: "keep it for lighter jobs." and
+// "set this machine up to take one test piece at a time") carry
+// ai-devops-windows-section but not the qualified label. They have only some
+// sections measured green with headroom, so each idle one takes at
+// most one section (in cfg.section_lane_order) and nothing else: no complete
+// matrix, no reviewer proof. A host carrying both labels counts only as
+// qualified. Busy, offline or unknown means the section stays on Blacksmith.
+
+// Linux (owner 2026-10-07, "yes, point the checks at it"): idle self-hosted
+// Linux hosts labelled cfg.linux_label (edge-dev3-linux, one job at a time)
+// take linux-offline-shard sections as extra capacity, one section per idle
+// host in cfg.linux_lane_order. Every other section, and every section when the
+// pool is busy, offline, unknown or the head is foreign, stays on Blacksmith.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
-function decide(cfg, { event, idleQualified, foreign }) {
+function decide(cfg, { event, idleQualified, idleSection, foreign }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
   // A foreign head never runs on our machines: not the self-hosted pool and
   // not the WarpBuild BYOC VMs in our own Azure subscription. Both stay zero;
   // every section falls through to Blacksmith.
   let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
-  return {
-    idle_qualified: idleQualified || 0,
-    windows_matrix: range(cfg.windows_sections).map(section => {
-      if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
-      return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
-    }),
-  };
+  const matrix = range(cfg.windows_sections).map(section => {
+    if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
+    return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
+  });
+  // One section per idle section-only host, never more than there are hosts.
+  let sectionHosts = foreign || !cfg.section_label ? 0 : Math.max(0, idleSection || 0);
+  for (const section of cfg.section_lane_order || []) {
+    if (sectionHosts <= 0) break;
+    const slot = matrix[section - 1];
+    if (!slot || slot.lane !== 'blacksmith') continue;
+    matrix[section - 1] = { section, lane: 'section-self-hosted', runs_on: cfg.section_windows };
+    sectionHosts -= 1;
+  }
+  return { idle_qualified: idleQualified || 0, idle_section: idleSection || 0, windows_matrix: matrix };
+}
+
+// eligible: section numbers the workflow proved select no cfg.linux_unfit_suites
+// for this pull request. Missing or empty means none (fail closed to Blacksmith).
+function parseEligible(text) {
+  return String(text || '').split(',').map(x => Number(x.trim())).filter(n => Number.isInteger(n) && n > 0);
+}
+
+function decideLinux(cfg, { idleLinux, foreign, eligible = [] }) {
+  const shards = cfg.linux_shards || 4;
+  const matrix = range(shards).map(shard => ({ shard, lane: 'blacksmith', runs_on: cfg.blacksmith_linux }));
+  let hosts = foreign || !cfg.linux_label ? 0 : Math.max(0, idleLinux || 0);
+  for (const shard of cfg.linux_lane_order || []) {
+    if (hosts <= 0) break;
+    const slot = matrix[shard - 1];
+    if (!slot || !eligible.includes(shard)) continue;
+    matrix[shard - 1] = { shard, lane: 'linux-self-hosted', runs_on: cfg.linux_self_hosted };
+    hosts -= 1;
+  }
+  return { idle_linux: foreign ? 0 : (idleLinux || 0), linux_matrix: matrix };
 }
 
 // Jobs already queued for a qualified host will claim idle ones first, so two
 // verify runs starting together do not both count the same machine.
-async function queuedQualifiedJobs(github, context, cfg) {
+async function queuedPoolJobs(github, context, cfg) {
   const repo = context.repo;
-  let queued = 0;
+  const queued = { qualified: 0, section: 0, linux: 0 };
   const { data } = await github.rest.actions.listWorkflowRunsForRepo({ ...repo, status: 'in_progress', per_page: cfg.max_active_runs_sampled });
   for (const run of data.workflow_runs.slice(0, cfg.max_active_runs_sampled)) {
     if (run.id === context.runId) continue;
     const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({ ...repo, run_id: run.id, filter: 'latest', per_page: 100 });
-    queued += jobs.jobs.filter(j => j.status === 'queued' && (j.labels || []).includes(cfg.qualified_label)).length;
+    for (const j of jobs.jobs) {
+      if (j.status !== 'queued') continue;
+      const labels = j.labels || [];
+      if (labels.includes(cfg.qualified_label)) queued.qualified += 1;
+      else if (cfg.section_label && labels.includes(cfg.section_label)) queued.section += 1;
+      else if (cfg.linux_label && labels.includes(cfg.linux_label)) queued.linux += 1;
+    }
   }
   return queued;
 }
 
-async function countIdleQualified(poolGithub, context, cfg) {
+async function countIdlePool(poolGithub, context, cfg) {
   const runners = await poolGithub.paginate(poolGithub.rest.actions.listSelfHostedRunnersForRepo, { ...context.repo, per_page: 100 });
-  return runners.filter(r => r.status === 'online' && !r.busy && r.labels.some(l => l.name === cfg.qualified_label)).length;
+  const idle = runners.filter(r => r.status === 'online' && !r.busy);
+  const has = (r, name) => r.labels.some(l => l.name === name);
+  return {
+    qualified: idle.filter(r => has(r, cfg.qualified_label)).length,
+    section: cfg.section_label ? idle.filter(r => has(r, cfg.section_label) && !has(r, cfg.qualified_label)).length : 0,
+    linux: cfg.linux_label ? idle.filter(r => has(r, cfg.linux_label) && !has(r, cfg.qualified_label) && !has(r, cfg.section_label)).length : 0,
+  };
 }
 
 // Code from another repository (a fork pull request) never runs on our own
@@ -58,25 +111,45 @@ function isForeignHead(context) {
 
 async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
+  let idleSection = 0;
+  let idleLinux = 0;
   const foreign = isForeignHead(context);
   if (foreign) {
-    core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
+    core.info('Pull request head is outside this repository; every Windows and Linux section stays on Blacksmith.');
     poolGithub = null;
   }
   try {
-    if (poolGithub) idle = Math.max(0, (await countIdleQualified(poolGithub, context, cfg)) - (await queuedQualifiedJobs(github, context, cfg)));
+    if (poolGithub) {
+      const pool = await countIdlePool(poolGithub, context, cfg);
+      const queued = await queuedPoolJobs(github, context, cfg);
+      idle = Math.max(0, pool.qualified - queued.qualified);
+      idleSection = Math.max(0, pool.section - queued.section);
+      idleLinux = Math.max(0, pool.linux - queued.linux);
+    }
   } catch (error) {
-    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
+    core.warning(`Self-hosted pool unknown (${error.message}); every Windows and Linux section stays on Blacksmith.`);
     idle = 0;
+    idleSection = 0;
+    idleLinux = 0;
   }
-  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, foreign });
-  core.info(`idle_qualified=${plan.idle_qualified}`);
+  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, idleSection, foreign });
+  core.info(`idle_qualified=${plan.idle_qualified} idle_section=${plan.idle_section}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
+  const eligible = parseEligible(process.env.LINUX_ELIGIBLE_SHARDS);
+  core.info(`linux_eligible=${eligible.join(',') || 'none'}`);
+  const linux = decideLinux(cfg, { idleLinux, foreign, eligible });
+  plan.idle_linux = linux.idle_linux;
+  plan.linux_matrix = linux.linux_matrix;
+  core.info(`idle_linux=${plan.idle_linux}`);
+  for (const l of plan.linux_matrix) core.info(`linux section ${l.shard} -> ${l.lane}`);
   core.setOutput('windows_matrix', JSON.stringify(plan.windows_matrix));
-  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}.\n\n` +
-    plan.windows_matrix.map(w => `- Windows section ${w.section}: ${w.lane}`).join('\n') + '\n');
+  core.setOutput('linux_matrix', JSON.stringify(plan.linux_matrix));
+  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}; idle section-only hosts ${plan.idle_section}.\n\n` +
+    plan.windows_matrix.map(w => `- Windows section ${w.section}: ${w.lane}`).join('\n') + '\n' +
+    `\nIdle self-hosted Linux hosts ${plan.idle_linux}.\n\n` +
+    plan.linux_matrix.map(l => `- Linux section ${l.shard}: ${l.lane}`).join('\n') + '\n');
   await core.summary.write();
   return plan;
 }
 
-module.exports = { decide, run, isForeignHead };
+module.exports = { decide, decideLinux, parseEligible, run, isForeignHead };

@@ -340,8 +340,8 @@ EOF
 #!/usr/bin/env sh
 # [ai-devops] managed by setup-secrets.sh — do not edit by hand.
 # \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
-# mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
-# before it runs: resolve it in memory here and pass it straight through.
+# Pinned mcp-remote expands header placeholders from its environment. Keep the
+# bearer value out of argv while retaining the same authenticated request.
 # Keep the refresh lock through op's exit, not through its children.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
@@ -364,19 +364,22 @@ _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
 case "\$REF" in
-  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
-  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
-  *) TOK= ;;
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) ;;
+  *) echo "ai-devops: unmanaged remote MCP reference — not starting \$URL" >&2; exit 1 ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(_aidev_flock op read "\$REF")" || {
-  echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
+# Resolve at launch even if the parent process still carries an older token.
+TOK="\$(_aidev_flock op read "\$REF")" || {
+  echo "ai-devops: serialized remote token refresh FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }
 [ -n "\$TOK" ] || {
   echo "ai-devops: \$REF resolved EMPTY — not starting \$URL" >&2
   exit 1
 }
-exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
+MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"
+export MCP_REMOTE_AUTH_HEADER
+unset TOK DEVOPS_MCP_TOKEN NAS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN
+exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
   ok "Wrote $REMOTE_SH"

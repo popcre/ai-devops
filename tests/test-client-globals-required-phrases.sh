@@ -24,6 +24,8 @@ MIMO_GLOBAL="$REPO_ROOT/templates/system/AGENTS-global-mimo.md"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 required_phrases=(
+  "Complete the authorized scope"
+  "Completing one child or phase is never a reason to stop"
   "Start immediately"
   "Never ask a human to approve"
   "recover first and finish"
@@ -47,6 +49,8 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     grep -qzF "$phrase" "$client_file" \
       || fail "$(basename "$client_file") lost or line-wrapped the autonomy rule: $phrase"
   done
+  ! grep -qiEz 'first[[:space:]]+unticked[[:space:]]+child.{0,80}do[[:space:]]+only[[:space:]]+that[[:space:]]+one|one[[:space:]]+unproven[[:space:]]+live-behavior[[:space:]]+outcome[[:space:]]+per[[:space:]]+session' "$client_file" \
+    || fail "$(basename "$client_file") restored a revoked automatic child-stop rule"
   # The canonical home since the 2026-09-18 transfer (#634): no client global
   # may keep teaching the pre-transfer slug as where structure work is authored.
   grep -qF 'popcre/shared-db' "$client_file" \

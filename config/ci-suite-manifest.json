@@ -14,6 +14,7 @@
     "select_all_globs": [
       "tests/lib-selection.sh",
       "tests/lib-test-harness.sh",
+      "tests/lib-reviewer-events-isolation.sh",
       "tests/lib-test-timing.sh",
       "tests/test-all.sh",
       "tests/test-all.ps1",
@@ -191,11 +192,13 @@
         "test-ai-memory-index-hook.sh"
       ],
       "bin/ai-process-supervisor": [
+        "test-reviewer-credit-stream.sh",
         "test-mcp-launch-lock.sh",
         "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"
       ],
       "bin/ai-process-supervisor.cmd": [
+        "test-reviewer-credit-stream.sh",
         "test-mcp-launch-lock.sh",
         "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"

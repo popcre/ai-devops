@@ -10,6 +10,11 @@
 #   bash grok.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+# Owner rule "remove the paid fallback": no grok child inherits a paid key.
+source "$DOOR_CREDIT_ROOT/tools/lib/grok-paid-keys.sh"
+grok_strip_paid_keys
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -75,13 +80,14 @@ resolve_grok() {
 # Credentials presence only — never print a key. A missing store is a local
 # dependency failure, not a provider fault.
 require_credentials() {
-  if [ -s "${AI_GROK_AUTH_HOME:-${HOME:-}/.grok}/auth.json" ] || [ -n "${XAI_API_KEY:-}" ]; then
+  # Subscription OAuth login only; a paid XAI_API_KEY never counts.
+  if [ -s "${AI_GROK_AUTH_HOME:-${HOME:-}/.grok}/auth.json" ]; then
     return 0
   fi
   if [ "${AI_GROK_ALLOW_NO_CREDS:-0}" = 1 ]; then
     return 0
   fi
-  printf 'grok door: no cached credentials and no XAI_API_KEY. Run grok login, or set AI_GROK_ALLOW_NO_CREDS=1 for offline tests.\n' >&2
+  printf 'grok door: no Grok subscription login (auth.json); a paid XAI_API_KEY is never used. Run grok login, or set AI_GROK_ALLOW_NO_CREDS=1 for offline tests.\n' >&2
   return 127
 }
 
@@ -197,12 +203,12 @@ main() {
   out="$(mktemp)"
   set +e
   if [ "$MODE" = implement ]; then
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
   else
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
@@ -223,7 +229,7 @@ main() {
     rpf="$(mktemp)"
     printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
     set +e
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
         --max-turns "$left" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
@@ -233,7 +239,8 @@ main() {
   done
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT grok door\n' >&2
+    reviewer_capacity_current grok "$out" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

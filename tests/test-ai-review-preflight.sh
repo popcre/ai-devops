@@ -50,6 +50,12 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
   if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+    receipt="$(mktemp)"
+    printf '{"provider":"qwen","failure_class":"allowance-exhausted"}\n' > "$receipt"
+    "${MOCK_ADMISSION_PYTHON}" "$MOCK_ADMISSION_TOOL" credit qwen --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record >/dev/null
+    rm -f "$receipt"
+    printf 'AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=qwen code=quota_exhausted\n'
+    printf 'ALLOWANCE EXHAUSTED: qwen; automatic return at provider reset; reset unavailable.\n'
     printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
     printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
     exit 1
@@ -91,6 +97,17 @@ echo health ok
 EOF
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
+# Like bin/ai-gemini: no detectable harness caller means refuse (installer
+# terminal). Preflight must name itself as the caller.
+[ "${AI_GEMINI_CALLER:-}" = preflight ] || { echo caller_identity_missing >&2; exit 2; }
+[ -z "${MOCK_GEMINI_MODE_LOG:-}" ] || printf '%s %s\n' "${1:-}" "${2:-}" >> "$MOCK_GEMINI_MODE_LOG"
+if [ "${1:-}" = qualify-live ] && [ "${MOCK_GEMINI_FAIL:-0}" = capacity ]; then
+  receipt="$(mktemp)"
+  printf '{"provider":"gemini","failure_class":"allowance-exhausted"}\n' > "$receipt"
+  "$MOCK_ADMISSION_PYTHON" "$MOCK_ADMISSION_TOOL" credit gemini --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record
+  rm -f "$receipt"
+  exit 1
+fi
 case "${1:-}" in
   qualify-live) [ "${MOCK_GEMINI_FAIL:-0}" = 0 ] || exit 70; [ "${MOCK_GEMINI_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; [ "${MOCK_GEMINI_MUTATE_RUNTIME:-0}" = 0 ] || printf '%064d\n' 0 | tr 0 b > "$MOCK_AGY_SHA_FILE"; printf 'QUALIFIED session=test model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/test\n' "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}" ;;
   doctor) if [ "${2:-}" = --live ]; then printf 'live\n' >> "$MOCK_GEMINI_LIVE_CONTACT"; printf 'QUALIFIED session=live model=gemini-3.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/live\n'; exit 0; fi; if [ "${2:-}" != --identity ] && [ "${MOCK_GEMINI_NORMAL_DOCTOR_FAIL:-0}" = 1 ]; then exit 124; fi; status=QUARANTINED; rc=3; [ "${2:-}" = --identity ] && { status=IDENTITY; rc=0; }; [ ! -f "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json" ] || { [ "${2:-}" = --identity ] || status=PASS; rc=0; }; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=test\n' "$status" "${MOCK_AGY_VERSION:-1.1.19}" "$(cat "$MOCK_AGY_SHA_FILE")" "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}"; exit "$rc" ;;
@@ -103,6 +120,7 @@ export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
+export MOCK_ADMISSION_PYTHON="$(command -v python3 || command -v python)" MOCK_ADMISSION_TOOL="$ROOT/tools/reviewer_admission.py"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
 export MOCK_GEMINI_LIVE_CONTACT="$TMP/gemini-live-contact"
@@ -146,6 +164,7 @@ check "all active providers are registered" "for p in claude grok kimi glm muse 
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
+check "Gemini requalification works outside any AI harness (installer terminal)" "env -u AI_GEMINI_CALLER -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SANDBOX $SCRIPT qualify gemini"
 check "successful Gemini live qualification durably releases quarantine" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini qualification remains valid when network-dependent normal doctor is unavailable" "MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT qualify gemini && MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 # Old "failed requalification revokes the prior qualification" (delete-before-
@@ -171,6 +190,7 @@ printf '\n# wrapper changed\n' >> "$TMP/bin/gemini"
 check "Gemini wrapper drift invalidates qualification" "$SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 sed -i '$d' "$TMP/bin/gemini"
 check "Gemini can be requalified after wrapper drift" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
+check "Gemini standard check works outside any AI harness and does not quarantine" "env -u AI_GEMINI_CALLER -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SANDBOX $SCRIPT check gemini '$REPO' | grep -q 'health=ok' && $SCRIPT status gemini | jq -e '.usable==true'"
 check "Gemini live preflight performs a genuine live probe" "rm -f '$MOCK_GEMINI_LIVE_CONTACT'; $SCRIPT check gemini '$REPO' --live | grep -q 'allowance=live-verified' && test \"\$(wc -l < '$MOCK_GEMINI_LIVE_CONTACT')\" -eq 1"
 check "Qwen status enforces built-in quarantine until live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Qwen check cannot report healthy while credits block live qualification" "! $SCRIPT check qwen '$REPO' 2>&1 | grep -q 'health=ok'"
@@ -259,11 +279,71 @@ CAPACITY_OUT="$(MOCK_QWEN_FAIL=capacity $SCRIPT requalify qwen 2>&1)"; CAPACITY_
 [ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'reviewer issue:' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
   && ok "a provider capacity failure is recorded but does not fail requalify" || bad "a provider capacity failure is recorded but does not fail requalify"
 check "a capacity-deferred requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+export MOCK_QWEN_CONTACT_FILE="$TMP/reset-canary-calls"
+: > "$MOCK_QWEN_CONTACT_FILE"
+check "capacity deferral without a known reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+check "unknown reset skips every additional identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_MODE_LOG'"
+check "unknown reset health uses only its existing identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT status qwen | jq -e '.failure_class==\"live-qualification-required\"' && test \"\$(grep -c -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_now="$(date +%s)"
+reset_past="$(date -u -d '@'"$((reset_now-1))" +%FT%TZ)"
+reset_future="$(date -u -d '@'"$((reset_now+3600))" +%FT%TZ)"
+reset_state="$AI_REVIEW_QUARANTINE_DIR/qwen.json"
+reset_record="$(jq -r '.capacity_deferral.capacity_record_id' "$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json")"
+reset_fixture(){
+  jq -nc --arg at "$1" --arg id "$reset_record" --argjson now "$reset_now" \
+    '{version:2,provider:"qwen",global:null,backoffs:{},capacity_hold:{provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-50),reset_at:$at,next_check_epoch:$now,record_id:$id}}' > "$reset_state"
+}
+reset_fixture "$reset_past"
+jq '.capacity_hold.record_id="old-unrelated-receipt"' "$reset_state" > "$TMP/old-receipt.json"
+mv "$TMP/old-receipt.json" "$reset_state"
+check "old reset receipt cannot authorize a later same-byte deferral" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_fixture "$reset_future"
+check "capacity deferral before reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+check "future reset skips every additional identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_MODE_LOG'"
+check "future reset health uses only its existing identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT status qwen | jq -e '.failure_class==\"live-qualification-required\"' && test \"\$(grep -c -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_fixture "$reset_past"
+"$SCRIPT" quarantine qwen authentication-failed --seconds 3600 >/dev/null
+check "reset qualification preserves a stronger authentication hold" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE' && $SCRIPT pause-status qwen | jq -e '.failure_class==\"authentication-failed\"'"
+# Remove only this fixture's stronger global hold; retain its due capacity record.
+reset_python="$(command -v python3 || command -v python)"
+"$reset_python" "$ROOT/tools/reviewer_admission.py" clear-global qwen --directory "$AI_REVIEW_QUARANTINE_DIR" >/dev/null
+cp "$AI_QWEN_TEST_RUNTIME_FILE" "$TMP/reset-runtime-before"
+printf '%064d\n' 9 | tr 0 f > "$AI_QWEN_TEST_RUNTIME_FILE"
+check "reset cannot qualify bytes different from the capacity deferral" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+cp "$TMP/reset-runtime-before" "$AI_QWEN_TEST_RUNTIME_FILE"
+"$SCRIPT" reset-requalify qwen > "$TMP/reset-one.log" 2>&1 & reset_one=$!
+"$SCRIPT" reset-requalify qwen > "$TMP/reset-two.log" 2>&1 & reset_two=$!
+wait "$reset_one"; reset_one_rc=$?
+wait "$reset_two"; reset_two_rc=$?
+[ "$reset_one_rc" -eq 0 ] && [ "$reset_two_rc" -eq 0 ] && [ "$(wc -l < "$MOCK_QWEN_CONTACT_FILE" | tr -d ' ')" -eq 1 ] \
+  && ok "concurrent due reset qualifies once through the existing canary" || bad "concurrent due reset qualifies once through the existing canary"
+check "successful reset canary restores ordinary current qualification" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "current qualification never repeats the reset canary" "$SCRIPT reset-requalify qwen && test \"\$(wc -l < '$MOCK_QWEN_CONTACT_FILE' | tr -d ' ')\" -eq 1"
+unset MOCK_QWEN_CONTACT_FILE
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
 check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+export MOCK_GEMINI_MODE_LOG="$TMP/gemini-reset-calls"
+printf '%064d\n' 7 | tr 0 d > "$MOCK_AGY_SHA_FILE"
+check "Gemini stale capacity deferral captures caller-qualified exact subject" "env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE MOCK_GEMINI_FAIL=capacity $SCRIPT requalify gemini && jq -e '.capacity_deferral.subject.identity_sha256|length==64' '$AI_REVIEW_QUARANTINE_DIR/gemini-requalify-marker.json'"
+check "Gemini unknown reset makes no additional identity or live call" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+jq --arg at "$reset_past" '.capacity_hold.reset_at=$at' "$AI_REVIEW_QUARANTINE_DIR/gemini.json" > "$TMP/gemini-due.json"
+mv "$TMP/gemini-due.json" "$AI_REVIEW_QUARANTINE_DIR/gemini.json"
+check "Gemini due reset restores qualification with explicit preflight caller" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE $SCRIPT reset-requalify gemini && test \"\$(grep -c '^qualify-live ' '$MOCK_GEMINI_MODE_LOG')\" -eq 1"
+check "healthy Gemini reset adds no identity or live calls" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+check "healthy Gemini status retains one existing identity check" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT status gemini | jq -e '.usable==true' && test \"\$(grep -c '^doctor --identity$' '$MOCK_GEMINI_MODE_LOG')\" -eq 1 && ! grep -q '^qualify-live ' '$MOCK_GEMINI_MODE_LOG'"
+unset MOCK_GEMINI_MODE_LOG
 unset AI_REVIEWER_ISSUE_DIR
 check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+# #1431 C5: a known exhausted allowance skips the reviewer until its reset.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/c5-provider-calls"\nexec "%s/bin/good" "$@"\n' "$TMP" "$TMP" > "$TMP/bin/c5-counting"
+chmod +x "$TMP/bin/c5-counting"
+c5_hold(){ jq --arg at "$1" --argjson now "$(date +%s)" '.capacity_hold={provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-60),reset_at:$at,next_check_epoch:$now,record_id:"c5-fixture"}' "$AI_REVIEW_QUARANTINE_DIR/qwen.json" > "$TMP/c5.json" && mv "$TMP/c5.json" "$AI_REVIEW_QUARANTINE_DIR/qwen.json"; }
+c5_hold "$(date -u -d '@'"$(( $(date +%s) + 86400 ))" +%FT%TZ)"
+rm -f "$TMP/c5-provider-calls"
+check "skip_until_quota_reset: future reset refuses with the EST line and makes zero provider calls" "out=\$(AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' 2>&1); rc=\$?; [ \$rc -eq 3 ] && printf '%s' \"\$out\" | grep -Eq 'qwen quota exhausted until .* E[SD]T; skipped with no provider call' && test ! -e '$TMP/c5-provider-calls'"
+c5_hold "$(date -u -d '@'"$(( $(date +%s) - 5 ))" +%FT%TZ)"
+check "dispatch_after_reset: a passed reset lifts the hold and the provider is contacted again" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' > '$TMP/c5-after.log' 2>&1; ! grep -q 'quota exhausted' '$TMP/c5-after.log' && test -s '$TMP/c5-provider-calls' && jq -e '.capacity_hold==null' '$AI_REVIEW_QUARANTINE_DIR/qwen.json'"
 
 echo '== post-merge reviewer hook (#804)'
 HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
@@ -427,7 +507,8 @@ check "the Gemini entry still records why the empty report mattered"   "jq -e '.
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "Grok is paused out of the shipped reviewer pool (owner instruction 2026-10-07)" "jq -e '.providers.grok.registry_state==\"absent\" and (.providers.grok.reason|test(\"2026-10-07\"))' '$REAL_REGISTRY'"
 check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
@@ -523,6 +604,85 @@ printf '%s' "$PAUSE_EXPIRED" | jq -e '.status=="expired"' >/dev/null && [ "$PAUS
 "$SCRIPT" pause grok provider-timeout --observed "$(( $(date +%s) + 3600 ))" >/dev/null 2>&1 && bad "pause refuses future observation" || ok "pause refuses future observation"
 "$SCRIPT" pause grok provider-timeout --observed malformed >/dev/null 2>&1 && bad "pause refuses malformed observation" || ok "pause refuses malformed observation"
 "$SCRIPT" clear grok >/dev/null 2>&1
+
+# --- passed-head (#1429): no extra reviewer on a head that already passed ---
+PH_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+PH_KEY="$(printf 'phkey' | sha256sum | cut -d' ' -f1)"; PH_DIGEST="$(printf 'phdigest' | sha256sum | cut -d' ' -f1)"
+PH_STORE="$TMP/ph-lifecycle"; mkdir -p "$REPO/.ai/reviews" "$PH_STORE/runs/$PH_KEY/gemini/zcode"
+cat > "$TMP/ph-lifecycle-bin" <<EOF
+#!/usr/bin/env bash
+[ "\$1" = identity ] && jq -nc --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" '{head:\$h,source_digest:\$d,repository_key:\$k}'
+EOF
+chmod +x "$TMP/ph-lifecycle-bin"
+PH_REPORT="$REPO/.ai/reviews/gemini-final-check-ph1.md"
+printf '# gemini final-check\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Verdict\nAPPROVE\n' "$PH_HEAD" "$PH_DIGEST" > "$PH_REPORT"
+jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REPORT" --arg s "$(sha256sum "$PH_REPORT" | cut -d' ' -f1)" \
+  '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+  > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
+PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(jq -r .report <<<"$PH_OUT")" = "$PH_REPORT" ] && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
+  && ok "no_extra_reviewer_on_passed_head" || bad "no_extra_reviewer_on_passed_head"
+PH_OUT="$(ph diff-review 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && [ "$PH_OUT" = null ] && ok "passed_head_other_mode_has_no_pass" || bad "passed_head_other_mode_has_no_pass"
+ph final-check --base HEAD >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && ok "passed_head_other_base_has_no_pass" || bad "passed_head_other_base_has_no_pass"
+PH_OUT="$(AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -ne 0 ] && ok "passed_head_lifecycle_substitution_needs_test_hooks" || bad "passed_head_lifecycle_substitution_needs_test_hooks"
+printf '{bad' > "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+ph final-check >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 3 ] && ok "passed_head_lookup_error_is_not_a_pass" || bad "passed_head_lookup_error_is_not_a_pass"
+rm -f "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+# Front door: a request for another reviewer on the passed head returns the
+# existing pass; --additional-reviewer allocates (dispatches) one.
+cat > "$TMP/ph-pool" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/ph-pool-args"; printf '%s\n' "$TMP/new-report.md"
+EOF
+chmod +x "$TMP/ph-pool"
+ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" \
+  AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" \
+  "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
+rm -f "$TMP/ph-pool-args"
+PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(printf '%s\n' "$PH_FRONT" | tail -1)" = "$PH_REPORT" ] && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
+  && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
+ph_front --additional-reviewer >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
+grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
+rm -f "$TMP/ph-pool-args"
+jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph_front --implementer codex >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"
+# Inherited Git locations must never aim the lookup at another tree: a victim
+# repository with no pass, pointed at the passing repo through GIT_DIR, must
+# still dispatch.
+VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; git -C "$VICTIM" init -q; git -C "$VICTIM" config user.name T; git -C "$VICTIM" config user.email t@example.com
+echo v > "$VICTIM/v"; git -C "$VICTIM" add v; git -C "$VICTIM" commit -qm v
+rm -f "$TMP/ph-pool-args"
+( cd "$VICTIM" && GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" \
+  AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
+! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
+
+# Windows (Git Bash): a due paid-balance re-check must hand the credit reader
+# the qualified bash, or every Windows re-check refuses and the hold never lifts.
+WINSTUB="$TMP/winstub"; mkdir -p "$WINSTUB"; REAL_PY="$(command -v python3)"
+cat > "$WINSTUB/cygpath" <<'EOF'
+#!/usr/bin/env bash
+printf 'C:\\Program Files\\Git\\usr\\bin\\bash.exe\n'
+EOF
+cat > "$WINSTUB/python3" <<EOF
+#!/usr/bin/env bash
+case "\$1" in *reviewer_credit_watch.py) printf '%s\n' "\${AI_REVIEW_CREDIT_WATCH_BASH:-missing}" > "$TMP/win-credit-bash"; exit 0 ;; esac
+exec "$REAL_PY" "\$@"
+EOF
+chmod +x "$WINSTUB/cygpath" "$WINSTUB/python3"
+WIN_STATE="$TMP/win-state"; mkdir -p "$WIN_STATE"
+jq -nc --argjson now "$(date +%s)" '{version:2,provider:"deepseek",global:null,backoffs:{},capacity_hold:{provider:"deepseek",failure_class:"out-of-credit",credential_profile_scope:null,model_scope:null,observed_epoch:($now-7200),reset_at:null,next_check_epoch:($now-60),record_id:"legacy"}}' > "$WIN_STATE/deepseek.json"
+rm -f "$TMP/win-credit-bash"
+OSTYPE=msys PATH="$WINSTUB:$PATH" AI_REVIEW_QUARANTINE_DIR="$WIN_STATE" "$SCRIPT" check deepseek "$REPO" >/dev/null 2>&1
+[ "$(cat "$TMP/win-credit-bash" 2>/dev/null)" = 'C:\Program Files\Git\usr\bin\bash.exe' ] \
+  && ok "windows_due_credit_recheck_receives_qualified_bash" || bad "windows_due_credit_recheck_receives_qualified_bash"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

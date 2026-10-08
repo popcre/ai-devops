@@ -7,6 +7,19 @@
   "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
   "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
   "qualified_label": "ai-devops-windows-qualified",
+  "section_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-section"],
+  "section_label": "ai-devops-windows-section",
+  "_section_comment": "Section-only lane (#1312, owner 2026-10-06: keep EDGE-ALIEN for lighter jobs; set it up to take one test piece at a time). A host labelled ai-devops-windows-section (and NOT ai-devops-windows-qualified) has measured-green sections with headroom (not the full matrix or every section); each idle one takes at most one pull-request section, chosen in section_lane_order. It never carries the qualified label, so it never takes windows-offline-complete or windows-reviewer-preferred.",
+  "section_lane_order": [3, 4, 9, 10, 11, 6, 1],
+  "_section_lane_order_comment": "Only sections EDGE-ALIEN finished with at least 12 minutes of headroom under the 40-minute ceiling, fastest first (runs 37628253929 and 37725520505): 3 (15-16m), 4 (20.5-21m), 9 (22m), 10 (24m), 11 (26.5m), 6 (26-28m), 1 (28m). Excluded as too close: 2 (33-35m), 5 (36m), 7 (35-36m), 8 (39m, then timed out), 12 (36.5m). Add a section only after a measured pass with headroom. The list is shared by every section-only host: a second host may get the label only after it passes every listed section with headroom.",
   "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
-  "reserved_qualified_hosts": 1
+  "reserved_qualified_hosts": 1,
+  "linux_shards": 4,
+  "blacksmith_linux": "blacksmith-4vcpu-ubuntu-2404",
+  "linux_self_hosted": ["self-hosted", "Linux", "X64", "ai-devops-linux"],
+  "linux_label": "ai-devops-linux",
+  "_linux_comment": "Owner 2026-10-07 (\"yes, point the checks at it\"): idle self-hosted Linux hosts labelled ai-devops-linux (edge-dev3-linux, one job at a time) take linux-offline-shard sections as extra capacity, one section per idle host, in linux_lane_order. Busy, offline, unknown, a failed lookup, merge_group/schedule/manual events (no router) and fork heads all keep every section on Blacksmith, so merges never depend on one machine. The shard preflight in verify.yml requires every tool a suite would skip without (python, python3, ssh-keygen, pwsh, shellcheck); edge-dev3 carries pwsh and shellcheck user-locally in ~/.local/bin on the runner PATH. A host missing one fails the shard loudly instead of passing by skipping.",
+  "linux_lane_order": [1, 2, 3, 4],
+  "linux_unfit_suites": ["test-ai-lock-doctor.sh"],
+  "_linux_unfit_comment": "A section selecting any of these never goes to a self-hosted Linux host. test-ai-lock-doctor.sh scans every process descriptor; on edge-dev3 (a busy desktop) one scan takes ~40s, the suite ~20 minutes, and a timing case failed (run 37697956258, job 113067788050)."
 }

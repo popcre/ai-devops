@@ -35,7 +35,7 @@ is closed; #166 subsequently merged through the protected queue as `d49100a2`.
 
 #393 cross-reference: [issue #608](https://github.com/popcre/ai-devops/issues/608) landed 2026-09-19 as `918866b8` (PR [#639](https://github.com/popcre/ai-devops/pull/639)) — only the target-ref tip check gained forward-move ancestry tolerance; mid-run base/head movement and whole-tree digest checks stay byte-strict, so the locked "a mid-run base/head movement invalidates authorization" direction below is unchanged.
 
-**Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
+**Fresh-session start:** select authorized registered children by dependency order below and keep each child’s code/test changes inside its own coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 
 **September 14 continuation order:** #397 → #394 → #393 → #271 → #398 →
 #337 → #166 → #159, with #396 consumer follow-through before #398. The

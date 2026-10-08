@@ -10,9 +10,10 @@ across 5 machines that **share one 1Password service account**, were each
 launching the 1Password MCP through a launcher that re-resolved **11 `op://`
 secrets on every single MCP-server start**. That burst of service-account
 requests exceeded 1Password's **per-hour request cap** and temporarily **locked
-the account** — the "storm." The fix caps 1Password to **≤1 refresh per 15
-minutes per machine** regardless of how many windows/servers/subagents launch,
-by resolving all secrets once and reusing a local DPAPI-encrypted cache. All of
+the account** — the "storm." On Windows, the fix caps 1Password to **≤1 refresh per 15
+minutes per profile** regardless of how many windows/servers/subagents launch,
+by resolving all secrets once and reusing a local DPAPI-encrypted cache. Linux
+remote MCP launchers resolve their bearer afresh at launch. All of
 it lives in the `ai-devops` repo so it reaches every machine via bootstrap.
 
 ## Background: how MCP secrets are launched on Windows
@@ -27,9 +28,9 @@ at launch by a wrapper the `ai-devops` repo generates onto each machine:
   no secret values. Currently ~11 `op://` references (supabase, devops-mcp, nas,
   trigger, recall-ai, zai, …).
 - `~/.config/ai-devops/mcp-launch.cmd` — the **stdio** launcher.
-- `~/.config/ai-devops/mcp-remote-launch.cmd` — the **remote/HTTP** launcher
-  (for mcp-remote servers whose bearer token must be a real value, since
-  mcp-remote does not expand `${VAR}` in `--header`).
+- `~/.config/ai-devops/mcp-remote-launch.cmd` — the **remote/HTTP** launcher.
+  The pinned `mcp-remote@0.1.38` expands a `${VAR}` placeholder in `--header`
+  from its environment; see the later correction under known remaining items.
 - `bin/mcp-secret-launch.ps1` (in the repo) — the actual launcher logic both
   `.cmd` files call.
 
@@ -196,19 +197,18 @@ repo changes are committed and pushed.
 
 ## Known remaining / secondary items
 
-- **Accepted Windows process-command-line exposure (owner decision,
-  2026-08-21):** authenticated remote MCPs currently pass their resolved bearer
-  token to `mcp-remote` through its required `--header` argument. The token is
-  absent from client configuration and disk, but it is visible in the live
-  Windows process command line. Removing that exposure would require a custom
-  proxy, another service/software component, or equivalent ongoing complexity;
-  the owner explicitly rejected adding those moving parts. Leave the launcher
-  architecture unchanged unless the existing clients gain a native supported
-  environment-sourced bearer mechanism. This is an accepted observability risk,
-  not a claim that environment injection has solved it. Diagnostics must never
-  emit raw `Win32_Process.CommandLine` or equivalent process arguments; collect
-  only executable name, PID, and parent PID unless the output is proven
-  secret-free before it enters logs or AI tool output.
+- **Windows process-command-line exposure (owner decision 2026-08-21,
+  implementation corrected 2026-10-07):** the owner accepted the earlier argv
+  exposure and rejected a custom proxy or extra service, while permitting a
+  native environment-sourced bearer mechanism if the client supported one.
+  The former launcher passed its resolved bearer in `--header` process
+  arguments. The pinned `mcp-remote@0.1.38` does
+  support environment expansion in that argument, contrary to the earlier
+  investigation. Isolated authenticated Linux and Windows requests proved the
+  bearer reaches the server while the process command line holds only a
+  placeholder. The bearer remains in the child environment; that environment
+  is sensitive and must not be printed. Live requests through each installed
+  managed endpoint are still required before declaring the repair deployed.
 - **Other plaintext secrets in `~/.codex/config.toml`:** the `trigger` and
   `recall-ai` blocks still carry inline tokens (`TRIGGER_ACCESS_TOKEN`,
   recall-ai bearer). Same launcher treatment could remove them; out of scope for

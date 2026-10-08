@@ -49,6 +49,7 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap qwen "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -747,6 +748,7 @@ declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "
 # match print the diagnosis and exit 92 so the caller stops now.
 qwen_credit_stop() {
   local out="$1" ev="$1.credit"
+  reviewer_capacity_current qwen "$out" || true
   provider_api_error "$out" > "$ev" 2>/dev/null || : > "$ev"
   reviewer_credit_scan qwen "$out.err" "$ev" || true
   rm -f "$ev"
@@ -1074,7 +1076,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   chmod 600 "$RUN_TURN_SECRET_FILE" 2>/dev/null || die 'could not protect private Qwen secret handoff.'
   protect_windows_path "$RUN_TURN_SECRET_FILE" file || die 'could not enforce private Qwen secret-handoff ACL.'
   set +e
-  ( cd "$repo" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  ( cd "$repo" && reviewer_credit_run qwen "$out" "$out.err" -- "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
   RUN_TURN_PID=$!
   # A cold start that never writes one stream byte hangs past Qwen's own
   # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own

@@ -15,7 +15,7 @@ Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcr
 
 Shared-db #3380 (**non-orchestrator work**) is closed and the #3631 (**non-orchestrator work**) Step 1 live proof is accepted 2026-09-28 EDT via landed pair #3611/#3615. Steps 2–3 remain Conditional (KEEP CONDITIONAL disposition 2026-09-28): no residual defect was proven by the baseline or decision reports, and #650 retains evidence-reuse ownership. Shared-db merges stay held; do not open shared-db PRs from this parent. The parent tracks only accepted mapped children; it may close when this documentation lands.
 
-Fresh session: re-read §1, §5, §8, §9 and the live STATUS of each referenced plan, then take **only the first unticked child** on parent #903. Finish that child, tick it with an artifact, comment the next child on the parent, and stop. Do not bundle unproven live outcomes. At each phase boundary use `fresh-session` and re-read downstream steps against current `origin/main`.
+Fresh session: re-read §1, §5, §8, §9 and the live STATUS of each referenced plan. Complete the authorized remaining work on #903, recording each outcome and its proof. Re-read downstream steps against current `origin/main` at phase boundaries; continue when dependencies, ownership and safety gates allow. The owner revoked automatic one-child stopping on 2026-10-07 EDT.
 
 ## 1. Ultimate goal
 
@@ -67,7 +67,7 @@ Re-resolve every line and SHA at Step 0; these references describe the planning 
 
 ## 8. Decisions
 
-**Locked, 2026-09-27 EDT:** GitHub stays authoritative and receives all accepted code; existing protected review, CI, database, production and rollback gates remain; shared-db refactor Step 1 and ai-devops #650 keep their own implementation ownership; jj is a reversible, disposable-clone trial. The parent issue routes one child per session. No production write is authorized.
+**Locked, 2026-09-27 EDT:** GitHub stays authoritative and receives all accepted code; existing protected review, CI, database, production and rollback gates remain; shared-db refactor Step 1 and ai-devops #650 keep their own implementation ownership; jj is a reversible, disposable-clone trial. Continue authorized work across child boundaries when the actual gates allow. No production write is authorized.
 
 **Open to implementer judgment:** after Step 0, whether any avoidable evidence-only commits remain outside already-owned repairs; which one proven caller still mishandles unrelated forward movement; the smallest safe evidence transport (existing immutable GitHub ref/status/record preferred); exact jj version and supported user-local installation method; pilot acceptance thresholds based on a comparable baseline. If measurements show no material win or safety regression, record no-go and keep Git worktrees. Policy changes and default rollout require a separate reviewed decision; routine test-fixture and module naming do not.
 

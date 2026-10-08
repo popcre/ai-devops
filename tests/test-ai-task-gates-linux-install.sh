@@ -62,7 +62,14 @@ git -C "$TMP/installed" fetch -q origin
 expect_stop 'ordinary update requires an assigned AI reviewer approval' gate preflight "$TMP/candidate" "$ordinary"
 expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" grok)"
 expect_stop 'ordinary update refuses an approval for another head' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$old")"
+# The real preflight accepts a pinned target behind a later origin/main merge,
+# but still refuses a target that is not in fetched origin/main history.
+git -C "$TMP/installed" update-ref refs/remotes/origin/main "$old"
+expect_stop 'ordinary update refuses a target outside fetched origin/main' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+later="$(git -C "$TMP/installed" commit-tree "$ordinary^{tree}" -p "$ordinary" -m 'later merge')"
+git -C "$TMP/installed" update-ref refs/remotes/origin/main "$later"
 expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+git -C "$TMP/installed" update-ref refs/remotes/origin/main "$ordinary"
 git -C "$TMP/installed" merge -q --ff-only "$ordinary"
 expect_ok 'ordinary updated checkout resumes' gate resume "$TMP/installed" "$ordinary"
 expect_stop 'finalize refuses before installed manifest is refreshed' gate finalize "$TMP/installed" "$ordinary"

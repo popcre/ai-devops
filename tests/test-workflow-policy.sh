@@ -317,6 +317,18 @@ sections_declared="[$(printf '%s\n' "$section_block" | grep -o '"section":[0-9]*
 routing="$ROOT/config/ci-runner-routing.json"
 check 'the routing config matches the manifest and never targets a GitHub-hosted label' \
   '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .blacksmith_windows "$routing")" = blacksmith-4vcpu-windows-2025 ] && [ "$(jq -r .warpbuild_windows "$routing")" = warp-custom-warpbuild-win2022-canary ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && ! grep -Eq "\"(windows-20[0-9][0-9]|ubuntu-[0-9][0-9]\\.[0-9][0-9])\"" "$routing"'
+# #1312: the section-only lane (EDGE-ALIEN) has its own label, never the
+# qualified one, and no workflow job targets it directly - only the router's
+# one-section-per-idle-host plan can send work there. Both short-TEMP steps of
+# the section job are guarded for every non-Blacksmith lane.
+section_temp_guarded() {
+  local lane_guard="matrix.lane != 'blacksmith' }}"
+  # The first `if:` after each step name, however many comment lines sit between.
+  printf '%s\n' "$section_block" | sed -n '/name: Shorten TEMP on a reused self-hosted machine/,$p' | grep -m1 -E '^[[:space:]]+if:' | grep -qF "$lane_guard" &&
+    printf '%s\n' "$section_block" | sed -n '/name: Remove the short TEMP tree on a reused machine/,$p' | grep -m1 -E '^[[:space:]]+if:' | grep -F 'always() &&' | grep -qF "$lane_guard"
+}
+check 'the section-only lane has its own label and is reachable only through the router' \
+  '[ "$(jq -c .section_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-section\"]" ] && [ "$(jq -r .section_label "$routing")" = ai-devops-windows-section ] && ! grep -rqF ai-devops-windows-section "$ROOT/.github/workflows" && section_temp_guarded'
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
   '[ "$shard_union" = "$hosted_without_reviewer" ] && [ "$(printf "%s\n" "$shard_union" | LC_ALL=C sort -u)" = "$shard_union" ]'
@@ -533,7 +545,13 @@ linux_weight_names="$(jq -r '.linux_offline_suite_seconds | keys[]' "$manifest" 
 # independent hosted machines, and the required `linux-offline` name survives
 # as a fail-closed aggregate that proves every suite ran exactly once.
 check 'the offline Bash suite runs as balanced parallel sections' \
-  'printf "%s" "$linux_shard_block" | grep -qF "fail-fast: false" && printf "%s" "$linux_shard_block" | grep -qF "shard: [1, 2, 3, 4]" && printf "%s" "$linux_shard_block" | grep -qF "tests/test-all.sh --balanced --shard" && printf "%s" "$linux_shard_block" | grep -qF "matrix.shard }}/4" && ! printf "%s" "$linux_shard_block" | grep -qE "run: bash tests/test-all.sh[[:space:]]*$"'
+  'printf "%s" "$linux_shard_block" | grep -qF "fail-fast: false" && printf "%s" "$linux_shard_block" | grep -qF '"'"'{"shard":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}'"'"' && printf "%s" "$linux_shard_block" | grep -qF "tests/test-all.sh --balanced --shard" && printf "%s" "$linux_shard_block" | grep -qF "matrix.shard }}/4" && ! printf "%s" "$linux_shard_block" | grep -qE "run: bash tests/test-all.sh[[:space:]]*$"'
+# Owner 2026-10-07 ("yes, point the checks at it"): idle self-hosted Linux
+# hosts take routed sections, but only for same-repository pull requests; every
+# other event and every fork head gets the all-Blacksmith literal, and the check
+# names stay "linux-offline-shard (N)".
+check 'routed Linux sections fall back to Blacksmith, never run fork heads, and keep their names' \
+  'printf "%s" "$linux_shard_block" | grep -qF "needs: [fast-classifier, manual-preflight, push-settle, runner-router]" && printf "%s" "$linux_shard_block" | grep -qF "github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.linux_matrix ||" && printf "%s" "$linux_shard_block" | grep -qF "name: linux-offline-shard (\${{ matrix.shard }})" && printf "%s" "$linux_shard_block" | grep -qF "runs-on: \${{ matrix.runs_on }}" && printf "%s" "$linux_shard_block" | grep -qF "if: \${{ matrix.lane != '"'"'blacksmith'"'"' }}"'
 check 'the required linux-offline name is a fail-closed aggregate over every section' \
   'printf "%s" "$linux_aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, linux-offline-shard]" && printf "%s" "$linux_aggregate_block" | grep -qF "bash tools/ci/linux-offline-aggregate.sh \"\$SHARD_RESULT\" 4" && printf "%s" "$linux_aggregate_block" | grep -qF "needs.linux-offline-shard.result" && printf "%s" "$linux_aggregate_block" | awk "/uses: actions\/checkout@/{c=NR} /linux-offline-aggregate.sh/{r=NR} END {exit !(c && r && c < r)}"'
 check 'the aggregate and its sections share one run condition, so a skip is never a pass' \

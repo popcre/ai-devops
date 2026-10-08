@@ -21,6 +21,9 @@ check "local runtime failure says Kimi was not contacted" "grep -q 'LOCAL Kimi r
 check "exhausted capacity fails before a Kimi review job is created" "sed -n '/start_review_job()/,/create_review_job/p' '$SCRIPT' | awk '/capacity_gate/{gate=NR} /create_review_job/{create=NR} END{exit !(gate>0 && create>gate)}' && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "worker launch failure records a terminal diagnostic" "grep -q 'terminal worker-start-failed.*failure-class worker-start-failed' '$SCRIPT'"
 check "every Kimi startup failure path records terminal evidence" "test \"\$(grep -c 'terminal worker-start-failed' '$SCRIPT')\" -eq 3"
+# Startup-ack race: a worker can reach a terminal phase between polls and must
+# not be overwritten as worker-start-failed (Codex High, PR #1410).
+check "startup wait accepts a terminal worker phase" "sed -n '/while.*STARTUP_TIMEOUT/,/did not acknowledge/p' '$SCRIPT' | grep -q 'job_is_terminal'"
 check "Kimi diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 check "Kimi delegates only pure adapter primitives to the shared helper" "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
 # Issue #802: the explicit base hint must reach refresh-copy too, matching
@@ -55,7 +58,7 @@ printf '%s\n' "$PWD" >> "$TMPDIR_FOR_TEST/pwd.txt"
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "0.32.0"; exit 0 ;;
-  provider)  [ "$mode" = noauth ] && exit 1; if [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] && [ ! "${KIMI_CODE_HOME:-}" -ef "$TMPDIR_FOR_TEST/delegated-profile" ]; then exit 1; fi; echo "managed:kimi-code type=kimi"; exit 0 ;;
+  provider)  [ "$mode" = noauth ] && exit 1; [ "$mode" = moonshotonly ] && { echo "moonshot-cn type=openai_legacy"; exit 0; }; if [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] && [ ! "${KIMI_CODE_HOME:-}" -ef "$TMPDIR_FOR_TEST/delegated-profile" ]; then exit 1; fi; echo "managed:kimi-code type=kimi"; exit 0 ;;
   export)
     while [ $# -gt 0 ]; do
       if [ "$1" = -o ]; then printf 'zip-fixture' > "$2"; exit 0; fi
@@ -391,6 +394,11 @@ echo "== durable_review_jobs =="
 JOB_ID="$(run start durable --prompt review)"
 check "start returns a durable job id" "test -n '$JOB_ID'"
 check "status reports a durable phase" "run status durable | jq -e '.phase == \"preflight\" or .phase == \"starting\" or .phase == \"running\" or .phase == \"finalizing\" or .phase == \"completed\"'"
+# Startup-ack race: an immediately-terminal worker must keep its real outcome.
+echo ok > "$TMP/mode"
+FAST_JOB="$(run start fast-terminal --prompt review)"
+check "start accepts an already-terminal worker" "test -n '$FAST_JOB'"
+check "fast terminal worker is never overwritten as worker-start-failed" "run status fast-terminal | jq -e '.phase != \"worker-start-failed\" and .terminal_reason != \"worker-start-failed\" and .phase != \"preflight\"'"
 run wait durable >/dev/null 2>&1
 check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
 check "durable job records measured preparation and provider timing" "run status durable | jq -e '.timing.snapshot_seconds >= 0 and .timing.test_seconds >= 0 and .timing.packet_seconds >= 0 and .timing.provider_seconds >= 0 and .timing.model_steps == \"unavailable\"'"
@@ -943,6 +951,12 @@ check "delete removes the matching private snapshot" "test ! -e '$R1_SNAPSHOT'"
 check "doctor resolves binary"   "run doctor | grep -q 'kimi binary'"
 check "doctor shows the profile" "run doctor | grep -q 'read-only'"
 check "doctor reports auth"      "run doctor | grep -q 'auth *: OK'"
+# #1427: only the kimi-code subscription provider passes readiness.
+echo moonshotonly > "$TMP/mode"
+MOON_ARGV_BEFORE="$(grep -c -- '-m kimi-code/k3' "$TMP/argv.txt" 2>/dev/null || echo 0)"
+check "kimi_readiness_requires_kimi_code_provider" "DOUT=\"\$(run doctor 2>&1)\"; printf '%s' \"\$DOUT\" | grep -q 'preflight *: FAIL (credentials-unavailable)' && printf '%s' \"\$DOUT\" | grep -q 'NO kimi-code subscription provider' && ! run new moon-1427 --prompt review >/dev/null 2>&1"
+check "kimi pay-per-use provider never starts a model call" "[ '$MOON_ARGV_BEFORE' = \"\$(grep -c -- '-m kimi-code/k3' '$TMP/argv.txt' 2>/dev/null || echo 0)\" ]"
+echo ok > "$TMP/mode"
 check "review file was written"  "ls '$REPO'/.ai/reviews/kimi-r7-*.md"
 OUT="$(run transcript r7 2>&1)"
 check "transcript writes a named archive" "printf '%s' \"\$OUT\" | grep -q 'transcript archive written'"

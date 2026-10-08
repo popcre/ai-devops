@@ -34,5 +34,12 @@ grep -Fq 'exec "$NODE_BIN" "$GUARD_JS"' "$source_file" ||
   fail "MCP launcher does not start the server under the session guard after releasing the lock"
 grep -Fq 'mcp-session-guard.mjs' "$source_file" ||
   fail "MCP launcher generation never installs the session guard"
+grep -Fq 'MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"' "$source_file" ||
+  fail "remote MCP bearer value is not handed to the child environment"
+grep -Fq 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "$source_file" ||
+  fail "remote MCP header must reach pinned mcp-remote as an argv placeholder"
+if grep -Fq -- '--header "Authorization: Bearer \$TOK"' "$source_file"; then
+  fail "remote MCP launcher leaks the bearer value through process argv"
+fi
 
-echo "PASS: Codex skill header and Linux MCP lock lifetime"
+echo "PASS: Codex skill header, Linux MCP lock lifetime, and remote bearer argv isolation"

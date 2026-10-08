@@ -122,6 +122,19 @@ for _door_pair in "muse:$MUSE_DOOR" "qwen:$QWEN_DOOR" "gemini:$GEMINI_DOOR" "ste
 done
 unset _door_pair _dname _dpath _drc
 
+# Git for Windows leaves the managed qwen.cmd launcher without an execute bit;
+# the door must still find it (edge-dev, #1409), as bin/ai-qwen already does.
+echo '== Qwen door finds a non-executable Windows .cmd launcher'
+mkdir -p "$TMP/qwen-lad/qwen-code/bin"
+printf '@echo off\r\n' >"$TMP/qwen-lad/qwen-code/bin/qwen.cmd"
+chmod -x "$TMP/qwen-lad/qwen-code/bin/qwen.cmd"
+sed -n '/^qwen_door_usable_bin() {/,/^}/p;/^resolve_qwen() {/,/^}/p' "$QWEN_DOOR" >"$TMP/qwen-resolve.sh"
+_qout="$(env -i PATH=/usr/bin:/bin HOME="$TMP/qwen-nohome" LOCALAPPDATA="$TMP/qwen-lad" bash -c ". '$TMP/qwen-resolve.sh'; resolve_qwen" 2>/dev/null || true)"
+check "qwen_door_resolves_nonexec_cmd_launcher" "test '$_qout' = '$TMP/qwen-lad/qwen-code/bin/qwen.cmd'"
+_qout="$(env -i PATH=/usr/bin:/bin HOME="$TMP/qwen-nohome" LOCALAPPDATA="$TMP/qwen-none" bash -c ". '$TMP/qwen-resolve.sh'; resolve_qwen" 2>&1 || true)"
+check "qwen_door_still_reports_missing_binary" "printf '%s' '$_qout' | grep -q 'qwen binary not found'"
+unset _qout
+
 # The Linux StepFun door must launch a dynamically linked StepCode binary
 # inside its real bubblewrap command. A shell stub misses a missing ELF loader.
 echo '== StepFun door Linux loader'
@@ -777,6 +790,48 @@ run_pc_door max_turns_reached turns
 check "grok_door_does_not_resume_turn_limit_cancel" \
   "test '$PC_RC' -ne 0 && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-turns')\" = 'first:10 '"
 
+# Owner rule "remove the paid fallback": an exported paid key must never reach
+# a grok child on review, implement, or the PermissionCancelled resume.
+STUB_KEY="$TMP/stub-grok-key"
+cat > "$STUB_KEY" <<'STUBEOF'
+#!/usr/bin/env bash
+resumed=0; for a in "$@"; do [ "$a" = -r ] && resumed=1; done
+seen=none
+for n in XAI_API_KEY GROK_CODE_XAI_API_KEY GROK_API_KEY XAI_OTHER_FIXTURE; do
+  [ -n "${!n+x}" ] && seen="$seen,$n"
+done
+printf '%s|%s|%s\n' "$KEY_MODE" "$resumed" "$seen" >> "$KEY_CALLS"
+case "$*" in *xai-fixture*) echo argv-leak >> "$KEY_CALLS" ;; esac
+if [ "$KEY_MODE" = resume ] && [ "$resumed" = 0 ]; then
+  mkdir -p "$GROK_HOME/sessions/x/sid-k1"
+  printf '%s\n' '{"params": {"sessionId": "sid-k1", "update": {"sessionUpdate": "turn_completed", "prompt_id": "req-1", "stop_reason": "cancelled"}, "_meta": {"cancellationCategory": "PermissionCancelled"}}}' > "$GROK_HOME/sessions/x/sid-k1/updates.jsonl"
+  printf '%s\n' '{"text":"","stopReason":"cancelled","num_turns":1,"sessionId":"sid-k1","requestId":"req-1"}'
+  exit 0
+fi
+printf '%s\n' '{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-k1","requestId":"req-2","modelUsage":{"grok-4.6-build":{}}}'
+STUBEOF
+chmod +x "$STUB_KEY"
+: > "$TMP/key-calls"
+for km in review implement resume; do
+  dm=review; [ "$km" = implement ] && dm=implement
+  rm -rf "$TMP/key-home-$km"
+  set +e
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$TMP/key-home-$km" \
+    XAI_API_KEY=xai-fixture-exported-key GROK_CODE_XAI_API_KEY=xai-fixture-code \
+    GROK_API_KEY=xai-fixture-grok XAI_OTHER_FIXTURE=xai-fixture-other \
+    KEY_MODE="$km" KEY_CALLS="$TMP/key-calls" DOOR_MAX_TURNS=10 \
+    AI_GROK_BIN="$STUB_KEY" AI_GROK_ALLOW_NO_CREDS=1 \
+    DOOR_MODE="$dm" DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+    DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/key-report-$km.md" \
+    DOOR_HEAD="$HEAD_SHA" \
+    bash "$GROK_DOOR" "$dm" >/dev/null 2>"$TMP/key-door-$km.err"
+  set -e
+done
+check "grok_door_review_never_forwards_paid_key" "grep -qx 'review|0|none' '$TMP/key-calls'"
+check "grok_door_implement_never_forwards_paid_key" "grep -qx 'implement|0|none' '$TMP/key-calls'"
+check "grok_door_permission_resume_never_forwards_paid_key" "grep -qx 'resume|0|none' '$TMP/key-calls' && grep -qx 'resume|1|none' '$TMP/key-calls'"
+check "grok_door_every_child_saw_no_paid_key" "test \"\$(wc -l < '$TMP/key-calls')\" -eq 4 && ! grep -q 'none,\\|argv-leak' '$TMP/key-calls'"
+
 # --- deepseek (OpenCode) door on the same runner ----------------------------
 # Program done needs one native door (grok) AND one OpenCode door on the same
 # runner. These checks prove the OpenCode shape keeps the same contracts and
@@ -877,6 +932,20 @@ check "front_door_routes_deepseek_to_pool" \
   "test '$FRONT_DS_RC' -eq 0 && grep -q 'pool-invoked: deepseek diff-review' '$TMP/stub-pool.log'"
 check "front_door_deepseek_no_longer_forces_code_only" \
   "! grep -q 'explicit code-only route' '$TMP/front-ds.err'"
+# #1427: ai-review strips generic pay-per-use keys before dispatch.
+cat > "$TMP/stub-pool-env" <<EOF
+#!/usr/bin/env bash
+env > "$TMP/stub-pool-env.log"
+exit 0
+EOF
+chmod +x "$TMP/stub-pool-env"; rm -f "$TMP/stub-pool-env.log"
+set +e
+( cd "$PREPO" && export OPENAI_API_KEY=fake-1427 CODEX_API_KEY=fake-1427 GEMINI_API_KEY=fake-1427 GOOGLE_API_KEY=fake-1427 \
+    AI_GEMINI_KEY=fake-1427 AI_QWEN_KEY=fake-1427 ANTHROPIC_API_KEY=fake-1427 && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/stub-pool-env" \
+    AI_POOL_CALLER=codex bash "$FRONT" deepseek diff-review ) >"$TMP/front-keys.out" 2>"$TMP/front-keys.err"
+set -e
+check "ai_review_strips_generic_keys" \
+  "test -s '$TMP/stub-pool-env.log' && ! grep -q 'fake-1427' '$TMP/stub-pool-env.log'"
 printf '{\n  "version": 1,\n  "providers": { "deepseek": { "registry_state": "absent", "reason": "test" } }\n}\n' > "$TMP/ds-absent-registry.json"
 rm -f "$TMP/stub-pool.log"
 set +e
@@ -907,6 +976,7 @@ while [ \$# -gt 0 ]; do
   esac
 done
 cat > /dev/null
+if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
 cat <<'JSON'
 {"type":"sessionID","sessionID":"stub-session-1"}
 {"type":"text","part":{"text":"I read the evidence packet and every changed hunk against the stated intent. The lock release path is correct, the digest is recomputed at the terminal transition, and no path writes outside managed storage. The scoreboard append is checked and an accounting failure keeps the lock for recovery rather than reporting success. Sibling issues of the same class were checked across the module and none remain. No blocking findings in this change set."}}
@@ -933,6 +1003,54 @@ check "deepseek_door_report_carries_opencode_metadata" \
 check "deepseek_door_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPORT'"
 check "deepseek_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_DEEPSEEK_OPENCODE='$STUB_OC' AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/ds-x.md' DOOR_HEAD='$HEAD_SHA' bash '$DS_DOOR' review) 2>/dev/null"
+
+# The grep presence check must not close the JSONL text producer early under
+# pipefail. Exercise a large multi-event report and retain all fail-closed
+# report shapes through the same existing OpenCode door fixture.
+python3 - "$TMP/ds-large.jsonl" <<'PY'
+import json, sys
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type":"text", "part":{"text":"## Verdict\nPROVISIONAL"}}) + "\n")
+    long_evidence = "Later multiline review evidence. " + ("x" * 120 + "\n") * 2500
+    f.write(json.dumps({"type":"text", "part":{"text":long_evidence}}) + "\n")
+    f.write(json.dumps({"type":"tool_use", "part":{"state":{"status":"ok"}}}) + "\n")
+    f.write(json.dumps({"type":"text", "part":{"text":"## Verdict\nAPPROVE"}}) + "\n")
+PY
+DS_LARGE_REPORT="$TMP/ds-large-report.md"
+DS_LARGE_RC=0
+DS_JSONL="$TMP/ds-large.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_LARGE_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_LARGE_RC=$?
+check "deepseek_large_multievent_report_keeps_exact_head_and_approve" \
+  "test '$DS_LARGE_RC' -eq 0 && grep -q '$HEAD_SHA' '$DS_LARGE_REPORT' && tail -2 '$DS_LARGE_REPORT' | grep -qx APPROVE && ! grep -q '^BLOCKED$' '$DS_LARGE_REPORT'"
+
+printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nREJECT"}}' > "$TMP/ds-reject.jsonl"
+DS_REJECT_REPORT="$TMP/ds-reject-report.md"
+DS_REJECT_RC=0
+DS_JSONL="$TMP/ds-reject.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_REJECT_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_REJECT_RC=$?
+check "deepseek_short_reject_is_preserved" \
+  "test '$DS_REJECT_RC' -eq 0 && tail -2 '$DS_REJECT_REPORT' | grep -qx REJECT"
+
+printf '%s\n' '{"type":"text","part":{"text":"No final verdict."}}' > "$TMP/ds-missing-verdict.jsonl"
+DS_MISSING_REPORT="$TMP/ds-missing-report.md"
+DS_MISSING_RC=0
+DS_JSONL="$TMP/ds-missing-verdict.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_MISSING_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_MISSING_RC=$?
+check "deepseek_absent_verdict_still_becomes_blocked" \
+  "test '$DS_MISSING_RC' -eq 0 && tail -2 '$DS_MISSING_REPORT' | grep -qx BLOCKED"
+
+printf '## Verdict\nMAYBE\n' > "$TMP/ds-malformed-report.md"
+check "lifecycle_validator_rejects_nonfinal_deepseek_verdict" \
+  "! (source '$CORE'; rlc_parse_verdict '$TMP/ds-malformed-report.md') >/dev/null 2>&1"
 
 # Full review contract for deepseek through the runner: packet + report.
 export AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR"
@@ -966,6 +1084,59 @@ set -e
 DS_IMPL_WT="$(tail -1 "$TMP/ds-impl.out" 2>/dev/null || true)"
 check "deepseek_implement_contract_runs_through_runner" \
   "test '$DS_IMPL_RC' -eq 0 && test -d '$DS_IMPL_WT' && test -f '$DS_IMPL_WT/impl.txt'"
+
+# Both native engines cross the same secret-file / clean-environment boundary.
+muse_boundary_offline() {
+  local engine="$1" dir="$TMP/muse-boundary-$1" result rc
+  mkdir -p "$dir/work" "$dir/packet"
+  printf 'review fixture' > "$dir/prompt"
+  cat > "$dir/provider" <<'FIXTURE'
+#!/usr/bin/env bash
+# Only fake sentinels enter this process; inspect names, never dump values.
+case "$*" in *fake-native-provider*|*fake-foreign*) exit 78;; esac
+for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET AI_MUSE_KEY AI_MUSE_SECRET_FILE AI_MUSE_KEY_ENV AI_MUSE_TEST_DIR MUSE_STUB_SECRET; do
+  [ -z "${!name+x}" ] || exit 73
+done
+/usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
+case "$1" in
+  exec) [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
+    printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
+  run) [ "${MODEL_API_KEY:-}" = fake-native-provider ] && [ -z "${META_API_KEY+x}" ] || exit 75
+    cat >/dev/null
+    printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}';;
+  *) exit 76;;
+esac
+FIXTURE
+  chmod 700 "$dir/provider"
+  env -i PATH="$PATH" HOME="$dir" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    DOOR_WORKDIR="$dir/work" DOOR_PACKET_DIR="$dir/packet" DOOR_PROMPT_FILE="$dir/prompt" DOOR_REPORT_OUT="$dir/report" DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa DOOR_TIMEOUT=10 \
+    AI_MUSE_ENGINE="$engine" AI_MUSE_BIN="$dir/provider" AI_MUSE_OPENCODE="$dir/provider" AI_MUSE_KEY=fake-native-provider \
+    STEPFUN_API_KEY=fake-foreign SUPABASE_ACCESS_TOKEN=fake-foreign SUPABASE_SERVICE_ROLE_KEY=fake-foreign TRIGGER_ACCESS_TOKEN=fake-foreign TRIGGER_SECRET_KEY=fake-foreign TYPESAFE_API_KEY=fake-foreign ZAI_API_KEY=fake-foreign ARBITRARY_CALLER_SECRET=fake-foreign AI_MUSE_TEST_DIR=fake-test-path MUSE_STUB_SECRET=fake-foreign \
+    bash "$MUSE_DOOR" review >"$dir/stdout" 2>"$dir/stderr" || return 1
+  grep -q APPROVE "$dir/report" && ! grep -rq 'fake-native-provider\|fake-foreign' "$dir/report" "$dir/stdout" "$dir/stderr"
+}
+for engine in muse-code opencode; do
+  if muse_boundary_offline "$engine"; then PASS=$((PASS+1)); printf 'PASS native %s clean credential boundary\n' "$engine"; else FAIL=$((FAIL+1)); printf 'FAIL native %s clean credential boundary\n' "$engine"; fi
+done
+
+# The shared boundary refuses linked handoffs and consumes private files before exec.
+set +e
+(
+  . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  printf 'fake-boundary-key\n' > "$TMP/boundary-key"; chmod 600 "$TMP/boundary-key"
+  ln -s "$TMP/boundary-key" "$TMP/boundary-link"
+  env -i AI_MUSE_SECRET_FILE="$TMP/boundary-link" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" fixture /usr/bin/true
+) >/dev/null 2>"$TMP/boundary-refusal.err"
+rc=$?
+if [ "$rc" = 86 ] && [ -f "$TMP/boundary-key" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
+(
+  . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  env -i AI_MUSE_SECRET_FILE="$TMP/boundary-key" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" fixture /usr/bin/false
+) >/dev/null 2>"$TMP/boundary-provider-failure.err"
+rc=$?
+if [ "$rc" = 1 ] && [ ! -e "$TMP/boundary-key" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
+
+set -e
 
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'

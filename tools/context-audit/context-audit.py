@@ -100,6 +100,8 @@ SAFETY_REASONS = {
 # Rules that must be present in BOTH client globals. Claude and Codex load
 # different entry files, so identical behavior has to be asserted, not assumed.
 PARITY_RULES = {
+    "complete authorized scope across children": r"Complete the authorized scope",
+    "child completion never imposes a stop": r"Completing one child or phase is never a reason to stop",
     "response style contract": r"^# Response Style",
     "closeout contract: account for deliverables": r"Account for the whole job",
     "closeout contract: preparation is not delivery": r"Preparation is not delivery",
@@ -506,6 +508,13 @@ def budget_report(budgets: dict, measured: dict) -> dict:
 
 def cross_client_parity(claude_text: str, codex_text: str) -> dict:
     rules = []
+    revoked_stop = r"first\s+unticked\s+child.{0,80}do\s+only\s+that\s+one|one\s+unproven\s+live-behavior\s+outcome\s+per\s+session"
+    revoked_claude = re.search(revoked_stop, claude_text, re.I | re.S) is not None
+    revoked_codex = re.search(revoked_stop, codex_text, re.I | re.S) is not None
+    if revoked_claude or revoked_codex:
+        rules.append({"name": "revoked automatic child-stop mandate", "inClaude": revoked_claude,
+                      "inCodex": revoked_codex, "status": "mismatch",
+                      "reason": "An always-loaded global restored an automatic stopping rule permanently revoked by the owner."})
     for name, pattern in sorted(PARITY_RULES.items()):
         in_claude = re.search(pattern, claude_text, re.I | re.M) is not None
         in_codex = re.search(pattern, codex_text, re.I | re.M) is not None

@@ -1,5 +1,6 @@
 """Behavioral coverage for scoped refusal backoff; no provider calls."""
 import importlib.util
+import datetime
 import json
 import os
 import pathlib
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE = pathlib.Path(__file__).resolve().parents[1] / 'tools/reviewer_admission.py'
 spec = importlib.util.spec_from_file_location('admission', MODULE)
@@ -15,6 +17,220 @@ spec.loader.exec_module(api)
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_qualified_reset_enrichment_preserves_failed_canary_record_identity(self):
+        import time
+        now=int(time.time())
+        data={'provider':'qwen','capacity_hold':{'provider':'qwen','failure_class':'allowance-exhausted','credential_profile_scope':None,'model_scope':None,'observed_epoch':now-10,'reset_at':None,'next_check_epoch':now,'record_id':'failed-canary'}}
+        observation={'provider':'qwen','state':'exhausted','observed_epoch':now,'reset_at':datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()}
+        self.assertEqual(api.capacity_observation(data,'qwen',observation,now)['status'],'held')
+        self.assertEqual(data['capacity_hold']['record_id'],'failed-canary')
+    def test_due_reset_claim_once_preserves_stronger_holds_and_new_reset_can_retry(self):
+        import time
+        now=int(time.time())
+        receipt={'provider':'qwen','failure_class':'allowance-exhausted','observed_epoch':now-60,'reset_at':datetime.datetime.fromtimestamp(now-1,datetime.timezone.utc).isoformat(),'record_id':'first'}
+        data={'version':2,'provider':'qwen','global':None,'backoffs':{},'last_capacity_reset':receipt}
+        api.publish(self.directory,'qwen',data)
+        command=[sys.executable,str(MODULE),'reset-qualification-claim','qwen','--directory',str(self.directory),'--expect-record','a'*64,'--run-id','wrong']
+        def claim():
+            result=subprocess.run(command,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            return json.loads(result.stdout)
+        self.assertFalse(claim()['claimed'])
+        command[-1]='first'
+        before=self.directory.joinpath('qwen.json').read_bytes()
+        checked=subprocess.run(command+['--check-only'],capture_output=True,text=True)
+        self.assertTrue(json.loads(checked.stdout)['ready'])
+        self.assertEqual(self.directory.joinpath('qwen.json').read_bytes(),before)
+        self.assertTrue(claim()['claimed'])
+        self.assertEqual(claim()['reason'],'already-attempted')
+        data=api.load(self.directory,'qwen')
+        data['last_capacity_reset']['record_id']='second'
+        data['global']={'provider':'qwen','failure_class':'authentication-failed','created_epoch':now,'expires_epoch':now+3600}
+        api.publish(self.directory,'qwen',data)
+        self.assertFalse(claim()['claimed'])
+        data['global']=None
+        api.publish(self.directory,'qwen',data)
+        self.assertFalse(claim()['claimed'])
+        command[-1]='second'
+        self.assertTrue(claim()['claimed'])
+    def test_subscription_quota_reset_never_lifts_prior_paid_funds_hold(self):
+        import time
+        now=int(time.time())
+        for provider in ('qwen','glm'):
+            prior={'provider':provider,'failure_class':'out-of-credit','credential_profile_scope':'account','model_scope':'model','observed_epoch':now-50,'reset_at':None,'next_check_epoch':now,'record_id':'paid-funds'}
+            api.publish(self.directory,provider,{'version':2,'provider':provider,'global':None,'backoffs':{},'capacity_hold':prior})
+            self.evidence.write_text(json.dumps({'provider':provider,'failure_class':'allowance-exhausted','reset_at':datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()}))
+            result=subprocess.run([sys.executable,str(MODULE),'credit',provider,'--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('existing paid-balance hold remains',result.stdout)
+            data=api.load(self.directory,provider)
+            self.assertEqual(data['capacity_hold']['failure_class'],'out-of-credit')
+            self.assertIsNone(data['capacity_hold']['reset_at'])
+            for state in ('available','exhausted'):
+                observation={'provider':provider,'state':state,'observed_epoch':now+1,'credential_profile_scope':'account','model_scope':'model','reset_at':datetime.datetime.fromtimestamp(now+7200,datetime.timezone.utc).isoformat()}
+                self.assertEqual(api.capacity_observation(data,provider,observation,now+1)['reason'],'paid-balance-hold-not-subscription-allowance')
+                self.assertEqual(data['capacity_hold']['failure_class'],'out-of-credit')
+    def test_eastern_display_without_iana_handles_spring_and_fall_boundaries(self):
+        with mock.patch.object(api, 'ZoneInfo', side_effect=api.ZoneInfoNotFoundError()):
+            for utc, suffix in (('2026-03-08T06:59:59Z','01:59 AM EST'),('2026-03-08T07:00:00Z','03:00 AM EDT'),('2026-11-01T05:59:59Z','01:59 AM EDT'),('2026-11-01T06:00:00Z','01:00 AM EST')):
+                self.assertTrue(api.eastern_reset_label(api.reset_epoch(utc)).endswith(suffix))
+    def test_stale_reset_cannot_restore_fresh_exhaustion_and_fraction_rounds_up(self):
+        data={'provider':'glm'}
+        observation={'provider':'glm','state':'exhausted','observed_epoch':1000,'credential_profile_scope':'scope','model_scope':'model','reset_at':'1970-01-01T00:16:39Z'}
+        self.assertEqual(api.capacity_observation(data,'glm',observation,1000)['status'],'held')
+        self.assertIsNone(data['capacity_hold']['reset_at'])
+        self.assertEqual(api.reset_epoch('1970-01-01T00:16:40.999Z'),1001)
+
+    def test_concurrent_refusals_and_status_keep_latest_hold(self):
+        import time
+        import concurrent.futures
+        now=int(time.time())
+        future=datetime.datetime.fromtimestamp(now+7200,datetime.timezone.utc).isoformat()
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':future}))
+        credit=[sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record']
+        status=[sys.executable,str(MODULE),'capacity-status','qwen','--directory',str(self.directory)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(lambda command:subprocess.run(command,capture_output=True,text=True),[credit,status,credit,status,credit,status]))
+        self.assertTrue(all(result.returncode==0 for result in results))
+        self.assertEqual(api.load(self.directory,'qwen')['capacity_hold']['reset_at'],future)
+    def test_plain_quoted_allowance_or_reset_cannot_hold(self):
+        for text in ('The assistant says monthly quota exhausted.', '{"response":"monthly quota exhausted","reset_at":"2999-01-01T00:00:00Z"}', 'tool error: weekly quota exceeded'):
+            self.evidence.write_text(text)
+            result=subprocess.run([sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--scan',str(self.evidence),'--record'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,3,result.stdout)
+        self.assertIsNone(api.load(self.directory,'qwen').get('capacity_hold'))
+
+    def test_capacity_observation_rejects_wrong_provider(self):
+        data={'provider':'glm'}
+        result=api.capacity_observation(data,'glm',{'provider':'deepseek','state':'exhausted','observed_epoch':1000},1000)
+        self.assertEqual(result['reason'],'wrong-provider')
+        self.assertNotIn('capacity_hold',data)
+
+    def test_partial_refusals_never_shorten_reset_and_precise_reset_enriches_unknown(self):
+        import time
+        now=int(time.time())
+        def marker(delta):
+            value=datetime.datetime.fromtimestamp(now+delta,datetime.timezone.utc).isoformat() if delta else None
+            self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':value}))
+            result=subprocess.run([sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            effective=api.load(self.directory,'qwen')['capacity_hold']['reset_at']
+            if effective:
+                label=api.eastern_reset_label(api.reset_epoch(effective))
+                self.assertIn(label,result.stdout)
+            return api.load(self.directory,'qwen')['capacity_hold']['reset_at']
+        later=marker(7200)
+        self.assertEqual(marker(3600),later)
+        self.assertIsNone(marker(None))
+        self.assertNotEqual(marker(10800),later)
+
+    def test_precise_reset_enriches_legacy_unknown_but_stale_marker_cannot(self):
+        import time
+        now=int(time.time())
+        hold={'provider':'qwen','failure_class':'allowance-exhausted','credential_profile_scope':None,'model_scope':None,'observed_epoch':now-1000,'reset_at':None,'next_check_epoch':now,'record_id':'old'}
+        api.publish(self.directory,'qwen',{'version':2,'provider':'qwen','global':None,'backoffs':{},'capacity_hold':hold})
+        reset=datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':reset,'observed_epoch':now-300}))
+        command=[sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record']
+        result=subprocess.run(command,capture_output=True,text=True)
+        self.assertEqual(result.returncode,3)
+        self.assertEqual(api.load(self.directory,'qwen')['capacity_hold'],hold)
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':reset,'observed_epoch':now}))
+        result=subprocess.run(command,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(api.load(self.directory,'qwen')['capacity_hold']['reset_at'],reset)
+
+    def test_invalid_reset_never_becomes_expiry(self):
+        for reset in (True, False, float('nan'), '2026-01-01T00:00:00', 'invalid', '2999-01-01T00:00:00Z'):
+            self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':reset}))
+            result=subprocess.run([sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIsNone(api.load(self.directory,'qwen')['capacity_hold']['reset_at'])
+    def test_provider_marker_allowance_stores_reset_without_overwriting_global(self):
+        import time
+        now=int(time.time())
+        hold={'version':1,'provider':'qwen','failure_class':'authentication-failed','created_epoch':now,'expires_epoch':now+86400}
+        api.publish(self.directory,'qwen',{'version':2,'provider':'qwen','global':hold,'backoffs':{}})
+        reset=datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()
+        self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','error':{'code':'QuotaExceeded','message':'monthly quota exhausted'},'reset_at':reset}))
+        result=subprocess.run([sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('AI_REVIEWER_ALLOWANCE_EXHAUSTED',result.stdout)
+        stored=api.load(self.directory,'qwen')
+        self.assertEqual(stored['global'],hold)
+        self.assertEqual(stored['capacity_hold']['reset_at'],reset)
+
+    def test_stale_and_repeated_observation_cannot_release_hold(self):
+        data={'provider':'glm'}
+        base={'provider':'glm','state':'exhausted','observed_epoch':1000,'credential_profile_scope':'same','model_scope':'same'}
+        api.capacity_observation(data,'glm',base,1000)
+        self.assertEqual(api.capacity_observation(data,'glm',dict(base,state='available'),1000)['reason'],'older-observation')
+        self.assertEqual(api.capacity_observation(data,'glm',dict(base,state='available'),1400)['reason'],'unknown-stale-or-unscoped')
+        self.assertIsNotNone(data['capacity_hold'])
+    def test_capacity_paid_hold_never_clock_expires_and_scope_controls_recovery(self):
+        data = {'provider':'deepseek','global':{'stronger':'kept'},'backoffs':{}}
+        exhausted = {'provider':'deepseek','state':'exhausted','observed_epoch':1000,'credential_profile_scope':'account-a','model_scope':'model-a','reset_at':'1970-01-01T00:20:00Z'}
+        self.assertEqual(api.capacity_observation(data,'deepseek',exhausted,1000)['status'],'held')
+        self.assertIsNone(data['capacity_hold']['reset_at'])
+        positive = dict(exhausted,state='available',observed_epoch=1001,credential_profile_scope='account-b')
+        self.assertEqual(api.capacity_observation(data,'deepseek',positive,1001)['reason'],'wrong-scope')
+        positive['credential_profile_scope']='account-a'
+        self.assertEqual(api.capacity_observation(data,'deepseek',positive,1001)['status'],'restored')
+        self.assertEqual(data['global'],{'stronger':'kept'})
+
+    def test_legacy_unscoped_paid_hold_released_by_scoped_positive_balance(self):
+        data = {'provider':'deepseek','global':None,'backoffs':{},'capacity_hold':{'provider':'deepseek','failure_class':'out-of-credit',
+            'credential_profile_scope':None,'model_scope':None,'observed_epoch':1000,'reset_at':None,'next_check_epoch':1000,'record_id':'legacy'}}
+        positive = {'provider':'deepseek','state':'available','observed_epoch':1001,'credential_profile_scope':'sha256:'+'a'*64,'model_scope':'deepseek-flash'}
+        self.assertEqual(api.capacity_observation(data,'deepseek',dict(positive,observed_epoch=1000),1001)['reason'],'older-observation')
+        self.assertEqual(api.capacity_observation(data,'deepseek',positive,1001)['status'],'restored')
+        self.assertIsNone(data['capacity_hold'])
+
+    def test_expired_legacy_global_credit_quarantine_releases_on_positive_balance(self):
+        import time
+        now = int(time.time())
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            (path/'deepseek.json').write_text(json.dumps({'version':1,'provider':'deepseek','failure_class':'out-of-credit',
+                'created_epoch':now-7200,'expires_epoch':now-3600,'record_id':'a'*64}))
+            run = lambda *extra: subprocess.run([sys.executable, str(MODULE), *extra, '--directory', directory], capture_output=True, text=True, check=True)
+            run('global', 'deepseek')
+            self.assertIsNone(json.loads((path/'deepseek.json').read_text())['capacity_hold']['credential_profile_scope'])
+            observation = path/'observation.json'
+            observation.write_text(json.dumps({'provider':'deepseek','state':'available','observed_epoch':now,
+                'credential_profile_scope':'sha256:'+'b'*64,'model_scope':'deepseek-flash'}))
+            self.assertEqual(json.loads(run('capacity-observe','deepseek','--observation-file',str(observation)).stdout)['status'],'restored')
+            self.assertIsNone(json.loads((path/'deepseek.json').read_text())['capacity_hold'])
+
+    def test_unknown_scope_exhaustion_holds_but_positive_cannot_release(self):
+        data = {'provider':'gemini'}
+        self.assertEqual(api.capacity_observation(data,'gemini',{'provider':'gemini','state':'exhausted','observed_epoch':1000},1000)['status'],'held')
+        self.assertEqual(api.capacity_observation(data,'gemini',{'provider':'gemini','state':'available','observed_epoch':1001,'credential_profile_scope':'another','model_scope':'model'},1001)['reason'],'wrong-scope')
+        self.assertEqual(api.capacity_observation(data,'gemini',{'provider':'gemini','state':'unknown'},1001)['status'],'deferred')
+        self.assertEqual(data['capacity_hold']['next_check_epoch'],4601)
+
+    def test_subscription_provider_reset_returns_candidate_without_clearing_stronger_hold(self):
+        import time
+        now=int(time.time())
+        data={'version':2,'provider':'glm','global':{'version':1,'provider':'glm','failure_class':'authentication-failed','created_epoch':now,'expires_epoch':now+86400},'backoffs':{},'capacity_hold':{'provider':'glm','failure_class':'allowance-exhausted','credential_profile_scope':None,'model_scope':None,'observed_epoch':now-50,'reset_at':datetime.datetime.fromtimestamp(now-1,datetime.timezone.utc).isoformat(),'next_check_epoch':now-1}}
+        api.publish(self.directory,'glm',data)
+        result=subprocess.run([sys.executable,str(MODULE),'capacity-status','glm','--directory',str(self.directory)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),None)
+        stored=api.load(self.directory,'glm')
+        self.assertEqual(stored['global'],data['global'])
+        self.assertIsNotNone(stored['last_capacity_reset'])
+
+    def test_expired_legacy_paid_credit_hold_remains(self):
+        import time
+        now=int(time.time())
+        data={'version':2,'provider':'grok','global':{'version':1,'provider':'grok','failure_class':'out-of-credit','created_epoch':now-7200,'expires_epoch':now-3600},'backoffs':{}}
+        api.publish(self.directory,'grok',data)
+        result=subprocess.run([sys.executable,str(MODULE),'global','grok','--directory',str(self.directory)],capture_output=True,text=True)
+        self.assertIsNone(json.loads(result.stdout))
+        migrated=api.load(self.directory,'grok')
+        self.assertEqual(migrated['legacy_capacity_evidence'],data['global'])
+        self.assertEqual(migrated['capacity_hold']['failure_class'],'out-of-credit')
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

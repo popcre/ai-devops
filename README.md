@@ -285,6 +285,8 @@ exclusions, rollout workflow, and legacy-document boundary.
 Active multi-session work is catalogued in the
 [implementation-plan index](docs/implementation-plan-index.md), including the
 evidence that establishes each completed gate.
+For #660's isolated request measurement build and separate offline/live
+qualification, see the [outgoing-write counter prototype](tools/github-requests/instrumented-gh/README.md).
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
 `visual-review`, `final-check`.

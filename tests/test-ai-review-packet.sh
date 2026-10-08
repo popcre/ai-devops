@@ -286,6 +286,19 @@ PART_COUNT="$(find "$PKT" -name 'patch.part-*' | wc -l)"
 check "split_has_directly_readable_numbered_parts" \
   "[ '$PART_COUNT' -gt 1 ] && grep -q 'patch.part-000' '$PKT/MANIFEST.md'"
 check "split_packet_still_verifies"           "'$SCRIPT' verify '$PKT'"
+# Regression for the 2026-10-08 final-check REJECT: patch.diff held the first
+# PATCH_MAX_BYTES of the diff while the manifest called it "the complete diff".
+check "split_index_holds_no_diff_text"        "! grep -q '^diff --git' '$PKT/patch.diff' && ! grep -q '^+' '$PKT/patch.diff'"
+check "split_manifest_never_claims_patch_diff_is_complete" \
+  "! grep -q 'complete unified diff is in' '$PKT/MANIFEST.md' && grep -q 'NOT in .patch.diff. alone' '$PKT/MANIFEST.md'"
+check "split_index_and_manifest_name_every_real_part" \
+  "for p in \$(cd '$PKT' && ls patch.part-*); do sz=\$(wc -c < '$PKT/'\$p | tr -d ' '); grep -qF \"\$p\\\`: \$sz bytes\" '$PKT/patch.diff' && grep -qF \"\$p\\\`: \$sz bytes\" '$PKT/MANIFEST.md' || exit 1; done"
+check "split_parts_reassemble_every_byte"     "cat '$PKT'/patch.part-* | cmp -s - '$PKT/patch.full.diff' && grep -q 'big.txt' '$PKT/patch.full.diff' && [ \$(wc -c < '$PKT/patch.full.diff') -gt 40000 ]"
+check "split_index_states_total_bytes"        "grep -q \"\$(wc -c < '$PKT/patch.full.diff' | tr -d ' ') bytes\" '$PKT/patch.diff'"
+for W in ai-grok-review ai-glm; do
+  check "${W}_instructions_point_to_every_split_part" \
+    "grep -q 'read EVERY numbered patch.part-\\* file' '$REPO_ROOT/bin/$W'"
+done
 
 # --- long file lists ----------------------------------------------------------
 # Regression for 2026-08-18: an unrelated untracked scratch directory produced a

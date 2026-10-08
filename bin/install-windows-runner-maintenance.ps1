@@ -137,6 +137,20 @@ function Get-DesiredPayloadManifest {
   return [ordered]@{ schema_version=1; owner='popcre/ai-devops#262'; operator_sid=$OperatorSid; task_path=$script:TaskPath; files=$files }
 }
 
+function Set-PayloadFileAcl {
+  # icacls applies (OI)(CI) grants to FILES as nothing at all: with
+  # /inheritance:r /T every payload file was left with an EMPTY protected
+  # DACL (D:PAI), unreadable even by Administrators, so the elevated worker
+  # could not load and -Verify/-RecoverPartial failed on access denied
+  # (#1312, reproduced 2026-10-08). Each payload file therefore gets explicit
+  # non-inheritable grants: Administrators/SYSTEM full, operator read/execute.
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid)
+  foreach ($child in @(Get-ChildItem -LiteralPath $LiteralPath -Force -File -Recurse)) {
+    Assert-NoReparsePoint -LiteralPath $child.FullName
+    Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r','*S-1-5-32-544:F','*S-1-5-18:F',"*${OperatorSid}:RX")
+  }
+}
+
 function Set-ProtectedFilesystemAcl {
   param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
@@ -145,6 +159,7 @@ function Set-ProtectedFilesystemAcl {
   if ($Kind -eq 'Payload') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
+    Set-PayloadFileAcl -LiteralPath $LiteralPath -OperatorSid $OperatorSid
   } elseif ($Kind -eq 'Evidence') {
     # No operator grant: the elevated qualification child writes through its
     # Administrators membership, so the non-elevated operator must hold
@@ -218,6 +233,33 @@ function Assert-NoPerUserComOverride {
   if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
 }
 
+function Test-TaskDaclEquivalent {
+  # Task Scheduler on current Windows 11 builds returns an EMPTY string for
+  # a descriptor read with flag 0 even elevated, and stores generic rights mapped
+  # (GRGX -> 0x1200a9) with auto-inherit flags (D:PAI). The DACL is therefore
+  # read with DACL_SECURITY_INFORMATION (4) and compared semantically: same
+  # protected flag, and exactly the same set of (type, SID, mapped mask) ACEs.
+  param([AllowEmptyString()][string]$Actual, [Parameter(Mandatory)][string]$Expected)
+  if ([string]::IsNullOrWhiteSpace($Actual)) { return $false }
+  $map = { param([int]$m)
+    $r = $m -band 0x0FFFFFFF
+    if ($m -band 0x80000000) { $r = $r -bor 0x120089 }
+    if ($m -band 0x40000000) { $r = $r -bor 0x120116 }
+    if ($m -band 0x20000000) { $r = $r -bor 0x1200a0 }
+    if ($m -band 0x10000000) { $r = $r -bor 0x1F01FF }
+    $r }
+  $parse = { param([string]$s)
+    try { $sd = [Security.AccessControl.RawSecurityDescriptor]::new($s) } catch { return $null }
+    if ($null -eq $sd.DiscretionaryAcl) { return $null }
+    $aces = @(foreach ($ace in $sd.DiscretionaryAcl) {
+      if ($ace -isnot [Security.AccessControl.CommonAce]) { 'unsupported' } else { '{0}|{1}|{2}' -f $ace.AceQualifier, $ace.SecurityIdentifier.Value, (& $map $ace.AccessMask) } })
+    [pscustomobject]@{ Protected = (($sd.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0); Aces = @($aces | Sort-Object) } }
+  $a = & $parse $Actual; $e = & $parse $Expected
+  if ($null -eq $a -or $null -eq $e -or $a.Protected -ne $e.Protected -or $a.Aces.Count -ne $e.Aces.Count) { return $false }
+  for ($i = 0; $i -lt $a.Aces.Count; $i++) { if ($a.Aces[$i] -cne $e.Aces[$i]) { return $false } }
+  return $true
+}
+
 function Set-MaintenanceTaskAcl {
   param([Parameter(Mandatory)][string]$OperatorSid)
   Assert-NoPerUserComOverride
@@ -225,7 +267,9 @@ function Set-MaintenanceTaskAcl {
   $service.Connect()
   $task = $service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName)
   $sddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"
-  $task.SetSecurityDescriptor($sddl, 0)
+  # 0x10 = TASK_DONT_ADD_PRINCIPAL_ACE: without it Windows silently adds an
+  # extra principal ACE and drops the protected flag.
+  $task.SetSecurityDescriptor($sddl, 0x10)
   return $sddl
 }
 
@@ -238,7 +282,9 @@ function Set-MaintenanceTaskTeardownAcl {
   $service.Connect()
   $task = $service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName)
   $sddl = 'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
-  $task.SetSecurityDescriptor($sddl, 0)
+  # 0x10 = TASK_DONT_ADD_PRINCIPAL_ACE: without it Windows silently adds an
+  # extra principal ACE and drops the protected flag.
+  $task.SetSecurityDescriptor($sddl, 0x10)
   return $sddl
 }
 
@@ -255,18 +301,20 @@ function Get-InstalledTaskSnapshot {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $sddl = [string]$service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(0)
+  $sddl = [string]$service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(4)
   # A filtered remote token returns an empty descriptor rather than an error.
   # Callers that must reason about permissions need an elevated read.
   if ([string]::IsNullOrWhiteSpace($sddl)) { throw 'TASK_SDDL_UNREADABLE: elevated token is required to read the task security descriptor.' }
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
-    action_count = @($task.Actions).Count
+    action_count = @($task.Actions | Where-Object { $null -ne $_ }).Count
     user_id = [string]$task.Principal.UserId
     logon_type = [string]$task.Principal.LogonType
     run_level = [string]$task.Principal.RunLevel
-    trigger_count = @($task.Triggers).Count
+    # @($null).Count is 1 in PowerShell: a triggerless task reports a null
+    # Triggers collection, so nulls are filtered before counting.
+    trigger_count = @($task.Triggers | Where-Object { $null -ne $_ }).Count
     multiple_instances = [string]$task.Settings.MultipleInstances
     sddl = $sddl
     state = [string]$task.State
@@ -338,7 +386,7 @@ function Test-MaintenanceInstallation {
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
   $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
-  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
+  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or (Resolve-TaskIdentitySid -Identity $task.user_id) -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or -not (Test-TaskDaclEquivalent -Actual $task.sddl -Expected $expectedSddl)) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
 }
 
@@ -572,6 +620,11 @@ function Recover-MaintenanceInstallation {
   if ($payloadPresent) {
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    # A partial install made by an installer before #1312 left every payload
+    # file with an empty DACL. Restore the intended file grants on the
+    # administrator-owned files only, then verify identity and hashes as before.
+    foreach ($child in @(Get-ChildItem -LiteralPath $script:PayloadRoot -Force -File)) { Assert-NoForeignOwnership -LiteralPath $child.FullName }
+    Set-PayloadFileAcl -LiteralPath $script:PayloadRoot -OperatorSid $ExpectedOperatorSid
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
     if ($manifest.schema_version -ne 1 -or $manifest.owner -cne 'popcre/ai-devops#262' -or
         $manifest.task_path -cne $script:TaskPath -or $manifest.operator_sid -cne $ExpectedOperatorSid) {
@@ -617,7 +670,7 @@ function Recover-MaintenanceInstallation {
     Set-MaintenanceTaskTeardownAcl | Out-Null
     $sealed = Get-InstalledTaskSnapshot
     $teardownSddl = 'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
-    if ($sealed.sddl -cne $teardownSddl) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
+    if (-not (Test-TaskDaclEquivalent -Actual $sealed.sddl -Expected $teardownSddl)) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
     Disable-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Out-Null
     # Start-ScheduledTask is asynchronous: stop any instance that landed
     # before the teardown descriptor, then wait for a terminal state.

@@ -26,6 +26,7 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/credit-holds"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 glm_recovery_cases(){
@@ -124,6 +125,151 @@ RECOVERY_CASES
 
 # Reconstructed public-schema fixture, informed by actual5569 code1310 diagnostic.
 # The live assistant envelope was not retained and is not represented as evidence.
+glm_original_observation_cases(){
+  local fixture="$TMP/original-observation"
+  mkdir -p "$fixture"; chmod 700 "$fixture"
+  cat > "$fixture/cases.sh" <<'OBSERVATION_CASES'
+set -e
+source "$AI_GLM_SOURCE"
+export AI_REVIEW_LIFECYCLE_DIR="$FIXTURE/lifecycle" AI_REVIEW_EVENT_DIR="$FIXTURE/events"
+export FIXTURE
+mkdir -p "$FIXTURE/repo" "$FIXTURE/packet"; chmod 700 "$FIXTURE/repo" "$FIXTURE/packet"
+# Match native Windows' refusal to spawn extensionless script helpers from
+# Python, even when this regression suite runs on Linux.
+mkdir -p "$FIXTURE/native-python"
+cat > "$FIXTURE/native-python/sitecustomize.py" <<'NATIVE_PY'
+import pathlib,subprocess
+original=subprocess.Popen
+def native_spawn(args,*rest,**kwargs):
+ if isinstance(args,(list,tuple)) and args and pathlib.Path(str(args[0])).is_file() and not pathlib.Path(str(args[0])).suffix:
+  raise OSError('native Python cannot spawn extensionless helpers')
+ return original(args,*rest,**kwargs)
+subprocess.Popen=native_spawn
+NATIVE_PY
+cat > "$FIXTURE/native-python/python3" <<'NATIVE_EXEC'
+#!/usr/bin/env bash
+PYTHONPATH="$FIXTURE/native-python${PYTHONPATH:+:$PYTHONPATH}" exec "$PYTHON" "$@"
+NATIVE_EXEC
+chmod 700 "$FIXTURE/native-python/python3"
+export PATH="$FIXTURE/native-python:$PATH"
+cat > "$FIXTURE/lifecycle-read" <<'FIXTURE_EXEC'
+#!/usr/bin/env bash
+case "${OBSERVATION_HELPER_CASE:-}" in helper-error) exit 2;; helper-malformed) printf '{broken';exit 0;; esac
+"$PYTHON" - <<'IDENTITY_PY'
+import json,os
+print(json.dumps({'repository_key':'a'*64,'repository_root':os.environ['FIXTURE']+'/repo'}))
+IDENTITY_PY
+FIXTURE_EXEC
+cat > "$FIXTURE/packet-read" <<'FIXTURE_EXEC'
+#!/usr/bin/env bash
+case "${OBSERVATION_HELPER_CASE:-}" in helper-path-empty) exit 0;; helper-path-multiline) printf '%s\n%s' "$FIXTURE/packet" "$FIXTURE/repo";exit 0;; esac
+printf '%s' "$FIXTURE/packet"
+FIXTURE_EXEC
+chmod 700 "$FIXTURE/lifecycle-read" "$FIXTURE/packet-read"
+REVIEW_LIFECYCLE_BIN="$FIXTURE/lifecycle-read"; PACKET_BIN="$FIXTURE/packet-read"
+timeout(){ if [ "${OBSERVATION_HELPER_CASE:-}" = helper-timeout ];then return 124;fi;command timeout "$@"; }
+preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
+REVIEW_PREFLIGHT_BIN=preflight_fixture
+: > "$FIXTURE/pauses"
+# Reconstructed public schema, never a claimed retained live assistant envelope.
+prepare(){
+ "$PYTHON" - "$FIXTURE" "$1" <<'FIXTURE_PY'
+import datetime,json,os,pathlib,sys,time
+root=pathlib.Path(sys.argv[1]);case=sys.argv[2];now=int(time.time());epoch=now-7200
+utc=lambda n:datetime.datetime.fromtimestamp(n,datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+run='historical-run';event={'observed_at':utc(epoch),'phase':'terminal','last_observation_type':'provider-error','provider_terminal_reason':'error','failure_class':'provider-quota-exhausted'}
+def save(path,value):
+ path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value));path.chmod(0o600)
+meta={'type':'review','name':'exact','caller':'codex','model':'glm-5.3','provider':'zai-coding-plan','opencode_session_id':'session-exact','repository_root':str(root/'repo'),'last_diagnostic_run_id':run,'remote_turn':{'state':'pending','original_invocation_id':'b'*32,'head':'c'*40,'base':'d'*40,'packet_sha256':'e'*64,'previous_message_id':'old','started_at':utc(epoch-6),'deadline_epoch':epoch+1794,'boundary_root':str(root/'repo')}}
+diag={'schema_version':1,'provider':'glm','caller':'codex','run_id':run,'session_id':'exact','repository_root':str(root/'repo'),'head':'c'*40,'source_digest':'f'*64,'truncated':False,'events':[event],'terminal_summary':event.copy()}
+required={'schema_version':1,'provider':'glm','caller':'codex','run_id':'b'*32,'head':'c'*40}
+identity={'head':'c'*40,'base':'d'*40,'source_digest':'f'*64}
+path=root/'lifecycle/diagnostics'/('a'*64)/'glm/codex/historical-run.json'
+if case=='wrong-head':diag['head']='0'*40
+if case=='wrong-caller':diag['caller']='claude'
+if case=='wrong-provider':diag['provider']='muse'
+if case=='wrong-session':diag['session_id']='other'
+if case=='wrong-run':diag['run_id']='other'
+if case=='wrong-source':diag['source_digest']='0'*64
+if case=='wrong-required':required['run_id']='0'*32
+if case=='wrong-packet':identity['base']='0'*40
+if case=='truncated':diag['truncated']=True
+if case=='ambiguous':diag['events'].append(event.copy())
+if case=='future':diag['events'][0]['observed_at']=utc(now+100);diag['terminal_summary']=diag['events'][0].copy()
+if case=='out-of-bounds':diag['events'][0]['observed_at']=utc(epoch-99);diag['terminal_summary']=diag['events'][0].copy()
+if case=='malformed-time':diag['events'][0]['observed_at']='not-a-time';diag['terminal_summary']=diag['events'][0].copy()
+if case=='missing-time':diag['events'][0].pop('observed_at');diag['terminal_summary']=diag['events'][0].copy()
+save(root/('meta-'+case+'.json'),meta);save(path,diag);save(root/'events/evidence'/('b'*32)/'required.json',required);save(root/'packet/identity.json',identity)
+(root/'packet/MANIFEST.sha256').write_text('e'*64);(root/'packet/MANIFEST.sha256').chmod(0o600)
+if case=='wrong-manifest':(root/'packet/MANIFEST.sha256').write_text('0'*64)
+if case=='unprotected':path.chmod(0o644)
+if case=='owner-readonly':path.chmod(0o400)
+if case=='owner-executable':path.chmod(0o700)
+if case=='missing':path.unlink()
+if case=='duplicate':path.write_text(path.read_text()[:-1]+',"provider":"glm"}')
+if case=='symlink':owned=path.with_suffix('.owned');path.rename(owned);path.symlink_to(owned)
+if case=='hardlink':os.link(path,path.with_suffix('.linked'))
+(root/'expected-epoch').write_text(str(epoch))
+FIXTURE_PY
+}
+msg='{"id":"new-error","finish":"error","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"error":{"message":"HTTP429 code1310 Weekly/Monthly Limit Exhausted"}}'
+prepare known;meta="$FIXTURE/meta-known.json"
+persist_review_error "$meta" "$msg" historical
+receipt="$(jq -r .remote_turn.error_path "$meta")";expected="$(cat "$FIXTURE/expected-epoch")"
+jq -e --argjson epoch "$expected" '.original_observation.state=="known" and .observed_epoch==$epoch and .captured_epoch>$epoch' "$receipt" >/dev/null
+[ ! -s "$FIXTURE/pauses" ] # #1404: error evidence alone never invents a one-hour credit pause.
+cp "$receipt" "$FIXTURE/immutable-known"
+# A later readback is telemetry only; no HTTP and no immutable time renewal.
+api(){ exit 91; };send_prompt(){ exit 92; };require_review_server(){ exit 93; };record_diagnostic(){ :; }
+if (recover_review_error "$meta") > "$FIXTURE/recovery.log" 2>&1;then exit 1;fi
+cmp "$receipt" "$FIXTURE/immutable-known"
+# The real pause component receives original expired time, never a fresh window.
+AI_REVIEW_QUARANTINE_DIR="$FIXTURE/admission" "$WRAPPER_DIR/ai-review-preflight" pause glm out-of-credit --seconds 3600 --observed "$expected" > "$FIXTURE/expired.json"
+jq -e '.status=="expired"' "$FIXTURE/expired.json" >/dev/null
+# Previously shipped v1 observation lacks provenance and remains immutable UNKNOWN.
+jq 'del(.original_observation,.captured_epoch) | .schema_version=1' "$FIXTURE/immutable-known" > "$receipt"
+chmod 600 "$receipt";cp "$receipt" "$FIXTURE/immutable-v1"
+before="$(wc -l < "$FIXTURE/pauses")"
+persist_review_error "$meta" "$msg" historical
+cmp "$receipt" "$FIXTURE/immutable-v1"
+[ "$(wc -l < "$FIXTURE/pauses")" = "$before" ]
+review_error_receipt "$meta" | jq -e '.observation_state=="unknown" and .observed_epoch==null' >/dev/null
+for case in wrong-head wrong-caller wrong-provider wrong-session wrong-run wrong-source wrong-required wrong-packet truncated ambiguous future out-of-bounds malformed-time missing-time wrong-manifest unprotected owner-readonly owner-executable missing duplicate symlink hardlink helper-error helper-malformed helper-timeout helper-path-empty helper-path-multiline;do
+ case "$case" in unprotected|owner-readonly|owner-executable)
+  # These exact Unix mode bits have no native Windows meaning. Keep the
+  # negatives on POSIX; all binding/file-identity cases still run on Windows.
+  if "$PYTHON" -c 'import os,sys;sys.exit(0 if os.name=="nt" else 1)';then
+   printf '  note %s is a POSIX mode-bit negative; unavailable on native Windows\n' "$case"
+   continue
+  fi;;
+ symlink)
+  # A Windows account without SeCreateSymbolicLinkPrivilege (the runner
+  # service on a self-hosted host) cannot create the fixture's symlink at all.
+  # Probe instead of failing; every other binding case still runs.
+  # Probe beside the fixture (same filesystem) and remove the probe link.
+  if ! "$PYTHON" -c 'import os,sys
+l=os.path.join(sys.argv[1],".symlink-probe")
+try: os.symlink(os.path.join(sys.argv[1],".symlink-target"),l)
+except OSError: sys.exit(1)
+os.unlink(l)' "$FIXTURE" 2>/dev/null;then
+   printf '  note %s negative needs symlink privilege; unavailable for this account\n' "$case"
+   continue
+  fi;; esac
+ # Reset only this owned fixture evidence; each receipt has a distinct path.
+ rm -f "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.json" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.owned" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.linked"
+ prepare "$case";meta="$FIXTURE/meta-$case.json";before="$(wc -l < "$FIXTURE/pauses")"
+ export OBSERVATION_HELPER_CASE="$case"
+ persist_review_error "$meta" "$msg" historical
+ jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null
+ receipt="$(jq -r .remote_turn.error_path "$meta")"
+ jq -e '.original_observation.state=="unknown" and .observed_epoch==null' "$receipt" >/dev/null
+ [ "$(wc -l < "$FIXTURE/pauses")" = "$before" ]
+done
+[ -z "$(find "$FIXTURE" -maxdepth 1 -name '*.error-identity.*' -o -name '*.error-packet.*' -o -name '*.error-input.*')" ]
+OBSERVATION_CASES
+  env AI_GLM_SOURCE="$AI_GLM" AI_GLM_TEST_SOURCE_ONLY=1 FIXTURE="$fixture" PYTHON="$PYTHON" bash "$fixture/cases.sh"
+}
+
 glm_terminal_error_cases(){
   local fixture="$TMP/terminal-error" result
   mkdir -p "$fixture"; chmod 700 "$fixture"
@@ -136,7 +282,7 @@ git -C "$FIXTURE/repo" init -q; git -C "$FIXTURE/repo" config user.name Test; gi
 printf fixture > "$FIXTURE/repo/source"; git -C "$FIXTURE/repo" add source; git -C "$FIXTURE/repo" commit -qm fixture
 HEAD_FIXTURE=$(git -C "$FIXTURE/repo" rev-parse HEAD); BASE_FIXTURE=$HEAD_FIXTURE
 printf '%064d' 0 | tr 0 b > "$FIXTURE/packet/MANIFEST.sha256"
-jq -n --arg h "$HEAD_FIXTURE" --arg b "$BASE_FIXTURE" '{type:"review",name:"exact",caller:"codex",model:"glm-5.3",provider:"zai-coding-plan",opencode_session_id:"session-exact",remote_turn:{state:"pending",original_invocation_id:("a"*32),head:$h,base:$b,packet_sha256:("b"*64),previous_message_id:"old",started_at:"2026-10-07T11:58:22Z"}}' > "$meta"
+jq -n --arg h "$HEAD_FIXTURE" --arg b "$BASE_FIXTURE" --arg started "$(date -u +%FT%TZ)" --argjson deadline "$(( $(date +%s)+900 ))" '{type:"review",name:"exact",caller:"codex",model:"glm-5.3",provider:"zai-coding-plan",opencode_session_id:"session-exact",remote_turn:{state:"pending",original_invocation_id:("a"*32),head:$h,base:$b,packet_sha256:("b"*64),previous_message_id:"old",started_at:$started,deadline_epoch:$deadline}}' > "$meta"
 jq --arg root "$FIXTURE/repo" --arg boundary "$FIXTURE/packet" '.repository_root=$root | .remote_turn.boundary_root=$boundary' "$meta" > "$FIXTURE/with-root"; mv "$FIXTURE/with-root" "$meta"
 chmod 600 "$meta"
 cp "$meta" "$FIXTURE/original"
@@ -149,7 +295,7 @@ jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false'
 [ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
 receipt="$(jq -r .remote_turn.error_path "$meta")"; cp "$receipt" "$FIXTURE/receipt-original"
 observed="$(jq -r .observed_epoch "$receipt")"
-grep -q -- "--observed $observed" "$FIXTURE/pauses"
+[ ! -e "$FIXTURE/pauses" ] # Error evidence alone never invents a one-hour credit pause.
 api(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 require_review_server(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 send_prompt(){ printf forbidden >> "$FIXTURE/network"; return 99; }
@@ -260,6 +406,7 @@ ERROR_CASES
 }
 if [ "${AI_GLM_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   trap 'rm -rf "$TMP"' EXIT
+  check 'original error observation is bound and historical recover never renews a hold' 'glm_original_observation_cases'
   glm_recovery_cases
   glm_terminal_error_cases
   printf '%d passed, %d failed\n' "$PASS" "$FAIL"
@@ -884,14 +1031,19 @@ printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
 lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
 "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
 pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
-printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 run_prune 1
 check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
 lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
-check "reconcile-lost refuses providers whose report naming it cannot search" "'$PYTHON' '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
+check "reconcile-lost refuses providers whose report naming it cannot search" "'$PYTHON' '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost claude '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a claude report'"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
+# Broad provider-wide search is fail-closed: any report with a key blocks loss,
+# including a sibling review name (never a false loss).
+check "reconcile-lost is fail-closed when a sibling report key exists" "! lost lost 'caller worktree deleted'"
+rm -f "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md" "$PR_ROOT/.ai/reviews/glm-present-20260911T000000Z.md"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+# An earlier-turn report is not this invocation's: the owned path filters by start time.
+printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
 "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
 lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"
@@ -1719,6 +1871,7 @@ check "a stale error from the previous turn is not mistaken for this turn" \
 rm -rf "$PERR_TMP"
 
 glm_recovery_cases
+check 'original error observation is bound and historical recover never renews a hold' 'glm_original_observation_cases'
 glm_terminal_error_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

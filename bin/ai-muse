@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ai-muse - persistent, named Muse Spark review conversations.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap muse "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 
 # Caller-supplied credentials or preload markers are never trusted. Only this
 # process may set the marker after validating its protected local key store.
@@ -228,13 +229,6 @@ lock_session(){
 }
 unlock_session(){ release_lock; }
 
-muse_system_drive_env(){
-  # PowerShell exports SystemDrive; Git Bash exposes the same Windows value as
-  # SYSTEMDRIVE. Pass only a drive letter through the clean provider boundary.
-  local drive="${SystemDrive:-${SYSTEMDRIVE:-}}"
-  [[ "$drive" =~ ^[A-Za-z]:$ ]] || return 1
-  printf 'SystemDrive=%s\n' "$drive"
-}
 runtime_env(){
   if [ "$ENGINE" = muse-code ]; then
     # Private stores: no personal skills, settings or sessions leak in or out.
@@ -675,20 +669,7 @@ heartbeat_meta(){
   [ -f "$meta" ] || return 0; tmp="$(tmp_file)"
   jq --arg now "$(date -u +%FT%TZ)" --argjson pid "$pid" '.status="turn_in_progress"|.worker_pid=$pid|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
-MUSE_CREDENTIAL_BOUNDARY='
-secret_file="${AI_MUSE_SECRET_FILE:-}"
-[ -n "$secret_file" ] && [ -f "$secret_file" ] && [ ! -L "$secret_file" ] || exit 86
-IFS= read -r MODEL_API_KEY < "$secret_file" || exit 87
-rm -f -- "$secret_file" || exit 88
-unset AI_MUSE_SECRET_FILE
-case "${AI_MUSE_KEY_ENV:-MODEL_API_KEY}" in
-  MODEL_API_KEY) export MODEL_API_KEY;;
-  META_API_KEY) export META_API_KEY="$MODEL_API_KEY"; unset MODEL_API_KEY;;
-  *) exit 89;;
-esac
-unset AI_MUSE_KEY_ENV
-exec "$@"
-'
+. "$ROOT/tools/lib/muse-credential-boundary.sh"
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
 }
@@ -816,17 +797,7 @@ run_turn(){
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
   test_interrupt_at pre_launch
   set +e
-  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
-  [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
-  clean_env+=("PSModuleAnalysisCachePath=${TEMP:-${TMPDIR:-/tmp}}/ai-muse-ps-module-cache") # #754: never into the checkout
-  for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
-    [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
-  done
-  if system_drive="$(muse_system_drive_env)"; then clean_env+=("$system_drive"); fi
-  if [ -n "${AI_MUSE_TEST_DIR:-}" ]; then
-    clean_env+=("AI_MUSE_TEST_DIR=$AI_MUSE_TEST_DIR")
-    while IFS='=' read -r safe_name _; do case "$safe_name" in AI_MUSE_TEST_*|MUSE_STUB_*) clean_env+=("$safe_name=${!safe_name}");; esac; done < <(env)
-  fi
+  muse_clean_environment "$PROFILE_HOME" "$ENGINE" "$env_bin"
   if [ -n "$meta" ]; then
     reviewer_event_evidence require-report muse "$evidence_dir" || die 'could not reserve durable review evidence.'
     local launch_tmp; launch_tmp="$(tmp_file)"
@@ -839,7 +810,7 @@ run_turn(){
     printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
     chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
     protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
-    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; reviewer_credit_run muse "$out" "$out.stderr" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
     MUSE_FAILURE_PHASE=provider-turn
     ACTIVE_META="$meta"; test_interrupt_at post_launch
     [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
@@ -923,8 +894,9 @@ parse_turn(){ # shared terminal parser; never launches the provider
 # exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
 muse_credit_stop(){
   local out="$1" ev
+  reviewer_capacity_current muse "$out" || true
   ev="$(tmp_file)" || return 0
-  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|del(.text)) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
+  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("^run[.]terminal[.]failed$")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
   printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"
   reviewer_credit_scan muse "$out.stderr" "$ev" || true
   [ -z "${REVIEWER_CREDIT_HIT:-}" ] || cat "$ev.note" >&2

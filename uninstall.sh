@@ -77,6 +77,12 @@ else
   "$hook_tool" --remove --repo "$resolved_repo" || exit 1
 fi
 
+# Remove the session temp hooks and sweep timer (plan_session-temp-cleanup.md).
+tmp_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-install-session-tmp"
+if [ -x "$tmp_tool" ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then "$tmp_tool" --remove --dry-run || exit 1; else "$tmp_tool" --remove || exit 1; fi
+fi
+
 if [ "$PURGE" -eq 1 ]; then
   echo "ARCHIVE config $resolved_etc -> $archive/etc-ai-devops.tar.gz"
   if [ "$DRY_RUN" -eq 0 ]; then

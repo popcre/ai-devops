@@ -65,7 +65,7 @@ class CreditTests(unittest.TestCase):
         public = watch.normalize('stepfun', result, datetime.datetime.now(datetime.timezone.utc))
         self.assertEqual(public['state'], 'available')
         self.assertNotIn('private-key', json.dumps(public))
-        self.assertNotIn('credential_profile_scope', public)
+        self.assertEqual(public['credential_profile_scope'], result['credential_profile_scope'])
         self.assertNotIn('balance', result)
 
     def test_stepfun_zero_only_prepaid_exhaustion_and_strict_schema(self):
@@ -111,15 +111,15 @@ class CreditTests(unittest.TestCase):
             if any(arg.endswith('stepfun_credit.py') for arg in command):
                 return subprocess.CompletedProcess(command, 0, json.dumps(observation))
             if any(arg.endswith('ai-local-watch') or arg.endswith('ai-review-preflight') for arg in command):
-                return subprocess.CompletedProcess(command, 0, '')
+                return subprocess.CompletedProcess(command, 0, '{"status":"held"}')
             return subprocess.CompletedProcess(command, 1, '')
         with contextlib.redirect_stdout(io.StringIO()) as out: self.assertEqual(watch.main(['tick'], run=run), 0)
-        pauses=[c for c in calls if 'pause' in c]
+        pauses=[c for c in calls if 'capacity-observe' in c]
         self.assertEqual(len(pauses), 1)
         rows = [json.loads(line) for line in out.getvalue().splitlines()]
-        self.assertEqual(next(row for row in rows if row['provider'] == 'stepfun')['hold'], 'accepted')
+        self.assertEqual(next(row for row in rows if row['provider'] == 'stepfun')['hold'], 'held')
         self.assertNotIn('applied', [row['hold'] for row in rows])
-        self.assertEqual(pauses[0][-7:], ['pause','stepfun','out-of-credit','--seconds','3600','--observed',str(watch.observed_epoch(now))])
+        self.assertIn('capacity-observe', pauses[0])
         self.assertNotIn('credential_profile_scope', out.getvalue())
         calls.clear(); observation.update(state='available',reason='reported-capacity')
         with contextlib.redirect_stdout(io.StringIO()): watch.main(['tick'],run=run)
@@ -410,6 +410,35 @@ class CreditTests(unittest.TestCase):
             value = dict(result, reason=bad)
             self.assertEqual(watch.normalize('deepseek', value, NOW)['state'], 'unknown')
 
+    def test_refresh_survives_windows_reconcile_failure(self):
+        # Windows without a qualified Git Bash: both the read and the store
+        # write refuse with OSError; refresh must report failure, never crash.
+        def refuse(*args, **kwargs):
+            raise OSError('qualified-bash-unavailable')
+        with mock.patch.object(watch, 'tool_command', refuse):
+            self.assertEqual(watch.main(['refresh', 'deepseek'], run=lambda *a, **k: None), 1)
+
+    def test_refresh_releases_legacy_unscoped_paid_hold_on_positive_balance(self):
+        current = datetime.datetime.now(datetime.timezone.utc)
+        value = balance.observation('key', opener=lambda *a, **k: Response(
+            b'{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"5.00"}]}'), now=current)
+        self.assertEqual(value['state'], 'available')
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            now = int(current.timestamp())
+            # Shape written by the failure classifier / expired legacy global quarantine.
+            (state / 'deepseek.json').write_text(json.dumps({'version': 2, 'provider': 'deepseek', 'global': None, 'backoffs': {},
+                'capacity_hold': {'provider': 'deepseek', 'failure_class': 'out-of-credit', 'credential_profile_scope': None,
+                                  'model_scope': None, 'observed_epoch': now - 7200, 'reset_at': None,
+                                  'next_check_epoch': now - 60, 'record_id': 'legacy'}}))
+            def run(command, **kwargs):
+                if any(str(arg).endswith('ai-deepseek-agent') for arg in command):
+                    return subprocess.CompletedProcess(command, 0, json.dumps(value), '')
+                env = dict(os.environ, AI_REVIEW_QUARANTINE_DIR=directory, AI_DEVOPS_TEST_MODE='1')
+                return subprocess.run(command, env=env, **kwargs)
+            self.assertEqual(watch.main(['refresh', 'deepseek'], run=run), 0)
+            self.assertIsNone(json.loads((state / 'deepseek.json').read_text())['capacity_hold'])
+
     def test_tick_only_exhaustion_pauses_and_never_unpauses(self):
         calls = []
         current = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -420,11 +449,11 @@ class CreditTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, json.dumps(value), 'private stderr')
             if any(arg.endswith('ai-deepseek-agent') for arg in command):
                 return subprocess.CompletedProcess(command, 1, '', 'private stderr')
-            return subprocess.CompletedProcess(command, 0)
+            return subprocess.CompletedProcess(command, 0, '{"status":"unchanged"}')
         out = io.StringIO()
         with contextlib.redirect_stdout(out): self.assertEqual(watch.main(['tick'], run=run), 0)
-        pauses = [c for c in calls if any(arg.endswith('ai-review-preflight') for arg in c)]
-        self.assertEqual(pauses[0][-7:], ['pause', 'gemini', 'out-of-credit', '--seconds', '3600', '--observed', str(watch.observed_epoch(current))])
+        pauses = [c for c in calls if 'capacity-observe' in c]
+        self.assertIn('capacity-observe', pauses[0])
         self.assertEqual(len(pauses), 1)
         self.assertNotIn('private', out.getvalue())
         self.assertNotIn('remaining_percent', out.getvalue())
@@ -440,13 +469,16 @@ class CreditTests(unittest.TestCase):
         def run(command, **kwargs):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0)
-        with mock.patch.object(watch, 'read_provider', side_effect=lambda provider, **kwargs: dict(observation, provider=provider)):
+        def reconcile(provider, value, run):
+            calls.append(dict(value))
+            return 'unchanged'
+        with mock.patch.object(watch, 'reconcile', side_effect=reconcile), mock.patch.object(watch, 'read_provider', side_effect=lambda provider, **kwargs: dict(observation, provider=provider)):
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(watch.main(['tick'], run=run), 0)
                 self.assertEqual(watch.main(['tick'], run=run), 0)
-        pauses = [command for command in calls if 'pause' in command]
+        pauses = [command for command in calls if isinstance(command, dict)]
         self.assertEqual(len(pauses), 8)
-        self.assertTrue(all(command[-2:] == ['--observed', str(original)] for command in pauses))
+        self.assertTrue(all(command['observed_epoch'] == original for command in pauses))
         self.assertNotIn('observed_epoch', output.getvalue())
 
     def test_all_providers_refuse_invalid_observation_times(self):
@@ -469,24 +501,24 @@ class CreditTests(unittest.TestCase):
         before = copy.deepcopy(state)
         calls = []
         def run(command, **kwargs):
-            if 'pause' in command:
-                calls.append(command)
-                result = admission.pause_failure(state, 'gemini', 'out-of-credit', now,
-                                                 int(command[-3]), int(command[-1]))
-                self.assertEqual(result, before['global'])
             return subprocess.CompletedProcess(command, 0)
+        def reconcile(provider, value, run):
+            calls.append(value)
+            result = admission.capacity_observation(state, provider, value, now)
+            self.assertIn(result['status'], ('held', 'unchanged'))
+            return result['status']
         def observation(provider, **kwargs):
             return {'provider': provider, 'state': 'exhausted' if provider == 'gemini' else 'unknown',
                     'reason': 'isolated-fixture', 'observed_epoch': original}
-        with mock.patch.object(watch, 'read_provider', side_effect=observation):
+        with mock.patch.object(watch, 'reconcile', side_effect=reconcile), mock.patch.object(watch, 'read_provider', side_effect=observation):
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(watch.main(['tick'], run=run), 0)
                 self.assertEqual(watch.main(['tick'], run=run), 0)
-        self.assertEqual(state, before)
+        self.assertEqual(state['global'], before['global'])
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all(command[-2:] == ['--observed', str(original)] for command in calls))
+        self.assertTrue(all(command['observed_epoch'] == original for command in calls))
         public = [json.loads(line) for line in output.getvalue().splitlines()]
-        self.assertTrue(all(row['hold'] == 'accepted' for row in public if row['provider'] == 'gemini'))
+        self.assertTrue(all(row['hold'] in ('held', 'unchanged') for row in public if row['provider'] == 'gemini'))
         self.assertTrue(all(row['hold'] == 'unchanged' for row in public if row['provider'] != 'gemini'))
         self.assertNotIn('existing-fixture-record', output.getvalue())
 

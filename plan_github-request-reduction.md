@@ -60,10 +60,50 @@ Installed P1 reporting (#660) and the rest of the handoff remain open.
 | P2. Protect the actual quota and preserve command behavior | Accepted: PR #929 (b2fb997) merged after review/CI; installed edge-dev3 hash matched and normal GraphQL read passed at 11:37 AM EDT; #914 closed with signed proof | Codex issue #658 orchestrator | Separate-bucket, identity, malformed-state and cost fixtures plus installed read passed; broader P8 savings remain separate |
 | P3. Route all managed request sources through the shared policy | PR #973 merged as 9cf87d4 after exact-head approval, focused tests, and green CI; shared-db consumer #3649 merged; installed #931/#933 proof open | #931 and #933 scoped proof owners; installation | Caller inventory, regression guard, and PR/CI passed; installed representative paths remain |
 | P4. Coalesce duplicate status reads and waiters | Accepted: PR #948 (f55c1a6) merged after review/CI; two installed edge-dev3 waiters shared one OPEN refresh and kept independent deadline outcomes at 11:45–11:46 AM EDT; #925 closed with signed proof | Codex issue #658 orchestrator | Live same-target trace passed; terminal merge/ejection and identity isolation passed checked-in fixtures |
-| P5. Remove repeated BlockerWatch scans and writes | Snapshot code through #923 merged; edge-dev telemetry lacks #929 category labels, so #868 live proof remains open | #868, Codex issue #658 orchestrator; installer #950 | One natural due tick after install with category counts and wake/alarm/link equivalence |
+| P5. Remove repeated BlockerWatch scans and writes | Snapshot live proof accepted October 1 under closed #868; category-label defect #1212 and quota-context defect #1211 remain open; repeated same-target fallback reads are under investigation | Current #658 coordinator; scoped #1211/#1212 repairs | Existing snapshot proof retained; new repairs require tests, guarded install and live proof |
 | P6. Govern aggregate account demand across hosts | Provisional decision on #658: retain local admission; no coordinator without same-principal contention evidence | Codex issue #658 orchestrator; P1/P7 samples | Simultaneous-host quota/recovery proof or evidence-backed final design record |
-| P7. Install and prove coverage across active clients and hosts | Open: #950 merged; #1008 interrupted safety repair follows valid 4837 REJECT; edge-dev3 guarded retry stopped before backup on sudo auth; edge-dev legacy launchers/dirty canonical preserved; edge-dev/916 personal auth and t16 route unresolved | Successor owner of #658; guarded host-local exact-head reviews and AI access recovery | Host/client/source-hash matrix and functional installed paths; Hetz production gate is separate |
+| P7. Install and prove coverage across active clients and hosts | Open: #1008 code repair accepted and closed October 7 after merged #1045 evidence reconciliation; edge-dev3 manifest is 744f836f while live checkout is a8f293a; edge-dev receipt hashes match but quota admission refuses; 916/4837 launchers lack source receipts; t16 supported route is unresolved | Current #658 coordinator; exact-host reviews, runtime collision controls and installation gates | Active fleet/client/source-hash matrix and original installed paths; production remains separately gated |
 | P8. Accept measured savings with no workflow regression | Open: no valid 20-outcome/two-busy-window comparison yet | Codex issue #658 orchestrator; P1-P7 | Comparable before/after report satisfying section 13 or independently reviewed lower-bound amendment |
+
+Update October 7, 2026, 10:05 AM EDT: Codex chat
+`01a116aa-0400-7230-97d9-3fab73f00bd1` on edge-dev3 owns programme
+coordination. Albert explicitly authorized independent parallel lanes through
+tested delivery, installation and measured closeout. Earlier automatic child,
+phase or session stopping instructions are superseded; dependency, ownership,
+collision and safety gates remain binding. Separate owners cover quota/label
+repairs, measurement/source savings and fleet readiness. Reviewer allocation,
+shared files, credentials, merge decisions and each installation are serialized.
+The [bounded October 2–7 aggregate](tests/verification/github-requests/p1-baseline.md)
+contains 1,065 receipts and 624 observed GraphQL points, but no comparable
+savings, whole-account totals or useful-work latency proof. #658 stays open.
+
+Update October 7, 2026, 12:25 PM EDT: the coordinator owns pending delivery
+of [#1401](https://github.com/popcre/ai-devops/pull/1401) (quota-state and
+category repair), [#1402](https://github.com/popcre/ai-devops/pull/1402)
+(Linux same-tick read sharing and credential-context binding),
+[#1407](https://github.com/popcre/ai-devops/pull/1407) (Linux HTTP-counter
+qualification), [#1408](https://github.com/popcre/ai-devops/pull/1408)
+(trusted Windows public-key diagnostic), and
+[#1414](https://github.com/popcre/ai-devops/pull/1414) (private completion-event
+evidence). Their exact-head reviews approve source; required checks, landing,
+installation and live acceptance remain separate. HTTP qualification is
+limited to observed constructor paths; total managed HTTP consumption remains
+unknown. Completion evidence deliberately rejects qualified source, clock and
+latency claims until separately reviewed adapters exist.
+
+The proposed partial installation design was rejected and remains unmerged.
+P7 uses the existing supported full installer, with complete exact-host scope,
+normal stages, current independent action approval, one-use authority and
+rollback evidence. No stage suppression or replacement routing is authorized.
+The active StepFun owner holds local Linux installation; the coordinator
+serializes around that ownership. Windows readiness is metadata-only. One
+unowned review brief is protected; no cleanup or installation occurred.
+Native Windows HTTP-channel qualification is owned by the fleet subagent;
+source/clock adapter design by the measurement subagent; host access,
+installation, merge decisions and section 13 acceptance by this coordinator.
+The owner-closed credential incident is not an open installation prerequisite;
+no further rotation, revocation or redaction is authorized by that incident.
+Historical samples remain unqualified for before/after savings. #658 stays open.
 
 **Start:** reconcile current upstream, read this STATUS and the
 [active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
@@ -229,7 +269,7 @@ discovery errors, not evidence that GitHub capacity improved.
 **Locked:** preserve capabilities, safety checks and concurrent workers; source
 reduction precedes claims of completion; use existing `ai-gh`/waiters/BlockerWatch;
 no hidden fallback, quota bypass or automatic mutation retry; no secret-bearing
-telemetry; one live outcome per session; compare equivalent workloads.
+telemetry; continue authorized live outcomes when actual gates allow; compare equivalent workloads.
 
 **Selected direction:** separate bucket-aware admission from reusable read
 snapshots. Keep `ai-gh` a transparent CLI boundary for existing callers. Add opt-in
@@ -428,7 +468,7 @@ Use supported installers after backing up affected config. Preserve Claude, Code
 and ZCode parity; never overwrite a client's config through another client's setup.
 Resolve each installed launcher/symlink and actual script hash. Windows and Bash
 both need proof. A prose router change is not proof of installed executable routing.
-Each installation session owns one host's outcome and retains all capabilities.
+Verify each host’s installation outcome separately and retain all capabilities; continue authorized work when actual gates allow.
 
 Gate: checked matrix names host, client/scheduler, authenticated-principal class,
 script hash, installer evidence and representative live result. Every active source

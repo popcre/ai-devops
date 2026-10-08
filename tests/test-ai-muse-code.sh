@@ -29,6 +29,10 @@ cat > "$MBIN/muse-bin-$VERSION.exe" <<'EOF'
 case "${1:-}" in
   --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code %s (%s)\n' "${MUSE_STUB_PRODUCT:-1.4.2}" "${MUSE_STUB_VERSION:-__PIN_VERSION__}";;
   exec)
+    if [ "${MUSE_STUB_BOUNDARY_CHECK:-}" = 1 ]; then
+      case "$*" in *fake-key*|*fake-foreign*) exit 78;; esac
+      /usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN TRIGGER_ACCESS_TOKEN TYPESAFE_API_KEY ZAI_API_KEY SUPABASE_SERVICE_ROLE_KEY TRIGGER_SECRET_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
+    fi
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
@@ -153,6 +157,7 @@ check 'new session completes and returns the final answer' "cd '$REPO' && eval \
 check 'provider prompt demands all findings and sibling issues' "grep -rq 'Return ALL findings in one pass' '$REPO/.ai/reviews' && grep -rq 'sibling issues' '$REPO/.ai/reviews' && grep -rq 'MANIFEST.md first' '$REPO/.ai/reviews'"
 check 'review launch is writable only in its disposable copy: no web, personal context or prompts (#974)' "for f in exec --json --disable-approval --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve; do grep -qx -- \"\$f\" '$TMP/provider-args' || exit 1; done && ! grep -qx -- --disable-write '$TMP/provider-args' && ! grep -qx -- --disable-shell '$TMP/provider-args' && grep -qx 'muse-spark-1.3-contributor' '$TMP/provider-args'"
 check 'provider gets the key only as META_API_KEY' "grep -qx 'META_API_KEY=fake-key' '$TMP/provider-env' && ! grep -q '^MODEL_API_KEY=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_KEY_ENV=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_SECRET_FILE=' '$TMP/provider-env'"
+check 'five incident names and arbitrary foreign credentials stay outside provider descendants' "cd '$REPO' && eval \"$ENV MUSE_STUB_BOUNDARY_CHECK=1 STEPFUN_API_KEY=fake-foreign SUPABASE_ACCESS_TOKEN=fake-foreign SUPABASE_SERVICE_ROLE_KEY=fake-foreign TRIGGER_ACCESS_TOKEN=fake-foreign TRIGGER_SECRET_KEY=fake-foreign TYPESAFE_API_KEY=fake-foreign ZAI_API_KEY=fake-foreign ARBITRARY_CALLER_SECRET=fake-foreign '$SCRIPT' new boundary-names --prompt test\" >/dev/null && ! grep -Eq '^(STEPFUN_API_KEY|SUPABASE_ACCESS_TOKEN|SUPABASE_SERVICE_ROLE_KEY|TRIGGER_ACCESS_TOKEN|TRIGGER_SECRET_KEY|TYPESAFE_API_KEY|ZAI_API_KEY|ARBITRARY_CALLER_SECRET)=' '$TMP/provider-env' && ! grep -q fake-foreign '$TMP/provider-args'"
 check 'Muse Code turn keeps Windows SystemDrive and strips unrelated caller variables' "cd '$REPO' && eval \"$ENV SystemDrive=C: LEAKY_TOKEN=leak-marker-7Q2Z '$SCRIPT' new systemdrive --prompt test\" >/dev/null && grep -Fxq 'SystemDrive=C:' '$TMP/provider-env' && ! grep -q 'LEAKY_TOKEN\|leak-marker-7Q2Z' '$TMP/provider-env'"
 check 'Git Bash SYSTEMDRIVE reaches the clean Muse Code turn as SystemDrive' "cd '$REPO' && eval \"$ENV SystemDrive= SYSTEMDRIVE=C: LEAKY_TOKEN=leak-marker-7Q2Z '$SCRIPT' new gitbash-systemdrive --prompt test\" >/dev/null && grep -Fxq 'SystemDrive=C:' '$TMP/provider-env' && ! grep -Eq '^(SYSTEMDRIVE|LEAKY_TOKEN)=' '$TMP/provider-env' && ! grep -q 'leak-marker-7Q2Z' '$TMP/provider-env'"
 check 'explicit SystemDrive takes precedence over Git Bash SYSTEMDRIVE' "cd '$REPO' && eval \"$ENV SystemDrive=D: SYSTEMDRIVE=C: '$SCRIPT' new systemdrive-precedence --prompt test\" >/dev/null && grep -Fxq 'SystemDrive=D:' '$TMP/provider-env' && ! grep -q '^SYSTEMDRIVE=' '$TMP/provider-env'"

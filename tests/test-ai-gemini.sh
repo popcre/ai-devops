@@ -62,7 +62,12 @@ if [[ "$args" == *"--input-format stream-json"* ]]; then
   stream_input="$(cat)"
   printf '%s' "$stream_input" | jq -r '.message.content[0].text' | wc -c > "$MOCK_STREAM_BYTES"
   [ "${MOCK_MODE:-normal}" != stream-mutate-protected ] || printf changed >> "$MOCK_PROTECTED/file.txt"
-  printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  [ "${MOCK_MODE:-normal}" != stream-foreign-scratch ] || { mkdir -p "$MOCK_PROTECTED/.scratch/other-session/__pycache__"; printf x > "$MOCK_PROTECTED/.scratch/other-session/__pycache__/m.pyc"; }
+  if [ -n "${MOCK_INIT_MODEL:-}" ]; then
+    jq -nc --arg m "$MOCK_INIT_MODEL" '{event:"init",conversation_id:"conv-good",init:{model:$m}}'
+  else
+    printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  fi
   if [ "${MOCK_MODE:-normal}" = stream-wrong-conversation ]; then
     printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-wrong","response":"## Verdict\nAPPROVE"}}'
   else
@@ -106,8 +111,7 @@ esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
 if [ "${MOCK_MODE:-normal}" = empty ]; then response=''; elif [ "${MOCK_MODE:-normal}" = badverdict ]; then response='## Verdict
-PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then response='Findings: none blocking in file.txt.
-VERDICT: APPROVE 1111111111111111111111111111111111111111'; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
+PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then gov_sha="$(printf '%s' "$args" | grep -oE 'VERDICT: APPROVE [0-9a-f]{40}' | head -1 | awk '{print $3}')"; response="$(printf 'Findings: none blocking in file.txt.\nVERDICT: APPROVE %s' "${gov_sha:-1111111111111111111111111111111111111111}")"; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
 APPROVE'; else response='## Verdict
 APPROVE'; fi
 if [ "${MOCK_MODE:-normal}" = denied ]; then printf '{"status":"SUCCESS","conversation_id":"%s","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}\n' "$cid"; exit 0; fi
@@ -139,10 +143,21 @@ check 'quarantine exposes only the governed live qualification path without over
 check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
 check 'doctor rejects unknown options instead of overstating a live check' "! '$SCRIPT' doctor --unknown"
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
+# #1427: generic pay-per-use keys never reach agy; only its subscription login.
+cat > "$TMP/bin/agy-envspy" <<EOF
+#!/usr/bin/env bash
+env >> "$TMP/agy-spy-env"
+exec "$TMP/bin/agy" "\$@"
+EOF
+chmod +x "$TMP/bin/agy-envspy"; rm -f "$TMP/agy-spy-env"
+GEMINI_API_KEY=fake-gem-1427 GOOGLE_API_KEY=fake-google-1427 AI_GEMINI_KEY=fake-aigem-1427 AI_GEMINI_BIN="$TMP/bin/agy-envspy" "$SCRIPT" doctor --identity >/dev/null 2>&1 || true
+check 'gemini_ignores_generic_api_keys' "test -s '$TMP/agy-spy-env' && ! grep -q 'fake-.*-1427' '$TMP/agy-spy-env'"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools/lib"
 cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
+cp "$ROOT/tools/reviewer_credit_stream.py" "$TMP/tools/"
+cp "$ROOT/bin/ai-process-supervisor" "$TMP/bin/"
 cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
@@ -248,7 +263,7 @@ R3E="$TMP/repo3e"; make_repo "$R3E"; export MOCK_PROTECTED="$R3E"
 check 'concurrent reviewer output (DeepSeek sessions, reports) during the turn is not source drift' "new_run '$R3E' concurrent-reviewers concurrent-reviewers | grep -q '^PASS'"
 R3F="$TMP/repo3f"; make_repo "$R3F"; export MOCK_PROTECTED="$R3F"
 check 'a real source edit alongside concurrent reviewer output is still rejected' "! new_run '$R3F' concurrent-source concurrent-reviewers-and-source"
-R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
+R3G="$TMP/repo3g"; make_repo "$R3G" no; export MOCK_PROTECTED="$R3G"
 check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
 R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
 check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
@@ -256,15 +271,16 @@ check 'tracked files inside the DeepSeek session directory remain protected' "! 
 # change during a review from the main checkout; they are not this source.
 R3I="$TMP/repo3i"; make_repo "$R3I"; mkdir -p "$R3I/.ai/wt/other" "$R3I/.ai/wt/plain"; git -C "$R3I/.ai/wt/other" init -q; printf a > "$R3I/.ai/wt/other/work.txt"; printf a > "$R3I/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3I"
 check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3I' protected-nested mutate-protected-nested"
-check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3I' protected-new-nested mutate-protected-new-nested"
-check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
+# #1433: wholly ignored, untracked directories are other sessions' scratch.
+check 'a new ignored nested checkout appearing is tolerated (foreign scratch)' "new_run '$R3I' protected-new-nested mutate-protected-new-nested"
+check 'foreign_scratch_write_accepted: an ignored plain folder changing is tolerated' "new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
 # 2026-09-24 (#795): another session's untracked root `.tmp-*` scratch changes during reviews.
 R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; git -C "$R3J" add .gitignore; git -C "$R3J" commit -qm ignore-tmp; printf a > "$R3J/.tmp-scratch.json"; mkdir -p "$R3J/sub"; printf a > "$R3J/sub/.tmp-deep"; printf a > "$R3J/.tmp-tracked.txt"; git -C "$R3J" add -f .tmp-tracked.txt; git -C "$R3J" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3J"
 check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
 check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
 check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
-GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
+GH="$(git -C "$RG" rev-parse HEAD)"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
 check 'governed mode emits the terminal verdict on standard output' "gov_run govok governed | tail -1 | grep -qx 'VERDICT: APPROVE $GH'"
 check 'governed mode rejects the non-governed heading verdict' "! gov_run govbad governed-heading"
@@ -287,7 +303,15 @@ set +e; (cd "$RLARGE" && MOCK_MODE=stream-wrong-conversation "$SCRIPT" new large
 check 'streamed result with a different conversation is refused' "test '$LARGE_WRONG_RC' -ne 0 && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
 check 'streamed conversation mismatch is not booked as missing-verdict' "test '$LARGE_WRONG_RC' -ne 81 && ! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/large-wrong.err'"
 export MOCK_PROTECTED="$RLARGE"
-check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
+# #1433: model identity from the main response; no separate /model call.
+printf '/.scratch/\n' >> "$RLARGE/.gitignore"; git -C "$RLARGE" add .gitignore; git -C "$RLARGE" commit -qm ignore-scratch
+export MOCK_PROTECTED="$RLARGE"
+BEFORE_MODEL_CALLS="$(grep -c ' /model ' "$MOCK_AGY_CALLS" || true)"; BEFORE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'model_from_main_response: streamed review completes from init model' "(cd '$RLARGE' && MOCK_INIT_MODEL=gemini-3.8-flash-high MOCK_MODE=stream-foreign-scratch '$SCRIPT' new init-model --prompt-file '$TMP/large-prompt.txt') | grep -q '^PASS'"
+check 'model_from_main_response: one provider call per review, no /model call' "test \"\$(grep -c ' /model ' '$MOCK_AGY_CALLS' || true)\" = '$BEFORE_MODEL_CALLS' && test \"\$(wc -l < '$MOCK_AGY_CALLS')\" -eq \$(( $BEFORE_CALLS + 1 ))"
+check 'foreign_scratch_write_accepted: another session writing ignored scratch during a streamed turn is not drift' "test -s '$RLARGE/.scratch/other-session/__pycache__/m.pyc' && jq -e '.status==\"COMPLETE\"' \"\$(meta_for init-model)\""
+check 'a wrong model named by the main response is rejected' "! (cd '$RLARGE' && MOCK_INIT_MODEL=gemini-wrong '$SCRIPT' new init-wrong --prompt-file '$TMP/large-prompt.txt')"
+check 'tracked_write_still_rejected: streamed tracked-source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
 STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
 check 'source-drift failure preserves raw stream evidence' "test -s '${STREAM_FAILURE%.json}.stream.ndjson'"
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
@@ -339,7 +363,7 @@ set +e; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" MOCK_CREDIT_FILE="$ROOT/tests/f
 check 'out of credit exits 92' "test '$GEMINI_CREDIT_RC' -eq 92"
 check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=gemini code=insufficient_quota' '$TMP/credit.err'"
 check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*ai.studio/projects' '$TMP/credit.err'"
-check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global gemini --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'out of credit records the capacity hold' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' capacity-status gemini --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check 'ordinary provider failure is not reported as out of credit' "! AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' new_run '$R4' plain-fail fail 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 check 'ordinary provider failure is not booked as missing-verdict' "! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/plain.err'"
 BAD_META="$(meta_for badverdict)"

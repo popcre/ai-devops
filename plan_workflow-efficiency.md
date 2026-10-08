@@ -2,15 +2,20 @@
 
 ## STATUS — read first
 
+> **Owner ruling, 2026-10-07 EDT:** completing one child, phase, measured
+> outcome or live proof never requires stopping. Continue the authorized scope
+> when actual dependencies, ownership, collision controls and safety gates allow.
+> Older per-session outcome limits and automatic phase cut points are revoked.
+
 Roadmap owner: [issue #650](https://github.com/popcre/ai-devops/issues/650), initially Codex chat `01a0bf5b-95b4-7363-8ee6-1322f3b81465` on `916-alien`. This is a planning deliverable, **not authorization to execute every row in one session**. The planning task is complete when these documents land; implementation remains open. No runtime repair is claimed by publication.
 
-Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Default first implementation is P1 under existing #633, after its short overlap/baseline check. Do not make a measurement platform a prerequisite. Re-read downstream phases before each phase; use `fresh-session` at natural cut points. Verify live state before treating the dated baseline as current.
+Fresh session: read sections 1, 8, 11, then claim the authorized work in section 9. Default first implementation is P1 under existing #633, after its short overlap/baseline check. Do not make a measurement platform a prerequisite. Re-read downstream phases before each phase and continue when actual dependencies, ownership and safety gates allow. Verify live state before treating the dated baseline as current.
 
 | Step | One independently accepted outcome | State, 2026-09-20 | Dependency / owner at dispatch | Evidence required for done |
 |---|---|---|---|---|
 | P0 | Reproducible delivery baseline and reconciled scope | open | Each implementer refreshes its own slice; #650 coordinates | Dated baseline and exact live source/run identities |
 | P1 | Gemini inventory is fast and byte-equivalent | open | Reuse #633; named implementation session claims before edits | Parity tests, large-tree timing, installed Gemini proof |
-| P2 | Other inventory consumers use the proven primitive | open | P1; one consumer outcome/session under #633 | Per-consumer tests and installed proof; no blanket completion |
+| P2 | Other inventory consumers use the proven primitive | open | P1; verify each authorized consumer under #633 | Per-consumer tests and installed proof; no blanket completion |
 | P3 | A known fast-validation failure stops expensive CI | code + unit truth table landed via A1; live negative + repaired successor on #1183 child 2 (runs `37003387555` / `37007389909`, PR #1226) | P0 slice; independent of P1 | Negative live run plus repaired run and aggregate results |
 | P4 | Dependency selector correctly predicts affected tests | landed via #805/#820 `18d30395`; shadow/complete-inventory acceptance still open | #650 coordinates remaining P4 gate | Complete-inventory checks and dependency/hostile-path fixtures beyond the unit suite |
 | P5 | PR checks use the proven selector on both platforms | PR activation landed via #805/#820 `18d30395`; live leaf `37004653826` (1 of 113) + complete backstop `37004696131` on #1183 child 2; merge queue stays full | P3 remaining + P4 acceptance | Representative narrowed one-file PR, injected dependency failure, complete backstop, p90 measure |
@@ -102,7 +107,7 @@ Live branch rules snapshot: one required `verification-closure` context, zero Gi
 - Rebuild Linux sharding, reviewer path filtering, or forward-target tolerance: already present at baseline.
 - Add a new global scheduler, monitoring service, evidence database, or universal provider abstraction: existing manifests, helpers and artifacts are sufficient initial homes.
 - Make fleet repair, every provider's qualification, or all old issues block one leaf improvement: each affected capability gets its own scoped acceptance and owner.
-- Make agents complete this whole roadmap in one session: violates the one-live-outcome rule and creates another weeks-long unfinished programme.
+- Treat roadmap publication as authorization for unrelated work: complete the owner's authorized scope, retaining per-outcome proof and actual gates.
 
 No implementation experiments were performed in the planning task. A Windows `.cmd` invocation split an API URL containing `&`; subsequent reads used Git Bash with quoted URL and redirected output. Do not mistake shell quoting failure for API failure or rerun verbose output into chat.
 
@@ -110,7 +115,7 @@ No implementation experiments were performed in the planning task. A Windows `.c
 
 **Locked:** preserve source/digest/merge-base integrity, private-data boundaries, reviewer containment, production authorization, recoverable destructive operations and genuine shared-runtime collision guards. Keep a stable aggregate check that rejects missing, cancelled and failed required evidence. Full default and scheduled testing remain available. Unknown dependency coverage cannot silently narrow.
 
-**Locked:** one current roadmap (#650), reused existing issue owners, one live outcome/session, one scoped installed proof for each changed capability. This publication changes prose only. No automatic approval of future gate weakening or production actions is implied.
+**Locked:** one current roadmap (#650), reused existing issue owners, authorized outcomes continued when actual gates allow, one scoped installed proof for each changed capability. This publication changes prose only. No automatic approval of future gate weakening or production actions is implied.
 
 **Locked:** local focused tests are development feedback; PR CI is authoritative relevant platform proof; merge-group validation protects a changed integration. Do not describe different trees as identical commits. Additional review stages need a distinct unresolved risk. Reviewer-safety gets one exact-head independent final review; ordinary prose does not buy a paid reviewer.
 

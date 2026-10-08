@@ -101,14 +101,22 @@ jobs:
   # merge queue, schedule, and manual runs keep the complete inventory, so
   # main's safety does not change. Unknown paths still select every suite.
   linux-offline-shard:
-    needs: [fast-classifier, manual-preflight, push-settle]
+    needs: [fast-classifier, manual-preflight, push-settle, runner-router]
     if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     strategy:
       # One failing section must never hide the other sections' results.
       fail-fast: false
+      # Sections 1-4 always. The router (pull requests only) may move one
+      # section per idle self-hosted Linux host (ai-devops-linux, e.g.
+      # edge-dev3-linux) off Blacksmith. merge_group, schedule and manual runs
+      # have no router output and no pull_request head, so they and any fork
+      # head always get the all-Blacksmith literal: merges never wait on one
+      # machine and foreign code never runs on ours.
       matrix:
-        shard: [1, 2, 3, 4]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+        include: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.linux_matrix || '[{"shard":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}, {"shard":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-ubuntu-2404"}]') }}
+    # The explicit name keeps the check names "linux-offline-shard (N)".
+    name: linux-offline-shard (${{ matrix.shard }})
+    runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 45
     env:
       SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
@@ -117,6 +125,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install offline test dependencies
+        if: ${{ matrix.lane == 'blacksmith' }}
         run: |
           # The runner image carries unrelated third-party feeds. A transient
           # Chrome index mismatch ejected this exact head from the merge queue
@@ -127,6 +136,22 @@ jobs:
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=-
           sudo apt-get install -y jq ripgrep shellcheck
+      - name: Verify self-hosted Linux test dependencies
+        # A self-hosted host has no passwordless sudo; it must already carry
+        # the tools the suites call. Fail loudly instead of passing by skipping.
+        if: ${{ matrix.lane != 'blacksmith' }}
+        run: |
+          missing=''
+          # Every tool a selected suite would otherwise skip without (python,
+          # ssh-keygen, pwsh, shellcheck) is required, so a skip never passes.
+          for tool in bash git jq rg node python python3 curl ssh-keygen pwsh shellcheck; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::self-hosted Linux runner is missing:$missing"
+            exit 1
+          fi
+          echo "Runner: $RUNNER_NAME"
       - name: Syntax
         if: ${{ matrix.shard == 1 }}
         run: |
@@ -248,17 +273,38 @@ jobs:
       contents: read
     outputs:
       windows_matrix: ${{ steps.route.outputs.windows_matrix }}
+      linux_matrix: ${{ steps.route.outputs.linux_matrix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          sparse-checkout: |
-            config/ci-runner-routing.json
-            tools/ci/runner-router.cjs
-          sparse-checkout-cone-mode: false
+          # Full history: the Linux eligibility step lists each section's
+          # selected suites against the pull request base, as the sections do.
+          fetch-depth: 0
+      - id: linux-eligible
+        # A self-hosted Linux host may take only a section that selects none of
+        # cfg.linux_unfit_suites (suites too slow on a busy desktop, e.g. the
+        # whole-/proc descriptor scan in test-ai-lock-doctor.sh). Any error
+        # leaves the list empty, so every Linux section stays on Blacksmith.
+        continue-on-error: true
+        env:
+          SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          unfit="$(jq -r '.linux_unfit_suites[]?' config/ci-runner-routing.json)"
+          shards="$(jq -r '.linux_shards' config/ci-runner-routing.json)"
+          eligible=''
+          for s in $(seq 1 "$shards"); do
+            list="$(bash tests/test-all.sh --changed-since "$SELECTION_BASE" --balanced --shard "$s/$shards" --list)" || continue
+            fit=true
+            for u in $unfit; do printf '%s\n' "$list" | grep -qxF "$u" && fit=false; done
+            [ "$fit" = true ] && eligible="$eligible${eligible:+,}$s"
+          done
+          echo "eligible Linux sections: ${eligible:-none}"
+          echo "shards=$eligible" >> "$GITHUB_OUTPUT"
       - id: route
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         env:
           POOL_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+          LINUX_ELIGIBLE_SHARDS: ${{ steps.linux-eligible.outputs.shards }}
         with:
           script: |
             const router = require(`${process.env.GITHUB_WORKSPACE}/tools/ci/runner-router.cjs`);
@@ -322,7 +368,7 @@ jobs:
       - name: Shorten TEMP on a reused self-hosted machine
         # The self-hosted profile puts TEMP deep enough that nested suite temp
         # trees cross the 260-char Windows path limit.
-        if: ${{ matrix.lane == 'qualified-self-hosted' }}
+        if: ${{ matrix.lane != 'blacksmith' }}
         shell: pwsh
         run: |
           $short = Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}'
@@ -336,7 +382,7 @@ jobs:
         run: |
           .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
-        if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
+        if: ${{ always() && matrix.lane != 'blacksmith' }}
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 

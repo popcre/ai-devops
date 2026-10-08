@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ai-codex-review — fail-closed, read-only Codex review of an exact source state.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap codex-review "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -284,7 +285,7 @@ set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
-printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
