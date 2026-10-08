@@ -641,6 +641,11 @@ ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_RE
 PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
 [ "$PH_RC" -eq 0 ] && [ "$(jq -r .report <<<"$PH_OUT")" = "$PH_REPORT" ] && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
   && ok "no_extra_reviewer_on_passed_head" || bad "no_extra_reviewer_on_passed_head"
+cp "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" "$TMP/ph-unscoped.json"
+jq '.evidence_scope="selected-code"|.code_only={paths:["README.md"]}' "$TMP/ph-unscoped.json" > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && [ "$PH_OUT" = null ] && ok "selected_code_pass_never_reuses_as_whole_repository_approval" || bad "selected_code_pass_never_reuses_as_whole_repository_approval"
+cp "$TMP/ph-unscoped.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 PH_OUT="$(ph diff-review 2>/dev/null)"; PH_RC=$?
 [ "$PH_RC" -eq 1 ] && [ "$PH_OUT" = null ] && ok "passed_head_other_mode_has_no_pass" || bad "passed_head_other_mode_has_no_pass"
 ph final-check --base HEAD >/dev/null 2>&1; PH_RC=$?

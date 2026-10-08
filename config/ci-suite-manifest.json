@@ -271,6 +271,10 @@
       ]
     },
     "companion_suites": {
+      "bin/ai-review*": ["test-ai-review-action-profile.sh"],
+      "bin/ai-task-gates": ["test-ai-review-action-profile.sh"],
+      "tools/review_action_profile.py": ["test-ai-review-action-profile.sh"],
+      "config/review-action-profiles.json": ["test-ai-review-action-profile.sh"],
       "bin/*.cmd": [
         "test-bin-cmd-launchers.sh"
       ]

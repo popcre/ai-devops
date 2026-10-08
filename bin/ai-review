@@ -3,7 +3,7 @@
 set -euo pipefail
 _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap review "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA] [--action-profile NAME --action-manifest PRIVATE_JSON]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -64,7 +64,7 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; additional_reviewer=0; wrapper_args=()
+implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; action_profile=""; action_manifest=""; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; additional_reviewer=0; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
@@ -82,6 +82,10 @@ while [ "$#" -gt 0 ]; do
       force_review=1; shift ;;
     --additional-reviewer)
       additional_reviewer=1; shift ;;
+    --action-profile|--action-manifest)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
+      case "$1" in --action-profile) action_profile="$2" ;; --action-manifest) action_manifest="$2" ;; esac
+      shift 2 ;;
     --code-only)
       [ "$code_only" -eq 0 ] || { usage >&2; exit 2; }
       code_only=1; shift ;;
@@ -104,6 +108,7 @@ if [ -n "$operation" ]; then
 fi
 # Only an explicit --operation reaches the wrappers; an inherited value never does.
 export AI_REVIEW_OPERATION="$operation"
+[ -z "$action_profile$action_manifest" ] || { [ "$code_only" -eq 1 ] && [ -n "$action_profile" ] && [ -f "$action_manifest" ] || { usage >&2; exit 2; }; }
 [ "$code_only" -eq 1 ] || { [ -z "$paths_file" ] || { usage >&2; exit 2; }; }
 if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
   # Ordinary DeepSeek reviews dispatch through the shared review runner's
@@ -267,6 +272,13 @@ tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" || { printf
 return_existing_pass
 sweep_orphans
 if [ "$code_only" -eq 1 ]; then
+  native_code_only=0
+  if python3 -c 'import os; raise SystemExit(0 if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)'; then native_code_only=1; fi
+  if [ -n "$action_profile" ] && ! python3 -c 'import os, sys; raise SystemExit(0 if sys.platform == "linux" and os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)'; then
+    printf 'ai-review: isolated action profile requires supported Linux custody; no export or reviewer was started.\n' >&2
+    exit 3
+  fi
+  umask 077
   # The private source never becomes a provider working directory. The exporter
   # admits only explicitly selected code and binds it to the full source state.
   source_head="$(git -C "$source_root" rev-parse HEAD 2>/dev/null)" || { printf 'ai-review: cannot resolve the source HEAD.\n' >&2; exit 3; }
@@ -283,8 +295,35 @@ if [ "$code_only" -eq 1 ]; then
     final-check) code_prompt='Perform a final correctness and security check of the exact selected code change. Use only the attached synthetic packet. State concrete findings with file and line evidence.' ;;
   esac
   code_prompt="$code_prompt Original source HEAD: $source_head. Synthetic review HEAD: $synthetic_head. Cite both identities in your findings."
+  if [ "$native_code_only" -eq 0 ]; then
+    printf 'ai-review: selected-code advisory review only on this platform; no original-source lifecycle or action authority.\n' >&2
+    result_file="$(mktemp)" || exit 3
+    if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file"; then provider_rc=0; else provider_rc=$?; fi
+    "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed; advisory verdict refused.\n' >&2; exit 3; }
+    if [ "$provider_rc" -ne 0 ]; then rm -f "$result_file"; exit "$provider_rc"; fi
+    grep -Fxq "VERDICT: APPROVE $synthetic_head" "$result_file" || { cat "$result_file"; rm -f "$result_file"; printf 'ai-review: selected-code advisory returned a non-approving verdict.\n' >&2; exit 3; }
+    cat "$result_file"; rm -f "$result_file"
+    exit 0
+  fi
+  lifecycle="$REAL_DIR/ai-review-lifecycle"
+  lifecycle_args=(begin --provider deepseek --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
+  [ -z "$action_profile" ] || lifecycle_args+=(--action-profile "$action_profile" --action-manifest "$action_manifest")
+  lifecycle_state="$("$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
+  if [ -n "$action_profile" ]; then
+    descriptor="$(jq -r .action_profile_binding.manifest_descriptor_sha256 "$lifecycle_state")"
+    code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated target dgmebpgczkrxykqqfjev schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
+  fi
+  lifecycle_started=$SECONDS
+  code_only_abort() {
+    "$lifecycle" fail --state "$lifecycle_state" --elapsed "$((SECONDS-lifecycle_started))" --failure incomplete-code-only-invocation >/dev/null 2>&1 || true
+  }
+  trap code_only_abort EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
-  if ( cd "$snapshot" && "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file"; then provider_rc=0; else provider_rc=$?; fi
+  error_file="$(mktemp)"
+  if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
+  cat "$error_file" >&2
   # DeepSeek retains its packet and transcript under this sanitized repository.
   # Keep it after dispatch, including a failed or stale response, for recovery.
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed during code-only review; verdict refused. Retained evidence: %s\n' "$snapshot" >&2; exit 3; }
@@ -293,8 +332,15 @@ if [ "$code_only" -eq 1 ]; then
     printf 'ai-review: reviewer did not return an authorizing verdict. Retained evidence: %s\n' "$snapshot" >&2
     exit "$provider_rc"
   fi
+  provider_session="$(sed -n 's/^SESSION_ID: //p' "$error_file")"
+  report_file="$snapshot/.ai-review-lifecycle/$tag/report.txt"
+  completion="$(python3 "$REAL_DIR/ai-review-code-only.py" lifecycle-proof "$lifecycle_state" "$provider_session" "$report_file" --publish "$result_file")" || { printf 'ai-review: native provider completion proof refused; verdict has no authority.\n' >&2; exit 3; }
+  terminal_state="$("$lifecycle" finish --state "$lifecycle_state" --provider-session "$provider_session" --verdict "$(jq -r .verdict <<<"$completion")" --report "$report_file" --elapsed "$((SECONDS-lifecycle_started))")" || exit 3
+  trap - EXIT INT TERM
+  jq -e '.status=="completed" and .stale==false and .verdict=="APPROVE"' <<<"$terminal_state" >/dev/null || { printf 'ai-review: completed review is non-authorizing.\n' >&2; exit 3; }
+  printf 'Original-source lifecycle report: %s\n' "$report_file" >&2
   cat "$result_file" || { rm -f "$result_file"; printf 'ai-review: could not publish verified review output.\n' >&2; exit 3; }
-  rm -f "$result_file"
+  rm -f "$result_file" "$error_file"
   exit 0
 fi
 exec "$wrapper" "${wrapper_args[@]}"

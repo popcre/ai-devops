@@ -64,6 +64,7 @@ usage: ai-task-gates <command> [options]
         [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install]
+        [--action-manifest-stdin --action-stage initial-forward|original-restoration]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
         --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
@@ -428,17 +429,22 @@ state_write(){
   local file; file="$(state_path)"
   mkdir -p "$STATE_DIR" || die "cannot create state directory: $STATE_DIR"
   chmod 0700 "$STATE_DIR" 2>/dev/null || true
-  printf '%s\n' "$1" > "$file.tmp" && mv -f "$file.tmp" "$file"
+  local temporary
+  temporary="$(umask 077; mktemp "$STATE_DIR/.task-state.XXXXXX")" || return 1
+  if printf '%s\n' "$1" > "$temporary" && mv -f "$temporary" "$file"; then return 0; fi
+  rm -f "$temporary"; return 1
 }
 
 state_record_override(){
   local kind="$1" action="$2" reason="$3" observed="$4" file
   file="$(state_path)"
   [ -f "$file" ] || return 0
-  jq --arg k "$kind" --arg a "$action" --arg r "$reason" --arg o "$observed" \
+  local row
+  row="$(jq --arg k "$kind" --arg a "$action" --arg r "$reason" --arg o "$observed" \
      --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.overrides = ((.overrides // []) + [{kind:$k,action:$a,reason:$r,observed_class:$o,at:$t}])' \
-     "$file" > "$file.tmp" && mv -f "$file.tmp" "$file"
+     "$file")" || return 1
+  state_write "$row"
 }
 
 # An approval is a reviewer report the lifecycle recorded as a completed,
@@ -448,7 +454,7 @@ state_record_override(){
 # code-only-review also accept plan-review, which is itself ungated.
 # Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE
 reviewer_approval_summary(){
-  local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row mode
+  local report="$1" action="$2" head="$3" worktree="$4" action_manifest_file="${5:-}" action_stage="${6:-initial-forward}" publish_admission="${7:-0}" identity key digest report_hash lifecycle_root state row mode
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
   report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
@@ -466,11 +472,21 @@ reviewer_approval_summary(){
       and ((.provider|ascii_downcase) != (.implementer_engine|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
   done
   [ -n "$row" ] || return 1
+  if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
+    [ "$action" = database ] && [ -n "$action_manifest_file" ] || return 1
+    jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
+    python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+  fi
+  [ -z "$action_manifest_file" ] || jq -e '.action_profile_binding!=null and .evidence_scope=="selected-code"' "$row" >/dev/null || return 1
   mode="$(jq -r '.review_mode // ""' "$row")"
   case "$action" in
     review|pr-wait|code-only-review) case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) return 1 ;; esac ;;
     *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
   esac
+  if [ "$publish_admission" = 1 ]; then
+    [ "$action" = database ] && [ -n "$action_manifest_file" ] || return 1
+    python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
+  fi
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
 }
@@ -872,9 +888,11 @@ toolkit_source_receipt(){
 cmd_check(){
   local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
-  local small_entry="" small_rows="" small_quote=""
+  local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
   while [ $# -gt 0 ]; do
     case "$1" in
+      --action-stage) need_value "$@"; action_stage="$2"; shift 2 ;;
+      --action-manifest-stdin) action_manifest_stdin=1; shift ;;
       --before) need_value "$@"; action="$2"; shift 2 ;;
       --acknowledge) need_value "$@"; acknowledge="$2"; shift 2 ;;
       --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
@@ -894,6 +912,14 @@ cmd_check(){
     [ -z "$small_rows$small_quote" ] || die '--row-count and --owner-quote need --small-owner-entry.'
   else
     [ -z "$reviewer_approval" ] || die '--small-owner-entry and --reviewer-approval are mutually exclusive.'
+  fi
+  case "$action_stage" in initial-forward) ;; original-restoration) [ "$action_manifest_stdin" -eq 1 ] || die 'restoration stage requires bounded action stdin.' ;; *) die 'unknown bounded action stage.' ;; esac
+  if [ "$action_manifest_stdin" -eq 1 ]; then
+    [ "$action" = database ] && [ -n "$reviewer_approval" ] && [ -z "$base$small_entry" ] || die 'bounded action stdin requires database, reviewer approval, and unchanged recorded task base.'
+    action_manifest_file="$(umask 077; mktemp)" || die 'cannot reserve private action stdin.'
+    trap 'rm -f "$action_manifest_file"' EXIT
+    head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
+    [ "$(wc -c < "$action_manifest_file")" -le 16777216 ] || die 'action stdin exceeds native bound.'
   fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
@@ -1101,9 +1127,19 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
       || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
-    state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
+    if [ "$action_manifest_stdin" -eq 1 ]; then
+      state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
+        && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+        || blocked 'ai-task-gates: STOP. Native reviewer receipt was not persisted; bounded action admission was not issued.'
+      local admission_summary
+      admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
+        || blocked 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
+      [ "$admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Bounded approval changed during native admission.'
+    else
+      state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
+    fi
     printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
     return 0
   fi

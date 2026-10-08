@@ -76,6 +76,30 @@ CLI reviewers lack a proven
 path-constrained read profile for private source, so this route refuses them.
 Ordinary and plan reviews of private source are refused before provider launch.
 The default private snapshot and packet routes also refuse private source.
+On a POSIX host with descriptor-based no-follow reads, this route starts a
+prospective original-source lifecycle before dispatch and retains the genuine
+final transcript bytes. Its selected-path scope is advisory: it cannot populate
+the whole-repository passed-head cache or authorize a live action. Other
+platforms retain the sealed selected-code advisory route without original-source
+lifecycle authority. No Windows operational acceptance is claimed.
+
+Issue #1531 adds one temporary installed profile, owned jointly with shared-db
+#770: `shared-db-770-isolated-timing-rehearsal-v1`. It requires supported Linux
+custody and refuses before export or provider dispatch elsewhere. The front door
+accepts its paired `--action-profile` and protected `--action-manifest`; native
+validation binds the complete installed code closure, truthful task declaration,
+all immutable input bytes, and the canonical operational descriptor. Only the
+seven explicit review-binding fields and verdict may change during binding.
+The reviewed consumer passes the exact dictionary using
+`--action-manifest-stdin`, never JSON arguments or environment variables.
+Initial-forward admission requires every declared output absent. The explicit
+`--action-stage original-restoration` requires the same native initial database
+receipt and immutable binding, and permits only the reviewed output leaves.
+These records establish eligibility only; production, credentials, application
+callbacks, and root action permission remain excluded. Retire the fixed profile
+when #770 delivery closes; adding another action requires its own reviewed
+configuration change.
+
 All registered reviewers may review an aggregate that has been checked for
 private content and written to a public repository worktree. Declare the public
 artifact's actual task class there and use the ordinary review route from that

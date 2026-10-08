@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -416,6 +417,160 @@ def clone_export(args):
     validate_snapshot(stage, record["original_head"])
 
 
+def private_read(path, limit=16 * 1024 * 1024, private=True):
+    """Read a bounded private regular inode through no-follow directory handles."""
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        fail("native proof requires supported no-follow filesystem reads")
+    path = Path(path).absolute()
+    if ".." in path.parts:
+        fail("unsafe evidence path")
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(descriptor, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_uid not in ((os.getuid(),) if private else (0, os.getuid())) or before.st_mode & (0o077 if private else 0o022) or before.st_size > limit:
+                fail("native evidence inode is not private and bounded")
+            content = stream.read(limit + 1)
+            after = os.fstat(stream.fileno())
+            if len(content) > limit or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                fail("native evidence changed during read")
+            return content
+    finally:
+        os.close(fd)
+
+
+def private_publish(stage, run_id, data):
+    if not re.fullmatch(r"code-only-[A-Za-z0-9-]+", run_id):
+        fail("invalid invocation report identity")
+    fd = os.open(stage, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in (".ai-review-lifecycle", run_id):
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+            info = os.fstat(fd)
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                fail("report parent is not private")
+        report_fd = os.open("report.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+        with os.fdopen(report_fd, "wb") as out:
+            out.write(data)
+    finally:
+        os.close(fd)
+
+
+def lifecycle_proof(args):
+    # This is prospective completion of an existing original-source invocation,
+    # never an import API. Identity is derived from the sealed export mapping.
+    state = json.loads(private_read(args.state))
+    if state.get("status") != ("completed" if args.completed else "running") or state.get("provider") != "deepseek":
+        fail("no running DeepSeek invocation")
+    if not state.get("implementer_engine") or state["implementer_engine"].lower() == "deepseek":
+        fail("independent implementer required")
+    stage = Path(state["code_only_export"]).resolve(strict=True)
+    record = validate_snapshot(stage, state["head"])
+    if record != state["code_only"] or record["source_digest"] != state["source_digest"]:
+        fail("prospective source binding changed")
+    source = json.loads(stage.with_name(stage.name + ".source.json").read_text())["source"]
+    if Path(source).resolve() != Path(state["repository_root"]).resolve():
+        fail("original repository mapping differs")
+    sid = args.session
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", sid):
+        fail("invalid native session")
+    if sid.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *("COM" + str(n) for n in range(1, 10)), *("LPT" + str(n) for n in range(1, 10))}:
+        fail("reserved native session")
+    sessions = stage / ".ai" / "deepseek-sessions"
+    for directory in (stage, stage / ".ai", sessions):
+        if directory.is_symlink() or not directory.is_dir() or directory.stat().st_uid != os.getuid() or directory.stat().st_mode & 0o022:
+            fail("native evidence directory is not privately owned")
+    def regular(path):
+        path = Path(path)
+        if path.is_symlink() or not path.is_file() or sessions.resolve() not in path.resolve().parents:
+            fail("native evidence outside owned session")
+        return private_read(path)
+    meta = json.loads(regular(sessions / (sid + ".meta.json")))
+    pending = sessions / (sid + ".pending")
+    intent_bytes = regular(pending / "intent.json")
+    intent = json.loads(intent_bytes)
+    if digest(intent_bytes) != regular(pending / "intent.sha256").decode().strip():
+        fail("native intent seal changed")
+    complete = json.loads(regular(pending / "complete.json"))
+    observed = json.loads(regular(pending / "observed.json"))
+    for evidence in (meta, intent):
+        if evidence.get("provider") != "deepseek" or evidence.get("model") != "deepseek-flash" or evidence.get("session_id") != sid or evidence.get("head") != record["export_head"] or evidence.get("governed_head") != record["export_head"] or Path(evidence.get("repository_root", "")).resolve() != stage or evidence.get("caller") != state["caller"]:
+            fail("native session identity differs")
+    if meta.get("schema_version") != 2 or intent.get("schema_version") != 1:
+        fail("native evidence schema differs")
+    if meta.get("status") != "complete" or meta.get("verdict_mode") != "governed" or meta.get("evidence_scope") not in ("attached-materials-only", "repository-read-tools") or not isinstance(meta.get("repository_access"), bool) or intent.get("repository_access") is not meta.get("repository_access") or intent.get("review") != 1 or intent.get("before_transcript_sha256") != "absent" or complete.get("state") != "complete" or complete.get("incomplete_reason"):
+        fail("native completion is not fresh synthetic-export review")
+    identity = meta.get("source_identity", {})
+    if identity.get("schema_version") != 1 or identity.get("head") != record["export_head"] or Path(identity.get("repository", "")).resolve() != stage or identity.get("code_only") != record:
+        fail("provider reviewed another export")
+    source_identity_file = Path(intent["source_identity_file"])
+    if json.loads(regular(source_identity_file)) != identity or digest(regular(str(source_identity_file) + ".files")) != intent.get("source_files_sha256"):
+        fail("native resolved source identity differs")
+    if digest(regular(pending / "messages.json")) != intent.get("request_sha256"):
+        fail("native request seal differs")
+    if digest(regular(sessions / (sid + ".attachments"))) != complete.get("ledger_sha256"):
+        fail("native completed attachment ledger differs")
+    transcript = regular(sessions / (sid + ".json"))
+    if digest(transcript) != complete.get("transcript_sha256"):
+        fail("native transcript changed")
+    response = regular(observed.get("response_path", ""))
+    if type(observed.get("transport_exit_code")) is not int or observed.get("transport_exit_code") != 0 or str(observed.get("http_status")) != "200" or digest(response) != observed.get("response_sha256"):
+        fail("native provider transport proof differs")
+    content = json.loads(response)["choices"][0]["message"]["content"]
+    if not isinstance(content, str) or not content.strip():
+        fail("native response has no final message")
+    messages = json.loads(transcript)
+    if messages[-1].get("role") != "assistant" or messages[-1].get("content") != content.rstrip("\n"):
+        fail("native final transcript differs from response")
+    if regular(pending / "reply.txt") != (content + "\n").encode():
+        fail("native final reply differs from response")
+    verdicts = re.findall(r"^VERDICT: (APPROVE|REVISE|REJECT|BLOCKED) " + re.escape(record["export_head"]) + r"\s*$", content, re.M)
+    if len(verdicts) != 1 or verdicts[0] != meta.get("verdict"):
+        fail("native governed verdict differs")
+    packet = Path(meta["source_packet_directory"])
+    expected_tag = "deepseek-" + digest(intent["source_identity_file"].encode())[:24]
+    if packet != sessions / (".ai-review-" + expected_tag) or intent.get("source_tag") != expected_tag or packet.is_symlink() or not packet.is_dir() or intent.get("source_packet") != str(packet) or intent.get("packet_sha256") != meta.get("packet_sha256"):
+        fail("native packet binding differs")
+    proc = subprocess.run([str(Path(__file__).with_name("ai-review-packet")), "verify", str(packet)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode or regular(packet / "MANIFEST.sha256").decode().strip() != meta["packet_sha256"] or json.loads(regular(packet / "identity.json")) != meta["source_identity"]:
+        fail("native packet verification refused")
+    if state.get("action_profile_binding"):
+        binding = state["action_profile_binding"]
+        expected_line = "Action scope: " + binding["profile"] + " descriptor sha256:" + binding["manifest_descriptor_sha256"] + "."
+        if verdicts[0] == "APPROVE" and content.splitlines().count(expected_line) != 1:
+            fail("native approval does not explicitly cover the exact bounded action")
+        action = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "tools/review_action_profile.py"), "finish", args.state, "--manifest", state["action_manifest"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE) if not args.completed else None
+        if not args.completed and action.returncode:
+            fail("bounded action changed during prospective review")
+    raw_final = content.encode("utf-8")
+    exact = messages[-1]["content"].encode("utf-8")
+    report = Path(args.report).absolute()
+    if report != stage / ".ai-review-lifecycle" / state["run_id"] / "report.txt":
+        fail("report is outside the owned invocation")
+    if args.publish:
+        if args.completed:
+            fail("completed native proof is read-only; publication is prospective only")
+        if report.is_symlink() or report.exists():
+            fail("report destination already exists")
+        if private_read(args.publish) != (content.rstrip("\n") + "\n").encode():
+            fail("provider stdout differs from actual final message")
+        private_publish(stage, state["run_id"], exact)
+    if report.is_symlink() or not report.is_file() or private_read(report) != exact:
+        fail("report bytes differ from actual final message")
+    print(json.dumps({"verdict": {"APPROVE": "APPROVE", "REVISE": "REJECT", "REJECT": "REJECT", "BLOCKED": "BLOCKED"}[verdicts[0]], "packet_dir": str(packet), "packet_sha256": meta["packet_sha256"], "response_sha256": observed["response_sha256"], "raw_final_message_sha256": digest(raw_final), "transcript_report_sha256": digest(exact), "session_id": sid}, sort_keys=True))
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -430,16 +585,24 @@ def main():
     verifier = sub.add_parser("verify")
     verifier.add_argument("stage")
     verifier.add_argument("--assert-head")
+    proof = sub.add_parser("lifecycle-proof")
+    proof.add_argument("state")
+    proof.add_argument("session")
+    proof.add_argument("report")
+    proof.add_argument("--publish")
+    proof.add_argument("--completed", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "create":
             create(args)
         elif args.command == "clone":
             clone_export(args)
+        elif args.command == "lifecycle-proof":
+            lifecycle_proof(args)
         else:
             record = validate_snapshot(Path(args.stage).resolve(strict=True), args.assert_head)
             print(json.dumps(record, sort_keys=True))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         print("ai-review-code-only: " + str(exc), file=sys.stderr)
         return 1
     return 0

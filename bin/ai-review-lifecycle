@@ -206,11 +206,16 @@ release_lock(){ # STATE
 
 begin(){
   local provider="" repo="" run="" session="" caller="" base="" mode=standard reviewer_approval="" identity key lock token state now preflight_rc=0 preflight_out row
+  local action_profile="" action_manifest="" action_binding=""
+  local export_root="" export_record="{}" gate_action=review preflight_repo=""
   local -a gate_args=()
   while [ "$#" -gt 0 ]; do case "$1" in
     --provider) provider="${2:-}"; shift 2;; --repo) repo="${2:-}"; shift 2;;
     --run-id) run="${2:-}"; shift 2;; --session-id) session="${2:-}"; shift 2;;
     --caller) caller="${2:-}"; shift 2;; --base) base="${2:-}"; shift 2;;
+    --action-profile) action_profile="${2:-}"; shift 2;;
+    --action-manifest) action_manifest="${2:-}"; shift 2;;
+    --code-only-export) export_root="${2:-}"; shift 2;;
     --reviewer-approval) reviewer_approval="${2:-}"; shift 2;;
     --preflight) mode="${2:-}"; shift 2;; *) die "unknown begin option: $1";; esac; done
   valid_provider "$provider" || die "unknown provider '$provider'."
@@ -219,6 +224,18 @@ begin(){
   [ -z "$session" ] || valid_id "$session" || die "--session-id is invalid."
   case "$mode" in standard|live) ;; none) [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die "preflight may be skipped only by hostile tests.";; *) die "--preflight must be standard or live.";; esac
   identity="$(identity_json "$repo")"; repo="$(jq -r .repository_root <<<"$identity")"
+  preflight_repo="$repo"
+  if [ -n "$export_root" ]; then
+    [ "$provider" = deepseek ] || die "code-only lifecycle requires DeepSeek."
+    case "${AI_REVIEW_GATE_MODE:-}" in diff-review|security-review|final-check) ;; *) die "code-only lifecycle requires a supported explicit review mode.";; esac
+    [ -n "${AI_REVIEW_IMPLEMENTER:-}" ] && [ "${AI_REVIEW_IMPLEMENTER,,}" != deepseek ] || die "code-only lifecycle requires an independent named implementer."
+    export_root="$(canon "$export_root")"
+    export_record="$(python3 "$REAL_DIR/ai-review-code-only.py" verify "$export_root" --assert-head "$(jq -r .head <<<"$identity")")" || die "code-only export binding refused."
+    [ "$(jq -r .source_digest <<<"$export_record")" = "$(jq -r .source_digest <<<"$identity")" ] || die "code-only source digest differs."
+    [ "$(jq -r .source <<<"$(cat "$export_root.source.json")")" = "$repo" ] || die "code-only original repository differs."
+    [ ! -e "$export_root/.ai/deepseek-sessions" ] || die "code-only export already has provider sessions; retrospective import refused."
+    gate_action=code-only-review; preflight_repo="$export_root"
+  fi
   # The task gate runs before the assignment lock, before any state file, and
   # before the provider preflight, so a review the change set does not call for
   # starts no process and spends no call.
@@ -229,7 +246,7 @@ begin(){
   if [ "${AI_REVIEW_GATE_MODE:-}" = plan-review ]; then
     : # a plan review decides what the work is; it cannot be gated on the work
   else
-  ( cd "$repo" && tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" )     || die "task gate refused this review; no lock, no state, and no provider call were created."
+  ( cd "$repo" && tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" )     || die "task gate refused this review; no lock, no state, and no provider call were created."
   fi
   key="$(sha "$(jq -r .normalized_upstream <<<"$identity")|$provider|$caller|$run")"
   lock="$STATE_DIR/locks/$key.lock"; token="$$-$(date +%s)-$RANDOM"
@@ -245,10 +262,21 @@ begin(){
   [ -z "$implementer" ] || valid_id "$implementer" || die "AI_REVIEW_IMPLEMENTER is invalid."
   row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" --arg rmode "$review_mode" --arg impl "$implementer" \
     '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,review_mode:(if $rmode=="" then null else $rmode end),implementer_engine:(if $impl=="" then null else $impl end),base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
+  row="$(jq --arg export "$export_root" --argjson binding "$export_record" 'if $export!="" then .code_only_export=$export|.code_only=$binding|.evidence_scope="selected-code" else . end' <<<"$row")"
   atomic_json "$state" "$row"
+  if [ -n "$action_profile$action_manifest" ]; then
+    [ -n "$action_profile" ] && [ -n "$action_manifest" ] && [ -n "$export_root" ] || die "action profile requires a protected manifest and code-only export."
+    action_binding="$(python3 "$REAL_DIR/../tools/review_action_profile.py" capture "$state" --profile "$action_profile" --manifest "$action_manifest")" || {
+      row="$(jq --arg now "$(date -u +%FT%TZ)" '.status="failed"|.verdict="BLOCKED"|.failure_class="bounded-action-capture-refused"|.finished_at=$now|.updated_at=$now' "$state")"
+      atomic_json "$state" "$row"; release_lock "$state"
+      die "bounded prospective action refused; no provider was dispatched."
+    }
+    row="$(jq --arg manifest "$action_manifest" --argjson binding "$action_binding" '.action_manifest=$manifest|.action_profile_binding=$binding' "$state")"
+    atomic_json "$state" "$row"
+  fi
   if [ "$mode" != none ]; then
-    local -a preflight_args=(check "$provider" "$repo")
-    [ -z "$base" ] || preflight_args+=(--base "$base")
+    local -a preflight_args=(check "$provider" "$preflight_repo")
+    if [ -n "$export_root" ]; then preflight_args+=(--base HEAD~1); else [ -z "$base" ] || preflight_args+=(--base "$base"); fi
     [ "$mode" != live ] || preflight_args+=(--live)
     preflight_out="$(mktemp)"
     set +e; "$PREFLIGHT" "${preflight_args[@]}" >"$preflight_out" 2>&1; preflight_rc=$?; set -e
@@ -280,11 +308,12 @@ report_substance(){ # FILE -> substantive character count
 
 terminal(){ # finish|fail args
   local operation="$1"; shift; local state="" verdict="" report="" elapsed="" failure="" current row report_sha="" stale=false scoreboard_rc=0 now
-  local packet_dir="" packet_sha256=""
+  local packet_dir="" packet_sha256="" provider_session="" proof=""
   while [ "$#" -gt 0 ]; do case "$1" in
     --state) state="${2:-}"; shift 2;; --verdict) verdict="${2:-}"; shift 2;;
     --report) report="${2:-}"; shift 2;; --elapsed) elapsed="${2:-}"; shift 2;;
     --failure) failure="${2:-}"; shift 2;;
+    --provider-session) provider_session="${2:-}"; shift 2;;
     --packet-dir) packet_dir="${2:-}"; shift 2;;
     --packet-sha256) packet_sha256="${2:-}"; shift 2;;
     *) die "unknown terminal option: $1";; esac; done
@@ -295,6 +324,12 @@ terminal(){ # finish|fail args
   fi
   if [ "$operation" = finish ]; then case "$verdict" in APPROVE|REJECT|BLOCKED) ;; *) die "finish requires APPROVE, REJECT, or BLOCKED.";; esac
   else verdict=BLOCKED; [ -n "$failure" ] || failure=provider-failed; fi
+  if [ "$operation" = finish ] && jq -e '.code_only_export!=null' "$state" >/dev/null; then
+    proof="$(python3 "$REAL_DIR/ai-review-code-only.py" lifecycle-proof "$state" "$provider_session" "$report")" || die "native code-only completion proof refused."
+    [ "$verdict" = "$(jq -r .verdict <<<"$proof")" ] || die "provider verdict differs from requested finish."
+    packet_dir="$(jq -r .packet_dir <<<"$proof")"; packet_sha256="$(jq -r .packet_sha256 <<<"$proof")"
+    row="$(jq --arg session "$provider_session" --argjson proof "$proof" '.session_id=$session|.code_only_completion=$proof' "$state")"; atomic_json "$state" "$row"
+  fi
   if [ -n "$report" ]; then [ -f "$report" ] && [ ! -L "$report" ] || die "report is not a regular file: $report"; report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; report_sha="$(sha256sum "$report"|cut -d' ' -f1)"; fi
   if [ "$operation" = finish ] && { [ "$verdict" = APPROVE ] || [ "$verdict" = REJECT ]; }; then
     if [ -z "$report" ]; then verdict=BLOCKED; failure=empty-report

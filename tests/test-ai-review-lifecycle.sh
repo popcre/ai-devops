@@ -224,6 +224,12 @@ REC_REPORT="$TMP/grok-plan-review-gate-recorded.md"
 check "a finished lifecycle APPROVE lifts the forbidden review for its exact head end to end" \
   "( cd '$GR' && AI_REVIEW_LIFECYCLE_DIR='$AI_REVIEW_LIFECYCLE_DIR' '$REPO_ROOT/bin/ai-task-gates' check --before review --reviewer-approval '$REC_REPORT' )"
 
+cp "$REC_STATE" "$TMP/unscoped-state-before"
+jq '.evidence_scope="selected-code"|.code_only={paths:["README.md"]}' "$TMP/unscoped-state-before" > "$REC_STATE"
+check "selected README scope cannot release generic whole-repository gate" \
+  "! ( cd '$GR' && AI_REVIEW_LIFECYCLE_DIR='$AI_REVIEW_LIFECYCLE_DIR' '$REPO_ROOT/bin/ai-task-gates' check --before review --reviewer-approval '$REC_REPORT' ) >/dev/null 2>&1"
+cp "$TMP/unscoped-state-before" "$REC_STATE"
+
 printf 'select 1;\n' > "$GR/migration.sql"
 GATE_OUT2="$(gated_begin gate-escalated 2>&1)"; GATE_RC2=$?
 check "work that outgrew its declared class refuses the review" "[ '$GATE_RC2' -ne 0 ]"
@@ -297,7 +303,7 @@ export AI_TEST_PRIVATE_EXPOSURE="$TMP/private-review-exposure"
 export AI_TEST_PRIVATE_SOURCE="$PRIVATE"
 PRIVATE_HEAD="$(git -C "$PRIVATE" rev-parse HEAD)"
 PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
-check "private code-only review reaches the provider through an exact export" "[ '$PRIVATE_RC' -eq 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
+check "private stub reaches an exact export but cannot create approval authority" "[ '$PRIVATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
 check "private export hides raw rows, untracked prompts, Git history, and source path" "[ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
 check "private review compares synthetic base and exact synthetic head" "grep -qx -- '--base' '$AI_TEST_PRIVATE_ARGS' && grep -qx 'HEAD~1' '$AI_TEST_PRIVATE_ARGS' && grep -qx -- '--assert-head' '$AI_TEST_PRIVATE_ARGS'"
 MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
@@ -351,7 +357,7 @@ synthetic_head="$(git rev-parse HEAD)"
 PY3="$(command -v python3 || command -v python)"
 "$PY3" - "$out" "$synthetic_head" <<'PY'
 import json, sys
-json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet.\nVERDICT: APPROVE " + sys.argv[2]}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
+json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet. The selected file contents match the supplied change, the synthetic baseline isolates exactly the approved path, no raw evidence or historical content is attached, and the checked source identity binds this review to the original source.\nVERDICT: APPROVE " + sys.argv[2] + "\n\n"}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
 PY
 printf 200
 EOF
@@ -359,7 +365,7 @@ chmod +x "$TMP/private-mock-bin/curl"
 DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
 DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
 NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
-[ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet' | tail -8)" >&2
+[ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet|code-only' | tail -8)" >&2
 check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
 check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"
 if [ -s "$DEEPSEEK_STUB_CWD" ]; then
@@ -367,6 +373,42 @@ if [ -s "$DEEPSEEK_STUB_CWD" ]; then
   NETWORK_SYNTHETIC_HEAD="$(git -C "$NETWORK_SNAPSHOT" rev-parse HEAD 2>/dev/null || true)"
   NETWORK_META="$(find "$NETWORK_SNAPSHOT/.ai/deepseek-sessions" -maxdepth 1 -name '*.meta.json' -print -quit 2>/dev/null)"
   check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
+  NETWORK_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -name '*.json' -exec jq -r --arg export "$NETWORK_SNAPSHOT" 'select(.code_only_export==$export and .status=="completed") | input_filename' {} \; | head -1)"
+  if [ -n "$NETWORK_STATE" ]; then
+    NETWORK_REPORT="$(jq -r .report_path "$NETWORK_STATE")"
+    NETWORK_SESSION="$(jq -r .session_id "$NETWORK_STATE")"
+    check "original lifecycle keeps selected scope and independent native identity" "jq -e --arg h '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' '.head==\$h and .code_only.original_head==\$h and .code_only.export_head==\$export and .code_only.paths==[\"src/loader.py\"] and .provider==\"deepseek\" and .implementer_engine==\"codex\" and .stale==false and .verdict==\"APPROVE\"' '$NETWORK_STATE' >/dev/null"
+    PROOF_STATE="$TMP/proof-state.json"
+    jq '.status="running"' "$NETWORK_STATE" > "$PROOF_STATE"
+    chmod 600 "$PROOF_STATE"
+    check "native proof verifies report bytes from the actual final message" "python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null"
+    printf 'foreign report' > "$TMP/foreign-report"
+    check "foreign report cannot inherit genuine native authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$TMP/foreign-report' >/dev/null 2>&1"
+    check "completed invocation cannot be replayed or backfilled" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$NETWORK_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+    check "old export with native sessions cannot start retrospective lifecycle" "! '$SCRIPT' begin --provider deepseek --repo '$PRIVATE' --run-id retrospective --caller codex --code-only-export '$NETWORK_SNAPSHOT' >/dev/null 2>&1"
+    cp "$NETWORK_META" "$TMP/native-meta-before"
+    for field in provider caller head governed_head; do
+      jq --arg field "$field" '.[$field]="foreign"' "$TMP/native-meta-before" > "$NETWORK_META"
+      check "native foreign $field refuses authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+    done
+    cp "$TMP/native-meta-before" "$NETWORK_META"
+    NETWORK_OBSERVED="$NETWORK_SNAPSHOT/.ai/deepseek-sessions/$NETWORK_SESSION.pending/observed.json"
+    cp "$NETWORK_OBSERVED" "$TMP/native-observed-before"
+    jq '.response_sha256="foreign"' "$TMP/native-observed-before" > "$NETWORK_OBSERVED"
+    check "altered native response seal cannot authorize a real verdict" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+    cp "$TMP/native-observed-before" "$NETWORK_OBSERVED"
+    chmod 644 "$NETWORK_META"
+    check "publicly readable native metadata refuses authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+    chmod 600 "$NETWORK_META"
+    mv "$NETWORK_REPORT" "$TMP/exact-report-before"
+    ln -s "$TMP/exact-report-before" "$NETWORK_REPORT"
+    check "symlinked genuine report cannot authorize the invocation" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+    rm "$NETWORK_REPORT"; mv "$TMP/exact-report-before" "$NETWORK_REPORT"
+    check "hidden session identifier refuses native proof" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '.hidden' '$NETWORK_REPORT' >/dev/null 2>&1"
+    check "reserved Windows session identifier refuses native proof" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' 'CON' '$NETWORK_REPORT' >/dev/null 2>&1"
+    printf 'drift after response\n' >> "$PRIVATE/evidence/raw.csv"
+    check "unselected original drift invalidates native completion" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
+  fi
 fi
 
 # --- packet identity on terminal finish (#1111, additive) ---------------------
