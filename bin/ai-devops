@@ -133,19 +133,27 @@ check_memory_and_schedule() {
 }
 
 check_provider_registry() {
-  local provider status line usable
+  local provider status line usable failure_class
   if have ai-review-preflight; then
     while IFS= read -r provider; do
       [ -n "$provider" ] || continue
       line="$(ai-review-preflight status "$provider" 2>/dev/null || true)"
+      if ! printf '%s' "$line" | jq -e 'type == "object" and (.status | type == "string" and length > 0) and (.usable | type == "boolean")' >/dev/null 2>&1; then
+        c_fail "review provider $provider status invalid"; FAILED=1; continue
+      fi
       status="$(printf '%s' "$line" | jq -r '.status' 2>/dev/null || echo invalid)"
       usable="$(printf '%s' "$line" | jq -r '.usable' 2>/dev/null || echo invalid)"
+      failure_class="$(printf '%s' "$line" | jq -r 'if (.failure_class | type) == "string" then .failure_class else "" end' 2>/dev/null || echo invalid)"
       case "$status:$usable" in
         installed-healthy:true) c_ok "review provider $provider is usable: healthy and in the reviewer registry" ;;
         installed-healthy:false) c_warn "review provider $provider is installed and healthy but not in the reviewer registry, so it cannot be assigned a review" ;;
-        quarantined:*) c_warn "review provider $provider registered but quarantined" ;;
-        unsupported-platform:*) c_ok "review provider $provider is not offered on this platform (Ubuntu/Linux only)" ;;
-        unknown:*) c_warn "review provider $provider live doctor unsupported" ;;
+        quarantined:false) c_warn "review provider $provider registered but quarantined" ;;
+        unsupported-platform:false) c_ok "review provider $provider is not offered on this platform (Ubuntu/Linux only)" ;;
+        unknown:false) c_warn "review provider $provider live doctor unsupported" ;;
+        capacity-held:false)
+          if [ -n "$failure_class" ] && [ "$failure_class" != invalid ]; then
+            c_warn "review provider $provider is unavailable because capacity is held ($failure_class)"
+          else c_fail "review provider $provider capacity-held status is malformed"; FAILED=1; fi ;;
         *) c_fail "review provider $provider status invalid"; FAILED=1 ;;
       esac
     done <<'EOF'
