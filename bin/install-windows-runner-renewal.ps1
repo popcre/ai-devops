@@ -142,11 +142,11 @@ function Get-RenewalTaskSnapshot {
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
-    action_count = @($task.Actions).Count
+    action_count = @($task.Actions | Where-Object { $null -ne $_ }).Count
     user_id = [string]$task.Principal.UserId
     logon_type = [string]$task.Principal.LogonType
     run_level = [string]$task.Principal.RunLevel
-    trigger_count = @($task.Triggers).Count
+    trigger_count = @($task.Triggers | Where-Object { $null -ne $_ }).Count
     startup_trigger = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' }).Count
     repetition_interval = [string](@($task.Triggers | Where-Object { $_.Repetition.Interval } | ForEach-Object { $_.Repetition.Interval }) | Select-Object -First 1)
     multiple_instances = [string]$task.Settings.MultipleInstances
@@ -207,7 +207,8 @@ function Assert-RenewalTaskContract {
   param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)][string]$ExpectedOperatorSid)
   $expectedInterval = 'PT{0}H' -f $script:RenewalIntervalHours
   if ($Task.action_count -ne 1 -or $Task.execute -cne $script:RenewalPowerShell -or $Task.arguments -cne (Get-RenewalTaskArguments)) { throw 'STALE_INSTALLATION: renewal task action drift.' }
-  if ($Task.user_id -cne $ExpectedOperatorSid -or $Task.logon_type -cne 'S4U' -or $Task.run_level -cne 'Limited') { throw 'STALE_INSTALLATION: renewal task principal drift.' }
+  $principalSid = try { Resolve-TaskIdentitySid -Identity ([string]$Task.user_id) } catch { '' }
+  if ($principalSid -cne $ExpectedOperatorSid -or $Task.logon_type -cne 'S4U' -or $Task.run_level -cne 'Limited') { throw 'STALE_INSTALLATION: renewal task principal drift.' }
   if ($Task.trigger_count -ne 2 -or $Task.startup_trigger -ne 1 -or $Task.repetition_interval -cne $expectedInterval) { throw 'STALE_INSTALLATION: renewal task schedule drift.' }
   if (-not $Task.enabled) { throw 'STALE_INSTALLATION: renewal task is disabled.' }
   if ($Task.multiple_instances -cne 'IgnoreNew' -or -not (Test-TaskDaclEquivalent -Actual ([string]$Task.sddl) -Expected (Get-RenewalTaskSddl -OperatorSid $ExpectedOperatorSid))) { throw 'STALE_INSTALLATION: renewal task settings or ACL drift.' }

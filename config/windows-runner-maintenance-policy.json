@@ -14,7 +14,7 @@
   "default_timeout_seconds": 180,
   "hard_timeout_seconds": 300,
   "payload_hashes": {
-    "windows-runner-maintenance-worker.ps1": "76466ceac5eef3dd29408bb18ee7b4f6d65e7f203ce34adf249ebe0a5f27a28f",
+    "windows-runner-maintenance-worker.ps1": "c763a9aff60f92ecca16be07ae7e1d43fc57bb608490eec0a74b59fa912f10f4",
     "launch-worker.bat": "02cccf7873d2b01b27665434600b89e5aae3fa27d106215e3cc09e2bbac32d92",
     "qualify-windows-runner.ps1": "172e1dac1d6de2407acef170b5f63332fb0bfa1e8db73e27b16d6ad2168ccaf7"
   }

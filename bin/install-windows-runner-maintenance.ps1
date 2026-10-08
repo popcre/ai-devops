@@ -308,11 +308,13 @@ function Get-InstalledTaskSnapshot {
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
-    action_count = @($task.Actions).Count
+    action_count = @($task.Actions | Where-Object { $null -ne $_ }).Count
     user_id = [string]$task.Principal.UserId
     logon_type = [string]$task.Principal.LogonType
     run_level = [string]$task.Principal.RunLevel
-    trigger_count = @($task.Triggers).Count
+    # @($null).Count is 1 in PowerShell: a triggerless task reports a null
+    # Triggers collection, so nulls are filtered before counting.
+    trigger_count = @($task.Triggers | Where-Object { $null -ne $_ }).Count
     multiple_instances = [string]$task.Settings.MultipleInstances
     sddl = $sddl
     state = [string]$task.State
@@ -384,7 +386,7 @@ function Test-MaintenanceInstallation {
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
   $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
-  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or -not (Test-TaskDaclEquivalent -Actual $task.sddl -Expected $expectedSddl)) { throw 'STALE_INSTALLATION: scheduled task drift.' }
+  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or (Resolve-TaskIdentitySid -Identity $task.user_id) -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or -not (Test-TaskDaclEquivalent -Actual $task.sddl -Expected $expectedSddl)) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
 }
 
