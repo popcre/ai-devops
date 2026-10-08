@@ -639,6 +639,20 @@ PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
   && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
 ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
+grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
+rm -f "$TMP/ph-pool-args"
+jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph_front --implementer codex >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"
+# Inherited Git locations must never aim the lookup at another tree: a victim
+# repository with no pass, pointed at the passing repo through GIT_DIR, must
+# still dispatch.
+VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; git -C "$VICTIM" init -q; git -C "$VICTIM" config user.name T; git -C "$VICTIM" config user.email t@example.com
+echo v > "$VICTIM/v"; git -C "$VICTIM" add v; git -C "$VICTIM" commit -qm v
+rm -f "$TMP/ph-pool-args"
+( cd "$VICTIM" && GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" \
+  AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
+! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1435,6 +1435,8 @@ passed_head() {
     esac
   done
   case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) die "unknown review mode '$mode'." ;; esac
+  # Inherited Git locations could aim every lookup below at another tree.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || { printf 'ai-review-preflight: passed-head: not a Git repository.\n' >&2; exit 3; }
   # The identity source is pinned; substituting it is a test hook only.
   lifecycle="$REGISTRY_REAL_DIR/ai-review-lifecycle"
