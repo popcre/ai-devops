@@ -22,7 +22,7 @@ part of Issue #335.
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | IN PROGRESS 2026-09-11 | Central repair #389 and Windows landed-source installation are complete; Ubuntu permission and private-memory health gates remain |
-| 2026-10-08 bounded repair | Independently approved DesignFlow source-release gate | OPEN; parent Codex owns #1490 | Read the appended bounded repair below; do not redo historic #335 rollout or bypass installed acceptance |
+| 2026-10-08 bounded repair | Exact DesignFlow source-release gate | PARTIAL/BLOCKED 2026-10-08; parent Codex owns #1490 | Source c396 final review REJECT at 7:48 AM EDT. Corrected mixed fixture7a53 exposes generic refusal gap (focused2 passed/1 failed); preserve failing regression. Full verification blocked by active local CI. Read appended closeout below; no installation/shipment acceptance. |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
 session, read this STATUS table and the newest matching OPEN handoff, and resume
