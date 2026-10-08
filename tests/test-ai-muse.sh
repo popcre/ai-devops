@@ -341,8 +341,9 @@ check 'HUP provider containment preserves an unrelated owned sibling' "kill -0 '
 check 'HUP stops the owned provider descendant before returning' "test '$MUSE_DESCENDANT_PID' -gt 0 && ! kill -0 '$MUSE_DESCENDANT_PID' 2>/dev/null"
 kill -TERM "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true; wait "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true
 rm -f "$TMP/muse-publish-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
-poll_worker_until "$MUSE_TARGET_PID" "$(budget 30 30)" 'the publication target was published' '[ -s "$TMP/muse-publish-target" ]' || true
+MUSE_TARGET_LOG="$TMP/muse-no-clobber-worker.log"
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >"$MUSE_TARGET_LOG" 2>&1) & MUSE_TARGET_PID=$!
+poll_worker_until "$MUSE_TARGET_PID" "$(budget 30 30)" 'the publication target was published' '[ -s "$TMP/muse-publish-target" ]' || { printf 'Muse no-clobber worker diagnostic:\n' >&2; cat "$MUSE_TARGET_LOG" >&2; }
 MUSE_TARGET="$(cat "$TMP/muse-publish-target" 2>/dev/null || true)"; printf owner-target > "$MUSE_TARGET"; MUSE_TARGET_RC=0; wait "$MUSE_TARGET_PID" || MUSE_TARGET_RC=$?
 check 'exact Muse report target creation is refused without overwrite' "test '$MUSE_TARGET_RC' -ne 0 && grep -qx owner-target '$MUSE_TARGET'"
 rm -f "$TMP/muse-late-target"
