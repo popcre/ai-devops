@@ -1665,7 +1665,9 @@ with event_lock(sys.argv[2]):
         self.write(row)
         events.require_report(self.root, "kimi", rid)
         sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
-        with self.assertRaisesRegex(events.Blocked, "still active"):
+        # Owner is dead and the run never finished, but with no recorded
+        # worker_pid the publisher cannot be proven gone — fail closed.
+        with self.assertRaisesRegex(events.Blocked, "still active|detached worker"):
             events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
         self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
 
@@ -1728,6 +1730,41 @@ with event_lock(sys.argv[2]):
         events.record_lost(self.root, "kimi", rid, sandbox, "worker job terminal, no report")
         self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
 
+    def test_async_submission_loss_allowed_when_worker_killed_without_finish(self):
+        """A SIGKILL'd worker that never finished is loss once every PID is dead."""
+        rid = "d5" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        # No finished row: the worker was killed before its EXIT trap ran.
+        (self.root / "evidence" / rid / "worker_pid").write_text("99999998\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker killed, report gone")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_worker_recorded_probe_guards_async_finish(self):
+        """worker-recorded is the guard's probe: skip finish only once a worker reserved."""
+        rid = "d6" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        import subprocess
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)}
+        missing = subprocess.run([sys.executable, tool, "worker-recorded", "kimi", rid], env=env,
+                                 capture_output=True, text=True)
+        self.assertEqual(missing.returncode, 1)
+        (root / "worker_pid").write_text("99999998\n")
+        present = subprocess.run([sys.executable, tool, "worker-recorded", "kimi", rid], env=env,
+                                 capture_output=True, text=True)
+        self.assertEqual(present.returncode, 0)
+        self.assertTrue(json.loads(present.stdout)["worker_recorded"])
+
     def test_codex_legacy_loss_allowed_when_no_report_exists(self):
         rid = "a2" + "0" * 30
         self._finished_lost_invocation("codex", rid)
@@ -1784,6 +1821,141 @@ with event_lock(sys.argv[2]):
                 del os.environ["AI_KIMI_STATE_DIR"]
             else:
                 os.environ["AI_KIMI_STATE_DIR"] = prior
+
+    def test_hidden_staging_file_refuses_loss(self):
+        """Hidden mktemp staging (no .md, leading dot) is recoverable — refuse loss."""
+        rid = "a7" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        # Production staging: mktemp "$REPORT_DIR/.codex-report.XXXXXX"
+        sandbox, _ = self._lost_sandbox("codex", name="hidden-stage",
+                                        reports=(".codex-report.Xf3Kq2",))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "hidden staging still on disk")
+
+    def test_log_failure_dump_refuses_loss(self):
+        """Codex failure dumps are .log files with the run_id in the name."""
+        rid = "a8" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        report = f"codex-final-check-failed-{rid}.log"
+        sandbox, _ = self._lost_sandbox("codex", name="log-dump", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "failure log still on disk")
+
+    def test_stale_suffix_move_refuses_loss(self):
+        """mv "$OUT" "$OUT.stale" keeps a recoverable report that is not a .md name."""
+        rid = "a9" + "0" * 30
+        self._finished_lost_invocation("muse", rid)
+        report = "muse-final-check-20261007T181703-576761-439.md.stale"
+        sandbox, _ = self._lost_sandbox("muse", name="stale-move", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "muse", sandbox, "stale-moved report still on disk")
+
+    def test_unreadable_review_dir_refuses_loss(self):
+        """An incomplete search must refuse loss, never report an empty candidate list."""
+        rid = "b1" + "0" * 30
+        self._finished_lost_invocation("gemini", rid)
+        sandbox, source = self._lost_sandbox("gemini", name="unreadable")
+        reviews = source / ".ai" / "reviews"
+        (reviews / "gemini-x-20260917T152549-99.md").write_text("maybe here\n")
+        # Python 3.13+ Path.rglob swallows nested filesystem errors, so the
+        # search walks with os.walk onerror. Drive that hook the way a real
+        # nested permission failure does — not a mocked top-level raise.
+        original_walk = os.walk
+
+        def walk_with_nested_error(top, *args, **kwargs):
+            onerror = kwargs.get("onerror")
+            yield from original_walk(top, *args, **kwargs)
+            if onerror is not None and Path(top) == reviews:
+                onerror(PermissionError(13, "nested directory is unreadable"))
+
+        with patch("reviewer_events.os.walk", walk_with_nested_error):
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "gemini", sandbox, "search cannot prove absence")
+
+    def test_kimi_default_state_jobs_refuse_loss_under_other_env(self):
+        """Reconciliation under a different AI_KIMI_STATE_DIR must still see the default tree."""
+        rid = "b3" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="alt-state")
+        fake_home = self.root / "fake-home"
+        report = (fake_home / ".local/state/ai-devops/kimi/jobs/rid/caller--canonical"
+                  / "review-20261007T120000Z-1.md")
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("# Kimi review — canonical\n")
+        # Point the live environment somewhere else entirely.
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "other-kimi-state")
+        try:
+            with patch.object(Path, "home", return_value=fake_home):
+                with self.assertRaises(events.Blocked):
+                    events.reconcile_lost(self.root, "kimi", sandbox, "report in default state tree")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
+
+    def test_kimi_recorded_report_root_refuses_loss_across_custom_states(self):
+        """A worker-recorded job dir is searched even when both env dirs differ from it."""
+        rid = "b4" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="recorded-root",
+                                             owner_line=f"evidence_owner=kimi:{rid}")
+        custom_a = self.root / "kimi-state-a" / "jobs" / "rid" / "caller--custom"
+        custom_a.mkdir(parents=True, exist_ok=True)
+        report = custom_a / "review-20261007T120000Z-2.md"
+        report.write_text("# Kimi review — custom A\n")
+        import subprocess
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)}
+        subprocess.check_call([sys.executable, tool, "note-report-root", "kimi", rid, str(custom_a)],
+                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "kimi-state-b")
+        try:
+            with patch.object(Path, "home", return_value=self.root / "other-home"):
+                with self.assertRaises(events.Blocked):
+                    events.reconcile_lost(self.root, "kimi", sandbox, "report in recorded custom root")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
+
+    def test_unreadable_recorded_report_root_refuses_loss(self):
+        """An unreadable report_search_roots file is an incomplete search, not an empty one."""
+        rid = "b5" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="unreadable-roots",
+                                             owner_line=f"evidence_owner=kimi:{rid}")
+        marker = self.root / "evidence" / rid / "report_search_roots"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(self.root / "somewhere") + "\n")
+        original_read = Path.read_text
+
+        def read_that_fails(self, *args, **kwargs):
+            if self.name == "report_search_roots":
+                raise PermissionError(13, "recorded roots are unreadable")
+            return original_read(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read_that_fails):
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "kimi", sandbox, "cannot read recorded roots")
+
+    def test_positive_ledger_references_refuse_loss(self):
+        """A finished row with evidence_references is publication proof."""
+        rid = "b2" + "0" * 30
+        row = {"schema_version": 1, "provider": "codex", "event": "started", "run_id": rid,
+               "repo": str(self.toolkit), "head": self.sha, "caller": "codex",
+               "timestamp": "2026-10-07T12:00:00+00:00"}
+        self.write(row)
+        events.require_report(self.root, "codex", rid)
+        self.write({**row, "event": "finished", "exit_code": 0,
+                    "evidence_references": [rid + "/" + ("a" * 64)]})
+        sandbox, _ = self._lost_sandbox("codex", name="positive-ledger")
+        with self.assertRaisesRegex(events.Blocked, "published evidence exists"):
+            events.record_lost(self.root, "codex", rid, sandbox, "ledger says published")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
 
 
 if __name__ == "__main__":

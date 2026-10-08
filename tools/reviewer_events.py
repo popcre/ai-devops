@@ -5,6 +5,7 @@ import contextlib
 import datetime
 import os
 import re
+import stat as stat_module
 from pathlib import Path
 import subprocess
 import sys
@@ -1059,45 +1060,140 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
 
-def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
-    """Reports this review could still have written; any one of them refuses a loss record.
+def _examined(path):
+    """stat() the path: None when it is truly missing, Blocked when it cannot be examined.
 
-    Production report names do not share one shape: glm/grok/qwen use
-    `{provider}-{name}-{key}.md`, gemini/muse/kimi embed the session name
-    under a caller-prefixed sandbox tag, and codex writes
-    `codex-{mode}-{ts-pid-random}.md` with no separate key. Keys are
-    timestamps, 24-character Qwen hashes, or 32/64-character digests.
-    Deriving the name from the sandbox tag therefore misses live reports
-    (false loss). Kimi also writes its canonical `review-<stamp>.md` into
-    the durable job directory outside `.ai/reviews` before optional
-    mirroring — a report still sitting there is as recoverable as a mirror.
-    Search every provider report that carries a timestamp or content-hash
-    key, the Kimi canonical location, and any that embeds the evidence
-    run_id — a sibling hit is a safe refusal, never a false loss.
+    Path.is_dir/is_file/exists can report False for inaccessible paths on
+    newer Pythons, which would turn an unreadable tree into a false loss.
+    FileNotFoundError means missing; every other OSError is an incomplete
+    search and must fail closed.
     """
-    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{24}|[0-9a-f]{32}|[0-9a-f]{64})"
-    patterns = [re.compile(re.escape(provider) + r"-.+" + key + r".*\.md")]
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise Blocked(f"report search cannot examine {path}; loss not recorded: {error}")
+
+
+def _report_search_roots(provider, source, directory=None, run_id=None):
+    """Every tree a provider may leave a recoverable report or staging file in."""
+    roots = [source / ".ai" / "reviews"]
     if provider == "kimi":
-        # Canonical artifact name from bin/ai-kimi render_review_artifact.
-        patterns.append(re.compile(r"review-" + key + r".*\.md"))
-    if run_id is not None:
-        patterns.append(re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md"))
+        # Canonical reports live under the Kimi state root. Search the current
+        # environment AND the default location: reconciliation may run under a
+        # different AI_KIMI_STATE_DIR than the review that wrote the report.
+        # Plus any root the worker itself recorded: a fully custom state dir
+        # is only discoverable from the run's own evidence.
+        default_state = Path.home() / ".local/state/ai-devops/kimi"
+        env_state = Path(os.environ.get("AI_KIMI_STATE_DIR") or default_state)
+        for state in (env_state, default_state):
+            jobs = state / "jobs"
+            if jobs not in roots:
+                roots.append(jobs)
+        # Sibling kimi state roots under the shared base (custom AI_KIMI_STATE_DIR
+        # values that still live next to the default). An unreadable base is an
+        # incomplete search — fail closed rather than inventing a loss.
+        base = Path.home() / ".local/state/ai-devops"
+        base_stat = _examined(base)
+        if base_stat is not None and stat_module.S_ISDIR(base_stat.st_mode):
+            try:
+                for child in base.iterdir():
+                    jobs = child / "jobs"
+                    if child.name.startswith("kimi") and jobs not in roots:
+                        jobs_stat = _examined(jobs)
+                        if jobs_stat is not None and stat_module.S_ISDIR(jobs_stat.st_mode):
+                            roots.append(jobs)
+            except OSError as error:
+                raise Blocked(f"report search cannot enumerate {base}; loss not recorded: {error}")
+        if run_id is not None:
+            event_dir = Path(directory) if directory is not None else (
+                Path(os.environ.get("AI_REVIEW_EVENT_DIR") or
+                     (Path.home() / ".local/state/ai-devops/reviewer-events")))
+            recorded = evidence_root(event_dir, run_id) / "report_search_roots"
+            recorded_stat = _examined(recorded)
+            if recorded_stat is not None and stat_module.S_ISREG(recorded_stat.st_mode):
+                try:
+                    for line in recorded.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if line:
+                            root = Path(line)
+                            if root not in roots:
+                                roots.append(root)
+                except OSError as error:
+                    raise Blocked(f"report search cannot read {recorded}; loss not recorded: {error}")
+    return roots
+
+
+def _recoverable_report_file(path, provider, run_id):
+    """True when this file could still be the review's report or staging.
+
+    Recovery shapes are not one suffix: final `.md` reports, `.log` failure
+    dumps, hidden mktemp staging (`.codex-report.XXXXXX`), `.stale` /
+    `.accounting-failed` moves, and `.incomplete` patches. Associate by
+    provider/run identity in the name or body — never by an extension
+    allowlist, which always misses the next shape. An unreadable body is
+    treated as recoverable so a permission edge cannot invent a loss.
+    """
+    name = path.name
+    if run_id is not None and run_id in name:
+        return True
+    if re.search(r"(?i)(?:^|[^a-z0-9])" + re.escape(provider) + r"(?:[^a-z0-9]|$)", name):
+        return True
+    if provider == "kimi" and name.startswith("review-"):
+        return True
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(65536)
+    except OSError:
+        return True
+    if run_id is not None and run_id.encode("utf-8") in head:
+        return True
+    if b"## Verdict" in head and provider.encode("utf-8") in head.lower():
+        return True
+    return False
+
+
+def lost_report_candidates(provider, sandbox, source, since=None, run_id=None, directory=None):
+    """Recoverable files this review could still have written; any one refuses a loss record.
+
+    Prefer positive publication evidence (evidence-store `*.report.json`)
+    over this negative search. When the search runs it must be exhaustive:
+    every regular file under the review and job trees, hidden entries and
+    non-`.md` names included. A sibling hit is a safe refusal, never a false
+    loss. An incomplete or unreadable walk refuses loss rather than reporting
+    an empty candidate list — Path.rglob swallows nested filesystem errors in
+    Python 3.13+, so walk with an onerror hook that fails closed.
+    """
     found = []
     def consider(path):
-        if since is not None and path.stat().st_mtime < since:
+        info = _examined(path)
+        if info is None:
             return
-        if any(p.fullmatch(path.name) for p in patterns):
+        if not stat_module.S_ISREG(info.st_mode):
+            return
+        if since is not None:
+            try:
+                if info.st_mtime < since:
+                    return
+            except OSError:
+                pass  # unstatable: cannot prove it is older than the invocation
+        if _recoverable_report_file(path, provider, run_id):
             found.append(path)
-    reviews = source / ".ai" / "reviews"
-    if reviews.is_dir():
-        for path in reviews.iterdir():
-            consider(path)
-    if provider == "kimi":
-        jobs = Path(os.environ.get("AI_KIMI_STATE_DIR") or
-                    (Path.home() / ".local/state/ai-devops/kimi")) / "jobs"
-        if jobs.is_dir():
-            for path in jobs.rglob("*"):
-                consider(path)
+    for root in _report_search_roots(provider, source, directory, run_id):
+        root_stat = _examined(root)
+        if root_stat is None:
+            continue
+        require(stat_module.S_ISDIR(root_stat.st_mode),
+                "report search root is not a directory; loss not recorded")
+        walk_errors = []
+        def on_walk_error(error):
+            walk_errors.append(error)
+        for dirpath, _dirnames, filenames in os.walk(root, onerror=on_walk_error):
+            for name in filenames:
+                consider(Path(dirpath) / name)
+        if walk_errors:
+            raise Blocked(f"report search incomplete under {root}; loss not recorded: {walk_errors[0]}")
     return sorted(found)
 
 
@@ -1166,11 +1262,14 @@ def record_lost(directory, provider, run_id, sandbox, reason):
                            for line in data.splitlines())
         if start.get("operation") == "async-submission":
             # A detached worker outlives the submitting supervisor (Kimi durable
-            # jobs). Supervisor death is not death of the publisher: the
-            # launcher's finish row is not proof the worker is gone. Refuse
-            # loss until the invocation is finished AND the detached worker is
-            # proven terminal (worker_pid dead or a terminal-job marker).
-            require(has_finished, "reviewer invocation is still active; loss not recorded")
+            # jobs). Supervisor death is not death of the publisher: a premature
+            # launcher finish is not proof the worker is gone. Refuse loss until
+            # the invocation is finished OR every recorded PID is dead, AND the
+            # detached worker is proven terminal (worker_pid dead or a
+            # terminal-job marker). Without that, a SIGKILL'd worker that never
+            # wrote its own finish row would be permanently unreconcilable.
+            require(has_finished or _proven_dead(directory, run_id, start),
+                    "reviewer invocation is still active; loss not recorded")
             require(_detached_worker_gone(directory, run_id),
                     "detached worker may still publish; loss not recorded")
         else:
@@ -1179,6 +1278,16 @@ def record_lost(directory, provider, run_id, sandbox, reason):
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
+    # Positive ledger publication also refuses loss: a finished row carrying
+    # evidence_references is proof the report was published, even if a receipt
+    # file were somehow missing from the evidence store.
+    _, lost_scan = snapshot(directory / "events.jsonl", "jsonl")
+    for line in lost_scan.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("run_id") == run_id and row.get("event") == "finished" and row.get("evidence_references"):
+            require(False, "published evidence exists; it is partial, not lost")
     require(not lost_blockers(root), "required patch or prepared evidence exists; loss not recorded")
     path = root / "evidence-lost.json"
     if not path.exists():
@@ -1203,7 +1312,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
     source = physical(lines[0])
     owners = [line.removeprefix("evidence_owner=") for line in lines if line.startswith("evidence_owner=")]
     if not owners:
-        found = lost_report_candidates(provider, sandbox, source)
+        found = lost_report_candidates(provider, sandbox, source, directory=directory)
         require(not found, "a report still exists; reconcile it with reconcile-sandbox: " + (str(found[0]) if found else ""))
         identity = {"provider": provider, "sandbox": sandbox.name, "marker_sha256": digest(marker_data), "report_state": "lost"}
         run_id = digest(encoded(identity))[:32]
@@ -1232,7 +1341,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
                 started = invocation(directory, provider, run_id)["timestamp"]
                 # A report older than the invocation belongs to an earlier turn, never to this one.
                 since = datetime.datetime.fromisoformat(started).timestamp() - 60
-                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id)
+                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id, directory=directory)
                 require(not found, "a report from this invocation may still exist; recover it: " + (str(found[0]) if found else ""))
                 record_lost(directory, provider, run_id, sandbox, reason)
     return {"sandbox": str(sandbox), "owners": owners, "report_state": "lost",
@@ -1424,6 +1533,23 @@ def main():
         root.mkdir(parents=True, exist_ok=True)
         (root / "worker_pid").write_text(str(worker_pid) + "\n")
         print(json.dumps({"run_id": sys.argv[3], "worker_pid": worker_pid}))
+    elif operation == "note-report-root":
+        # The worker records the exact directory its report will land in, so
+        # reconciliation can find a custom AI_KIMI_STATE_DIR tree without
+        # guessing. Missing this note only weakens the negative search; it
+        # never authorises a loss by itself.
+        require(len(sys.argv) == 5, "note-report-root requires provider, run_id and directory")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        marker = root / "report_search_roots"
+        prior_roots = []
+        if marker.is_file():
+            prior_roots = [line for line in marker.read_text(encoding="utf-8").splitlines() if line.strip()]
+        new_root = physical(sys.argv[4])
+        if str(new_root) not in prior_roots:
+            marker.write_text("\n".join(prior_roots + [str(new_root)]) + "\n")
+        print(json.dumps({"run_id": sys.argv[3], "report_search_root": str(new_root)}))
     elif operation == "note-worker-terminal":
         require(len(sys.argv) == 4, "note-worker-terminal requires provider and run_id")
         require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
@@ -1433,6 +1559,17 @@ def main():
         if not marker.exists():
             publish(marker, {"schema_version": 1, "run_id": sys.argv[3], "marked_at": now()})
         print(json.dumps({"run_id": sys.argv[3], "worker_terminal": True}))
+    elif operation == "worker-recorded":
+        # Guard probe: true when a detached worker reserved this invocation.
+        # The guard must not finish an async-submission while a worker can
+        # still publish — that finish would block publish-report (active=True)
+        # and record a false failure mid-review.
+        require(len(sys.argv) == 4, "worker-recorded requires provider and run_id")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        present = (root / "worker_pid").is_file() or (root / "worker_terminal").is_file()
+        print(json.dumps({"run_id": sys.argv[3], "worker_recorded": present}))
+        sys.exit(0 if present else 1)
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))

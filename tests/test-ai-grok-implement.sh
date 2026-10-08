@@ -115,6 +115,17 @@ grep -q 'made-by-grok' "$AI_GROK_STATE_DIR/implement/claude__ok1.d/changes.diff"
 grep -q 'grok-run' "$AI_GROK_STATE_DIR/implement/claude__ok1.d/changes.diff" \
   && bad "diff_excludes_wrapper_scratch" || ok "diff_excludes_wrapper_scratch"
 
+# --- 1b. paid key never reaches the run-mode child (owner: "remove the paid fallback")
+R1K="$TMP/r1k"; mkrepo "$R1K"; rm -f "$TMP/child.env"
+echo ok > "$TMP/mode"; : > "$TMP/argv.txt"
+XAI_API_KEY=xai-fixture-run GROK_CODE_XAI_API_KEY=xai-fixture-code GROK_API_KEY=xai-fixture-grok \
+  XAI_OTHER_FIXTURE=xai-fixture-other \
+  "$SCRIPT" run okkey --repo "$R1K" --prompt-file "$BRIEF" >"$TMP/out.okkey" 2>"$TMP/err.okkey"
+rc=$?
+[ "$rc" = 0 ] && [ -s "$TMP/child.env" ] && ! grep -qE '^(XAI_[A-Z_]*|GROK_API_KEY|GROK_CODE_XAI_API_KEY)=' "$TMP/child.env" \
+  && ok "run_child_never_sees_paid_key" || bad "run_child_never_sees_paid_key (rc=$rc)"
+grep -q 'xai-fixture' "$TMP/argv.txt" && bad "paid_key_never_in_argv" || ok "paid_key_never_in_argv"
+
 # --- 2. never passes --worktree ----------------------------------------------
 if grep -q -- '--worktree' "$TMP/argv.txt"; then
   bad "never_passes_worktree_flag"

@@ -1256,7 +1256,10 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
       || true
     return 1
   fi
-  trap - EXIT
+  # Keep the EXIT trap: it records the terminal evidence row (finish) that
+  # release must not clear. Clearing it here left every normal completion
+  # falsely unfinished. The trap's lock target is already the private release
+  # path (or empty), so it cannot delete a successor's public lock.
 }
 
 review_worker() { # JOB-DIR PROMPT-FILE
@@ -1272,7 +1275,10 @@ review_worker() { # JOB-DIR PROMPT-FILE
   # cleanup in the emergency EXIT path as well as each explicit terminal path.
   # Mark the detached job terminal before cleanup: after this point the worker
   # publishes nothing more, so loss reconciliation may treat it as gone.
-  trap 'reviewer_event_evidence note-worker-terminal kimi >/dev/null 2>&1 || true; cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
+  # The worker also records the terminal finish row: the launcher's guard
+  # deliberately does not finish an async-submission once a worker is recorded,
+  # because that finish would block publish-report and invent a false failure.
+  trap 'rc=$?; reviewer_event_evidence note-worker-terminal kimi >/dev/null 2>&1 || true; reviewer_event_evidence finish kimi "$rc" >/dev/null 2>&1 || true; cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
   sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2
@@ -1283,6 +1289,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
   # review would die after the command reported success.
   worker_evidence_pid="$$"; [ ! -r "/proc/$$/winpid" ] || worker_evidence_pid="$(cat /proc/$$/winpid)"
   reviewer_event_evidence note-worker kimi "$worker_evidence_pid" || exit 2
+  # Record the exact job directory so reconciliation can find this worker's
+  # canonical report even under a custom AI_KIMI_STATE_DIR.
+  reviewer_event_evidence note-report-root kimi "$dir" || exit 2
   reviewer_event_evidence require-report kimi || exit 2
   reviewer_event_evidence bind-sandbox kimi "$workdir" || exit 2
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
@@ -1455,10 +1464,14 @@ start_review_job() { # NAME [CONTINUE]
     # phase=starting first, then reserves note-worker/require-report,
     # then phase=running. Waiting for "not preflight" would return on
     # starting and race the reservation.
+    # A terminal phase is also a valid acknowledgement: the worker can
+    # finish or fail between one-second polls and must not be overwritten
+    # as worker-start-failed after it already recorded a real outcome.
     [ "$phase" = running ] && break
+    job_is_terminal "$dir/job.json" && break
     sleep 1; startup_waited=$((startup_waited+1))
   done
-  if [ "${phase:-preflight}" != running ]; then
+  if [ "${phase:-preflight}" != running ] && ! job_is_terminal "$dir/job.json"; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
     record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-ack-timeout --deadline-kind startup-timeout --cancellation-confirmation not-requested

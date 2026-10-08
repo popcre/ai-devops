@@ -5,6 +5,8 @@ Parent issue: https://github.com/popcre/ai-devops/issues/1464 (children: ai-devo
 
 ## STATUS
 
+**CANCELLED 2026-10-07 by owner** (chat, verbatim: "if it's just pennies, i don't really care"). Finding: ai-devops and shared-db are public, so their GitHub-hosted minutes are $0 and do not draw from the 2,000-minute included quota; only the private DesignFlow repos count (~2,100 Linux min Oct 1-7, a few dollars of overage at most). Moving public-repo jobs to Blacksmith would add cost. Nothing merged; all children closed not planned. Kept: 4 edge-dev3 runner slots each for ai-devops and shared-db. Unmerged report tool: PR #1469 branch. Do not resume without a new owner request.
+
 | Step | Status | Evidence |
 |------|--------|----------|
 | 0. Baseline measurement script + numbers | ⬜ open (2026-10-07) | — |
