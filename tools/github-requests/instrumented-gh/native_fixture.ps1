@@ -43,7 +43,7 @@ function Assert-BootstrapPrivateDirectory([string]$Path) {
     $ownerRead = $false
     foreach ($ace in $raw.DiscretionaryAcl) {
         if ($ace -isnot [Security.AccessControl.CommonAce] -or $ace.IsCallback -or
-            $ace.AceQualifier -ne 'AccessAllowed' -or ($ace.AceFlags -band [Security.AccessControl.AceFlags]::Inherited) -or
+            $ace.AceQualifier -ne 'AccessAllowed' -or (([int]$ace.AceFlags -band [int][Security.AccessControl.AceFlags]::Inherited)) -or
             $ace.SecurityIdentifier.Value -notin @($owner,'S-1-5-18','S-1-5-32-544') -or
             $ace.AccessMask -notin @(2032127,1179785,1179817)) { throw 'Unsafe compiler DACL refused' }
         if ($ace.SecurityIdentifier.Value -eq $owner -and ($ace.AccessMask -band 1179785) -eq 1179785) { $ownerRead = $true }
