@@ -60,5 +60,13 @@ check "idle Claude scratch with no owner record -> kept and reported" '[ -d "$AI
 check "Claude root kept while its scratch folder remains" '[ -d "$AI_SESSION_TMP_BASE/claude-$sid2" ]'
 check "Claude root of a removed scratch folder -> deleted" '[ ! -e "$AI_SESSION_TMP_BASE/claude-$sid" ]'
 
+sid5=aaaaaaaa-bbbb-cccc-dddd-222222222222
+mkdir -p "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5" "$work/forged"
+printf '{"pid":%s,"pid_start_ticks":"","engine":"t","session_id":"x","started_utc":"","started_epoch":%s,"cwd":"/"}\n' "$dead" "$old" > "$work/forged/owner.json"
+ln -s "$work/forged" "$AI_SESSION_TMP_BASE/claude-$sid5"
+touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5"
+bash "$sweep" >/dev/null
+check "symlinked Claude root is not accepted as an owner record" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5" ]'
+
 kill "$live" 2>/dev/null
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

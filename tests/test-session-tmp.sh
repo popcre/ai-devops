@@ -116,8 +116,13 @@ printf '{"session_id":"11111111-2222-3333-4444-555555555555"}' | CLAUDE_ENV_FILE
 hr="$AI_SESSION_TMP_BASE/claude-11111111-2222-3333-4444-555555555555"
 check "hook start creates the session root" '[ -f "$hr/owner.json" ]'
 check "hook start exports TMPDIR via CLAUDE_ENV_FILE" 'grep -q "export TMPDIR=$hr" "$envf"'
+export AI_SESSION_TMP_CLAUDE_DIR="$work/claude-tmp"
+mkdir -p "$AI_SESSION_TMP_CLAUDE_DIR/proj/11111111-2222-3333-4444-555555555555/scratchpad" \
+  "$AI_SESSION_TMP_CLAUDE_DIR/proj/11111111-2222-3333-4444-666666666666"
 printf '{"session_id":"11111111-2222-3333-4444-555555555555"}' | bash "$hook" end
 check "hook end removes the session root" '[ ! -e "$hr" ]'
+check "hook end removes the session's Claude scratch folder" '[ ! -e "$AI_SESSION_TMP_CLAUDE_DIR/proj/11111111-2222-3333-4444-555555555555" ]'
+check "hook end leaves other sessions' scratch folders" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/11111111-2222-3333-4444-666666666666" ]'
 printf 'not json' | bash "$hook" start; check "hook never fails on bad input" '[ $? -eq 0 ]'
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
