@@ -115,6 +115,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   jq -n --argjson schema "$version" --arg source_sha "$source_sha" --arg applied_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{schema:$schema,source_sha:$source_sha,applied_at:$applied_at}' > "$state_tmp" || exit 1
   jq -e '.schema and .source_sha and .applied_at' "$state_tmp" >/dev/null || exit 1
+  chmod 0644 "$state_tmp" || { rm -f "$state_tmp"; exit 1; }
   mv -f "$state_tmp" "$CONFIG_DIR/config-state.json" || exit 1
 fi
 echo "CONFIG OK: schema=$version source=$source_sha changed=$changed dry_run=$DRY_RUN"

@@ -46,7 +46,11 @@ cat > "$TMP/bin/ai-review-preflight" <<'EOF'
 #!/usr/bin/env bash
 provider="${2:-unknown}"
 if [ "$provider" = glm ]; then
-  printf '{"provider":"glm","status":"quarantined","failure_class":"allowance-exhausted","usable":false}\n'
+  if [ -n "${AI_DOCTOR_TEST_PROVIDER_RESPONSE:-}" ]; then
+    printf '%s\n' "$AI_DOCTOR_TEST_PROVIDER_RESPONSE"
+  else
+    printf '{"provider":"glm","status":"capacity-held","failure_class":"out-of-credit","usable":false}\n'
+  fi
 else
   printf '{"provider":"%s","status":"installed-healthy","usable":true}\n' "$provider"
 fi
@@ -56,5 +60,14 @@ PATH="$TMP/bin:$PATH"
 FAILED=0
 check_provider_registry > "$TMP/provider-registry.out"
 [ "$FAILED" -eq 0 ] || { echo 'FAIL: active provider quarantine failed doctor'; exit 1; }
-grep -q 'review provider glm registered but quarantined' "$TMP/provider-registry.out" || { echo 'FAIL: active provider quarantine was not reported'; exit 1; }
+grep -q 'review provider glm is unavailable because capacity is held (out-of-credit)' "$TMP/provider-registry.out" || { echo 'FAIL: capacity hold was not reported as an availability warning'; exit 1; }
+AI_DOCTOR_TEST_PROVIDER_RESPONSE='{"provider":"glm","status":"unknown","usable":false}'
+export AI_DOCTOR_TEST_PROVIDER_RESPONSE
+FAILED=0; check_provider_registry > "$TMP/provider-unknown.out"
+[ "$FAILED" -eq 1 ] || { echo 'FAIL: unknown provider status passed doctor'; exit 1; }
+grep -q 'review provider glm status invalid' "$TMP/provider-unknown.out" || { echo 'FAIL: unknown provider status was not reported'; exit 1; }
+AI_DOCTOR_TEST_PROVIDER_RESPONSE='not-json'
+FAILED=0; check_provider_registry > "$TMP/provider-malformed.out"
+[ "$FAILED" -eq 1 ] || { echo 'FAIL: malformed provider status passed doctor'; exit 1; }
+unset AI_DOCTOR_TEST_PROVIDER_RESPONSE
 echo 'PASS: doctor proves source/schema/manifest and covers Node, memory, schedule, and every reviewer provider'

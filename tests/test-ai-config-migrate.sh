@@ -5,22 +5,31 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 CFG="$TMP/etc"; mkdir -p "$CFG"
 cp "$ROOT/config/models.env.example" "$CFG/models.env"
 cp "$ROOT/config/server.env.example" "$CFG/server.env"
+chmod 600 "$CFG/models.env" "$CFG/server.env"
 sed -i '/^CODEX_TEST_CMD=/d' "$CFG/models.env"
 sed -i "s#^CODEX_CMD=.*#CODEX_CMD='codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'#" "$CFG/models.env"
 sed -i "s#^CLAUDE_REVIEW_CMD=.*#CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'#" "$CFG/models.env"
 sed -i 's#^OWNER_NAME=.*#OWNER_NAME="Custom Owner"#' "$CFG/server.env"
+server_hash_before="$(sha256sum "$CFG/server.env" | cut -d' ' -f1)"
 FIXED_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 bash "$ROOT/bin/ai-config-migrate" --repo-root "$ROOT" --config-dir "$CFG" --dry-run >/dev/null
 ! grep -q '^CODEX_TEST_CMD=' "$CFG/models.env" || { echo 'FAIL: dry run changed config'; exit 1; }
 ! grep -q 'CODEX_CMD=.*gpt-5.6-sol' "$CFG/models.env" || { echo 'FAIL: dry run replaced config'; exit 1; }
 ! grep -q 'CLAUDE_REVIEW_CMD=.*--effort low' "$CFG/models.env" || { echo 'FAIL: dry run replaced Claude effort'; exit 1; }
+umask 077
 bash "$ROOT/bin/ai-config-migrate" --repo-root "$ROOT" --config-dir "$CFG" --source-sha "$FIXED_SHA" >/dev/null
+umask 022
 grep -q '^CODEX_TEST_CMD=' "$CFG/models.env" || { echo 'FAIL: missing default not added'; exit 1; }
 grep -q "^CODEX_CMD='codex exec -m gpt-5.6-sol" "$CFG/models.env" || { echo 'FAIL: known old default not upgraded'; exit 1; }
 grep -q "^CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort low " "$CFG/models.env" || { echo 'FAIL: old --effort high default not upgraded'; exit 1; }
 grep -q '^OWNER_NAME="Custom Owner"' "$CFG/server.env" || { echo 'FAIL: user value overwritten'; exit 1; }
 jq -e --arg sha "$FIXED_SHA" '.schema == 2 and .source_sha == $sha' "$CFG/config-state.json" >/dev/null || { echo 'FAIL: exact source state missing'; exit 1; }
+jq -e 'keys == ["applied_at","schema","source_sha"] and (.applied_at|type=="string")' "$CFG/config-state.json" >/dev/null || { echo 'FAIL: migration metadata schema changed'; exit 1; }
+[[ "$(stat -c '%a' "$CFG/config-state.json")" = 644 && -r "$CFG/config-state.json" ]] || { echo 'FAIL: migration metadata is not readable with mode 0644'; exit 1; }
+[[ "$(stat -c '%a' "$CFG/models.env")" = 600 && "$(stat -c '%a' "$CFG/server.env")" = 600 ]] || { echo 'FAIL: secret config permissions changed'; exit 1; }
+[[ "$(stat -c '%a' "$CFG/backups/schema-2-"*/models.env)" = 600 ]] || { echo 'FAIL: secret config backup permissions changed'; exit 1; }
+[[ "$(sha256sum "$CFG/server.env" | cut -d' ' -f1)" = "$server_hash_before" ]] || { echo 'FAIL: secret config content changed'; exit 1; }
 find "$CFG/backups" -type f -name models.env | grep -q . || { echo 'FAIL: backup missing'; exit 1; }
 
 cp "$CFG/models.env" "$TMP/before"
