@@ -414,7 +414,8 @@ main() {
     # the whole turn with no report, so the turn runs in RPC mode and the door
     # declines every such question: the model is told no and keeps reviewing.
     # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
-    # pause, as bin/ai-stepfun does.
+    # pause, as bin/ai-stepfun does. Implementation turns are never re-run
+    # blindly: a partial edit in the writable clone must not be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
@@ -423,6 +424,7 @@ main() {
       sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
+      [ "$MODE" = review ] || break
       grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
       rate_retries=$((rate_retries + 1))
       printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
