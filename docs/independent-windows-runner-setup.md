@@ -334,6 +334,39 @@ and runtime records under an administrator-owned directory, and leaves existing
 requests, results, audit, and replay records in place. Verify the installation
 and refresh the security evidence before full GitHub qualification.
 
+### Automatic renewal of the security evidence
+
+CI jobs refuse evidence older than 24 hours ("Administrator security preflight
+evidence is not fresh."). Issue #1312 keeps it fresh without a human by adding
+one unprivileged sibling task, `\AiDevOps\WindowsRunnerQualificationRenewal`,
+on top of the #262 boundary above. It adds no elevation path:
+
+- It runs as the operator's own S4U token at run level **Limited** (never
+  `Highest`), five minutes after startup and every 8 hours, and only calls the
+  unchanged #262 client for `refresh-qualification`. The elevated work is still
+  done only by the hash-pinned `\AiDevOps\WindowsRunnerMaintenance` task, which
+  keeps its no-trigger contract.
+- Every guard is unchanged, so a host whose TPM disappeared after a restart
+  (`Get-Tpm` `TpmPresent=False`) still FAILS and the existing evidence is left
+  untouched; the next 8-hour run retries.
+- Each run writes `C:\ProgramData\ai-devops\windows-runner-renewal\last-run.json`;
+  every non-`SUCCESS` run (including `SUCCESS` whose evidence is not then fresh,
+  recorded as `EVIDENCE_NOT_REFRESHED`) is also appended to `failures.jsonl` in
+  the same folder (bounded at 1 MiB, one rotation). The directory is readable by
+  every local user; the task's Last Run Result is non-zero on failure, and the
+  #262 `audit.jsonl` keeps its own record.
+
+Install only after the maintenance installation verifies, from an elevated
+checkout of current `main`; `-Verify` (elevated) re-verifies both layers and
+`-Remove` removes the task and payload but keeps the failure history:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-renewal.ps1 -Install -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\install-windows-runner-renewal.ps1 -Verify -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+Offline tests: `pwsh -NoProfile -File tests/test-windows-runner-renewal.ps1`.
+
 Restart the service after any machine-wide package or PATH change:
 
 ```powershell
