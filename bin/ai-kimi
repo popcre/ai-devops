@@ -1248,7 +1248,10 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
       || true
     return 1
   fi
-  trap - EXIT
+  # Keep the EXIT trap: it records the terminal evidence row (finish) that
+  # release must not clear. Clearing it here left every normal completion
+  # falsely unfinished. The trap's lock target is already the private release
+  # path (or empty), so it cannot delete a successor's public lock.
 }
 
 review_worker() { # JOB-DIR PROMPT-FILE
