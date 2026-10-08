@@ -43,13 +43,22 @@ bash "$sweep" --max 3 >/dev/null
 check "cap honoured" '[ "$(ls -d "$AI_SESSION_TMP_BASE"/t-cap-* 2>/dev/null | wc -l)" = 2 ]'
 
 sid=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee sid2=aaaaaaaa-bbbb-cccc-dddd-ffffffffffff
-mkdir -p "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid2" "$AI_SESSION_TMP_CLAUDE_PROJECTS/proj"
-touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid2"
-touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_PROJECTS/proj/$sid.jsonl"
+sid3=aaaaaaaa-bbbb-cccc-dddd-000000000000 sid4=aaaaaaaa-bbbb-cccc-dddd-111111111111
+for s_ in "$sid" "$sid2" "$sid3" "$sid4"; do mkdir -p "$AI_SESSION_TMP_CLAUDE_DIR/proj/$s_"; done
+mkdir -p "$AI_SESSION_TMP_CLAUDE_PROJECTS/proj"
+mk "claude-$sid" "$dead" "$old"; mk "claude-$sid2" "$dead" "$old"
+mk "claude-$sid3" "$live" "$old" "$(awk '{print $22}' /proc/$live/stat)"
+for s_ in "$sid" "$sid2" "$sid3" "$sid4"; do
+  touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$s_" "$AI_SESSION_TMP_CLAUDE_PROJECTS/proj/$s_.jsonl"
+done
 touch "$AI_SESSION_TMP_CLAUDE_PROJECTS/proj/$sid2.jsonl"
-bash "$sweep" >/dev/null
-check "idle Claude scratch folder -> deleted" '[ ! -e "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid" ]'
-check "active Claude session scratch -> kept" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid2" ]'
+out="$(bash "$sweep")"
+check "dead owner + idle Claude scratch folder -> deleted" '[ ! -e "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid" ]'
+check "recently active Claude session scratch -> kept" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid2" ]'
+check "idle but live-owner Claude scratch -> kept (inactivity is not death)" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid3" ]'
+check "idle Claude scratch with no owner record -> kept and reported" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid4" ] && grep -q "$sid4 (no owner record)" <<<"$out"'
+check "Claude root kept while its scratch folder remains" '[ -d "$AI_SESSION_TMP_BASE/claude-$sid2" ]'
+check "Claude root of a removed scratch folder -> deleted" '[ ! -e "$AI_SESSION_TMP_BASE/claude-$sid" ]'
 
 kill "$live" 2>/dev/null
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

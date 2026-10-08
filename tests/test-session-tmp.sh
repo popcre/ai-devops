@@ -81,6 +81,34 @@ out="$(bash -c ". \"$lib\"; ai_session_tmp_wrap cap; echo done")"
 check "command substitution does not wait on the watcher" '[ "$out" = done ]'
 check "AI_SESSION_TMP=0 disables" 'AI_SESSION_TMP=0 bash -c ". \"$lib\"; ai_session_tmp_begin a b; [ -z \"\${AI_SESSION_TMP_ROOT:-}\" ]"'
 
+echo "== Kimi detached review worker"
+# The worker outlives the launcher; it must get a root that lives until it exits.
+sed -n '/^launch_review_worker() {/,/^}/p' "$root_dir/bin/ai-kimi" > "$work/launch.sh"
+cat > "$work/kworker.sh" <<'KW'
+. "$LIB"; ai_session_tmp_wrap kimi
+[ "$1" = __review-worker ] || exit 2
+echo "worker=$TMPDIR" >> "$KLOG"; echo x > "$TMPDIR/w"
+while [ ! -e "$KSTOP" ]; do sleep 0.2; done
+[ -f "$TMPDIR/w" ] && echo worker-root-intact >> "$KLOG"
+KW
+cat > "$work/klauncher.sh" <<'KL'
+. "$LIB"; ai_session_tmp_wrap kimi
+echo "launcher=$TMPDIR" >> "$KLOG"
+. "$KLAUNCH"; _self="$KWORKER"; AI_KIMI_TEST_MODE=1 AI_KIMI_TEST_DIRECT_WORKER=1
+mkdir -p "$KJOB"; launch_review_worker "$KJOB" /dev/null >/dev/null
+KL
+export KLOG="$work/klog" KSTOP="$work/kstop" KLAUNCH="$work/launch.sh" KWORKER="$work/kworker.sh" KJOB="$work/kjob"
+: > "$KLOG"; env -u TMPDIR -u AI_SESSION_TMP_ROOT bash "$work/klauncher.sh" </dev/null
+for _ in $(seq 1 25); do grep -q '^worker=' "$KLOG" && break; sleep 0.2; done
+lr="$(sed -n 's/^launcher=//p' "$KLOG")"; wr="$(sed -n 's/^worker=//p' "$KLOG")"
+for _ in $(seq 1 25); do [ ! -e "$lr" ] && break; sleep 0.2; done
+check "launcher root removed when the launcher exits" '[ -n "$lr" ] && [ ! -e "$lr" ]'
+check "detached worker has its own root" '[ -n "$wr" ] && [ "$wr" != "$lr" ]'
+check "worker root survives the launcher's exit" '[ -f "$wr/w" ]'
+touch "$KSTOP"; for _ in $(seq 1 25); do [ ! -e "$wr" ] && break; sleep 0.2; done
+check "worker kept its temp storage until done" 'grep -q worker-root-intact "$KLOG"'
+check "worker root removed when the worker exits" '[ ! -e "$wr" ]'
+
 echo "== Claude hook"
 hook="$root_dir/bin/ai-session-tmp-hook"
 envf="$work/claude.env"

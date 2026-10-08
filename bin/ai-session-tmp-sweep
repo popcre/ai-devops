@@ -5,7 +5,9 @@
 #   * /var/tmp/ai-sessions-<uid>/<root>: owner.json pid dead (or reused by another
 #     process, by start ticks) AND started more than --min-age ago.
 #   * /tmp/claude-<uid>/<project>/<session>: the Claude Code scratch folder of a
-#     session whose transcript and folder have not changed for --min-age.
+#     session whose owner process (named in the session root's owner.json by
+#     ai-session-tmp-hook) is dead, AND whose transcript and folder have not
+#     changed for --min-age. No owner record means kept and reported.
 # A root without a readable owner.json is kept and reported. Age alone is
 # never ownership proof. At most --max deletions per run.
 #
@@ -60,6 +62,39 @@ owner_alive() {  # pid start_ticks
 
 json_field() { sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}[,}].*/\1/p" "$1" | head -1; }
 
+# Claude Code scratch folders: /tmp/claude-<uid>/<project>/<session-uuid>.
+# Checked before session roots so this run still sees the owner record.
+if [ -d "$claude_tmp" ] && [ ! -L "$claude_tmp" ] && [ -O "$claude_tmp" ]; then
+  for dir in "$claude_tmp"/*/*; do
+    [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+    sid="${dir##*/}"
+    [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
+    project="${dir%/*}"; project="${project##*/}"
+    transcript="$claude_projects/$project/$sid.jsonl"
+    # Proof of death: the session's own root names its Claude Code process
+    # (bin/ai-session-tmp-hook). Inactivity alone never proves a session ended.
+    rec="$base/claude-$(ai_session_tmp_slug "$sid")/owner.json"
+    if [ ! -f "$rec" ] || [ -L "$rec" ]; then
+      say "kept $dir (no owner record)"; reported=$((reported + 1)); continue
+    fi
+    opid="$(json_field "$rec" pid)"; oticks="$(json_field "$rec" pid_start_ticks)"
+    if ! [[ "$opid" =~ ^[0-9]+$ ]]; then
+      say "kept $dir (malformed owner record)"; reported=$((reported + 1)); continue
+    fi
+    if owner_alive "$opid" "$oticks"; then kept=$((kept + 1)); continue; fi
+    newest="$(find "$dir" -newermt "@$((now - min_age))" -print -quit 2>/dev/null)"
+    [ -z "$newest" ] || { kept=$((kept + 1)); continue; }
+    if [ -f "$transcript" ]; then
+      t="$(stat -c %Y "$transcript" 2>/dev/null || echo "$now")"
+      (( now - t >= min_age )) || { kept=$((kept + 1)); continue; }
+    else
+      d="$(stat -c %Y "$dir" 2>/dev/null || echo "$now")"
+      (( now - d >= min_age )) || { kept=$((kept + 1)); continue; }
+    fi
+    remove "$dir" "claude session $sid owner pid $opid gone" || break
+  done
+fi
+
 if [ -d "$base" ] && [ ! -L "$base" ]; then
   for root in "$base"/*; do
     [ -e "$root" ] || continue
@@ -77,29 +112,13 @@ if [ -d "$base" ] && [ ! -L "$base" ]; then
       say "kept $root (malformed owner.json)"; reported=$((reported + 1)); continue
     fi
     if owner_alive "$pid" "$ticks"; then kept=$((kept + 1)); continue; fi
+    # A Claude root is the owner record for its scratch folder: keep it until
+    # that folder is gone, or the scratch folder would lose its proof of death.
+    case "${root##*/}" in claude-*)
+      if compgen -G "$claude_tmp/*/${root##*/claude-}" >/dev/null; then kept=$((kept + 1)); continue; fi ;;
+    esac
     if (( now - started < min_age )); then kept=$((kept + 1)); continue; fi
     remove "$root" "owner pid $pid gone" || break
-  done
-fi
-
-# Claude Code scratch folders: /tmp/claude-<uid>/<project>/<session-uuid>.
-if [ -d "$claude_tmp" ] && [ ! -L "$claude_tmp" ] && [ -O "$claude_tmp" ]; then
-  for dir in "$claude_tmp"/*/*; do
-    [ -d "$dir" ] && [ ! -L "$dir" ] || continue
-    sid="${dir##*/}"
-    [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
-    project="${dir%/*}"; project="${project##*/}"
-    transcript="$claude_projects/$project/$sid.jsonl"
-    newest="$(find "$dir" -newermt "@$((now - min_age))" -print -quit 2>/dev/null)"
-    [ -z "$newest" ] || { kept=$((kept + 1)); continue; }
-    if [ -f "$transcript" ]; then
-      t="$(stat -c %Y "$transcript" 2>/dev/null || echo "$now")"
-      (( now - t >= min_age )) || { kept=$((kept + 1)); continue; }
-    else
-      d="$(stat -c %Y "$dir" 2>/dev/null || echo "$now")"
-      (( now - d >= min_age )) || { kept=$((kept + 1)); continue; }
-    fi
-    remove "$dir" "claude session $sid idle" || break
   done
 fi
 
