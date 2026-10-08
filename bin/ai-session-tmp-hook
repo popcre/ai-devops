@@ -19,6 +19,7 @@ mode="${1:-}"
 input="$(cat 2>/dev/null || true)"
 sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$sid" ] || exit 0
+raw_sid="$sid"
 sid="$(ai_session_tmp_slug "$sid")"
 root="$(ai_session_tmp_base)/claude-$sid"
 
@@ -50,6 +51,18 @@ case "$mode" in
     fi
     ;;
   end)
+    # The ending session also removes Claude Code's own scratch folder for it
+    # (/tmp/claude-<uid>/<project>/<session-id>): once the root (its owner
+    # record) is gone the sweeper can no longer prove the session dead.
+    claude_tmp="${AI_SESSION_TMP_CLAUDE_DIR:-/tmp/claude-$(id -u)}"
+    if [ "${AI_KEEP_SANDBOX:-0}" != 1 ] \
+       && [[ "$raw_sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+       && [ -d "$claude_tmp" ] && [ ! -L "$claude_tmp" ] && [ -O "$claude_tmp" ]; then
+      for dir in "$claude_tmp"/*/"$raw_sid"; do
+        [ -d "$dir" ] && [ ! -L "$dir" ] && [ -O "$dir" ] && [ ! -L "${dir%/*}" ] || continue
+        rm -rf -- "$dir" 2>/dev/null || true
+      done
+    fi
     [ -d "$root" ] || exit 0
     AI_SESSION_TMP_ROOT="$root" ai_session_tmp_end >/dev/null 2>&1 || true
     ;;

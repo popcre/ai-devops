@@ -1140,10 +1140,17 @@ create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
 
 launch_review_worker() { # JOB-DIR PROMPT-FILE
   local dir="$1" pf="$2" pid="" bash_bin win_dir win_pf win_self ps_bash ps_dir ps_pf ps_self
+  # The detached worker outlives this launcher, whose session temp root is
+  # deleted when the launcher exits: drop it so the worker's own wrap
+  # (top of this file) gives the worker a root that lives until it exits.
+  local detach=(env)
+  if [ -n "${AI_SESSION_TMP_ROOT:-}" ] && [ "${TMPDIR:-}" = "$AI_SESSION_TMP_ROOT" ]; then
+    detach=(env -u TMPDIR -u TMP -u TEMP -u AI_SESSION_TMP_ROOT)
+  fi
   [ "${AI_KIMI_TEST_FAIL_WORKER_START:-0}" != 1 ] || return 1
   if [ "${AI_KIMI_TEST_DIRECT_WORKER:-0}" = 1 ]; then
     [ "${AI_KIMI_TEST_MODE:-0}" = 1 ] || return 1
-    nohup bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$dir/worker.log" 2>&1 &
+    nohup "${detach[@]}" bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$dir/worker.log" 2>&1 &
     printf '%s' "$!"
     return 0
   fi
@@ -1175,7 +1182,7 @@ launch_review_worker() { # JOB-DIR PROMPT-FILE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$bootstrap" </dev/null >/dev/null 2>&1 || return 1
     pid=0
   else
-    nohup bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$(job_log "$(basename "$(dirname "$dir")")" "$(basename "$dir" | sed "s/^$CALLER--//")")" 2>&1 &
+    nohup "${detach[@]}" bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$(job_log "$(basename "$(dirname "$dir")")" "$(basename "$dir" | sed "s/^$CALLER--//")")" 2>&1 &
     pid=$!
   fi
   printf '%s' "$pid"
