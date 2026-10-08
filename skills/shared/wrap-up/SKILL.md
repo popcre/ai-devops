@@ -109,7 +109,9 @@ incomplete, and so is a session that ends holding an unreleased claim.
    questions, as effectively as you can right now, including knowing what was
    tried and failed. A three-sentence handoff is a failure; expand until the
    audit passes (use the `handoff-writer` skill, which owns the naming rules,
-   the static `HANDOFF.md` pointer, legacy migration, and retention). Once it
+   the static `HANDOFF.md` pointer, legacy migration, and retention). Name every
+   file by its GitHub URL (see the path rule under step 7) — never a
+   machine-local path. Once it
    passes, if asked whether the handoff is comprehensive enough, answer "Yes"
    with evidence — do not reflexively answer "No, I'll fix it."
 
@@ -160,14 +162,47 @@ incomplete, and so is a session that ends holding an unreleased claim.
    - **Never** delete a branch, worktree, or checkout that another session is
      using, and never delete unmerged work to make the report look clean.
 
-7. **Next-session prompt** — end with a copy-paste prompt Albert can drop into a
-   fresh session to resume exactly here. Put it in its own fenced block at the
-   very bottom of the closing report, and make it self-contained: a stranger
-   pasting it into an empty session must be able to continue with no chat
-   context. It states the repo and branch, the one-sentence goal, what is
+7. **Next-session prompt — REQUIRED whenever anything is unfinished. A
+   closeout that omits it while work remains is INCOMPLETE; do not send the
+   closing report without it.** End with a copy-paste prompt Albert can drop
+   into a fresh session to resume exactly here. Put it in its own fenced block
+   at the very bottom of the closing report, and make it self-contained: a
+   stranger pasting it into an empty session must be able to continue with no
+   chat context. It states the repo and branch, the one-sentence goal, what is
    already done, the exact next action, how to verify success, and a pointer to
-   the `HANDOFF.d/` file written in step 4. If the work is genuinely complete,
-   say "No follow-up prompt — this workstream is closed" instead of inventing one.
+   the `HANDOFF.d/` file written in step 4 — every file named by its **GitHub
+   URL** (see the path rule below), never a machine-local path.
+
+   **Unfinished means any of:** you wrote a `HANDOFF.d/` file in step 4;
+   commits are unpushed; a PR is unmerged; an issue or checklist item is still
+   open; a scope-freeze item was deferred; a step is blocked; verification is
+   incomplete. **If you wrote a handoff file, the prompt is mandatory — the two
+   always travel together.**
+
+   Only when EVERYTHING is proven done (landed, verified, nothing deferred)
+   say "No follow-up prompt — this workstream is closed" instead of inventing
+   one. Do not invent completeness: if you are unsure, write the prompt.
+
+   **Self-check before sending the report:** is any work unfinished? If yes, is
+   the fenced prompt the last thing in the message? If the first answer is yes
+   and the second is no, write the prompt now. A report with neither the fenced
+   prompt nor the closed line has not finished this step.
+
+### Path rule — GitHub URLs only
+
+The next session may run on a different machine. Every file reference in the
+`HANDOFF.d/` file **and** in the next-session prompt must be a GitHub URL the
+successor can open in a browser from anywhere:
+
+`https://github.com/<org>/<repo>/blob/<ref>/<path>` (add `#L<n>` or
+`#L<n>-<m>` for a line or range).
+
+- **Never** write machine-local paths: `C:\...`, `/home/...`, `/Users/...`,
+  `/c/...`, `~\...`, `~/...`. Those only work on the machine that wrote them.
+- A bare relative path (`docs/foo.md`) is not enough on its own — give the full
+  GitHub URL.
+- For work that is not yet pushed, say so and give the intended GitHub URL
+  (branch or PR) once it lands. Do not invent a `main` URL for unpushed work.
 
 ## Closing report (plain English, one message)
 
@@ -181,6 +216,8 @@ incomplete, and so is a session that ends holding an unreleased claim.
   whose issue is closed by name with their owner; closure alone is not completion.
   Never report the file COUNT as a problem: 20 concurrent workstreams means 20
   files and that is correct (owner ruling 2026-08-13)]
+- Next-session prompt: [PRESENT in the fenced block below / "No follow-up
+  prompt — this workstream is closed" — only when nothing is unfinished]
 - Shipped: [commit SHAs, PR URLs, deploy verified yes/no]
 - Loose ends: [anything Albert should know, or "none"]
 - Deferred by the scope freeze: [what you found or were asked during wrap-up and
@@ -189,7 +226,9 @@ incomplete, and so is a session that ends holding an unreleased claim.
   removed/kept + why]
 
 Then, as the last thing in the message, the fenced next-session prompt from
-step 7 (or the single line saying the workstream is closed).
+step 7 (or the single line saying the workstream is closed). If work is
+unfinished and the fenced prompt is missing, the closeout is INCOMPLETE —
+write the prompt before sending this report.
 ```
 
 If any step could not be completed (blocked push, failing test), say exactly

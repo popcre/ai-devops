@@ -197,6 +197,24 @@ Default to TOO MUCH. A handoff that is too long costs a few minutes of reading.
 A handoff that is too short costs Albert a whole session of rediscovery. These
 are not symmetric — always err long.
 
+## File references — GitHub URLs only (portable across machines)
+
+The next session may run on a **different machine**. Every file path in a
+handoff — and in any next-session prompt that points at one — must be a
+**GitHub URL**, never a machine-local path.
+
+- Required form:
+  `https://github.com/<org>/<repo>/blob/<ref>/<path>` (add `#L<n>` or
+  `#L<n>-<m>` for a line or range).
+- **Never** write machine-local paths: `C:\...`, `/home/...`, `/Users/...`,
+  `/c/...`, `~\...`, `~/...`. Those only work on the machine that wrote them.
+- A bare relative path (`docs/foo.md`) is not enough on its own — give the full
+  GitHub URL the successor can open in a browser.
+- For work that is not yet pushed, say so, and give the intended GitHub URL
+  (branch or PR) once it lands. Do not invent a `main` URL for unpushed work.
+- Same rule for commit SHAs: give the GitHub commit URL, not a local git
+  object id alone.
+
 ## Required structure
 
 Use these sections. Never drop one silently — if a section genuinely doesn't
@@ -250,7 +268,7 @@ The goal in business terms + the technical objective + what triggered it
 
 ## 3. Current state — what is true right now
 - What works / is done (verified how?)
-- What is half-done and its EXACT current state (files touched, file:line)
+- What is half-done and its EXACT current state (files touched, GitHub URL + file:line)
 - What has not been started
 - Is the code committed? pushed? deployed? On which branch/environment?
 
@@ -260,7 +278,7 @@ why it seemed reasonable, how it failed, and why. This is what stops the next
 session from wasting hours repeating your mistakes.
 
 ## 5. Root causes and key findings
-What we actually learned about the problem, with file:line references and any
+What we actually learned about the problem, with GitHub URL file:line references and any
 non-obvious discoveries ("the RFQ sub-grid columns come from the backend, not
 colDefs" — the kind of thing that took you an hour to figure out).
 
@@ -300,7 +318,9 @@ answer is an evidence-backed "yes" and every identified gap has been closed:
 4. Is every next step concrete enough to execute without guessing, each with a
    way to verify it worked?
 5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
-6. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
+6. **Is every file and commit reference a GitHub URL** (not a machine-local
+   path), so a session on another machine can open it?
+7. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
    that every business decision needing Albert appears in §0 (and no technical
    approval does), including the ones outside
    this workstream?
@@ -353,6 +373,9 @@ always be more detailed" is NOT an item on this list — do not treat it as one.
 - [ ] Every next step is concrete and has a "you'll know it worked when ___" gate.
 - [ ] Every term, identifier, path, URL, and commit SHA a newcomer wouldn't know
       is defined or referenced.
+- [ ] **Every file and commit reference is a GitHub URL** (never a machine-local
+      path like `C:\...` or `/home/...`). Unpushed work says so and names the
+      intended GitHub URL.
 - [ ] Commit / push / deploy status is explicit for each piece of work.
 - [ ] Secrets are referenced by location only (vault/item), never by value.
 - [ ] In a multi-workstream handoff, YOUR workstream's section clears every bar
@@ -386,9 +409,12 @@ If that is true, the answer is Yes — say it.
 
 - Assuming the reader knows what the app does, or what "the RFQ issue" refers to.
 - Listing the final plan but omitting the failed attempts.
-- "Continue where we left off" without saying where that is, in file:line terms.
+- "Continue where we left off" without saying where that is, in GitHub URL file:line terms.
 - Vague next steps ("finish the migration") instead of exact ones.
 - Jargon or internal shorthand from this session with no definition.
+- **Machine-local paths** (`C:\repos\...`, `/home/ahazan/...`, `~/...`) in the
+  handoff or the next-session prompt. The next session may be on another
+  machine; only GitHub URLs open from anywhere.
 - Writing three sentences and calling it a handoff. If it's under a screen of
   text for anything non-trivial, it's almost certainly too thin — re-audit.
 - **Rewriting the shared root `HANDOFF.md`, or editing another session's
