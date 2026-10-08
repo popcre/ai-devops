@@ -11,7 +11,25 @@ cd "$ROOT" || exit 1
 
 failures=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; failures=$((failures + 1)); }
-tg_reviewer_ci_path() { tg_legacy_classify pull_request <<<"$1" | grep -qx 'reviewer=true'; }
+tg_reviewer_ci_path() { tg_legacy_classify pull_request <<<"$1" | grep -x 'reviewer=true' >/dev/null; }
+
+# A matching header must not make the consumer close before the classifier
+# finishes. Large trailing output makes that pipefail regression deterministic.
+if ! (
+  tg_legacy_classify() {
+    printf 'reviewer=true\n'
+    printf '%200000s\n' ''
+  }
+  tg_reviewer_ci_path templates/delegation/debate-turn.md
+); then
+  fail 'matching reviewer header must preserve complete classifier output'
+fi
+if (
+  tg_legacy_classify() { printf 'reviewer=true\n'; return 23; }
+  tg_reviewer_ci_path templates/delegation/debate-turn.md
+); then
+  fail 'classifier failure must refuse even with a matching reviewer header'
+fi
 
 # 1. Completeness: walk every tracked repository file the reviewer suites load,
 #    transitively, and require the path list to cover each one. A file counts
