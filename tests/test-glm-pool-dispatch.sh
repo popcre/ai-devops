@@ -7,6 +7,8 @@ trap 'rm -rf "$TMP"' EXIT
 export AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=codex
 export AI_REVIEW_EVENT_DIR="$TMP/events" AI_REVIEW_SANDBOX_HOME="$TMP/sandboxes"
 export GLM_FIXTURE="$TMP" REAL_PACKET="$ROOT/bin/ai-review-packet"
+# Shared offline isolation (#1435, #1505): marker, cleared outer review session.
+. "$ROOT/tests/lib-reviewer-events-isolation.sh"
 mkdir -p "$TMP/repo" "$TMP/events"
 git -C "$TMP/repo" init -q -b main
 git -C "$TMP/repo" config user.name Test

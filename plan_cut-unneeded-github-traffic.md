@@ -12,6 +12,15 @@ Linked handoff (this session):
 
 ## STATUS — read first
 
+October 8, 2026, 10:16 AM EDT: existing #658 coordinator owns installation,
+live proof and S4/P8 acceptance. Read the parent plan's current STATUS and
+source-only destination appendix for source repairs, #1510/#1511 fixture
+evidence and remaining transport dispositions. The full Linux update failed
+required stages; 916 native execution and t16 trusted access remain unproven.
+Accepted S1/S2 and #914/#925/#868/#1008 proofs remain accepted. Comparable
+savings, two busy windows and useful-work latency are unknown; source,
+compilation and CLI invocation counts do not close an issue.
+
 > **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.
 
 | Step | State | Owner / dependency | Evidence required to accept |
