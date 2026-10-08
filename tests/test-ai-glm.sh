@@ -246,10 +246,12 @@ for case in wrong-head wrong-caller wrong-provider wrong-session wrong-run wrong
   # A Windows account without SeCreateSymbolicLinkPrivilege (the runner
   # service on a self-hosted host) cannot create the fixture's symlink at all.
   # Probe instead of failing; every other binding case still runs.
-  if ! "$PYTHON" -c 'import os,sys,tempfile
-d=tempfile.mkdtemp()
-try: os.symlink(os.path.join(d,"t"),os.path.join(d,"l"))
-except OSError: sys.exit(1)' 2>/dev/null;then
+  # Probe beside the fixture (same filesystem) and remove the probe link.
+  if ! "$PYTHON" -c 'import os,sys
+l=os.path.join(sys.argv[1],".symlink-probe")
+try: os.symlink(os.path.join(sys.argv[1],".symlink-target"),l)
+except OSError: sys.exit(1)
+os.unlink(l)' "$FIXTURE" 2>/dev/null;then
    printf '  note %s negative needs symlink privilege; unavailable for this account\n' "$case"
    continue
   fi;; esac
