@@ -337,7 +337,9 @@ patch, and what you are being asked to decide.
 
 You may read any other file in this directory to confirm a finding — the packet
 is your starting point, not a boundary. What you must NOT do is spend turns
-reconstructing the diff yourself; it is already in .ai-review/patch.diff.
+reconstructing the diff yourself; it is already in .ai-review/patch.diff. If MANIFEST.md says the patch was
+split, patch.diff is only an index: read EVERY numbered patch.part-* file it
+lists before deciding.
 Everything you need is local; do not search the web.
 
 ---
