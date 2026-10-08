@@ -142,7 +142,9 @@ jobs:
         if: ${{ matrix.lane != 'blacksmith' }}
         run: |
           missing=''
-          for tool in bash git jq rg node python3 curl; do
+          # Every tool a selected suite would otherwise skip without (python,
+          # ssh-keygen, pwsh, shellcheck) is required, so a skip never passes.
+          for tool in bash git jq rg node python python3 curl ssh-keygen pwsh shellcheck; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
           done
           if [ -n "$missing" ]; then
