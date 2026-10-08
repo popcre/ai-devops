@@ -1264,7 +1264,10 @@ review_worker() { # JOB-DIR PROMPT-FILE
   # cleanup in the emergency EXIT path as well as each explicit terminal path.
   # Mark the detached job terminal before cleanup: after this point the worker
   # publishes nothing more, so loss reconciliation may treat it as gone.
-  trap 'reviewer_event_evidence note-worker-terminal kimi >/dev/null 2>&1 || true; cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
+  # The worker also records the terminal finish row: the launcher's guard
+  # deliberately does not finish an async-submission once a worker is recorded,
+  # because that finish would block publish-report and invent a false failure.
+  trap 'rc=$?; reviewer_event_evidence note-worker-terminal kimi >/dev/null 2>&1 || true; reviewer_event_evidence finish kimi "$rc" >/dev/null 2>&1 || true; cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
   sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2

@@ -1665,7 +1665,9 @@ with event_lock(sys.argv[2]):
         self.write(row)
         events.require_report(self.root, "kimi", rid)
         sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
-        with self.assertRaisesRegex(events.Blocked, "still active"):
+        # Owner is dead and the run never finished, but with no recorded
+        # worker_pid the publisher cannot be proven gone — fail closed.
+        with self.assertRaisesRegex(events.Blocked, "still active|detached worker"):
             events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
         self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
 
@@ -1727,6 +1729,41 @@ with event_lock(sys.argv[2]):
         sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
         events.record_lost(self.root, "kimi", rid, sandbox, "worker job terminal, no report")
         self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_async_submission_loss_allowed_when_worker_killed_without_finish(self):
+        """A SIGKILL'd worker that never finished is loss once every PID is dead."""
+        rid = "d5" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        # No finished row: the worker was killed before its EXIT trap ran.
+        (self.root / "evidence" / rid / "worker_pid").write_text("99999998\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker killed, report gone")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_worker_recorded_probe_guards_async_finish(self):
+        """worker-recorded is the guard's probe: skip finish only once a worker reserved."""
+        rid = "d6" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        import subprocess
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)}
+        missing = subprocess.run([sys.executable, tool, "worker-recorded", "kimi", rid], env=env,
+                                 capture_output=True, text=True)
+        self.assertEqual(missing.returncode, 1)
+        (root / "worker_pid").write_text("99999998\n")
+        present = subprocess.run([sys.executable, tool, "worker-recorded", "kimi", rid], env=env,
+                                 capture_output=True, text=True)
+        self.assertEqual(present.returncode, 0)
+        self.assertTrue(json.loads(present.stdout)["worker_recorded"])
 
     def test_codex_legacy_loss_allowed_when_no_report_exists(self):
         rid = "a2" + "0" * 30

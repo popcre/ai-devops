@@ -1186,11 +1186,14 @@ def record_lost(directory, provider, run_id, sandbox, reason):
                            for line in data.splitlines())
         if start.get("operation") == "async-submission":
             # A detached worker outlives the submitting supervisor (Kimi durable
-            # jobs). Supervisor death is not death of the publisher: the
-            # launcher's finish row is not proof the worker is gone. Refuse
-            # loss until the invocation is finished AND the detached worker is
-            # proven terminal (worker_pid dead or a terminal-job marker).
-            require(has_finished, "reviewer invocation is still active; loss not recorded")
+            # jobs). Supervisor death is not death of the publisher: a premature
+            # launcher finish is not proof the worker is gone. Refuse loss until
+            # the invocation is finished OR every recorded PID is dead, AND the
+            # detached worker is proven terminal (worker_pid dead or a
+            # terminal-job marker). Without that, a SIGKILL'd worker that never
+            # wrote its own finish row would be permanently unreconcilable.
+            require(has_finished or _proven_dead(directory, run_id, start),
+                    "reviewer invocation is still active; loss not recorded")
             require(_detached_worker_gone(directory, run_id),
                     "detached worker may still publish; loss not recorded")
         else:
@@ -1462,6 +1465,17 @@ def main():
         if not marker.exists():
             publish(marker, {"schema_version": 1, "run_id": sys.argv[3], "marked_at": now()})
         print(json.dumps({"run_id": sys.argv[3], "worker_terminal": True}))
+    elif operation == "worker-recorded":
+        # Guard probe: true when a detached worker reserved this invocation.
+        # The guard must not finish an async-submission while a worker can
+        # still publish — that finish would block publish-report (active=True)
+        # and record a false failure mid-review.
+        require(len(sys.argv) == 4, "worker-recorded requires provider and run_id")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        present = (root / "worker_pid").is_file() or (root / "worker_terminal").is_file()
+        print(json.dumps({"run_id": sys.argv[3], "worker_recorded": present}))
+        sys.exit(0 if present else 1)
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
