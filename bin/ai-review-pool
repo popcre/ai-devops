@@ -160,6 +160,9 @@ fi
 # doors may skip is a rejected shape. This is the admission gate that ends the
 # copy-paste governance path for migrated doors.
 # ---------------------------------------------------------------------------
+# Generic pay-per-use API keys never reach a reviewer (owner lock 2026-10-07,
+# #1427): every reviewer uses its subscription login or its own protected store.
+unset OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY
 # AI_REVIEW_ENGINE_BIN was gated above: without AI_POOL_TEST_HOOKS=1 the
 # override is refused, and ENGINE is the pinned runner in this tree.
 ENGINE="${AI_REVIEW_ENGINE_BIN:-$ROOT/ai-review-engine}"
@@ -232,6 +235,9 @@ case "$provider" in
   glm) [ -z "${AI_POOL_RUNNER_GLM:-}" ] || RUNNER="$AI_POOL_RUNNER_GLM" ;;
 esac
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+# Generic pay-per-use API keys never reach a reviewer door (#1427); stripped
+# after the models file so it cannot reintroduce one.
+unset OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY
 [ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
 # Single expansion: the value is never re-evaluated, and the name is pinned
 # by the provider case above.

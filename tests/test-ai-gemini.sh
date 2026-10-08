@@ -143,6 +143,15 @@ check 'quarantine exposes only the governed live qualification path without over
 check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
 check 'doctor rejects unknown options instead of overstating a live check' "! '$SCRIPT' doctor --unknown"
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
+# #1427: generic pay-per-use keys never reach agy; only its subscription login.
+cat > "$TMP/bin/agy-envspy" <<EOF
+#!/usr/bin/env bash
+env >> "$TMP/agy-spy-env"
+exec "$TMP/bin/agy" "\$@"
+EOF
+chmod +x "$TMP/bin/agy-envspy"; rm -f "$TMP/agy-spy-env"
+GEMINI_API_KEY=fake-gem-1427 GOOGLE_API_KEY=fake-google-1427 AI_GEMINI_KEY=fake-aigem-1427 AI_GEMINI_BIN="$TMP/bin/agy-envspy" "$SCRIPT" doctor --identity >/dev/null 2>&1 || true
+check 'gemini_ignores_generic_api_keys' "test -s '$TMP/agy-spy-env' && ! grep -q 'fake-.*-1427' '$TMP/agy-spy-env'"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools/lib"

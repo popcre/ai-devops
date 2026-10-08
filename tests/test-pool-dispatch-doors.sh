@@ -223,6 +223,42 @@ make_pass qwen diff-review 20261007T000000-1-7 REJECT
 jq '.finished_at="2026-10-08T00:00:00Z"' "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json" > "$POOLTMP/r.json" && mv "$POOLTMP/r.json" "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json"
 reuse_run reuse-newer-reject qwen diff-review
 check "newer_reject_supersedes_older_approve" "engargs | grep -q -- '--provider qwen'"
+# #1427: generic pay-per-use keys never reach a reviewer door or agy.
+HOSTILE_KEYS="OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY"
+hostile_env() { local k; for k in $HOSTILE_KEYS; do export "$k=fake-$k-1427"; done; }
+cat > "$POOLTMP/env-engine" <<EOF
+#!/usr/bin/env bash
+env > "$POOLTMP/engine-env"
+exit 0
+EOF
+chmod +x "$POOLTMP/env-engine"
+rm -f "$POOLTMP/engine-env"
+( cd "$POOLTMP/fakerepo" && export_pool && hostile_env && AI_REVIEW_ENGINE_BIN="$POOLTMP/env-engine" bash "$POOL" qwen security-review ) > "$POOLTMP/out-keys" 2>&1
+check "pool_strips_generic_keys_before_dispatch" \
+  "test -s '$POOLTMP/engine-env' && ! grep -q 'fake-.*-1427' '$POOLTMP/engine-env'"
+
+mkdir -p "$POOLTMP/gd/work" "$POOLTMP/gd/packet"
+printf 'Review the packet.\n' > "$POOLTMP/gd/prompt"
+cat > "$POOLTMP/gd/agy" <<EOF
+#!/usr/bin/env bash
+env > "$POOLTMP/gd/agy-env"
+printf '{"response":"Review complete.\\\\n## Verdict\\\\nAPPROVE","model":"gemini-3.8-flash-high"}\n'
+EOF
+chmod +x "$POOLTMP/gd/agy"
+gemini_door() { # extra env assignments as args
+  rm -f "$POOLTMP/gd/agy-env"
+  ( for kv in "$@"; do export "$kv"; done
+    export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_GEMINI_BIN="$POOLTMP/gd/agy" \
+      DOOR_WORKDIR="$POOLTMP/gd/work" DOOR_PACKET_DIR="$POOLTMP/gd/packet" DOOR_PROMPT_FILE="$POOLTMP/gd/prompt" \
+      DOOR_REPORT_OUT="$POOLTMP/gd/report" DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    bash "$REPO_ROOT/tools/lib/review-doors/gemini.sh" review ) > "$POOLTMP/gd/out" 2>&1
+}
+gemini_door GOOGLE_API_KEY=fake-google-1427; GD_RC=$?
+check "gemini_door_refuses_google_key_fallback" \
+  "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-google-1427' '$POOLTMP/gd/agy-env' && ! grep -q '^GEMINI_API_KEY=' '$POOLTMP/gd/agy-env'"
+gemini_door AI_GEMINI_KEY=fake-aigem-1427 GEMINI_API_KEY=fake-gem-1427; GD_RC=$?
+check "gemini_door_unsets_ai_gemini_key" \
+  "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-aigem-1427\|fake-gem-1427' '$POOLTMP/gd/agy-env'"
 
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"

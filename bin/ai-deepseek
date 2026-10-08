@@ -180,7 +180,13 @@ cmd_implement() {
   parse_prompt_opts "$@"; [ ${#REST[@]} -eq 1 ] || usage 2
   local name="${REST[0]}"; valid_name "$name"
   [ -n "${REPO:-}" ] || die "--repo is required"
-  MODEL="${MODEL:-${DEEPSEEK_MODEL:-deepseek-flash}}"; check_model "$MODEL"
+  # An ambient DEEPSEEK_MODEL never selects the paid Pro model (#1427): only an
+  # explicit --model does, and the choice is printed.
+  if [ -n "${DEEPSEEK_MODEL:-}" ] && [ -z "${MODEL:-}" ]; then
+    echo "ai-deepseek: note: ignoring DEEPSEEK_MODEL=$DEEPSEEK_MODEL; pass --model to choose a model." >&2
+  fi
+  MODEL="${MODEL:-deepseek-flash}"; check_model "$MODEL"
+  echo "ai-deepseek: implement model: $MODEL" >&2
   read_prompt
   local repo td wt branch
   repo="$(git -C "$REPO" rev-parse --show-toplevel)" || die "not a git repository: $REPO"
