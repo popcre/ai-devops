@@ -198,6 +198,16 @@ try {
         ForEach-Object { "$($_.FullName) $((Get-FileHash -LiteralPath $_.FullName).Hash)" } | Sort-Object
     Assert-True (($before -join "|") -eq ($after -join "|")) "second apply changed files (not idempotent)"
 
+    # Current content with a stale nonempty marker refreshes only metadata.
+    $contentHash = (Get-FileHash -LiteralPath (Join-Path $installed 'SKILL.md')).Hash
+    (('0' * 64) + '  SKILL.md') | Set-Content -LiteralPath $marker
+    $output = Invoke-Installer $fixture $claude $codex
+    Assert-True ($output -match '= client-claude \(Claude\) up to date') 'current content not classified identical'
+    $expectedMarker = $contentHash.ToLowerInvariant() + '  SKILL.md'
+    Assert-True ((Get-Content -LiteralPath $marker) -contains $expectedMarker) 'stale nonempty marker not reconciled'
+    Assert-True ((Get-FileHash -LiteralPath (Join-Path $installed 'SKILL.md')).Hash -eq $contentHash) 'metadata reconciliation changed content'
+    Assert-True (-not (Test-Path (Join-Path $claude 'skills-backup\client-claude'))) 'unchanged content unnecessarily backed up'
+
     # locally extended: a file the repo does not ship survives an update.
     "local note" | Set-Content -LiteralPath (Join-Path $installed "LOCAL-NOTES.md")
     @("---", "name: client-claude", "description: test v2", "---") | Set-Content -LiteralPath $skill
