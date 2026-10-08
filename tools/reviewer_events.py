@@ -1075,7 +1075,8 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
             if jobs not in roots:
                 roots.append(jobs)
         # Sibling kimi state roots under the shared base (custom AI_KIMI_STATE_DIR
-        # values that still live next to the default).
+        # values that still live next to the default). An unreadable base is an
+        # incomplete search — fail closed rather than inventing a loss.
         base = Path.home() / ".local/state/ai-devops"
         if base.is_dir():
             try:
@@ -1083,8 +1084,8 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
                     jobs = child / "jobs"
                     if child.name.startswith("kimi") and jobs.is_dir() and jobs not in roots:
                         roots.append(jobs)
-            except OSError:
-                pass
+            except OSError as error:
+                raise Blocked(f"report search cannot enumerate {base}; loss not recorded: {error}")
         if run_id is not None:
             event_dir = Path(directory) if directory is not None else (
                 Path(os.environ.get("AI_REVIEW_EVENT_DIR") or
@@ -1098,8 +1099,8 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
                             root = Path(line)
                             if root not in roots:
                                 roots.append(root)
-                except OSError:
-                    pass  # unreadable recording: the walk below still covers defaults
+                except OSError as error:
+                    raise Blocked(f"report search cannot read {recorded}; loss not recorded: {error}")
     return roots
 
 

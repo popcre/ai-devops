@@ -1922,6 +1922,26 @@ with event_lock(sys.argv[2]):
             else:
                 os.environ["AI_KIMI_STATE_DIR"] = prior
 
+    def test_unreadable_recorded_report_root_refuses_loss(self):
+        """An unreadable report_search_roots file is an incomplete search, not an empty one."""
+        rid = "b5" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="unreadable-roots",
+                                             owner_line=f"evidence_owner=kimi:{rid}")
+        marker = self.root / "evidence" / rid / "report_search_roots"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(self.root / "somewhere") + "\n")
+        original_read = Path.read_text
+
+        def read_that_fails(self, *args, **kwargs):
+            if self.name == "report_search_roots":
+                raise PermissionError(13, "recorded roots are unreadable")
+            return original_read(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read_that_fails):
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "kimi", sandbox, "cannot read recorded roots")
+
     def test_positive_ledger_references_refuse_loss(self):
         """A finished row with evidence_references is publication proof."""
         rid = "b2" + "0" * 30
