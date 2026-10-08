@@ -1265,7 +1265,8 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
     that binds provider, mode, head, digest, verdict and the report checksum,
     so it is the lookup source. A match requires every one of: a completed,
     non-stale APPROVE with no failure; the same provider (or any, for "any"),
-    mode, head, whole-source digest, repository, resolved base and (when both
+    recorded mode (a record with no recorded mode never matches), head,
+    whole-source digest, repository, resolved base and (when both
     are known) implementing engine; no review operation; and a report file
     whose checksum still matches and which itself names the head, the digest
     and a final APPROVE. A malformed record raises: the caller then runs a
@@ -1291,7 +1292,7 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
                 row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
                 (provider == "any" or row.get("provider") == provider) and
                 row.get("provider") == path.parent.parent.name and
-                row.get("review_mode") in (None, mode)):
+                row.get("review_mode") == mode):
             continue
         # A later REJECT (or BLOCKED) on the same source supersedes an older
         # APPROVE: remember the newest real judgment of any kind.

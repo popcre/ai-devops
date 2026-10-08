@@ -160,8 +160,8 @@ fi
 exit 0
 EOF
 chmod +x "$POOLTMP/lifecycle-id"
-make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD]
-  local provider="$1" mode="$2" run="$3" verdict="$4" head="${5:-$REUSE_HEAD}" report sha
+make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD] [RECORDED_MODE|null|absent]
+  local provider="$1" mode="$2" run="$3" verdict="$4" head="${5:-$REUSE_HEAD}" rmode="${6:-$2}" report sha
   mkdir -p "$POOLTMP/fakerepo/.ai/reviews" "$LCDIR/runs/$REUSE_KEY/$provider/zcode"
   report="$POOLTMP/fakerepo/.ai/reviews/$provider-$mode-$run.md"
   printf '# %s %s\n\n| field | value |\n|---|---|\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Result\n\nAnalysis of %s.\n\n## Verdict\n%s\n' \
@@ -169,7 +169,8 @@ make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD]
   sha="$(sha256sum "$report" | cut -d' ' -f1)"
   jq -n --arg p "$provider" --arg m "$mode" --arg r "$run" --arg v "$verdict" --arg h "$head" --arg d "$REUSE_DIGEST" \
     --arg k "$REUSE_KEY" --arg rp "$report" --arg s "$sha" \
-    '{schema_version:1,status:"completed",provider:$p,run_id:$r,caller:"zcode",review_mode:$m,base:null,repository_key:$k,head:$h,source_digest:$d,verdict:$v,failure_class:null,report_path:$rp,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+    '{schema_version:1,status:"completed",provider:$p,run_id:$r,caller:"zcode",review_mode:$m,base:null,repository_key:$k,head:$h,source_digest:$d,verdict:$v,failure_class:null,report_path:$rp,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}
+    | if $rm == "null" then .review_mode=null elif $rm == "absent" then del(.review_mode) else . end' --arg rm "$rmode" \
     > "$LCDIR/runs/$REUSE_KEY/$provider/zcode/$run.json"
 }
 reuse_run(){ # reuse_run OUT PROVIDER MODE [ARGS...]
@@ -198,6 +199,12 @@ check "no_reuse_of_a_reject" "engargs | grep -q -- '--provider gemini'"
 make_pass muse diff-review 20261007T000000-1-3 APPROVE 0000000000000000000000000000000000000000
 reuse_run reuse-head muse diff-review
 check "no_reuse_on_head_change" "engargs | grep -q -- '--provider muse'"
+make_pass stepfun final-check 20261007T000000-1-9 APPROVE "$REUSE_HEAD" null
+reuse_run reuse-nullmode stepfun final-check
+check "no_reuse_of_null_review_mode_record" "engargs | grep -q -- '--provider stepfun'"
+make_pass gemini final-check 20261007T000000-1-10 APPROVE "$REUSE_HEAD" absent
+reuse_run reuse-absentmode gemini final-check
+check "no_reuse_of_absent_review_mode_record" "engargs | grep -q -- '--provider gemini'"
 make_pass deepseek diff-review 20261007T000000-1-4 APPROVE
 printf 'tampered\n' >> "$POOLTMP/fakerepo/.ai/reviews/deepseek-diff-review-20261007T000000-1-4.md"
 reuse_run reuse-tamper deepseek diff-review
