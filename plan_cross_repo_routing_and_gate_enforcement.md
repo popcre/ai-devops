@@ -22,6 +22,7 @@ part of Issue #335.
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | IN PROGRESS 2026-09-11 | Central repair #389 and Windows landed-source installation are complete; Ubuntu permission and private-memory health gates remain |
+| HTS release boundary (#1490) | Exact reviewed sandbox application-source admission | PARTIAL 2026-10-08, 1:54 PM EDT | Source 547880568055be4b629ca4fc9c54807f05ffb79b tested/approved; PR #1521 OPEN with Windows section 2 failure, installed route and live proof pending; read latest HTS handoff below |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
 session, read this STATUS table and the newest matching OPEN handoff, and resume
@@ -590,3 +591,7 @@ local gate appears to require weakening, stop that repository and report it `Blo
    Yes. Sections 4, 7, 8, and 11 reject size-only deletion, copied enforcement,
    timer-based fixes, gate downgrades, private-data inspection, and unauthorized
    external mutations; pilots deliberately cover the strongest risk families.
+
+## HTS release continuation — October 8, 2026, 1:54 PM EDT
+
+Current source/test/review and actual delivery distinctions, including superseded encoding and installation diagnoses, are preserved in [the dated HTS continuation handoff](HANDOFF.d/2026-10-08T1754Z-edge-dev3-codex-hts-review-rag.md). Do not redo completed 434 toolkit checks or 185 application suites/1,979 tests without source changes. Do not infer Windows CI success: PR #1521 has an actual section 2 test failure, with assertion unavailable until its run finishes, plus a separately diagnosed preferred-reviewer dependency delay. Source candidate is frozen and independently approved; any corrective head movement requires renewed review. Installed e172 is healthy but lacks the new route. Successor Codex owns diagnosis, repair, merge, supported installation and #94 live proof; no active worker or background continuation is registered. These bounded HTS facts do not close unrelated Phase 5 obligations above.
