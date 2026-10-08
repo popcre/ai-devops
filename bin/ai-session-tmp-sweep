@@ -13,8 +13,10 @@
 set -uo pipefail
 
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+lib="$here/../tools/lib/session-tmp.sh"
+[ -f "$lib" ] || lib="$HOME/.config/ai-devops/session-tmp.sh"
 # shellcheck source=../tools/lib/session-tmp.sh
-. "$here/../tools/lib/session-tmp.sh"
+. "$lib"
 
 dry=0; min_age=7200; max=50
 while (($#)); do
@@ -41,7 +43,9 @@ say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$log" 2
 remove() {
   local path="$1" why="$2"
   if (( deleted >= max )); then say "cap $max reached; left $path"; return 1; fi
-  if (( dry )); then say "would delete $path ($why)"; else rm -rf -- "$path" && say "deleted $path ($why)"; fi
+  if (( dry )); then say "would delete $path ($why)"
+  elif rm -rf -- "$path"; then say "deleted $path ($why)"
+  else say "could not delete $path"; return 0; fi
   deleted=$((deleted + 1))
 }
 

@@ -35,12 +35,15 @@ owner_pid() {
 
 case "$mode" in
   start)
-    if [ -d "$root" ] && ai_session_tmp_is_safe_root "$root"; then
-      AI_SESSION_TMP_ROOT="$root"   # resumed session: reuse its root
+    if [ -d "$root" ] && ai_session_tmp_is_safe_root "$root" && [ -O "$root" ]; then
+      # Resumed session: reuse its root, but name the new owner process so the
+      # sweeper never treats the stale owner.json as proof the session is gone.
+      ai_session_tmp_write_owner "$root" claude "$sid" "$(owner_pid)" 2>/dev/null || exit 0
+      AI_SESSION_TMP_ROOT="$root"
     else
       ai_session_tmp_begin claude "$sid" "$(owner_pid)" >/dev/null 2>&1 || exit 0
     fi
-    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    if [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qF "AI_SESSION_TMP_ROOT=$AI_SESSION_TMP_ROOT" "$CLAUDE_ENV_FILE" 2>/dev/null; then
       printf 'export TMPDIR=%q TMP=%q TEMP=%q AI_SESSION_TMP_ROOT=%q\n' \
         "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" \
         >> "$CLAUDE_ENV_FILE" 2>/dev/null || true

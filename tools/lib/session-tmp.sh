@@ -40,6 +40,15 @@ ai_session_tmp_is_safe_root() {
   return 0
 }
 
+# (Re)write owner.json so the sweeper's proof of life names the current owner.
+ai_session_tmp_write_owner() {
+  local root="$1" engine="$2" sid="$3" pid="$4" start
+  start="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+  printf '{"pid":%s,"pid_start_ticks":"%s","engine":"%s","session_id":"%s","started_utc":"%s","started_epoch":%s,"cwd":"%s"}\n' \
+    "$pid" "$start" "$engine" "$sid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" \
+    "$(pwd | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$root/owner.json.$$" && mv -f "$root/owner.json.$$" "$root/owner.json"
+}
+
 ai_session_tmp_begin() {
   ai_session_tmp_enabled || return 0
   local engine sid pid base root start
@@ -53,16 +62,12 @@ ai_session_tmp_begin() {
   # another account rename roots (and private-directory checks reject it).
   [ -d "$base" ] || (umask 077 && mkdir -p "$base") 2>/dev/null
   [ -d "$base" ] && [ ! -L "$base" ] && [ -O "$base" ] || { echo "session-tmp: cannot use $base" >&2; return 1; }
-  chmod 700 "$base" 2>/dev/null || true
   if ! (umask 077 && mkdir "$root") 2>/dev/null; then
     # An id collision with a live root must not share it: add a unique suffix.
     root="$base/$engine-$sid-$$-${RANDOM}"
     (umask 077 && mkdir "$root") || { echo "session-tmp: cannot create $root" >&2; return 1; }
   fi
-  start="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
-  printf '{"pid":%s,"pid_start_ticks":"%s","engine":"%s","session_id":"%s","started_utc":"%s","started_epoch":%s,"cwd":"%s"}\n' \
-    "$pid" "$start" "$engine" "$sid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" \
-    "$(pwd | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$root/owner.json"
+  ai_session_tmp_write_owner "$root" "$engine" "$sid" "$pid"
   AI_SESSION_TMP_ROOT="$root"
   export AI_SESSION_TMP_ROOT TMPDIR="$root" TMP="$root" TEMP="$root"
 }
@@ -96,11 +101,13 @@ ai_session_tmp_wrap() {
 ai_session_tmp_watch() {
   local pid="$1" root="$2" lib
   lib="${BASH_SOURCE[0]}"
-  command -v setsid >/dev/null 2>&1 || return 0
-  setsid -f bash -c '
+  local launcher=(setsid -f)
+  command -v setsid >/dev/null 2>&1 || launcher=(nohup)
+  "${launcher[@]}" bash -c '
     . "$1"
     if command -v tail >/dev/null 2>&1 && tail --pid="$2" -f /dev/null 2>/dev/null; then :
     else while kill -0 "$2" 2>/dev/null; do sleep 2; done; fi
     AI_SESSION_TMP_ROOT="$3" ai_session_tmp_end
-  ' _ "$lib" "$pid" "$root" </dev/null >/dev/null 2>&1
+  ' _ "$lib" "$pid" "$root" </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
 }
