@@ -275,14 +275,34 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          sparse-checkout: |
-            config/ci-runner-routing.json
-            tools/ci/runner-router.cjs
-          sparse-checkout-cone-mode: false
+          # Full history: the Linux eligibility step lists each section's
+          # selected suites against the pull request base, as the sections do.
+          fetch-depth: 0
+      - id: linux-eligible
+        # A self-hosted Linux host may take only a section that selects none of
+        # cfg.linux_unfit_suites (suites too slow on a busy desktop, e.g. the
+        # whole-/proc descriptor scan in test-ai-lock-doctor.sh). Any error
+        # leaves the list empty, so every Linux section stays on Blacksmith.
+        continue-on-error: true
+        env:
+          SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          unfit="$(jq -r '.linux_unfit_suites[]?' config/ci-runner-routing.json)"
+          shards="$(jq -r '.linux_shards' config/ci-runner-routing.json)"
+          eligible=''
+          for s in $(seq 1 "$shards"); do
+            list="$(bash tests/test-all.sh --changed-since "$SELECTION_BASE" --balanced --shard "$s/$shards" --list)" || continue
+            fit=true
+            for u in $unfit; do printf '%s\n' "$list" | grep -qxF "$u" && fit=false; done
+            [ "$fit" = true ] && eligible="$eligible${eligible:+,}$s"
+          done
+          echo "eligible Linux sections: ${eligible:-none}"
+          echo "shards=$eligible" >> "$GITHUB_OUTPUT"
       - id: route
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         env:
           POOL_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+          LINUX_ELIGIBLE_SHARDS: ${{ steps.linux-eligible.outputs.shards }}
         with:
           script: |
             const router = require(`${process.env.GITHUB_WORKSPACE}/tools/ci/runner-router.cjs`);

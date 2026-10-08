@@ -48,14 +48,20 @@ function decide(cfg, { event, idleQualified, idleSection, foreign }) {
   return { idle_qualified: idleQualified || 0, idle_section: idleSection || 0, windows_matrix: matrix };
 }
 
-function decideLinux(cfg, { idleLinux, foreign }) {
+// eligible: section numbers the workflow proved select no cfg.linux_unfit_suites
+// for this pull request. Missing or empty means none (fail closed to Blacksmith).
+function parseEligible(text) {
+  return String(text || '').split(',').map(x => Number(x.trim())).filter(n => Number.isInteger(n) && n > 0);
+}
+
+function decideLinux(cfg, { idleLinux, foreign, eligible = [] }) {
   const shards = cfg.linux_shards || 4;
   const matrix = range(shards).map(shard => ({ shard, lane: 'blacksmith', runs_on: cfg.blacksmith_linux }));
   let hosts = foreign || !cfg.linux_label ? 0 : Math.max(0, idleLinux || 0);
   for (const shard of cfg.linux_lane_order || []) {
     if (hosts <= 0) break;
     const slot = matrix[shard - 1];
-    if (!slot) continue;
+    if (!slot || !eligible.includes(shard)) continue;
     matrix[shard - 1] = { shard, lane: 'linux-self-hosted', runs_on: cfg.linux_self_hosted };
     hosts -= 1;
   }
@@ -129,7 +135,9 @@ async function run({ github, poolGithub, context, core, cfg }) {
   const plan = decide(cfg, { event: context.eventName, idleQualified: idle, idleSection, foreign });
   core.info(`idle_qualified=${plan.idle_qualified} idle_section=${plan.idle_section}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
-  const linux = decideLinux(cfg, { idleLinux, foreign });
+  const eligible = parseEligible(process.env.LINUX_ELIGIBLE_SHARDS);
+  core.info(`linux_eligible=${eligible.join(',') || 'none'}`);
+  const linux = decideLinux(cfg, { idleLinux, foreign, eligible });
   plan.idle_linux = linux.idle_linux;
   plan.linux_matrix = linux.linux_matrix;
   core.info(`idle_linux=${plan.idle_linux}`);
@@ -144,4 +152,4 @@ async function run({ github, poolGithub, context, core, cfg }) {
   return plan;
 }
 
-module.exports = { decide, decideLinux, run, isForeignHead };
+module.exports = { decide, decideLinux, parseEligible, run, isForeignHead };
