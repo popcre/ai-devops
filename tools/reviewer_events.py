@@ -15,11 +15,27 @@ import uuid
 from reviewer_maintenance import Blocked, digest, encoded, now, physical, publish, read_json, require, snapshot
 
 
+def live_location():
+    """The real user's ledger, independent of any HOME a test substitutes."""
+    try:
+        import pwd
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError):
+        home = str(Path.home())
+    return Path(home) / ".local/state/ai-devops/reviewer-events"
+
+
 def location():
     if os.environ.get("AI_REVIEW_EVENT_DIR"):
-        return physical(os.environ["AI_REVIEW_EVENT_DIR"])
-    base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
-    return physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(Path(base) / "reviewer-events")))
+        chosen = os.environ["AI_REVIEW_EVENT_DIR"]
+    else:
+        base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
+        chosen = str(Path(base) / "reviewer-events")
+    if os.environ.get("AI_REVIEW_TEST_ISOLATION") == "1":
+        # Test runs must never add stub rows to the live spend ledger (#1435).
+        require(os.path.realpath(chosen) != os.path.realpath(str(live_location())),
+                "test run refused the live reviewer events log; set AI_REVIEW_EVENT_DIR to a private directory")
+    return physical(chosen)
 
 
 def git_value(*args):
@@ -1323,7 +1339,8 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
     that binds provider, mode, head, digest, verdict and the report checksum,
     so it is the lookup source. A match requires every one of: a completed,
     non-stale APPROVE with no failure; the same provider (or any, for "any"),
-    mode, head, whole-source digest, repository, resolved base and (when both
+    recorded mode (a record with no recorded mode never matches), head,
+    whole-source digest, repository, resolved base and (when both
     are known) implementing engine; no review operation; and a report file
     whose checksum still matches and which itself names the head, the digest
     and a final APPROVE. A malformed record raises: the caller then runs a
@@ -1349,7 +1366,7 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
                 row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
                 (provider == "any" or row.get("provider") == provider) and
                 row.get("provider") == path.parent.parent.name and
-                row.get("review_mode") in (None, mode)):
+                row.get("review_mode") == mode):
             continue
         # A later REJECT (or BLOCKED) on the same source supersedes an older
         # APPROVE: remember the newest real judgment of any kind.

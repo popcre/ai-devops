@@ -160,6 +160,9 @@ fi
 # doors may skip is a rejected shape. This is the admission gate that ends the
 # copy-paste governance path for migrated doors.
 # ---------------------------------------------------------------------------
+# Generic pay-per-use API keys never reach a reviewer (owner lock 2026-10-07,
+# #1427): every reviewer uses its subscription login or its own protected store.
+unset OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY
 # AI_REVIEW_ENGINE_BIN was gated above: without AI_POOL_TEST_HOOKS=1 the
 # override is refused, and ENGINE is the pinned runner in this tree.
 ENGINE="${AI_REVIEW_ENGINE_BIN:-$ROOT/ai-review-engine}"
@@ -232,6 +235,9 @@ case "$provider" in
   glm) [ -z "${AI_POOL_RUNNER_GLM:-}" ] || RUNNER="$AI_POOL_RUNNER_GLM" ;;
 esac
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+# Generic pay-per-use API keys never reach a reviewer door (#1427); stripped
+# after the models file so it cannot reintroduce one.
+unset OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY
 [ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
 # Single expansion: the value is never re-evaluated, and the name is pinned
 # by the provider case above.
@@ -379,10 +385,14 @@ if [ -n "$TESTS_COMMAND" ]; then
     die 'tests command failed; no review was dispatched.'
   fi
 fi
-cat > "$TMP_BRIEF" <<BRIEF
+# Cache-stable layout (#1430): every fixed instruction, the decision text and
+# the verdict format come first so briefs for different heads share one byte
+# prefix; run facts that change per review come last in a labeled block.
+{
+cat <<BRIEF
 You are performing a $mode. You MAY run shell commands, builds and tests, and edit files, but only inside your disposable review copy: your edits are discarded and are never part of the change under review. Never commit, push, merge, or touch any remote, the pull-request branch, or any checkout outside your copy. No web search.
 
-Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s (executed before dispatch; result: %s)' "$TESTS_COMMAND" "$TESTS_RESULT")
+Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. Read the packet manifest and its patch first, then the changed files listed under RUN FACTS, then only what you need inside the packet to confirm a finding. You MUST quote the full reviewed head SHA given under RUN FACTS in your report.
 
 $DECISION
 
@@ -390,7 +400,14 @@ Return ALL findings in one pass, grouped by severity, with file and line evidenc
 
 ## Verdict
 APPROVE|REJECT|BLOCKED
+
+## RUN FACTS (this review only)
+The reviewed head commit is $REVIEW_HEAD.
+The source digest is $REVIEW_DIGEST.
 BRIEF
+if [ -n "$CHANGED_FILES" ]; then printf 'Changed files (the change under review is exactly these):\n%s\n' "$CHANGED_FILES"; fi
+if [ -n "$TESTS_COMMAND" ]; then printf 'Tests command on record: %s (executed before dispatch; result: %s)\n' "$TESTS_COMMAND" "$TESTS_RESULT"; fi
+} > "$TMP_BRIEF"
 
 # The review runs inside the disposable snapshot (no live-checkout binding),
 # so the durable requirement is recorded without a sandbox ownership marker;

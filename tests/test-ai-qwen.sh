@@ -1152,5 +1152,25 @@ if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-de
 
 recovery_cases
 fi  # part 2
+
+# #1427: the Qwen door trusts only the protected Token Plan store; an ambient
+# OPENAI_API_KEY / AI_QWEN_KEY is never used as a pay-per-use fallback.
+QD="$TMP/qwen-door-1427"; mkdir -p "$QD/work" "$QD/packet"
+printf 'Review.\n' > "$QD/prompt"
+cat > "$QD/qwen" <<EOF
+#!/usr/bin/env bash
+env > "$QD/qwen-env"
+printf '%s\n' '{"type":"result","is_error":false,"result":"ok\n## Verdict\nAPPROVE","num_turns":1}'
+EOF
+chmod +x "$QD/qwen"
+qwen_door() { rm -f "$QD/qwen-env"; ( export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_QWEN_BIN="$QD/qwen" \
+  DOOR_WORKDIR="$QD/work" DOOR_PACKET_DIR="$QD/packet" DOOR_PROMPT_FILE="$QD/prompt" DOOR_REPORT_OUT="$QD/report" \
+  DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa OPENAI_API_KEY=fake-openai-1427 AI_QWEN_KEY=fake-aiqwen-1427 "$@"
+  unset AI_QWEN_ALLOW_NO_CREDS; bash "$REPO_ROOT/tools/lib/review-doors/qwen.sh" review ) > "$QD/out" 2>&1; }
+qwen_door AI_QWEN_KEY_STORE="$QD/no-such-store"; QD_RC=$?
+check 'qwen_door_ignores_ambient_openai_key' "test '$QD_RC' -eq 127 && test ! -e '$QD/qwen-env' && grep -q 'no Qwen key in the protected store' '$QD/out'"
+printf 'sk-sp-store-1427\n' > "$QD/store"; chmod 600 "$QD/store"
+qwen_door AI_QWEN_KEY_STORE="$QD/store"; QD_RC=$?
+check 'qwen door forwards only the protected store key' "test '$QD_RC' -eq 0 && grep -q '^OPENAI_API_KEY=sk-sp-store-1427$' '$QD/qwen-env' && ! grep -q 'fake-.*-1427' '$QD/qwen-env'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))
