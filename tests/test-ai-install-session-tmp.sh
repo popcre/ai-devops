@@ -25,4 +25,9 @@ check "remove deletes the copies" '[ ! -e "$HOME/.config/ai-devops/session-tmp-h
 check "--check fails after remove" '! bash "$inst" --check --no-timer >/dev/null'
 printf 'not json' > "$s"
 check "refuses an unparseable settings file" '! bash "$inst" --no-timer >/dev/null 2>&1 && [ "$(cat "$s")" = "not json" ]'
+mkdir -p "$work/stub"; printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' "$work" > "$work/stub/systemctl"; chmod +x "$work/stub/systemctl"
+printf '{}\n' > "$s"; AI_SESSION_TMP_SYSTEMCTL="$work/stub/systemctl" bash "$inst" >/dev/null
+t="$XDG_CONFIG_HOME/systemd/user/ai-session-tmp-sweep.timer"
+check "timer uses a wall-clock schedule that re-arms" 'grep -qx "OnCalendar=\*:0/30" "$t" && ! grep -q "^OnUnitActiveSec" "$t"'
+check "timer is enabled and restarted through systemctl --user" 'grep -q "enable --now ai-session-tmp-sweep.timer" "$work/systemctl.log" && grep -q "restart ai-session-tmp-sweep.timer" "$work/systemctl.log"'
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

@@ -30,15 +30,16 @@ cfg_dir="$HOME/.config/ai-devops"
 settings="$claude_home/settings.json"
 marker='session-tmp-hook'
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+systemctl_cmd="${AI_SESSION_TMP_SYSTEMCTL:-systemctl}"
 
 if (( remove )); then
   # Strictly reverses this installer: our hook entries, copies, and timer only.
   run() { if (( dry )); then echo "WOULD $*"; else "$@"; fi; }
   if [ -f "$unit_dir/ai-session-tmp-sweep.timer" ]; then
     echo "REMOVE sweep timer"
-    (( dry )) || systemctl --user disable --now ai-session-tmp-sweep.timer >/dev/null 2>&1 || true
+    (( dry )) || "$systemctl_cmd" --user disable --now ai-session-tmp-sweep.timer >/dev/null 2>&1 || true
     run rm -f "$unit_dir/ai-session-tmp-sweep.timer" "$unit_dir/ai-session-tmp-sweep.service"
-    (( dry )) || systemctl --user daemon-reload >/dev/null 2>&1 || true
+    (( dry )) || "$systemctl_cmd" --user daemon-reload >/dev/null 2>&1 || true
   fi
   if [ -f "$settings" ] && grep -qF "$marker" "$settings" && command -v jq >/dev/null 2>&1 \
      && jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
@@ -117,14 +118,16 @@ cat > "$unit_dir/ai-session-tmp-sweep.timer" <<'EOF'
 Description=Run the AI session temp backup sweep every 30 minutes
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=30min
+# Wall-clock schedule: OnUnitActiveSec never re-arms after a timer started
+# with --now whose oneshot already ran, which left the sweep running once.
+OnCalendar=*:0/30
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 EOF
-if systemctl --user daemon-reload 2>/dev/null && systemctl --user enable --now ai-session-tmp-sweep.timer >/dev/null 2>&1; then
+if "$systemctl_cmd" --user daemon-reload 2>/dev/null && "$systemctl_cmd" --user enable --now ai-session-tmp-sweep.timer >/dev/null 2>&1 \
+   && "$systemctl_cmd" --user restart ai-session-tmp-sweep.timer >/dev/null 2>&1; then  # pick up a changed schedule
   echo "OK sweep timer active"
 else
   echo "WARN sweep timer written but systemd --user is unavailable here"
