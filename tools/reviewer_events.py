@@ -5,6 +5,7 @@ import contextlib
 import datetime
 import os
 import re
+import stat as stat_module
 from pathlib import Path
 import subprocess
 import sys
@@ -1059,6 +1060,22 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
 
+def _examined(path):
+    """stat() the path: None when it is truly missing, Blocked when it cannot be examined.
+
+    Path.is_dir/is_file/exists can report False for inaccessible paths on
+    newer Pythons, which would turn an unreadable tree into a false loss.
+    FileNotFoundError means missing; every other OSError is an incomplete
+    search and must fail closed.
+    """
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise Blocked(f"report search cannot examine {path}; loss not recorded: {error}")
+
+
 def _report_search_roots(provider, source, directory=None, run_id=None):
     """Every tree a provider may leave a recoverable report or staging file in."""
     roots = [source / ".ai" / "reviews"]
@@ -1078,12 +1095,15 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
         # values that still live next to the default). An unreadable base is an
         # incomplete search — fail closed rather than inventing a loss.
         base = Path.home() / ".local/state/ai-devops"
-        if base.is_dir():
+        base_stat = _examined(base)
+        if base_stat is not None and stat_module.S_ISDIR(base_stat.st_mode):
             try:
                 for child in base.iterdir():
                     jobs = child / "jobs"
-                    if child.name.startswith("kimi") and jobs.is_dir() and jobs not in roots:
-                        roots.append(jobs)
+                    if child.name.startswith("kimi") and jobs not in roots:
+                        jobs_stat = _examined(jobs)
+                        if jobs_stat is not None and stat_module.S_ISDIR(jobs_stat.st_mode):
+                            roots.append(jobs)
             except OSError as error:
                 raise Blocked(f"report search cannot enumerate {base}; loss not recorded: {error}")
         if run_id is not None:
@@ -1091,7 +1111,8 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
                 Path(os.environ.get("AI_REVIEW_EVENT_DIR") or
                      (Path.home() / ".local/state/ai-devops/reviewer-events")))
             recorded = evidence_root(event_dir, run_id) / "report_search_roots"
-            if recorded.is_file():
+            recorded_stat = _examined(recorded)
+            if recorded_stat is not None and stat_module.S_ISREG(recorded_stat.st_mode):
                 try:
                     for line in recorded.read_text(encoding="utf-8").splitlines():
                         line = line.strip()
@@ -1146,24 +1167,25 @@ def lost_report_candidates(provider, sandbox, source, since=None, run_id=None, d
     """
     found = []
     def consider(path):
-        try:
-            if not path.is_file():
-                return
-        except OSError:
-            found.append(path)
+        info = _examined(path)
+        if info is None:
+            return
+        if not stat_module.S_ISREG(info.st_mode):
             return
         if since is not None:
             try:
-                if path.stat().st_mtime < since:
+                if info.st_mtime < since:
                     return
             except OSError:
                 pass  # unstatable: cannot prove it is older than the invocation
         if _recoverable_report_file(path, provider, run_id):
             found.append(path)
     for root in _report_search_roots(provider, source, directory, run_id):
-        if not root.exists():
+        root_stat = _examined(root)
+        if root_stat is None:
             continue
-        require(root.is_dir(), "report search root is not a directory; loss not recorded")
+        require(stat_module.S_ISDIR(root_stat.st_mode),
+                "report search root is not a directory; loss not recorded")
         walk_errors = []
         def on_walk_error(error):
             walk_errors.append(error)
