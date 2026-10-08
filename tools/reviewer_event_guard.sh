@@ -125,25 +125,33 @@ reviewer_event_guard(){
   # repository), so binding its sandbox onto the review run is refused
   # ("sandbox evidence source differs from invocation"). Only the probe recorder's
   # own direct child keeps that qualification invocation.
+  # Resolve a bash pid to the OS/Win32 pid process_alive can see.
+  # Git Bash `$$` is an MSYS pid; OpenProcess cannot see it (a live
+  # shell would read as dead and open a false-loss window).
+  os_pid() {
+    if [ -r "/proc/$1/winpid" ]; then cat "/proc/$1/winpid"; else printf '%s\n' "$1"; fi
+  }
   local entry_cmd="${1:-}" entry_live=0
   [ "$entry_cmd" = qualify-live ] && entry_live=1
   [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
     if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
     if [ "$entry_live" -eq 0 ] && reviewer_event_run_is_open; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
   fi
   # Declining inherit (e.g. a qualify-live probe launched from an open review)
   # must begin its own invocation on a clean identity, never resume the outer run.
-  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_PRIVACY_SCOPE
+  # Drop the outer owner PID too: a fresh invocation must record THIS guard,
+  # not a stale/dead parent PID that would make the run look proven-dead.
+  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID AI_REVIEW_PRIVACY_SCOPE
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation privacy_scope=""
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
@@ -159,9 +167,14 @@ reviewer_event_guard(){
   [ "$provider" != deepseek ] || [ "${1:-}" != finalize ] || operation=local-finalization
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
+  # Owner PID must be set before begin so normal top-level runs store it.
+  # Always store the OS/Win32 pid (see os_pid above) so process_alive can see it.
+  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "$$")}"
+  event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
-  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
+  # child_pending is created by begin (Python handles Windows path shapes);
+  # note-child clears it after the child PID is durably recorded.
   # Forward only to this invocation's child; never search process names or
   # change another review's state. A killed supervisor leaves an unmatched start.
   trap 'received=TERM; observed_signal=TERM; [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true' TERM
@@ -187,6 +200,9 @@ reviewer_event_guard(){
     find "$privacy_base" -mindepth 1 -maxdepth 1 -type d -name 'scope.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
   fi
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
+  # Record the child so loss is refused while it can still publish.
+  child_pid_recorded="$(os_pid "$child")"
+  env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child_pid_recorded" >/dev/null 2>&1 || true
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
   while true; do
     received=''

@@ -1,5 +1,6 @@
 """Synthetic maintenance contract tests, run by test-ai-reviewer-issue.sh."""
 import copy
+import datetime
 import importlib.util
 import json
 import os
@@ -79,9 +80,11 @@ esac
         with self.ledger.open("ab") as output:
             output.write(json.dumps(event).encode() + b"\n")
 
-    def invocation(self, rid="run-1", code=1, provider="grok", finish=True):
+    def invocation(self, rid="run-1", code=1, provider="grok", finish=True, owner_pid=None):
         row = {"schema_version": 1, "provider": provider, "event": "started", "run_id": rid,
                "repo": str(self.toolkit), "head": self.sha, "caller": "codex", "timestamp": "same-time"}
+        if owner_pid is not None:
+            row["owner_pid"] = owner_pid
         self.write(row)
         if finish:
             self.write({**row, "event": "finished", "exit_code": code})
@@ -569,7 +572,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
     def test_failed_publication_still_records_exact_terminal_exit(self):
         result = self.guard(operation="unpublished")
         self.assertEqual(result.returncode, 7)
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual([row["event"] for row in rows], ["started", "finished"])
         self.assertEqual(rows[-1]["exit_code"], 7)
         self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
@@ -591,7 +595,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(result.stdout, "unchanged input\n")
         self.assertEqual(result.stderr, "synthetic stderr\n")
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual([r["event"] for r in rows], ["started", "finished"])
         self.assertEqual(rows[-1]["exit_code"], 7)
 
@@ -600,7 +605,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
         for provider in providers:
             result = self.guard(provider)
             self.assertEqual(result.returncode, 0, result.stderr)
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual({r["provider"] for r in rows}, set(providers))
         self.assertEqual(len(rows), 2 * len(providers))
 
@@ -1303,7 +1309,10 @@ wait "$job"
                                  "/usr/bin/bash" if os.name == "nt" else self.bash, str(self.wrapper)],
                                 cwd=self.toolkit, env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 137, result.stderr)
-        self.assertEqual(len(self.ledger.read_text().splitlines()), 1)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines() if line.strip()]
+        starts = [r for r in rows if r.get("event") == "started"]
+        self.assertEqual(len(starts), 1)
+        self.assertFalse(any(r.get("event") == "finished" for r in rows))
         self.assertEqual(self.engine.start()["candidates"][0]["classification"], "completion-unproven")
 
     def test_log_prefix_and_json_snapshot_continuity(self):
@@ -1402,6 +1411,379 @@ with event_lock(sys.argv[2]):
                 child.wait(timeout=5)
             child.stdout.close()
             child.stderr.close()
+
+    # ---- evidence-lost: non-GLM providers, proven-dead owner, verify accept ----
+
+    def _lost_sandbox(self, provider, name="lost-test", owner_line=None, reports=()):
+        """Build a sandbox + source tree ready for reconcile-lost."""
+        source = self.root / "lost-source"
+        reviews = source / ".ai" / "reviews"
+        reviews.mkdir(parents=True, exist_ok=True)
+        for report_name in reports:
+            (reviews / report_name).write_text("still here\n")
+        sandbox = self.root / f"{provider}-{name}-0123456789ab"
+        sandbox.mkdir(exist_ok=True)
+        marker = sandbox / ".ai-review-sandbox"
+        lines = [str(source)]
+        if owner_line:
+            lines.append("evidence_format=1")
+            lines.append(owner_line)
+        marker.write_text("\n".join(lines) + "\n")
+        return sandbox, source
+
+    def _finished_lost_invocation(self, provider, rid):
+        row = {"schema_version": 1, "provider": provider, "event": "started", "run_id": rid,
+               "repo": str(self.toolkit), "head": self.sha, "caller": "codex",
+               "timestamp": "2026-10-07T12:00:00+00:00"}
+        self.write(row)
+        events.require_report(self.root, provider, rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+
+    def test_non_glm_finished_loss_records_when_no_report_exists(self):
+        rid = "c" * 32
+        self._finished_lost_invocation("codex", rid)
+        sandbox, _ = self._lost_sandbox("codex", owner_line=f"evidence_owner=codex:{rid}")
+        events.record_lost(self.root, "codex", rid, sandbox, "provider exit 1, report gone")
+        path = self.root / "evidence" / rid / "evidence-lost.json"
+        self.assertTrue(path.is_file())
+        row = json.loads(path.read_text())
+        self.assertEqual(row["report_state"], "lost")
+        self.assertEqual(row["provider"], "codex")
+
+    def test_loss_still_refuses_when_report_exists(self):
+        rid = "d" * 32
+        self._finished_lost_invocation("gemini", rid)
+        report_name = "gemini-lost-test-20260911T000000Z-99.md"
+        sandbox, _ = self._lost_sandbox("gemini", owner_line=f"evidence_owner=gemini:{rid}",
+                                        reports=(report_name,))
+        # reconcile-lost searches the source's .ai/reviews and refuses the loss.
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "gemini", sandbox, "report still exists")
+
+    def test_loss_still_refuses_when_artifact_exists(self):
+        rid = "e" * 32
+        self._finished_lost_invocation("qwen", rid)
+        sandbox, _ = self._lost_sandbox("qwen", owner_line=f"evidence_owner=qwen:{rid}")
+        artifact_dir = self.root / "evidence" / rid / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / ("0" * 64 + ".json")).write_text("{}\n")
+        with self.assertRaises(events.Blocked):
+            events.record_lost(self.root, "qwen", rid, sandbox, "artifact exists")
+
+    def test_started_never_finished_requires_proven_dead(self):
+        rid = "f" * 32
+        self.invocation(rid=rid, code=1, provider="muse", finish=False)
+        events.require_report(self.root, "muse", rid)
+        sandbox, _ = self._lost_sandbox("muse", owner_line=f"evidence_owner=muse:{rid}")
+        # Fresh start, no PID: fail-closed, wrapper may still be alive.
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
+        # Age alone is NEVER proof of death — even 3h with no PID stays fail-closed.
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        stale = (datetime.datetime.now(datetime.timezone.utc) -
+                 datetime.timedelta(hours=3)).isoformat()
+        for row in rows:
+            if row.get("run_id") == rid and row.get("event") == "started":
+                row["timestamp"] = stale
+        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_child_pending_blocks_loss(self):
+        """Fork-handshake gap: child_pending present means a child may still publish."""
+        rid = "c5" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        (self.root / "evidence" / rid / "child_pending").write_text("pending\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "fork gap")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_child_pending_cleared_after_note_child(self):
+        """note-child records the PID and clears the pending marker."""
+        rid = "c6" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "child_pending").write_text("pending\n")
+        import subprocess, sys
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        subprocess.check_call([sys.executable, tool, "note-child", "glm", rid, "99999997"],
+                              env={**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)},
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertTrue((root / "child_pid").is_file())
+        self.assertFalse((root / "child_pending").exists())
+
+    def test_live_owner_pid_blocks_loss_even_if_old(self):
+        """Age alone must NEVER mark dead while a live owner PID exists."""
+        rid = "c0" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=os.getpid())
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        # Age the start past the window — PID is alive, so loss must still refuse.
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        stale = (datetime.datetime.now(datetime.timezone.utc) -
+                 datetime.timedelta(hours=3)).isoformat()
+        for row in rows:
+            if row.get("run_id") == rid and row.get("event") == "started":
+                row["timestamp"] = stale
+        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "live owner blocks loss")
+
+    def test_killed_wrapper_dead_owner_pid_records_loss(self):
+        """A wrapper killed before finish: recorded owner PID is dead → loss ok."""
+        rid = "c1" + "0" * 30
+        # 99999999 is never a live PID on this machine.
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        events.record_lost(self.root, "glm", rid, sandbox, "wrapper killed before publication")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_live_owner_pid_still_refuses(self):
+        """A live review that still owes a report stays fail-closed."""
+        rid = "c2" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=os.getpid())
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "not dead")
+
+    def test_child_publisher_blocks_loss(self):
+        """A still-alive child that can publish blocks loss even if owner PID is dead."""
+        rid = "c3" + "0" * 30
+        # Owner PID is dead (99999999), but a live child PID exists.
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        # Record a live child (the current process) via the sidecar file.
+        child_file = self.root / "evidence" / rid / "child_pid"
+        child_file.write_text(str(os.getpid()) + "\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "child can still publish")
+
+    def test_dead_owner_and_dead_child_records_loss(self):
+        """Both owner and child dead → loss is recordable."""
+        rid = "c4" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        child_file = self.root / "evidence" / rid / "child_pid"
+        child_file.write_text("99999998\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        events.record_lost(self.root, "glm", rid, sandbox, "all dead")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_begin_stores_owner_pid(self):
+        """Normal begin stores the owner PID from the environment."""
+        os.environ["AI_REVIEW_EVENT_OWNER_PID"] = str(os.getpid())
+        try:
+            import uuid as _uuid
+            run_id = _uuid.uuid4().hex
+            row = {"schema_version": 1, "event": "started", "provider": "glm",
+                   "operation": "invocation", "parent_run_id": None,
+                   "run_id": run_id, "timestamp": "2026-10-07T12:00:00+00:00",
+                   "repo": str(self.toolkit), "head": self.sha,
+                   "owner_pid": events._owner_pid_from_env(),
+                   "caller": "test"}
+            self.write(row)
+            starts = [json.loads(l) for l in self.ledger.read_text().splitlines()
+                      if json.loads(l).get("run_id") == run_id]
+            self.assertEqual(starts[0].get("owner_pid"), os.getpid())
+        finally:
+            del os.environ["AI_REVIEW_EVENT_OWNER_PID"]
+
+    def test_verify_accepts_matching_evidence_lost_without_ledger_row(self):
+        rid = "b" * 32
+        # required.json + evidence-lost.json with matching identity, no ledger row.
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fixture", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        self.assertEqual(events.verify_reports(self.root, "glm", rid), [rid + "/evidence-lost"])
+
+    def test_verify_rejects_evidence_lost_identity_mismatch(self):
+        rid = "a1" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "head": "1" * 40, "sandbox": "glm-x-0123456789ab",
+                "report_state": "lost", "reason": "fixture", "recorded_at": "x",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
+    def test_verify_rejects_no_ledger_loss_without_historical_markers(self):
+        """A live review cannot fabricate a terminal loss with no ledger row."""
+        rid = "b1" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "a" * 40, "caller": "codex"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fabricated", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
+    def test_verify_rejects_historical_loss_when_ledger_row_exists(self):
+        """Corrupt/duplicate ledger rows must not fall through to fixture loss."""
+        rid = "b2" + "0" * 30
+        # Wrong-provider started row: invocation() is Blocked, but a row exists.
+        self.write({"schema_version": 1, "provider": "grok", "event": "started",
+                    "run_id": rid, "repo": str(self.toolkit), "head": self.sha,
+                    "caller": "codex", "timestamp": "same-time"})
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fixture", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
+    def test_async_submission_refuses_loss_without_finish(self):
+        """A detached worker outlives the supervisor: supervisor death is not loss."""
+        rid = "d0" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_refuses_loss_while_worker_may_live(self):
+        """The launcher's finish is not the detached worker's death."""
+        rid = "d1" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        # The detached worker recorded a live PID (this process) and can publish.
+        (self.root / "evidence" / rid / "worker_pid").write_text(str(os.getpid()) + "\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "detached worker"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_refuses_loss_when_worker_pid_unknown(self):
+        """Unknown worker_pid fails closed: the worker may still publish."""
+        rid = "d2" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "detached worker"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "worker state unknown")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_loss_allowed_when_worker_is_gone(self):
+        """Finished + recorded worker_pid dead (or terminal-job marker) is loss."""
+        rid = "d3" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        # 99999998 is never a live PID on this machine: worker proven dead.
+        (self.root / "evidence" / rid / "worker_pid").write_text("99999998\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker finished without a report")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_async_submission_loss_allowed_on_terminal_job_marker(self):
+        """A terminal-job marker is proof the detached worker cannot publish."""
+        rid = "d4" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        (self.root / "evidence" / rid / "worker_terminal").write_text("terminal\n")
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker job terminal, no report")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_codex_legacy_loss_allowed_when_no_report_exists(self):
+        rid = "a2" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        sandbox, _ = self._lost_sandbox("codex", name="no-owner")
+        # No evidence_owner line → legacy local-reconciliation path. Broad
+        # provider-wide search finds no report, so the loss is real.
+        events.reconcile_lost(self.root, "codex", sandbox, "legacy path, report gone")
+        self.assertTrue(any(self.root.glob("evidence/*/evidence-lost.json")))
+
+    def test_codex_broad_search_finds_production_report_names(self):
+        rid = "a3" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        # Production Codex report name: codex-{mode}-{ts}-{pid}-{random}.md
+        report = "codex-with-report-20260917T152549-12345-6789.md"
+        sandbox, _ = self._lost_sandbox("codex", name="with-report", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "report still on disk")
+
+    def test_gemini_broad_search_finds_production_report_names(self):
+        rid = "a4" + "0" * 30
+        self._finished_lost_invocation("gemini", rid)
+        # Production Gemini report name: gemini-{name}-{ts}-{pid}.md
+        report = "gemini-gem-tag-20260917T152549-99.md"
+        sandbox, _ = self._lost_sandbox("gemini", name="gem-tag", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "gemini", sandbox, "report still on disk")
+
+    def test_qwen_24_char_hash_report_refuses_loss(self):
+        """Qwen truncates report hashes to 24 chars; the search must find them."""
+        rid = "a5" + "0" * 30
+        self._finished_lost_invocation("qwen", rid)
+        # Production Qwen report name: qwen-{name}-{first 24 of sha256}.md
+        report = "qwen-lost-test-0123456789abcdef01234567.md"
+        sandbox, _ = self._lost_sandbox("qwen", name="qwen-24", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "qwen", sandbox, "qwen 24-char report still on disk")
+
+    def test_kimi_canonical_report_outside_reviews_refuses_loss(self):
+        """Kimi writes the canonical report outside .ai/reviews before mirroring."""
+        rid = "a6" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="canonical")
+        state = self.root / "kimi-state"
+        canonical = state / "jobs" / "rid" / "caller--canonical" / "review-20261007T120000Z-1.md"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("# Kimi review — canonical\n")
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(state)
+        try:
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "kimi", sandbox, "canonical report still on disk")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
 
 
 if __name__ == "__main__":
