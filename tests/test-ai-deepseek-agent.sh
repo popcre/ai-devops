@@ -716,7 +716,7 @@ check "--repo-tools sends the file content back as a tool message" "jq -e '.tool
 rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
 CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 DEEPSEEK_TOOLS_MAX_ROUNDS=2 DEEPSEEK_STUB_TOOLCALL_ALWAYS=1 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' run send 'loop forever' --repo-tools > "$TMP/tools-budget.out" 2>&1 || true  # no answer after the budget is a clean failure
-check "tool loop is bounded and the last request withholds tools" "test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 3 )) && jq -e '(has(\"tools\")|not) and (.messages[-1].content|contains(\"budget exhausted\"))' '$TOOL_REQ'"
+check "tool loop is bounded and the last request withholds tools" "test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 4 )) && jq -e '(has(\"tools\")|not) and (.messages[-1].content|contains(\"budget exhausted\"))' '$TOOL_REQ'"
 rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
 git -C "$TMP/repo" remote add origin https://example.invalid/repo.git 2>/dev/null || true
 CALLER_STATUS="$(git -C "$TMP/repo" status --porcelain; cat "$TMP/repo/proof.txt")"

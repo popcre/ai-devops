@@ -197,8 +197,22 @@ def main():
         rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "0"], env=env).returncode
         body = json.load(open(req))
         check("step continues with a tool result", rc == 10 and body["messages"][-2]["role"] == "tool")
-        check("last round withholds tools and demands an answer",
-              "tools" not in body and "budget exhausted" in body["messages"][-1]["content"])
+        check("last round keeps the tool list (cache prefix) and demands an answer",
+              body.get("tools") == t.TOOLS and body["messages"][-1]["content"] == t.FINAL_DEMAND)
+        final_msgs = body["messages"]
+        # A model that still calls a tool after the demand gets a refusal (the
+        # tool is not run) and the next request withholds tools to force an answer.
+        with open(resp, "w") as fh:
+            json.dump({"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}, fh)
+        rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"], env=env).returncode
+        body = json.load(open(req))
+        check("a tool call after the final demand is refused, then tools are withheld",
+              rc == 10 and "tools" not in body and body["messages"][-2]["content"].startswith("Error: tool budget")
+              and body["messages"][-1]["content"] == t.FINAL_DEMAND)
+        check("refusal round extends the final request's messages unchanged",
+              body["messages"][:len(final_msgs)] == final_msgs)
+        rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "2"], env=env).returncode
+        check("with tools withheld the loop ends", rc == 0)
         entry = json.loads(open(log).read().splitlines()[0])
         check("tool call is logged", entry["tool"] == "read_file" and entry["refused"] is False)
 
