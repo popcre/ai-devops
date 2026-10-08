@@ -78,24 +78,11 @@ resolve_agy() {
   return 127
 }
 
-# Credentials: agy owns its own local auth. A missing runtime is a local
-# dependency failure, not a provider fault. An explicit key, when present,
-# enters the child environment only; it never appears in argv or output.
-GE_KEY=""
+# Credentials: agy's own subscription login is the ONLY credential. Generic
+# pay-per-use key variables are never forwarded (owner lock 2026-10-07, #1427):
+# they are stripped before agy starts so a stray key cannot bill silently.
 require_credentials() {
-  if [ -n "${AI_GEMINI_KEY:-}" ]; then
-    GE_KEY="$AI_GEMINI_KEY"
-    return 0
-  fi
-  if [ -n "${GEMINI_API_KEY:-}" ]; then
-    GE_KEY="$GEMINI_API_KEY"
-    return 0
-  fi
-  if [ -n "${GOOGLE_API_KEY:-}" ]; then
-    GE_KEY="$GOOGLE_API_KEY"
-    return 0
-  fi
-  # No explicit key: agy's own local auth session is the credential store.
+  unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
   return 0
 }
 
@@ -152,7 +139,7 @@ main() {
   set +e
   (
     cd "$DOOR_WORKDIR" || exit 1
-    if [ -n "$GE_KEY" ]; then export GEMINI_API_KEY="$GE_KEY"; fi
+    unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
     if [ "$MODE" = implement ]; then
       reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
         --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
@@ -165,7 +152,6 @@ main() {
   )
   rc=$?
   set -e
-  GE_KEY=""
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current gemini "$out" || true

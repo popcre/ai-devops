@@ -142,8 +142,8 @@ Each StepFun turn writes an owner-only `turn.*.json` counter file under
 `~/.local/state/ai-devops/stepfun/reports/` (or `AI_STEPFUN_STATE_DIR/reports/`).
 It records engine, retry count, resume state, and available input/output and
 cache read/write token counts. OpenCode reads only numeric `step_finish` usage
-fields from its event stream; StepCode reports null counts because its plain
-output has no usage event. These counters do not establish a cache saving by
+fields from its event stream; StepCode runs with `--mode json` and sums the usage
+on each assistant `message_end` (counted as `provider_calls`). These counters do not establish a cache saving by
 themselves; compare real turns before making that claim.
 
 The completed reconciliation plan is [`plan_sync-machine-wrapper-reconciliation.md`](../plan_sync-machine-wrapper-reconciliation.md). The command catalog now covers Grok, Kimi, Qwen, GLM, and DeepSeek launchers.

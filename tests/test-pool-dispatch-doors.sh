@@ -107,6 +107,23 @@ rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-grkeng" 2>&1
 check "pool_grok_argv_keeps_max_turns" "grep -q -- '--provider grok' '$POOLTMP/engine-args' && grep -q -- '--max-turns 120' '$POOLTMP/engine-args'"
 
+# Cache-stable brief (#1430): briefs for two different heads share an identical
+# byte prefix through the decision text and verdict format; per-review facts
+# (head SHA, digest) come only after it, and the head SHA is still quoted.
+# The engine's rlc_write_brief is the brief every registered door receives.
+HEAD1=1111111111111111111111111111111111111111; HEAD2=2222222222222222222222222222222222222222
+( . "$REPO_ROOT/tools/lib/review-lifecycle-core.sh" \
+  && rlc_write_brief "$POOLTMP/brief1" final-check "$HEAD1" digest-one "$POOLTMP/copy-one" .ai/pkt-one 'Decide the fixed question.' 'exit 0' 'a.txt' \
+  && rlc_write_brief "$POOLTMP/brief2" final-check "$HEAD2" digest-two "$POOLTMP/copy-two" .ai/pkt-two 'Decide the fixed question.' 'exit 1' 'b.txt' ) > /dev/null 2>&1
+prefix_through_verdict(){ sed -n '1,/^APPROVE|REJECT|BLOCKED$/p' "$1"; }
+check "brief_prefix_stable_across_heads" \
+  "grep -qx 'APPROVE|REJECT|BLOCKED' '$POOLTMP/brief1' && prefix_through_verdict '$POOLTMP/brief1' | grep -q 'Decide the fixed question.' && [ \"\$(prefix_through_verdict '$POOLTMP/brief1')\" = \"\$(prefix_through_verdict '$POOLTMP/brief2')\" ] && ! prefix_through_verdict '$POOLTMP/brief1' | grep -qE '$HEAD1|digest-one|copy-one|a.txt'"
+check "brief_run_facts_carry_head_sha_last" \
+  "sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief1' | grep -q 'The reviewed head commit is $HEAD1' && sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief2' | grep -q 'The reviewed head commit is $HEAD2' && sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief1' | grep -q 'copy-one/.ai/pkt-one/MANIFEST.md' && grep -q 'MUST quote the full reviewed head SHA' '$POOLTMP/brief1'"
+# The legacy pool brief keeps the same order: no per-run value before RUN FACTS.
+check "pool_legacy_brief_run_facts_last" \
+  "awk '/^cat <<BRIEF\$/{on=1;next} on&&/^## RUN FACTS/{exit} on' '$POOL' | grep -q DECISION && ! awk '/^cat <<BRIEF\$/{on=1;next} on&&/^## RUN FACTS/{exit} on' '$POOL' | grep -qE 'REVIEW_HEAD|REVIEW_DIGEST|CHANGED_FILES|TESTS_'"
+
 # A plain runner substitution for a registered door is a bypass and is refused.
 cat > "$POOLTMP/not-the-engine" <<'EOF'
 #!/usr/bin/env bash
@@ -143,8 +160,8 @@ fi
 exit 0
 EOF
 chmod +x "$POOLTMP/lifecycle-id"
-make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD]
-  local provider="$1" mode="$2" run="$3" verdict="$4" head="${5:-$REUSE_HEAD}" report sha
+make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD] [RECORDED_MODE|null|absent]
+  local provider="$1" mode="$2" run="$3" verdict="$4" head="${5:-$REUSE_HEAD}" rmode="${6:-$2}" report sha
   mkdir -p "$POOLTMP/fakerepo/.ai/reviews" "$LCDIR/runs/$REUSE_KEY/$provider/zcode"
   report="$POOLTMP/fakerepo/.ai/reviews/$provider-$mode-$run.md"
   printf '# %s %s\n\n| field | value |\n|---|---|\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Result\n\nAnalysis of %s.\n\n## Verdict\n%s\n' \
@@ -152,7 +169,8 @@ make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD]
   sha="$(sha256sum "$report" | cut -d' ' -f1)"
   jq -n --arg p "$provider" --arg m "$mode" --arg r "$run" --arg v "$verdict" --arg h "$head" --arg d "$REUSE_DIGEST" \
     --arg k "$REUSE_KEY" --arg rp "$report" --arg s "$sha" \
-    '{schema_version:1,status:"completed",provider:$p,run_id:$r,caller:"zcode",review_mode:$m,base:null,repository_key:$k,head:$h,source_digest:$d,verdict:$v,failure_class:null,report_path:$rp,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+    '{schema_version:1,status:"completed",provider:$p,run_id:$r,caller:"zcode",review_mode:$m,base:null,repository_key:$k,head:$h,source_digest:$d,verdict:$v,failure_class:null,report_path:$rp,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}
+    | if $rm == "null" then .review_mode=null elif $rm == "absent" then del(.review_mode) else . end' --arg rm "$rmode" \
     > "$LCDIR/runs/$REUSE_KEY/$provider/zcode/$run.json"
 }
 reuse_run(){ # reuse_run OUT PROVIDER MODE [ARGS...]
@@ -181,6 +199,12 @@ check "no_reuse_of_a_reject" "engargs | grep -q -- '--provider gemini'"
 make_pass muse diff-review 20261007T000000-1-3 APPROVE 0000000000000000000000000000000000000000
 reuse_run reuse-head muse diff-review
 check "no_reuse_on_head_change" "engargs | grep -q -- '--provider muse'"
+make_pass stepfun final-check 20261007T000000-1-9 APPROVE "$REUSE_HEAD" null
+reuse_run reuse-nullmode stepfun final-check
+check "no_reuse_of_null_review_mode_record" "engargs | grep -q -- '--provider stepfun'"
+make_pass gemini final-check 20261007T000000-1-10 APPROVE "$REUSE_HEAD" absent
+reuse_run reuse-absentmode gemini final-check
+check "no_reuse_of_absent_review_mode_record" "engargs | grep -q -- '--provider gemini'"
 make_pass deepseek diff-review 20261007T000000-1-4 APPROVE
 printf 'tampered\n' >> "$POOLTMP/fakerepo/.ai/reviews/deepseek-diff-review-20261007T000000-1-4.md"
 reuse_run reuse-tamper deepseek diff-review
@@ -206,6 +230,42 @@ make_pass qwen diff-review 20261007T000000-1-7 REJECT
 jq '.finished_at="2026-10-08T00:00:00Z"' "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json" > "$POOLTMP/r.json" && mv "$POOLTMP/r.json" "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json"
 reuse_run reuse-newer-reject qwen diff-review
 check "newer_reject_supersedes_older_approve" "engargs | grep -q -- '--provider qwen'"
+# #1427: generic pay-per-use keys never reach a reviewer door or agy.
+HOSTILE_KEYS="OPENAI_API_KEY CODEX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY AI_QWEN_KEY ANTHROPIC_API_KEY"
+hostile_env() { local k; for k in $HOSTILE_KEYS; do export "$k=fake-$k-1427"; done; }
+cat > "$POOLTMP/env-engine" <<EOF
+#!/usr/bin/env bash
+env > "$POOLTMP/engine-env"
+exit 0
+EOF
+chmod +x "$POOLTMP/env-engine"
+rm -f "$POOLTMP/engine-env"
+( cd "$POOLTMP/fakerepo" && export_pool && hostile_env && AI_REVIEW_ENGINE_BIN="$POOLTMP/env-engine" bash "$POOL" qwen security-review ) > "$POOLTMP/out-keys" 2>&1
+check "pool_strips_generic_keys_before_dispatch" \
+  "test -s '$POOLTMP/engine-env' && ! grep -q 'fake-.*-1427' '$POOLTMP/engine-env'"
+
+mkdir -p "$POOLTMP/gd/work" "$POOLTMP/gd/packet"
+printf 'Review the packet.\n' > "$POOLTMP/gd/prompt"
+cat > "$POOLTMP/gd/agy" <<EOF
+#!/usr/bin/env bash
+env > "$POOLTMP/gd/agy-env"
+printf '{"response":"Review complete.\\\\n## Verdict\\\\nAPPROVE","model":"gemini-3.8-flash-high"}\n'
+EOF
+chmod +x "$POOLTMP/gd/agy"
+gemini_door() { # extra env assignments as args
+  rm -f "$POOLTMP/gd/agy-env"
+  ( for kv in "$@"; do export "$kv"; done
+    export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_GEMINI_BIN="$POOLTMP/gd/agy" \
+      DOOR_WORKDIR="$POOLTMP/gd/work" DOOR_PACKET_DIR="$POOLTMP/gd/packet" DOOR_PROMPT_FILE="$POOLTMP/gd/prompt" \
+      DOOR_REPORT_OUT="$POOLTMP/gd/report" DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    bash "$REPO_ROOT/tools/lib/review-doors/gemini.sh" review ) > "$POOLTMP/gd/out" 2>&1
+}
+gemini_door GOOGLE_API_KEY=fake-google-1427; GD_RC=$?
+check "gemini_door_refuses_google_key_fallback" \
+  "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-google-1427' '$POOLTMP/gd/agy-env' && ! grep -q '^GEMINI_API_KEY=' '$POOLTMP/gd/agy-env'"
+gemini_door AI_GEMINI_KEY=fake-aigem-1427 GEMINI_API_KEY=fake-gem-1427; GD_RC=$?
+check "gemini_door_unsets_ai_gemini_key" \
+  "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-aigem-1427\|fake-gem-1427' '$POOLTMP/gd/agy-env'"
 
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"

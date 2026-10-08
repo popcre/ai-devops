@@ -8,6 +8,9 @@
 # conversation/model and durable report gates pass. Copy edits are discarded.
 # Never add --dangerously-skip-permissions or mutate global Antigravity settings.
 set -euo pipefail
+# agy uses only its own subscription login. Generic pay-per-use key variables
+# would let it bill an API key silently, so they never reach agy (#1427).
+unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
 # agy self-updates on ordinary invocations (even `agy models` in doctor). A
 # silent swap changes the runtime hash the live qualification is bound to, and
 # every following review refuses. The wrapper never lets its own calls update it.

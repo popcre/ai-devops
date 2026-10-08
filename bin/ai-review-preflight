@@ -60,6 +60,13 @@ admission_store() {
   "$runtime" "$REGISTRY_REAL_DIR/../tools/reviewer_admission.py" "$@" --directory "$STATE_DIR"
 }
 
+quota_reset_label() { # ISO-8601 RESET -> "October 09, 2026 at 12:00 AM EDT" (America/New_York)
+  local runtime
+  runtime="$(command -v python3 || command -v python)" || return 1
+  "$runtime" -c 'import sys; sys.path.insert(0, sys.argv[1]); import reviewer_admission as a; print(a.eastern_reset_label(a.reset_epoch(sys.argv[2])))' \
+    "$REGISTRY_REAL_DIR/../tools" "$1" 2>/dev/null
+}
+
 kimi_effective_profile() {
   local home="${KIMI_CODE_HOME:-$HOME/.kimi-code}" owner="${AI_KIMI_OWNER:-ai}" as="" candidate binary="" found="" context
   # Only root can use the existing password-free delegation capability. All
@@ -896,7 +903,15 @@ check_provider() { # PROVIDER REPO LIVE BASE
   local capacity_hold
   capacity_hold="$(capacity_admission "$provider")" || return 1
   if [ "$capacity_hold" != null ]; then
-      printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "$(printf '%s' "$capacity_hold" | jq -r '.reset_at // "unavailable"')" >&2
+      local hold_reset hold_label
+      hold_reset="$(printf '%s' "$capacity_hold" | jq -r '.reset_at // empty')"
+      if [ -n "$hold_reset" ] && [ "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" = allowance-exhausted ] \
+        && hold_label="$(quota_reset_label "$hold_reset")"; then
+        # #1431: known exhausted allowance; refuse before any provider call.
+        printf 'ai-review-preflight: %s quota exhausted until %s; skipped with no provider call.\n' "$provider" "$hold_label" >&2
+      else
+        printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "${hold_reset:-unavailable}" >&2
+      fi
       return 3
   fi
   out="$(default_admission "$provider")" || return 1
@@ -1408,6 +1423,7 @@ Usage:
   ai-review-preflight requalify [provider]
   ai-review-preflight status [provider]
   ai-review-preflight usable [provider]
+  ai-review-preflight passed-head <repo> <mode> [--base REF]
   ai-review-preflight explain <failure-class>
   ai-review-preflight capacity <provider> --json
   ai-review-preflight admission <provider> --profile HASH --model MODEL --json
@@ -1417,8 +1433,44 @@ Usage:
 EOF
 }
 
+# passed-head (#1429): does ANY reviewer already hold a verified passing
+# report for this repository's exact head, whole-source digest, mode and
+# resolved base? Prints the match as JSON and exits 0; prints null and exits 1
+# when there is none; any lookup error exits 3 (callers then allocate
+# normally). The match rules are tools/reviewer_events.py find_passing_report,
+# the same ones ai-review-pool uses for its same-reviewer reuse (#1428).
+passed_head() {
+  local repo="${1:-}" mode="${2:-}" base_ref="" base="" lifecycle identity head digest key found
+  [ -n "$repo" ] && [ -n "$mode" ] || die 'usage: ai-review-preflight passed-head <repo> <mode> [--base REF]'
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base) [ "$#" -ge 2 ] && [ -n "$2" ] || die '--base requires a value.'; base_ref="$2"; shift 2 ;;
+      *) die "unknown option '$1'." ;;
+    esac
+  done
+  case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) die "unknown review mode '$mode'." ;; esac
+  # Inherited Git locations could aim every lookup below at another tree.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
+  repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || { printf 'ai-review-preflight: passed-head: not a Git repository.\n' >&2; exit 3; }
+  # The identity source is pinned; substituting it is a test hook only.
+  lifecycle="$REGISTRY_REAL_DIR/ai-review-lifecycle"
+  [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ] || lifecycle="${AI_REVIEW_LIFECYCLE_BIN:-$lifecycle}"
+  identity="$("$lifecycle" identity "$repo" 2>/dev/null)" || { printf 'ai-review-preflight: passed-head: source identity unavailable.\n' >&2; exit 3; }
+  head="$(jq -r '.head // empty' <<<"$identity" 2>/dev/null)"; digest="$(jq -r '.source_digest // empty' <<<"$identity" 2>/dev/null)"
+  key="$(jq -r '.repository_key // empty' <<<"$identity" 2>/dev/null)"
+  [ -n "$head" ] && [ -n "$digest" ] && [ -n "$key" ] || { printf 'ai-review-preflight: passed-head: source identity incomplete.\n' >&2; exit 3; }
+  if [ -n "$base_ref" ]; then
+    base="$(git -C "$repo" rev-parse --verify --quiet --end-of-options "$base_ref^{commit}" 2>/dev/null)" || { printf 'ai-review-preflight: passed-head: base does not resolve.\n' >&2; exit 3; }
+  fi
+  found="$(cd "$repo" && python3 "$REGISTRY_REAL_DIR/../tools/reviewer_events.py" find-passing-report any "$mode" "$head" "$digest" "$key" "$base" "${AI_REVIEW_IMPLEMENTER:-}")" || { printf 'ai-review-preflight: passed-head: lookup failed.\n' >&2; exit 3; }
+  printf '%s\n' "$found"
+  [ "$found" != null ] || exit 1
+}
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  passed-head) passed_head "$@" ;;
   effective-profile)
     [ "${1:-}" = kimi ] && [ "$#" = 1 ] || die 'effective-profile requires kimi.'
     kimi_effective_profile ;;

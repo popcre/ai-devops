@@ -335,6 +335,15 @@ check "healthy Gemini status retains one existing identity check" ": > '$MOCK_GE
 unset MOCK_GEMINI_MODE_LOG
 unset AI_REVIEWER_ISSUE_DIR
 check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+# #1431 C5: a known exhausted allowance skips the reviewer until its reset.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/c5-provider-calls"\nexec "%s/bin/good" "$@"\n' "$TMP" "$TMP" > "$TMP/bin/c5-counting"
+chmod +x "$TMP/bin/c5-counting"
+c5_hold(){ jq --arg at "$1" --argjson now "$(date +%s)" '.capacity_hold={provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-60),reset_at:$at,next_check_epoch:$now,record_id:"c5-fixture"}' "$AI_REVIEW_QUARANTINE_DIR/qwen.json" > "$TMP/c5.json" && mv "$TMP/c5.json" "$AI_REVIEW_QUARANTINE_DIR/qwen.json"; }
+c5_hold "$(date -u -d '@'"$(( $(date +%s) + 86400 ))" +%FT%TZ)"
+rm -f "$TMP/c5-provider-calls"
+check "skip_until_quota_reset: future reset refuses with the EST line and makes zero provider calls" "out=\$(AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' 2>&1); rc=\$?; [ \$rc -eq 3 ] && printf '%s' \"\$out\" | grep -Eq 'qwen quota exhausted until .* E[SD]T; skipped with no provider call' && test ! -e '$TMP/c5-provider-calls'"
+c5_hold "$(date -u -d '@'"$(( $(date +%s) - 5 ))" +%FT%TZ)"
+check "dispatch_after_reset: a passed reset lifts the hold and the provider is contacted again" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' > '$TMP/c5-after.log' 2>&1; ! grep -q 'quota exhausted' '$TMP/c5-after.log' && test -s '$TMP/c5-provider-calls' && jq -e '.capacity_hold==null' '$AI_REVIEW_QUARANTINE_DIR/qwen.json'"
 
 echo '== post-merge reviewer hook (#804)'
 HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
@@ -594,6 +603,65 @@ printf '%s' "$PAUSE_EXPIRED" | jq -e '.status=="expired"' >/dev/null && [ "$PAUS
 "$SCRIPT" pause grok provider-timeout --observed "$(( $(date +%s) + 3600 ))" >/dev/null 2>&1 && bad "pause refuses future observation" || ok "pause refuses future observation"
 "$SCRIPT" pause grok provider-timeout --observed malformed >/dev/null 2>&1 && bad "pause refuses malformed observation" || ok "pause refuses malformed observation"
 "$SCRIPT" clear grok >/dev/null 2>&1
+
+# --- passed-head (#1429): no extra reviewer on a head that already passed ---
+PH_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+PH_KEY="$(printf 'phkey' | sha256sum | cut -d' ' -f1)"; PH_DIGEST="$(printf 'phdigest' | sha256sum | cut -d' ' -f1)"
+PH_STORE="$TMP/ph-lifecycle"; mkdir -p "$REPO/.ai/reviews" "$PH_STORE/runs/$PH_KEY/gemini/zcode"
+cat > "$TMP/ph-lifecycle-bin" <<EOF
+#!/usr/bin/env bash
+[ "\$1" = identity ] && jq -nc --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" '{head:\$h,source_digest:\$d,repository_key:\$k}'
+EOF
+chmod +x "$TMP/ph-lifecycle-bin"
+PH_REPORT="$REPO/.ai/reviews/gemini-final-check-ph1.md"
+printf '# gemini final-check\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Verdict\nAPPROVE\n' "$PH_HEAD" "$PH_DIGEST" > "$PH_REPORT"
+jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REPORT" --arg s "$(sha256sum "$PH_REPORT" | cut -d' ' -f1)" \
+  '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+  > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
+PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(jq -r .report <<<"$PH_OUT")" = "$PH_REPORT" ] && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
+  && ok "no_extra_reviewer_on_passed_head" || bad "no_extra_reviewer_on_passed_head"
+PH_OUT="$(ph diff-review 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && [ "$PH_OUT" = null ] && ok "passed_head_other_mode_has_no_pass" || bad "passed_head_other_mode_has_no_pass"
+ph final-check --base HEAD >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && ok "passed_head_other_base_has_no_pass" || bad "passed_head_other_base_has_no_pass"
+PH_OUT="$(AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -ne 0 ] && ok "passed_head_lifecycle_substitution_needs_test_hooks" || bad "passed_head_lifecycle_substitution_needs_test_hooks"
+printf '{bad' > "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+ph final-check >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 3 ] && ok "passed_head_lookup_error_is_not_a_pass" || bad "passed_head_lookup_error_is_not_a_pass"
+rm -f "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+# Front door: a request for another reviewer on the passed head returns the
+# existing pass; --additional-reviewer allocates (dispatches) one.
+cat > "$TMP/ph-pool" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/ph-pool-args"; printf '%s\n' "$TMP/new-report.md"
+EOF
+chmod +x "$TMP/ph-pool"
+ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" \
+  AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" \
+  "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
+rm -f "$TMP/ph-pool-args"
+PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(printf '%s\n' "$PH_FRONT" | tail -1)" = "$PH_REPORT" ] && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
+  && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
+ph_front --additional-reviewer >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
+grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
+rm -f "$TMP/ph-pool-args"
+jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph_front --implementer codex >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"
+# Inherited Git locations must never aim the lookup at another tree: a victim
+# repository with no pass, pointed at the passing repo through GIT_DIR, must
+# still dispatch.
+VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; git -C "$VICTIM" init -q; git -C "$VICTIM" config user.name T; git -C "$VICTIM" config user.email t@example.com
+echo v > "$VICTIM/v"; git -C "$VICTIM" add v; git -C "$VICTIM" commit -qm v
+rm -f "$TMP/ph-pool-args"
+( cd "$VICTIM" && GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" \
+  AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
+! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
