@@ -664,25 +664,41 @@ rm -f "$TMP/ph-pool-args"
   AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
 ! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
 
-# Windows (Git Bash): a due paid-balance re-check must hand the credit reader
-# the qualified bash, or every Windows re-check refuses and the hold never lifts.
-WINSTUB="$TMP/winstub"; mkdir -p "$WINSTUB"; REAL_PY="$(command -v python3)"
+# Windows (Git Bash) and every platform: a due paid-balance re-check must go
+# through bin/ai-review-credit-watch, the only entrypoint that hands the credit
+# reader a qualified Git Bash. A direct tools/reviewer_credit_watch.py refresh
+# leaves tool_command without AI_REVIEW_CREDIT_WATCH_BASH and the hold never lifts.
+WIN_STATE="$TMP/win-state"; mkdir -p "$WIN_STATE"
+jq -nc --argjson now "$(date +%s)" '{version:2,provider:"deepseek",global:null,backoffs:{},capacity_hold:{provider:"deepseek",failure_class:"out-of-credit",credential_profile_scope:null,model_scope:null,observed_epoch:($now-7200),reset_at:null,next_check_epoch:($now-60),record_id:"legacy"}}' > "$WIN_STATE/deepseek.json"
+CREDIT_STUB="$TMP/win-credit-watch"
+cat > "$CREDIT_STUB" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "$TMP/win-credit-args"
+exit 0
+EOF
+chmod +x "$CREDIT_STUB"
+rm -f "$TMP/win-credit-args"
+AI_REVIEW_CREDIT_WATCH_BIN="$CREDIT_STUB" AI_REVIEW_QUARANTINE_DIR="$WIN_STATE" "$SCRIPT" check deepseek "$REPO" >/dev/null 2>&1
+[ "$(cat "$TMP/win-credit-args" 2>/dev/null)" = "refresh deepseek" ] \
+  && ok "windows_due_credit_recheck_routes_through_credit_watch" || bad "windows_due_credit_recheck_routes_through_credit_watch"
+
+# The credit-watch entrypoint must export the qualified Git Bash so tool_command
+# can run provider wrappers on Windows-shaped hosts.
+WINSTUB="$TMP/winstub"; mkdir -p "$WINSTUB"
 cat > "$WINSTUB/cygpath" <<'EOF'
 #!/usr/bin/env bash
 printf 'C:\\Program Files\\Git\\usr\\bin\\bash.exe\n'
 EOF
 cat > "$WINSTUB/python3" <<EOF
 #!/usr/bin/env bash
-case "\$1" in *reviewer_credit_watch.py) printf '%s\n' "\${AI_REVIEW_CREDIT_WATCH_BASH:-missing}" > "$TMP/win-credit-bash"; exit 0 ;; esac
-exec "$REAL_PY" "\$@"
+printf '%s\n' "\${AI_REVIEW_CREDIT_WATCH_BASH:-missing}" > "$TMP/win-credit-bash"
+exit 0
 EOF
 chmod +x "$WINSTUB/cygpath" "$WINSTUB/python3"
-WIN_STATE="$TMP/win-state"; mkdir -p "$WIN_STATE"
-jq -nc --argjson now "$(date +%s)" '{version:2,provider:"deepseek",global:null,backoffs:{},capacity_hold:{provider:"deepseek",failure_class:"out-of-credit",credential_profile_scope:null,model_scope:null,observed_epoch:($now-7200),reset_at:null,next_check_epoch:($now-60),record_id:"legacy"}}' > "$WIN_STATE/deepseek.json"
 rm -f "$TMP/win-credit-bash"
-OSTYPE=msys PATH="$WINSTUB:$PATH" AI_REVIEW_QUARANTINE_DIR="$WIN_STATE" "$SCRIPT" check deepseek "$REPO" >/dev/null 2>&1
+OSTYPE=msys PATH="$WINSTUB:$PATH" "$ROOT/bin/ai-review-credit-watch" refresh deepseek >/dev/null 2>&1
 [ "$(cat "$TMP/win-credit-bash" 2>/dev/null)" = 'C:\Program Files\Git\usr\bin\bash.exe' ] \
-  && ok "windows_due_credit_recheck_receives_qualified_bash" || bad "windows_due_credit_recheck_receives_qualified_bash"
+  && ok "windows_credit_watch_exports_qualified_bash" || bad "windows_credit_watch_exports_qualified_bash"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

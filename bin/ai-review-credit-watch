@@ -3,9 +3,13 @@
 set -euo pipefail
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
-case "${OSTYPE:-}" in
-  msys*|cygwin*)
-    export AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")"
+# tool_command() refuses every bash wrapper on Windows unless this is a
+# qualified Git Bash absolute path. Only this entrypoint supplies it.
+case "${OSTYPE:-$(uname -s 2>/dev/null || echo unknown)}" in
+  msys*|cygwin*|MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
+    if command -v cygpath >/dev/null 2>&1 && [ -n "${BASH:-}" ]; then
+      export AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")"
+    fi
     ;;
 esac
 if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then

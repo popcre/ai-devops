@@ -39,6 +39,20 @@ def gemini(a=50, b=50):
         {'id': 'gemini-weekly', 'remaining_percent': a},
         {'id': 'gemini-5h', 'remaining_percent': b}]}]}
 
+def windows_git_bash():
+    """Real Git Bash for subprocess proofs; ignores setUp's ProgramFiles forgery."""
+    if os.name != 'nt':
+        return None
+    roots = (pathlib.Path(r'C:\Program Files\Git'),
+             pathlib.Path(r'C:\Program Files (x86)\Git'),
+             pathlib.Path.home() / 'AppData' / 'Local' / 'Programs' / 'Git')
+    for root in roots:
+        for folder in ('usr/bin', 'bin'):
+            candidate = root / folder / 'bash.exe'
+            if candidate.is_file():
+                return str(candidate)
+    raise unittest.SkipTest('Git Bash is required for the Windows-shaped refresh proof')
+
 class Response(io.BytesIO):
     pass
 
@@ -426,17 +440,29 @@ class CreditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = pathlib.Path(directory)
             now = int(current.timestamp())
-            # Shape written by the failure classifier / expired legacy global quarantine.
+            # Shape written by the failure classifier / expired legacy global
+            # quarantine: unscoped out-of-credit hold, due for re-check.
             (state / 'deepseek.json').write_text(json.dumps({'version': 2, 'provider': 'deepseek', 'global': None, 'backoffs': {},
                 'capacity_hold': {'provider': 'deepseek', 'failure_class': 'out-of-credit', 'credential_profile_scope': None,
                                   'model_scope': None, 'observed_epoch': now - 7200, 'reset_at': None,
                                   'next_check_epoch': now - 60, 'record_id': 'legacy'}}))
+            # PE forgery of tool_command is owned by test_native_windows_*.
+            # This proof runs the real admission store on Windows and POSIX.
+            def posix_tool(tool, *args, platform=None):
+                return [str(ROOT / 'bin' / tool), *args]
             def run(command, **kwargs):
                 if any(str(arg).endswith('ai-deepseek-agent') for arg in command):
                     return subprocess.CompletedProcess(command, 0, json.dumps(value), '')
                 env = dict(os.environ, AI_REVIEW_QUARANTINE_DIR=directory, AI_DEVOPS_TEST_MODE='1')
+                if os.name == 'nt':
+                    bash = windows_git_bash()
+                    env['AI_REVIEW_CREDIT_WATCH_BASH'] = bash
+                    script = next(str(arg) for arg in command if str(arg).endswith('ai-review-preflight'))
+                    rest = [arg for arg in command if not str(arg).endswith('ai-review-preflight')]
+                    command = [bash, script, *rest]
                 return subprocess.run(command, env=env, **kwargs)
-            self.assertEqual(watch.main(['refresh', 'deepseek'], run=run), 0)
+            with mock.patch.object(watch, 'tool_command', side_effect=posix_tool):
+                self.assertEqual(watch.main(['refresh', 'deepseek'], run=run), 0)
             self.assertIsNone(json.loads((state / 'deepseek.json').read_text())['capacity_hold'])
 
     def test_tick_only_exhaustion_pauses_and_never_unpauses(self):
