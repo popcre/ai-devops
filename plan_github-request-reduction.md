@@ -2,6 +2,31 @@
 
 ## STATUS — read first
 
+Closeout reconciliation — October 8, 2026, 1:16 PM EDT. This supersedes the
+historical 10:16 AM EDT snapshot below. Owner remains Codex chat
+`01a116aa-0400-7230-97d9-3fab73f00bd1` under #658.
+
+| Outcome | Verified state | Next gate |
+|---|---|---|
+| Wake sharing | #1402 merged `699b14f5`, 10:29 AM EDT | Installed behavior open |
+| Source ledger | #1516 merged `f490b87a`, 10:36 AM EDT; 24 families, 35 bindings, 79 witnesses | Installed attribution and measured costs open |
+| Duration evidence | #1510 OPEN at approved published `d61550a6`; 90/272 fixtures; twenty-pair offline p95 increase 1.78% | Run 37806944352 active; rerun failures after completion, then normal queue |
+| Counter qualification | #1511 OPEN and dequeued; correction `e67e13ad` and evidence `7fb448bf` committed locally, unpublished | Fresh source and exact native action approval; actual qualification |
+| Linux runners | Four scoped services repaired, actual listener PATH/tool versions verified 12:41 PM EDT | Successful failed-job rerun required |
+| Fleet installation | Full 933 update failed; later 958 receipt memory-seed PASS, secrets SKIP | Full required receipts and original installed behavior |
+| Section 13 | OPEN; actual HTTP, comparable baseline, busy windows and useful-work latency unknown | All acceptance requirements measured |
+
+Native attempt one failed before staging under PowerShell 5. Stage absence was
+verified at 1:02 PM EDT. Both legacy ACE predicates fail on 19 ancestor entries;
+explicit integer predicates pass 38 checks. The later source review inferred a
+no-op using PowerShell 7 and returned REJECT. The second native action is only
+prepared. Later memory-seed PASS supersedes the old current-memory failure below;
+secrets SKIP still does not establish required-secrets acceptance. Preserve
+accepted #914/#925/#868/#1008. Start with the
+[closeout continuation](HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
+
+Historical snapshot follows; its pending PRs and manifest are not current.
+
 Coordinator reconciliation — October 8, 2026, 10:16 AM EDT. Accountable owner:
 Codex chat `01a116aa-0400-7230-97d9-3fab73f00bd1` under existing #658.
 Historical ownership below is retained; the prior ALBT16 chat is unreadable

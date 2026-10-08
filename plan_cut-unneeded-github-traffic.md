@@ -12,6 +12,19 @@ Linked handoff (this session):
 
 ## STATUS — read first
 
+October 8, 2026, 1:16 PM EDT supersedes the snapshot below: #1402 and #1516
+source outcomes are merged. #1510 remains OPEN at approved published `d61550a6`;
+failed Linux pre-test jobs and a canceled Windows section await the current
+run's completion. Four Linux runner services were repaired and verified at
+12:41 PM EDT; successful rerun remains required. #1511 was dequeued after actual
+PowerShell 5 failure before staging; locally committed correction and evidence
+need fresh approval. The second native action is only prepared. Later 958
+memory-seed PASS supersedes the old failure, but secrets SKIP does not establish
+required installation. S3 installed proofs and S4/P8 acceptance remain OPEN.
+Read the parent plan's superseding STATUS and the
+[closeout continuation](HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
+Preserve accepted S1/S2 outcomes.
+
 October 8, 2026, 10:16 AM EDT: existing #658 coordinator owns installation,
 live proof and S4/P8 acceptance. Read the parent plan's current STATUS and
 source-only destination appendix for source repairs, #1510/#1511 fixture
