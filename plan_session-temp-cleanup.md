@@ -14,7 +14,7 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 | 5. Orphan sweep as backup only | ✅ code | `bin/ai-session-tmp-sweep` + user timer, `tests/test-ai-session-tmp-sweep.sh` |
 | 6. Guard against regression (lint + test) | ✅ code | `tools/ci/check-temp-hygiene.sh`, `tests/test-temp-hygiene.sh` |
 | 7. Clear the current pile safely | ✅ 2026-10-07 | 26,839 stale entries removed, 6 GB freed; recent/busy entries kept |
-| 8. Live proof on edge-dev3 | ⬜ open | — |
+| 8. Live proof on edge-dev3 | 🟡 partial 2026-10-08 | #1472 merged (b6adb3cb), installed 3:03 AM EDT; wrapper run left 0 roots; kill -9'd wrapper root removed in 2 s; timer active. Left: a fresh interactive Claude session's root appears and is removed at session end (issue #1471) |
 
 **Where a fresh session starts:** step 8 (live proof) after the PR merges and the installer runs. Read every section first. Re-read Part 3 before each phase (drift check).
 
