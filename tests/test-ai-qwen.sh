@@ -113,7 +113,7 @@ if (mode === 'timeout') process.exit(124);
 if (mode === 'tool-budget') { console.error('Run aborted: tool-call budget of 3 exceeded (--max-tool-calls); observed 4.'); process.exit(55); }
 if (mode === 'wall-budget') { console.error('Run aborted: wall-clock budget of 900s exceeded (--max-wall-time).'); process.exit(55); }
 if (mode === 'turn-budget') { console.error('Reached max session turns for this session. Increase the number of turns by specifying maxSessionTurns in settings.json.'); process.exit(53); }
-if (mode === 'quota-terminal') { const resetFile=path.join(root, 'quota-reset'); const date=fs.existsSync(resetFile) ? fs.readFileSync(resetFile, 'utf8').trim() : '11-01 16:00:00 UTC'; const m=`Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at ${date}.`; console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:m}]}})); console.log(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:'qwen-session-1',is_error:true,error:{message:m}})); process.exit(1); }
+if (mode === 'quota-terminal' || mode === 'quota-terminal-trailer') { const resetFile=path.join(root, 'quota-reset'); const date=fs.existsSync(resetFile) ? fs.readFileSync(resetFile, 'utf8').trim() : '11-01 16:00:00 UTC'; const m=`Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at ${date}.` + (mode === 'quota-terminal-trailer' ? '\n\nPlease retry after the reset time, or switch to another API key / auth method.' : ''); console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:m}]}})); console.log(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:'qwen-session-1',is_error:true,error:{message:m}})); process.exit(1); }
 if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
 if (mode.startsWith('content-filter')) {
   const error = '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY API_KEY=synthetic-secret]';
@@ -934,8 +934,9 @@ mv "$TMP/undated-hold.json" "$AI_REVIEW_QUARANTINE_DIR/qwen.json"
 quota_started="$(date +%s)"
 quota_expected="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=25)).replace(microsecond=0).isoformat().replace("+00:00","Z"))')"
 printf '%s' "$quota_expected" | sed 's/^....-//;s/T/ /;s/Z/ UTC/' > "$TMP/quota-reset"
+echo quota-terminal-trailer > "$TMP/mode"
 run doctor --live > "$TMP/quota-fresh.log" 2>&1 || quota_rc=$?
-check 'doctor consumes the exact typed canary receipt into a fresh dated allowance hold' "jq -e --arg prior '$quota_prior_id' --arg at '$quota_expected' --argjson started '$quota_started' '.capacity_hold|.failure_class==\"allowance-exhausted\" and .reset_at==\$at and .record_id!=\$prior and .observed_epoch>=\$started' '$AI_REVIEW_QUARANTINE_DIR/qwen.json' >/dev/null"
+check 'doctor consumes the native trailer terminal receipt into a fresh dated allowance hold' "jq -e --arg prior '$quota_prior_id' --arg at '$quota_expected' --argjson started '$quota_started' '.capacity_hold|.failure_class==\"allowance-exhausted\" and .reset_at==\$at and .record_id!=\$prior and .observed_epoch>=\$started' '$AI_REVIEW_QUARANTINE_DIR/qwen.json' >/dev/null"
 check 'dated allowance doctor returns distinct exhaustion status' "test '${quota_rc:-0}' = 92"
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"

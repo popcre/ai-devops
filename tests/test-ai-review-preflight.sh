@@ -49,9 +49,23 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
-  if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+  if [ "${MOCK_QWEN_FAIL:-0}" = capacity ] || [ "${MOCK_QWEN_FAIL:-0}" = capacity-trailer ]; then
     receipt="$(mktemp)"
     printf '{"provider":"qwen","failure_class":"allowance-exhausted"}\n' > "$receipt"
+    if [ "${MOCK_QWEN_FAIL:-0}" = capacity-trailer ]; then
+      "$MOCK_ADMISSION_PYTHON" - "$MOCK_ADMISSION_TOOL" "$receipt" <<'PY'
+import datetime, json, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+from reviewer_credit_stream import Reader
+at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=25)
+message = ("Quota exhausted: Your token-plan 1-month quota has been exhausted. "
+           f"The quota will reset at {at.strftime('%m-%d %H:%M:%S')} UTC."
+           "\n\nPlease retry after the reset time, or switch to another API key / auth method.")
+row = {"type":"result", "subtype":"error_during_execution", "is_error":True, "error":{"message":message}}
+receipt = Reader("unused", False).parse("qwen", json.dumps(row).encode())
+pathlib.Path(sys.argv[2]).write_text(json.dumps(receipt))
+PY
+    fi
     "${MOCK_ADMISSION_PYTHON}" "$MOCK_ADMISSION_TOOL" credit qwen --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record >/dev/null
     rm -f "$receipt"
     printf 'AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=qwen code=quota_exhausted\n'
@@ -284,6 +298,19 @@ export MOCK_QWEN_CONTACT_FILE="$TMP/reset-canary-calls"
 check "capacity deferral without a known reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
 check "unknown reset skips every additional identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_MODE_LOG'"
 check "unknown reset health uses only its existing identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT status qwen | jq -e '.failure_class==\"live-qualification-required\"' && test \"\$(grep -c -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+cp "$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json" "$TMP/unknown-qualification-before.json"
+cp "$AI_REVIEW_QUARANTINE_DIR/qwen.json" "$TMP/unknown-hold-before.json"
+cp "$AI_QWEN_TEST_RUNTIME_FILE" "$TMP/unknown-runtime-before"
+printf '%064d\n' 6 | tr 0 c > "$AI_QWEN_TEST_RUNTIME_FILE"
+printf '\n# changed fixture wrapper\n' >> "$TMP/bin/good"
+check "ordinary updates preserve an unknown reset deferral without repeated quota calls" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT requalify qwen && $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && test ! -s '$MOCK_QWEN_CONTACT_FILE' && cmp '$TMP/unknown-hold-before.json' '$AI_REVIEW_QUARANTINE_DIR/qwen.json' && cmp '$TMP/unknown-qualification-before.json' '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json'"
+check "unknown reset deferral refreshes exact subject and preserves receipt identity" "jq -e --arg id \"\$(jq -r '.capacity_hold.record_id' '$AI_REVIEW_QUARANTINE_DIR/qwen.json')\" --arg sha \"\$(sha256sum '$TMP/bin/good' | cut -d' ' -f1)\" '.capacity_deferral.capacity_record_id==\$id and .capacity_deferral.subject.wrapper_sha256==\$sha' '$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json' && $SCRIPT status qwen | jq -e '.usable==false'"
+cp "$TMP/unknown-runtime-before" "$AI_QWEN_TEST_RUNTIME_FILE"
+# An unrelated record must not lend its deferral authority to a new receipt.
+jq '.capacity_deferral.capacity_record_id="unrelated-unknown-record"' "$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json" > "$TMP/unrelated-unknown.json"
+mv "$TMP/unrelated-unknown.json" "$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json"
+check "native trailer receipt creates an exact dated qualification deferral" "MOCK_QWEN_FAIL=capacity-trailer $SCRIPT requalify qwen && jq -e --slurpfile hold '$AI_REVIEW_QUARANTINE_DIR/qwen.json' '.capacity_deferral.capacity_record_id==\$hold[0].capacity_hold.record_id and (\$hold[0].capacity_hold.reset_at|type)==\"string\"' '$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json' && grep -qx -- --live '$MOCK_QWEN_MODE_LOG'"
+: > "$MOCK_QWEN_CONTACT_FILE"
 reset_now="$(date +%s)"
 reset_past="$(date -u -d '@'"$((reset_now-1))" +%FT%TZ)"
 reset_future="$(date -u -d '@'"$((reset_now+3600))" +%FT%TZ)"
