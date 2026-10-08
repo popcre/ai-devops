@@ -22,6 +22,7 @@ part of Issue #335.
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | IN PROGRESS 2026-09-11 | Central repair #389 and Windows landed-source installation are complete; Ubuntu permission and private-memory health gates remain |
+| 2026-10-08 bounded repair | Independently approved DesignFlow source-release gate | OPEN; parent Codex owns #1490 | Read the appended bounded repair below; do not redo historic #335 rollout or bypass installed acceptance |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
 session, read this STATUS table and the newest matching OPEN handoff, and resume
@@ -590,3 +591,84 @@ local gate appears to require weakening, stop that repository and report it `Blo
    Yes. Sections 4, 7, 8, and 11 reject size-only deletion, copied enforcement,
    timer-based fixes, gate downgrades, private-data inspection, and unauthorized
    external mutations; pilots deliberately cover the strongest risk families.
+
+## 2026-10-08 bounded application-source release repair (#1490)
+
+### 1. Ultimate goal
+
+Allow Albert's independently approved DesignFlow sandbox source to reach its normal automatic release without weakening review or installing tool code through an application loophole. If a step conflicts with this goal, the goal wins: stop and flag it. Parent Codex owns the decision and installed/live acceptance on existing tools issue #1490; DesignFlow's complete outcome stays on backend #94. This additive repair does not reopen historical #335 work. No new competing plan or handoff is created; these existing issue cards remain the continuation records.
+
+### 2. Application
+
+`popcre/ai-devops` owns `bin/ai-task-gates`, central policy/schema and hermetic tests. Its protected `main` uses reviewed feature PRs and the merge queue; installation is a distinct exact-reviewed operation. Consumer `popcre/designflow-backend` releases `sandbox-albert` through regional Cloud Build to project `lithe-breaker-323913`, region `us-east4`, service `popcre-albert-core-sandbox`; Uma owns its `develop` merge. No other consumer or environment is admitted by this repair.
+
+### 3. Trigger
+
+At 6:48 AM EDT October 8, application head `9e03f180def4680b060056ca97946ccd330fae5b` received independent final APPROVE (182 suites/1957 tests PASS). Its `ship` check passed, while `deploy` refused verbatim: `Reviewer-safety changes cannot use the generic deploy action; use a separate reviewed installation task.` No application push or cloud mutation followed. The app's strengthened local policy classifies its plan/router as reviewer-safety; installation is a machine-tool route and cannot deploy this application. Frontier read-only audit found no documented supported exception.
+
+### 4. Scope
+
+Edit only `bin/ai-task-gates`, `config/task-gates.json`, `config/task-gates.schema.json`, existing `tests/test-ai-task-gates.sh`, relevant `docs/context-spec.md` and this plan's additive repair/STATUS. Reuse `reviewer_approval_summary`, `state_record_override`, existing fixture/lifecycle proof helpers and JSON/schema validator. Do not add an alternate gate binary, weaken classes, narrow away contributors, change toolkit installation receipts, private policies, production/infrastructure/database actions, provider holds/budgets, memory, credentials or Cloud Build inputs. The later application consumer manifest is parent-owned, separately reviewed source work.
+
+### 5. Current source
+
+Owned repair worktree starts at merged main `7f7900082b29a5afeaa2b2cdd4ecc0c9b4af221a`; no implementation yet. `bin/ai-task-gates:1057-1065` sets reviewer_release from every contributor then refuses generic deploy unconditionally. `tests/test-ai-task-gates.sh:228-231` explicitly preserves refusal even with approval for toolkit reviewer-safety. That assertion MUST continue passing. App source remains frozen and unshipped. Prior tool installation failed required private-memory health (12404-byte outgoing index exceeds12288), user-bus setup environment and doctor classification/readability; PR1500's latter source repairs merged, but full installation is not accepted. No repeat of the known private-memory failure or unauthorized memory modification.
+
+### 6. Root cause
+
+A machine-installation prohibition is applied to an application source release solely because a stronger local router/plan gate contributes reviewer-safety. Merely using the ship check would knowingly cause the refused deployment and is not recovery. The fix needs explicit central admission plus a committed reviewed destination; generic deploy remains refused.
+
+### 7. Rejected approaches
+
+No class downgrade, changed comparison base to omit protected files, removed plan/router, copied/uninstalled candidate gate, generic ship-only push, manual gcloud deployment, toolkit installation masquerading as application release, weakened exact review, forged report, private-memory compression/edits, skipped installer stage or provider fallback. No broad all-application exception. No legacy raw hash acceptance/rehash/backfill: old incompatible evidence correctly abstains from learning while interactive history remains available.
+
+### 8. Locked design
+
+Add optional `check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval REPORT`. This is an explicit Cloud Build BRANCH SOURCE PUSH route, not permission for a manual Cloud Run mutation. It admits only effective class `deployment`, exact canonical GitHub identity `popcre/designflow-backend`, and the following committed manifest object with exactly these keys:
+
+`{"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}`
+
+Central policy new `application_source_releases` is a CLOSED map containing only that repository, its fixed manifest path, exact expected target object, and required consumer-local deployment gate `cloud-build-release-review`. Schema uses existing supported `const`/properties/additionalProperties=false constructs, not unsupported enum/propertyNames or a new validator. The caller cannot supply arbitrary manifest locations: require the exact central relative path, a regular nonsymlink file contained by the actual repository, committed at HEAD and byte-identical to its HEAD blob. Reject malformed JSON, duplicate keys, extras, wrong types, any wrong target or route. Read admitted identity from existing canonical Git-origin resolution, never from the manifest alone; aliases/foreign hosts/toolkit identities do not inherit admission.
+
+Admission MUST explicitly validate an existing independent lifecycle-recorded final-check/security-review APPROVE through `reviewer_approval_summary REPORT deploy CURRENT_HEAD ACTUAL_WORKTREE`, including its existing exact source digest and implementer independence. A plan review cannot open release. Do not assume symbolic required gates or the ordinary successful ship path perform this validation. Retain all contributor reviewer-safety proofs; record only the exact app release override after successful proof validation. Validate before returning success. Absent the explicit flag, the old generic deploy refusal remains unchanged. An application flag on any other action refuses. Private evidence/tooling, infrastructure, production, shared-db and toolkit installation cannot enter this route even with a target-shaped file. No central/local existing gate is removed.
+
+### 9. Ordered implementation
+
+1. Add closed central policy/schema and CLI parse/help for the one optional target flag. Preserve closed validation and class ranks. Gate: existing schema validator validates central/local policies and rejects malformed admission configuration.
+2. Add narrow admission validation using existing helpers. Run it only for deploy with explicit target; prove exact repository/class/consumer gate/committed target, then independent final approval. It releases only the application-specific reviewer-safety generic-deploy refusal. All other forbidden/private/scope gates stay sealed. Gate: actual positive fixture contains both changed protected router and deployment source and a committed exact manifest; its lifecycle-recorded exact approval succeeds and records matching source/target, while the old toolkit refusal still fails.
+3. Add adversarial fixtures to the EXISTING gate suite, not a duplicate harness. Update only relevant current context documentation and this STATUS/evidence. Gate: full listed suites, syntax, schema and whitespace pass. Commit only owned files and freeze. Parent independently verifies actual behavior; one child correction retry per this phase, later failures parent-owned.
+4. Parent obtains assigned exact-head final review, reconciles fresh main, creates/pushes PR and uses normal queue/checks; attach PR and confirm actual merge. Then installation is separately reviewed against current merged target with normal receipts/stages. A known required private-memory boundary means installation/live application deployment remains OPEN; never call candidate-source invocation installed acceptance or bypass the installed launcher.
+5. ONLY after supported installation succeeds, parent adds the exact manifest to owned application source, updates its existing executed-shell/contract test if necessary to bind it to target guard, obtains fresh exact-source/release approval (the old9e review expires on source movement), and checks ship AND the explicit application deploy route. Push only approved HEAD to sandbox-albert through normal Cloud Build, update existing open PR161 without destroying its TLS work, preserve Uma merge ownership. Prove each enabled revision's CPU/minimum, exact image/source and unchanged interactive capability. Native Luna access and complete genuine review-to-RAG live proof remain separate #94 boundaries.
+
+### 10. Tests and adversarial matrix
+
+All rows below belong in `tests/test-ai-task-gates.sh` using its existing `newrepo`, `appr`, lifecycle fixtures and rc/out helpers. Run that full suite plus `tests/test-ai-task-gates-bulk.sh`, `tests/test-task-gates-phase5-acceptance.sh`, `tests/test-ai-task-gates-linux-install.sh`, schema validation, `bash -n bin/ai-task-gates tests/test-ai-task-gates.sh`, and `git diff --check`. No provider/live cloud tests in child.
+
+| Input | Hostile case | Existing-suite named assertion to add/retain |
+|---|---|---|
+| Target/repo/class | Exact approved app with protected contributor and deployment | application source release requires and accepts exact final approval |
+| Action | Flag on ship/review/database/production | application target flag cannot open another action |
+| Generic route | No explicit target / toolkit reviewer-safety with approval | generic reviewer-safety deploy remains forbidden |
+| Repo/origin | Another app, toolkit, foreign host, alias, no remote | unadmitted origins cannot borrow application release |
+| Effective class | Private evidence/tooling/shared-db/production/infrastructure | stronger protected classes cannot use application release |
+| Consumer gate | Missing cloud-build-release-review in local deployment requirements | central admission requires consumer opt-in |
+| Manifest | Missing/untracked/dirty/symlink/path escape | destination must be exact committed regular source |
+| JSON | Malformed/duplicate/extra/wrong-type keys | ambiguous application target refuses |
+| Target fields | Wrong project/region/service/branch/route/repository | every target binding independently refuses |
+| Approval | Missing/REJECT/plan/foreign repo/stale SHA/digest/source/implementer-self | application release retains independent final exact-source proof |
+| State | Valid success then source/target movement | prior override never authorizes changed source |
+| Installation | Old canonical toolkit test and receipt suites | installed routing and generic refusal are unchanged |
+
+### 11. Constraints
+
+Parent owns schema/security/merge/release decisions; this plan locks the new admission design before lower-tier mechanical execution. Source-only repair does not authorize current refused shipment, production mutation, new provider calls or private-note updates. Write only dedicated current-upstream worktrees. Keep GitHub calls through ai-gh, exact task class reviewer-safety, protected merge queue, standing signature and all human times EDT. No new handoff/memory update: user explicitly keeps continuation on existing issues.
+
+### 12. Environment
+
+Linux edge-dev3, normal authenticated ai-gh/GCP read-only; Bash/jq/Python are available. Toolkit source canonical checkout remains landing-only and its completed installation receipt remains old. Use owned `/home/ahazan/.codex/worktrees/hts-application-release-gate`. No secret value or 1Password operation is needed for source/fixtures/review. Full later installation needs separately scoped existing protected installer credentials and actual user bus; its private-note health boundary is not waived by this plan.
+
+### 13. Done and risks
+
+Source done means focused/full required tests, parent reproduction, exact independent final APPROVE, queued PR actually merged and docs accurate. Operational done additionally requires supported installed launcher/receipt/stages and live app release checks; it is BLOCKED on private-memory health until legitimately resolved without unauthorized edits. Rollback is normal reviewed Git revert/release, never an unreviewed live script replacement. The key risk is accidentally turning app admission into a toolkit/private/manual-production loophole; the negative matrix and closed central target prevent that. Genuine RAG proof is still open on missing native provider access; no source or CPU acceptance closes #94.
+
+Self-audit: a fresh implementer can follow §§2,4,5,8–12 without chat; exact route/schema/target/proof/fixtures are specified. Failed and forbidden approaches plus current installation boundaries are preserved in §§3,5–7,13. Business intent and independent-review/preserve-capability decision criteria are explicit in §§1,8,13. All13 sections are present; existing issue/plan continuation overrides creation of a competing handoff or memory entry.
