@@ -95,6 +95,8 @@ function Set-RenewalAcl {
   if ($Kind -eq 'Payload') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
+    # (OI)(CI) grants leave files with an empty DACL; give files explicit ones.
+    Set-PayloadFileAcl -LiteralPath $LiteralPath -OperatorSid $OperatorSid
   } else {
     # The status directory is the only operator-writable location this adds;
     # it holds informational run records, never anything the CI gate reads.

@@ -137,6 +137,20 @@ function Get-DesiredPayloadManifest {
   return [ordered]@{ schema_version=1; owner='popcre/ai-devops#262'; operator_sid=$OperatorSid; task_path=$script:TaskPath; files=$files }
 }
 
+function Set-PayloadFileAcl {
+  # icacls applies (OI)(CI) grants to FILES as nothing at all: with
+  # /inheritance:r /T every payload file was left with an EMPTY protected
+  # DACL (D:PAI), unreadable even by Administrators, so the elevated worker
+  # could not load and -Verify/-RecoverPartial failed on access denied
+  # (#1312, reproduced 2026-10-08). Each payload file therefore gets explicit
+  # non-inheritable grants: Administrators/SYSTEM full, operator read/execute.
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid)
+  foreach ($child in @(Get-ChildItem -LiteralPath $LiteralPath -Force -File -Recurse)) {
+    Assert-NoReparsePoint -LiteralPath $child.FullName
+    Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r','*S-1-5-32-544:F','*S-1-5-18:F',"*${OperatorSid}:RX")
+  }
+}
+
 function Set-ProtectedFilesystemAcl {
   param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
@@ -145,6 +159,7 @@ function Set-ProtectedFilesystemAcl {
   if ($Kind -eq 'Payload') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
+    Set-PayloadFileAcl -LiteralPath $LiteralPath -OperatorSid $OperatorSid
   } elseif ($Kind -eq 'Evidence') {
     # No operator grant: the elevated qualification child writes through its
     # Administrators membership, so the non-elevated operator must hold
@@ -572,6 +587,11 @@ function Recover-MaintenanceInstallation {
   if ($payloadPresent) {
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    # A partial install made by an installer before #1312 left every payload
+    # file with an empty DACL. Restore the intended file grants on the
+    # administrator-owned files only, then verify identity and hashes as before.
+    foreach ($child in @(Get-ChildItem -LiteralPath $script:PayloadRoot -Force -File)) { Assert-NoForeignOwnership -LiteralPath $child.FullName }
+    Set-PayloadFileAcl -LiteralPath $script:PayloadRoot -OperatorSid $ExpectedOperatorSid
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
     if ($manifest.schema_version -ne 1 -or $manifest.owner -cne 'popcre/ai-devops#262' -or
         $manifest.task_path -cne $script:TaskPath -or $manifest.operator_sid -cne $ExpectedOperatorSid) {

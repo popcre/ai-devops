@@ -272,6 +272,28 @@ try {
   }
   Case 'Renewal_StatusTempNameIsUnpredictable' { Assert-True ($renewText.Contains("[guid]::NewGuid().ToString('N') + '.tmp'")) 'predictable temp name' }
 
+  Case 'PayloadFiles_GetExplicitReadableAcl' {
+    # Real filesystem: the (OI)(CI) directory grant leaves files with an
+    # empty DACL; Set-PayloadFileAcl must give each file explicit grants.
+    $dir = Join-Path $temp 'acl-real'; New-Item -ItemType Directory -Path $dir | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $dir 'f.ps1')
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    try {
+      & 'C:\Windows\System32\icacls.exe' $dir /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' /T /C | Out-Null
+      Assert-True ((Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Access.Count -eq 0) 'precondition: icacls (OI)(CI) /T no longer empties file DACLs'
+      Set-PayloadFileAcl -LiteralPath $dir -OperatorSid $me
+      $sddl = (Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Sddl
+      foreach ($ace in @('(A;;FA;;;BA)', '(A;;FA;;;SY)', "(A;;0x1200a9;;;$me)")) { Assert-True ($sddl.Contains($ace)) "file ACL missing $ace in $sddl" }
+      Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $dir 'f.ps1')).Trim() -eq 'payload') 'payload file not readable'
+    } finally { & 'C:\Windows\System32\icacls.exe' $dir /reset /T /C | Out-Null }
+  }
+  Case 'PayloadAcl_BothInstallersGrantFilesExplicitly' {
+    Assert-True ($maintenanceInstaller.Contains("Set-PayloadFileAcl -LiteralPath `$LiteralPath -OperatorSid `$OperatorSid")) 'maintenance payload ACL leaves files empty'
+    Assert-True ($installerText.Contains("Set-PayloadFileAcl -LiteralPath `$LiteralPath -OperatorSid `$OperatorSid")) 'renewal payload ACL leaves files empty'
+    $recover = $maintenanceInstaller.Substring($maintenanceInstaller.IndexOf('function Recover-MaintenanceInstallation'))
+    Assert-True ($recover.IndexOf('Set-PayloadFileAcl') -lt $recover.IndexOf("Get-Content -Raw -LiteralPath (Join-Path `$script:PayloadRoot 'manifest.json')")) 'recovery cannot read an empty-DACL manifest'
+  }
+
   Case 'MaintenanceTask_StaysTriggerless' {
     # The elevated #262 task keeps its no-trigger contract; only the
     # unprivileged sibling is scheduled.
