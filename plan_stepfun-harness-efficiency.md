@@ -22,7 +22,7 @@ a genuine business-meaning choice appears.
 | W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
 | W3 Phase 5 subagent (measure + live proof) | ✅ measured; live proof done | 2026-10-07/08: a recording proxy measured real reviews; StepFun reports `cached_tokens`, 93–97% of input was cached, and the real limit is 500k tokens per minute. Cold rerun on 429 fixed in [PR #1482](https://github.com/popcre/ai-devops/pull/1482). Full numbers: [`docs/stepfun-cost-measurements.md`](docs/stepfun-cost-measurements.md). Linux and Windows `doctor --live` verified after #1482 merged; a fresh Linux review returned APPROVE with 0 rate-limit hits. |
 | W4 integrate, PR, required exact-head independent review, merge | ✅ merged | [PR #1337](https://github.com/popcre/ai-devops/pull/1337): Muse approved exact head `962ef01a37cccb9bd6a0aeff9a7dab450d28c4d1`, merged as `61d95fe9`; [repair PR #1360](https://github.com/popcre/ai-devops/pull/1360): DeepSeek approved exact head `8b78d12db70c560c504f2749583f52fcc65d0826`, merged as `ea45ba40`; required original suites and merge checks passed. Subsequent support repairs through [PR #1364](https://github.com/popcre/ai-devops/pull/1364) are on `origin/main` at `37070ecf`. |
-| Live proof checklist on landing issue | ⬜ full Windows installation evidence pending | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) was closed on 2026-10-07 with its live-proof box checked. Codex's 2026-10-08 audit independently verified Linux full installation at `2822470d`: all 29 stages passed, including all 19 required stages. Windows has a valid paired launcher receipt at `2032b678`, but that receipt alone does not prove full installation stages. Owner: Codex, retaining this acceptance gap on the same issue. |
+| Live proof checklist on landing issue | ⬜ corrected installed acceptance pending | October 8, 2026: both hosts completed normal full installation at `e1723db85c9c`. Linux all 30 stages/20 required passed; Windows native public full installer exited 0. Installed doctors passed. A genuine Linux formal review returned REVISE for protected-store selection; [correction #1520](https://github.com/popcre/ai-devops/pull/1520) independently approved, all GitHub checks passed, queued at 2:00 PM EDT. Corrected installations and fresh formal acceptance remain on [#1336](https://github.com/popcre/ai-devops/issues/1336), owned by Codex. [Audited continuation](HANDOFF.d/2026-10-08T1800Z-edge-dev3-codex-stepfun-acceptance.md). |
 
 **Merged code and installation repair chain on `origin/main` (through `37070ecf`):**
 [#1337](https://github.com/popcre/ai-devops/pull/1337) `61d95fe9` shipped the harness;
@@ -43,7 +43,7 @@ review-door sandbox launch with the wrapper and made doctor probe it. These
 StepFun commits are ancestors of `origin/main`. Subsequent [PR #1422](https://github.com/popcre/ai-devops/pull/1422)
 corrected the review-door live probe. Issue #1336 records successful installed
 checks and a real model verdict on 2026-10-07; the earlier credit blocker is
-historical. Full Windows installation-stage acceptance is still being verified.
+historical. Both hosts now have full e172 installation evidence; corrected installation and fresh formal acceptance remain open. The credential incident is CLOSED_BY_OWNER_DIRECTION: no further redaction or rotation.
 
 The [Muse Git Bash readiness repair #1381](https://github.com/popcre/ai-devops/pull/1381)
 merged as `e1ff6b71` on `origin/main`. Its separate Windows shell runner still
@@ -67,9 +67,7 @@ on `edge-dev`.
 *File rename note:* never name a doc `*token*` — `.gitignore` `**/*token*` hides it.
 
 **Execution record:** Waves 0–2, Wave 3 counter logging, Wave 4 merge, and the
-supporting repair chain are recorded in STATUS. Full Windows installation-stage
-proof remains open on issue #1336 under Codex; installed live checks were reported
-successful on 2026-10-07 and Linux full-stage evidence was verified on 2026-10-08. Measured review costs and cache counters are now recorded in
+supporting repair chain are recorded in STATUS. Corrected installed acceptance remains open on issue #1336 under Codex; both full installations at e172 were verified on October 8, 2026, and the authentic REVISE is addressed by queued correction #1520. Measured review costs and cache counters are now recorded in
 [`docs/stepfun-cost-measurements.md`](docs/stepfun-cost-measurements.md); retain
 its stated variability and avoid inferring a guaranteed savings rate.
 
