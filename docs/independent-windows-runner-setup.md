@@ -366,7 +366,9 @@ on top of the #262 boundary above. It adds no elevation path:
   at most once a day (`alert-state.json`). `last-run.json` records the alert
   outcome as `alert`: `POSTED`, `SUPPRESSED_REPEAT`, or `ALERT_FAILED:<reason>`
   (for example `APP_KEY_MISSING`); an alert failure never changes the renewal
-  result and is retried on the next run.
+  result and is retried on the next run. The renewal script is hash-pinned in
+  the payload, so after this change lands each installed host must re-run the
+  elevated `-Install` below or `-Verify` reports `STALE_INSTALLATION`.
 
 Install only after the maintenance installation verifies, from an elevated
 checkout of current `main`; `-Verify` (elevated) re-verifies both layers and

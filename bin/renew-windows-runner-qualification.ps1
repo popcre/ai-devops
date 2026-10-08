@@ -35,7 +35,7 @@ $script:AlertRepo = 'popcre/ai-devops'
 $script:AlertIssue = 1312
 $script:AlertRepeatHours = 24
 $script:AppId = 5112061
-$script:AppKeyPath = [IO.Path]::Combine($env:USERPROFILE, '.ai-devops', 'github-app', 'pop-ai-watchers.pem')
+$script:AppKeyPath = [IO.Path]::Combine($(if ($env:AI_GH_APP_DIR) { $env:AI_GH_APP_DIR } else { [IO.Path]::Combine($env:USERPROFILE, '.ai-devops', 'github-app') }), 'pop-ai-watchers.pem')
 
 function Invoke-MaintenanceClient {
   param([int]$Timeout)
@@ -158,7 +158,8 @@ function Invoke-QualificationRenewal {
   }
   if ($result -ne 'SUCCESS') {
     Add-FailureRecord -Root $Root -Line ($record | ConvertTo-Json -Compress)
-    $record.alert = Send-FailureAlert -Root $Root -Record $record -Sender $AlertSender -Now $ended
+    try { $record.alert = Send-FailureAlert -Root $Root -Record $record -Sender $AlertSender -Now $ended }
+    catch { $record.alert = 'ALERT_FAILED:alert bookkeeping error' }
   }
   Write-StatusFile -LiteralPath (Join-Path $Root 'last-run.json') -Json ($record | ConvertTo-Json -Compress)
   return [pscustomobject]$record
