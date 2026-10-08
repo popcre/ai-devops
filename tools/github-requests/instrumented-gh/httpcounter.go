@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 )
 
 var state = struct {
@@ -20,28 +18,6 @@ var state = struct {
 	active, pending, writes, failed, external uint64
 	finished, incomplete                      bool
 }{}
-
-func init() {
-	fdText := os.Getenv("AI_GH_HTTP_COUNTER_FD")
-	host := os.Getenv("AI_GH_HTTP_COUNTER_HOST")
-	os.Unsetenv("AI_GH_HTTP_COUNTER_FD")
-	os.Unsetenv("AI_GH_HTTP_COUNTER_HOST")
-	fd, err := strconv.Atoi(fdText)
-	if err != nil || fd < 3 || fd > 1024 || host == "" {
-		return
-	}
-	var stat syscall.Stat_t
-	if syscall.Fstat(fd, &stat) != nil || stat.Mode&syscall.S_IFMT != syscall.S_IFIFO {
-		return
-	}
-	syscall.CloseOnExec(fd)
-	state.pipe = os.NewFile(uintptr(fd), "httpcounter")
-	state.host = strings.ToLower(host)
-	// Fixed channel records only. No command, error, route or HTTP data.
-	if _, err := state.pipe.Write([]byte("{\"schema\":1,\"started\":true}\n")); err != nil {
-		state.incomplete = true
-	}
-}
 
 type transport struct{ next http.RoundTripper }
 

@@ -22,16 +22,21 @@ directory descriptor anchors extraction and execution through publication.
 Go uses a private HOME, fixed system PATH, GOENV=off and local toolchain;
 user flags and checksum-bypass configuration are not inherited.
 
-The qualification CLI accepts only builtin `api` GET/HEAD, `auth status`,
-`issue list/view`, `pr list/view/checks`, `run list/view`, and
-`workflow list/view`, excluding browser/watch options. It refuses other
-families before binary access. This restriction belongs to the optional
-qualification helper; the vendor CLI and installed routing are unchanged.
-For admitted commands with no caller `GH_PATH`, the helper uses upstream's
+The qualification CLI accepts only one literal relative `api` endpoint with
+GET or HEAD (default GET) and the finite parser's read-only flags. It rejects
+all other command families, payload sources, placeholders, executor-expanding
+endpoints, browser/watch options, and ambiguous arguments before binary access.
+The positive profile is a controlled fixture contract with an empty private
+config, explicit private directories, a token, empty PATH and no pager or
+runtime-selection variables. Ordinary inherited environments return unknown;
+this is not fleet or installed qualification.
+The observer CLI and every observer execution entry refuse a nonempty caller
+`GH_PATH` before executable access, returning status 2 and unknown metadata.
+Absent or empty `GH_PATH` uses upstream's
 supported override bound to its still-open verified sealed image. That keeps
 detached telemetry self-execution working without leaking counter descriptors
-or keys. Caller overrides retain their original semantics and remain outside
-the qualified scope. Durable credential setup, long-lived codespaces, skills,
+or keys. Raw immutable baseline/instrumented CLI parity retains explicit caller
+override semantics without the observer. Durable credential setup, long-lived codespaces, skills,
 aliases and extensions are not admitted; internal synthetic child fixtures
 exercise preservation and explicitly show their HTTP requests are unobserved.
 No ephemeral image path may be persisted as a Git credential helper.
@@ -99,6 +104,108 @@ fixture timing nor offline validation proves installed workflow latency.
 Future integration reuses the existing Bash caller's protected channel after
 independent exact-head security review, checks and each host's guarded install.
 Source/stat digest validation and invalidation need their own security proof.
+
+## Isolated native Windows qualification
+
+This is fixture-only code owned by #660. No Windows execution receipt exists
+until the reviewed fixture runs; compilation and offline tests are separate
+evidence. Neither success qualifies installation, production routing, MSYS
+result transport, Windows TLS/auth/context coverage or a global HTTP total.
+Native commands and the OS-installed gh remain untouched. The pinned build
+does not supply vendor signing, Windows resources or official release parity.
+
+`build.py --target windows-amd64 --compile-native-fixture` cross-builds the
+paired images and the existing counter package's native test executable from
+the same pinned official Linux Go archive. It keeps the sealed archive and
+private anchored-directory build boundary. Windows uses identical version,
+date, `-s -w` and trimpath flags for both images; the default upstream build
+tags disable the updater. Windows race execution is not claimed.
+
+The versioned `counter_source_binding` binds the complete finite input closure:
+httpcounter.go, httpcounter_test.go, channel.go, channel_linux.go,
+channel_windows.go, channel_unsupported.go, channel_windows_test.go,
+windows_cli_fixture_test.go and native_fixture.ps1, in that order.
+`compiled_counter_source_binding` binds the post-gofmt copied closure. The
+existing `patch_sha256` still means only httpcounter.go's input bytes; it is
+insufficient alone. Missing, altered and extra source files are rejected.
+The tracing suffix has a fixed reviewed digest; constructor/final hooks remain
+unchanged. Captured input bytes are the bytes copied into the private build.
+
+The root coordinator must review the exact source/build head BEFORE copying
+or executing anything on the sole permitted Windows fixture host. Recheck
+physical runner/runtime collision first. Stage only reviewed images, build.json
+and the complete input closure under a fresh owner-only local application-data
+Temp directory, or a fresh DIRECT child of the existing protected system
+ProgramFiles directory, named ai-devops-gh-counter- followed by 16–32 hex digits;
+images and manifest are at its root, input sources under source/.
+The second fixed parent is temporary native qualification only: no installation,
+routing or base-directory creation. Root must independently review the exact
+finite staging action and existing parent protection; foreign write/delete/ACL
+modification or unknown protection means refusal. Create the new root and source
+child atomically with owner/SYSTEM/Administrators protected ACLs. Never change
+an existing ACL, use an arbitrary root override or select a fallback location.
+Trusted staging must also atomically create a protected fixed `temp` child.
+Before Add-Type, the guard rejects unknown/link/unsafe root or temp directories,
+saves and clears all ambient fixture/counter prefixes and config/self-path/
+telemetry controls, exercises hostile process-local sentinel values, and sets
+TEMP/TMP only to that private child. Native locks retain it through the suite;
+compiler and Go temporary writes stay there. Original caller values are restored
+in finally, including failure. No ambient role, test, config or telemetry URL
+may select fixture behavior; the existing native telemetry case supplies its
+own local endpoint. Native environment outcomes remain mandatory qualification,
+never inferred from offline source checks.
+Invoke the staged source/native_fixture.ps1 with that fixture directory and
+the independently reviewed build.json SHA-256 as ExpectedManifestSha256.
+The script opens every ancestor and staged file with native no-follow handles
+before reading; ownership, type, reparse status, link count and identity come
+from those handles. A private DACL must be present, protected and non-null;
+only explicit allow entries for the owner, SYSTEM and Administrators with
+exact full-control/read/read-execute masks are accepted. Deny, inherited,
+callback and other entries are refused. Hashes use the same retained handles;
+execution paths come from those handles and are re-bound to their identities.
+Volume-to-leaf ancestor locks deny deletion; image locks deny writes/deletion
+until native tests finish. No staged ACL, service, task, PATH, trust store or
+credential changes. Hostile ACL/link fixtures affect fresh private test objects
+only. Nine actual native boundary cases must pass before the Go fixture runs:
+null/world/unprotected/deny DACLs, verified-byte write/rename replacement,
+hard links, symbolic links, repeatedly redirected junctions and held ancestor
+rename/reparse replacement. Missing native capabilities mean unknown, never
+skip-success. Offline assertions do not establish these native outcomes.
+
+The native parent creates anonymous owner/SYSTEM pipes only, checks actual
+input-direction capacity above the 1024-byte total record bound, whitelists
+only standard handles plus the metadata writer, and drains concurrently.
+Windows uses the distinct HANDLE key, never an MSYS fd. Child initialization
+clears all three reserved keys and writer inheritance before descendants.
+Exactly the existing two numeric records are allowed; absent final records,
+crashes, malformed channels and concurrent incomplete work mean unknown.
+
+Native cases cover invalid/standard/file/MSYS handles, reserved keys,
+inheritance sentinel and grandchildren, separate concurrent channels, capacity,
+paused/closed readers, strict two-record parsing, record sizing, verify/use image
+and ancestor replacement, pagination/hidden retry/redirect server ledgers,
+Unicode/header/stdio/status parity, forced cancellation without replay, actual
+console cancellation, detached telemetry, and numeric receipt shape. Absence
+of a console is a genuine unknown failure, never a successful skip. The
+offline source-binding and numeric-schema cases additionally reject missing,
+mismatched/extra source and receipt fields, text, forged digests and NaN.
+
+Both cold-process and warm-private-config groups contain 20 alternating pairs.
+Fresh processes are always used; no OS page-cache flush is claimed. Timing
+includes channel construction, primary lifecycle, drain and validation; held
+image verification occurs once outside the timed region. Each group must meet
+both p95 and total elapsed <=5% gates. Historical failed Python overhead and
+prior Linux distributions remain separate evidence.
+
+After the complete native test selection, numeric-result.json is emitted in
+the locked private fixture directory even for failures. Its values are only
+numbers, booleans, null and numeric arrays. Digest arrays follow the source
+order above; binary arrays are baseline, instrumented, native fixture. Raw
+timing arrays identify cold/warm baseline/candidate. No routes, command text,
+headers, tokens, bodies or diagnostics enter this file. Numeric receipt
+validation re-binds every digest and independently checks performance gates;
+the whole HTTP total remains null and installed acceptance remains false.
+No public Windows receipt is fabricated before actual execution.
 
 ## Retirement
 

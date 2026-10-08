@@ -25,6 +25,44 @@ def archive_bytes(content):
 
 
 class SealedUse(unittest.TestCase):
+    def test_hostile_self_path_refuses_cli_and_api_before_any_execution(self):
+        import json
+        import run
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            marker = root / 'executed'
+            hostile = root / 'hostile'
+            hostile.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
+            hostile.chmod(0o700)
+            env = dict(os.environ, GH_PATH=str(hostile))
+            read_fd, write_fd = os.pipe()
+            try:
+                result = subprocess.run([sys.executable, str(pathlib.Path(run.__file__)),
+                    '--binary', str(hostile), '--sha256', '0'*64, '--api-host', 'localhost',
+                    '--metadata-fd', str(write_fd), '--', 'api', 'private'],
+                    env=env, pass_fds=(write_fd,), capture_output=True, timeout=10)
+            finally:
+                os.close(write_fd)
+            with os.fdopen(read_fd, 'rb') as channel:
+                self.assertEqual(json.loads(channel.read()), run.UNKNOWN)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, b'')
+            with patch.dict(os.environ, {'GH_PATH': str(hostile)}):
+                self.assertEqual(run.run_counted(hostile, ['api', 'private'], 'localhost', '0'*64), (2, run.UNKNOWN))
+                self.assertEqual(run.run_verified(None, hostile, ['api', 'private'], 'localhost'), (2, run.UNKNOWN))
+            self.assertFalse(marker.exists())
+
+    def test_raw_sealed_image_executes_with_empty_self_path(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            binary = pathlib.Path(scratch) / 'verified-python'
+            shutil.copyfile(sys.executable, binary)
+            binary.chmod(0o700)
+            artifact = {'path': str(binary), 'sha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
+            result = sealed.verified_run(artifact, ['-c', 'import os; print(os.environ.get("GH_PATH", ""))'],
+                                         env=dict(os.environ, GH_PATH=''), capture_output=True, timeout=10)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'\n', b''))
+
     def test_hostile_go_configuration_not_inherited(self):
         import build
         from unittest.mock import patch
@@ -120,7 +158,7 @@ class SealedUse(unittest.TestCase):
             # replacement happens after verification but before Popen, exactly
             # where the valid security REJECT found the vulnerable window.
             script = '''import os, pathlib, shutil, sys
-import sealed, run
+import sealed
 original = sealed.verified_snapshot
 def swapped(path, expected):
     snapshot = original(path, expected)
@@ -130,10 +168,10 @@ def swapped(path, expected):
     os.replace(replacement, path)
     return snapshot
 sealed.verified_snapshot = swapped
-status, metadata = run.run_counted(sys.argv[1], ['-c', 'print("VERIFIED")'], 'localhost', sys.argv[2])
-assert metadata['http_requests'] is None
-assert metadata['observed_completed_writes'] is None
-raise SystemExit(status)
+result = sealed.verified_run({'path': sys.argv[1], 'sha256': sys.argv[2]}, ['-c', 'print("VERIFIED")'], capture_output=True)
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+raise SystemExit(result.returncode)
 '''
             result = subprocess.run([sys.executable, "-c", script, str(binary), digest],
                                     cwd=pathlib.Path(__file__).parent, capture_output=True, timeout=10)
