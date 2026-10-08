@@ -44,6 +44,8 @@ REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 declare -F reviewer_credit_scan >/dev/null || source "$REAL_DIR/../tools/reviewer_event_guard.sh"
 # shellcheck source=../tools/lib/stepfun-sandbox.sh
 source "$REAL_DIR/../tools/lib/stepfun-sandbox.sh"
+# shellcheck source=../tools/lib/stepfun-pace.sh
+source "$REAL_DIR/../tools/lib/stepfun-pace.sh"
 
 # StepCode model id; the OpenCode profile pins stepfun-api/step-5-preview.
 MODEL="${AI_STEPFUN_MODEL:-step/step-5-preview}"
@@ -178,8 +180,11 @@ load_key(){
 
 # StepFun's lower account tiers allow about 10 requests a minute (HTTP 429
 # rate_limited). STEP_AUTOPILOT=1 lets StepCode retry and resume inside a run;
-# review/ask turns are also re-run whole, after a pause, when a 429 still ends
-# the run. Implementation runs are never re-run blindly: the clone is kept.
+# Every turn first waits for a slot from the shared pacer
+# (tools/lib/stepfun-pace.sh), so concurrent runs are spaced instead of
+# colliding (#1432). A 429 that still ends a review/ask turn sets a shared
+# cooldown; the turn is re-run only after that wait, as a last resort so the
+# review is not lost. Implementation runs are never re-run blindly.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
 # StepCode prints HTTP errors on stdout; only status 429 is a rate signal.
@@ -208,8 +213,8 @@ run_step_retry(){ # same arguments as run_step; disposable-copy turns only
     rc=0; run_step "$@" || rc=$?
     if [ "$rc" -eq 0 ] && retry_report_well_formed "$2"; then return 0; fi
     rate_limited "$2" && [ "$n" -lt "$RATE_RETRIES" ] || return "$rc"
-    n=$((n + 1)); note "StepFun rate limit reached; retrying in ${RATE_PAUSE}s ($n/$RATE_RETRIES)."
-    sleep "$RATE_PAUSE"
+    n=$((n + 1)); note "StepFun rate limit reached; retrying after a ${RATE_PAUSE}s shared cooldown ($n/$RATE_RETRIES)."
+    stepfun_pace_cooldown "$RATE_PAUSE" "$STATE_DIR"
   done
 }
 
@@ -218,24 +223,37 @@ run_step_retry(){ # same arguments as run_step; disposable-copy turns only
 run_step(){
   detect_engine
   local rc=0
+  stepfun_pace_wait "$STATE_DIR"
   case "$ENGINE" in
     stepcode) run_stepcode "$@" || rc=$? ;;
     opencode) run_opencode_turn "$@" || rc=$? ;;
     *) die 'no engine available (StepCode or OpenCode)' ;;
   esac
   record_turn_counters "$2" "${STEPFUN_RETRY_COUNT:-0}" || note 'could not record StepFun turn counters'
+  rm -f "$2.events"
   return "$rc"
 }
 
 # Only fixed numeric usage fields leave the raw OpenCode event stream. Never
 # copy session IDs, prompts, tool arguments, errors, or provider credentials.
-# StepCode has no JSONL usage channel, so its unavailable values stay null.
+# StepCode's --mode json stream carries usage on each assistant message_end
+# (one per provider call); those are summed into the turn record (#1432).
 record_turn_counters(){
   local out="$1" retry="$2" report
   mkdir -p "$STATE_DIR/reports" || return 1
   chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
   report="$(mktemp "$STATE_DIR/reports/turn.XXXXXX.json")" || return 1
   chmod 600 "$report" 2>/dev/null || true
+  if [ "$ENGINE" = stepcode ] && [ -s "$out.events" ] && command -v jq >/dev/null 2>&1; then
+    jq -R 'fromjson? // empty' "$out.events" 2>/dev/null | jq -s --arg engine "$ENGINE" --argjson retry "$retry" '
+      [ .[] | select(type == "object" and .type == "message_end" and .message.role == "assistant")
+        | .message.usage | select(type == "object") ] as $u
+      | def sum_field($f): if any($u[]; .[$f] | type == "number") then ([$u[] | .[$f] | numbers] | add) else null end;
+        {engine:$engine, resumed:false, retry_count:$retry, provider_calls:($u | length),
+         input_tokens:sum_field("input"), output_tokens:sum_field("output"),
+         cache_read_tokens:sum_field("cacheRead"), cache_write_tokens:sum_field("cacheWrite")}
+    ' > "$report" 2>/dev/null && [ -s "$report" ] && return 0
+  fi
   if [ -s "$out.jsonl" ] && command -v jq >/dev/null 2>&1; then
     jq -s --arg engine "$ENGINE" --argjson retry "$retry" '
       [ .[] | select(.type == "step_finish") | .part.tokens | select(type == "object") ] as $t
@@ -245,10 +263,10 @@ record_turn_counters(){
           then ([$t[] | .cache[$field] | numbers] | add) else null end;
         {engine:$engine, resumed:false, retry_count:$retry,
          input_tokens:sum_field("input"), output_tokens:sum_field("output"),
-         cache_read_tokens:sum_cache("read"), cache_write_tokens:sum_cache("write")}
+         provider_calls:($t | length), cache_read_tokens:sum_cache("read"), cache_write_tokens:sum_cache("write")}
     ' "$out.jsonl" > "$report" 2>/dev/null && [ -s "$report" ] && return 0
   fi
-  printf '{"engine":"%s","resumed":false,"retry_count":%s,"input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null}\n' "$ENGINE" "$retry" > "$report"
+  printf '{"engine":"%s","resumed":false,"retry_count":%s,"provider_calls":null,"input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null}\n' "$ENGINE" "$retry" > "$report"
 }
 
 # ---- OpenCode engine (Windows, or any host without StepCode) ----
@@ -280,6 +298,7 @@ oc_bin(){
 # per #974); implement uses the implement agent. Both are write-capable.
 # Caller sets STEPFUN_OC_AGENT to choose; defaults to the review agent.
 run_opencode_turn(){
+  reviewer_credit_prepare || return 1
   local dir="$1" out="$2" prompt="$3" agent="${STEPFUN_OC_AGENT:-$OC_AGENT_REVIEW}" rc=0 log oc
   oc="$(oc_bin)" || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-glm.sh first."
   [ -d "$dir" ] || die "OpenCode turn directory is gone: $dir"
@@ -346,7 +365,7 @@ run_opencode_turn(){
       cp "$win_home/shim/bash" "$win_home/shim/bash.exe"
       printf '@echo off\r\nbash "%%~dp0bash" %%*\r\n' > "$win_home/shim/bash.cmd"
       export PATH="$win_home/shim:$gate_path"
-      printf '%s' "$prompt" | "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
+      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
         --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
         > "$log" 2>"$out.stderr"
     )
@@ -379,7 +398,7 @@ run_opencode_turn(){
     export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
       XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
       XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
-    printf '%s' "$prompt" | "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \
@@ -429,6 +448,7 @@ run_opencode_turn(){
 # STEPFUN_SANDBOX_ENV_ALLOW from the shared sandbox library).
 STEP_ENV_ALLOW=" LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR "
 run_stepcode(){
+  reviewer_credit_prepare || return 1
   local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
   [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
   local -a tool_args=(--no-tools)
@@ -455,16 +475,37 @@ run_stepcode(){
     local home="$HOME"
     export HOME="$home" PATH="$home/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
-    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
+    STEPFUN_CREDIT_OUTPUT="$out" STEPFUN_CREDIT_STDERR="$out.stderr" stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
       --ro-bind-try "$home/.stepcode/agent/bin" "$home/.stepcode/agent/bin" \
       --bind "$agent" "$agent" "${prompt_binds[@]}" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
-      -p --no-session --model "$MODEL" "${tool_args[@]}" \
+      -p --no-session --mode json --model "$MODEL" "${tool_args[@]}" \
       --approval-mode "$approval" --non-interactive-approval "$fallback" \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check -- "${prompt_args[@]}"
-  ) < /dev/null > "$out" 2>"$out.stderr" || rc=$?
+  ) < /dev/null > "$out.events" 2>"$out.stderr" || rc=$?
   rm -rf "$agent"
+  stepcode_events_to_text "$out"
   return "$rc"
+}
+
+# stepcode_events_to_text OUT: StepCode runs with --mode json so its usage is
+# measurable. OUT receives what text mode printed: any non-event line (such as
+# a "429: {json}" HTTP error) and the final assistant answer. Provider error
+# messages on assistant events go to OUT.stderr, the channel the rate and
+# credit scanners read (never assistant content).
+stepcode_events_to_text(){
+  local out="$1" ev="$1.events"
+  : > "$out"
+  [ -s "$ev" ] || return 0
+  command -v jq >/dev/null 2>&1 || { cp "$ev" "$out"; return 0; }
+  jq -Rr '. as $l | (fromjson? // null) | if type == "object" and has("type") then empty else $l end' "$ev" >> "$out" 2>/dev/null || true
+  jq -R 'fromjson? // empty' "$ev" 2>/dev/null | jq -rs '
+      .[] | select(type == "object" and .type == "message_end" and .message.role == "assistant")
+      | .message.errorMessage // empty | select(. != "") | "provider error: " + .' >> "$out.stderr" 2>/dev/null || true
+  jq -R 'fromjson? // empty' "$ev" 2>/dev/null | jq -rs '
+      [ .[] | select(type == "object" and .type == "message_end" and .message.role == "assistant")
+        | [.message.content[]? | select(.type == "text") | .text] | join("") | select(. != "") ]
+      | last // empty' >> "$out" 2>/dev/null || true
 }
 
 # sandbox_sys_binds: the shared system-tree list (tools/lib/stepfun-sandbox.sh).
@@ -480,6 +521,8 @@ bwrap_bin(){
 # "4xx: {json}" lines StepCode prints on stdout for an HTTP error. A review
 # that merely quotes a billing message must not be read as out of credit.
 credit_stop(){
+  reviewer_capacity_current stepfun "$1" || true
+  reviewer_capacity_current stepfun "$1.jsonl" || true
   local ev="$1.provider-errors"
   grep -E '^4[0-9][0-9]: \{' "$1" > "$ev" 2>/dev/null || true
   reviewer_credit_scan stepfun "$1.stderr" "$ev" || true
@@ -568,6 +611,11 @@ door_probe(){
   # with a short review instead of the literal token. The door writes a report
   # only when the model returned text, so a report with a Verdict section after
   # exit 0 proves the live turn ran.
+  if [ "$rc" -eq 92 ]; then
+    # Out of credit: the door already recorded the quarantine; keep exit 92.
+    grep -E '^(AI_REVIEWER_OUT_OF_CREDIT|OUT OF CREDIT)' "$t/out" >&2 || true
+    printf 'FAIL live call through the review door: StepFun is out of credit\n'; rm -rf "$t"; return 92
+  fi
   if [ "$rc" -ne 0 ] || ! grep -q '^## Verdict' "$t/report" 2>/dev/null; then
     printf 'FAIL live call through the review door did not answer (exit %s)\n' "$rc"; tail -n 5 "$t/out"; rm -rf "$t"; return 1
   fi
@@ -627,14 +675,24 @@ cmd_doctor(){
   key_store_ok || { printf 'FAIL protected StepFun key store missing (run: ai-stepfun store-key)\n'; exit 1; }
   printf 'PASS  protected key store (owner-only): %s\n' "$KEY_STORE"
   if [ "$live" = 1 ]; then
-    local tmp; mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/doctor.XXXXXX")"; load_key
+    load_key
+    # One paid call (#1432): on StepCode the door probe is the live call, since
+    # it is the path every allocator review takes. OpenCode has no door, so it
+    # makes the direct call instead.
+    if [ "$ENGINE" = stepcode ]; then
+      local probe_rc=0; door_probe || probe_rc=$?
+      [ "$probe_rc" -eq 0 ] || exit "$probe_rc"
+      printf 'PASS  live StepFun call answered (model %s)\n' "$MODEL"
+      printf 'OK engine=%s model=%s live=verified\n' "$ENGINE" "$MODEL"
+      return 0
+    fi
+    local tmp; mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/doctor.XXXXXX")"
     if ! run_step "$tmp" "$tmp/out" 'Reply with exactly the text STEPFUN-OK and nothing else.' || ! grep -q 'STEPFUN-OK' "$tmp/out"; then
       credit_stop "$tmp/out"
       printf 'FAIL live StepFun call did not answer\n'; sed -n 1,5p "$tmp/out" "$tmp/out.stderr" 2>/dev/null; rm -rf "$tmp"; exit 1
     fi
     rm -rf "$tmp"
     printf 'PASS  live StepFun call answered (model %s)\n' "$MODEL"
-    [ "$ENGINE" != stepcode ] || door_probe || exit 1
   fi
   printf 'OK engine=%s model=%s live=%s\n' "$ENGINE" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
 }

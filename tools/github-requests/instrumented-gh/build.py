@@ -50,6 +50,16 @@ def patch(source):
     shutil.copyfile(HERE / "httpcounter_test.go", counter / "httpcounter_test.go")
 
 
+def discard_build_inputs(build_root):
+    """Keep only the paired binaries; caches, sources and toolchain are ~1.5 GB."""
+    for name in ("toolchain", "gocache", "modules", "baseline", "instrumented", "home"):
+        tree = build_root / name
+        # Go's module cache is read-only; make each directory removable first.
+        for directory, _subdirs, _files in os.walk(tree):
+            os.chmod(directory, 0o700)
+        shutil.rmtree(tree)
+
+
 def main():
     with ExitStack() as snapshots:
         build(snapshots)
@@ -97,8 +107,9 @@ def build(snapshots):
         tags = ["-tags", "updateable"] if args.qualify_updater else []
         subprocess.run([str(go), "build", *tags, "-trimpath", "-ldflags", "-X github.com/cli/cli/v2/internal/build.Version=" + pins["upstream_version"], "-o", str(output), "./cmd/gh"], cwd=source, env=env, check=True)
         artifacts[kind] = {"path": str(args.output.absolute() / build_root.name / output.name), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
+    discard_build_inputs(build_root)
     durable_root = args.output.absolute() / build_root.name
-    manifest = {"pins": pins, "artifacts": artifacts, "toolchain": str(durable_root / "toolchain/go/bin/go"), "build_root": str(durable_root),
+    manifest = {"pins": pins, "artifacts": artifacts, "build_root": str(durable_root),
                 "patch_sha256": hashlib.sha256((HERE / "httpcounter.go").read_bytes()).hexdigest(), "installed": False,
                 "qualification_build_tags": ["updateable"] if args.qualify_updater else []}
     manifest_path = anchored_output / "build.json"

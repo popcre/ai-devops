@@ -5,6 +5,14 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 target="$tmp/bin"
 bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >/dev/null
 bash "$repo/bin/ai-machine-tools-doctor" --platform ubuntu --target-dir "$target" | grep -q 'OK local AI command'
+# Ubuntu installs the doctor as a /usr/local/bin symlink; it must resolve its real repo root.
+# Git Bash on Windows copies instead of linking, so only check where a real symlink exists.
+ln -s "$repo/bin/ai-machine-tools-doctor" "$tmp/doctor-link"
+if [[ -L "$tmp/doctor-link" ]]; then
+  "$tmp/doctor-link" --platform ubuntu --target-dir "$target" >"$tmp/link-out" 2>"$tmp/link-err"
+  if [[ -s "$tmp/link-err" ]]; then cat "$tmp/link-err" >&2; exit 1; fi
+  grep -q 'OK local AI command' "$tmp/link-out"
+fi
 for n in ai-grok-review ai-grok-implement ai-gemini ai-kimi ai-qwen ai-deepseek-agent ai-glm ai-headroom; do [[ -e "$target/$n" ]]; done
 # Every bash+cmd tool must be EXECUTABLE in git. The Ubuntu installer only
 # symlinks and prints "OK installed", so a 100644 source installs "successfully"

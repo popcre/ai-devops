@@ -228,7 +228,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS DEEPSEEK_TOOLS_MAX_GREP_MATCHES DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS SOURCE_ATTACH_MAX_BYTES SOURCE_ATTACH_SMALL_BYTES AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS DEEPSEEK_TOOLS_MAX_GREP_MATCHES DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS SOURCE_ATTACH_MAX_BYTES SOURCE_ATTACH_SMALL_BYTES AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -803,7 +803,7 @@ PY
       [ "$max_time" -le "$CALL_TIMEOUT" ] || max_time="$CALL_TIMEOUT"
       [ "$max_time" -gt 0 ] || { echo "Error: repository tool loop exceeded its ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget." >&2; rc=1; break; }
     fi
-    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | curl -sS -o "$resp_file" -w '%{http_code}' \
+    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | reviewer_credit_run deepseek "$resp_file" "$resp_file.stderr" -- curl -sS -o "$resp_file" -w '%{http_code}' \
       --connect-timeout "$CONNECT_TIMEOUT" --max-time "$max_time" \
       "$BASE_URL/chat/completions" \
       -H @- \
@@ -825,6 +825,7 @@ PY
   drop_turn_workspace
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   pending_observed "$resp_file" "$rc" "$http_code" || return 1
+  reviewer_capacity_current deepseek "$resp_file" || true
   if [ "$rc" -ne 0 ]; then
     echo "Error: provider-transport-failure: DeepSeek request failed or exceeded ${CALL_TIMEOUT}s; private response: $resp_file" >&2
     publish_failure_evidence request-failed || return 1
@@ -1468,7 +1469,7 @@ case "$SUBCMD" in
     fi
     ;;
   list)
-    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' -printf '%T@ %f\n' 2>/dev/null \
+    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' ! -name '*.credit-refusal.*.json' -printf '%T@ %f\n' 2>/dev/null \
       | sort -rn | sed -E 's/^[^ ]+ //; s/\.json$//'
     ;;
 

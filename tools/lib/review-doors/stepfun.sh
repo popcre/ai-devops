@@ -41,6 +41,9 @@ SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
 # The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
 # shellcheck source=../stepfun-sandbox.sh
 source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+# The shared request pacer, also used by bin/ai-stepfun (#1432).
+# shellcheck source=../stepfun-pace.sh
+source "$SF_ROOT/tools/lib/stepfun-pace.sh"
 # reviewer_credit_scan: the shared out-of-credit classifier.
 # shellcheck source=../../reviewer_event_guard.sh
 source "$SF_ROOT/tools/reviewer_event_guard.sh"
@@ -97,6 +100,16 @@ resolve_stepcode() {
 stepcode_identity_ok() { # stepcode_identity_ok BIN
   NO_COLOR=1 "$1" --help 2>/dev/null | head -n1 |
     sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'
+}
+
+# OpenCode reports an HTTP 429 on stderr or as a JSONL error event. Assistant
+# text, including JSONL text events, is never a rate signal (as bin/ai-stepfun).
+oc_rate_limited() { # oc_rate_limited JSONL_LOG STDERR
+  local re='(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
+  grep -Eiq "$re" "$2" 2>/dev/null && return 0
+  [ -s "$1" ] || return 1
+  jq -r 'select(.type != "text" and (.type == "error" or .error != null)) | tostring' "$1" 2>/dev/null \
+    | grep -Eiq "$re"
 }
 
 resolve_opencode() {
@@ -268,12 +281,13 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
 # Writes the final assistant text to $log; declined commands and provider
 # errors go to $out.err. Returns 0 only when the model answered.
 sf_rpc_turn() {
+  reviewer_credit_prepare || return 1
   local prompt_file="$1" line typ id method text="" sf_pid
   : > "$log"; : > "$out.err"
   coproc SF_RPC {
     export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
+    STEPFUN_CREDIT_OUTPUT="$log" STEPFUN_CREDIT_STDERR="$out.err" stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
       --mode rpc --no-session --model "$SF_STEP_MODEL" --approval-mode auto \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check 2>>"$out.err"
@@ -356,19 +370,32 @@ main() {
       oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"; SF_TEMP_PATHS+=("$oc_scratch")
       cp -a "$DOOR_WORKDIR" "$oc_dir" || { rm -rf "$xdg" "$oc_scratch"; rm -f "$prompt_full"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     fi
-    (
-      export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
-             XDG_DATA_HOME="$(native_path "$xdg/data")" \
-             XDG_STATE_HOME="$(native_path "$xdg/state")" \
-             XDG_CACHE_HOME="$(native_path "$xdg/cache")"
-      if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
-      printf '%s' "$(cat "$prompt_full")" \
-        | timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
-            --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
-            --dir "$(native_path "$oc_dir")" \
-            > "$log" 2> "$out.err"
-    )
-    rc=$?
+    # The same shared pacer and 429 cooldown as the StepCode branch below
+    # (#1432): every turn waits for a slot first, and a 429 that still ends
+    # the turn sets the shared cooldown before one bounded rerun.
+    local rate_retries=0
+    local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    while :; do
+      stepfun_pace_wait
+      (
+        export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
+               XDG_DATA_HOME="$(native_path "$xdg/data")" \
+               XDG_STATE_HOME="$(native_path "$xdg/state")" \
+               XDG_CACHE_HOME="$(native_path "$xdg/cache")"
+        if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
+        printf '%s' "$(cat "$prompt_full")" \
+          | reviewer_credit_run stepfun "$log" "$out.err" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+              --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
+              --dir "$(native_path "$oc_dir")" \
+              > "$log" 2> "$out.err"
+      )
+      rc=$?
+      [ "$rc" -ne 0 ] || break
+      oc_rate_limited "$log" "$out.err" && [ "$rate_retries" -lt "$rate_max" ] || break
+      rate_retries=$((rate_retries + 1))
+      printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      stepfun_pace_cooldown "$rate_pause"
+    done
     rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"
   else
     # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under the
@@ -413,30 +440,36 @@ main() {
     # unattended (rm -rf, unanalysable shell). In -p mode that question ends
     # the whole turn with no report, so the turn runs in RPC mode and the door
     # declines every such question: the model is told no and keeps reviewing.
-    # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
-    # pause, as bin/ai-stepfun does.
+    # Every turn waits for a slot from the shared pacer first, so concurrent
+    # reviews are spaced instead of colliding (#1432). An HTTP 429 that still
+    # outlasts StepCode's own retry sets a shared cooldown, and the turn is
+    # rerun only after that wait, as bin/ai-stepfun does.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
       "${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
     while :; do
+      stepfun_pace_wait
       sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
       grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
       rate_retries=$((rate_retries + 1))
-      printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
-      sleep "$rate_pause"
+      printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      stepfun_pace_cooldown "$rate_pause"
     done
     rm -f "$model_catalog"; rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
   set -e
   SF_KEY=""
+  reviewer_capacity_current stepfun "$log" || true
 
   # Out of credit: the one shared classifier reads the provider error lines
   # (the agent_end errors land in $out.err), records the out-of-credit
   # quarantine, and prints both contract lines; the runner keeps exit 92.
-  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err"; }; then
+  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err" "$log.credit-refusal.json"; }; then
+    reviewer_capacity_current stepfun "$log" || true
+    reviewer_credit_scan stepfun "$out.err" || true
     [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
     [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
     rm -f "$prompt_full"

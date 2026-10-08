@@ -410,10 +410,14 @@ rlc_write_brief() { # rlc_write_brief DEST MODE HEAD DIGEST WORKDIR PACKET_REL [
     implement) verb='Implement the requested change';;
     *) verb='Judge the change';;
   esac
-  cat > "$dest" <<BRIEF
-You are performing a ${mode}. You MAY run shell commands, builds and tests$( [ "$mode" = implement ] && printf ', and edit files' || printf ', and edit files to test a hypothesis' ), but only inside your disposable copy at ${workdir}: your edits are discarded and are never part of the change under review unless this is implement mode. Never commit, push, merge, or touch any remote or any checkout outside your copy. No web search.
+  # Cache-stable layout (#1430): fixed instructions, the decision and the
+  # verdict format come first so briefs for different heads share one byte
+  # prefix; per-run facts (copy path, packet, head, digest, files, tests) last.
+  {
+  cat <<BRIEF
+You are performing a ${mode}. You MAY run shell commands, builds and tests$( [ "$mode" = implement ] && printf ', and edit files' || printf ', and edit files to test a hypothesis' ), but only inside your disposable copy named under RUN FACTS: your edits are discarded and are never part of the change under review unless this is implement mode. Never commit, push, merge, or touch any remote or any checkout outside your copy. No web search.
 
-Your session harness announces an evidence packet at ${workdir}/${packet_rel}/MANIFEST.md. THAT PACKET is the review subject. The reviewed head commit is ${head} and the source digest is ${digest}; you MUST quote the full reviewed head SHA in your report.$( [ -n "$changed_files" ] && printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first):\n%s' "$changed_files" )$( [ -n "$tests_result" ] && printf '\n\ntests command on record: %s' "$tests_result" )
+Your session harness announces an evidence packet whose MANIFEST.md path is given under RUN FACTS. THAT PACKET is the review subject; read the packet manifest and its patch first. You MUST quote the full reviewed head SHA given under RUN FACTS in your report.
 
 ${decision:-${verb} for correctness, regressions, data exposure, and missing tests.}
 
@@ -421,7 +425,16 @@ Return ALL findings in one pass, grouped by severity, with file and line evidenc
 
 ## Verdict
 APPROVE|REJECT|BLOCKED
+
+## RUN FACTS (this review only)
+Disposable copy: ${workdir}
+Evidence packet: ${workdir}/${packet_rel}/MANIFEST.md
+The reviewed head commit is ${head}.
+The source digest is ${digest}.
 BRIEF
+  [ -z "$changed_files" ] || printf 'Changed files (the change under review is exactly these):\n%s\n' "$changed_files"
+  [ -z "$tests_result" ] || printf 'tests command on record: %s\n' "$tests_result"
+  } > "$dest"
 }
 
 # ---------------------------------------------------------------------------

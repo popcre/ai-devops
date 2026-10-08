@@ -7,13 +7,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tools/lib/provider-wrapper-common.sh"
+# Keep test runs out of the live reviewer events ledger (#1435).
+. "$ROOT/tests/lib-reviewer-events-isolation.sh"
 PASS=0; FAIL=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 # Run a wrapper in an environment that carries no harness markers.
-run_bare(){ env -i PATH="$PATH" HOME="$HOME" USERPROFILE="${USERPROFILE:-}" SYSTEMROOT="${SYSTEMROOT:-}" LOCALAPPDATA="${LOCALAPPDATA:-}" "$@"; }
+run_bare(){ env -i PATH="$PATH" HOME="$HOME" AI_REVIEW_TEST_ISOLATION="$AI_REVIEW_TEST_ISOLATION" AI_REVIEW_EVENT_DIR="$AI_REVIEW_EVENT_DIR" USERPROFILE="${USERPROFILE:-}" SYSTEMROOT="${SYSTEMROOT:-}" LOCALAPPDATA="${LOCALAPPDATA:-}" "$@"; }
 
 echo '== provider_wrapper_detect_caller'
 check 'detects mimo from MIMO_NODE' 'test "$(MIMO_NODE=/x CLAUDECODE= CODEX_THREAD_ID= ZCODE_SESSION_ID= MIMO_SESSION_ID= MIMO_PYTHON= MIMO_NPM= MIMO_ELECTRON_NODE_HOST= CLAUDE_CODE_SESSION_ID= CODEX_SANDBOX= provider_wrapper_detect_caller)" = mimo'

@@ -119,7 +119,9 @@ export AI_GROK_STATE_DIR="$TMP/state"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_SANDBOX_PROGRESS_FILE="$TMP/source-digest.progress"
-export AI_GROK_AUTH_HOME="$TMP/no-auth"
+export AI_GROK_AUTH_HOME="$TMP/oauth-home"
+# Reviews run only on the subscription OAuth login, so the default fixture has one.
+mkdir -p "$AI_GROK_AUTH_HOME"; printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 export AI_GROK_CALLER="claude"
 export AI_GROK_TEST_MODE=1
 export AI_DEVOPS_TEST_MODE=1
@@ -311,7 +313,10 @@ test_process_alive() {
   local pid="$1"
   kill -0 "$pid" 2>/dev/null && return 0
   case "$(uname -s 2>/dev/null || true)" in
-    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$pid" '$1 == p { found=1 } END { exit !found }' ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Column 1 is the MSYS pid, column 4 the Win32 pid. The event guard
+      # records Win32 pids so process_alive can see them; accept either.
+      ps -W 2>/dev/null | awk -v p="$pid" '$1 == p || $4 == p { found=1 } END { exit !found }' ;;
     *) return 1 ;;
   esac
 }
@@ -510,7 +515,7 @@ check "out_of_credit_prints_machine_line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT p
 check "out_of_credit_prints_human_line" "grep -q '^OUT OF CREDIT: .*console.x.ai' '$TMP/credit.err'"
 check "out_of_credit_gives_no_retry_hint" "! grep -q 'Retry once' '$TMP/credit.err'"
 check "out_of_credit_does_not_wait_for_the_result_deadline" "test '$CREDIT_ELAPSED' -lt 450"
-check "out_of_credit_records_quarantine" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
+check "out_of_credit_records_capacity_hold" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' capacity-status grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
 check "out_of_credit_leaves_no_stranded_work_lock" "test -z \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\""
 echo ok > "$TMP/mode"
 
@@ -645,17 +650,17 @@ check "inspect and paid children share one empty user home separate from GROK_HO
 check "inspect and paid children both retain credential reachability through GROK_HOME" "test \"\$(grep -cx visible '$TMP/isolation-auth.txt')\" -eq 2"
 check "OAuth session present: no API key is forwarded" "test \"\$(grep -cx 'none|stripped' '$TMP/isolation-key.txt')\" -eq 2"
 
-echo "== api_key_store_forwarded_only_without_oauth_session =="
+echo "== paid_api_key_never_forwarded =="
 : > "$TMP/isolation-key.txt"; : > "$TMP/argv.txt"
-KEY_HOME="$TMP/key-auth"; mkdir -p "$KEY_HOME" "$TMP/key-store"; chmod 700 "$TMP/key-store"
-printf 'xai-fixture-store-key\n' > "$TMP/key-store/grok-xai-api-key"; chmod 600 "$TMP/key-store/grok-xai-api-key"
-AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/grok-xai-api-key" OPERATOR_SECRET_FIXTURE=leaked XAI_API_KEY= run new tkey --prompt "review this" >/dev/null 2>&1
-check "protected key store reaches both Grok children as XAI_API_KEY" "test \"\$(grep -cx 'xai-fixture-store-key|stripped' '$TMP/isolation-key.txt')\" -eq 2"
-check "forwarded key never appears in Grok argv" "! grep -q 'xai-fixture-store-key' '$TMP/argv.txt'"
-check "review path never calls 1Password" "! sed -n '/^resolve_xai_api_key() {/,/^}/p' '$SCRIPT' | grep -q 'op read'"
+OPERATOR_SECRET_FIXTURE=leaked XAI_API_KEY=xai-fixture-exported-key run new tkey --prompt "review this" >/dev/null 2>&1
+check "exported XAI_API_KEY never reaches either Grok child" "test \"\$(grep -cx 'none|stripped' '$TMP/isolation-key.txt')\" -eq 2"
+check "exported key never appears in Grok argv" "! grep -q 'xai-fixture' '$TMP/argv.txt'"
+check "store-key maintenance command is gone" "! grep -q 'store-key\\|resolve_xai_api_key\\|GROK_KEY_REF\\|GROK_KEY_STORE' '$SCRIPT'"
+KEY_HOME="$TMP/key-auth"; mkdir -p "$KEY_HOME"
 : > "$TMP/isolation-key.txt"
-AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/missing" XAI_API_KEY= run new tkey2 --prompt "review this" >/dev/null 2>&1
-check "no store and no OAuth session forwards nothing" "! grep -q 'xai-' '$TMP/isolation-key.txt'"
+NOAUTH_OUT="$(AI_GROK_AUTH_HOME="$KEY_HOME" XAI_API_KEY=xai-fixture-exported-key run new tkey2 --prompt "review this" 2>&1)"; NOAUTH_RC=$?
+check "missing subscription login fails clearly even with an exported key" "[ '$NOAUTH_RC' -ne 0 ] && printf '%s' \"\$NOAUTH_OUT\" | grep -q 'grok login'"
+check "missing subscription login never starts a Grok child" "[ ! -s '$TMP/isolation-key.txt' ]"
 check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q '\"USERPROFILE=\$isolated_native_user_home\"' '$REPO_ROOT/bin/ai-grok-review'"
 check "Windows reviewer isolates every XDG root for the native Grok child" "grep -q '\"XDG_CONFIG_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_CACHE_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_DATA_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review'"
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
@@ -1210,7 +1215,7 @@ EMPTY_AUTH_HOME="$TMP/empty-auth"; mkdir -p "$EMPTY_AUTH_HOME"; : > "$EMPTY_AUTH
 EMPTY_AUTH_OUT="$(AI_GROK_AUTH_HOME="$EMPTY_AUTH_HOME" XAI_API_KEY= run doctor --live 2>&1)"; EMPTY_AUTH_RC=$?
 check "empty credentials refuse before a live probe" "[ '$EMPTY_AUTH_RC' -ne 0 ] && ! printf '%s' \"\$EMPTY_AUTH_OUT\" | grep -q 'live probe'"
 KEY_AUTH_OUT="$(AI_GROK_AUTH_HOME="$TMP/missing-auth" XAI_API_KEY=fixture-key run doctor 2>&1)"; KEY_AUTH_RC=$?
-check "environment key remains supported without printing its value" "[ '$KEY_AUTH_RC' -eq 0 ] && ! printf '%s' \"\$KEY_AUTH_OUT\" | grep -q 'fixture-key'"
+check "exported paid key does not satisfy auth; doctor says run grok login" "[ '$KEY_AUTH_RC' -ne 0 ] && printf '%s' \"\$KEY_AUTH_OUT\" | grep -q 'auth *: MISSING.*grok login' && ! printf '%s' \"\$KEY_AUTH_OUT\" | grep -q 'fixture-key'"
 echo noauth > "$TMP/mode"
 OUT="$(run doctor 2>&1)"
 check "ambiguous auth does not blame grok doctor" "printf '%s' \"\$OUT\" | grep -qi 'terminal/clipboard'"

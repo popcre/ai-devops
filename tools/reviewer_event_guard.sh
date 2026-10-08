@@ -8,7 +8,7 @@ reviewer_event_evidence(){
   [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] || { printf 'durable evidence requires an invocation identity\n' >&2; return 1; }
   python="$(command -v python3 || command -v python)" || return 1
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" "$event_tool" "$operation" "$provider" "$AI_REVIEW_EVENT_RUN_ID" "$@"
@@ -38,7 +38,7 @@ reviewer_event_verify_private(){
   local -a evidence_env=()
   python="$(command -v python3 || command -v python)" || return 1
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" "$event_tool" "$@" >/dev/null
@@ -66,15 +66,16 @@ reviewer_event_run_is_open(){
   [[ "$run_id" =~ ^[0-9a-f]{32}$ ]] || return 1
   [ -n "$provider" ] || return 1
   python="$(command -v python3 || command -v python)" || return 1
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" - "$run_id" "$provider" <<'PY'
 import json, os, sys
 from pathlib import Path
 run_id, provider = sys.argv[1], sys.argv[2]
-base = os.environ.get("AI_REVIEW_EVENT_DIR") or (
-    (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops/reviewer-events")
+base = os.environ.get("AI_REVIEW_EVENT_DIR") or str(Path(
+    os.environ.get("AI_REVIEWER_STATE_BASE")
+    or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops") / "reviewer-events")
 path = Path(base) / "events.jsonl"
 if not path.is_file():
     sys.exit(1)
@@ -125,31 +126,39 @@ reviewer_event_guard(){
   # repository), so binding its sandbox onto the review run is refused
   # ("sandbox evidence source differs from invocation"). Only the probe recorder's
   # own direct child keeps that qualification invocation.
+  # Resolve a bash pid to the OS/Win32 pid process_alive can see.
+  # Git Bash `$$` is an MSYS pid; OpenProcess cannot see it (a live
+  # shell would read as dead and open a false-loss window).
+  os_pid() {
+    if [ -r "/proc/$1/winpid" ]; then cat "/proc/$1/winpid"; else printf '%s\n' "$1"; fi
+  }
   local entry_cmd="${1:-}" entry_live=0
   [ "$entry_cmd" = qualify-live ] && entry_live=1
   [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
     if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
     if [ "$entry_live" -eq 0 ] && reviewer_event_run_is_open; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
   fi
   # Declining inherit (e.g. a qualify-live probe launched from an open review)
   # must begin its own invocation on a clean identity, never resume the outer run.
-  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_PRIVACY_SCOPE
+  # Drop the outer owner PID too: a fresh invocation must record THIS guard,
+  # not a stale/dead parent PID that would make the run look proven-dead.
+  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID AI_REVIEW_PRIVACY_SCOPE
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation privacy_scope=""
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
   python="$(command -v python3 || command -v python)" || { printf 'reviewer event recording requires Python 3\n' >&2; exit 1; }
   event_tool="$root/tools/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_EVENT_RUN_ID; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION AI_REVIEW_EVENT_RUN_ID; do
     [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   done
   name="AI_${provider^^}_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
@@ -159,9 +168,14 @@ reviewer_event_guard(){
   [ "$provider" != deepseek ] || [ "${1:-}" != finalize ] || operation=local-finalization
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
+  # Owner PID must be set before begin so normal top-level runs store it.
+  # Always store the OS/Win32 pid (see os_pid above) so process_alive can see it.
+  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "$$")}"
+  event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
-  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
+  # child_pending is created by begin (Python handles Windows path shapes);
+  # note-child clears it after the child PID is durably recorded.
   # Forward only to this invocation's child; never search process names or
   # change another review's state. A killed supervisor leaves an unmatched start.
   trap 'received=TERM; observed_signal=TERM; [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true' TERM
@@ -187,6 +201,9 @@ reviewer_event_guard(){
     find "$privacy_base" -mindepth 1 -maxdepth 1 -type d -name 'scope.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
   fi
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
+  # Record the child so loss is refused while it can still publish.
+  child_pid_recorded="$(os_pid "$child")"
+  env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child_pid_recorded" >/dev/null 2>&1 || true
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
   while true; do
     received=''
@@ -242,3 +259,91 @@ reviewer_credit_exit(){
 }
 
 reviewer_credit_stop(){ reviewer_credit_scan "$@" || true; reviewer_credit_exit; }
+
+# Only supervisor-owned structured receipts may assert subscription exhaustion
+# or automatic refill dates. Arbitrary text scans retain billing-only meaning.
+REVIEWER_CREDIT_INVOCATION_TAG="${AI_REVIEW_EVENT_RUN_ID:-$BASHPID-$RANDOM}"
+reviewer_capacity_current(){ reviewer_capacity_scan "$1" "$2.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json"; }
+reviewer_capacity_scan(){
+  local provider="$1" marker="$2" python tool dir out rc=0
+  [ -s "$marker" ] || return 3
+  python="$(command -v python3 || command -v python)" || return 1
+  tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_admission.py"
+  dir="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
+  out="$("$python" "$tool" credit "$provider" --directory "$dir" --marker "$marker" --record)" || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
+  REVIEWER_CREDIT_HIT="$out"
+}
+
+# Run one exact command under the existing cross-platform owned-tree supervisor.
+# Inspection is incremental inside that supervisor, not a second polling process.
+# The private refusal marker remains alongside the run's existing evidence.
+reviewer_credit_prepare(){
+  REVIEWER_CREDIT_PYTHON="$(command -v python3 || command -v python)" || return 1
+  REVIEWER_CREDIT_SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd -P)/ai-process-supervisor"
+}
+reviewer_credit_run(){
+  local provider="$1" output="$2" stderr="$3"; shift 3
+  [ "${1:-}" != -- ] || shift
+  local python supervisor marker="$output.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json" rc=0 arg command_bin child received='' term_trap int_trap hup_trap
+  [ -n "${REVIEWER_CREDIT_PYTHON:-}" ] || reviewer_credit_prepare || return 1
+  python="$REVIEWER_CREDIT_PYTHON"; supervisor="$REVIEWER_CREDIT_SUPERVISOR"
+  command_bin="$(command -v "$1")" || return 127
+  shift
+  local argument_exclusions="${MSYS2_ARG_CONV_EXCL:-}" shell_launcher='' shell_command=''
+  local -a paths=("$supervisor" "$output" "$stderr" "$marker")
+  case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*)
+    # Git Bash resolves executable shebang launchers as commands too. Win32
+    # cannot execute them directly, so retain Bash's execution semantics inside
+    # the same supervised Job Object; actual native executables stay direct.
+    if [ "$(head -c 2 "$command_bin" 2>/dev/null)" = '#!' ]; then
+      shell_launcher="$(command -v bash)" || return 127
+      shell_launcher="$(cygpath -w "$shell_launcher")" || return 1
+    fi
+    for arg in "${!paths[@]}"; do paths[$arg]="$(cygpath -w "${paths[$arg]}")" || return 1; done
+    if [ -z "$shell_launcher" ]; then
+      command_bin="$(cygpath -w "$command_bin")" || return 1
+    fi
+    # Native Python otherwise converts an env(1) PATH= argument to a Windows
+    # semicolon list. Its MSYS child must receive the original POSIX PATH to
+    # find the credential boundary's tools. Retain caller exclusions as well.
+    case ";$argument_exclusions;" in
+      *';*;'*) ;; # The caller already excludes every argument.
+      *) argument_exclusions="${argument_exclusions:+$argument_exclusions;}PATH=";;
+    esac;;
+  esac
+  local -a child_command=("$command_bin" "$@")
+  if [ -n "$shell_launcher" ]; then
+    # A native parent makes the MSYS startup parser expand separate @file and
+    # brace/wildcard arguments before Bash receives them. Transport one shell
+    # program instead, single-quoting every argument as a literal Bash word.
+    # Nothing from the caller is interpolated as executable shell syntax.
+    for arg in "${child_command[@]}"; do
+      shell_command+="'${arg//\'/\'\\\'\'}' "
+    done
+    child_command=("$shell_launcher" --noprofile --norc -c "exec $shell_command")
+  fi
+  term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
+  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
+  trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
+  trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
+  trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP
+  while :; do
+    local signal_before="$received"
+    wait "$child" || rc=$?
+    [ "$received" != "$signal_before" ] || break
+  done
+  trap - TERM INT HUP
+  [ -z "$term_trap" ] || eval "$term_trap"
+  [ -z "$int_trap" ] || eval "$int_trap"
+  [ -z "$hup_trap" ] || eval "$hup_trap"
+  case "$received" in TERM) rc=143;; INT) rc=130;; HUP) rc=129;; esac
+  if [ "$rc" -eq 92 ] && [ -s "$marker" ]; then
+    reviewer_capacity_scan "$provider" "$marker" || true
+    [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
+    # Existing failed-turn parsers already inspect stderr. Give them normalized
+    # error evidence, never arbitrary model response or private provider bodies.
+    cat "$marker" >> "$stderr"
+  fi
+  return "$rc"
+}

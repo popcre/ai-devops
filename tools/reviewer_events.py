@@ -15,11 +15,27 @@ import uuid
 from reviewer_maintenance import Blocked, digest, encoded, now, physical, publish, read_json, require, snapshot
 
 
+def live_location():
+    """The real user's ledger, independent of any HOME a test substitutes."""
+    try:
+        import pwd
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError):
+        home = str(Path.home())
+    return Path(home) / ".local/state/ai-devops/reviewer-events"
+
+
 def location():
     if os.environ.get("AI_REVIEW_EVENT_DIR"):
-        return physical(os.environ["AI_REVIEW_EVENT_DIR"])
-    base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
-    return physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(Path(base) / "reviewer-events")))
+        chosen = os.environ["AI_REVIEW_EVENT_DIR"]
+    else:
+        base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
+        chosen = str(Path(base) / "reviewer-events")
+    if os.environ.get("AI_REVIEW_TEST_ISOLATION") == "1":
+        # Test runs must never add stub rows to the live spend ledger (#1435).
+        require(os.path.realpath(chosen) != os.path.realpath(str(live_location())),
+                "test run refused the live reviewer events log; set AI_REVIEW_EVENT_DIR to a private directory")
+    return physical(chosen)
 
 
 def git_value(*args):
@@ -120,6 +136,63 @@ def provenance(value=None):
 def evidence_root(directory, run_id):
     # Keep evidence in the existing private event store, outside disposable repos.
     return physical(directory / "evidence" / run_id)
+
+
+def _owner_pid_from_env():
+    value = os.environ.get("AI_REVIEW_EVENT_OWNER_PID", "")
+    return int(value) if re.fullmatch(r"[0-9]+", value) else None
+
+
+def process_alive(pid):
+    """Same-machine liveness for a recorded wrapper PID; never trusted alone.
+
+    On Windows a Git Bash `$$` is an MSYS pid, not a Win32 one. OpenProcess
+    failure is ambiguous: access-denied means the process exists, only
+    ERROR_INVALID_PARAMETER proves it is gone. Treat anything uncertain as
+    alive so a live review stays fail-closed.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetLastError(0)
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        error = kernel32.GetLastError()
+        return error != 87  # ERROR_INVALID_PARAMETER → no such process
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True  # uncertain → assume alive (fail-closed)
+    return True
+
+
+def _recorded_pids(rows, run_id, directory=None):
+    """Every PID that could still publish this invocation: owner, child, worker."""
+    pids = []
+    for row in rows:
+        if row.get("run_id") != run_id:
+            continue
+        if row.get("event") == "started" and isinstance(row.get("owner_pid"), int):
+            pids.append(row["owner_pid"])
+    if directory is not None:
+        for name in ("child_pid", "worker_pid"):
+            sidecar = evidence_root(directory, run_id) / name
+            if sidecar.is_file():
+                try:
+                    pid = int(sidecar.read_text().strip())
+                    if pid > 0 and pid not in pids:
+                        pids.append(pid)
+                except (ValueError, OSError):
+                    pass
+    return pids
 
 
 def require_report(directory, provider, run_id):
@@ -236,8 +309,54 @@ def missing_prepared(directory, provider, run_id, references):
     return missing
 
 
+def _evidence_lost_identity(directory, provider, run_id):
+    """Return (required, lost_row) for a historical local-recovery loss only.
+
+    A no-ledger pair is accepted solely for the documented local-recovery
+    fixture shape (caller=local-recovery, empty/zero head). Any other
+    missing-ledger pair is unproven and must stay fail-closed — a live
+    review cannot fabricate its own terminal loss this way.
+    """
+    root = evidence_root(directory, run_id)
+    required_path = root / "required.json"
+    lost_path = root / "evidence-lost.json"
+    if not required_path.is_file() or not lost_path.is_file():
+        return None
+    required = read_json(required_path)
+    row = read_json(lost_path)
+    head = required.get("head")
+    historical_head = head in (None, "", "0" * 40, "0" * 64)
+    if (required.get("schema_version") == 1 and required.get("run_id") == run_id and
+            required.get("provider") == provider and
+            required.get("caller") == "local-recovery" and
+            historical_head and
+            row.get("schema_version") == 1 and row.get("run_id") == run_id and
+            row.get("provider") == provider and
+            row.get("head") == head and
+            row.get("caller") == "local-recovery" and
+            row.get("report_state") == "lost" and
+            isinstance(row.get("reason"), str) and row["reason"].strip()):
+        return required, row
+    return None
+
+
 def verify_reports(directory, provider, run_id):
-    start = invocation(directory, provider, run_id)
+    try:
+        start = invocation(directory, provider, run_id)
+    except Blocked:
+        # Historical local-recovery fixtures may have no ledger row at all.
+        # A Blocked from duplicate/conflicting/wrong-provider rows must NOT
+        # take this path — that would bypass the unique-start safety check.
+        _, data = snapshot(directory / "events.jsonl", "jsonl")
+        has_any_row = any(json.loads(line).get("run_id") == run_id
+                          for line in data.splitlines() if line.strip())
+        if not has_any_row:
+            pre = _evidence_lost_identity(directory, provider, run_id)
+            if pre is not None:
+                root = evidence_root(directory, run_id)
+                if not any(root.glob("*.report.json")) and not lost_blockers(root):
+                    return [run_id + "/evidence-lost"]
+        raise
     root = evidence_root(directory, run_id)
     if not (root / "required.json").exists():
         return []
@@ -937,21 +1056,49 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     return {"run_id": run_id, "report_count": len(report_values), "historical_source_authorization": "unknown"}
 
 
-LOST_REPORT_PROVIDERS = {"glm"}
+LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
 
-def lost_report_candidates(provider, sandbox, source, since=None):
-    """Reports this review could still have written; any one of them refuses a loss record."""
-    match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
-    require(match, "sandbox name does not identify its review")
-    # Only this exact review name: a sibling such as NAME-r3 is a different review.
-    pattern = re.compile(re.escape(provider + "-" + match[1] + "-") +
-                         r"(?:\d{8}T\d{6}Z|[0-9a-f]{64})(?:\.incomplete)?\.md")
+def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
+    """Reports this review could still have written; any one of them refuses a loss record.
+
+    Production report names do not share one shape: glm/grok/qwen use
+    `{provider}-{name}-{key}.md`, gemini/muse/kimi embed the session name
+    under a caller-prefixed sandbox tag, and codex writes
+    `codex-{mode}-{ts-pid-random}.md` with no separate key. Keys are
+    timestamps, 24-character Qwen hashes, or 32/64-character digests.
+    Deriving the name from the sandbox tag therefore misses live reports
+    (false loss). Kimi also writes its canonical `review-<stamp>.md` into
+    the durable job directory outside `.ai/reviews` before optional
+    mirroring — a report still sitting there is as recoverable as a mirror.
+    Search every provider report that carries a timestamp or content-hash
+    key, the Kimi canonical location, and any that embeds the evidence
+    run_id — a sibling hit is a safe refusal, never a false loss.
+    """
+    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{24}|[0-9a-f]{32}|[0-9a-f]{64})"
+    patterns = [re.compile(re.escape(provider) + r"-.+" + key + r".*\.md")]
+    if provider == "kimi":
+        # Canonical artifact name from bin/ai-kimi render_review_artifact.
+        patterns.append(re.compile(r"review-" + key + r".*\.md"))
+    if run_id is not None:
+        patterns.append(re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md"))
+    found = []
+    def consider(path):
+        if since is not None and path.stat().st_mtime < since:
+            return
+        if any(p.fullmatch(path.name) for p in patterns):
+            found.append(path)
     reviews = source / ".ai" / "reviews"
-    if not reviews.is_dir():
-        return []
-    return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
-                  (since is None or path.stat().st_mtime >= since))
+    if reviews.is_dir():
+        for path in reviews.iterdir():
+            consider(path)
+    if provider == "kimi":
+        jobs = Path(os.environ.get("AI_KIMI_STATE_DIR") or
+                    (Path.home() / ".local/state/ai-devops/kimi")) / "jobs"
+        if jobs.is_dir():
+            for path in jobs.rglob("*"):
+                consider(path)
+    return sorted(found)
 
 
 def lost_blockers(root):
@@ -959,14 +1106,76 @@ def lost_blockers(root):
     return sorted(list((root / "artifacts").glob("*.json")) + list((root / "prepared").glob("*.json")))
 
 
+def _proven_dead(directory, run_id, start=None):
+    """True only when a started-but-never-finished invocation is provably dead.
+
+    Age alone is NEVER proof of death. Proof requires every recorded PID
+    (owner and child) to be no longer alive. No recorded PID cannot be
+    proven dead from the process table — fail closed. A pending child
+    marker means the fork handshake has not completed and the child may
+    still publish — fail closed.
+    """
+    _, data = snapshot(directory / "events.jsonl", "jsonl")
+    rows = [json.loads(line) for line in data.splitlines() if line.strip()]
+    starts = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
+    if len(starts) != 1 or any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows):
+        return False
+    root = evidence_root(directory, run_id)
+    if (root / "child_pending").exists():
+        return False
+    effective_start = start if start is not None else starts[0]
+    pids = _recorded_pids(rows, run_id, directory)
+    pid_owner = effective_start.get("owner_pid")
+    if isinstance(pid_owner, int) and pid_owner > 0 and pid_owner not in pids:
+        pids.append(pid_owner)
+    if not pids:
+        return False
+    return all(not process_alive(p) for p in pids)
+
+
+def _detached_worker_gone(directory, run_id):
+    """True only when an async-submission's detached worker cannot publish again.
+
+    The launcher's exit is not the worker's death: the guard records
+    `finished` when the launcher exits while a durable Kimi worker is still
+    running and can publish the paid report. Proof requires a recorded
+    worker_pid that is no longer alive, or a terminal-job marker written by
+    the worker after its last publication. No recorded worker_pid cannot be
+    proven dead — fail closed.
+    """
+    root = evidence_root(directory, run_id)
+    if (root / "worker_terminal").is_file():
+        return True
+    worker_file = root / "worker_pid"
+    if not worker_file.is_file():
+        return False
+    try:
+        pid = int(worker_file.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    return pid > 0 and not process_alive(pid)
+
+
 def record_lost(directory, provider, run_id, sandbox, reason):
     start = invocation(directory, provider, run_id)
     if start.get("operation") != "local-reconciliation":
-        # A running provider may still publish its paid result; only a finished invocation can have lost it.
-        # (Legacy markers predate evidence ownership, so no live run can own one.)
+        # A running provider may still publish its paid result; only a finished
+        # invocation — or one whose owner is provably dead — can have lost it.
         _, data = snapshot(directory / "events.jsonl", "jsonl")
-        require(any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
-                    for line in data.splitlines()), "reviewer invocation is still active; loss not recorded")
+        has_finished = any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
+                           for line in data.splitlines())
+        if start.get("operation") == "async-submission":
+            # A detached worker outlives the submitting supervisor (Kimi durable
+            # jobs). Supervisor death is not death of the publisher: the
+            # launcher's finish row is not proof the worker is gone. Refuse
+            # loss until the invocation is finished AND the detached worker is
+            # proven terminal (worker_pid dead or a terminal-job marker).
+            require(has_finished, "reviewer invocation is still active; loss not recorded")
+            require(_detached_worker_gone(directory, run_id),
+                    "detached worker may still publish; loss not recorded")
+        else:
+            require(has_finished or _proven_dead(directory, run_id, start),
+                    "reviewer invocation is still active; loss not recorded")
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
@@ -982,8 +1191,9 @@ def reconcile_lost(directory, provider, sandbox, reason):
     """Owner-recorded terminal state for a review whose report provably no longer exists."""
     require(isinstance(reason, str) and reason.strip() and "\n" not in reason and len(reason) <= 500,
             "reconcile-lost requires the owner's one-line reason (at most 500 characters)")
-    # Report-existence proof depends on each provider's report naming; only GLM's is known here.
-    # Another provider could keep a recoverable report this search would miss.
+    # Report-existence proof depends on each provider's report naming.
+    # A provider outside LOST_REPORT_PROVIDERS could keep a recoverable report
+    # this search would miss — fail closed for it rather than inventing loss.
     require(provider in LOST_REPORT_PROVIDERS, "reconcile-lost cannot prove a " + provider + " report is gone; use reconcile-sandbox")
     sandbox = physical(sandbox)
     marker = physical(sandbox / ".ai-review-sandbox")
@@ -1022,7 +1232,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
                 started = invocation(directory, provider, run_id)["timestamp"]
                 # A report older than the invocation belongs to an earlier turn, never to this one.
                 since = datetime.datetime.fromisoformat(started).timestamp() - 60
-                found = lost_report_candidates(provider, sandbox, source, since)
+                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id)
                 require(not found, "a report from this invocation may still exist; recover it: " + (str(found[0]) if found else ""))
                 record_lost(directory, provider, run_id, sandbox, reason)
     return {"sandbox": str(sandbox), "owners": owners, "report_state": "lost",
@@ -1043,7 +1253,113 @@ def finish_reconciliation(directory, provider, run_id, references):
     append(directory, terminal)
 
 
+def lifecycle_location():
+    """The lifecycle state store, resolved exactly as bin/ai-review-lifecycle does."""
+    if os.environ.get("AI_REVIEW_LIFECYCLE_DIR"):
+        return physical(os.environ["AI_REVIEW_LIFECYCLE_DIR"])
+    home = os.environ.get("HOME") or str(Path.home())
+    return physical(str(Path(home) / ".local/state/ai-devops/review-lifecycle"))
+
+
+def report_verdict(text):
+    """The verdict word under the LAST literal "## Verdict" heading, or None."""
+    lines = text.splitlines()
+    verdict = None
+    for index, line in enumerate(lines):
+        if re.fullmatch(r"\s*##\s+Verdict\s*", line):
+            following = [value.strip().strip("*").strip() for value in lines[index + 1:] if value.strip()]
+            verdict = following[0] if following else None
+    return verdict
+
+
+def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key, base="", implementer=""):
+    """Return the newest reusable APPROVE report for this exact review request.
+
+    The reviewer event ledger (events.jsonl) records invocations but not the
+    review mode, the source digest or the verdict, and runner-door reviews do
+    not publish their report there; the lifecycle run record is the one store
+    that binds provider, mode, head, digest, verdict and the report checksum,
+    so it is the lookup source. A match requires every one of: a completed,
+    non-stale APPROVE with no failure; the same provider (or any, for "any"),
+    recorded mode (a record with no recorded mode never matches), head,
+    whole-source digest, repository, resolved base and (when both
+    are known) implementing engine; no review operation; and a report file
+    whose checksum still matches and which itself names the head, the digest
+    and a final APPROVE. A malformed record raises: the caller then runs a
+    normal review rather than guessing.
+    """
+    require(re.fullmatch(r"[0-9a-f]{40}", head), "lookup head is not a full commit SHA")
+    require(re.fullmatch(r"[0-9a-f]{64}", source_digest), "lookup source digest is not a SHA-256")
+    require(re.fullmatch(r"[0-9a-f]{64}", repo_key), "lookup repository key is not a SHA-256")
+    require(mode in {"plan-review", "diff-review", "security-review", "final-check"}, "unknown review mode")
+    require(base == "" or re.fullmatch(r"[0-9a-f]{40}", base), "lookup base is not a full commit SHA")
+    root = Path(state_dir) / "runs" / repo_key
+    if not root.is_dir():
+        return None
+    pattern = "*/*/*.json" if provider == "any" else provider + "/*/*.json"
+    best = None
+    latest_judgment = ""
+    for path in sorted(root.glob(pattern)):
+        if path.is_symlink() or not path.is_file():
+            continue
+        row = json.loads(path.read_text(encoding="utf-8"))
+        require(isinstance(row, dict), f"lifecycle record is not an object: {path.name}")
+        if not (row.get("schema_version") == 1 and row.get("head") == head and
+                row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
+                (provider == "any" or row.get("provider") == provider) and
+                row.get("provider") == path.parent.parent.name and
+                row.get("review_mode") == mode):
+            continue
+        # A later REJECT (or BLOCKED) on the same source supersedes an older
+        # APPROVE: remember the newest real judgment of any kind.
+        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "BLOCKED"}:
+            latest_judgment = max(latest_judgment, row.get("finished_at") or "")
+        if not (row.get("status") == "completed" and row.get("verdict") == "APPROVE" and
+                row.get("stale") is False and row.get("failure_class") is None):
+            continue
+        if implementer and row.get("implementer_engine") and row["implementer_engine"] != implementer:
+            continue
+        recorded_base = row.get("base") or ""
+        if recorded_base:
+            resolved = git_value("rev-parse", "--verify", "--quiet", "--end-of-options", recorded_base + "^{commit}")
+            if not resolved or resolved != base:
+                continue
+        elif base:
+            continue
+        report = row.get("report_path")
+        run_id = row.get("run_id")
+        if not (isinstance(report, str) and isinstance(run_id, str) and
+                Path(report).name == f"{row['provider']}-{mode}-{run_id}.md"):
+            continue
+        report_path = Path(report)
+        if report_path.is_symlink() or not report_path.is_file():
+            continue
+        data = report_path.read_bytes()
+        if digest(data) != row.get("report_sha256"):
+            continue
+        text = data.decode("utf-8")
+        if ("| reviewed commit | `" + head + "` |") not in text or ("| source digest | `" + source_digest + "` |") not in text:
+            continue
+        if re.search(r"^\| operation \|", text, re.M) or report_verdict(text) != "APPROVE":
+            continue
+        finished = row.get("finished_at") or ""
+        if best is None or finished > best[0]:
+            best = (finished, str(report_path), row)
+    if best is None or (latest_judgment and latest_judgment >= best[0]):
+        return None
+    return {"report": best[1], "provider": best[2]["provider"], "run_id": best[2]["run_id"],
+            "review_mode": mode, "head": head, "source_digest": source_digest, "finished_at": best[0]}
+
+
 def main():
+    if sys.argv[1] == "find-passing-report":
+        # find-passing-report PROVIDER|any MODE HEAD DIGEST REPO_KEY [BASE_SHA] [IMPLEMENTER]
+        require(len(sys.argv) in {7, 8, 9}, "find-passing-report requires provider, mode, head, digest and repository key")
+        provider = sys.argv[2]
+        require(provider == "any" or provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi",
+                                                  "muse", "qwen", "stepfun"}, "unknown reviewer provider")
+        print(json.dumps(find_passing_report(lifecycle_location(), provider, *sys.argv[3:])))
+        return
     if sys.argv[1] == "verify-sandbox":
         require(len(sys.argv) == 3, "invalid sandbox evidence verification")
         print(json.dumps({"references": verify_sandbox(location(), sys.argv[2])}))
@@ -1076,11 +1392,47 @@ def main():
                  "operation": kind, "parent_run_id": parent if re.fullmatch(r"[0-9a-f]{32}", parent) else None,
                  "run_id": uuid.uuid4().hex, "timestamp": now(), "repo": git_value("rev-parse", "--show-toplevel"),
                  "head": git_value("rev-parse", "HEAD"),
+                 "owner_pid": _owner_pid_from_env(),
                  "caller": os.environ.get("AI_" + provider.upper() + "_CALLER",
                            os.environ.get("AI_" + provider.upper() + "_REVIEW_CALLER",
                                           "codex" if provider in {"claude", "codex", "gemini"} else "unknown"))}
         append(directory, event)
+        # child_pending closes the fork gap: from begin until note-child records
+        # the child PID, loss must refuse (the child may still publish).
+        pending = evidence_root(directory, event["run_id"]) / "child_pending"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text("pending\n")
         print(event["run_id"])
+    elif operation == "note-child":
+        require(len(sys.argv) == 5, "note-child requires provider, run_id and child pid")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        child_pid = int(sys.argv[4])
+        require(child_pid > 0, "note-child requires a positive pid")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "child_pid").write_text(str(child_pid) + "\n")
+        pending = root / "child_pending"
+        if pending.exists():
+            pending.unlink()
+        print(json.dumps({"run_id": sys.argv[3], "child_pid": child_pid}))
+    elif operation == "note-worker":
+        require(len(sys.argv) == 5, "note-worker requires provider, run_id and worker pid")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        worker_pid = int(sys.argv[4])
+        require(worker_pid > 0, "note-worker requires a positive pid")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "worker_pid").write_text(str(worker_pid) + "\n")
+        print(json.dumps({"run_id": sys.argv[3], "worker_pid": worker_pid}))
+    elif operation == "note-worker-terminal":
+        require(len(sys.argv) == 4, "note-worker-terminal requires provider and run_id")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        marker = root / "worker_terminal"
+        if not marker.exists():
+            publish(marker, {"schema_version": 1, "run_id": sys.argv[3], "marked_at": now()})
+        print(json.dumps({"run_id": sys.argv[3], "worker_terminal": True}))
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
@@ -1118,9 +1470,11 @@ def main():
         facts = provenance(json.loads(sys.argv[5]) if len(sys.argv) == 6 else None)
         publication_incomplete = []
         def finish(rows):
-            matches = [r for r in rows if r.get("run_id") == run_id]
-            require(len(matches) == 1 and matches[0].get("event") == "started" and
+            matches = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
+            require(len(matches) == 1 and
                     matches[0].get("provider") == provider, "event has no unique matching start")
+            require(not any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows),
+                    "invocation already has a terminal row")
             try:
                 references = verify_reports(directory, provider, run_id)
             except (Blocked, OSError, ValueError):

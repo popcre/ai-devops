@@ -777,6 +777,48 @@ run_pc_door max_turns_reached turns
 check "grok_door_does_not_resume_turn_limit_cancel" \
   "test '$PC_RC' -ne 0 && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-turns')\" = 'first:10 '"
 
+# Owner rule "remove the paid fallback": an exported paid key must never reach
+# a grok child on review, implement, or the PermissionCancelled resume.
+STUB_KEY="$TMP/stub-grok-key"
+cat > "$STUB_KEY" <<'STUBEOF'
+#!/usr/bin/env bash
+resumed=0; for a in "$@"; do [ "$a" = -r ] && resumed=1; done
+seen=none
+for n in XAI_API_KEY GROK_CODE_XAI_API_KEY GROK_API_KEY XAI_OTHER_FIXTURE; do
+  [ -n "${!n+x}" ] && seen="$seen,$n"
+done
+printf '%s|%s|%s\n' "$KEY_MODE" "$resumed" "$seen" >> "$KEY_CALLS"
+case "$*" in *xai-fixture*) echo argv-leak >> "$KEY_CALLS" ;; esac
+if [ "$KEY_MODE" = resume ] && [ "$resumed" = 0 ]; then
+  mkdir -p "$GROK_HOME/sessions/x/sid-k1"
+  printf '%s\n' '{"params": {"sessionId": "sid-k1", "update": {"sessionUpdate": "turn_completed", "prompt_id": "req-1", "stop_reason": "cancelled"}, "_meta": {"cancellationCategory": "PermissionCancelled"}}}' > "$GROK_HOME/sessions/x/sid-k1/updates.jsonl"
+  printf '%s\n' '{"text":"","stopReason":"cancelled","num_turns":1,"sessionId":"sid-k1","requestId":"req-1"}'
+  exit 0
+fi
+printf '%s\n' '{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-k1","requestId":"req-2","modelUsage":{"grok-4.6-build":{}}}'
+STUBEOF
+chmod +x "$STUB_KEY"
+: > "$TMP/key-calls"
+for km in review implement resume; do
+  dm=review; [ "$km" = implement ] && dm=implement
+  rm -rf "$TMP/key-home-$km"
+  set +e
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$TMP/key-home-$km" \
+    XAI_API_KEY=xai-fixture-exported-key GROK_CODE_XAI_API_KEY=xai-fixture-code \
+    GROK_API_KEY=xai-fixture-grok XAI_OTHER_FIXTURE=xai-fixture-other \
+    KEY_MODE="$km" KEY_CALLS="$TMP/key-calls" DOOR_MAX_TURNS=10 \
+    AI_GROK_BIN="$STUB_KEY" AI_GROK_ALLOW_NO_CREDS=1 \
+    DOOR_MODE="$dm" DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+    DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/key-report-$km.md" \
+    DOOR_HEAD="$HEAD_SHA" \
+    bash "$GROK_DOOR" "$dm" >/dev/null 2>"$TMP/key-door-$km.err"
+  set -e
+done
+check "grok_door_review_never_forwards_paid_key" "grep -qx 'review|0|none' '$TMP/key-calls'"
+check "grok_door_implement_never_forwards_paid_key" "grep -qx 'implement|0|none' '$TMP/key-calls'"
+check "grok_door_permission_resume_never_forwards_paid_key" "grep -qx 'resume|0|none' '$TMP/key-calls' && grep -qx 'resume|1|none' '$TMP/key-calls'"
+check "grok_door_every_child_saw_no_paid_key" "test \"\$(wc -l < '$TMP/key-calls')\" -eq 4 && ! grep -q 'none,\\|argv-leak' '$TMP/key-calls'"
+
 # --- deepseek (OpenCode) door on the same runner ----------------------------
 # Program done needs one native door (grok) AND one OpenCode door on the same
 # runner. These checks prove the OpenCode shape keeps the same contracts and
@@ -877,6 +919,20 @@ check "front_door_routes_deepseek_to_pool" \
   "test '$FRONT_DS_RC' -eq 0 && grep -q 'pool-invoked: deepseek diff-review' '$TMP/stub-pool.log'"
 check "front_door_deepseek_no_longer_forces_code_only" \
   "! grep -q 'explicit code-only route' '$TMP/front-ds.err'"
+# #1427: ai-review strips generic pay-per-use keys before dispatch.
+cat > "$TMP/stub-pool-env" <<EOF
+#!/usr/bin/env bash
+env > "$TMP/stub-pool-env.log"
+exit 0
+EOF
+chmod +x "$TMP/stub-pool-env"; rm -f "$TMP/stub-pool-env.log"
+set +e
+( cd "$PREPO" && export OPENAI_API_KEY=fake-1427 CODEX_API_KEY=fake-1427 GEMINI_API_KEY=fake-1427 GOOGLE_API_KEY=fake-1427 \
+    AI_GEMINI_KEY=fake-1427 AI_QWEN_KEY=fake-1427 ANTHROPIC_API_KEY=fake-1427 && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/stub-pool-env" \
+    AI_POOL_CALLER=codex bash "$FRONT" deepseek diff-review ) >"$TMP/front-keys.out" 2>"$TMP/front-keys.err"
+set -e
+check "ai_review_strips_generic_keys" \
+  "test -s '$TMP/stub-pool-env.log' && ! grep -q 'fake-1427' '$TMP/stub-pool-env.log'"
 printf '{\n  "version": 1,\n  "providers": { "deepseek": { "registry_state": "absent", "reason": "test" } }\n}\n' > "$TMP/ds-absent-registry.json"
 rm -f "$TMP/stub-pool.log"
 set +e

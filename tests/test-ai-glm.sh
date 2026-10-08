@@ -26,6 +26,7 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/credit-holds"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 glm_recovery_cases(){
@@ -169,6 +170,7 @@ REVIEW_LIFECYCLE_BIN="$FIXTURE/lifecycle-read"; PACKET_BIN="$FIXTURE/packet-read
 timeout(){ if [ "${OBSERVATION_HELPER_CASE:-}" = helper-timeout ];then return 124;fi;command timeout "$@"; }
 preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
 REVIEW_PREFLIGHT_BIN=preflight_fixture
+: > "$FIXTURE/pauses"
 # Reconstructed public schema, never a claimed retained live assistant envelope.
 prepare(){
  "$PYTHON" - "$FIXTURE" "$1" <<'FIXTURE_PY'
@@ -215,7 +217,7 @@ prepare known;meta="$FIXTURE/meta-known.json"
 persist_review_error "$meta" "$msg" historical
 receipt="$(jq -r .remote_turn.error_path "$meta")";expected="$(cat "$FIXTURE/expected-epoch")"
 jq -e --argjson epoch "$expected" '.original_observation.state=="known" and .observed_epoch==$epoch and .captured_epoch>$epoch' "$receipt" >/dev/null
-grep -q -- "--observed $expected" "$FIXTURE/pauses"
+[ ! -s "$FIXTURE/pauses" ] # #1404: error evidence alone never invents a one-hour credit pause.
 cp "$receipt" "$FIXTURE/immutable-known"
 # A later readback is telemetry only; no HTTP and no immutable time renewal.
 api(){ exit 91; };send_prompt(){ exit 92; };require_review_server(){ exit 93; };record_diagnostic(){ :; }
@@ -280,7 +282,7 @@ jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false'
 [ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
 receipt="$(jq -r .remote_turn.error_path "$meta")"; cp "$receipt" "$FIXTURE/receipt-original"
 observed="$(jq -r .observed_epoch "$receipt")"
-grep -q -- "--observed $observed" "$FIXTURE/pauses"
+[ ! -e "$FIXTURE/pauses" ] # Error evidence alone never invents a one-hour credit pause.
 api(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 require_review_server(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 send_prompt(){ printf forbidden >> "$FIXTURE/network"; return 99; }
@@ -1016,14 +1018,19 @@ printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
 lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
 "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
 pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
-printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 run_prune 1
 check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
 lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
-check "reconcile-lost refuses providers whose report naming it cannot search" "'$PYTHON' '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
+check "reconcile-lost refuses providers whose report naming it cannot search" "'$PYTHON' '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost claude '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a claude report'"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
+# Broad provider-wide search is fail-closed: any report with a key blocks loss,
+# including a sibling review name (never a false loss).
+check "reconcile-lost is fail-closed when a sibling report key exists" "! lost lost 'caller worktree deleted'"
+rm -f "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md" "$PR_ROOT/.ai/reviews/glm-present-20260911T000000Z.md"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+# An earlier-turn report is not this invocation's: the owned path filters by start time.
+printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
 "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
 lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"

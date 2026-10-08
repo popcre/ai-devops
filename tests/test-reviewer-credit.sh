@@ -27,8 +27,8 @@ for pair in grok:grok-xai-403.stderr muse:muse-insufficient-quota.jsonl qwen:qwe
   human="$(printf '%s\n' "$out" | sed -n 2p)"
   check "$provider human line names the provider and is ASCII, 10-300 chars" \
     "printf '%s' '$human' | grep -q '^OUT OF CREDIT: ' && [ \"\$(printf '%s' '$human' | LC_ALL=C tr -d '\040-\176' | wc -c)\" -eq 0 ] && [ ${#human} -ge 10 ] && [ ${#human} -le 300 ]"
-  check "$provider quarantine is recorded as out-of-credit" \
-    "\"$PY\" \"$TOOL\" global $provider --directory '$Q' | jq -e '.failure_class==\"out-of-credit\" and .expires_epoch > .created_epoch'"
+  check "$provider persistent capacity hold is recorded as out-of-credit" \
+    "\"$PY\" \"$TOOL\" capacity-status $provider --directory '$Q' | jq -e '.failure_class==\"out-of-credit\" and .reset_at==null and (has(\"expires_epoch\")|not)'"
 done
 
 rm -rf "$Q"
@@ -39,7 +39,7 @@ check "the existing Gemini quota fixture is not a credit failure" "[ '$rc' = 3 ]
 check "no quarantine is recorded without a match" "[ \"\$(\"$PY\" \"$TOOL\" global grok --directory '$Q')\" = null ]"
 out="$(classify grok "$TMP/missing-file")"; rc=$?
 check "missing evidence is no match, not an error" "[ '$rc' = 3 ]"
-check "an unsupported provider is refused" "! \"$PY\" \"$TOOL\" credit kimi --directory '$Q' --scan '$FIX/deepseek-402.json' >/dev/null 2>&1"
+check "an unsupported provider is refused" "! \"$PY\" \"$TOOL\" credit claude --directory '$Q' --scan '$FIX/deepseek-402.json' >/dev/null 2>&1"
 check "the classifier source has no control characters" "! LC_ALL=C grep -q '[[:cntrl:]]' <(tr -d '\r\t\n' < '$TOOL')"
 for phrase in 'Payment Required' 'out of credits.' 'monthly spending limit'; do
   printf '%s\n' "$phrase" > "$TMP/phrase.txt"

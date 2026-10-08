@@ -985,7 +985,7 @@ QWEN_CREDIT_RC=0; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" bash -c 'source "$1";
 check 'out of credit exits 92' "test '$QWEN_CREDIT_RC' -eq 92 && ! grep -q not-stopped '$TMP/credit.out'"
 check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$TMP/credit.err'"
 check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: ' '$TMP/credit.err'"
-check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global qwen --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'out of credit records the capacity hold' "\"\$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' capacity-status qwen --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check 'an ordinary provider refusal is not out of credit' "AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' bash -c 'source \"\$1\"; source \"\$2\"; qwen_credit_stop \"\$3\"; echo not-stopped' _ '$REPO_ROOT/tools/reviewer_event_guard.sh' '$TMP/credit-stop.sh' '$TMP/api-error.jsonl' 2>/dev/null | grep -q not-stopped"
 check 'every failed-turn exit runs the credit stop' "test \"\$(grep -c 'qwen_credit_stop \"\$out\"' '$SCRIPT')\" -eq 6"
 
@@ -1152,5 +1152,25 @@ if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-de
 
 recovery_cases
 fi  # part 2
+
+# #1427: the Qwen door trusts only the protected Token Plan store; an ambient
+# OPENAI_API_KEY / AI_QWEN_KEY is never used as a pay-per-use fallback.
+QD="$TMP/qwen-door-1427"; mkdir -p "$QD/work" "$QD/packet"
+printf 'Review.\n' > "$QD/prompt"
+cat > "$QD/qwen" <<EOF
+#!/usr/bin/env bash
+env > "$QD/qwen-env"
+printf '%s\n' '{"type":"result","is_error":false,"result":"ok\n## Verdict\nAPPROVE","num_turns":1}'
+EOF
+chmod +x "$QD/qwen"
+qwen_door() { rm -f "$QD/qwen-env"; ( export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_QWEN_BIN="$QD/qwen" \
+  DOOR_WORKDIR="$QD/work" DOOR_PACKET_DIR="$QD/packet" DOOR_PROMPT_FILE="$QD/prompt" DOOR_REPORT_OUT="$QD/report" \
+  DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa OPENAI_API_KEY=fake-openai-1427 AI_QWEN_KEY=fake-aiqwen-1427 "$@"
+  unset AI_QWEN_ALLOW_NO_CREDS; bash "$REPO_ROOT/tools/lib/review-doors/qwen.sh" review ) > "$QD/out" 2>&1; }
+qwen_door AI_QWEN_KEY_STORE="$QD/no-such-store"; QD_RC=$?
+check 'qwen_door_ignores_ambient_openai_key' "test '$QD_RC' -eq 127 && test ! -e '$QD/qwen-env' && grep -q 'no Qwen key in the protected store' '$QD/out'"
+printf 'sk-sp-store-1427\n' > "$QD/store"; chmod 600 "$QD/store"
+qwen_door AI_QWEN_KEY_STORE="$QD/store"; QD_RC=$?
+check 'qwen door forwards only the protected store key' "test '$QD_RC' -eq 0 && grep -q '^OPENAI_API_KEY=sk-sp-store-1427$' '$QD/qwen-env' && ! grep -q 'fake-.*-1427' '$QD/qwen-env'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

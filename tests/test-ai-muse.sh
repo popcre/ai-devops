@@ -152,7 +152,15 @@ case "${1:-}" in
     fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
-    [ "${MUSE_STUB_MODE:-}" = slow ] && { [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"; trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM; sleep "${MUSE_STUB_DELAY:-2}"; }
+    [ "${MUSE_STUB_MODE:-}" = slow ] && {
+      [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"
+      trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM
+      if [ -n "${MUSE_STUB_DESCENDANT_PID_FILE:-}" ]; then
+        sleep "${MUSE_STUB_DELAY:-2}" & slow_descendant=$!
+        printf '%s\n' "$slow_descendant" > "$MUSE_STUB_DESCENDANT_PID_FILE"
+        wait "$slow_descendant"
+      else sleep "${MUSE_STUB_DELAY:-2}"; fi
+    }
     if [ -n "${MUSE_STUB_SWAP_REVIEWS:-}" ]; then
       mv "$MUSE_STUB_SWAP_REVIEWS" "$MUSE_STUB_SWAP_REVIEWS.safe"
       ln -s "$MUSE_STUB_OUTSIDE" "$MUSE_STUB_SWAP_REVIEWS" || { mv "$MUSE_STUB_SWAP_REVIEWS.safe" "$MUSE_STUB_SWAP_REVIEWS"; exit 71; }
@@ -182,6 +190,13 @@ esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_DIR='$TMP' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+muse_fixture_launch_failure(){
+  # Only this suite's synthetic provider output is eligible for diagnostics.
+  # Preserve the failed initial-launch reason before EXIT removes the fixture.
+  printf 'Muse fixture launch failed: %s\n' "$1" >&2
+  find "$TMP" -type f -name '*.stderr' -exec sh -c 'for f do printf "fixture stderr: %s\n" "$f"; head -60 "$f"; done' sh {} + >&2
+  exit 1
+}
 export AI_MUSE_TEST_DIR="$TMP" AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe
 mkdir -p "$HOME_FIX/.config/ai-devops/secrets"
 chmod 700 "$HOME_FIX/.config/ai-devops" "$HOME_FIX/.config/ai-devops/secrets"
@@ -309,11 +324,22 @@ POST_META="$(find "$TMP/state" -name 'codex--post-process-interrupt.json' -type 
 kill -TERM "$POST_PID" 2>/dev/null || true; wait "$POST_PID" 2>/dev/null || true
 check 'interrupt after provider exit but before classification marks outcome uncertain' "test -f '$POST_META' && jq -e '.status==\"provider_outcome_uncertain\"' '$POST_META'"
 rm -f "$TMP/muse-child-pid" "$TMP/muse-child-stopped"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
-poll_worker_until "$MUSE_HUP_PID" "$(budget 30 30)" 'the provider child announced itself' '[ -s "$TMP/muse-child-pid" ]' || true
-MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_DESCENDANT_PID_FILE="$TMP/muse-descendant-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
+poll_worker_until "$MUSE_HUP_PID" "$(budget 30 30)" 'the provider child and its descendant announced themselves' '[ -s "$TMP/muse-child-pid" ] && [ -s "$TMP/muse-descendant-pid" ]' || true
+MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; MUSE_DESCENDANT_PID="$(cat "$TMP/muse-descendant-pid" 2>/dev/null || echo 0)"
+sleep 30 & MUSE_HUP_SIBLING_PID=$!
+kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
 MUSE_HUP_META="$(find "$TMP/state" -name 'codex--hup-turn.json' -type f -print -quit)"
-check 'HUP stops and waits for the provider child before releasing an uncertain session' "test -f '$TMP/muse-child-stopped' && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_HUP_META'"
+MUSE_HUP_TERM_PROOF="test -f '$TMP/muse-child-stopped'"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  # Windows stops the owned Job Object directly. No POSIX TERM trap executes,
+  # so assert actual child death and session state instead of a trap receipt.
+  MUSE_HUP_TERM_PROOF=:;;
+esac
+check 'HUP stops and waits for the provider child before releasing an uncertain session' "$MUSE_HUP_TERM_PROOF && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\" and .failure_reason==\"interrupted-local-observer\"' '$MUSE_HUP_META' && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*--hup-turn.lock.d' -print)\""
+check 'HUP provider containment preserves an unrelated owned sibling' "kill -0 '$MUSE_HUP_SIBLING_PID' 2>/dev/null"
+check 'HUP stops the owned provider descendant before returning' "test '$MUSE_DESCENDANT_PID' -gt 0 && ! kill -0 '$MUSE_DESCENDANT_PID' 2>/dev/null"
+kill -TERM "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true; wait "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true
 rm -f "$TMP/muse-publish-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
 poll_worker_until "$MUSE_TARGET_PID" "$(budget 30 30)" 'the publication target was published' '[ -s "$TMP/muse-publish-target" ]' || true
@@ -410,7 +436,7 @@ fi  # part 1
 ai_test_part 2
 if ai_test_part_active; then
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
-NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
+NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)" || muse_fixture_launch_failure "$NEW_OUT"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   LEGACY_LOCK_RC=0
@@ -490,7 +516,7 @@ set +e; (cd "$REPO" && eval "$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q' MUSE_
 check 'out of credit exits 92' "test '$MUSE_CREDIT_RC' -eq 92"
 check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=muse code=insufficient_quota' '$TMP/credit.err'"
 check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*dev.meta.ai' '$TMP/credit.err'"
-check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'out of credit records the capacity hold' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' capacity-status muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check 'ordinary failure is not reported as out of credit' "cd '$REPO' && ! eval \"$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' MUSE_STUB_MODE=fail '$SCRIPT' new plain-fail --prompt test\" 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
@@ -514,7 +540,7 @@ check 'exact retained completion can reconcile an interrupted local observer wit
 fi  # part 2
 ai_test_part 3
 if ai_test_part_active; then
-WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
+WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)" || muse_fixture_launch_failure "$WRONG_NEW"
 WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
 check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""

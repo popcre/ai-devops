@@ -7,7 +7,7 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 1. Move `/tmp` off RAM onto the SSD | ✅ 2026-10-07 | fstab tmpfs line commented out; after reboot `findmnt /tmp` empty, memory used 12 G |
+| 1. Move `/tmp` off RAM onto the SSD | ✅ 2026-10-07 | `/etc/fstab` tmpfs line commented (backup `/etc/fstab.bak-20261007`); `systemctl mask tmp.mount` (Ubuntu ships `tmp.mount` in `local-fs.target.wants`); after reboot `findmnt /tmp` prints nothing, memory used 12 G |
 | 2. One session-owned temp root, exported to every engine | ✅ code | base is per-user `/var/tmp/ai-sessions-<uid>` (0700), not shared `/var/tmp/ai-sessions`: a user-owned world-writable parent fails the repo's private-directory checks (`sealed.py`) and lets other accounts rename roots; `tools/lib/session-tmp.sh`, `tests/test-session-tmp.sh` |
 | 3. Session wrappers delete their own temp root on exit | ✅ code | 18 `bin/ai-*` wrappers + test runners via `ai_session_tmp_wrap` (detached watcher deletes the root when the wrapper PID exits, incl. kill -9; a re-exec design was rejected because reviewer event records key on the wrapper PID); Claude Code via SessionStart/SessionEnd hook (`bin/ai-session-tmp-hook`, `bin/ai-install-session-tmp`). Interactive Codex sessions not covered (no session hook) |
 | 4. Fix the named offenders (issue-prefixed `/tmp/<issue>-*` dirs, bare `mktemp`) | ✅ code | issue-prefixed names were hand-typed by agents: global templates now say use `$TMPDIR`; bare `mktemp` now lands in the session root; 13 legacy files baselined in `config/temp-hygiene-baseline.txt` |
@@ -16,7 +16,7 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 | 7. Clear the current pile safely | ✅ 2026-10-07 | 26,839 stale entries removed, 6 GB freed; recent/busy entries kept |
 | 8. Live proof on edge-dev3 | ⬜ open | — |
 
-**Where a fresh session starts:** step 1. Read every section first. Re-read Part 3 before each phase (drift check).
+**Where a fresh session starts:** step 8 (live proof) after the PR merges and the installer runs. Read every section first. Re-read Part 3 before each phase (drift check).
 
 ---
 
@@ -98,7 +98,7 @@ Open (implementer judgment): exact helper name; whether Claude Code's own scratc
 
 **Phase A (machine, edge-dev3)**
 
-1. **Move `/tmp` to SSD.** Remove the tmpfs line from `/etc/fstab` (back up to `/etc/fstab.bak-20261007` first); `sudo systemctl mask tmp.mount` is NOT needed (unit is fstab-generated). Takes effect at next reboot; schedule the reboot when no session is live (check `find-live-sessions-by-transcript-mtime` memory). Record in `templates/system/machine-atlas.md` (edge-dev3 row).
+1. **Move `/tmp` to SSD.** Remove the tmpfs line from `/etc/fstab` (back up to `/etc/fstab.bak-20261007` first) AND `sudo systemctl mask tmp.mount` — Ubuntu ships `tmp.mount` enabled via `local-fs.target.wants`, so the fstab edit alone is not enough. Takes effect at next reboot; schedule the reboot when no session is live (check `find-live-sessions-by-transcript-mtime` memory). Record in `templates/system/machine-atlas.md` (edge-dev3 row).
    Done when: after reboot `findmnt /tmp` prints nothing (plain dir on `/`) and `free -g` "shared" < 3 G.
 
 **Phase B (repo code)** — cut point: fresh session OK here.

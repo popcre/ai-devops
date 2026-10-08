@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Keep test runs out of the live reviewer events ledger (#1435).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-model-call"; GATE="$ROOT/bin/ai-review"
 PASS=0; FAIL=0; ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }; check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }

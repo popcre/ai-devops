@@ -10,6 +10,8 @@
 #   bash qwen.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -70,14 +72,9 @@ resolve_qwen() {
 # environment only; it never appears in argv or output.
 QWEN_KEY=""
 require_credentials() {
-  if [ -n "${AI_QWEN_KEY:-}" ]; then
-    QWEN_KEY="$AI_QWEN_KEY"
-    return 0
-  fi
-  if [ -n "${OPENAI_API_KEY:-}" ]; then
-    QWEN_KEY="$OPENAI_API_KEY"
-    return 0
-  fi
+  # Only the protected Token Plan store is trusted. Ambient OPENAI_API_KEY /
+  # AI_QWEN_KEY are pay-per-use fallbacks and are never read (#1427).
+  unset OPENAI_API_KEY AI_QWEN_KEY
   local cfg="${AI_DEVOPS_CONFIG_DIR:-${HOME:-}/.config/ai-devops}"
   local store="${AI_QWEN_KEY_STORE:-$cfg/secrets/qwen-token-plan-key}"
   if [ -s "$store" ]; then
@@ -174,14 +171,15 @@ main() {
   (
     cd "$DOOR_WORKDIR" || exit 1
     if [ -n "$QWEN_KEY" ]; then export OPENAI_API_KEY="$QWEN_KEY"; else unset OPENAI_API_KEY || true; fi
-    timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
+    reviewer_credit_run qwen "$out" "$out.err" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
   )
   rc=$?
   set -e
   QWEN_KEY=""
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT qwen door\n' >&2
+    reviewer_capacity_current qwen "$out" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi
