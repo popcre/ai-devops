@@ -55,8 +55,8 @@ check('the section-only lane uses its own label, never the qualified one', () =>
   assert.deepStrictEqual(cfg.section_windows, ['self-hosted', 'Windows', 'X64', cfg.section_label]);
   assert.ok(!cfg.section_windows.includes(cfg.qualified_label));
   assert.notStrictEqual(cfg.section_label, cfg.qualified_label);
-  // Pinned to EDGE-ALIEN's measured-with-headroom sections (run 37628253929, #1312).
-  assert.deepStrictEqual(cfg.section_lane_order, [3, 4, 6]);
+  // Pinned to EDGE-ALIEN's measured-with-headroom sections (runs 37628253929 and 37725520505, #1312).
+  assert.deepStrictEqual(cfg.section_lane_order, [3, 4, 9, 10, 11, 6, 1]);
   assert.strictEqual(new Set(cfg.section_lane_order).size, cfg.section_lane_order.length);
   for (const s of cfg.section_lane_order) assert.ok(Number.isInteger(s) && s >= 1 && s <= cfg.windows_sections);
 });
