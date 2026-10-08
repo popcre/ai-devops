@@ -102,6 +102,16 @@ stepcode_identity_ok() { # stepcode_identity_ok BIN
     sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'
 }
 
+# OpenCode reports an HTTP 429 on stderr or as a JSONL error event. Assistant
+# text, including JSONL text events, is never a rate signal (as bin/ai-stepfun).
+oc_rate_limited() { # oc_rate_limited JSONL_LOG STDERR
+  local re='(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
+  grep -Eiq "$re" "$2" 2>/dev/null && return 0
+  [ -s "$1" ] || return 1
+  jq -r 'select(.type != "text" and (.type == "error" or .error != null)) | tostring' "$1" 2>/dev/null \
+    | grep -Eiq "$re"
+}
+
 resolve_opencode() {
   if [ -n "${AI_STEPFUN_OPENCODE:-}" ] && [ -x "${AI_STEPFUN_OPENCODE}" ]; then
     printf '%s' "$AI_STEPFUN_OPENCODE"; return 0
@@ -360,19 +370,32 @@ main() {
       oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"; SF_TEMP_PATHS+=("$oc_scratch")
       cp -a "$DOOR_WORKDIR" "$oc_dir" || { rm -rf "$xdg" "$oc_scratch"; rm -f "$prompt_full"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     fi
-    (
-      export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
-             XDG_DATA_HOME="$(native_path "$xdg/data")" \
-             XDG_STATE_HOME="$(native_path "$xdg/state")" \
-             XDG_CACHE_HOME="$(native_path "$xdg/cache")"
-      if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
-      printf '%s' "$(cat "$prompt_full")" \
-        | reviewer_credit_run stepfun "$log" "$out.err" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
-            --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
-            --dir "$(native_path "$oc_dir")" \
-            > "$log" 2> "$out.err"
-    )
-    rc=$?
+    # The same shared pacer and 429 cooldown as the StepCode branch below
+    # (#1432): every turn waits for a slot first, and a 429 that still ends
+    # the turn sets the shared cooldown before one bounded rerun.
+    local rate_retries=0
+    local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    while :; do
+      stepfun_pace_wait
+      (
+        export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
+               XDG_DATA_HOME="$(native_path "$xdg/data")" \
+               XDG_STATE_HOME="$(native_path "$xdg/state")" \
+               XDG_CACHE_HOME="$(native_path "$xdg/cache")"
+        if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
+        printf '%s' "$(cat "$prompt_full")" \
+          | reviewer_credit_run stepfun "$log" "$out.err" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+              --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
+              --dir "$(native_path "$oc_dir")" \
+              > "$log" 2> "$out.err"
+      )
+      rc=$?
+      [ "$rc" -ne 0 ] || break
+      oc_rate_limited "$log" "$out.err" && [ "$rate_retries" -lt "$rate_max" ] || break
+      rate_retries=$((rate_retries + 1))
+      printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      stepfun_pace_cooldown "$rate_pause"
+    done
     rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"
   else
     # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under the
