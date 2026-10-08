@@ -1288,6 +1288,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
   # review would die after the command reported success.
   worker_evidence_pid="$$"; [ ! -r "/proc/$$/winpid" ] || worker_evidence_pid="$(cat /proc/$$/winpid)"
   reviewer_event_evidence note-worker kimi "$worker_evidence_pid" || exit 2
+  # Record the exact job directory so reconciliation can find this worker's
+  # canonical report even under a custom AI_KIMI_STATE_DIR.
+  reviewer_event_evidence note-report-root kimi "$dir" || exit 2
   reviewer_event_evidence require-report kimi || exit 2
   reviewer_event_evidence bind-sandbox kimi "$workdir" || exit 2
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2

@@ -1895,6 +1895,33 @@ with event_lock(sys.argv[2]):
             else:
                 os.environ["AI_KIMI_STATE_DIR"] = prior
 
+    def test_kimi_recorded_report_root_refuses_loss_across_custom_states(self):
+        """A worker-recorded job dir is searched even when both env dirs differ from it."""
+        rid = "b4" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="recorded-root",
+                                             owner_line=f"evidence_owner=kimi:{rid}")
+        custom_a = self.root / "kimi-state-a" / "jobs" / "rid" / "caller--custom"
+        custom_a.mkdir(parents=True, exist_ok=True)
+        report = custom_a / "review-20261007T120000Z-2.md"
+        report.write_text("# Kimi review — custom A\n")
+        import subprocess
+        tool = str(self.toolkit / "tools" / "reviewer_events.py")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)}
+        subprocess.check_call([sys.executable, tool, "note-report-root", "kimi", rid, str(custom_a)],
+                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "kimi-state-b")
+        try:
+            with patch.object(Path, "home", return_value=self.root / "other-home"):
+                with self.assertRaises(events.Blocked):
+                    events.reconcile_lost(self.root, "kimi", sandbox, "report in recorded custom root")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
+
     def test_positive_ledger_references_refuse_loss(self):
         """A finished row with evidence_references is publication proof."""
         rid = "b2" + "0" * 30

@@ -1059,19 +1059,47 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
 
-def _report_search_roots(provider, source):
+def _report_search_roots(provider, source, directory=None, run_id=None):
     """Every tree a provider may leave a recoverable report or staging file in."""
     roots = [source / ".ai" / "reviews"]
     if provider == "kimi":
         # Canonical reports live under the Kimi state root. Search the current
         # environment AND the default location: reconciliation may run under a
         # different AI_KIMI_STATE_DIR than the review that wrote the report.
+        # Plus any root the worker itself recorded: a fully custom state dir
+        # is only discoverable from the run's own evidence.
         default_state = Path.home() / ".local/state/ai-devops/kimi"
         env_state = Path(os.environ.get("AI_KIMI_STATE_DIR") or default_state)
         for state in (env_state, default_state):
             jobs = state / "jobs"
             if jobs not in roots:
                 roots.append(jobs)
+        # Sibling kimi state roots under the shared base (custom AI_KIMI_STATE_DIR
+        # values that still live next to the default).
+        base = Path.home() / ".local/state/ai-devops"
+        if base.is_dir():
+            try:
+                for child in base.iterdir():
+                    jobs = child / "jobs"
+                    if child.name.startswith("kimi") and jobs.is_dir() and jobs not in roots:
+                        roots.append(jobs)
+            except OSError:
+                pass
+        if run_id is not None:
+            event_dir = Path(directory) if directory is not None else (
+                Path(os.environ.get("AI_REVIEW_EVENT_DIR") or
+                     (Path.home() / ".local/state/ai-devops/reviewer-events")))
+            recorded = evidence_root(event_dir, run_id) / "report_search_roots"
+            if recorded.is_file():
+                try:
+                    for line in recorded.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if line:
+                            root = Path(line)
+                            if root not in roots:
+                                roots.append(root)
+                except OSError:
+                    pass  # unreadable recording: the walk below still covers defaults
     return roots
 
 
@@ -1104,7 +1132,7 @@ def _recoverable_report_file(path, provider, run_id):
     return False
 
 
-def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
+def lost_report_candidates(provider, sandbox, source, since=None, run_id=None, directory=None):
     """Recoverable files this review could still have written; any one refuses a loss record.
 
     Prefer positive publication evidence (evidence-store `*.report.json`)
@@ -1131,7 +1159,7 @@ def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
                 pass  # unstatable: cannot prove it is older than the invocation
         if _recoverable_report_file(path, provider, run_id):
             found.append(path)
-    for root in _report_search_roots(provider, source):
+    for root in _report_search_roots(provider, source, directory, run_id):
         if not root.exists():
             continue
         require(root.is_dir(), "report search root is not a directory; loss not recorded")
@@ -1261,7 +1289,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
     source = physical(lines[0])
     owners = [line.removeprefix("evidence_owner=") for line in lines if line.startswith("evidence_owner=")]
     if not owners:
-        found = lost_report_candidates(provider, sandbox, source)
+        found = lost_report_candidates(provider, sandbox, source, directory=directory)
         require(not found, "a report still exists; reconcile it with reconcile-sandbox: " + (str(found[0]) if found else ""))
         identity = {"provider": provider, "sandbox": sandbox.name, "marker_sha256": digest(marker_data), "report_state": "lost"}
         run_id = digest(encoded(identity))[:32]
@@ -1290,7 +1318,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
                 started = invocation(directory, provider, run_id)["timestamp"]
                 # A report older than the invocation belongs to an earlier turn, never to this one.
                 since = datetime.datetime.fromisoformat(started).timestamp() - 60
-                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id)
+                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id, directory=directory)
                 require(not found, "a report from this invocation may still exist; recover it: " + (str(found[0]) if found else ""))
                 record_lost(directory, provider, run_id, sandbox, reason)
     return {"sandbox": str(sandbox), "owners": owners, "report_state": "lost",
@@ -1482,6 +1510,23 @@ def main():
         root.mkdir(parents=True, exist_ok=True)
         (root / "worker_pid").write_text(str(worker_pid) + "\n")
         print(json.dumps({"run_id": sys.argv[3], "worker_pid": worker_pid}))
+    elif operation == "note-report-root":
+        # The worker records the exact directory its report will land in, so
+        # reconciliation can find a custom AI_KIMI_STATE_DIR tree without
+        # guessing. Missing this note only weakens the negative search; it
+        # never authorises a loss by itself.
+        require(len(sys.argv) == 5, "note-report-root requires provider, run_id and directory")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        marker = root / "report_search_roots"
+        prior_roots = []
+        if marker.is_file():
+            prior_roots = [line for line in marker.read_text(encoding="utf-8").splitlines() if line.strip()]
+        new_root = physical(sys.argv[4])
+        if str(new_root) not in prior_roots:
+            marker.write_text("\n".join(prior_roots + [str(new_root)]) + "\n")
+        print(json.dumps({"run_id": sys.argv[3], "report_search_root": str(new_root)}))
     elif operation == "note-worker-terminal":
         require(len(sys.argv) == 4, "note-worker-terminal requires provider and run_id")
         require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
