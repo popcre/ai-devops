@@ -111,6 +111,9 @@ def build(snapshots):
         if env["GOOS"] == "windows":
             flags += " -s -w -X github.com/cli/cli/v2/internal/build.Date=2026-10-07"
         subprocess.run([str(go), "build", *tags, "-trimpath", "-ldflags", flags, "-o", str(output), "./cmd/gh"], cwd=source, env=env, check=True)
+        # Imported modules use the official archive's go.mod/go.sum pins;
+        # verify the cached source as well as the downloaded zip checksums.
+        subprocess.run([str(go), "mod", "verify"], cwd=source, env=env, check=True)
         artifacts[kind] = {"path": str(args.output.absolute() / build_root.name / output.name), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
         if kind == "instrumented" and args.compile_native_fixture:
             fixture = build_root / "httpcounter-windows-fixture.exe"
