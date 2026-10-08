@@ -110,5 +110,26 @@ ln -s "$REAL_CURL" "$TMP/real-curl-bin/curl"
 printf 'abc.def.ghi\n' | PATH="$TMP/real-curl-bin:$ORIGINAL_PATH" HOME="$TMP/hostile-home" CURL_HOME="$TMP/hostile-home" \
   bash -c 'source "$1"; API="$2"; app_request GET users/o/installation' bash "$TMP/request-only.sh" "file://$TMP/local-api" > "$TMP/local-result"
 check 'hostile ambient curlrc cannot enable traces or redirect authenticated output' "cmp '$FIXTURE/installation' '$TMP/local-result' && [ ! -e '$TMP/ambient-trace' ] && [ ! -e '$TMP/ambient-output' ]"
+# Interrupt only the optional metadata publication, after its private file
+# exists. The caller must still return its minted token and leave no temporary
+# binding behind; the earlier schema-zero invalidation remains authoritative.
+export REAL_MV="$(command -v mv)"
+mkdir "$TMP/interrupt-bin"
+cat > "$TMP/interrupt-bin/mv" <<'MV'
+#!/usr/bin/env bash
+if [ "${1:-}" = -f ] && [ "${2:-}" = -- ] &&
+   jq -e '.schema == 1' "$3" >/dev/null 2>&1; then
+  printf '%s\n' "$3" > "$FIXTURE/interrupted-temporary"
+  kill -TERM "$PPID"
+  exit 0
+fi
+exec "$REAL_MV" "$@"
+MV
+chmod +x "$TMP/interrupt-bin/mv"
+jq '.permissions={issues:"write",contents:"read"}' "$FIXTURE/token" > "$TMP/qualified-token"
+cp "$TMP/qualified-token" "$FIXTURE/token"
+printf '1 ghs_synthetic_installation\n' > "$AI_GH_APP_DIR/token-o"
+PATH="$TMP/interrupt-bin:$PATH" "$SCRIPT" token o > "$TMP/interrupted-token" 2> "$TMP/interrupted-errors"
+check 'interrupted metadata publication preserves minted token and cleans its private temporary' "cmp '$TMP/minted' '$TMP/interrupted-token' && [ -s '$FIXTURE/interrupted-temporary' ] && [ ! -e \"\$(cat '$FIXTURE/interrupted-temporary')\" ] && ! '$SCRIPT' context o && grep -q 'metadata unavailable' '$TMP/interrupted-errors'"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
