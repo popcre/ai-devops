@@ -50,5 +50,16 @@ leak="$(env AI_REVIEW_OPERATION=stale-linux-manifest-recovery AI_REVIEW_GATE_MOD
   '. "$1/tests/lib-test-harness.sh"; printf "%s|%s|%s|%s|%s" "${AI_REVIEW_OPERATION-unset}" "${AI_REVIEW_GATE_MODE-unset}" "${AI_REVIEW_IMPLEMENTER-unset}" "${AI_REVIEW_REVIEWER_APPROVAL-unset}" "$AI_REVIEW_TEST_ISOLATION"' _ "$ROOT")"
 check "harness clears the inherited outer review session" '[ "$leak" = "unset|unset|unset|unset|1" ]'
 
+# Every offline suite that drives the review pool must source the shared
+# isolation helper, directly or through lib-test-harness.sh.
+unisolated=""
+for suite in "$ROOT"/tests/test-*.sh; do
+  grep -q 'ai-review-pool' "$suite" || continue
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*lib-(reviewer-events-isolation|test-harness)\.sh' "$suite" \
+    || unisolated="$unisolated ${suite##*/}"
+done
+check "every pool-invoking suite sources the isolation helper" '[ -z "$unisolated" ]'
+[ -z "$unisolated" ] || printf 'unisolated suites:%s\n' "$unisolated" >&2
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
