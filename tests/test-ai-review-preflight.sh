@@ -595,5 +595,50 @@ printf '%s' "$PAUSE_EXPIRED" | jq -e '.status=="expired"' >/dev/null && [ "$PAUS
 "$SCRIPT" pause grok provider-timeout --observed malformed >/dev/null 2>&1 && bad "pause refuses malformed observation" || ok "pause refuses malformed observation"
 "$SCRIPT" clear grok >/dev/null 2>&1
 
+# --- passed-head (#1429): no extra reviewer on a head that already passed ---
+PH_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+PH_KEY="$(printf 'phkey' | sha256sum | cut -d' ' -f1)"; PH_DIGEST="$(printf 'phdigest' | sha256sum | cut -d' ' -f1)"
+PH_STORE="$TMP/ph-lifecycle"; mkdir -p "$REPO/.ai/reviews" "$PH_STORE/runs/$PH_KEY/gemini/zcode"
+cat > "$TMP/ph-lifecycle-bin" <<EOF
+#!/usr/bin/env bash
+[ "\$1" = identity ] && jq -nc --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" '{head:\$h,source_digest:\$d,repository_key:\$k}'
+EOF
+chmod +x "$TMP/ph-lifecycle-bin"
+PH_REPORT="$REPO/.ai/reviews/gemini-final-check-ph1.md"
+printf '# gemini final-check\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Verdict\nAPPROVE\n' "$PH_HEAD" "$PH_DIGEST" > "$PH_REPORT"
+jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REPORT" --arg s "$(sha256sum "$PH_REPORT" | cut -d' ' -f1)" \
+  '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+  > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
+PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(jq -r .report <<<"$PH_OUT")" = "$PH_REPORT" ] && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
+  && ok "no_extra_reviewer_on_passed_head" || bad "no_extra_reviewer_on_passed_head"
+PH_OUT="$(ph diff-review 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && [ "$PH_OUT" = null ] && ok "passed_head_other_mode_has_no_pass" || bad "passed_head_other_mode_has_no_pass"
+ph final-check --base HEAD >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 1 ] && ok "passed_head_other_base_has_no_pass" || bad "passed_head_other_base_has_no_pass"
+PH_OUT="$(AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" final-check 2>/dev/null)"; PH_RC=$?
+[ "$PH_RC" -ne 0 ] && ok "passed_head_lifecycle_substitution_needs_test_hooks" || bad "passed_head_lifecycle_substitution_needs_test_hooks"
+printf '{bad' > "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+ph final-check >/dev/null 2>&1; PH_RC=$?
+[ "$PH_RC" -eq 3 ] && ok "passed_head_lookup_error_is_not_a_pass" || bad "passed_head_lookup_error_is_not_a_pass"
+rm -f "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
+# Front door: a request for another reviewer on the passed head returns the
+# existing pass; --additional-reviewer allocates (dispatches) one.
+cat > "$TMP/ph-pool" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/ph-pool-args"; printf '%s\n' "$TMP/new-report.md"
+EOF
+chmod +x "$TMP/ph-pool"
+ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" \
+  AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" \
+  "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
+rm -f "$TMP/ph-pool-args"
+PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
+[ "$PH_RC" -eq 0 ] && [ "$(printf '%s\n' "$PH_FRONT" | tail -1)" = "$PH_REPORT" ] && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
+  && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
+ph_front --additional-reviewer >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
