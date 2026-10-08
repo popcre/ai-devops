@@ -10,7 +10,7 @@ lib="$root_dir/tools/lib/session-tmp.sh"
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 export AI_SESSION_TMP_BASE="$work/base" AI_SESSION_TMP_FORCE=1
-unset AI_KEEP_SANDBOX AI_SESSION_TMP_ROOT AI_SESSION_TMP_CHILD
+unset AI_KEEP_SANDBOX AI_SESSION_TMP_ROOT AI_SESSION_TMP_CHILD TMPDIR
 
 echo "== begin / end"
 out="$(bash -c '. "$1"; ai_session_tmp_begin test abc; printf "%s|%s|%s|%s\n" "$AI_SESSION_TMP_ROOT" "$TMPDIR" "$TMP" "$TEMP"; [ -f "$AI_SESSION_TMP_ROOT/owner.json" ] && cat "$AI_SESSION_TMP_ROOT/owner.json"; stat -c %a "$AI_SESSION_TMP_ROOT"' _ "$lib")"
@@ -66,8 +66,10 @@ OUT
 export LIB="$lib" LOG="$work/log" INNER="$work/inner.sh"
 echo hello | bash "$work/outer.sh"; rc=$?
 check "wrapper exit code preserved" '[ "$rc" = 7 ]'
-check "inner got its own root" '[ "$(sed -n "s/^inner=//p" "$LOG")" != "$(sed -n "s/^outer=//p" "$LOG")" ]'
+check "inner wrapper reuses the outer root" '[ "$(sed -n "s/^inner=//p" "$LOG")" = "$(sed -n "s/^outer=//p" "$LOG")" ]'
 check "outer root survives inner end" 'grep -q outer-survives "$LOG"'
+mkdir -p "$work/mine"; TMPDIR="$work/mine" bash "$work/inner.sh"
+check "a caller-chosen TMPDIR is kept, not replaced" 'grep -q "inner=$work/mine$" "$LOG" && [ -f "$work/mine/scratch" ]'
 check "stdin reaches the wrapped child" 'grep -q "stdin=hello" "$LOG"'
 check "no roots left after wrappers exit" 'no_roots'
 : > "$LOG"

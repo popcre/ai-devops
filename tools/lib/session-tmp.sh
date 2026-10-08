@@ -90,10 +90,13 @@ ai_session_tmp_end() {
 # Wrapper entry point: create the root for the calling process ($$) and start
 # a detached watcher that deletes the root the moment that process exits, even
 # on kill -9. The wrapper keeps its own PID, traps, stdin and stdout untouched.
-# A nested wrapper call gets its own root and watcher.
+# A caller that already chose a temp folder (an outer AI session, a test, an
+# operator) keeps it: that owner cleans it up, and evidence a wrapper retains
+# there on failure survives the wrapper's exit.
 ai_session_tmp_wrap() {
   local engine="$1"
   ai_session_tmp_enabled || return 0
+  [ -z "${TMPDIR:-}" ] || return 0
   ai_session_tmp_begin "$engine" "$$-$(date +%s)" "$$" || return 0
   ai_session_tmp_watch "$$" "$AI_SESSION_TMP_ROOT"
 }
