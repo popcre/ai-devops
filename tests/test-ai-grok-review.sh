@@ -1536,6 +1536,14 @@ chmod +x "$POOLTMP/engine"
 # the runner core's contract and are covered by tests/test-ai-review-engine.sh.
 export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 engargs(){ cat "$POOLTMP/engine-args" 2>/dev/null; }
+# Regression: this suite run as the --tests command of an operation review
+# (stale-manifest recovery) inherited AI_REVIEW_OPERATION and friends from
+# bin/ai-review, so every fake dispatch here refused. The shared harness must
+# clear the outer review session before any case runs.
+rm -f "$POOLTMP/engine-args"
+( cd "$POOLTMP/fakerepo" && export AI_REVIEW_OPERATION=stale-linux-manifest-recovery AI_REVIEW_GATE_MODE=final-check AI_REVIEW_IMPLEMENTER=codex AI_REVIEW_REVIEWER_APPROVAL="$POOLTMP/no-approval.md" \
+  && . "$REPO_ROOT/tests/lib-reviewer-events-isolation.sh" && export_pool && bash "$POOL" qwen security-review ) > "$POOLTMP/out-leak" 2>&1; RC_LEAK=$?
+check "pool_dispatch_ignores_a_leaked_outer_review_session" "[ '$RC_LEAK' -eq 0 ] && engargs | grep -q -- '--provider qwen' && ! engargs | grep -q -- '--operation'"
 
 rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
