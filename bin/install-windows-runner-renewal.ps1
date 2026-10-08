@@ -80,6 +80,9 @@ function Install-RenewalPayload {
   }
   if (Test-Path -LiteralPath $script:RenewalPayloadRoot) { Assert-NoReparsePoint -LiteralPath $script:RenewalPayloadRoot; Assert-NoForeignOwnership -LiteralPath $script:RenewalPayloadRoot; Remove-Item -LiteralPath $script:RenewalPayloadRoot -Recurse -Force }
   Move-Item -LiteralPath $staging -Destination $script:RenewalPayloadRoot
+  $statusParent = Split-Path -Parent $script:RenewalStatusRoot
+  Assert-NoReparsePoint -LiteralPath $statusParent -AllowMissing:$false
+  Assert-NoForeignOwnership -LiteralPath $statusParent
   if (-not (Test-Path -LiteralPath $script:RenewalStatusRoot)) { New-Item -ItemType Directory -Path $script:RenewalStatusRoot | Out-Null }
   Assert-NoForeignOwnership -LiteralPath $script:RenewalStatusRoot
   Set-RenewalAcl -LiteralPath $script:RenewalStatusRoot -OperatorSid $OperatorSid -Kind Status
@@ -103,18 +106,28 @@ function Set-RenewalAcl {
 
 function Register-RenewalTask {
   param([Parameter(Mandatory)][string]$OperatorSid)
+  # COM tripwire BEFORE the first task write, then register DISABLED, seal
+  # the DACL, and only then enable. Any failure unregisters, so a planted
+  # override can never leave an enabled, unsealed startup task behind.
+  Assert-NoPerUserComOverride
   $action = New-ScheduledTaskAction -Execute $script:RenewalPowerShell -Argument (Get-RenewalTaskArguments)
   $startup = New-ScheduledTaskTrigger -AtStartup
   $startup.Delay = 'PT{0}M' -f $script:RenewalStartupDelayMinutes
   $repeat = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.Date.AddHours(1)) -RepetitionInterval ([TimeSpan]::FromHours($script:RenewalIntervalHours))
   # Limited run level: this task holds no administrator power at all.
   $principal = New-ScheduledTaskPrincipal -UserId $OperatorSid -LogonType S4U -RunLevel Limited
-  $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(10)) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-  Register-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Action $action -Trigger @($startup, $repeat) -Principal $principal -Settings $settings -Force | Out-Null
-  Assert-NoPerUserComOverride
-  $service = New-Object -ComObject 'Schedule.Service'
-  $service.Connect()
-  $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).SetSecurityDescriptor((Get-RenewalTaskSddl -OperatorSid $OperatorSid), 0)
+  $settings = New-ScheduledTaskSettingsSet -Disable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(10)) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+  try {
+    Register-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Action $action -Trigger @($startup, $repeat) -Principal $principal -Settings $settings -Force | Out-Null
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $registered = $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName)
+    $registered.SetSecurityDescriptor((Get-RenewalTaskSddl -OperatorSid $OperatorSid), 0)
+    $registered.Enabled = $true
+  } catch {
+    Unregister-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    throw
+  }
 }
 
 function Get-RenewalTaskSnapshot {
@@ -135,6 +148,7 @@ function Get-RenewalTaskSnapshot {
     startup_trigger = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' }).Count
     repetition_interval = [string](@($task.Triggers | Where-Object { $_.Repetition.Interval } | ForEach-Object { $_.Repetition.Interval }) | Select-Object -First 1)
     multiple_instances = [string]$task.Settings.MultipleInstances
+    enabled = [bool]$task.Settings.Enabled
     sddl = $sddl
   }
 }
@@ -193,16 +207,19 @@ function Assert-RenewalTaskContract {
   if ($Task.action_count -ne 1 -or $Task.execute -cne $script:RenewalPowerShell -or $Task.arguments -cne (Get-RenewalTaskArguments)) { throw 'STALE_INSTALLATION: renewal task action drift.' }
   if ($Task.user_id -cne $ExpectedOperatorSid -or $Task.logon_type -cne 'S4U' -or $Task.run_level -cne 'Limited') { throw 'STALE_INSTALLATION: renewal task principal drift.' }
   if ($Task.trigger_count -ne 2 -or $Task.startup_trigger -ne 1 -or $Task.repetition_interval -cne $expectedInterval) { throw 'STALE_INSTALLATION: renewal task schedule drift.' }
+  if (-not $Task.enabled) { throw 'STALE_INSTALLATION: renewal task is disabled.' }
   if ($Task.multiple_instances -cne 'IgnoreNew' -or $Task.sddl -cne (Get-RenewalTaskSddl -OperatorSid $ExpectedOperatorSid)) { throw 'STALE_INSTALLATION: renewal task settings or ACL drift.' }
 }
 
 function Remove-RenewalInstallation {
+  # Tripwire first; a planted override blocks removal (fail closed) and is
+  # reported, never silently bypassed.
+  Assert-NoPerUserComOverride
   $task = Get-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -ErrorAction SilentlyContinue
   if ($null -eq $task -and -not (Test-Path -LiteralPath $script:RenewalPayloadRoot)) { return 'ABSENT' }
   if ($null -ne $task) {
     # Seal to administrators/SYSTEM first so the operator cannot start it
     # during teardown, then unregister.
-    Assert-NoPerUserComOverride
     $service = New-Object -ComObject 'Schedule.Service'
     $service.Connect()
     $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).SetSecurityDescriptor('D:P(A;;FA;;;SY)(A;;FA;;;BA)', 0)

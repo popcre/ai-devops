@@ -132,7 +132,7 @@ try {
   $good = [ordered]@{
     execute = 'C:\Program Files\PowerShell\7\pwsh.exe'; arguments = (Get-RenewalTaskArguments); action_count = 1
     user_id = $sid; logon_type = 'S4U'; run_level = 'Limited'; trigger_count = 2; startup_trigger = 1
-    repetition_interval = 'PT8H'; multiple_instances = 'IgnoreNew'; sddl = (Get-RenewalTaskSddl -OperatorSid $sid)
+    repetition_interval = 'PT8H'; multiple_instances = 'IgnoreNew'; enabled = $true; sddl = (Get-RenewalTaskSddl -OperatorSid $sid)
   }
   Case 'Task_ExpectedContractPasses' { Assert-RenewalTaskContract -Task $good -ExpectedOperatorSid $sid }
   $drifts = [ordered]@{
@@ -145,6 +145,7 @@ try {
     'Task_RequiresEightHourRepetition' = @{ repetition_interval = 'P1D' }
     'Task_RefusesOperatorWriteSddl' = @{ sddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;$sid)" }
     'Task_RefusesParallelInstances' = @{ multiple_instances = 'Parallel' }
+    'Task_RefusesDisabledTask' = @{ enabled = $false }
   }
   foreach ($entry in $drifts.GetEnumerator()) {
     $drift = $entry.Value
@@ -191,6 +192,27 @@ try {
       Assert-True ($register.Contains($needle)) "registration missing $needle"
     }
     Assert-True (-not $register.Contains('Highest')) 'renewal task requests elevation'
+  }
+
+  Case 'Install_TripwireThenDisabledSealThenEnable' {
+    $register = [regex]::Match($installerText, 'function Register-RenewalTask[\s\S]*?
+}').Value
+    $trip = $register.IndexOf('Assert-NoPerUserComOverride'); $reg = $register.IndexOf('Register-ScheduledTask'); $seal = $register.IndexOf('SetSecurityDescriptor'); $enable = $register.IndexOf('.Enabled = $true')
+    Assert-True ($trip -ge 0 -and $trip -lt $reg -and $reg -lt $seal -and $seal -lt $enable) 'order is not tripwire, register, seal, enable'
+    Assert-True ($register.Contains('New-ScheduledTaskSettingsSet -Disable')) 'task not registered disabled'
+    Assert-True ($register -match 'catch \{\s*Unregister-ScheduledTask') 'failed seal does not unregister'
+  }
+
+  Case 'Remove_TripwireBeforeAnyTaskAccess' {
+    $remove = [regex]::Match($installerText, 'function Remove-RenewalInstallation[\s\S]*?
+}').Value
+    Assert-True ($remove.IndexOf('Assert-NoPerUserComOverride') -lt $remove.IndexOf('Get-ScheduledTask')) 'remove touches the task before the COM tripwire'
+  }
+
+  Case 'Install_StatusParentCheckedAtCreateSite' {
+    $install = [regex]::Match($installerText, 'function Install-RenewalPayload[\s\S]*?
+}').Value
+    Assert-True ($install.IndexOf('Assert-NoForeignOwnership -LiteralPath $statusParent') -lt $install.IndexOf('New-Item -ItemType Directory -Path $script:RenewalStatusRoot')) 'status parent not checked before create'
   }
 
   Case 'Remove_KeepsFailureHistoryAndIsIdempotent' {
