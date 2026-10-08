@@ -128,8 +128,17 @@ try {
   git -C $race.Repo push origin main | Out-Null
   $later=(git -C $race.Repo rev-parse HEAD).Trim()
   git -C $race.Repo reset --hard $approved | Out-Null
-  Invoke-Gate $race -ExpectedHead $approved -ExpectFailure
+  # Merged, not newest: an approved target behind a moved origin/main is
+  # accepted and installs exactly that SHA, never the newer tip.
+  Invoke-Gate $race -ExpectedHead $approved
   Assert ((git -C $race.Repo rev-parse HEAD).Trim() -eq $approved) 'moved origin/main was installed despite expected-head guard'
+  git -C $race.Repo checkout -q -b unmerged | Out-Null
+  'unmerged release' | Add-Content (Join-Path $race.Repo 'README.md')
+  git -C $race.Repo commit -qam unmerged | Out-Null
+  $unmerged=(git -C $race.Repo rev-parse HEAD).Trim()
+  git -C $race.Repo checkout -q main | Out-Null
+  Invoke-Gate $race -ExpectedHead $unmerged -ExpectFailure -FailureContains 'is not in fetched origin/main'
+  Assert ((git -C $race.Repo rev-parse HEAD).Trim() -eq $approved) 'unmerged expected head moved the checkout'
   Invoke-Gate $race -ExpectedHead $later
   Assert ((git -C $race.Repo rev-parse HEAD).Trim() -eq $later) 'exact expected target did not install'
 
@@ -175,6 +184,23 @@ try {
   Write-TestAuthorization $sequence $sequenceTarget $sequenceBase | Out-Null
   Invoke-Gate $sequence -ExpectedHead $sequenceTarget
   Assert ((git -C $sequence.Repo rev-parse HEAD).Trim() -eq $sequenceTarget) 'ordinary then protected update failed'
+
+  # A reviewed protected target stays installable after later merges land
+  # (Windows reviews outlast main): exactly the approved SHA installs.
+  $behind=New-Fixture protected-behind-tip
+  $behindBase=(git -C $behind.Repo rev-parse HEAD).Trim()
+  'changed gate' | Set-Content (Join-Path $behind.Repo 'bin/ai-task-gates')
+  git -C $behind.Repo add bin/ai-task-gates
+  git -C $behind.Repo commit -m protected | Out-Null
+  $behindTarget=(git -C $behind.Repo rev-parse HEAD).Trim()
+  'later merge' | Add-Content (Join-Path $behind.Repo 'README.md')
+  git -C $behind.Repo add README.md
+  git -C $behind.Repo commit -m later | Out-Null
+  git -C $behind.Repo push origin main | Out-Null
+  git -C $behind.Repo reset --hard $behindBase | Out-Null
+  Write-TestAuthorization $behind $behindTarget $behindBase | Out-Null
+  Invoke-Gate $behind -ExpectedHead $behindTarget
+  Assert ((git -C $behind.Repo rev-parse HEAD).Trim() -eq $behindTarget) 'approved protected target behind origin/main did not install exactly'
 
   $protected=New-Fixture protected
   $before=(git -C $protected.Repo rev-parse HEAD).Trim()
@@ -238,7 +264,7 @@ try {
   Invoke-Gate $protected -ExpectedHead $protectedHead
   Assert (Test-Path -LiteralPath $pending) 'same-target source retry consumed pending authorization'
   Assert ((Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash -eq $pendingHash) 'same-target source retry changed pending authorization'
-  Invoke-Gate $protected -ExpectedHead ('0' * 40) -ExpectFailure -FailureContains 'differs from the gate-approved install target'
+  Invoke-Gate $protected -ExpectedHead ('0' * 40) -ExpectFailure -FailureContains 'is not in fetched origin/main'
   $savedAuth=Get-Content -Raw -LiteralPath $pending
   try {
     $tampered=$savedAuth | ConvertFrom-Json

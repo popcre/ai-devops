@@ -448,11 +448,20 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
     if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops HEAD.' }
     $remoteHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'origin/main')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
-    if ($ExpectedHead -and $remoteHead.Trim() -ne $ExpectedHead) {
-        throw "Fetched origin/main $($remoteHead.Trim()) differs from the gate-approved install target $ExpectedHead."
+    # Same rule as Linux install-verify: a pinned target must be a merged
+    # release (in fetched origin/main history), not necessarily the newest
+    # tip. Windows reviews outlast merges to main; requiring the tip made a
+    # pinned install impossible. The exact approved SHA is what installs.
+    $targetHead = $remoteHead.Trim()
+    if ($ExpectedHead) {
+        Invoke-GitCommand @('-C', $Path, 'merge-base', '--is-ancestor', $ExpectedHead, $targetHead) | Out-Null
+        if ($script:LastGitExitCode -ne 0) {
+            throw "Gate-approved install target $ExpectedHead is not in fetched origin/main $targetHead history."
+        }
+        $targetHead = $ExpectedHead
     }
-    if ($LauncherGateOnly -and $head.Trim() -ne $remoteHead.Trim()) {
-        throw 'Launcher receipt cannot be stamped before the checkout reaches exact origin/main.'
+    if ($LauncherGateOnly -and $head.Trim() -ne $targetHead) {
+        throw 'Launcher receipt cannot be stamped before the checkout reaches the exact install target.'
     }
     # Restore a hard-crashed launcher transaction before reading its receipt.
     # The sub-installer validates the exact source, catalog and prior bytes.
@@ -471,16 +480,16 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
     $receiptHead = Get-InstalledSourceReceipt -Path $Path
     $installedBaseline = $head.Trim()
     if ($receiptHead -and $receiptHead -notin @('legacy','missing','partial')) {
-        Invoke-GitCommand @('-C', $Path, 'merge-base', '--is-ancestor', $receiptHead, $remoteHead.Trim()) | Out-Null
+        Invoke-GitCommand @('-C', $Path, 'merge-base', '--is-ancestor', $receiptHead, $targetHead) | Out-Null
         if ($script:LastGitExitCode -ne 0) { throw 'Installed source receipt is not an ancestor of the fetched release.' }
         $installedBaseline = $receiptHead
     }
-    $protectedUpdate = Test-ProtectedUpdate -Path $Path -CurrentHead $installedBaseline -TargetHead $remoteHead.Trim()
+    $protectedUpdate = Test-ProtectedUpdate -Path $Path -CurrentHead $installedBaseline -TargetHead $targetHead
     $authorityDir = Join-Path $env:USERPROFILE '.local\state\ai-devops\task-gates\install-authorizations'
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_LAUNCHER) {
         $authorityDir = Join-Path (Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER) 'install-authorizations'
     }
-    $issuedAuthorization = Join-Path $authorityDir ($remoteHead.Trim() + '.json')
+    $issuedAuthorization = Join-Path $authorityDir ($targetHead + '.json')
     $pendingAuthorization = "$issuedAuthorization.consuming"
     $hasAuthorization = (Test-Path -LiteralPath $issuedAuthorization -PathType Leaf) -or
         (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)
@@ -496,21 +505,21 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
         # launcher stamping, even after the source-only gate fast-forwarded it.
         $authorizationBaseline = $head.Trim()
         $existingAuthority = if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) { $pendingAuthorization } else { $issuedAuthorization }
-        if ((Test-Path -LiteralPath $existingAuthority -PathType Leaf) -and $head.Trim() -ceq $remoteHead.Trim()) {
+        if ((Test-Path -LiteralPath $existingAuthority -PathType Leaf) -and $head.Trim() -ceq $targetHead) {
             try { $pending = Get-Content -Raw -LiteralPath $existingAuthority | ConvertFrom-Json }
             catch { throw 'Pending toolkit install authorization is malformed.' }
             $authorizationBaseline = [string]$pending.installed_head
         }
-        $authorizationPath = Assert-InstallAuthorization -Path $Path -TargetHead $remoteHead.Trim() -InstalledHead $authorizationBaseline -LegacyMigration $legacyMigration -FirstInstall $firstInstall -RecoverLaunchers $recoverLaunchers
+        $authorizationPath = Assert-InstallAuthorization -Path $Path -TargetHead $targetHead -InstalledHead $authorizationBaseline -LegacyMigration $legacyMigration -FirstInstall $firstInstall -RecoverLaunchers $recoverLaunchers
         $consumingPath = if ($authorizationPath.EndsWith('.consuming')) { $authorizationPath } else { "$authorizationPath.consuming" }
         if ($authorizationPath -ne $consumingPath) { Move-Item -LiteralPath $authorizationPath -Destination $consumingPath }
         $script:ConsumingInstallAuthorization = $consumingPath
     }
-    if ($head.Trim() -ne $remoteHead.Trim()) {
-        $counts = Invoke-GitCommand @('-C', $Path, 'rev-list', '--left-right', '--count', 'HEAD...origin/main')
+    if ($head.Trim() -ne $targetHead) {
+        $counts = Invoke-GitCommand @('-C', $Path, 'rev-list', '--left-right', '--count', "HEAD...$targetHead")
         if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops source state.' }
         $parts = @($counts -split '\s+') | Where-Object { $_ }
-        if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from origin/main.' }
+        if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from the install target.' }
         # Hooks stay disabled for this fast-forward on purpose: the post-merge
         # reviewer hook would requalify against the old checkout mid-install,
         # and a failed canary would read as a fast-forward failure before any
@@ -521,13 +530,13 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
         try {
             # Merge the commit we just proved. A concurrent fetch must not
             # change the target between the comparison and this fast-forward.
-            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', $remoteHead.Trim()) | Out-Host
+            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', $targetHead) | Out-Host
             if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
         } finally {
             Remove-Item -LiteralPath $emptyHooks -Force -Recurse -ErrorAction SilentlyContinue
         }
         $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
-        if ($script:LastGitExitCode -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
+        if ($script:LastGitExitCode -ne 0 -or $head.Trim() -ne $targetHead) { throw 'ai-devops did not converge exactly to the install target.' }
     }
 }
 

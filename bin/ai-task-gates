@@ -1659,7 +1659,18 @@ cmd_authorize_install(){
   candidate_common="$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && pwd -P)" || blocked 'ai-task-gates: STOP. Candidate Git ownership unavailable.'
   [ "$installed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkouts do not share Git ownership.'
   installed_head="$(git -C "$installed_root" rev-parse HEAD 2>/dev/null)" || blocked 'ai-task-gates: STOP. Installed HEAD unavailable.'
-  [ "$installed_head" = "$start_head" ] || blocked 'ai-task-gates: STOP. Installed checkout moved since task declaration.'
+  # Reviews outlast merges, so another session's ordinary `git pull` or
+  # unprotected install may fast-forward the installed checkout during the
+  # review. A forward move that stays at or behind the target lies inside the
+  # classified start..target range: bind the authority to the checkout's
+  # actual HEAD. Any other move (backward, sideways, or past the target)
+  # remains a stop.
+  if [ "$installed_head" != "$start_head" ]; then
+    { git -C "$installed_root" merge-base --is-ancestor "$start_head" "$installed_head" 2>/dev/null &&
+      git -C "$installed_root" merge-base --is-ancestor "$installed_head" "$target_head" 2>/dev/null; } ||
+      blocked 'ai-task-gates: STOP. Installed checkout moved since task declaration outside the reviewed release range.'
+    printf 'ai-task-gates: installed checkout advanced from %s to %s within the reviewed release range.\n' "$start_head" "$installed_head" >&2
+  fi
   [ -z "$(git -C "$installed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout is dirty.'
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then canonical_launcher="$HOME/.local/bin/ai-task-gates"; else canonical_launcher="/usr/local/bin/ai-task-gates"; fi
   [ "$installed_launcher" = "$canonical_launcher" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'
@@ -1837,7 +1848,7 @@ cmd_authorize_install(){
   local auth_stage
   auth_stage="$(mktemp "$auth_dir/.authority.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
   chmod 0600 "$auth_stage" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
-  jq -nc --arg target "$target_head" --arg base "$start_head" --arg checkout "$receipt_checkout" \
+  jq -nc --arg target "$target_head" --arg base "$installed_head" --arg checkout "$receipt_checkout" \
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
@@ -1845,7 +1856,7 @@ cmd_authorize_install(){
     '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,windows_receipt_sha:$windows_receipt_sha,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
     && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
 
-  printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
+  printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$installed_head"
 }
 
 main(){

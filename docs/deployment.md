@@ -146,8 +146,12 @@ change. The authorization binds the candidate, review, installed checkout,
 launcher, and recorded old HEAD in the same Git repository, and is consumed
 once by the Windows installer. Fetch `origin/main` immediately before issuing
 authorization; the target must be a merged release (in fetched `origin/main`
-history). Linux `update.sh` accepts it even after later merges; the Windows
-installer still requires it to equal the fetched tip. The
+history). Linux `update.sh` and the Windows installer both accept it even
+after later merges and install exactly that SHA, never the newer tip. If
+another session fast-forwards the installed checkout during the review, the
+authorization accepts a move that stays inside the declared start..target
+range and binds the checkout's actual HEAD; a move backward, sideways, or past
+the target still stops. The
 installed checkout must be the durable primary checkout and the launcher must
 have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the

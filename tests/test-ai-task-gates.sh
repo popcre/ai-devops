@@ -256,6 +256,20 @@ check 'the issued authority binds old and target commits' \
 check 'authorization cannot be issued twice for one target' \
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$class_target.json"
+# Another session's ordinary pull may fast-forward the installed checkout
+# during a long review. A forward move inside start..target is accepted and
+# the authority binds the checkout's actual HEAD; a backward move still stops.
+class_start="$(git -C "$TMP/class" rev-parse HEAD)"
+git -C "$TMP/class" merge -q --ff-only "$class_target"
+check 'an installed checkout advanced within the reviewed range can issue authority' \
+  "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
+check 'authority advanced within the range binds the actual installed HEAD' \
+  "jq -e --arg target '$class_target' '.installed_head==\$target and .target_head==\$target' '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json'"
+rm -f "$AI_TASK_GATES_DIR/install-authorizations/$class_target.json"
+git -C "$TMP/class" reset -q --hard "$class_start^"
+check 'an installed checkout moved backward since declaration still stops' \
+  "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\" | grep -q 'outside the reviewed release range' && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
+git -C "$TMP/class" reset -q --hard "$class_start"
 cp "$class_report" "$TMP/class-report.backup"
 printf '\nchanged report\n' >> "$class_report"
 check 'tampered exact-head review cannot issue install authority' \
