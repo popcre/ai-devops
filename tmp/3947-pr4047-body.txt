@@ -1,0 +1,58 @@
+## Summary
+
+Closes #3947
+
+Work issue #3947
+
+Note: GitHub will auto-close #3947 on merge (required by the guarded merge lane). Reopen it immediately afterwards and leave the application-owned live-proof artifact checklist item on it until `u2giants/popdam3` produces `shared-db-live-proof-3947-<application_sha>`.
+
+Forward replacement migration **20261007190954** re-applies the Scraped Properties display-dedupe behavior (Warner fallback-twin hide, Sesame value_key collapse, Lucasfilm/Disney display dedupe) as a NEW reserved version under claim **#3955** (exclusive object `function api.db_data_admin_scraped_source_inventory`).
+
+## Why forward replacement (precedent #3911)
+
+PR #3957 merged head `f8b8b321` is permanently blocked: two immutable DeepSeek REVISE verdicts (slot 12 and slot 13, `readsRepository:true`) pin it, and no disregard path exists for those verdicts. Original **20261007020907** can never be promoted; preview already applied it. Per the #3911 precedent (`production_migration_guard.py` merged-stranded handling), a durable refusal on a merged head requires a forward-replacement migration (NEW version + NEW PR + fresh reviews). This PR is that replacement.
+
+## What changed
+
+- **New migration** `supabase/migrations/20261007190954_scraped_inventory_warner_fallback_sesame_value_key_dedupe_forward.sql` — the 20261007020907 body, re-runnable via `CREATE OR REPLACE` so it applies on preview (which already holds 20261007020907) and on production (which never will). Character and style_guide arms, security posture (SECURITY DEFINER, pinned `search_path`, licensing-gate-first ordering), and every grant are unchanged. `derived-from: 20261002193034` matches the stranded original.
+- **Production guard** retires 20261007020907 in `HARD_BLOCKED` / `RETIRED_VERSION_REASONS` with a `test_production_migration_guard.py` assertion and a `test_post_batch_app_verification.py` retired-version entry.
+
+## Claim
+
+- Claim #3955 reissued (immutable retirement `17b73daac7315345194b6eac26ed5a21748b9cb0`) from version 20261007020907 to **20261007190954** on branch `mimo/3947-scraped-dedupe-fwd-20261007` / worktree `C:\repos\shared-db-wt-3947-fwd-20261007`.
+- Exclusive object retained: `function api.db_data_admin_scraped_source_inventory`.
+- Lease active through **3:09 PM EST October 8, 2026** (renewal is an audit warning, not auto-release).
+
+## Tests (offline, all green)
+
+| Suite | Result |
+|---|---|
+| `scripts/check-sql.sh` | passed |
+| `python -m pytest scripts/test_production_migration_guard.py` | 298 passed |
+| `python -m pytest scripts/test_migration_derivation.py` | 44 passed |
+| `python -m pytest scripts/test_post_batch_app_verification.py` | 142 passed |
+| `node --test scripts/agent-work-contract*.test.mjs` | 77 passed |
+| `node --test scripts/check-migration-pr-lease.test.mjs` (+applied-edit, ledger-drift) | 89 passed |
+| `node --test scripts/agent-work-contract-activation.test.mjs scripts/check-sql.test.mjs` | 72 passed |
+
+SQL contract tests (`scraped_inventory_warner_sesame_dedupe.sql`, `db_data_admin_scraped_source_inventory.sql`) already on main from PR #3957 assert #3947 predicates by function-body content, so they cover this replacement unchanged; they run in the PR's ephemeral-database CI check.
+
+## Not done here (next agents)
+
+- Governed reviews of this new head.
+- Merge and production promotion of 20261007190954.
+- Live proof.
+
+---
+Posted by MiMo chat unknown on edge-dev
+
+Times above are EST (America/New_York).
+
+<!-- codesmith:footer -->
+---
+<a href="https://app.blacksmith.sh/popcre/codesmith/shared-db/pr/4047?autoLogin=true&ref=codesmith_pr_footer"><picture><source media="(prefers-color-scheme: dark)" srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"><source media="(prefers-color-scheme: light)" srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img alt="View with [code]smith" src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a> <a href="https://backend.blacksmith.sh/track/enable-autofix?expires=1793992976&installation_model_id=436274&pr_number=4047&ref=codesmith_pr_footer&repository=popcre%2Fshared-db&return_to=https%3A%2F%2Fgithub.com%2Fpopcre%2Fshared-db%2Fpull%2F4047&signature=e977619592c94dafce6aaaac43ff472dee2a8c4bc4c3227db95a8fe421622572"><picture><source media="(prefers-color-scheme: dark)" srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img alt="Autofix with [code]smith" src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
+<sup>Need help on this PR? Tag <code>@codesmith-bot</code> with what you need. Autofix is disabled.</sup>
+
+<!-- codesmith:autofix:disabled -->
+<!-- /codesmith:footer -->
+

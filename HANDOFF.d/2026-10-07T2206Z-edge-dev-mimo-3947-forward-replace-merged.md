@@ -28,7 +28,23 @@ Land the Scraped Properties display dedupe (Warner fallback-twin hide, Sesame `v
 
 ---
 
-## 3. Current state (checked 2026-10-07T22:06Z / 6:06 PM EDT)
+## 3. Current state (checked 2026-10-07T22:20Z / 6:20 PM EDT)
+
+### ⚠️ CRITICAL UPDATE after handoff first draft
+PR #4047 head `e35c1ecde…` is **ALSO HARD_BLOCKED**. A StepFun REVISE
+(`refs/db-review-verdicts/3947-4047-e35c1ecde…-slot3` / seq 5718) landed when
+its Windows wrapper failed (`NotFound: ChildProcess.spawn`) and it REVISEd
+without reading source. Same class as DeepSeek on `f8b8b321`. No supported
+command retires a `readsRepository:true` REVISE on a merged head.
+
+**Required path: a SECOND forward replacement** (new version + new PR + fresh
+reviews). Never draw DeepSeek OR StepFun for #3947 promotion slots — Muse and
+Gemini only. Fire apply in the same breath as the fence (main moves in minutes).
+
+Muse slot-4 fence APPROVE does exist at LIVE main `e181f5a0…` with
+`ordered_allowlist=["20261007190954"]` — but it cannot unpin the head.
+
+
 
 | Fact | Value |
 |---|---|
@@ -70,13 +86,15 @@ Two DeepSeek REVISE verdicts on merged head `f8b8b321…` make `assertExactDurab
 
 ## 6. Exact next steps (ordered)
 
-1. Re-read LIVE `origin/main`.
-2. ONE Muse fence APPROVE at PR #4047 head `e35c1ecde901b55e7ed3a343da685d5f2c4c7a37` with `production-risk-assessment` `main_sha` = that tip, `ordered_allowlist:["20261007190954"]`, `source_pr:4047`. `AI_MUSE_CALLER=claude`, `-- new <session> --prompt-file`. Force-emit the filled fence JSON.
-3. Immediately: `C:/repos/ai-devops/tmp/3947-fire-production-apply-fwd.sh <main_sha> e35c1ecde…` (preview apply of `20261007190954` + automatic production promotion).
-4. Ledger proof `20261007190954` on production (READ ONLY).
-5. Run `C:/repos/ai-devops/tmp/3947-live-proof-queries.sql` on production (READ ONLY). Gate: zero FAIL rows (Warner / Sesame / Lucasfilm-Disney).
-6. Signed comment on #3947, tick checklist. App-owned live artifact (u2giants/popdam3 `shared-db-live-proof-3947-<sha>`) may remain — leave that item on #3947 if so. Close only when the whole expanded issue is delivered.
-7. Retire this handoff when done.
+**Do not try to promote `20261007190954` or `20261007020907` — both heads are pinned.**
+
+1. Author a SECOND forward replacement (new reserved version, same function body) in a NEW worktree from `origin/main`. Use `--reissue-merged-stranded-claim` on claim #3955 (it now holds `20261007190954` which is also merged-stranded). Open PR with `Closes #3947`.
+2. Fresh governed reviews: **Muse and Gemini ONLY**. Never DeepSeek, never StepFun on this issue. Each findings must include a `production-risk-assessment` fence with `main_sha` = LIVE tip at issue time, `ordered_allowlist:["<new version>"]`, `source_pr:<new PR>`.
+3. Merge via guarded path (body must say `Closes #3947`).
+4. In ONE tight breath: re-read main → Muse fence at live tip → immediately dispatch preview apply + auto production promotion of the NEW version (do not reuse `historical_preview_original_run_map` for a never-applied version; use `merged_preview_source_pr=<new PR>`).
+5. Ledger proof of the NEW version on production (READ ONLY).
+6. Run `C:/repos/ai-devops/tmp/3947-live-proof-queries.sql` on production (READ ONLY). Gate: zero FAIL rows.
+7. Signed comment on #3947, tick checklist. App-owned live artifact may remain as a checklist item. Close only when fully delivered.
 
 ---
 

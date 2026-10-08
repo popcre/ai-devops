@@ -1,0 +1,33 @@
+# Slot-6 governed DeepSeek review brief — shared-db #3947 / PR #3957 (draft)
+
+> Preparation-only artifact. Not a verdict. `fee69a25ffd9b39c2b3accfde680dfbac3aa54f5` was the prior promoted tip;
+> LIVE `origin/main` is now `7037db734c36a5392524099b3749a650e309195c` (re-read before this brief was issued).
+
+---
+
+You are the assigned production-risk reviewer for a merged shared-db migration.
+Review the governed evidence packet completely, then answer with the block and the
+terminal verdict line below. Do not stop at the first problem.
+
+Scope: PR #3957 (issue #3947), reviewed head `f8b8b32139380911c315001238e63a149af5fda9`,
+migration `20261007020907` (`scraped_inventory_warner_fallback_sesame_value_key_dedupe.sql`).
+Function-body change to `api.db_data_admin_scraped_source_inventory` (Scraped Properties
+display dedupe): Warner fallback-twin hide, Sesame `value_key` collapse, Lucasfilm/Disney
+display dedupe. Claim #3955, exclusive object `function api.db_data_admin_scraped_source_inventory`.
+
+Assess exactly the three risk classes the production gate derives. Each assessment
+string must be substantive (at least 40 characters) and must speak to THIS change.
+
+Include EXACTLY ONE fenced block in your findings, shaped exactly like this
+(`7037db734c36a5392524099b3749a650e309195c` already replaced):
+
+```production-risk-assessment
+{"schema":"shared-db-production-risk-assessment/v1","main_sha":"d241515e9454b663d8f2d49258820e089f15863a","ordered_allowlist":["20261007020907"],"source_pr":3957,"assessed_risks":{"material_access_change":"No access-control or permission change is introduced: the migration replaces only the body of api.db_data_admin_scraped_source_inventory and does not alter roles, grants, RLS policies, or the existing authenticated licensing gate that already guards the function.","permanent_data_rewrite_or_loss":"No table rows are rewritten or deleted: the function body only collapses duplicate display rows (Warner fallback-twin hide, Sesame value_key collapse, Lucasfilm/Disney display dedupe) at read time, leaving underlying scraped inventory, decisions, and source rows untouched and recoverable.","expected_downtime":"No planned downtime: CREATE OR REPLACE FUNCTION on a read path is transactional and brief; concurrent readers may see the old or new body for the duration of the statement only, with no exclusive table lock and no service interruption expected."}}
+```
+
+End your findings with exactly one terminal line:
+
+VERDICT: APPROVE f8b8b32139380911c315001238e63a149af5fda9
+
+(If the evidence shows a real defect, use `VERDICT: REVISE <same head>` or
+`VERDICT: REJECT <same head>` instead and explain — never approve around a defect.)
