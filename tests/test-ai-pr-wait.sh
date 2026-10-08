@@ -579,6 +579,10 @@ printf '%s\n' "$*" >> "$EVIDENCE_CALLS"
 printf '{"data":{"repository":{"pullRequest":{"state":"%s","mergedAt":"2026-01-01T00:00:00Z","closedAt":"2026-01-01T00:00:00Z","headRefOid":"abc","isInMergeQueue":false,"mergeCommit":{"oid":"abc"}}}}}\n' "$EVIDENCE_TERMINAL"
 EOF
 chmod +x "$TMP/evidence-bin/gh"
+case "$(uname -s 2>/dev/null || true)" in
+  Linux) expected_local_reason=source_unknown ;;
+  *) expected_local_reason=clock_unknown ;;
+esac
 for terminal in MERGED CLOSED; do
   for broken in 0 1; do
     state="$TMP/native-evidence-$terminal-$broken"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
@@ -593,7 +597,7 @@ for terminal in MERGED CLOSED; do
       "[ '$rc' -eq '$expected' ] && grep -q '$terminal' '$state/output' && [ \"\$(wc -l < '$calls')\" -eq 1 ] && grep -q 'mergedAt closedAt' '$calls'"
     if [ "$broken" = 0 ]; then
       check 'native terminal companion is consistent and never claims source or clock proof' \
-        "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq -e '.workflow_evidence_records == 1 and .local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \"source_unknown\" and .qualified_latency_ms.count == 0'"
+        "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq --arg expected '$expected_local_reason' -e '.workflow_evidence_records == 1 and .local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \$expected and .qualified_latency_ms.count == 0'"
     else
       check 'observer write failure remains a visible measurement gap' "grep -q 'workflow evidence not saved' '$state/output'"
     fi
