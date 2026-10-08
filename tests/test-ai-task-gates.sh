@@ -1177,7 +1177,8 @@ check 'an action-gate naming an undeclared class fails closed' \
 # release of deployment actions or the reviewer-safety refusal.
 APP="$TMP/application-release"
 newrepo "$APP" popcre/designflow-backend
-( cd "$APP" && "$GATES" start --class deployment >/dev/null 2>&1 )
+APP_BASE="$(git -C "$APP" rev-parse HEAD)"
+( cd "$APP" && "$GATES" start --class deployment --base "$APP_BASE" >/dev/null 2>&1 )
 mkdir -p "$APP/.ai-devops"
 cat > "$APP/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"paths":[{"glob":"src/router.ts","class":"reviewer-safety"}],"gates":{"deployment":{"required":["cloud-build-release-review"]}}}
@@ -1194,6 +1195,8 @@ git -C "$APP" add .ai-devops/task-gates.json .ai-devops/application-release-targ
 git -C "$APP" commit -qm 'declare reviewed sandbox source target'
 APP_HEAD="$(git -C "$APP" rev-parse HEAD)"
 APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
+check 'application release fixture actually contains a changed reviewer-safety router' \
+  "out '$APP' explain --json | jq -e '.changes | any(.class==\"reviewer-safety\" and .path==\"src/router.ts\")' >/dev/null"
 check 'mixed protected application source keeps the generic deployment refusal' \
   "rc 3 '$APP' check --before deploy --reviewer-approval '$APP_APPROVAL'"
 check 'the exact committed application source target records its independent approval' \
