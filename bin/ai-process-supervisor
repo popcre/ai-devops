@@ -52,7 +52,14 @@ def posix_main(
             except ProcessLookupError:
                 pass
             deadline = time.monotonic() + 3
-        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check():
+        try:
+            os.killpg(pgid, 0)
+            group_alive = True
+        except ProcessLookupError:
+            group_alive = False
+        except PermissionError:
+            group_alive = True
+        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check(final=direct_rc is not None and not group_alive):
             stop_requested = True
             try:
                 os.killpg(pgid, signal.SIGTERM)
@@ -66,13 +73,6 @@ def posix_main(
             except ProcessLookupError:
                 pass
             deadline = time.monotonic() + 3
-        try:
-            os.killpg(pgid, 0)
-            group_alive = True
-        except ProcessLookupError:
-            group_alive = False
-        except PermissionError:
-            group_alive = True
         if direct_rc is not None and not group_alive:
             if stop_requested:
                 if credit_monitor and credit_monitor.publication_failed:
@@ -183,7 +183,12 @@ def windows_main(
                 error = ctypes.get_last_error()
                 kernel32.CloseHandle(job)
                 die(f"TerminateJobObject failed ({error})")
-        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check():
+        accounting = Accounting()
+        if not kernel32.QueryInformationJobObject(job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
+            kernel32.TerminateJobObject(job, 1)
+            kernel32.CloseHandle(job)
+            die(f"QueryInformationJobObject failed ({ctypes.get_last_error()})")
+        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check(final=direct_rc is not None and accounting.ActiveProcesses == 0):
             stop_requested = True
             if not kernel32.TerminateJobObject(job, 92):
                 error = ctypes.get_last_error()
@@ -195,11 +200,6 @@ def windows_main(
                 error = ctypes.get_last_error()
                 kernel32.CloseHandle(job)
                 die(f"TerminateJobObject failed ({error})")
-        accounting = Accounting()
-        if not kernel32.QueryInformationJobObject(job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
-            kernel32.TerminateJobObject(job, 1)
-            kernel32.CloseHandle(job)
-            die(f"QueryInformationJobObject failed ({ctypes.get_last_error()})")
         if direct_rc is not None and accounting.ActiveProcesses == 0:
             kernel32.CloseHandle(job)
             if stop_requested:

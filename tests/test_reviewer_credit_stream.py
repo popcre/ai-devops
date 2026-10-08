@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -256,6 +257,48 @@ class CreditStreamTests(unittest.TestCase):
             _, err = child.communicate(timeout=5)
             self.assertEqual(child.returncode, code, err)
             self.assertFalse(self.marker.exists())
+
+    def test_final_check_bypasses_interval_and_finds_bounded_terminal_tail(self):
+        monitor = Monitor("qwen", str(self.out), str(self.err), str(self.marker))
+        self.assertFalse(monitor.check())
+        monitor.next_check = time.monotonic() + 60
+        date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=24)).replace(microsecond=0)
+        message = "Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at " + date.strftime("%m-%d %H:%M:%S") + " UTC."
+        terminal = json.dumps({"type": "result", "is_error": True, "error": {"message": message}})
+        self.out.write_text(json.dumps({"type": "assistant", "text": "x" * (LIMIT * 3)}) + "\n" + terminal + "\n")
+        self.assertFalse(monitor.check())
+        self.assertTrue(monitor.safe_check(final=True))
+        receipt = json.loads(self.marker.read_text())
+        self.assertEqual(receipt["reset_at"], date.isoformat().replace("+00:00", "Z"))
+        self.assertLessEqual(sum(reader.bytes_read for reader in monitor.readers), LIMIT)
+
+    def test_fast_terminal_refusal_is_preserved_before_child_exit(self):
+        source = f"import json;open({str(self.out)!r},'w').write(json.dumps({{'type':'error','error':{{'message':'out of credits'}}}})+'\\n')"
+        child = self.run_supervisor(source)
+        _, err = child.communicate(timeout=5)
+        self.assertEqual(child.returncode, 92, err)
+        self.assertEqual(json.loads(self.marker.read_text())["failure_class"], "out-of-credit")
+
+    def test_final_tail_never_promotes_assistant_quoted_error(self):
+        monitor = Monitor("muse", str(self.out), str(self.err), str(self.marker))
+        self.assertFalse(monitor.check())
+        self.out.write_text("x" * (LIMIT * 2) + "\n" + json.dumps({"type": "assistant", "error": {"message": "out of credits"}}) + "\n")
+        self.assertFalse(monitor.safe_check(final=True))
+        self.assertFalse(self.marker.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX group accounting; native Windows proof uses Job Object")
+    def test_direct_child_exit_keeps_normal_checks_until_owned_group_ends(self):
+        loader = importlib.machinery.SourceFileLoader("credit_supervisor_fixture", str(ROOT / "bin/ai-process-supervisor"))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        supervisor = importlib.util.module_from_spec(spec)
+        loader.exec_module(supervisor)
+        child = mock.Mock(pid=123, poll=mock.Mock(return_value=0))
+        monitor = mock.Mock(safe_check=mock.Mock(return_value=False))
+        with mock.patch.object(supervisor.subprocess, "Popen", return_value=child), \
+             mock.patch.object(supervisor.os, "killpg", side_effect=[None, None, ProcessLookupError()]), \
+             mock.patch.object(supervisor.signal, "signal"), mock.patch.object(supervisor.time, "sleep"):
+            self.assertEqual(supervisor.posix_main(["fixture"], credit_monitor=monitor), 0)
+        self.assertEqual(monitor.safe_check.call_args_list, [mock.call(final=False), mock.call(final=False), mock.call(final=True)])
 
     @unittest.skipIf(os.name == "nt", "POSIX signal proof; Windows Job Object runs in CI")
     def test_cancellation_and_sibling_survive(self):

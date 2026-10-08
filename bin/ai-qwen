@@ -1597,6 +1597,9 @@ cmd_doctor() {
         return 1
       fi
       rc=1
+      # Consume this probe's structured refusal before removing its stream.
+      # Only its supervisor receipt carries qualified subscription reset dates.
+      reviewer_capacity_current qwen "$tmp" || true
       # A billing refusal stops the doctor with exit 92 and the top-up line.
       provider_api_error "$tmp" > "$tmp.credit" 2>/dev/null || : > "$tmp.credit"
       reviewer_credit_scan qwen "$tmp.err" "$tmp.credit" || true

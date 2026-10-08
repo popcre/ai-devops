@@ -125,7 +125,7 @@ class Reader:
         self.discard_line = False
         self.stderr_error_frame = False
 
-    def read(self, provider: str) -> dict | None:
+    def read(self, provider: str, final: bool = False) -> dict | None:
         try:
             with open(self.path, "rb") as handle:
                 stat = os.fstat(handle.fileno())
@@ -134,6 +134,12 @@ class Reader:
                     self.offset, self.pending, self.discard_line = 0, b"", False
                     self.stderr_error_frame = False
                 self.identity = identity
+                # A fast exit can leave a terminal frame beyond the unread
+                # prefix. Inspect only the bounded tail; skip its partial line.
+                if final and stat.st_size - self.offset > LIMIT:
+                    self.offset = stat.st_size - LIMIT
+                    self.pending, self.discard_line = b"", True
+                    self.stderr_error_frame = False
                 handle.seek(self.offset)
                 data = handle.read(LIMIT)
                 self.offset += len(data)
@@ -196,22 +202,22 @@ class Monitor:
         self.hit = False
         self.publication_failed = False
 
-    def safe_check(self) -> bool:
+    def safe_check(self, final: bool = False) -> bool:
         try:
-            return self.check()
+            return self.check(final=final)
         except OSError:
             self.publication_failed = True
             return True # The supervisor must tear down its own tree on failure.
 
-    def check(self) -> bool:
+    def check(self, final: bool = False) -> bool:
         if self.hit:
             return True
         now = time.monotonic()
-        if now < self.next_check:
+        if not final and now < self.next_check:
             return False
         self.next_check = now + INTERVAL
         for reader in self.readers:
-            receipt = reader.read(self.provider)
+            receipt = reader.read(self.provider, final=final)
             if receipt:
                 # mkstemp-reserved parent directory belongs to this invocation.
                 descriptor = os.open(self.marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
