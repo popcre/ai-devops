@@ -36,6 +36,8 @@ class NativeProfile(unittest.TestCase):
         cls.config = json.loads((ROOT / "config/review-action-profiles.json").read_text())
         cls.p = cls.config["profiles"][profile.PROFILE]
         cls.p["source_host_sha256"] = hashlib.sha256(b"192.0.2.1").hexdigest()
+        cls.target_ref = "synthetic770destination"
+        cls.p["target_ref_sha256"] = hashlib.sha256(cls.target_ref.encode()).hexdigest()
         for path in cls.p["paths"]:
             target = cls.repo / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +70,7 @@ class NativeProfile(unittest.TestCase):
         def replace_json(path, value):
             Path(path).write_text(json.dumps(value))
         replace_json(cls.m["source_config"], {"host": "192.0.2.1", "user": "albert_read_only", "dbname": "postgres", "port": 5432, "sslmode": "verify-ca", "sslrootcert": source_ca, "password": "synthetic-never-transmitted", "connect_timeout": 5})
-        replace_json(cls.m["destination_config"], {"host": "aws-0-us-east-1.pooler.supabase.com", "user": "postgres." + cls.p["target_ref"], "dbname": "postgres", "port": 5432, "runtime_port": 6543, "sslmode": "verify-full", "sslrootcert": target_ca, "password": "synthetic-never-transmitted", "connect_timeout": 5})
+        replace_json(cls.m["destination_config"], {"host": "aws-0-us-east-1.pooler.supabase.com", "user": "postgres." + cls.target_ref, "dbname": "postgres", "port": 5432, "runtime_port": 6543, "sslmode": "verify-full", "sslrootcert": target_ca, "password": "synthetic-never-transmitted", "connect_timeout": 5})
         runtime = cls.work / "runtime"
         runtime.mkdir(mode=0o700)
         (runtime / "fixture").write_text("isolated runtime fixture")
@@ -97,7 +99,7 @@ class NativeProfile(unittest.TestCase):
         cls.m["pglast_dependency"] = {"interpreter": str(interpreter), "interpreter_sha256": profile.file_hash(interpreter)[0], "version": "8.5", "abi": "synthetic-bound-abi", "root": str(parser_root), "files": rows, "closure_sha256": profile.sha(profile.canonical(rows))}
         mappings = {"auth_dependency_bootstrap": "scripts/cutover-recovery/schema/auth_dependency_bootstrap.sql", "tuple_constraint_contract": "scripts/cutover-rehearsal/contracts/tuple_constraint_contract.json", "tuple_preflight_tool": "scripts/cutover-rehearsal/tuple_preflight.py", "recovery_tool": "scripts/cutover-recovery/designflow-recovery.py", "postwrite_runner": "scripts/cutover-recovery/postwrite_bwrap.py", "postwrite_runtime_helper": "scripts/cutover-recovery/bwrap_restore.py", "networked_client_tool": "scripts/cutover-recovery/networked_client.py", "credential_tool": "scripts/cutover/issue_designflow_credentials.py", "custody_tool": "scripts/cutover/service_credential_custody.py"}
         cls.m.update({field: str(cls.repo / relative) for field, relative in mappings.items()})
-        cls.m.update(target_ref=cls.p["target_ref"], schema="dflow_prod", preparation_scope="TIMING_ONLY", issue_isolated_credentials=False, authorization_attested=False, action_authority={"root_action_authorized": False, "status": "PENDING_NEW_EXACT_REVIEW_AND_ROOT_DECISION"}, verdict="PENDING", postwrite_runtime_closure_sha256=closure)
+        cls.m.update(target_ref=cls.target_ref, schema="dflow_prod", preparation_scope="TIMING_ONLY", issue_isolated_credentials=False, authorization_attested=False, action_authority={"root_action_authorized": False, "status": "PENDING_NEW_EXACT_REVIEW_AND_ROOT_DECISION"}, verdict="PENDING", postwrite_runtime_closure_sha256=closure)
         future = [str(cls.inputs / ("future-" + str(i) + ".json")) for i in range(5)]
         cls.m["future_outputs_nonexistence"] = {path: True for path in future}
         cls.m["original_restoration_result"] = future[0]
@@ -135,7 +137,7 @@ class NativeProfile(unittest.TestCase):
 import json,sys,re,os
 from pathlib import Path
 a=sys.argv; out=a[a.index('-o')+1]; req=json.loads(Path(a[a.index('-d')+1][1:]).read_text()); text='\\n'.join(x['content'] for x in req['messages']); head=re.search(r'Synthetic review HEAD: ([a-f0-9]{40})',text)[1]; descriptor_match=re.search(r'Exact canonical operational descriptor sha256: ([a-f0-9]{64})',text); descriptor=descriptor_match[1] if descriptor_match else '0'*64
-assert 'synthetic-never-transmitted' not in text
+assert 'synthetic-never-transmitted' not in text and 'synthetic770destination' not in text
 with (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'curl-calls').open('a') as calls: calls.write('dispatch\\n')
 content='The complete selected runtime code and typed contract were reviewed. The immutable operational descriptor covers exactly the isolated timing rehearsal, disabled credentials and callbacks, and mandatory original restoration. This approval is bounded to the stated profile and descriptor and confers no production or root action authority.\\nAction scope: shared-db-770-isolated-timing-rehearsal-v1 descriptor sha256:'+descriptor+'.\\nVERDICT: APPROVE '+head+'\\n\\n'
 if (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'mock-revise').exists(): content=content.replace('VERDICT: APPROVE ', 'VERDICT: REVISE ')

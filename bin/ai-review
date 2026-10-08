@@ -311,7 +311,8 @@ if [ "$code_only" -eq 1 ]; then
   lifecycle_state="$("$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
   if [ -n "$action_profile" ]; then
     descriptor="$(jq -r .action_profile_binding.manifest_descriptor_sha256 "$lifecycle_state")"
-    code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated target dgmebpgczkrxykqqfjev schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
+    target_identity="$(jq -r .action_profile_binding.target_ref_sha256 "$lifecycle_state")"
+    code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated destination identity sha256:$target_identity schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
   fi
   lifecycle_started=$SECONDS
   code_only_abort() {

@@ -135,7 +135,7 @@
       ],
       "schema": "dflow_prod",
       "source_host_sha256": "67b2a6290a92e6a9f833aecacaf59654d97c9db2513e3c5a60600e299aa06d15",
-      "target_ref": "dgmebpgczkrxykqqfjev"
+      "target_ref_sha256": "f3bb365eb5cb7bec231af99cfefd9701cdfc6cdf299049e4a985f77f241d549c"
     }
   },
   "schema_version": 1

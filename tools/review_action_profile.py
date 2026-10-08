@@ -167,7 +167,8 @@ def action_binding(state, manifest, phase, stage="initial-forward"):
     record = _native.validate_snapshot(Path(state["code_only_export"]), state["head"])
     require(record == state["code_only"] and record["paths"] == profile["paths"], "selected paths do not cover the complete action implementation")
     require(isinstance(manifest, dict) and set(manifest) == set(profile["manifest_keys"]), "operational action manifest schema differs")
-    for field in ("target_ref", "schema", "preparation_scope", "issue_isolated_credentials"):
+    require(isinstance(manifest.get("target_ref"), str) and sha(manifest["target_ref"].encode()) == profile["target_ref_sha256"], "isolated target hash differs")
+    for field in ("schema", "preparation_scope", "issue_isolated_credentials"):
         require(manifest[field] == profile[field] and type(manifest[field]) is type(profile[field]), "bounded target or flags differ")
     require(manifest["verdict"] in ("PENDING", "APPROVE"), "invalid action review binding status")
     require(manifest["authorization_attested"] is False and manifest["action_authority"]["root_action_authorized"] is False, "eligibility cannot invent root action authority")
@@ -207,7 +208,7 @@ def action_binding(state, manifest, phase, stage="initial-forward"):
     require(set(source) == connection_keys and set(target) == connection_keys | {"runtime_port"}, "connection descriptor contains unreviewed options")
     require(all(type(config["connect_timeout"]) is int and 1 <= config["connect_timeout"] <= 30 and isinstance(config["password"], str) and config["password"] for config in (source, target)), "bounded connection credentials descriptor differs")
     require(sha(str(source.get("host", "")).encode()) == profile["source_host_sha256"] and source.get("user") == "albert_read_only" and source.get("dbname") == "postgres" and source.get("port") == 5432 and source.get("sslmode") == "verify-ca", "source read-only identity differs")
-    require(target.get("user") == "postgres." + profile["target_ref"] and target.get("dbname") == "postgres" and target.get("host") == "aws-0-us-east-1.pooler.supabase.com" and target.get("port") == 5432 and target.get("runtime_port") == 6543 and target.get("sslmode") == "verify-full", "isolated destination identity differs")
+    require(target.get("user") == "postgres." + manifest["target_ref"] and target.get("dbname") == "postgres" and target.get("host") == "aws-0-us-east-1.pooler.supabase.com" and target.get("port") == 5432 and target.get("runtime_port") == 6543 and target.get("sslmode") == "verify-full", "isolated destination identity differs")
     require(source["sslrootcert"] in inputs and target["sslrootcert"] in inputs, "TLS root input is not immutable")
     dep = manifest["pglast_dependency"]
     require(set(dep) == {"interpreter", "interpreter_sha256", "abi", "version", "root", "files", "closure_sha256"} and dep["version"] == "8.5" and dep["interpreter_sha256"] == inputs[interpreter], "parser runtime descriptor differs")
@@ -235,7 +236,7 @@ def action_binding(state, manifest, phase, stage="initial-forward"):
                 mount_private(item)
                 file_hash(item, private=True)
     descriptor = {key: value for key, value in manifest.items() if key not in BINDINGS}
-    return {"profile": PROFILE, "profile_sha256": profile_digest, "action": "database", "manifest_descriptor_sha256": sha(canonical(descriptor)), "immutable_input_sha256": sha(canonical(actual)), "task": task_identity(repo), "path_set_sha256": profile["path_set_sha256"], "entrypoint": profile["entrypoint"], "target_ref": profile["target_ref"], "schema": profile["schema"], "root_action_authority": False, "future_output_leaves": sorted(manifest["future_outputs_nonexistence"])}
+    return {"profile": PROFILE, "profile_sha256": profile_digest, "action": "database", "manifest_descriptor_sha256": sha(canonical(descriptor)), "immutable_input_sha256": sha(canonical(actual)), "task": task_identity(repo), "path_set_sha256": profile["path_set_sha256"], "entrypoint": profile["entrypoint"], "target_ref": manifest["target_ref"], "target_ref_sha256": profile["target_ref_sha256"], "schema": profile["schema"], "root_action_authority": False, "future_output_leaves": sorted(manifest["future_outputs_nonexistence"])}
 
 
 def receipt_binding(state, binding):

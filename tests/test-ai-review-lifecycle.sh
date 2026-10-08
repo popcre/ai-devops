@@ -13,6 +13,8 @@ PASS=0; FAIL=0
 # file, where it is switched back on.
 export AI_DEVOPS_TEST_MODE=1
 export AI_TASK_GATES_MODE=none
+# Fixture provenance is explicit; CI must not inherit a desktop engine identity.
+unset AI_IMPLEMENTER_ENGINE CODEX_THREAD_ID CODEX_SANDBOX CLAUDECODE AI_REVIEW_IMPLEMENTER
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q
@@ -302,14 +304,17 @@ export AI_TEST_PRIVATE_TRACKED="$TMP/private-review-tracked"
 export AI_TEST_PRIVATE_EXPOSURE="$TMP/private-review-exposure"
 export AI_TEST_PRIVATE_SOURCE="$PRIVATE"
 PRIVATE_HEAD="$(git -C "$PRIVATE" rev-parse HEAD)"
-PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
+PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
 check "private stub reaches an exact export but cannot create approval authority" "[ '$PRIVATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
 check "private export hides raw rows, untracked prompts, Git history, and source path" "[ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
 check "private review compares synthetic base and exact synthetic head" "grep -qx -- '--base' '$AI_TEST_PRIVATE_ARGS' && grep -qx 'HEAD~1' '$AI_TEST_PRIVATE_ARGS' && grep -qx -- '--assert-head' '$AI_TEST_PRIVATE_ARGS'"
-MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
+rm -f "$AI_TEST_PRIVATE_ARGS"
+UNKNOWN_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; UNKNOWN_RC=$?
+check "unknown implementing engine refuses before provider despite a valid selected export" "[ '$UNKNOWN_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q -- '--caller must be a safe non-empty identifier'"
+MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
 check "private review refuses a verdict when unselected source changes during provider work" "[ '$MUTATE_RC' -ne 0 ] && printf '%s' \"\$MUTATE_OUT\" | grep -q 'verdict refused'"
 check "a stale private result never prints an APPROVE token" "! printf '%s' \"\$MUTATE_OUT\" | grep -q 'VERDICT: APPROVE'"
-TESTS_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --tests 'cat evidence/raw.csv' 2>&1)"; TESTS_RC=$?
+TESTS_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --tests 'cat evidence/raw.csv' 2>&1)"; TESTS_RC=$?
 check "private code-only route refuses arbitrary tests commands before provider" "[ '$TESTS_RC' -ne 0 ] && printf '%s' \"\$TESTS_OUT\" | grep -q 'does not accept a tests command'"
 CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
 check "private code-only route refuses tool-capable CLI reviewers before provider" "[ '$CLI_RC' -ne 0 ] && printf '%s' \"\$CLI_OUT\" | grep -q 'attachment-only DeepSeek'"
@@ -323,7 +328,7 @@ for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-revie
 done
 printf '["evidence/raw.csv"]\n' > "$TMP/raw-paths.json"
 rm -f "$AI_TEST_PRIVATE_ARGS"
-RAW_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/raw-paths.json" 2>&1)"; RAW_RC=$?
+RAW_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/raw-paths.json" 2>&1)"; RAW_RC=$?
 check "private code-only route refuses a raw-evidence selection before provider" "[ '$RAW_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ]"
 
 # Exercise the real attachment-only DeepSeek wrapper without a network call.
@@ -364,7 +369,7 @@ EOF
 chmod +x "$TMP/private-mock-bin/curl"
 DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
 DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
-NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
+NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
 [ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet|code-only' | tail -8)" >&2
 check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
 check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"
