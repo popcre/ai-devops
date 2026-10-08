@@ -241,6 +241,17 @@ for case in wrong-head wrong-caller wrong-provider wrong-session wrong-run wrong
   if "$PYTHON" -c 'import os,sys;sys.exit(0 if os.name=="nt" else 1)';then
    printf '  note %s is a POSIX mode-bit negative; unavailable on native Windows\n' "$case"
    continue
+  fi;;
+ symlink)
+  # A Windows account without SeCreateSymbolicLinkPrivilege (the runner
+  # service on a self-hosted host) cannot create the fixture's symlink at all.
+  # Probe instead of failing; every other binding case still runs.
+  if ! "$PYTHON" -c 'import os,sys,tempfile
+d=tempfile.mkdtemp()
+try: os.symlink(os.path.join(d,"t"),os.path.join(d,"l"))
+except OSError: sys.exit(1)' 2>/dev/null;then
+   printf '  note %s negative needs symlink privilege; unavailable for this account\n' "$case"
+   continue
   fi;; esac
  # Reset only this owned fixture evidence; each receipt has a distinct path.
  rm -f "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.json" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.owned" "$FIXTURE/lifecycle/diagnostics/$(printf '%064d' 0 | tr 0 a)/glm/codex/historical-run.linked"
