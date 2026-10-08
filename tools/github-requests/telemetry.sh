@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # P1 collector owned by #658. No request/response text reaches this file.
 # Sourced by ai-gh; opaque CLI executions are estimates, never HTTP counts.
+GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=0
+GH_MEASURE_LOCAL_PLATFORM=unknown
 gh_measure_init(){
   gh_measure_clock
   GH_MEASURE_START="$GH_MEASURE_CLOCK"
@@ -43,6 +45,64 @@ gh_measure_clock(){
   else
     GH_MEASURE_CLOCK=$(date +%s%3N)
   fi
+}
+
+# Independent local observation clock.  The waiter calls this exactly at its
+# two boundary points; it never falls back to wall time or a configurable
+# source.  /proc/uptime reports BOOTTIME in seconds with centisecond precision.
+gh_measure_local_clock_parse(){
+  GH_MEASURE_LOCAL_CLOCK_MS=''
+  GH_MEASURE_LOCAL_CLOCK_BASIS=unknown
+  local uptime="${1:-}" seconds centis
+  [[ "$uptime" =~ ^([0-9]{1,10})\.([0-9]{2})$ ]] || return 0
+  seconds="${BASH_REMATCH[1]}"
+  centis="${BASH_REMATCH[2]}"
+  seconds=$((10#$seconds))
+  centis=$((10#$centis))
+  GH_MEASURE_LOCAL_CLOCK_MS=$((seconds * 1000 + centis * 10))
+  [ "$GH_MEASURE_LOCAL_CLOCK_MS" -le 9999999999999 ] || { GH_MEASURE_LOCAL_CLOCK_MS=''; return 0; }
+  GH_MEASURE_LOCAL_CLOCK_BASIS=linux_boottime_centiseconds
+}
+
+gh_measure_local_clock(){
+  GH_MEASURE_LOCAL_CLOCK_MS=''
+  GH_MEASURE_LOCAL_CLOCK_BASIS=unknown
+  if [ "$GH_MEASURE_LOCAL_PLATFORM_INITIALIZED" -eq 0 ]; then
+    GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=1
+    [ "$(uname -s 2>/dev/null || true)" = Linux ] && GH_MEASURE_LOCAL_PLATFORM=linux
+  fi
+  [ "$GH_MEASURE_LOCAL_PLATFORM" = linux ] || return 0
+  local uptime
+  IFS=' ' read -r uptime _ < /proc/uptime 2>/dev/null || return 0
+  gh_measure_local_clock_parse "$uptime"
+}
+
+gh_measure_local_observation(){
+  local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown lower=null upper=null error=null start_json=null end_json=null
+  case "$outcome" in merged|closed|checks_failed|ejected|deadline) ;; *) return 2 ;; esac
+  [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
+  if [ "$output_failed" = 1 ]; then
+    reason=delivery_unknown
+  elif [ "$basis" = linux_boottime_centiseconds ] && [[ "$start" =~ ^[0-9]{1,13}$ ]] && [[ "$end" =~ ^[0-9]{1,13}$ ]]; then
+    start_json="$start"; end_json="$end"
+    if [ "$end" -lt "$start" ]; then
+      reason=clock_negative
+      start_json=null; end_json=null
+    else
+      local elapsed=$((end - start))
+      if [ "$elapsed" -le 604800000 ]; then
+        lower=$((elapsed - 20)); [ "$lower" -lt 0 ] && lower=0
+        upper=$((elapsed + 20)); error=20; reason=source_unknown
+      else
+        reason=clock_negative
+        start_json=null; end_json=null
+      fi
+    fi
+  fi
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":5,"utc":"%s","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","outcome":"%s","boundary":"receipt_init_to_terminal_output","clock_basis":"%s","start_monotonic_ms":%s,"end_monotonic_ms":%s,"duration_lower_ms":%s,"duration_upper_ms":%s,"clock_error_bound_ms":%s,"source_verified":"unknown","acceptance":"unknown","unknown_reason":"%s"}' \
+    "$utc" "$id" "$outcome" "$basis" "$start_json" "$end_json" "$lower" "$upper" "$error" "$reason")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
 gh_measure_finish(){

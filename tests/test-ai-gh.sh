@@ -888,4 +888,55 @@ for mutation in '.caller = "interactive"' '.bucket = "unknown"'; do
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/operation-invalid-report" >/dev/null 2>&1; operation_rc=$?
   check "transformed caller label rejects invalid metadata: $mutation" "[ $operation_rc -eq 1 ]"
 done
+source "$ROOT/tools/github-requests/telemetry.sh"
+for fixture in '123.45' '0.00' '9999999999.99'; do
+  gh_measure_local_clock_parse "$fixture"
+  check "local_clock_valid_$fixture" "[ '$GH_MEASURE_LOCAL_CLOCK_BASIS' = linux_boottime_centiseconds ] && [ '$GH_MEASURE_LOCAL_CLOCK_MS' -ge 0 ]"
+done
+for fixture in '' '1' '1.2' '1.234' '-1.00' '10000000000.00' '1.00x'; do
+  gh_measure_local_clock_parse "$fixture"
+  check "local_clock_invalid_unknown_${fixture:-empty}" "[ '$GH_MEASURE_LOCAL_CLOCK_BASIS' = unknown ] && [ -z '$GH_MEASURE_LOCAL_CLOCK_MS' ]"
+done
+local_state="$TMP/local-duration-state"; mkdir -p "$local_state/measurements"; chmod 700 "$local_state/measurements"
+local_id=0123456789abcdef0123456789abcdef
+AI_GH_STATE_DIR="$local_state" gh_measure_workflow_outcome ai-pr-wait pr_wait "$local_id" checks_failed 100
+AI_GH_STATE_DIR="$local_state" gh_measure_local_observation "$local_id" checks_failed 1000 2100 linux_boottime_centiseconds 0
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$local_state/measurements" > "$TMP/local-report"; rc=$?
+check 'local observation joins one schema-3 receipt and stays unqualified' \
+  "[ '$rc' -eq 0 ] && jq -e '.local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \"source_unknown\" and .qualified_latency_ms.count == 0' '$TMP/local-report'"
+for bad in duplicate dangling mismatch forged extra bool missing repeated-key interval partial basis; do
+  d="$TMP/local-invalid-$bad"; mkdir -p "$d"; f="$d/2026-10-08.jsonl"
+  receipt='{"schema":3,"utc":"2026-10-08T00:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":100}'
+  observation='{"schema":5,"utc":"2026-10-08T00:00:00Z","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","boundary":"receipt_init_to_terminal_output","clock_basis":"linux_boottime_centiseconds","start_monotonic_ms":1000,"end_monotonic_ms":1100,"duration_lower_ms":80,"duration_upper_ms":120,"clock_error_bound_ms":20,"source_verified":"unknown","acceptance":"unknown","unknown_reason":"source_unknown"}'
+  printf '%s\n' "$receipt" > "$f"
+  case "$bad" in
+    duplicate) printf '%s\n%s\n' "$observation" "$observation" >> "$f" ;;
+    dangling) jq -c '.workflow_id="fedcba9876543210fedcba9876543210"' <<<"$observation" >> "$f" ;;
+    mismatch) jq -c '.outcome="merged"' <<<"$observation" >> "$f" ;;
+    forged) jq -c '.source_verified="verified"' <<<"$observation" >> "$f" ;;
+    extra) jq -c '.extra="x"' <<<"$observation" >> "$f" ;;
+    bool) jq -c '.start_monotonic_ms=true' <<<"$observation" >> "$f" ;;
+    missing) jq -c 'del(.boundary)' <<<"$observation" >> "$f" ;;
+    repeated-key) printf '%s\n' "${observation/\"schema\":5/\"schema\":5,\"schema\":5}" >> "$f" ;;
+    interval) jq -c '.duration_upper_ms=121' <<<"$observation" >> "$f" ;;
+    partial) jq -c '.end_monotonic_ms=null' <<<"$observation" >> "$f" ;;
+    basis) jq -c '.clock_basis="unknown"' <<<"$observation" >> "$f" ;;
+  esac
+  "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" >/dev/null 2>&1; rc=$?
+  check "local_observation_${bad}_rejected" "[ '$rc' -eq 1 ]"
+done
+for fixture in '2100 1000 linux_boottime_centiseconds 0 clock_negative' '0 604800001 linux_boottime_centiseconds 0 clock_negative' '1000 2100 unknown 0 clock_unknown' '1000 2100 linux_boottime_centiseconds 1 delivery_unknown'; do
+  read -r start end basis failed reason <<<"$fixture"
+  state="$TMP/local-unknown-$reason-$start-$end"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
+  AI_GH_STATE_DIR="$state" gh_measure_local_observation "$local_id" checks_failed "$start" "$end" "$basis" "$failed"
+  check "local_duration_unknown_$reason" "jq -se '.[0].unknown_reason == \"$reason\" and .[0].start_monotonic_ms == null and .[0].duration_upper_ms == null' '$state/measurements/'*.jsonl"
+done
+(
+  GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=0
+  uname(){ printf '%s\n' unsupported; }
+  gh_measure_local_clock
+  [ "$GH_MEASURE_LOCAL_CLOCK_BASIS" = unknown ] && [ -z "$GH_MEASURE_LOCAL_CLOCK_MS" ]
+)
+unsupported_rc=$?
+check 'local_clock_unsupported_unknown' "[ '$unsupported_rc' -eq 0 ]"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

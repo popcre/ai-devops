@@ -273,6 +273,7 @@ say() {
   local rc
   printf '%s\n' "$*"; rc=$?
   if [ "$rc" -ne 0 ] && [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" = terminal_report ]; then PR_WAIT_REPORT_FAILED=1; fi
+  if [ "$rc" -ne 0 ] && [ -n "${PR_WAIT_OUTCOME:-}" ]; then PR_WAIT_LOCAL_OUTPUT_FAILED=1; fi
   return "$rc"
 }
 
@@ -307,6 +308,17 @@ PR_WAIT_SOURCE_VERIFIED=unknown
 PR_WAIT_CLOCK_QUALITY=unknown
 PR_WAIT_DELIVERY_BOUNDARY=unknown
 PR_WAIT_REPORT_FAILED=0
+PR_WAIT_LOCAL_OUTPUT_FAILED=0
+PR_WAIT_LOCAL_START_MS=''
+PR_WAIT_LOCAL_END_MS=''
+PR_WAIT_LOCAL_CLOCK_BASIS=unknown
+capture_local_end(){
+  [ "$GH_COST_READY" = 1 ] || return 0
+  [ -n "$PR_WAIT_RECEIPT_ID" ] || return 0
+  [ "$PR_WAIT_LOCAL_OUTPUT_FAILED" -ne 0 ] && return 0
+  gh_measure_local_clock
+  PR_WAIT_LOCAL_END_MS="${GH_MEASURE_LOCAL_CLOCK_MS:-}"
+}
 emit_workflow_evidence(){
   [ "$GH_COST_READY" = 1 ] || return 0
   if [ "$PR_WAIT_REPORT_FAILED" != 0 ]; then PR_WAIT_DELIVERY_BOUNDARY=unknown; PR_WAIT_DELIVERED_UTC_MS=''; fi
@@ -352,6 +364,9 @@ if [ "$GH_COST_READY" = 1 ]; then
   PR_WAIT_RECEIPT_ID="$(gh_measure_workflow_id)" ||
     printf 'ai-pr-wait: request measurement unavailable: workflow ID not created\n' >&2
   gh_measure_clock; PR_WAIT_STARTED_MS="$GH_MEASURE_CLOCK"
+  gh_measure_local_clock
+  PR_WAIT_LOCAL_START_MS="${GH_MEASURE_LOCAL_CLOCK_MS:-}"
+  PR_WAIT_LOCAL_CLOCK_BASIS="${GH_MEASURE_LOCAL_CLOCK_BASIS:-unknown}"
 fi
 export PR_WAIT_RECEIPT_ID
 pr_wait_cleanup(){
@@ -362,6 +377,8 @@ pr_wait_cleanup(){
     [ "$elapsed_ms" -ge 0 ] || elapsed_ms=0
     gh_measure_workflow_outcome ai-pr-wait pr_wait "$PR_WAIT_RECEIPT_ID" "$PR_WAIT_OUTCOME" "$elapsed_ms" ||
       printf 'ai-pr-wait: request measurement unavailable: workflow outcome not saved\n' >&2
+    gh_measure_local_observation "$PR_WAIT_RECEIPT_ID" "$PR_WAIT_OUTCOME" "$PR_WAIT_LOCAL_START_MS" "$PR_WAIT_LOCAL_END_MS" "$PR_WAIT_LOCAL_CLOCK_BASIS" "$PR_WAIT_LOCAL_OUTPUT_FAILED" ||
+      printf 'ai-pr-wait: request measurement unavailable: local observation not saved\n' >&2
   fi
   cleanup_wait_files
   return "$rc"
@@ -456,6 +473,7 @@ while :; do
     PR_WAIT_OUTCOME=merged
     PR_WAIT_DELIVERY_BOUNDARY=terminal_report
     say "PR #$PR MERGED  merge commit $MERGE_SHA"
+    capture_local_end
     PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
     emit_workflow_evidence
     exit 0
@@ -465,6 +483,7 @@ while :; do
     PR_WAIT_OUTCOME=closed
     PR_WAIT_DELIVERY_BOUNDARY=terminal_report
     say "PR #$PR CLOSED without merging - it will not merge on its own"
+    capture_local_end
     PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
     emit_workflow_evidence
     exit 1
@@ -486,6 +505,7 @@ while :; do
     say "PR #$PR was EJECTED from the merge queue and is still OPEN - waiting longer changes nothing."
     say "  Look at the merge_group run, not the pull request run:"
     say "    gh run list --repo $REPO --event merge_group --limit 5"
+    capture_local_end
     PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
     emit_workflow_evidence
     exit 1
@@ -537,6 +557,7 @@ while :; do
         say "  park the whole pull request as capacity."
       fi
     fi
+    capture_local_end
     PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
     emit_workflow_evidence
     exit 1
@@ -552,12 +573,14 @@ while :; do
     PR_WAIT_OUTCOME=deadline
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
+    capture_local_end
     exit 2
   fi
   wait_for_next_poll || {
     PR_WAIT_OUTCOME=deadline
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
+    capture_local_end
     exit 2
   }
 done
