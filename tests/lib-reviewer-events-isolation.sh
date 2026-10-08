@@ -6,6 +6,13 @@
 # log outright; the private directory gives wrappers somewhere to write.
 # A suite that already chose its own AI_REVIEW_EVENT_DIR keeps it.
 export AI_REVIEW_TEST_ISOLATION=1
+# A suite run as a review's --tests command inherits the outer review
+# session that bin/ai-review exported (operation, gate mode, implementer,
+# reviewer approval). Those describe the caller's review, not the fixtures:
+# an inherited AI_REVIEW_OPERATION made every fake pool dispatch in
+# tests/test-ai-grok-review.sh refuse during a stale-manifest recovery review.
+# Suites set these inline per case when a case needs one.
+unset AI_REVIEW_OPERATION AI_REVIEW_GATE_MODE AI_REVIEW_IMPLEMENTER AI_REVIEW_REVIEWER_APPROVAL
 if [ -z "${AI_REVIEW_EVENT_DIR:-}" ]; then
   # Suites own their EXIT traps, so this helper cannot remove its directory at
   # exit. Instead it removes its own private directories left by runs that
