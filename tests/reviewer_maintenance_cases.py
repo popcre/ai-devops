@@ -1857,16 +1857,43 @@ with event_lock(sys.argv[2]):
         sandbox, source = self._lost_sandbox("gemini", name="unreadable")
         reviews = source / ".ai" / "reviews"
         (reviews / "gemini-x-20260917T152549-99.md").write_text("maybe here\n")
-        original = Path.rglob
+        # Python 3.13+ Path.rglob swallows nested filesystem errors, so the
+        # search walks with os.walk onerror. Drive that hook the way a real
+        # nested permission failure does — not a mocked top-level raise.
+        original_walk = os.walk
 
-        def walk_that_fails(self, pattern):
-            if self == reviews or (self.is_absolute() and str(self).endswith("reviews")):
-                raise PermissionError("review tree is unreadable")
-            return original(self, pattern)
+        def walk_with_nested_error(top, *args, **kwargs):
+            onerror = kwargs.get("onerror")
+            yield from original_walk(top, *args, **kwargs)
+            if onerror is not None and Path(top) == reviews:
+                onerror(PermissionError(13, "nested directory is unreadable"))
 
-        with patch.object(Path, "rglob", walk_that_fails):
+        with patch("reviewer_events.os.walk", walk_with_nested_error):
             with self.assertRaises(events.Blocked):
                 events.reconcile_lost(self.root, "gemini", sandbox, "search cannot prove absence")
+
+    def test_kimi_default_state_jobs_refuse_loss_under_other_env(self):
+        """Reconciliation under a different AI_KIMI_STATE_DIR must still see the default tree."""
+        rid = "b3" + "0" * 30
+        self._finished_lost_invocation("kimi", rid)
+        sandbox, source = self._lost_sandbox("kimi", name="alt-state")
+        fake_home = self.root / "fake-home"
+        report = (fake_home / ".local/state/ai-devops/kimi/jobs/rid/caller--canonical"
+                  / "review-20261007T120000Z-1.md")
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("# Kimi review — canonical\n")
+        # Point the live environment somewhere else entirely.
+        prior = os.environ.get("AI_KIMI_STATE_DIR")
+        os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "other-kimi-state")
+        try:
+            with patch.object(Path, "home", return_value=fake_home):
+                with self.assertRaises(events.Blocked):
+                    events.reconcile_lost(self.root, "kimi", sandbox, "report in default state tree")
+        finally:
+            if prior is None:
+                del os.environ["AI_KIMI_STATE_DIR"]
+            else:
+                os.environ["AI_KIMI_STATE_DIR"] = prior
 
     def test_positive_ledger_references_refuse_loss(self):
         """A finished row with evidence_references is publication proof."""

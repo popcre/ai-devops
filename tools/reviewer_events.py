@@ -1047,9 +1047,15 @@ def _report_search_roots(provider, source):
     """Every tree a provider may leave a recoverable report or staging file in."""
     roots = [source / ".ai" / "reviews"]
     if provider == "kimi":
-        jobs = Path(os.environ.get("AI_KIMI_STATE_DIR") or
-                    (Path.home() / ".local/state/ai-devops/kimi")) / "jobs"
-        roots.append(jobs)
+        # Canonical reports live under the Kimi state root. Search the current
+        # environment AND the default location: reconciliation may run under a
+        # different AI_KIMI_STATE_DIR than the review that wrote the report.
+        default_state = Path.home() / ".local/state/ai-devops/kimi"
+        env_state = Path(os.environ.get("AI_KIMI_STATE_DIR") or default_state)
+        for state in (env_state, default_state):
+            jobs = state / "jobs"
+            if jobs not in roots:
+                roots.append(jobs)
     return roots
 
 
@@ -1090,7 +1096,8 @@ def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
     every regular file under the review and job trees, hidden entries and
     non-`.md` names included. A sibling hit is a safe refusal, never a false
     loss. An incomplete or unreadable walk refuses loss rather than reporting
-    an empty candidate list.
+    an empty candidate list — Path.rglob swallows nested filesystem errors in
+    Python 3.13+, so walk with an onerror hook that fails closed.
     """
     found = []
     def consider(path):
@@ -1112,12 +1119,14 @@ def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
         if not root.exists():
             continue
         require(root.is_dir(), "report search root is not a directory; loss not recorded")
-        try:
-            entries = list(root.rglob("*"))
-        except OSError as error:
-            raise Blocked(f"report search incomplete under {root}; loss not recorded: {error}")
-        for path in entries:
-            consider(path)
+        walk_errors = []
+        def on_walk_error(error):
+            walk_errors.append(error)
+        for dirpath, _dirnames, filenames in os.walk(root, onerror=on_walk_error):
+            for name in filenames:
+                consider(Path(dirpath) / name)
+        if walk_errors:
+            raise Blocked(f"report search incomplete under {root}; loss not recorded: {walk_errors[0]}")
     return sorted(found)
 
 
