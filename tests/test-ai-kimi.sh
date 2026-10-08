@@ -21,6 +21,9 @@ check "local runtime failure says Kimi was not contacted" "grep -q 'LOCAL Kimi r
 check "exhausted capacity fails before a Kimi review job is created" "sed -n '/start_review_job()/,/create_review_job/p' '$SCRIPT' | awk '/capacity_gate/{gate=NR} /create_review_job/{create=NR} END{exit !(gate>0 && create>gate)}' && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "worker launch failure records a terminal diagnostic" "grep -q 'terminal worker-start-failed.*failure-class worker-start-failed' '$SCRIPT'"
 check "every Kimi startup failure path records terminal evidence" "test \"\$(grep -c 'terminal worker-start-failed' '$SCRIPT')\" -eq 3"
+# Startup-ack race: a worker can reach a terminal phase between polls and must
+# not be overwritten as worker-start-failed (Codex High, PR #1410).
+check "startup wait accepts a terminal worker phase" "sed -n '/while.*STARTUP_TIMEOUT/,/did not acknowledge/p' '$SCRIPT' | grep -q 'job_is_terminal'"
 check "Kimi diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 check "Kimi delegates only pure adapter primitives to the shared helper" "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
 # Issue #802: the explicit base hint must reach refresh-copy too, matching
@@ -391,6 +394,11 @@ echo "== durable_review_jobs =="
 JOB_ID="$(run start durable --prompt review)"
 check "start returns a durable job id" "test -n '$JOB_ID'"
 check "status reports a durable phase" "run status durable | jq -e '.phase == \"preflight\" or .phase == \"starting\" or .phase == \"running\" or .phase == \"finalizing\" or .phase == \"completed\"'"
+# Startup-ack race: an immediately-terminal worker must keep its real outcome.
+echo ok > "$TMP/mode"
+FAST_JOB="$(run start fast-terminal --prompt review)"
+check "start accepts an already-terminal worker" "test -n '$FAST_JOB'"
+check "fast terminal worker is never overwritten as worker-start-failed" "run status fast-terminal | jq -e '.phase != \"worker-start-failed\" and .terminal_reason != \"worker-start-failed\" and .phase != \"preflight\"'"
 run wait durable >/dev/null 2>&1
 check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
 check "durable job records measured preparation and provider timing" "run status durable | jq -e '.timing.snapshot_seconds >= 0 and .timing.test_seconds >= 0 and .timing.packet_seconds >= 0 and .timing.provider_seconds >= 0 and .timing.model_steps == \"unavailable\"'"

@@ -220,6 +220,15 @@ reviewer_event_guard(){
   if [ -n "$observed_signal" ]; then
     facts="{\"source\":\"os-signal\",\"phase\":\"wrapper-running\",\"signal\":\"$observed_signal\"}"
   fi
+  # Async-submission (kimi start): once a detached worker has reserved the
+  # invocation, the launcher's exit is only the startup acknowledgement.
+  # Finishing here would record a false failure while the paid review is still
+  # running and would block the worker's later publish-report (active=True
+  # refuses a finished invocation). The worker records the terminal row.
+  if [ "$operation" = async-submission ] \
+     && env -i "${event_env[@]}" "$python" "$event_tool" worker-recorded "$provider" "$event_id" >/dev/null 2>&1; then
+    exit "$result"
+  fi
   if ! env -i "${event_env[@]}" "$python" "$event_tool" finish "$provider" "$event_id" "$result" "$facts"; then
     printf 'reviewer finished, but required evidence verification failed; private recovery evidence retained\n' >&2
     [ "$result" -ne 0 ] || result=1
