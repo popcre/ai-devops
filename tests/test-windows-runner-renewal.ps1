@@ -310,6 +310,33 @@ try {
     }
   }
 
+  # Live on EDGE-ALIEN a triggerless task reported trigger_count 1 (because
+  # @($null).Count is 1) and its principal as the account NAME, so every
+  # verifier refused the real task (#1312).
+  Case 'TaskCounts_IgnoreNullCollections' {
+    Assert-True (@($null).Count -eq 1) 'precondition: @($null).Count changed'
+    $worker = Get-Content -Raw -LiteralPath (Join-Path $repo 'bin\windows-runner-maintenance-worker.ps1')
+    foreach ($text in @($installerText, $maintenanceInstaller, $worker)) {
+      Assert-True ($text -notmatch '@\(\$task\.(Triggers|Actions)\)\.Count') 'a task collection is counted without filtering nulls'
+    }
+  }
+  Case 'TaskPrincipal_AcceptsAccountNameForm' {
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $task = [ordered]@{}; foreach ($k in $good.Keys) { $task[$k] = $good[$k] }
+    $task.arguments = (Get-RenewalTaskArguments)
+    $task.user_id = $me.Name.Split('\')[-1]; $task.sddl = (Get-RenewalTaskSddl -OperatorSid $me.User.Value)
+    Assert-RenewalTaskContract -Task $task -ExpectedOperatorSid $me.User.Value
+    $task.user_id = 'NoSuchAccount-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $threw = $false
+    try { Assert-RenewalTaskContract -Task $task -ExpectedOperatorSid $me.User.Value } catch { $threw = $_.Exception.Message -like 'STALE_INSTALLATION*' }
+    Assert-True $threw 'unresolvable principal accepted'
+  }
+  Case 'TaskPrincipal_MaintenanceVerifierAndWorkerResolveNames' {
+    Assert-True ($maintenanceInstaller.Contains('(Resolve-TaskIdentitySid -Identity $task.user_id) -cne $ExpectedOperatorSid')) 'maintenance verify compares the raw principal'
+    $worker = Get-Content -Raw -LiteralPath (Join-Path $repo 'bin\windows-runner-maintenance-worker.ps1')
+    Assert-True ($worker.Contains('$principalSid -cne $ExpectedOperatorSid')) 'worker compares the raw principal'
+  }
+
   Case 'MaintenanceTask_StaysTriggerless' {
     # The elevated #262 task keeps its no-trigger contract; only the
     # unprivileged sibling is scheduled.
