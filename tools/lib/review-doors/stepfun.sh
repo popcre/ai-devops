@@ -176,18 +176,8 @@ select_engine() {
 # environment only; it never appears in argv or output.
 SF_KEY=""
 require_credentials() {
-  if [ -n "${AI_STEPFUN_KEY:-}" ]; then
-    SF_KEY="$AI_STEPFUN_KEY"
-    return 0
-  fi
-  if [ -n "${STEPFUN_API_KEY:-}" ]; then
-    SF_KEY="$STEPFUN_API_KEY"
-    return 0
-  fi
-  if [ -n "${STEP_API_KEY:-}" ]; then
-    SF_KEY="$STEP_API_KEY"
-    return 0
-  fi
+  # Review credentials come only from the protected store, matching ai-stepfun.
+  # Ambient provider variables must not select a different account for probes.
   local store="${AI_STEPFUN_KEY_STORE:-${HOME:-}/.config/ai-devops/secrets/stepfun-api-key}"
   if [ -s "$store" ]; then
     IFS= read -r SF_KEY < "$store" || SF_KEY=""
