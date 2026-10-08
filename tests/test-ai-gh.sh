@@ -925,7 +925,7 @@ for bad in duplicate dangling mismatch forged extra bool missing repeated-key in
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" >/dev/null 2>&1; rc=$?
   check "local_observation_${bad}_rejected" "[ '$rc' -eq 1 ]"
 done
-for fixture in '2100 1000 linux_boottime_centiseconds 0 clock_negative' '0 604800001 linux_boottime_centiseconds 0 clock_negative' '1000 2100 unknown 0 clock_unknown' '1000 2100 linux_boottime_centiseconds 1 delivery_unknown'; do
+for fixture in '2100 1000 linux_boottime_centiseconds 0 clock_negative' '0 604800001 linux_boottime_centiseconds 0 clock_negative' '1000 2100 unknown 0 clock_unknown' '1000 2100 linux_boottime_centiseconds 1 delivery_unknown' '0000 0008 linux_boottime_centiseconds 0 clock_unknown'; do
   read -r start end basis failed reason <<<"$fixture"
   state="$TMP/local-unknown-$reason-$start-$end"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
   AI_GH_STATE_DIR="$state" gh_measure_local_observation "$local_id" checks_failed "$start" "$end" "$basis" "$failed"

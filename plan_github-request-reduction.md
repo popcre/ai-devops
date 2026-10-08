@@ -650,11 +650,12 @@ schema-3 receipts and schema-4 event evidence retain their contracts. Separate
 schema-5 observations always report source and acceptance as **unknown**; they
 do not populate qualified workflow latency or satisfy section 13.
 
-The coordinator's independent local verification reports 89 waiter checks and
-271 transport/report checks passing. A corrected twenty-pair offline overhead
+The coordinator's independent local verification reports 90 waiter checks and
+272 transport/report checks passing. A corrected twenty-pair offline overhead
 comparison used all three candidate runtime files together: waiter, telemetry
-and reporter. Observed p95 was 492 ms for the baseline and 505 ms for the
-candidate, a ratio of 1.02642 (approximately 2.64% higher). The fixture retained
+and reporter, timed independently with Python's monotonic clock. Observed p95
+was 515.05 ms for the baseline and 524.20 ms for the candidate, a ratio of
+1.01776 (approximately 1.78% higher). The fixture retained
 one fake transport invocation and two uptime reads. An earlier comparison
 copied only the waiter and is invalid; no result from that comparison is
 acceptance evidence. These are local fixture observations, not real HTTP

@@ -83,7 +83,7 @@ gh_measure_local_observation(){
   [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
   if [ "$output_failed" = 1 ]; then
     reason=delivery_unknown
-  elif [ "$basis" = linux_boottime_centiseconds ] && [[ "$start" =~ ^[0-9]{1,13}$ ]] && [[ "$end" =~ ^[0-9]{1,13}$ ]]; then
+  elif [ "$basis" = linux_boottime_centiseconds ] && [[ "$start" =~ ^(0|[1-9][0-9]{0,12})$ ]] && [[ "$end" =~ ^(0|[1-9][0-9]{0,12})$ ]]; then
     start_json="$start"; end_json="$end"
     if [ "$end" -lt "$start" ]; then
       reason=clock_negative

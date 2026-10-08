@@ -86,9 +86,13 @@ check "a missing throttle refuses the wait before any direct gh call" \
 sed -n '/^capture_local_end(){/,/^}/p' "$CMD" > "$TMP/local-end-helper.sh"
 check "missing telemetry helper skips the local end read without changing status" \
   "GH_COST_READY=0 PR_WAIT_RECEIPT_ID='' PR_WAIT_LOCAL_OUTPUT_FAILED=0 bash -c 'source \"$TMP/local-end-helper.sh\"; capture_local_end'"
-OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+OUT="$(AI_GH_STATE_DIR="$TMP/transient-duration-state" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
+if [ "$(uname -s)" = Linux ]; then
+  check 'transient-read deadline records the successful terminal boundary' \
+    "jq -se '[.[]|select(.schema==5)] | length == 1 and .[0].unknown_reason == \"source_unknown\" and .[0].end_monotonic_ms != null' '$TMP/transient-duration-state/measurements/'*.jsonl"
+fi
 
 # A recorded machine-wide back-off: the throttle exits 75 without calling GitHub,
 # and ai-pr-wait treats it as temporary and gives up only at its deadline.
@@ -588,7 +592,7 @@ for terminal in MERGED CLOSED; do
     check 'optional evidence preserves terminal output exit and one upstream call' \
       "[ '$rc' -eq '$expected' ] && grep -q '$terminal' '$state/output' && [ \"\$(wc -l < '$calls')\" -eq 1 ] && grep -q 'mergedAt closedAt' '$calls'"
     if [ "$broken" = 0 ]; then
-check 'native terminal companion is consistent and never claims source or clock proof' \
+      check 'native terminal companion is consistent and never claims source or clock proof' \
         "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq -e '.workflow_evidence_records == 1 and .local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \"source_unknown\" and .qualified_latency_ms.count == 0'"
     else
       check 'observer write failure remains a visible measurement gap' "grep -q 'workflow evidence not saved' '$state/output'"
