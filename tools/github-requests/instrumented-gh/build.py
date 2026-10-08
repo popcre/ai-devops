@@ -101,6 +101,8 @@ def build(snapshots):
             patch(source, package_bytes)
             subprocess.run([str(toolchain / "go/bin/gofmt"), "-w", "api/http_client.go", "cmd/gh/main.go", *["internal/httpcounter/" + name for name in FILES if name.endswith(".go")]], cwd=source, env=env, check=True)
             compiled_binding = source_binding(source / "internal/httpcounter")
+            if compiled_binding != binding:
+                raise ValueError("compiled counter source differs from captured source")
             race_env = dict(env, CGO_ENABLED="1", GOOS="linux")
             subprocess.run([str(go), "test", "-race", "./internal/httpcounter"], cwd=source, env=race_env, check=True)
         output = build_root / ("gh-" + kind + (".exe" if env["GOOS"] == "windows" else ""))

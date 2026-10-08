@@ -79,6 +79,22 @@ public static class CounterFixtureLocks {
  [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool AllocConsole();
  [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool GetConsoleMode(SafeFileHandle handle, out uint mode);
  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool FreeConsole();
+ [DllImport("kernel32.dll", SetLastError=true)] internal static extern IntPtr GetStdHandle(int kind);
+ [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool SetStdHandle(int kind, IntPtr handle);
+ static readonly int[] StandardKinds = new int[] { -10, -11, -12 };
+ static IntPtr[] SavedStandardHandles;
+ static bool RestoreStandardHandles() {
+  bool restored = true;
+  for (int i = 0; i < StandardKinds.Length; i++)
+   if (!SetStdHandle(StandardKinds[i], SavedStandardHandles[i])) restored = false;
+  return restored;
+ }
+ public static bool ReleaseFixtureConsole() {
+  bool released = FreeConsole();
+  bool restored = RestoreStandardHandles();
+  SavedStandardHandles = null;
+  return released && restored;
+ }
  public static bool EnsureFixtureConsole() {
   using (SafeFileHandle input = CreateFile("CONIN$", 0x80000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
    if (!input.IsInvalid) {
@@ -87,14 +103,20 @@ public static class CounterFixtureLocks {
     return false;
    }
   }
+  IntPtr[] previous = new IntPtr[StandardKinds.Length];
+  for (int i = 0; i < StandardKinds.Length; i++) previous[i] = GetStdHandle(StandardKinds[i]);
   if (!AllocConsole()) throw new IOException("Fixture console allocation failed");
+  SavedStandardHandles = previous;
   try {
+   // Allocation may replace redirected SSH handles. Restore the original
+   // table without closing handles owned by the calling process.
+   if (!RestoreStandardHandles()) throw new IOException("Fixture standard handle restoration failed");
    using (SafeFileHandle input = CreateFile("CONIN$", 0x80000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
     uint mode;
     if (input.IsInvalid || !GetConsoleMode(input, out mode)) throw new IOException("Allocated fixture console unavailable");
    }
    return true;
-  } catch { FreeConsole(); throw; }
+  } catch { ReleaseFixtureConsole(); throw; }
  }
  [StructLayout(LayoutKind.Sequential)] public struct NativeTime { public uint Low, High; }
  [StructLayout(LayoutKind.Sequential)] public struct FileInfo {
@@ -444,7 +466,7 @@ function Digest([IO.Stream]$Stream) {
         if ($process.ExitCode -ne 0) { throw 'Native qualification failed or unknown' }
     } finally {
         $process.Dispose()
-        if ($ownedConsole -and -not [CounterFixtureLocks]::FreeConsole()) { throw 'Owned fixture console cleanup failed' }
+        if ($ownedConsole -and -not [CounterFixtureLocks]::ReleaseFixtureConsole()) { throw 'Owned fixture console cleanup failed' }
     }
 } finally {
     Clear-QualificationEnvironment
