@@ -2,6 +2,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# uninstall.sh removes the session temp hooks and timer from $HOME; keep that
+# in a throwaway home with a stub systemctl so tests never touch the real ones.
+export HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config"; mkdir -p "$HOME/.claude"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/systemctl-stub"; chmod +x "$TMP/systemctl-stub"
+export AI_SESSION_TMP_SYSTEMCTL="$TMP/systemctl-stub"
 REPO="$TMP/repo"; ETC="$TMP/etc-ai-devops"; BIN="$TMP/bin"; ARCH="$TMP/archive"
 mkdir -p "$REPO/bin" "$ETC" "$BIN"
 cp "$ROOT/bin/ai-devops" "$REPO/bin/ai-devops"; chmod +x "$REPO/bin/ai-devops"

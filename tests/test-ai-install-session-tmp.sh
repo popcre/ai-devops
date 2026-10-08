@@ -7,6 +7,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 inst="$here/../bin/ai-install-session-tmp"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 export HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config"; mkdir -p "$HOME/.claude"
+# Never reach the real user's systemd: every call goes to a recording stub.
+mkdir -p "$work/stub"; printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' "$work" > "$work/stub/systemctl"; chmod +x "$work/stub/systemctl"
+export AI_SESSION_TMP_SYSTEMCTL="$work/stub/systemctl"
 s="$HOME/.claude/settings.json"
 printf '{"model":"x","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"foreign"}]}]}}\n' > "$s"
 bash "$inst" --no-timer >/dev/null; check "install succeeds" '[ $? -eq 0 ]'
@@ -25,4 +28,8 @@ check "remove deletes the copies" '[ ! -e "$HOME/.config/ai-devops/session-tmp-h
 check "--check fails after remove" '! bash "$inst" --check --no-timer >/dev/null'
 printf 'not json' > "$s"
 check "refuses an unparseable settings file" '! bash "$inst" --no-timer >/dev/null 2>&1 && [ "$(cat "$s")" = "not json" ]'
+printf '{}\n' > "$s"; bash "$inst" >/dev/null
+t="$XDG_CONFIG_HOME/systemd/user/ai-session-tmp-sweep.timer"
+check "timer uses a wall-clock schedule that re-arms" 'grep -qx "OnCalendar=\*:0/30" "$t" && ! grep -q "^OnUnitActiveSec" "$t"'
+check "timer is enabled and restarted through systemctl --user" 'grep -q "enable --now ai-session-tmp-sweep.timer" "$work/systemctl.log" && grep -q "restart ai-session-tmp-sweep.timer" "$work/systemctl.log"'
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
