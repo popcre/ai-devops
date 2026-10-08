@@ -157,6 +157,18 @@ unowned review brief is protected; no cleanup or installation occurred.
 Native Windows HTTP-channel qualification is owned by the fleet subagent;
 source/clock adapter design by the measurement subagent; host access,
 installation, merge decisions and section 13 acceptance by this coordinator.
+Windows PowerShell 5 compatibility evidence — October 8, 2026: actual
+supported-runtime receipt `658-916-powershell5-inherited-predicate-proof.private.json`
+records `major5`, AceFlags underlying type Byte, ControlFlags and
+FileAttributes underlying types Int32. The original staging diagnostic failed
+before its first write. Both legacy byte-backed predicates fail separately on
+the real target: legacy `InheritOnly` 19 FAIL and legacy `Inherited` 19 FAIL.
+Explicit integer casts for both predicates match the integer reference across
+38 actual ancestor-ACE checks (`integer_cast_pass=true`, `stage_absent=true`).
+PowerShell 7 sandbox inference cannot disprove this version-five failure. This
+is diagnostic compatibility evidence only; it does not establish full native
+qualification, fleet installation, global HTTP savings or section 13
+acceptance.
 The owner-closed credential incident is not an open installation prerequisite;
 no further rotation, revocation or redaction is authorized by that incident.
 Historical samples remain unqualified for before/after savings. #658 stays open.

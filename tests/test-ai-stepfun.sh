@@ -388,6 +388,23 @@ STUB
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
 read -r req
 echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+ans=STEPFUN-OK
+if [ ! -e ./limited ]; then : > ./limited; ans=""
+  echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'; fi
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport" "$RH/dw/limited"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
+  check "door never retries an implementation turn after a 429" "[ '$drc' != 0 ] && ! grep -q 'rate limit reached' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
 echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"402: {\"type\":\"quota_exceeded\"}"}]}'
 echo '{"type":"agent_settled"}'; read -r _
 echo '{"id":"door-text","type":"response","data":{"text":""}}'
