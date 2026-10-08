@@ -355,6 +355,18 @@ on top of the #262 boundary above. It adds no elevation path:
   the same folder (bounded at 1 MiB, one rotation). The directory is readable by
   every local user; the task's Last Run Result is non-zero on failure, and the
   #262 `audit.jsonl` keeps its own record.
+- Every failure is also posted as a comment on issue #1312, signed
+  `Posted by WindowsRunnerQualificationRenewal on <host>`, using the
+  `pop-ai-watchers` GitHub App (issues write, no contents write) that
+  scheduled work already uses — not the personal login, which an S4U task
+  cannot read from the credential store. The app key file is the one
+  `bin/ai-gh-app-auth install` writes to
+  `%USERPROFILE%\.ai-devops\github-app\pop-ai-watchers.pem`; the token is
+  minted in-process and never printed. A repeat of the same result is posted
+  at most once a day (`alert-state.json`). `last-run.json` records the alert
+  outcome as `alert`: `POSTED`, `SUPPRESSED_REPEAT`, or `ALERT_FAILED:<reason>`
+  (for example `APP_KEY_MISSING`); an alert failure never changes the renewal
+  result and is retried on the next run.
 
 Install only after the maintenance installation verifies, from an elevated
 checkout of current `main`; `-Verify` (elevated) re-verifies both layers and

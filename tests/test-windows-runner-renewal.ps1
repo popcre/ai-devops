@@ -22,6 +22,10 @@ New-Item -ItemType Directory -Path $temp | Out-Null
 try {
   . $renewPath -LibraryMode
   . $installerPath -LibraryMode
+  # Offline: the default alert sender resolves Send-IssueComment at call
+  # time, so this recorder guarantees no test ever posts to GitHub.
+  $script:posted = [Collections.Generic.List[string]]::new()
+  function Send-IssueComment { param([string]$Body) $script:posted.Add($Body) }
   $sid = 'S-1-5-21-100-200-300-1001'
   $now = [DateTime]::new(2026, 10, 8, 12, 0, 0, [DateTimeKind]::Utc)
   $clock = { $now }.GetNewClosure()
@@ -119,6 +123,44 @@ try {
     $threw = $false
     try { Invoke-QualificationRenewal -Root (Join-Path $root 'absent') -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 0 } -Clock $clock | Out-Null } catch { $threw = $true }
     Assert-True $threw 'missing status root accepted'
+  }
+
+  Case 'Alert_FailurePostsToIssue1312OnceThenSuppressesRepeat' {
+    $root = New-Case 'alert'; $status = Join-Path $root 'status'
+    $sent = [Collections.Generic.List[string]]::new()
+    $sender = { param($b) $sent.Add($b) }.GetNewClosure()
+    $r1 = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 13 } -Clock $clock -AlertSender $sender
+    $r2 = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 13 } -Clock $clock -AlertSender $sender
+    Assert-True ($r1.alert -eq 'POSTED' -and $r2.alert -eq 'SUPPRESSED_REPEAT') "alerts were $($r1.alert),$($r2.alert)"
+    Assert-True ($sent.Count -eq 1 -and $sent[0].Contains('REQUEST_REJECTED') -and $sent[0].Contains('Posted by WindowsRunnerQualificationRenewal on')) 'alert body wrong'
+    Assert-True ((Get-Content -Raw (Join-Path $status 'last-run.json') | ConvertFrom-Json).alert -eq 'SUPPRESSED_REPEAT') 'alert outcome not in last-run.json'
+    $r3 = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 16 } -Clock $clock -AlertSender $sender
+    Assert-True ($r3.alert -eq 'POSTED' -and $sent.Count -eq 2) 'a different result was not posted'
+    $later = { $now.AddHours(25) }.GetNewClosure()
+    $r4 = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 16 } -Clock $later -AlertSender $sender
+    Assert-True ($r4.alert -eq 'POSTED' -and $sent.Count -eq 3) 'repeat not re-posted after a day'
+  }
+
+  Case 'Alert_SenderFailureIsRecordedAndRetriedNextRun' {
+    $root = New-Case 'alertfail'; $status = Join-Path $root 'status'
+    $r = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 14 } -Clock $clock -AlertSender { param($b) throw 'HTTP 401' }
+    Assert-True ($r.result -eq 'OPERATION_FAILED' -and $r.alert -like 'ALERT_FAILED:*401*') "alert was $($r.alert)"
+    Assert-True (-not (Test-Path (Join-Path $status 'alert-state.json'))) 'failed alert marked as posted'
+    $r2 = Invoke-QualificationRenewal -Root $status -Evidence (Join-Path $root 'e.json') -ClientRunner { param($t) 14 } -Clock $clock -AlertSender { param($b) }
+    Assert-True ($r2.alert -eq 'POSTED') 'failed alert not retried'
+  }
+
+  Case 'Alert_SuccessNeverPostsAndTestsStayOffline' {
+    Assert-True ($script:posted.Count -gt 0 -and $script:posted[0].Contains('Posted by')) 'default sender did not route to the offline recorder'
+    $root = New-Case 'alertok'; $evidence = Join-Path $root 'evidence.json'
+    $runner = { param($t) Write-Evidence $evidence $now.AddMinutes(-1); 0 }.GetNewClosure()
+    $r = Invoke-QualificationRenewal -Root (Join-Path $root 'status') -Evidence $evidence -ClientRunner $runner -Clock $clock -AlertSender { param($b) throw 'must not post' }
+    Assert-True ($r.result -eq 'SUCCESS' -and $null -eq $r.PSObject.Properties['alert']) 'success produced an alert'
+  }
+
+  Case 'Alert_TargetsExistingIssueWithAppIdentity' {
+    Assert-True ($script:AlertRepo -ceq 'popcre/ai-devops' -and $script:AlertIssue -eq 1312 -and $script:AppId -eq 5112061) 'alert target or identity changed'
+    Assert-True (-not $renewText.Contains('gh auth') -and -not $renewText.Contains('Write-Output $tok')) 'alert path depends on personal gh login'
   }
 
   Case 'Renewal_UsesOnlyTheFixedClientOperation' {
