@@ -431,14 +431,19 @@ gh api -X POST repos/popcre/ai-devops/actions/runners/<runner-id>/labels -f "lab
 ```
 
 EDGE-ALIEN (i7-6700, 4 cores) is the first section-only host: the complete
-matrix hit the 150-minute ceiling (run 37487753427). Sections-scope run
-37628253929 (2026-10-07): sections 3, 4 and 6 passed in 15, 20.5 and 26
-minutes and are its only `section_lane_order` entries; 2, 7 and 8 passed in
-33, 36 and 39 minutes (too close to the ceiling); 1 and 5 failed on host
-prerequisites (python3, Windows long paths) and 9-12 on expired preflight
-evidence. A section joins the order only after a measured pass with headroom;
-evidence is
+matrix hit the 150-minute ceiling (run 37487753427). Sections-scope runs
+37628253929 (2026-10-07) and 37725520505 (2026-10-08, after python3, Windows
+long paths and the GLM symlink-privilege test fix #1492) give its
+`section_lane_order`: sections 3, 4, 9, 10, 11, 6 and 1, each finished in 28
+minutes or less (at least 12 minutes of headroom). Sections 2, 5, 7, 8 and 12
+passed in 33-39 minutes (8 once timed out) and stay on Blacksmith. A section
+joins the order only after a measured pass with that headroom; evidence is
 recorded on #1312.
+
+EDGE-ALIEN's firmware TPM can vanish after a plain restart (it returns only
+after entering the BIOS or on some boots; BIOS 1.0.23 appears to be final).
+Without it the Administrator preflight fails with "TPM must be present and
+ready.", which blocks requalification but not the section lane itself.
 
 ## 6. Admit the host to ordinary CI
 
