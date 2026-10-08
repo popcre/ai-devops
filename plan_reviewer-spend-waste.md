@@ -4,21 +4,21 @@ Parent issue: [#1436](https://github.com/popcre/ai-devops/issues/1436) ·
 Source audit: [#1426](https://github.com/popcre/ai-devops/issues/1426) ·
 Handoff: [`HANDOFF.d/2026-10-07T2122Z-edge-dev3-claude-reviewer-spend-waste-plan.md`](HANDOFF.d/2026-10-07T2122Z-edge-dev3-claude-reviewer-spend-waste-plan.md)
 
-## STATUS (2026-10-07, 5:22 PM EDT)
+## STATUS (2026-10-07, 10:10 PM EDT)
 
 | Step | Child issue | State | Evidence |
 |---|---|---|---|
-| C1 Remove silent paid-key fallbacks | [#1427](https://github.com/popcre/ai-devops/issues/1427) | ⬜ open | — |
-| C2 Pool reuses passing report (same reviewer + head + digest) | [#1428](https://github.com/popcre/ai-devops/issues/1428) | ⬜ open | — |
-| C3 Allocator: no extra reviewer on a passed head | [#1429](https://github.com/popcre/ai-devops/issues/1429) | ⬜ open | — |
-| C4 Stable cache prefix in briefs | [#1430](https://github.com/popcre/ai-devops/issues/1430) | ⬜ open | — |
-| C5 Skip reviewers in known quota exhaustion | [#1431](https://github.com/popcre/ai-devops/issues/1431) | ⬜ open | — |
-| C6 StepFun pacing / usage / one doctor call | [#1432](https://github.com/popcre/ai-devops/issues/1432) | ⬜ open | — |
-| C7 Gemini keeps finished reviews / one model call | [#1433](https://github.com/popcre/ai-devops/issues/1433) | ⬜ open | — |
-| C8 DeepSeek append-only compaction | [#1434](https://github.com/popcre/ai-devops/issues/1434) | ⬜ open | — |
-| C9 Tests stop writing live events log | [#1435](https://github.com/popcre/ai-devops/issues/1435) | ⬜ open | — |
+| C1 Remove silent paid-key fallbacks | [#1427](https://github.com/popcre/ai-devops/issues/1427) | ✅ done | PR #1447 `5cbd3c34`; proof #1427 comment 6049807001 |
+| C2 Pool reuses passing report (same reviewer + head + digest) | [#1428](https://github.com/popcre/ai-devops/issues/1428) | ✅ done | PR #1443 `17e73b3f`; proof #1428 comment 6049580379 |
+| C3 Allocator: no extra reviewer on a passed head | [#1429](https://github.com/popcre/ai-devops/issues/1429) | ✅ done | PR #1470 `2608d23b`; proof #1429 comment 6050543916; shared-db allocator already compliant (evidence #1429 comment 6050669615) |
+| C4 Stable cache prefix in briefs | [#1430](https://github.com/popcre/ai-devops/issues/1430) | ✅ done | PR #1444 `1ce948db`; proof #1430 comment 6049157726 |
+| C5 Skip reviewers in known quota exhaustion | [#1431](https://github.com/popcre/ai-devops/issues/1431) | ✅ done | PRs #1404 `08ef1c73`, #1454 `07962593`; proof #1431 comment 6049417681 (GLM excluded until 2026-10-09) |
+| C6 StepFun pacing / usage / one doctor call | [#1432](https://github.com/popcre/ai-devops/issues/1432) | ✅ done | PR #1445 `bc86d832`; proof #1432 comment 6049332545 |
+| C7 Gemini keeps finished reviews / one model call | [#1433](https://github.com/popcre/ai-devops/issues/1433) | ✅ done | PR #1442 `3a663e28`; proof #1433 comment 6048571095 |
+| C8 DeepSeek append-only compaction | [#1434](https://github.com/popcre/ai-devops/issues/1434) | ✅ done | PRs #1441, #1452, #1477 `9b437917`; proof #1434 comment 6050577168 |
+| C9 Tests stop writing live events log | [#1435](https://github.com/popcre/ai-devops/issues/1435) | ✅ done | PR #1450 `f1b39060`; proof #1435 comment 6050794930 |
 
-**A fresh session starts at:** the first unticked child on parent #1436 (today: C1, #1427). Do only that child, tick it, comment the next child on the parent, and stop. A row becomes "done" only with an artifact (merge SHA, CI run id, or test file path) and live proof recorded on the same child issue.
+**All children done (2026-10-07, 10:20 PM EDT); parent #1436 closed.** Do only that child, tick it, comment the next child on the parent, and stop. A row becomes "done" only with an artifact (merge SHA, CI run id, or test file path) and live proof recorded on the same child issue.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
