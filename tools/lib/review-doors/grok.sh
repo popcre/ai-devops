@@ -12,6 +12,9 @@
 set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+# Owner rule "remove the paid fallback": no grok child inherits a paid key.
+source "$DOOR_CREDIT_ROOT/tools/lib/grok-paid-keys.sh"
+grok_strip_paid_keys
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -86,19 +89,6 @@ require_credentials() {
   fi
   printf 'grok door: no Grok subscription login (auth.json); a paid XAI_API_KEY is never used. Run grok login, or set AI_GROK_ALLOW_NO_CREDS=1 for offline tests.\n' >&2
   return 127
-}
-
-# Owner rule (2026-10-07, "remove the paid fallback"): Grok runs only on the
-# subscription login. Every launch strips each xAI/Grok API-key variable the
-# CLI honors (XAI_API_KEY, GROK_CODE_XAI_API_KEY, GROK_API_KEY, any XAI_* or
-# GROK_*API_KEY) with `env -u NAME`: names in argv, never values.
-grok_paid_key_unsets() { # prints one `-u NAME` pair per line for the env -u list
-  local n
-  for n in XAI_API_KEY GROK_CODE_XAI_API_KEY GROK_API_KEY GROK_DEPLOYMENT_KEY $(compgen -e); do
-    case "$n" in
-      XAI_*|GROK_*API_KEY|GROK_*_XAI_*|GROK_DEPLOYMENT_KEY) printf -- '-u\n%s\n' "$n" ;;
-    esac
-  done
 }
 
 # Native path for --cwd on Windows (MSYS conversion is a heuristic, not a
@@ -210,17 +200,15 @@ main() {
   } > "$prompt_full"
 
   cwd="$(native_cwd "$DOOR_WORKDIR")"
-  local -a GROK_KEY_UNSETS=()
-  mapfile -t GROK_KEY_UNSETS < <(grok_paid_key_unsets)
   out="$(mktemp)"
   set +e
   if [ "$MODE" = implement ]; then
-    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER "${GROK_KEY_UNSETS[@]}" \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
   else
-    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER "${GROK_KEY_UNSETS[@]}" \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
@@ -241,7 +229,7 @@ main() {
     rpf="$(mktemp)"
     printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
     set +e
-    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER "${GROK_KEY_UNSETS[@]}" \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
         --max-turns "$left" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"

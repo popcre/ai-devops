@@ -61,6 +61,12 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+# Owner rule (Albert, "remove the paid fallback"): strip every xAI/Grok paid
+# API-key variable before any grok launch (run, investigate, worktree, models).
+_AI_GROK_KEYS_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")")/../tools/lib/grok-paid-keys.sh"
+[ -f "$_AI_GROK_KEYS_LIB" ] || { printf 'ai-grok-implement: missing %s; refusing to launch Grok with a possible paid key.\n' "$_AI_GROK_KEYS_LIB" >&2; exit 2; }
+source "$_AI_GROK_KEYS_LIB"; unset _AI_GROK_KEYS_LIB
+grok_strip_paid_keys
 
 VERSION="1.1.0"
 

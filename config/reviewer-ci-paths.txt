@@ -65,6 +65,7 @@ tests/test-ai-review-credit-watch.sh
 tests/test_review_credit_watch.py
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
+tools/lib/grok-paid-keys.sh
 tools/lib/provider-wrapper-common.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
