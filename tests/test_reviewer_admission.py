@@ -178,6 +178,30 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(api.capacity_observation(data,'deepseek',positive,1001)['status'],'restored')
         self.assertEqual(data['global'],{'stronger':'kept'})
 
+    def test_legacy_unscoped_paid_hold_released_by_scoped_positive_balance(self):
+        data = {'provider':'deepseek','global':None,'backoffs':{},'capacity_hold':{'provider':'deepseek','failure_class':'out-of-credit',
+            'credential_profile_scope':None,'model_scope':None,'observed_epoch':1000,'reset_at':None,'next_check_epoch':1000,'record_id':'legacy'}}
+        positive = {'provider':'deepseek','state':'available','observed_epoch':1001,'credential_profile_scope':'sha256:'+'a'*64,'model_scope':'deepseek-flash'}
+        self.assertEqual(api.capacity_observation(data,'deepseek',dict(positive,observed_epoch=1000),1001)['reason'],'older-observation')
+        self.assertEqual(api.capacity_observation(data,'deepseek',positive,1001)['status'],'restored')
+        self.assertIsNone(data['capacity_hold'])
+
+    def test_expired_legacy_global_credit_quarantine_releases_on_positive_balance(self):
+        import time
+        now = int(time.time())
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            (path/'deepseek.json').write_text(json.dumps({'version':1,'provider':'deepseek','failure_class':'out-of-credit',
+                'created_epoch':now-7200,'expires_epoch':now-3600,'record_id':'a'*64}))
+            run = lambda *extra: subprocess.run([sys.executable, str(MODULE), *extra, '--directory', directory], capture_output=True, text=True, check=True)
+            run('global', 'deepseek')
+            self.assertIsNone(json.loads((path/'deepseek.json').read_text())['capacity_hold']['credential_profile_scope'])
+            observation = path/'observation.json'
+            observation.write_text(json.dumps({'provider':'deepseek','state':'available','observed_epoch':now,
+                'credential_profile_scope':'sha256:'+'b'*64,'model_scope':'deepseek-flash'}))
+            self.assertEqual(json.loads(run('capacity-observe','deepseek','--observation-file',str(observation)).stdout)['status'],'restored')
+            self.assertIsNone(json.loads((path/'deepseek.json').read_text())['capacity_hold'])
+
     def test_unknown_scope_exhaustion_holds_but_positive_cannot_release(self):
         data = {'provider':'gemini'}
         self.assertEqual(api.capacity_observation(data,'gemini',{'provider':'gemini','state':'exhausted','observed_epoch':1000},1000)['status'],'held')

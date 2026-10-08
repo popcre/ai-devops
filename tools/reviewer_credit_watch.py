@@ -194,7 +194,11 @@ def main(args=None, run=subprocess.run):
     args = sys.argv[1:] if args is None else args
     if len(args) == 2 and args[0] == 'refresh' and args[1] in ('gemini', 'deepseek', 'glm', 'stepfun'):
         observation = read_provider(args[1], run=run)
-        return 1 if reconcile(args[1], observation, run) == 'failed' else 0
+        try:
+            status = reconcile(args[1], observation, run)
+        except (OSError, subprocess.TimeoutExpired):
+            status = 'failed'
+        return 1 if status == 'failed' else 0
     if args in (['--help'], ['help']):
         print('ai-review-credit-watch check|tick; scheduled hourly by ai-local-watch tick-all')
         return 0
