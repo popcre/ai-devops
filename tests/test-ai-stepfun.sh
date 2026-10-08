@@ -350,6 +350,24 @@ STUB
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
 read -r req
 echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'
+echo '{"type":"agent_settled"}'; read -r req
+[ "$(jq -r '.id + "/" + .streamingBehavior' <<<"$req")" = door-resume/followUp ] || exit 1
+echo '{"id":"door-resume","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn '{id:"door-text",type:"response",data:{text:"STEPFUN-OK"}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door resumes the same live review after a StepFun 429 instead of rerunning it cold" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && [ \$(grep -c 'resuming the same review' '$RH/dout') = 1 ] && ! grep -q 'retrying after' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
 ans=STEPFUN-OK
 if [ ! -e ./limited ]; then : > ./limited; ans=""
   echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'; fi
@@ -357,11 +375,11 @@ echo '{"type":"agent_settled"}'; read -r _
 jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
 STUB
   rm -f "$RH/dreport"; drc=0
-  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_RATE_RESUMES=0 \
     AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
-  check "door reruns the turn after a StepFun 429 rate limit" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
+  check "door reruns the turn after a StepFun 429 once in-place resumes are used up" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }

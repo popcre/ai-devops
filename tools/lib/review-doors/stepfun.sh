@@ -282,7 +282,8 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
 # errors go to $out.err. Returns 0 only when the model answered.
 sf_rpc_turn() {
   reviewer_credit_prepare || return 1
-  local prompt_file="$1" line typ id method text="" sf_pid
+  local prompt_file="$1" line typ id method text="" sf_pid err resume=0 resumes=0
+  local resume_max="${AI_STEPFUN_RATE_RESUMES:-6}" resume_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
   : > "$log"; : > "$out.err"
   coproc SF_RPC {
     export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
@@ -309,13 +310,28 @@ sf_rpc_turn() {
             jq -cn --arg id "$id" '{type:"extension_ui_response",id:$id,cancelled:true}' >&"$to_rpc" ;;
         esac ;;
       agent_end)
-        jq -r '[.messages[]? | select(.role=="assistant") | .errorMessage // empty] | last // empty' <<<"$line" >>"$out.err" 2>/dev/null || true ;;
+        err="$(jq -r '[.messages[]? | select(.role=="assistant") | .errorMessage // empty] | last // empty' <<<"$line" 2>/dev/null || true)"
+        [ -z "$err" ] || printf '%s\n' "$err" >>"$out.err"
+        # A 429 mid-review resumes this same live conversation after the
+        # shared cooldown, so the steps already paid for are kept instead of
+        # rerunning the whole turn cold. The 429 stays in $out.err, so the
+        # caller's whole-turn rerun remains the fallback if the stream dies.
+        resume=0
+        [[ "$err" != 429:* ]] || [ "$resumes" -ge "$resume_max" ] || resume=1 ;;
       agent_settled)
-        jq -cn '{id:"door-text",type:"get_last_assistant_text"}' >&"$to_rpc" ;;
+        if [ "$resume" = 1 ]; then
+          resume=0; resumes=$((resumes + 1))
+          printf 'stepfun door: StepFun rate limit reached; resuming the same review after a %ss shared cooldown (%s/%s)\n' "$resume_pause" "$resumes" "$resume_max" >&2
+          stepfun_pace_cooldown "$resume_pause"; stepfun_pace_wait
+          # followUp queues behind any retry StepCode already started itself.
+          jq -cn '{id:"door-resume",type:"prompt",streamingBehavior:"followUp",message:"The previous request hit a provider rate limit. Continue the review exactly where you left off."}' >&"$to_rpc"
+        else
+          jq -cn '{id:"door-text",type:"get_last_assistant_text"}' >&"$to_rpc"
+        fi ;;
       response)
         case "$(jq -r '.id // empty' <<<"$line")" in
           door-text) text="$(jq -r '.data.text // empty' <<<"$line")"; break ;;
-          door-prompt) [ "$(jq -r '.success' <<<"$line")" = true ] || { jq -r '.error // "prompt refused"' <<<"$line" >>"$out.err"; break; } ;;
+          door-prompt|door-resume) [ "$(jq -r '.success' <<<"$line")" = true ] || { jq -r '.error // "prompt refused"' <<<"$line" >>"$out.err"; break; } ;;
         esac ;;
     esac
   done
@@ -346,6 +362,7 @@ main() {
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
     printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them.\n'
+    printf 'Work in few, large steps: every step resends the whole conversation, so when you need several files, searches, or commands, request them all together in one step rather than one per step, and read whole relevant files or large ranges instead of small slices.\n'
     [ "$MODE" != review ] || printf 'Work in your current directory: it is a private writable copy of the review workdir, discarded afterwards; never write to the original path.\n'
     printf '\n'
     cat "$DOOR_PROMPT_FILE"
