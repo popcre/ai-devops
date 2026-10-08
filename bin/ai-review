@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -63,7 +63,7 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; wrapper_args=()
+implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; additional_reviewer=0; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
@@ -79,6 +79,8 @@ while [ "$#" -gt 0 ]; do
       operation="$2"; shift 2 ;;
     --force)
       force_review=1; shift ;;
+    --additional-reviewer)
+      additional_reviewer=1; shift ;;
     --code-only)
       [ "$code_only" -eq 0 ] || { usage >&2; exit 2; }
       code_only=1; shift ;;
@@ -132,6 +134,42 @@ if [ "$force_review" = 1 ]; then
   [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] || { printf 'ai-review: --force applies only to pool reviewers.\n' >&2; exit 2; }
   wrapper_args+=(--force)
 fi
+[ "$additional_reviewer" = 0 ] || { [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ]; } \
+  || { printf 'ai-review: --additional-reviewer applies only to pool reviewers.\n' >&2; exit 2; }
+# No extra reviewer on a head that already passed (#1429). When ANY reviewer
+# already holds a verified APPROVE for this exact head, whole-source digest,
+# mode and base, that pass is returned instead of starting another paid
+# review. --additional-reviewer (a second opinion on purpose, which also
+# bypasses the pool's same-reviewer reuse) and --force dispatch anyway;
+# --tests, --operation and --reviewer-approval ask a different question and
+# are never answered from an earlier pass. A lookup error dispatches normally
+# and says so. It is CALLED only after the inherited Git locations are
+# cleared, the implementer is resolved, and the private-source check and task
+# gate ran (plan reviews are never gated), so a pass is never bound to
+# another tree.
+return_existing_pass(){
+  { [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] && [ "$additional_reviewer" = 0 ] && [ "$force_review" = 0 ] \
+    && [ -z "$tests_command" ] && [ -z "$operation" ] && [ -z "$reviewer_approval" ]; } || return 0
+  local passed_repo passed_rc=3 passed_json="" passed_report passed_by
+  passed_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$passed_repo" ] && { [ -z "$review_head" ] || [ "$(git rev-parse --verify --quiet --end-of-options "$review_head^{commit}" 2>/dev/null)" = "$(git rev-parse HEAD 2>/dev/null)" ]; }; then
+    passed_json="$(AI_REVIEW_IMPLEMENTER="$implementer" "$REAL_DIR/ai-review-preflight" passed-head "$passed_repo" "$mode" ${review_base:+--base "$review_base"} 2>/dev/null)" && passed_rc=0 || passed_rc=$?
+  fi
+  case "$passed_rc" in
+    0)
+      passed_report="$(jq -r '.report // empty' <<<"$passed_json" 2>/dev/null || true)"
+      passed_by="$(jq -r '.provider // empty' <<<"$passed_json" 2>/dev/null || true)"
+      if [ -n "$passed_report" ]; then
+        printf 'ai-review: this exact head already passed %s review by %s; returning that pass instead of a new reviewer. Pass --additional-reviewer for another reviewer.\n' "$mode" "$passed_by" >&2
+        printf '%s\n' "$passed_report"
+        exit 0
+      fi ;;
+    1) ;;
+    *) printf 'ai-review: passed-head lookup unavailable; dispatching the requested reviewer.\n' >&2 ;;
+  esac
+}
+# An explicit additional reviewer must also skip the pool's own reuse.
+[ "$additional_reviewer" = 0 ] || [ "$force_review" = 1 ] || wrapper_args+=(--force)
 if [ "$code_only" -eq 1 ]; then
   [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
   jq -e '.providers.deepseek.registry_state == "registered"' "$REAL_DIR/../config/reviewer-registry.json" >/dev/null 2>&1 || { printf 'ai-review: DeepSeek is not currently registered for review.\n' >&2; exit 3; }
@@ -215,7 +253,7 @@ sweep_orphans() {
   [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && return 0
   "$REAL_DIR/ai-review-sandbox" sweep-orphans || true
 }
-if [ "$mode" = plan-review ]; then sweep_orphans; exec "$wrapper" "${wrapper_args[@]}"; fi
+if [ "$mode" = plan-review ]; then return_existing_pass; sweep_orphans; exec "$wrapper" "${wrapper_args[@]}"; fi
 # The sealed attachment-only route is its own gate action: the formal review
 # action stays forbidden for private classes, while code-only-review opens only
 # when the repository's own declaration carries the synthetic-fixtures-only
@@ -225,6 +263,7 @@ gate_action=review
 gate_args=()
 [ -z "$reviewer_approval" ] || gate_args=(--reviewer-approval "$reviewer_approval")
 tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
+return_existing_pass
 sweep_orphans
 if [ "$code_only" -eq 1 ]; then
   # The private source never becomes a provider working directory. The exporter
