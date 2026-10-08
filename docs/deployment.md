@@ -5,6 +5,13 @@ is no cloud release, container, or CI/CD. Canonical guide:
 [`../AGENTS.md`](../AGENTS.md). First-time / disaster restore:
 [`restore-from-zero.md`](restore-from-zero.md).
 
+The one application-source exception is the centrally sealed DesignFlow
+backend sandbox target. Its approved source push uses the repository's existing
+Cloud Build route and requires the committed target manifest, local review-gate
+declaration, and independent exact-head approval described in
+[`context-spec.md`](context-spec.md). It grants no manual Cloud Run or other
+cloud mutation.
+
 ## What "deploy" means here
 
 - GitHub Actions runs offline Linux and Windows verification only. It never

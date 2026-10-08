@@ -119,8 +119,8 @@ Real names, runners, and timeouts as of `9fafcd2`:
 | `windows-offline-warpbuild-proof` | PR only, **DISABLED** | `warp-custom-warpbuild-win2022-canary` | 40 min | `if: false && …` (verify.yml:351-352); `continue-on-error: true`; `max-parallel: 2`; **outside** every required aggregate |
 | `windows-offline-complete` | schedule/dispatch | `windows-2025` | 105 min | 5-section complete backstop |
 | `windows-offline` | all but merge_group | `ubuntu-24.04` | 5 min | Fail-closed aggregate; stable name for #166 |
-| `reviewer-runner-availability` | not merge_group | `ubuntu-24.04` | 3 min | Samples ENVY / qualified pool |
-| `windows-reviewer-preferred` | PR/dispatch | `[self-hosted, Windows, X64, ai-devops-windows-qualified]` | 60 min | e.g. edge-runn-envy |
+| `reviewer-runner-availability` | explicit full manual dispatch | `ubuntu-24.04` | 3 min | Samples ENVY / qualified pool |
+| `windows-reviewer-preferred` | explicit full manual dispatch | `[self-hosted, Windows, X64, ai-devops-windows-qualified]` | 60 min | e.g. edge-runn-envy |
 | `reviewer-safety-start-deadline` | — | `ubuntu-24.04` | 3 min | Bounds the self-hosted start |
 | `windows-reviewer-fallback-codex` / `-grok` | when preferred absent | `windows-2025` | 120 min | GitHub-hosted fallback |
 | `windows-reviewer-safety` | — | `ubuntu-24.04` | 5 min | Aggregate proof |

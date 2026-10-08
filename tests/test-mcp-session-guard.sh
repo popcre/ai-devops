@@ -56,6 +56,18 @@ fs.writeFileSync(process.argv[2] + '.kid', String(kid.pid))
 setTimeout(() => {}, 15000)
 EOF
 
+# A launcher may exit on EOF before its server does (cmd/npm have this shape).
+# The guard must retain the launcher's live tree until it performs cleanup.
+cat > "$TMP/eof-launcher.js" <<'EOF'
+const fs = require('fs')
+const { spawn } = require('child_process')
+const server = spawn(process.execPath, [process.argv[2], process.argv[3]], { stdio: 'ignore' })
+fs.writeFileSync(process.argv[3] + '.launcher', String(process.pid))
+process.stdin.resume()
+process.stdin.on('end', () => process.exit(0))
+setTimeout(() => {}, 15000)
+EOF
+
 # Session client: like Claude, owns the helper's stdin and can close it.
 cat > "$TMP/session.js" <<'EOF'
 // usage: session.js <guard.mjs> <pidfile> <mode> <command> [args...]
@@ -151,6 +163,19 @@ wait_ready "$TMP/pid1.eof" || fail "session did not close stdin (stdin-eof case)
 wait_reaped "$HELPER_PID" "$KID_PID" || fail "helper tree still alive after stdin EOF (helper $HELPER_PID; grandchild $KID_PID)"
 wait "$SESSION" 2>/dev/null || true
 ok "stdin_eof_kills_helper_and_grandchild"
+
+"$NODE" "$TMP/session.js" "$GUARD" "$TMP/pidlauncher" eof "$NODE" "$TMP/eof-launcher.js" "$TMP/hold.js" "$TMP/pidlauncher" \
+  >"$TMP/outlauncher" 2>"$TMP/errlauncher" &
+SESSION=$!
+wait_ready "$TMP/pidlauncher.kid" || fail 'EOF launcher server tree did not start'
+HELPER_PID="$(cat "$TMP/pidlauncher")"
+KID_PID="$(cat "$TMP/pidlauncher.kid")"
+LAUNCHER_PID="$(cat "$TMP/pidlauncher.launcher")"
+printf 'close\n' > "$TMP/pidlauncher.close"
+wait_ready "$TMP/pidlauncher.eof" || fail 'EOF launcher session did not close stdin'
+wait_reaped "$LAUNCHER_PID" "$HELPER_PID" "$KID_PID" || fail 'launcher exited on forwarded EOF before its server tree was reaped'
+wait "$SESSION" 2>/dev/null || true
+ok 'stdin_eof_cannot_orphan_an_eof_sensitive_launcher_tree'
 
 # --- 2. session SIGKILL (Claude OOM) reaps the helper tree -------------
 # Killing the session closes its stdin write end — the same event an OOM

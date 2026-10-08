@@ -93,6 +93,33 @@ $SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --
 $SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase terminal --observation wrapper-cancelled --elapsed 2 --cancellation-initiator signal --cancellation-confirmation unconfirmed >/dev/null & CONCURRENT_TWO=$!
 wait "$CONCURRENT_ONE"; CONCURRENT_ONE_RC=$?; wait "$CONCURRENT_TWO"; CONCURRENT_TWO_RC=$?
 check "concurrent diagnostic updates are serialized without lost evidence" "test '$CONCURRENT_ONE_RC' -eq 0 -a '$CONCURRENT_TWO_RC' -eq 0 && jq -e '([.events[].last_observation_type]|index(\"provider-completed\")!=null) and ([.events[].last_observation_type]|index(\"wrapper-cancelled\")!=null)' '$CONCURRENT'"
+SHIM_BIN="$TMP/mkdir-shim"; mkdir -p "$SHIM_BIN"
+SHIM_FIRST="$TMP/shim-first"; SHIM_SECOND="$TMP/shim-second"; SHIM_DONE="$TMP/shim-done"
+cat > "$SHIM_BIN/mkdir" <<'SHIMEOF'
+#!/usr/bin/env bash
+if [ "$#" -eq 1 ] && [ "$1" = "$AI_TEST_TARGET_LOCK" ]; then
+  if [ -d "$1" ]; then
+    if [ ! -e "$AI_TEST_SHIM_FIRST" ]; then
+      : > "$AI_TEST_SHIM_FIRST"
+      exit 0
+    fi
+    : > "$AI_TEST_SHIM_SECOND"
+    exit 0
+  fi
+fi
+exec "$AI_TEST_REAL_MKDIR" "$@"
+SHIMEOF
+chmod +x "$SHIM_BIN/mkdir"
+SHIM_CONCURRENT="$($SCRIPT observe --provider glm --repo "$R" --run-id shim-concurrent --caller codex --phase launch --observation provider-started --elapsed 0)"
+SHIM_LOCK="$SHIM_CONCURRENT.update-lock"; SHIM_DIGEST="$(sha256sum "$SHIM_CONCURRENT" | cut -d' ' -f1)"
+mkdir "$SHIM_LOCK"; printf '%s\n' "$$" > "$SHIM_LOCK/pid"
+export AI_TEST_REAL_MKDIR="$(command -v mkdir)" AI_TEST_TARGET_LOCK="$SHIM_LOCK" AI_TEST_SHIM_FIRST="$SHIM_FIRST" AI_TEST_SHIM_SECOND="$SHIM_SECOND"
+PATH="$SHIM_BIN:$PATH" "$SCRIPT" observe --provider glm --repo "$R" --run-id shim-concurrent --caller codex --phase terminal --observation wrapper-cancelled --elapsed 2 --cancellation-initiator signal --cancellation-confirmation unconfirmed >/dev/null && : > "$SHIM_DONE" & SHIM_ONE=$!
+for _ in $(seq 1 100); do [ -e "$SHIM_SECOND" ] || [ -e "$SHIM_DONE" ] && break; sleep 0.01; done
+check "hostile mkdir cannot clobber a live diagnostic lock owner" "test \"\$(cat '$SHIM_LOCK/pid' 2>/dev/null)\" = \"$$\" -a \"\$(sha256sum '$SHIM_CONCURRENT' | cut -d' ' -f1)\" = '$SHIM_DIGEST' -a ! -e '$SHIM_DONE' -a -e '$SHIM_SECOND'"
+rm -f "$SHIM_LOCK/pid"; rmdir "$SHIM_LOCK"
+wait "$SHIM_ONE"; SHIM_ONE_RC=$?
+check "hostile mkdir observer completes after fixture-owned lock release" "test '$SHIM_ONE_RC' -eq 0 && jq -e '([.events[].last_observation_type]|index(\"provider-started\")!=null) and ([.events[].last_observation_type]|index(\"wrapper-cancelled\")!=null)' '$SHIM_CONCURRENT'"
 mkdir "$CONCURRENT.update-lock"; printf '99999999\n' > "$CONCURRENT.update-lock/pid"
 $SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase finalizing --observation stale-lock-recovered --elapsed 3 >/dev/null
 check "dead diagnostic lock owner is reclaimed without losing the run" "test ! -e '$CONCURRENT.update-lock' && jq -e '[.events[].last_observation_type]|index(\"stale-lock-recovered\")!=null' '$CONCURRENT'"

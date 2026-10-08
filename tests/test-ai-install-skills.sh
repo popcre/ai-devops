@@ -167,6 +167,17 @@ grep -Fq '~ ' "$TMP_ROOT/m2.out" && fail "second apply reported an update"
 after="$(find "$claude/skills" "$codex/skills" -type f -exec sha256sum {} + | sort)"
 [[ "$before" == "$after" ]] || fail "second apply changed files (not idempotent)"
 
+# Current content with a stale nonempty marker must refresh only its metadata.
+marker="$claude/skills/client-claude/.ai-devops-managed"
+content_before="$(sha256sum "$claude/skills/client-claude/SKILL.md")"
+printf '%064d  SKILL.md\n' 0 > "$marker"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/stale-marker.out" 2>&1
+grep -Fq '= client-claude (Claude) up to date' "$TMP_ROOT/stale-marker.out" || fail "current content not classified identical"
+expected_hash="$(sha256sum "$claude/skills/client-claude/SKILL.md" | cut -d ' ' -f1)"
+grep -Fxq "$expected_hash  SKILL.md" "$marker" || fail "stale nonempty marker not reconciled"
+[[ "$content_before" == "$(sha256sum "$claude/skills/client-claude/SKILL.md")" ]] || fail "metadata reconciliation changed content"
+[[ ! -e "$claude/skills-backup/client-claude" ]] || fail "unchanged content unnecessarily backed up"
+
 # locally extended: a file the repo does not ship must survive an update.
 echo 'local note' > "$claude/skills/client-claude/LOCAL-NOTES.md"
 printf '%s\n' '---' 'name: client-claude' 'description: test v2' '---' \

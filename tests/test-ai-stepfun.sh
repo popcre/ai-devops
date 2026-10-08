@@ -9,6 +9,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" AI_STEPFUN_STATE_DIR="$TMP/state" AI_STEPFUN_KEY_STORE="$TMP/home/key"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_STEPFUN_STEP_BIN="$TMP/bin/step"
 export AI_REVIEW_EVENT_DIR="$TMP/events"
+unset AI_STEPFUN_KEY STEPFUN_API_KEY STEP_API_KEY
 export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20 AI_STEPFUN_RPM=100000
 mkdir -p "$TMP/bin" "$HOME"
 printf 'stub-key\n' > "$AI_STEPFUN_KEY_STORE"; chmod 600 "$AI_STEPFUN_KEY_STORE"
@@ -182,6 +183,8 @@ check "usage_parsed_into_report" "[ $rc = 0 ] && [ '$out' = 'final json answer' 
 check "raw StepCode event stream is removed after the turn" "! find '$AI_STEPFUN_STATE_DIR' -name '*.events' | grep -q ."
 check "StepCode runs in json event mode" "grep -qx json '$STUB_ARGS' && grep -B1 -x json '$STUB_ARGS' | grep -qx -- --mode"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
+check "review door ignores ambient keys when the protected store exists" "mode ok; AI_STEPFUN_KEY=ambient-one STEPFUN_API_KEY=ambient-two STEP_API_KEY=ambient-three '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key'"
+check "review door refuses ambient keys without a protected store" "AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR='$TMP/repo' DOOR_PACKET_DIR='$TMP' DOOR_PROMPT_FILE='$TMP/missing-prompt' DOOR_REPORT_OUT='$TMP/missing-report' DOOR_HEAD='$HEAD_SHA' AI_STEPFUN_ALLOW_NO_CREDS=0 AI_STEPFUN_KEY_STORE='$TMP/missing-store' AI_STEPFUN_KEY=ambient-one STEPFUN_API_KEY=ambient-two STEP_API_KEY=ambient-three bash '$ROOT/tools/lib/review-doors/stepfun.sh' review >'$TMP/no-store.out' 2>&1; rc=\$?; [ \$rc = 127 ] && grep -q 'no StepFun key in the protected store' '$TMP/no-store.out'"
 
 check "review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
 check "StepCode retains its only verdict-format instructions" "[ \"\$(grep -c '^VERDICT: APPROVE <head sha>' '$STUB_ARGS.prompt')\" = 1 ] && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$STUB_ARGS.prompt'"
@@ -380,6 +383,23 @@ STUB
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "door reruns the turn after a StepFun 429 once in-place resumes are used up" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+ans=STEPFUN-OK
+if [ ! -e ./limited ]; then : > ./limited; ans=""
+  echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'; fi
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport" "$RH/dw/limited"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
+  check "door never retries an implementation turn after a 429" "[ '$drc' != 0 ] && ! grep -q 'rate limit reached' '$RH/dout'"
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }

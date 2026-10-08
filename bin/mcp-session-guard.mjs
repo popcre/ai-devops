@@ -260,7 +260,10 @@ if (child.stdin) {
       process.stderr.write('mcp-session-guard: stdin close\n')
     }
   })
-  process.stdin.pipe(child.stdin)
+  // Observe EOF here before closing the launcher's pipe. cmd/npm may exit
+  // immediately when that pipe ends, losing the root needed to reap its tree.
+  // shutdown owns the pipe and the complete child tree from this point.
+  process.stdin.pipe(child.stdin, { end: false })
 }
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {

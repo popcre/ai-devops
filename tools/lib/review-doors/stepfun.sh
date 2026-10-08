@@ -176,18 +176,8 @@ select_engine() {
 # environment only; it never appears in argv or output.
 SF_KEY=""
 require_credentials() {
-  if [ -n "${AI_STEPFUN_KEY:-}" ]; then
-    SF_KEY="$AI_STEPFUN_KEY"
-    return 0
-  fi
-  if [ -n "${STEPFUN_API_KEY:-}" ]; then
-    SF_KEY="$STEPFUN_API_KEY"
-    return 0
-  fi
-  if [ -n "${STEP_API_KEY:-}" ]; then
-    SF_KEY="$STEP_API_KEY"
-    return 0
-  fi
+  # Review credentials come only from the protected store, matching ai-stepfun.
+  # Ambient provider variables must not select a different account for probes.
   local store="${AI_STEPFUN_KEY_STORE:-${HOME:-}/.config/ai-devops/secrets/stepfun-api-key}"
   if [ -s "$store" ]; then
     IFS= read -r SF_KEY < "$store" || SF_KEY=""
@@ -316,8 +306,10 @@ sf_rpc_turn() {
         # shared cooldown, so the steps already paid for are kept instead of
         # rerunning the whole turn cold. The 429 stays in $out.err, so the
         # caller's whole-turn rerun remains the fallback if the stream dies.
+        # Implementation turns never resume: a partial edit in the writable
+        # clone must not be duplicated.
         resume=0
-        [[ "$err" != 429:* ]] || [ "$resumes" -ge "$resume_max" ] || resume=1 ;;
+        [[ "$err" != 429:* ]] || [ "$MODE" != review ] || [ "$resumes" -ge "$resume_max" ] || resume=1 ;;
       agent_settled)
         if [ "$resume" = 1 ]; then
           resume=0; resumes=$((resumes + 1))
@@ -390,6 +382,8 @@ main() {
     # The same shared pacer and 429 cooldown as the StepCode branch below
     # (#1432): every turn waits for a slot first, and a 429 that still ends
     # the turn sets the shared cooldown before one bounded rerun.
+    # Implementation turns are never re-run blindly: a partial edit in the
+    # writable clone must not be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     while :; do
@@ -408,6 +402,7 @@ main() {
       )
       rc=$?
       [ "$rc" -ne 0 ] || break
+      [ "$MODE" = review ] || break
       oc_rate_limited "$log" "$out.err" && [ "$rate_retries" -lt "$rate_max" ] || break
       rate_retries=$((rate_retries + 1))
       printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
@@ -460,7 +455,9 @@ main() {
     # Every turn waits for a slot from the shared pacer first, so concurrent
     # reviews are spaced instead of colliding (#1432). An HTTP 429 that still
     # outlasts StepCode's own retry sets a shared cooldown, and the turn is
-    # rerun only after that wait, as bin/ai-stepfun does.
+    # rerun only after that wait, as bin/ai-stepfun does. Implementation turns
+    # are never re-run blindly: a partial edit in the writable clone must not
+    # be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
@@ -470,6 +467,7 @@ main() {
       sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
+      [ "$MODE" = review ] || break
       grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
       rate_retries=$((rate_retries + 1))
       printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2

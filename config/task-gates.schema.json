@@ -46,6 +46,37 @@
         "additionalProperties": { "type": "string", "minLength": 1 }
       }
     },
+    "application_source_releases": {
+      "description": "Central only: a closed exact-target admission for a reviewed application source push through its existing Cloud Build route. It grants no manual cloud action.",
+      "type": "object",
+      "required": ["popcre/designflow-backend"],
+      "additionalProperties": false,
+      "properties": {
+        "popcre/designflow-backend": {
+          "type": "object",
+          "required": ["manifest_path", "required_consumer_gate", "target"],
+          "additionalProperties": false,
+          "properties": {
+            "manifest_path": { "const": ".ai-devops/application-release-target.json" },
+            "required_consumer_gate": { "const": "cloud-build-release-review" },
+            "target": {
+              "type": "object",
+              "required": ["schema_version", "repository", "route", "branch", "project", "region", "service"],
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": { "const": 1 },
+                "repository": { "const": "popcre/designflow-backend" },
+                "route": { "const": "cloud-build-branch-push" },
+                "branch": { "const": "sandbox-albert" },
+                "project": { "const": "lithe-breaker-323913" },
+                "region": { "const": "us-east4" },
+                "service": { "const": "popcre-albert-core-sandbox" }
+              }
+            }
+          }
+        }
+      }
+    },
     "change_classes": {
       "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged away, and is reviewer-approved past a forbidden action only through an explicit reviewer_release.",
       "type": "object",

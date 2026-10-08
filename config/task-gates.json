@@ -22,7 +22,8 @@
     "action, only while the EFFECTIVE class is named there AND that repository declares the named gate",
     "for that class in its own .ai-devops/task-gates.json. It never starts the action without an",
     "assigned AI reviewer exact-head final-check or security-review APPROVE, and it can never",
-    "release private-evidence: one licensed path in the change set keeps the action sealed."
+    "release private-evidence: one licensed path in the change set keeps the action sealed.",
+    "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
     "review",
@@ -51,6 +52,21 @@
   "reviewer_release": {
     "database": {
       "private-tooling": "reviewed-private-data-writer"
+    }
+  },
+  "application_source_releases": {
+    "popcre/designflow-backend": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-backend",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-core-sandbox"
+      }
     }
   },
   "change_classes": {

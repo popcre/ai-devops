@@ -181,6 +181,24 @@ migration is still pending.
   enough. Re-read the actual file, grade it, and answer per § Answering the
   verification question.
 
+## File references — GitHub URLs only (portable across machines)
+
+The next session may run on a **different machine**. Every file path in a
+handoff — and in any next-session prompt that points at one — must be a
+**GitHub URL**, never a machine-local path.
+
+- Required form:
+  `https://github.com/<org>/<repo>/blob/<ref>/<path>` (add `#L<n>` or
+  `#L<n>-<m>` for a line or range).
+- **Never** write machine-local paths: `C:\...`, `/home/...`, `/Users/...`,
+  `/c/...`, `~\...`, `~/...`. Those only work on the machine that wrote them.
+- A bare relative path (`docs/foo.md`) is not enough on its own — give the full
+  GitHub URL the successor can open in a browser.
+- For work that is not yet pushed, say so, and give the intended GitHub URL
+  (branch or PR) once it lands. Do not invent a `main` URL for unpushed work.
+- Same rule for commit SHAs: give the GitHub commit URL, not a local git
+  object id alone.
+
 ## Required structure (use these 10 sections, **0–9**, in YOUR `HANDOFF.d/` file; never drop one silently — write "N/A" + why if truly inapplicable)
 
 Write for a developer who **walked in off the street this morning**: zero
@@ -199,13 +217,14 @@ session; those are not symmetric, so err long.
 2. **What we set out to do this session, and why** — goal in business terms + the
    technical objective + what triggered it (bug, feature, incident).
 3. **Current state — what is true right now** — what works (verified how?);
-   what is half-done and its EXACT state (files, `file:line`); what is not started;
+   what is half-done and its EXACT state (files as GitHub URLs with lines);
+   what is not started;
    is the code committed / pushed / deployed, on which branch/environment.
 4. **Everything we tried that did NOT work** — the most-skipped, most-important
    section. Each dead end: what we tried, why it seemed reasonable, how it failed,
    why. This is what stops the next session repeating your hours of mistakes.
-5. **Root causes and key findings** — what you actually learned, with `file:line`
-   refs and the non-obvious discoveries that each took you real time to work out.
+5. **Root causes and key findings** — what you actually learned, with GitHub
+   URL file:line refs and the non-obvious discoveries that each took you real time to work out.
 6. **Exact next steps** — numbered, in order, specific enough to execute without
    judgment calls. Each ends with a verification gate: "you'll know it worked when ___."
 7. **Constraints and gotchas in force** — standing rules (branch policy, no
@@ -310,6 +329,9 @@ always be more detailed" is NOT a checklist item — do not treat it as one.
 - [ ] Every next step is concrete + has a "you'll know it worked when ___" gate.
 - [ ] Every term, identifier, path, URL, and commit SHA a newcomer wouldn't know
       is defined or referenced.
+- [ ] **Every file and commit reference is a GitHub URL** (never a machine-local
+      path like `C:\...` or `/home/...`). Unpushed work says so and names the
+      intended GitHub URL.
 - [ ] Commit/push/deploy status is explicit for each piece of work.
 - [ ] Secrets are referenced by location only (vault/item), never by value.
 - [ ] For a multi-workstream handoff: **your** workstream's section clears every
@@ -374,9 +396,12 @@ now**. If that is true, the answer is Yes — say it.
 
 - Assuming the reader knows what the app does or what "the X issue" refers to.
 - Listing the final plan but omitting the failed attempts.
-- "Continue where we left off" without saying where, in `file:line` terms.
+- "Continue where we left off" without saying where, in GitHub URL `file:line` terms.
 - Vague next steps ("finish the migration") instead of exact, verifiable ones.
 - Session jargon with no definition.
+- **Machine-local paths** (`C:\repos\...`, `/home/ahazan/...`, `~/...`) in the
+  handoff or the next-session prompt. The next session may be on another
+  machine; only GitHub URLs open from anywhere.
 - Three sentences called a handoff. Under a screen of text for non-trivial work is
   almost certainly too thin — re-audit. (The per-session file does NOT lower the
   verbosity bar; all 10 sections and the "what did NOT work" section still apply.)
