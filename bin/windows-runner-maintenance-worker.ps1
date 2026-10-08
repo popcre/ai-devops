@@ -213,6 +213,33 @@ function Test-IntegrityCapacity {
   if ((Test-Path -LiteralPath $LedgerPath) -and (Get-Item -LiteralPath $LedgerPath).Length -ge ($MaxLedgerBytes - 8192)) { throw 'LEDGER_FULL' }
 }
 
+function Test-TaskDaclEquivalent {
+  # Task Scheduler on current Windows 11 builds returns an EMPTY string for
+  # a descriptor read with flag 0 even elevated, and stores generic rights mapped
+  # (GRGX -> 0x1200a9) with auto-inherit flags (D:PAI). The DACL is therefore
+  # read with DACL_SECURITY_INFORMATION (4) and compared semantically: same
+  # protected flag, and exactly the same set of (type, SID, mapped mask) ACEs.
+  param([AllowEmptyString()][string]$Actual, [Parameter(Mandatory)][string]$Expected)
+  if ([string]::IsNullOrWhiteSpace($Actual)) { return $false }
+  $map = { param([int]$m)
+    $r = $m -band 0x0FFFFFFF
+    if ($m -band 0x80000000) { $r = $r -bor 0x120089 }
+    if ($m -band 0x40000000) { $r = $r -bor 0x120116 }
+    if ($m -band 0x20000000) { $r = $r -bor 0x1200a0 }
+    if ($m -band 0x10000000) { $r = $r -bor 0x1F01FF }
+    $r }
+  $parse = { param([string]$s)
+    try { $sd = [Security.AccessControl.RawSecurityDescriptor]::new($s) } catch { return $null }
+    if ($null -eq $sd.DiscretionaryAcl) { return $null }
+    $aces = @(foreach ($ace in $sd.DiscretionaryAcl) {
+      if ($ace -isnot [Security.AccessControl.CommonAce]) { 'unsupported' } else { '{0}|{1}|{2}' -f $ace.AceQualifier, $ace.SecurityIdentifier.Value, (& $map $ace.AccessMask) } })
+    [pscustomobject]@{ Protected = (($sd.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0); Aces = @($aces | Sort-Object) } }
+  $a = & $parse $Actual; $e = & $parse $Expected
+  if ($null -eq $a -or $null -eq $e -or $a.Protected -ne $e.Protected -or $a.Aces.Count -ne $e.Aces.Count) { return $false }
+  for ($i = 0; $i -lt $a.Aces.Count; $i++) { if ($a.Aces[$i] -cne $e.Aces[$i]) { return $false } }
+  return $true
+}
+
 function Test-TaskBoundary {
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
   $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
@@ -222,8 +249,8 @@ function Test-TaskBoundary {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $actualSddl = $service.GetFolder('\AiDevOps').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
-  if ($actualSddl -cne "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)") { throw 'ACL_DRIFT' }
+  $actualSddl = [string]$service.GetFolder('\AiDevOps').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(4)
+  if (-not (Test-TaskDaclEquivalent -Actual $actualSddl -Expected "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)")) { throw 'ACL_DRIFT' }
 }
 
 function Invoke-RefreshQualification {

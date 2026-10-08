@@ -294,6 +294,22 @@ try {
     Assert-True ($recover.IndexOf('Set-PayloadFileAcl') -lt $recover.IndexOf("Get-Content -Raw -LiteralPath (Join-Path `$script:PayloadRoot 'manifest.json')")) 'recovery cannot read an empty-DACL manifest'
   }
 
+  # Task DACL comparison (#1312, observed live on build 26300): flag 0 reads
+  # return '', and stored DACLs come back mapped (GRGX -> 0x1200a9) as D:PAI.
+  $expectedTaskDacl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$sid)"
+  Case 'TaskDacl_AcceptsStoredMappedForm' { Assert-True (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)" -Expected $expectedTaskDacl) 'stored mapped DACL rejected' }
+  Case 'TaskDacl_RefusesEmptyRead' { Assert-True (-not (Test-TaskDaclEquivalent -Actual '' -Expected $expectedTaskDacl)) 'empty descriptor accepted' }
+  Case 'TaskDacl_RefusesUnprotectedWithPrincipalAce' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)(A;;FR;;;$sid)" -Expected $expectedTaskDacl)) 'unsealed default DACL accepted' }
+  Case 'TaskDacl_RefusesOperatorFullControl' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;$sid)" -Expected $expectedTaskDacl)) 'operator full control accepted' }
+  Case 'TaskDacl_RefusesExtraIdentity' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)(A;;0x1200a9;;;WD)" -Expected $expectedTaskDacl)) 'extra identity accepted' }
+  Case 'TaskDacl_RefusesDenyInsteadOfAllow' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(D;;0x1200a9;;;$sid)" -Expected $expectedTaskDacl)) 'deny ACE accepted' }
+  Case 'TaskDacl_ReadsWithDaclFlagAndSetsWithoutPrincipalAce' {
+    foreach ($text in @($installerText, $maintenanceInstaller, (Get-Content -Raw -LiteralPath (Join-Path $repo 'bin\windows-runner-maintenance-worker.ps1')))) {
+      Assert-True ($text -notmatch 'GetSecurityDescriptor\(0\)') 'a task descriptor is still read with flag 0'
+      Assert-True ($text -notmatch 'SetSecurityDescriptor\([^)]*,\s*0\)') 'a task descriptor is still set without TASK_DONT_ADD_PRINCIPAL_ACE'
+    }
+  }
+
   Case 'MaintenanceTask_StaysTriggerless' {
     # The elevated #262 task keeps its no-trigger contract; only the
     # unprivileged sibling is scheduled.
