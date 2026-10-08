@@ -20,7 +20,7 @@ a genuine business-meaning choice appears.
 | W1b Phase 3 subagent (Windows gate) | ✅ done | `2e50a4c7`, `0d8e1248`; Windows and Linux shell suites each passed 52, 0 failed; Windows junction fixture proves the path escape guard |
 | W2a Phase 2 subagent (prompt de-dup) | ✅ done, compaction repaired | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips; [PR #1360](https://github.com/popcre/ai-devops/pull/1360) restored the qualified compaction block and documented its unmeasured effect in `config/opencode-stepfun/README.md` |
 | W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
-| W3 Phase 5 subagent (measure + live proof) | ✅ measurement delivered; live checks reported passed | `b07d79fb`; original suites passed 80 StepFun checks and 52 Windows-shell checks, 0 failures. StepCode exposes no usage or cache counters, so numeric savings remain unmeasured. The 2026-10-07 credit failure was superseded by successful Linux and Windows installed live checks reported on [issue #1336](https://github.com/popcre/ai-devops/issues/1336), following [PR #1422](https://github.com/popcre/ai-devops/pull/1422), merged as `7c140cf8`. Full Windows installation-stage evidence remains open under Codex. |
+| W3 Phase 5 subagent (measure + live proof) | ✅ measured; live proof done | 2026-10-07/08: a recording proxy measured real reviews; StepFun reports `cached_tokens`, 93–97% of input was cached, and the real limit is 500k tokens per minute. Cold rerun on 429 fixed in [PR #1482](https://github.com/popcre/ai-devops/pull/1482). Full numbers: [`docs/stepfun-cost-measurements.md`](docs/stepfun-cost-measurements.md). Linux and Windows `doctor --live` verified after #1482 merged; a fresh Linux review returned APPROVE with 0 rate-limit hits. |
 | W4 integrate, PR, required exact-head independent review, merge | ✅ merged | [PR #1337](https://github.com/popcre/ai-devops/pull/1337): Muse approved exact head `962ef01a37cccb9bd6a0aeff9a7dab450d28c4d1`, merged as `61d95fe9`; [repair PR #1360](https://github.com/popcre/ai-devops/pull/1360): DeepSeek approved exact head `8b78d12db70c560c504f2749583f52fcc65d0826`, merged as `ea45ba40`; required original suites and merge checks passed. Subsequent support repairs through [PR #1364](https://github.com/popcre/ai-devops/pull/1364) are on `origin/main` at `37070ecf`. |
 | Live proof checklist on landing issue | ⬜ full Windows installation evidence pending | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) was closed on 2026-10-07 with its live-proof box checked. Codex's 2026-10-08 audit independently verified Linux full installation at `2822470d`: all 29 stages passed, including all 19 required stages. Windows has a valid paired launcher receipt at `2032b678`, but that receipt alone does not prove full installation stages. Owner: Codex, retaining this acceptance gap on the same issue. |
 
@@ -69,8 +69,9 @@ on `edge-dev`.
 **Execution record:** Waves 0–2, Wave 3 counter logging, Wave 4 merge, and the
 supporting repair chain are recorded in STATUS. Full Windows installation-stage
 proof remains open on issue #1336 under Codex; installed live checks were reported
-successful on 2026-10-07 and Linux full-stage evidence was verified on 2026-10-08. No
-token-savings or cache-hit claim is made while provider counters are unavailable.
+successful on 2026-10-07 and Linux full-stage evidence was verified on 2026-10-08. Measured review costs and cache counters are now recorded in
+[`docs/stepfun-cost-measurements.md`](docs/stepfun-cost-measurements.md); retain
+its stated variability and avoid inferring a guaranteed savings rate.
 
 ---
 
