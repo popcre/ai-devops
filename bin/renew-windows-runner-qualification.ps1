@@ -21,6 +21,8 @@ param(
 # shows it too.
 
 $ErrorActionPreference = 'Stop'
+# Pin module resolution to system-owned directories before any cmdlet runs.
+$env:PSModulePath = "$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"
 $script:ClientPath = Join-Path $PSScriptRoot 'invoke-windows-runner-maintenance.ps1'
 $script:PowerShellPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
 $script:ResultNames = @{ 0='SUCCESS'; 10='MISSING_TASK'; 11='STALE_INSTALLATION'; 12='CONCURRENT_EXECUTION'; 13='REQUEST_REJECTED'; 14='OPERATION_FAILED'; 15='RESULT_INVALID'; 16='TIMEOUT' }
@@ -47,7 +49,7 @@ function Read-EvidenceTimestamp {
 
 function Write-StatusFile {
   param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$Json)
-  $temporary = "$LiteralPath.tmp"
+  $temporary = "$LiteralPath." + [guid]::NewGuid().ToString('N') + '.tmp'
   [IO.File]::WriteAllText($temporary, $Json, [Text.UTF8Encoding]::new($false))
   Move-Item -LiteralPath $temporary -Destination $LiteralPath -Force
 }

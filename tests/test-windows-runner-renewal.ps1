@@ -199,6 +199,57 @@ try {
     Assert-True (-not $remove.Contains('RenewalStatusRoot')) 'remove deletes the failure history'
   }
 
+  $full = 2032127
+  $goodPayload = @(
+    [pscustomobject]@{ Sid='S-1-5-32-544'; AccessControlType='Allow'; Rights=$full },
+    [pscustomobject]@{ Sid='S-1-5-18'; AccessControlType='Allow'; Rights=$full },
+    [pscustomobject]@{ Sid=$sid; AccessControlType='Allow'; Rights=1179817 })
+  Case 'Acl_PayloadContractPasses' { Test-RenewalAclRules -OwnerSid 'S-1-5-32-544' -Rules $goodPayload -OperatorSid $sid -Kind Payload }
+  Case 'Acl_StatusContractPasses' {
+    $rules = @($goodPayload[0], $goodPayload[1], [pscustomobject]@{ Sid=$sid; AccessControlType='Allow'; Rights=1245631 }, [pscustomobject]@{ Sid='S-1-5-32-545'; AccessControlType='Allow'; Rights=1179817 })
+    Test-RenewalAclRules -OwnerSid 'S-1-5-32-544' -Rules $rules -OperatorSid $sid -Kind Status
+  }
+  $aclDrifts = [ordered]@{
+    'Acl_RefusesForeignOwner' = @{ owner='S-1-5-21-9-9-9-500'; kind='Payload'; extra=$null }
+    'Acl_RefusesUnexpectedIdentity' = @{ owner='S-1-5-32-544'; kind='Payload'; extra=[pscustomobject]@{ Sid='S-1-1-0'; AccessControlType='Allow'; Rights=1179817 } }
+    'Acl_RefusesDenyRule' = @{ owner='S-1-5-32-544'; kind='Payload'; extra=[pscustomobject]@{ Sid=$sid; AccessControlType='Deny'; Rights=1 } }
+    'Acl_RefusesOperatorTakeOwnershipOnPayload' = @{ owner='S-1-5-32-544'; kind='Payload'; extra=[pscustomobject]@{ Sid=$sid; AccessControlType='Allow'; Rights=0x80000 } }
+    'Acl_RefusesOperatorWriteOnPayload' = @{ owner='S-1-5-32-544'; kind='Payload'; extra=[pscustomobject]@{ Sid=$sid; AccessControlType='Allow'; Rights=0x2 } }
+    'Acl_RefusesUsersWriteOnStatus' = @{ owner='S-1-5-32-544'; kind='Status'; extra=[pscustomobject]@{ Sid='S-1-5-32-545'; AccessControlType='Allow'; Rights=0x2 } }
+    'Acl_RefusesOperatorChangePermissionsOnStatus' = @{ owner='S-1-5-32-544'; kind='Status'; extra=[pscustomobject]@{ Sid=$sid; AccessControlType='Allow'; Rights=0x40000 } }
+  }
+  foreach ($entry in $aclDrifts.GetEnumerator()) {
+    $d = $entry.Value
+    Case $entry.Key {
+      $rules = @($goodPayload); if ($null -ne $d.extra) { $rules += $d.extra }
+      $threw = $false
+      try { Test-RenewalAclRules -OwnerSid $d.owner -Rules $rules -OperatorSid $sid -Kind $d.kind } catch { $threw = $_.Exception.Message -like 'STALE_INSTALLATION*' }
+      Assert-True $threw 'ACL drift accepted'
+    }.GetNewClosure()
+  }
+  Case 'Acl_VerifyChecksPayloadFilesAndStatus' {
+    $verify = [regex]::Match($installerText, 'function Test-RenewalInstallation[\s\S]*?\n}').Value
+    Assert-True ($verify.Contains('Get-ChildItem -LiteralPath $script:RenewalPayloadRoot') -and $verify.Contains('-Kind Status')) 'verify skips payload files or status ACL'
+  }
+  Case 'Installer_PinsModulesAndRefusesHostileEnvBeforeAnyCmdlet' {
+    $pin = $installerText.IndexOf('$env:PSModulePath = ')
+    $hostile = $installerText.IndexOf('DOTNET_STARTUP_HOOKS')
+    $dot = $installerText.IndexOf(". ([IO.Path]::Combine(")
+    Assert-True ($pin -gt 0 -and $hostile -gt $pin -and $dot -gt $hostile) 'pin/hostile check not before dot-source'
+    $prefix = $installerText.Substring(0, $pin)
+    Assert-True ($prefix -notmatch '(?m)^\s*[^#\s].*\b(Join-Path|Get-|Set-|New-|Test-Path)\b') 'a cmdlet runs before the module pin'
+    Assert-True ($renewText.IndexOf('$env:PSModulePath = ') -lt $renewText.IndexOf('Join-Path')) 'renewal script resolves a cmdlet before the pin'
+  }
+  Case 'Remove_SealsTaskBeforeUnregister' {
+    $remove = [regex]::Match($installerText, 'function Remove-RenewalInstallation[\s\S]*?\n}').Value
+    $seal = $remove.IndexOf("SetSecurityDescriptor('D:P(A;;FA;;;SY)(A;;FA;;;BA)'")
+    Assert-True ($seal -gt 0 -and $seal -lt $remove.IndexOf('Unregister-ScheduledTask')) 'task not sealed before unregister'
+  }
+  Case 'Install_StagingDeleteChecksOwnership' {
+    Assert-True ($installerText.Contains('Assert-NoReparsePoint -LiteralPath $staging; Assert-NoForeignOwnership -LiteralPath $staging; Remove-Item')) 'staging deleted without ownership check'
+  }
+  Case 'Renewal_StatusTempNameIsUnpredictable' { Assert-True ($renewText.Contains("[guid]::NewGuid().ToString('N') + '.tmp'")) 'predictable temp name' }
+
   Case 'MaintenanceTask_StaysTriggerless' {
     # The elevated #262 task keeps its no-trigger contract; only the
     # unprivileged sibling is scheduled.

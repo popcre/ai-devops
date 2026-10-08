@@ -16,6 +16,14 @@ param(
 # payload, which must already be installed and verify before this installs.
 
 $ErrorActionPreference = 'Stop'
+# Same self-hardening as the #262 installer, and BEFORE any cmdlet runs: this
+# installer is elevated under the operator's own account, so its console is
+# untrusted input. Module resolution is pinned to system-owned directories
+# and known code-loading variables refuse the run (only .NET calls above).
+$env:PSModulePath = "$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"
+foreach ($hostile in @('DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','CORECLR_ENABLE_PROFILING','CORECLR_PROFILER','COR_ENABLE_PROFILING','COR_PROFILER')) {
+  if ([Environment]::GetEnvironmentVariable($hostile)) { throw "Refusing to run: hostile code-loading variable $hostile is set in this shell. Rerun from a clean elevated shell." }
+}
 $script:RenewalTaskFolder = '\AiDevOps\'
 $script:RenewalTaskFolderCom = '\AiDevOps'
 $script:RenewalTaskName = 'WindowsRunnerQualificationRenewal'
@@ -34,7 +42,7 @@ $script:RenewalLibraryMode = [bool]$LibraryMode
 # Reuse the hardened #262 installer's primitives (administrator check,
 # checked icacls, operator SID resolution, reparse and COM-override guards,
 # and the full maintenance installation verifier).
-. (Join-Path $PSScriptRoot 'install-windows-runner-maintenance.ps1') -LibraryMode
+. ([IO.Path]::Combine($PSScriptRoot, 'install-windows-runner-maintenance.ps1')) -LibraryMode
 
 function Get-RenewalTaskArguments {
   return "-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$script:RenewalPayloadRoot\renew-windows-runner-qualification.ps1`""
@@ -62,7 +70,7 @@ function Install-RenewalPayload {
   $parent = Split-Path -Parent $script:RenewalPayloadRoot
   Assert-NoReparsePoint -LiteralPath $parent
   $staging = "$script:RenewalPayloadRoot.staging"
-  if (Test-Path -LiteralPath $staging) { Assert-NoReparsePoint -LiteralPath $staging; Remove-Item -LiteralPath $staging -Recurse -Force }
+  if (Test-Path -LiteralPath $staging) { Assert-NoReparsePoint -LiteralPath $staging; Assert-NoForeignOwnership -LiteralPath $staging; Remove-Item -LiteralPath $staging -Recurse -Force }
   New-Item -ItemType Directory -Path $staging | Out-Null
   foreach ($name in $script:RenewalFiles) { Copy-Item -LiteralPath (Join-Path $SourceRoot "bin\$name") -Destination (Join-Path $staging $name) }
   ($manifest | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath (Join-Path $staging 'manifest.json') -Encoding utf8
@@ -142,13 +150,41 @@ function Test-RenewalInstallation {
   foreach ($name in $script:RenewalFiles) {
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $script:RenewalPayloadRoot $name)).Hash.ToLowerInvariant() -cne [string]$manifest.files.$name) { throw "STALE_INSTALLATION: renewal hash drift in $name." }
   }
-  $acl = Get-Acl -LiteralPath $script:RenewalPayloadRoot
-  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-  if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'STALE_INSTALLATION: foreign owner on renewal payload.' }
-  $operatorWrite = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18') -and (($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ChangePermissions)) })
-  if ($operatorWrite.Count -ne 0) { throw 'STALE_INSTALLATION: non-administrator write access on renewal payload.' }
+  Test-RenewalPathAcl -LiteralPath $script:RenewalPayloadRoot -OperatorSid $ExpectedOperatorSid -Kind Payload
+  foreach ($child in @(Get-ChildItem -LiteralPath $script:RenewalPayloadRoot -Force)) { Test-RenewalPathAcl -LiteralPath $child.FullName -OperatorSid $ExpectedOperatorSid -Kind Payload }
+  Test-RenewalPathAcl -LiteralPath $script:RenewalStatusRoot -OperatorSid $ExpectedOperatorSid -Kind Status
   Assert-RenewalTaskContract -Task (Get-RenewalTaskSnapshot) -ExpectedOperatorSid $ExpectedOperatorSid
   return $true
+}
+
+function Test-RenewalAclRules {
+  # Pure contract over (owner, rules) so it is testable offline. Payload:
+  # Administrators/SYSTEM full control, operator read/execute only, nothing
+  # else. Status: the same plus operator modify and Users read only.
+  param([Parameter(Mandatory)][string]$OwnerSid, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rules, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Status')][string]$Kind)
+  if ($OwnerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: foreign owner on renewal $Kind." }
+  $allowed = @('S-1-5-32-544','S-1-5-18',$OperatorSid)
+  if ($Kind -eq 'Status') { $allowed += 'S-1-5-32-545' }
+  if (@($Rules | Where-Object { [string]$_.AccessControlType -ne 'Allow' -or [string]$_.Sid -notin $allowed }).Count -ne 0) { throw "STALE_INSTALLATION: unexpected ACL identity on renewal $Kind." }
+  foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
+    if (-not ($Rules | Where-Object { [string]$_.Sid -eq $required -and (([int]$_.Rights -band 2032127) -eq 2032127) })) { throw "STALE_INSTALLATION: missing protected ACL on renewal $Kind." }
+  }
+  # Write | AppendData | WriteEA | WriteAttributes | DeleteSubdirectoriesAndFiles | Delete | ChangePermissions | TakeOwnership
+  $mutating = 0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000
+  $ownerChange = 0x40000 -bor 0x80000
+  foreach ($rule in @($Rules | Where-Object { [string]$_.Sid -notin @('S-1-5-32-544','S-1-5-18') })) {
+    $rights = [int]$rule.Rights
+    if ([string]$rule.Sid -eq $OperatorSid -and $Kind -eq 'Status') { if ($rights -band $ownerChange) { throw 'STALE_INSTALLATION: operator may change ownership or permissions on renewal Status.' }; continue }
+    if ($rights -band $mutating) { throw "STALE_INSTALLATION: non-administrator write access on renewal $Kind." }
+  }
+}
+
+function Test-RenewalPathAcl {
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Status')][string]$Kind)
+  Assert-NoReparsePoint -LiteralPath $LiteralPath
+  $acl = Get-Acl -LiteralPath $LiteralPath
+  $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { [pscustomobject]@{ Sid=$_.IdentityReference.Value; AccessControlType=[string]$_.AccessControlType; Rights=[int]$_.FileSystemRights } })
+  Test-RenewalAclRules -OwnerSid $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -Rules $rules -OperatorSid $OperatorSid -Kind $Kind
 }
 
 function Assert-RenewalTaskContract {
@@ -163,7 +199,15 @@ function Assert-RenewalTaskContract {
 function Remove-RenewalInstallation {
   $task = Get-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -ErrorAction SilentlyContinue
   if ($null -eq $task -and -not (Test-Path -LiteralPath $script:RenewalPayloadRoot)) { return 'ABSENT' }
-  if ($null -ne $task) { Unregister-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Confirm:$false }
+  if ($null -ne $task) {
+    # Seal to administrators/SYSTEM first so the operator cannot start it
+    # during teardown, then unregister.
+    Assert-NoPerUserComOverride
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).SetSecurityDescriptor('D:P(A;;FA;;;SY)(A;;FA;;;BA)', 0)
+    Unregister-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Confirm:$false
+  }
   if (Test-Path -LiteralPath $script:RenewalPayloadRoot) {
     Assert-NoReparsePoint -LiteralPath $script:RenewalPayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:RenewalPayloadRoot
