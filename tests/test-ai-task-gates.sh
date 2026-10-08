@@ -1166,7 +1166,7 @@ newrepo "$APP" popcre/designflow-backend
 ( cd "$APP" && "$GATES" start --class deployment >/dev/null 2>&1 )
 mkdir -p "$APP/.ai-devops"
 cat > "$APP/.ai-devops/task-gates.json" <<'EOF'
-{"schema_version":1,"gates":{"deployment":{"required":["cloud-build-release-review"]}}}
+{"schema_version":1,"paths":[{"glob":"src/router.ts","class":"reviewer-safety"}],"gates":{"deployment":{"required":["cloud-build-release-review"]}}}
 EOF
 cat > "$APP/.ai-devops/application-release-target.json" <<'EOF'
 {"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}
@@ -1174,10 +1174,14 @@ EOF
 printf 'steps: []\n' > "$APP/cloudbuild.yaml"
 mkdir -p "$APP/bin"
 printf '# application reviewer route fixture\n' > "$APP/bin/ai-review-lifecycle"
-git -C "$APP" add .ai-devops/task-gates.json .ai-devops/application-release-target.json cloudbuild.yaml bin/ai-review-lifecycle
+mkdir -p "$APP/src"
+printf 'reviewed application router fixture\n' > "$APP/src/router.ts"
+git -C "$APP" add .ai-devops/task-gates.json .ai-devops/application-release-target.json cloudbuild.yaml bin/ai-review-lifecycle src/router.ts
 git -C "$APP" commit -qm 'declare reviewed sandbox source target'
 APP_HEAD="$(git -C "$APP" rev-parse HEAD)"
 APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
+check 'mixed protected application source keeps the generic deployment refusal' \
+  "rc 3 '$APP' check --before deploy --reviewer-approval '$APP_APPROVAL'"
 check 'the exact committed application source target records its independent approval' \
   "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
 check 'application source route refuses missing reviewer approval instead of ordinary success' \
