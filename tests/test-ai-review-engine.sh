@@ -1145,16 +1145,30 @@ mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
 : > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
 printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
+sed -n '/^review_verdict() {/,/^take_governed_head()/p' "$REPO_ROOT/bin/ai-deepseek-agent" | sed '$d' > "$DS_API_ROOT/validator"
 cat > "$DS_API_ROOT/bin/ai-deepseek-agent" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$DS_API_ARGS"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --file) cat "$2" >> "$DS_API_ARGS"; shift ;;
+    --governed-verdict) printf 'Wrong terminal contract\n' >&2; exit 2 ;;
+  esac
+  shift
+done
 case "${DS_API_RESULT:-approve}" in
-  missing-operation) printf 'Reviewed %s\nVERDICT: APPROVE %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
-  wrong-head) printf 'Approved first-managed-install.\nVERDICT: APPROVE wrong\n' ;;
-  reject) printf 'Reviewed %s\nVERDICT: REJECT %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
+  missing-operation) reply=$(printf 'Reviewed %s\n## Verdict\nAPPROVE\n' "$DOOR_HEAD") ;;
+  wrong-head) reply=$(printf 'Reviewed wrong\nApproved first-managed-install.\n## Verdict\nAPPROVE\n') ;;
+  malformed) reply=$(printf 'Reviewed %s\nApproved first-managed-install.\n## Verdict\nAPPROVE\ntrailing text\n' "$DOOR_HEAD") ;;
+  reject) reply=$(printf 'Reviewed %s\n## Verdict\nREJECT\n' "$DOOR_HEAD") ;;
   failure) exit 92 ;;
-  *) printf 'Reviewed %s\nApproved first-managed-install.\nVERDICT: APPROVE %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
+  *) reply=$(printf 'Reviewed %s\nApproved first-managed-install.\n## Verdict\nAPPROVE\n' "$DOOR_HEAD") ;;
 esac
+# Reuse the real API agent validator, rather than inventing a fixture grammar.
+. "$DS_API_VALIDATOR"
+PYTHON=python3; GOVERNED_HEAD=''
+review_verdict "$reply" >/dev/null || exit 1
+printf '%s\n' "$reply"
 EOF
 chmod +x "$DS_API_ROOT/bin/ai-deepseek-agent"
 git init -q "$DS_API_ROOT/source"
@@ -1168,7 +1182,7 @@ ds_api_case() {
     DOOR_OPERATION="$operation" DOOR_REVIEW_MODE="${DS_API_REVIEW_MODE:-final-check}" DOOR_MODE="$contract" DOOR_WORKDIR="$DS_API_ROOT/source" \
     DOOR_PACKET_DIR="$DS_API_ROOT" DOOR_PROMPT_FILE="$DS_API_ROOT/prompt" \
     DOOR_REPORT_OUT="$DS_API_ROOT/report" DOOR_HEAD=1111111111111111111111111111111111111111 \
-    DS_API_RESULT="$result" DS_API_ARGS="$DS_API_ROOT/args" \
+    DS_API_RESULT="$result" DS_API_ARGS="$DS_API_ROOT/args" DS_API_VALIDATOR="$DS_API_ROOT/validator" \
     bash "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh" "$contract" > "$DS_API_ROOT/stdout" 2> "$DS_API_ROOT/stderr"
 }
 check 'attachment_api_approves_exact_native_head_and_inventory' \
@@ -1183,6 +1197,8 @@ check 'attachment_api_refuses_implementation_before_provider' \
   "! ds_api_case attachment-api first-managed-install implement approve && ! test -e '$DS_API_ROOT/args'"
 check 'attachment_api_refuses_wrong_terminal_head' \
   "! ds_api_case attachment-api first-managed-install review wrong-head && ! test -s '$DS_API_ROOT/report'"
+check 'attachment_api_uses_real_ordinary_terminal_contract' \
+  "! ds_api_case attachment-api first-managed-install review malformed && ! test -s '$DS_API_ROOT/report'"
 check 'attachment_api_refuses_missing_operation_approval' \
   "! ds_api_case attachment-api first-managed-install review missing-operation && ! test -s '$DS_API_ROOT/report'"
 check 'attachment_api_preserves_provider_rejection' \
