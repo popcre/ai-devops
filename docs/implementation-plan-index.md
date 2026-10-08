@@ -13,7 +13,6 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
-| [`plan_reviewer-spend-waste.md`](../plan_reviewer-spend-waste.md) | [#1436](https://github.com/popcre/ai-devops/issues/1436) | C1 (#1427); plan written 2026-10-07, no implementation started |
 | [`plan_blockerwatch-reliability-repair.md`](../plan_blockerwatch-reliability-repair.md) | [#632](https://github.com/popcre/ai-devops/issues/632) | Step 0; comprehensive audit/repair plan written, no implementation started |
 | [`plan_blockerwatch-parked-work.md`](../plan_blockerwatch-parked-work.md) | [#617](https://github.com/popcre/ai-devops/issues/617) | Steps 1-9 and 11 done (merge `eb92356e`); step 10 partly proved on 916-alien - the fresh session must still be proved on a machine with a working headless agent, owned by #617 |
 | [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 3, §9.4; the [Windows and Ubuntu Git-ref qualification](../tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) and [task-only schema/baseline](../tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md) passed |
@@ -51,6 +50,7 @@ approach.
 
 | Plans | Completion owner or durable evidence |
 |---|---|
+| [`plan_reviewer-spend-waste.md`](../plan_reviewer-spend-waste.md) | Parent [#1436](https://github.com/popcre/ai-devops/issues/1436) (closed): C1-C9 all done 2026-10-07 with live proof; do not redo. Locks still binding: never cap turn budgets, no silent paid-key fallback |
 | `plan_ai-glm-permission-deadlock.md`, `plan_ai-glm-permission-failures.md`, `plan_ai-grok-review.md` | Complete STATUS tables and repository history |
 | `plan_codex_reviewer_trust_repair.md`, `plan_gemini_reviewer_safety_repair.md`, `plan_kimi_reviewer_completion_repair.md`, `plan_muse_reviewer_availability_repair.md`, `plan_qwen_reviewer_evidence_repair.md`, `plan_reviewer_shared_evidence_integrity.md` | Complete STATUS tables; Qwen re-proved on EDGE-DEV 2026-09-16 |
 | `plan_completion-honesty-enforcement.md` | Core rollout complete; residual issues #103, #108, and #119 own their narrower follow-ups |
