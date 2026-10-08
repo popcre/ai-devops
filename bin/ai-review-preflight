@@ -396,18 +396,16 @@ stepfun_opencode_bin() {
 # health_status PROVIDER prints the install-health object and returns 0 only
 # when the local install is healthy, unquarantined, and live-qualified.
 capacity_admission() { # PROVIDER -> current hold, with due-only read-only refresh
-  local provider="$1" hold credit_python
+  local provider="$1" hold
   hold="$(admission_store capacity-status "$provider")" || return 1
   if [ "$hold" != null ] && [ "$(printf '%s' "$hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
     case "$provider" in gemini|deepseek|glm|stepfun)
-      credit_python="$(command -v python3 || command -v python)" || return 1
-      # Windows: the credit reader runs bash wrappers only through the qualified
-      # Git Bash it is handed, exactly as bin/ai-review-credit-watch does.
-      case "${OSTYPE:-}" in
-        msys*|cygwin*) AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")" \
-          "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
-        *) "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
-      esac ;;
+      # Refresh only through bin/ai-review-credit-watch. That entrypoint is the
+      # sole place that hands the credit reader a qualified Git Bash on Windows;
+      # calling tools/reviewer_credit_watch.py directly leaves tool_command
+      # without AI_REVIEW_CREDIT_WATCH_BASH and every due re-check refuses.
+      "${AI_REVIEW_CREDIT_WATCH_BIN:-$SCRIPT_DIR/ai-review-credit-watch}" \
+        refresh "$provider" >/dev/null 2>&1 || true ;;
     esac
     hold="$(admission_store capacity-status "$provider")" || return 1
   fi
