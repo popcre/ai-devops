@@ -10,6 +10,16 @@ $script:TaskPath = '\AiDevOps\WindowsRunnerMaintenance'
 $script:SafeFields = @('schema_version', 'request_id', 'operation', 'host', 'started_at_utc', 'ended_at_utc', 'result', 'exit_code', 'message')
 $script:ResultExitCodes = @{ SUCCESS=0; MISSING_TASK=10; STALE_INSTALLATION=11; CONCURRENT_EXECUTION=12; REQUEST_REJECTED=13; OPERATION_FAILED=14; RESULT_INVALID=15; TIMEOUT=16 }
 
+function Set-RequestOwnerToCaller {
+  param([Parameter(Mandatory)][string]$LiteralPath)
+  $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  $info = [IO.FileInfo]::new($LiteralPath)
+  $security = [IO.FileSystemAclExtensions]::GetAccessControl($info, [Security.AccessControl.AccessControlSections]::Owner)
+  if ($security.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq $user.Value) { return }
+  $security.SetOwner($user)
+  [IO.FileSystemAclExtensions]::SetAccessControl($info, $security)
+}
+
 function New-MaintenanceRequest {
   param([string]$OperationName = 'refresh-qualification', [datetime]$NowUtc = [DateTime]::UtcNow)
   if ($OperationName -cne 'refresh-qualification') { throw 'REQUEST_REJECTED' }
@@ -19,6 +29,12 @@ function New-MaintenanceRequest {
   $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($request | ConvertTo-Json -Compress))
   $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
   try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+  # An S4U task token for an administrator account (even at run level
+  # Limited) creates files owned by BUILTIN\Administrators, which the worker
+  # correctly rejects (REQUEST_REJECTED, live on EDGE-ALIEN for #1312). The
+  # request is therefore re-owned by the caller's own user SID - the only
+  # owner the worker accepts - touching only the owner section.
+  Set-RequestOwnerToCaller -LiteralPath $path
   return [pscustomobject]@{ Id=$id; Path=$path }
 }
 
