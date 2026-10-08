@@ -7,13 +7,13 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 1. Move `/tmp` off RAM onto the SSD | ⬜ open (2026-10-07) | — |
-| 2. One session-owned temp root, exported to every engine | ⬜ open | — |
-| 3. Session wrappers delete their own temp root on exit | ⬜ open | — |
-| 4. Fix the named offenders (issue-prefixed `/tmp/<issue>-*` dirs, bare `mktemp`) | ⬜ open | — |
-| 5. Orphan sweep as backup only | ⬜ open | — |
-| 6. Guard against regression (lint + test) | ⬜ open | — |
-| 7. Clear the current pile safely | ⬜ open | — |
+| 1. Move `/tmp` off RAM onto the SSD | ✅ 2026-10-07 | fstab tmpfs line commented out; after reboot `findmnt /tmp` empty, memory used 12 G |
+| 2. One session-owned temp root, exported to every engine | ✅ code | base is per-user `/var/tmp/ai-sessions-<uid>` (0700), not shared `/var/tmp/ai-sessions`: a user-owned world-writable parent fails the repo's private-directory checks (`sealed.py`) and lets other accounts rename roots; `tools/lib/session-tmp.sh`, `tests/test-session-tmp.sh` |
+| 3. Session wrappers delete their own temp root on exit | ✅ code | 18 `bin/ai-*` wrappers + test runners via `ai_session_tmp_wrap` (detached watcher deletes the root when the wrapper PID exits, incl. kill -9; a re-exec design was rejected because reviewer event records key on the wrapper PID); Claude Code via SessionStart/SessionEnd hook (`bin/ai-session-tmp-hook`, `bin/ai-install-session-tmp`). Interactive Codex sessions not covered (no session hook) |
+| 4. Fix the named offenders (issue-prefixed `/tmp/<issue>-*` dirs, bare `mktemp`) | ✅ code | issue-prefixed names were hand-typed by agents: global templates now say use `$TMPDIR`; bare `mktemp` now lands in the session root; 13 legacy files baselined in `config/temp-hygiene-baseline.txt` |
+| 5. Orphan sweep as backup only | ✅ code | `bin/ai-session-tmp-sweep` + user timer, `tests/test-ai-session-tmp-sweep.sh` |
+| 6. Guard against regression (lint + test) | ✅ code | `tools/ci/check-temp-hygiene.sh`, `tests/test-temp-hygiene.sh` |
+| 7. Clear the current pile safely | ✅ 2026-10-07 | 26,839 stale entries removed, 6 GB freed; recent/busy entries kept |
 | 8. Live proof on edge-dev3 | ⬜ open | — |
 
 **Where a fresh session starts:** step 1. Read every section first. Re-read Part 3 before each phase (drift check).

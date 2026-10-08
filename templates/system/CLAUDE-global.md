@@ -243,6 +243,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 
 ## Work discipline
 
+- Put scratch files under `$TMPDIR` (your session's own temp folder, deleted
+  when the session ends), never hand-named `/tmp/<issue>-...` paths.
 - Keep routine tool output short; save long output to a scratch file and
   return only the decisive result.
 - **Never delegate a decision** (schema, merge, production, security). A

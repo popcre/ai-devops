@@ -629,6 +629,13 @@ run_stage required "Claude tool permissions" "$REPO_ROOT/bin/ai-claude-permissio
 run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-check-hook" --client claude
 
 # --------------------------------------------------------------------------
+# 4.9 Session temp cleanup (plan_session-temp-cleanup.md). Each Claude Code
+#     session gets its own temp folder that its SessionEnd hook deletes, plus a
+#     30-minute backup sweep for crashed sessions. Linux only; SKIP elsewhere.
+# --------------------------------------------------------------------------
+run_stage required "Session temp cleanup" "$REPO_ROOT/bin/ai-install-session-tmp"
+
+# --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
 # --------------------------------------------------------------------------
 # Wires the vault-locked 1Password service-account token, the central mcp.env

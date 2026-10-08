@@ -33,6 +33,7 @@
 # Provider turns read that store and never contact 1Password.
 
 set -uo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap deepseek-agent "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 # A caller's environment is untrusted review input. Only the managed
 # descriptor supplied by explicit store-key may introduce the provider key.
 unset DEEPSEEK_API_KEY

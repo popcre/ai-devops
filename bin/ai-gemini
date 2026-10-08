@@ -8,6 +8,7 @@
 # conversation/model and durable report gates pass. Copy edits are discarded.
 # Never add --dangerously-skip-permissions or mutate global Antigravity settings.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap gemini "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 # agy self-updates on ordinary invocations (even `agy models` in doctor). A
 # silent swap changes the runtime hash the live qualification is bound to, and
 # every following review refuses. The wrapper never lets its own calls update it.

@@ -4,6 +4,7 @@
 # mcp.env for this one process only. Nothing is written to disk or settings.
 # For reviews and delegated coding use `ai-qwen`, which adds containment.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap qwen-cli "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
