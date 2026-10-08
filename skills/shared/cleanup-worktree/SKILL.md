@@ -22,6 +22,11 @@ changing anything. If the user asked for a machine-wide audit, scan local fixed
 drives and known repository roots, but do not traverse large network mounts
 unless explicitly invited.
 
+**Default folder-scoped purview.** When the skill is invoked inside a repository
+folder, the audit covers that repository **and every adjacent sibling folder
+sharing its base-name prefix** (see §2 "Same-prefix sibling expansion"). The
+prefix widens discovery only; every removal still needs the proof rules below.
+
 Before cleanup:
 
 - Record the current repo, branch, status, remotes, and worktree list.
@@ -68,6 +73,19 @@ worktrees. Common clues include:
   `*-worktrees` directories.
 - Claude paths under `.claude/worktrees/`.
 - Delegated-agent, review, audit, or detached checkouts under temp roots.
+
+**Same-prefix sibling expansion (folder-scoped runs).** When the audit starts
+inside a known repository folder (for example `C:/repos/shared-db`), expand the
+candidate set to **adjacent sibling directories whose names share that
+repository's base name** — `shared-db`, `shared-db-*`, `shared-db_*`, and nested
+`.ai/worktrees`, `.claude/worktrees`, or `*-worktrees` trees under them. Also
+scan the parent directory for standalone clones Git never registered. A shared
+prefix is a **discovery hint only**: never treat name similarity as proof.
+Resolve each candidate's Git identity (`.git` directory or file,
+`git rev-parse --path-format=absolute --git-common-dir`, origin URL) and run the
+full classification below. Skip any folder that is not this repository family
+(backups, notes, exports, or another product that merely starts with the same
+string) and say so in the report.
 
 For machine-wide discovery, search for both `.git` directories and `.git`
 files: linked worktrees normally contain a `.git` file. Resolve

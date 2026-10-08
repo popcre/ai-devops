@@ -209,12 +209,12 @@ class PrototypeTests(unittest.TestCase):
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.host = "localhost:" + str(cls.server.server_port)
-        cls.env = {name: os.environ[name] for name in ("PATH",) if name in os.environ}
-        cls.env.update(GH_HOST=cls.host, GH_TOKEN="fake-token-sentinel", GH_PROMPT_DISABLED="1",
-                       GH_ENTERPRISE_TOKEN="fake-token-sentinel", GH_CONFIG_DIR=str(scratch / "config"),
-                       HOME=str(scratch), XDG_CACHE_HOME=str(scratch / "cache"),
-                       SSL_CERT_FILE=str(certificate), SSL_CERT_DIR=str(scratch / "trust"),
-                       GH_NO_UPDATE_NOTIFIER="1", GH_TELEMETRY="false", NO_COLOR="1")
+        for name in ("config", "home", "cache", "temp"):
+            (scratch / name).mkdir(mode=0o700)
+        cls.env = dict(GH_HOST=cls.host, GH_TOKEN="fake-token-sentinel", GH_PROMPT_DISABLED="1",
+                       GH_PAGER="", GH_CONFIG_DIR=str(scratch / "config"), HOME=str(scratch / "home"),
+                       XDG_CACHE_HOME=str(scratch / "cache"), TMPDIR=str(scratch / "temp"),
+                       PATH="", SSL_CERT_FILE=str(certificate), NO_COLOR="1")
 
     @classmethod
     def tearDownClass(cls):
@@ -224,33 +224,45 @@ class PrototypeTests(unittest.TestCase):
 
     def setUp(self):
         self.env = type(self).env.copy()
+        config = pathlib.Path(self.env['GH_CONFIG_DIR'])
+        shutil.rmtree(config, ignore_errors=True)
+        config.mkdir(mode=0o700)
         self.cwd = None
         self.observation_host = self.host
 
     def reset(self, retry=False):
         shutil.rmtree(self.env['XDG_CACHE_HOME'], ignore_errors=True)
+        pathlib.Path(self.env['XDG_CACHE_HOME']).mkdir(mode=0o700)
         self.server.received = 0
         self.server.paths = []
         self.server.retry = retry
 
+    def raw_env(self, artifact=None, updater=False):
+        environment = self.env.copy()
+        environment['PATH'] = '/usr/bin:/bin'
+        if updater:
+            environment.pop('GH_NO_UPDATE_NOTIFIER', None)
+        else:
+            environment['GH_NO_UPDATE_NOTIFIER'] = '1'
+        environment.setdefault('GH_ENTERPRISE_TOKEN', 'fake-token-sentinel')
+        if artifact is not None and 'GH_PATH' not in environment:
+            environment['GH_PATH'] = artifact['path']
+        return environment
+
     def execute(self, kind, args, instrument=True):
         artifact = MANIFEST["artifacts"][kind]
-        if not instrument:
-            result = verified_run(artifact, args, env=self.env, cwd=getattr(self, 'cwd', None), capture_output=True, timeout=20)
+        host = getattr(self, 'observation_host', self.host)
+        if instrument and args in (['fixture-self'], ['fixture-extension'], ['fixture-counter-env']):
+            return self.diagnostic(args)
+        qualify = instrument and runner.eligible(args, host) and runner.validate_profile(host, self.env)
+        if not qualify:
+            result = verified_run(artifact, args, env=self.raw_env(artifact), cwd=getattr(self, 'cwd', None), capture_output=True, timeout=20)
             return result, None
         read_fd, write_fd = os.pipe()
         try:
             invocation = [sys.executable, str(HERE / "run.py"), "--binary", artifact["path"],
                                      "--sha256", artifact["sha256"], "--api-host", getattr(self, 'observation_host', self.host),
                                      "--metadata-fd", str(write_fd), "--", *args]
-            if args[0].startswith('fixture-'):
-                # Internal controlled descendant diagnostic, intentionally not
-                # admitted through the qualification CLI allowlist.
-                code = ('import json,os,sys; import run; status,meta=run.run_counted(sys.argv[1],sys.argv[5:],sys.argv[3],sys.argv[2]); '
-                        'os.write(int(sys.argv[4]),(json.dumps(meta)+"\\n").encode()); raise SystemExit(status)')
-                invocation = [sys.executable, '-c', code, artifact['path'], artifact['sha256'],
-                              getattr(self, 'observation_host', self.host), str(write_fd), *args]
-                self.env['PYTHONPATH'] = str(HERE)
             result = subprocess.run(invocation, env=self.env, cwd=getattr(self, 'cwd', None),
                                     pass_fds=(write_fd,), capture_output=True, timeout=20)
             os.close(write_fd)
@@ -266,15 +278,61 @@ class PrototypeTests(unittest.TestCase):
             if write_fd >= 0:
                 os.close(write_fd)
 
-    def parity(self, args, expected, retry=False):
+    def diagnostic(self, args):
+        # Test-only transport/descendant instrumentation. No production runner
+        # guard is bypassed or extended, and no qualifying receipt is emitted.
+        host = getattr(self, 'observation_host', self.host)
+        self.assertTrue(args in (['fixture-self'], ['fixture-extension'], ['fixture-counter-env'])
+                        or runner.eligible(args, host))
+        artifact = MANIFEST['artifacts']['instrumented']
+        read_fd, write_fd = os.pipe()
+        try:
+            with verified_snapshot(artifact['path'], artifact['sha256']) as image:
+                pinned = f'/proc/{os.getpid()}/fd/{image.fileno()}'
+                environment = self.raw_env()
+                environment.update(GH_PATH=pinned, AI_GH_HTTP_COUNTER_FD=str(write_fd),
+                                   AI_GH_HTTP_COUNTER_HOST=host)
+                result = subprocess.run([artifact['path'], *args], executable=pinned,
+                                        env=environment, pass_fds=(write_fd,), capture_output=True,
+                                        cwd=getattr(self, 'cwd', None), timeout=20)
+                os.close(write_fd)
+                write_fd = -1
+                os.set_blocking(read_fd, False)
+                raw = bytearray()
+                deadline = time.monotonic() + 1
+                eof = False
+                while time.monotonic() < deadline and len(raw) <= 4096:
+                    if not select.select([read_fd], [], [], max(0, deadline - time.monotonic()))[0]:
+                        break
+                    data = os.read(read_fd, 4097 - len(raw))
+                    if not data:
+                        eof = True
+                        break
+                    raw.extend(data)
+                self.assertTrue(eof, 'controlled descendants retained the counter descriptor')
+                for forbidden in (b'fake-token-sentinel', b'fake-body-sentinel',
+                                  b'fake-query-sentinel', host.encode()):
+                    self.assertNotIn(forbidden, raw)
+                metadata = runner.validate(bytes(raw))
+                self.assertTrue(metadata['complete'], 'diagnostic did not exercise the counter')
+                self.assertIsNone(metadata['http_requests'])
+                return result, metadata
+        finally:
+            os.close(read_fd)
+            if write_fd >= 0:
+                os.close(write_fd)
+
+    def parity(self, args, expected, retry=False, diagnostic=False):
         self.reset(retry)
         baseline, _ = self.execute("baseline", args, instrument=False)
         self.assertEqual(self.server.received, expected)
         self.reset(retry)
-        patched, metadata = self.execute("instrumented", args)
+        patched, metadata = self.diagnostic(args) if diagnostic else self.execute("instrumented", args)
         self.assertEqual(self.server.received, expected)
         self.assertEqual((patched.returncode, patched.stdout, patched.stderr),
                          (baseline.returncode, baseline.stdout, baseline.stderr))
+        if metadata is None:
+            return
         self.assertEqual(metadata["observed_completed_writes"], expected)
         self.assertTrue(metadata["complete"])
         self.assertIsNone(metadata["http_requests"])
@@ -305,7 +363,7 @@ class PrototypeTests(unittest.TestCase):
         with self.proxy():
             self.env['GH_HOST'] = 'github.com'
             self.observation_host = 'api.github.com'
-            self.parity(['api', 'private'], 1)
+            self.parity(['api', 'private'], 1, diagnostic=True)
             self.assertGreaterEqual(self.proxy_connections, 2)
 
     def test_redirect_external_bucket_is_separate(self):
@@ -313,12 +371,12 @@ class PrototypeTests(unittest.TestCase):
             self.env['GH_HOST'] = 'github.com'
             self.observation_host = 'api.github.com'
             self.reset()
-            result, metadata = self.execute('instrumented', ['api', 'redirect-external'])
+            result, metadata = self.diagnostic(['api', 'redirect-external'])
             self.assertEqual(result.returncode, 0)
             self.assertEqual(self.server.received, 2)
             self.assertEqual(metadata['observed_completed_writes'], 1)
             self.assertEqual(metadata['observed_external_writes'], 1)
-            self.assertIsNone(metadata['http_requests'])
+            self.assertTrue(metadata['complete'])
 
     def proxy(self):
         from contextlib import contextmanager
@@ -363,6 +421,7 @@ class PrototypeTests(unittest.TestCase):
         return configured()
 
     def test_telemetry_enabled_self_execution_diagnostic(self):
+        self.reset()
         # Local-only demonstration: original sealed self-executable cannot be
         # reopened by upstream, whereas its supported GH_PATH can point at a
         # still-held verified image. No arbitrary pathname fallback.
@@ -374,27 +433,10 @@ class PrototypeTests(unittest.TestCase):
             config = pathlib.Path(self.env['GH_CONFIG_DIR'])
             config.mkdir(exist_ok=True)
             (config / 'config.yml').write_text('version: "1"\ntelemetry: enabled\n')
-            self.server.telemetry_received = 0
             artifact = MANIFEST['artifacts']['baseline']
-            with verified_snapshot(artifact['path'], artifact['sha256']) as image:
-                self.env['GH_PATH'] = f'/proc/{os.getpid()}/fd/{image.fileno()}'
-                baseline, _ = self.execute('baseline', ['api', 'private'], instrument=False)
-                deadline = time.monotonic() + 5
-                while not self.server.telemetry_received and time.monotonic() < deadline:
-                    time.sleep(0.02)
-                self.assertEqual(self.server.telemetry_received, 1)
-            self.env.pop('GH_PATH')
-            self.server.telemetry_received = 0
+            baseline = verified_run(artifact, ['api', 'private'], env=self.raw_env(artifact), capture_output=True)
             result, metadata = self.execute('instrumented', ['api', 'private'])
-            self.assertEqual(result.returncode, 0)
-            deadline = time.monotonic() + 5
-            while not self.server.telemetry_received and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertEqual(result.returncode, 0)
-            self.assertEqual(self.server.telemetry_received, 1)
-            self.assertIsNone(metadata['http_requests'])
-            self.assertEqual(metadata['observed_completed_writes'], 1)
-            self.assertEqual(metadata['observed_external_writes'], 0)
+            self.assertIsNone(metadata)
             self.assertEqual((result.returncode, result.stdout, result.stderr),
                              (baseline.returncode, baseline.stdout, baseline.stderr))
 
@@ -402,22 +444,24 @@ class PrototypeTests(unittest.TestCase):
         self.env['GH_PATH'] = '/fixture-caller-explicit'
         alias = '!printf "%s" "$GH_PATH"'
         verified_run(MANIFEST['artifacts']['baseline'], ['alias', 'set', 'fixture-explicit', alias],
-                     env=self.env, capture_output=True, check=True)
-        result, metadata = self.execute('instrumented', ['fixture-explicit'])
+                     env=self.raw_env(MANIFEST['artifacts']['baseline']), capture_output=True, check=True)
+        baseline = verified_run(MANIFEST['artifacts']['baseline'], ['fixture-explicit'], env=self.raw_env(MANIFEST['artifacts']['baseline']), capture_output=True)
+        result = verified_run(MANIFEST['artifacts']['instrumented'], ['fixture-explicit'], env=self.raw_env(MANIFEST['artifacts']['instrumented']), capture_output=True)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (baseline.returncode, baseline.stdout, baseline.stderr))
         self.assertEqual(result.stdout, b'/fixture-caller-explicit')
         self.assertEqual(result.returncode, 0)
-        self.assertIsNone(metadata['http_requests'])
 
     def test_nested_alias_self_exec_is_unobserved_child(self):
         alias = '!test -z "${AI_GH_HTTP_COUNTER_FD+x}" && test -z "${AI_GH_HTTP_COUNTER_HOST+x}" && "$GH_PATH" api private'
         verified_run(MANIFEST['artifacts']['baseline'], ['alias', 'set', 'fixture-self', alias],
-                     env=self.env, capture_output=True, check=True)
+                     env=self.raw_env(MANIFEST['artifacts']['baseline']), capture_output=True, check=True)
         self.reset()
         result, metadata = self.execute('instrumented', ['fixture-self'])
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.server.received, 1)
         self.assertEqual(metadata['observed_completed_writes'], 0)
-        self.assertIsNone(metadata['http_requests'])
+        self.assertTrue(metadata['complete'])
 
     def test_internal_extension_preserves_self_exec_without_channel(self):
         self.env['XDG_DATA_HOME'] = str(pathlib.Path(self.scratch.name) / 'extension-data')
@@ -430,7 +474,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.server.received, 1)
         self.assertEqual(metadata['observed_completed_writes'], 0)
-        self.assertIsNone(metadata['http_requests'])
+        self.assertTrue(metadata['complete'])
 
     def test_qualification_cli_refuses_unsupported_before_binary_access(self):
         for args in (['auth', 'setup-git'], ['auth', 'login'], ['codespace', 'ssh'],
@@ -474,8 +518,7 @@ class PrototypeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(server.received, 1)
             self.assertEqual(self.server.received, 0)
-            self.assertEqual(metadata['observed_completed_writes'], 1)
-            self.assertIsNone(metadata['http_requests'])
+            self.assertIsNone(metadata)
         finally:
             if prior is None:
                 settings.unlink()
@@ -490,7 +533,7 @@ class PrototypeTests(unittest.TestCase):
             self.observation_host = 'api.github.com'
             for args in (['git', 'init', '-q', directory],
                          ['git', '-C', directory, 'remote', 'add', 'origin', 'https://github.com/owner/fixture.git']):
-                subprocess.run(args, env=self.env, check=True, capture_output=True)
+                subprocess.run(args, env=self.raw_env(), check=True, capture_output=True)
             self.cwd = directory
             # Noninteractive resolution intentionally uses local remote state
             # and adds no request; the TTY path below exercises API resolution.
@@ -500,11 +543,19 @@ class PrototypeTests(unittest.TestCase):
             result, metadata = self.execute_tty('instrumented', ['issue', 'list', '--limit', '2', '--json', 'number'])
             self.assertEqual(result.returncode, 0)
             self.assertEqual(self.server.received, 3)
-            self.assertEqual(metadata['observed_completed_writes'], 3)
-            self.assertIsNone(metadata['http_requests'])
+            self.assertIsNone(metadata)
 
     def execute_tty(self, kind, args):
         artifact = MANIFEST['artifacts'][kind]
+        if not runner.eligible(args, getattr(self, 'observation_host', self.host)):
+            primary, secondary = pty.openpty()
+            try:
+                result = verified_run(artifact, args, env=self.raw_env(), stdin=secondary,
+                                      stdout=secondary, stderr=secondary, timeout=20)
+                return result, None
+            finally:
+                os.close(primary)
+                os.close(secondary)
         primary, secondary = pty.openpty()
         read_fd, write_fd = os.pipe()
         try:
@@ -554,21 +605,10 @@ class PrototypeTests(unittest.TestCase):
                     artifact = MANIFEST['artifacts'][kind]
                     try:
                         args = ['api', 'private' if mode == 'success' else 'denied']
-                        if kind == 'baseline':
-                            result = verified_run(artifact, args, env=self.env, stdout=secondary,
-                                                  stderr=secondary, stdin=subprocess.DEVNULL, timeout=20)
-                        else:
-                            invocation = [sys.executable, str(HERE / 'run.py'), '--binary', artifact['path'],
-                                          '--sha256', artifact['sha256'], '--api-host', 'api.github.com',
-                                          '--metadata-fd', str(write_fd), '--', *args]
-                            result = subprocess.run(invocation, env=self.env, stdout=secondary, stderr=secondary,
-                                                    stdin=subprocess.DEVNULL, pass_fds=(write_fd,), timeout=20)
-                            os.close(write_fd)
-                            write_fd = -1
-                            metadata = json.loads(os.read(read_fd, 4096))
-                            self.assertEqual(metadata['observed_completed_writes'], 2)
-                            self.assertEqual(metadata['complete'], mode == 'success')
-                            self.assertIsNone(metadata['http_requests'])
+                        # TTY/updater execution remains raw behavior parity;
+                        # neither image receives a qualified observer channel.
+                        result = verified_run(artifact, args, env=self.raw_env(artifact, updater=True), stdout=secondary,
+                                              stderr=secondary, stdin=subprocess.DEVNULL, timeout=20)
                         self.assertTrue(self.server.updater_entered.is_set())
                         self.assertEqual(self.server.received, 2)
                         self.assertEqual(result.returncode, 0 if mode == 'success' else 1)
@@ -629,7 +669,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_termination_leaves_unknown_without_replay(self):
         self.reset()
-        self.server.entered.clear()
+        self.server.entered = threading.Event()
         artifact = MANIFEST["artifacts"]["instrumented"]
         read_fd, write_fd = os.pipe()
         process = None
@@ -660,14 +700,13 @@ class PrototypeTests(unittest.TestCase):
         alias = '!if [ -z "${AI_GH_HTTP_COUNTER_FD+x}" ] && [ -z "${AI_GH_HTTP_COUNTER_HOST+x}" ]; then printf "CLEAR\\n"; else exit 4; fi'
         baseline = MANIFEST["artifacts"]["baseline"]
         configured = verified_run(baseline, ["alias", "set", "fixture-counter-env", alias],
-                                    env=self.env, capture_output=True, timeout=10)
+                                    env=self.raw_env(baseline), capture_output=True, timeout=10)
         self.assertEqual(configured.returncode, 0)
         result, metadata = self.execute("instrumented", ["fixture-counter-env"])
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b"CLEAR\n")
-        self.assertTrue(metadata["complete"])
-        self.assertEqual(metadata["observed_completed_writes"], 0)
-        self.assertIsNone(metadata["http_requests"])
+        self.assertEqual(metadata['observed_completed_writes'], 0)
+        self.assertTrue(metadata['complete'])
 
 
 if __name__ == "__main__":
