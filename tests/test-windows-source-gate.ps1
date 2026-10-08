@@ -618,7 +618,8 @@ try {
   Assert ($source -match "Invoke-GitCommand @\('-C', \`$Path, 'fetch', 'origin', 'main'\)\s+\| Out-Host\s+if \(\`$script:LastGitExitCode -ne 0\)") 'fetch exit code is not checked immediately'
   Assert ($source.Contains("'branch', '--show-current'")) 'main branch gate missing'
   Assert ($source.Contains("'rev-parse', 'origin/main'")) 'exact origin/main proof missing'
-  Assert ($source.Contains("'merge', '--ff-only', `$remoteHead.Trim()")) 'fast-forward must use the proved commit, not a mutable ref'
+  Assert ($source.Contains("'merge', '--ff-only', `$targetHead)")) 'fast-forward must use the proved commit, not a mutable ref'
+  Assert ($source.Contains("'merge-base', '--is-ancestor', `$ExpectedHead, `$targetHead)") -and $source.Contains("        `$targetHead = `$ExpectedHead")) 'pinned target must be proved merged and then become the exact fast-forward commit'
   $bootstrap = Get-Content -Raw (Join-Path $root 'bin\bootstrap-windows-dev.ps1')
   Assert ($bootstrap.Contains("[string]`$RepoPath = 'C:\repos\ai-devops'")) 'bootstrap default is not C:\repos\ai-devops'
   Assert ($bootstrap -match 'function Invoke-GitCommand') 'bootstrap native Git stderr guard missing'

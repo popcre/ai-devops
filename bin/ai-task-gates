@@ -1659,8 +1659,9 @@ cmd_authorize_install(){
   candidate_common="$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && pwd -P)" || blocked 'ai-task-gates: STOP. Candidate Git ownership unavailable.'
   [ "$installed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkouts do not share Git ownership.'
   installed_head="$(git -C "$installed_root" rev-parse HEAD 2>/dev/null)" || blocked 'ai-task-gates: STOP. Installed HEAD unavailable.'
-  # Reviews outlast merges, so another session's ordinary `git pull` or
-  # unprotected install may fast-forward the installed checkout during the
+  # Reviews outlast merges, so another session's unprotected install (or, on
+  # Windows, a plain `git pull`; the receipt checks below still bind the
+  # installed launchers) may fast-forward the installed checkout during the
   # review. A forward move that stays at or behind the target lies inside the
   # classified start..target range: bind the authority to the checkout's
   # actual HEAD. Any other move (backward, sideways, or past the target)

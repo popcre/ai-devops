@@ -143,7 +143,7 @@ ai-task-gates launcher> --review-report <exact-head APPROVE report>
 the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
 installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
-launcher, and recorded old HEAD in the same Git repository, and is consumed
+launcher, and the installed checkout's actual HEAD in the same Git repository, and is consumed
 once by the Windows installer. Fetch `origin/main` immediately before issuing
 authorization; the target must be a merged release (in fetched `origin/main`
 history). Linux `update.sh` and the Windows installer both accept it even
@@ -151,7 +151,8 @@ after later merges and install exactly that SHA, never the newer tip. If
 another session fast-forwards the installed checkout during the review, the
 authorization accepts a move that stays inside the declared start..target
 range and binds the checkout's actual HEAD; a move backward, sideways, or past
-the target still stops. The
+the target still stops. On Linux the installed manifest must still attest
+that HEAD, so a bare pull without a reinstall still stops there. The
 installed checkout must be the durable primary checkout and the launcher must
 have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the
