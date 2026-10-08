@@ -373,9 +373,14 @@ reconcile_skill() {
   case "$STATE" in
     identical)
       echo "  = $name ($label) up to date"
-      # One-time upgrade of a legacy marker so the NEXT run can tell a local
-      # edit apart. Writes only the marker, and only once.
-      ((${#RECORDS[@]})) || write_marker "$dst"
+      # Reconcile stale metadata even when the installed content is current.
+      # Leave an already-current marker untouched for an idempotent install.
+      local marker_current=1 rel
+      ((${#RECORDS[@]} == ${#SRC_HASHES[@]})) || marker_current=0
+      for rel in "${!SRC_HASHES[@]}"; do
+        [[ "${RECORDS[$rel]:-}" == "${SRC_HASHES[$rel]}" ]] || marker_current=0
+      done
+      ((marker_current)) || write_marker "$dst"
       return 0
       ;;
     absent)

@@ -846,9 +846,13 @@ function Install-SkillFolder {
         switch ($info.State) {
             "identical" {
                 Write-Note "$prefix= $skillName ($Label) up to date"
-                # One-time upgrade of a legacy marker so the NEXT run can tell a
-                # local edit apart. Writes only the marker, and only once.
-                if ((Read-SkillMarker (Join-Path $dest $script:ManagedMarker)).Count -eq 0) {
+                # Reconcile stale metadata without rewriting current content.
+                $markerHashes = Read-SkillMarker (Join-Path $dest $script:ManagedMarker)
+                $markerCurrent = $markerHashes.Count -eq $info.SourceHashes.Count
+                foreach ($rel in $info.SourceHashes.Keys) {
+                    if ($markerHashes[$rel] -ne $info.SourceHashes[$rel]) { $markerCurrent = $false }
+                }
+                if (-not $markerCurrent) {
                     Write-SkillMarker -Dest $dest -SourceHashes $info.SourceHashes
                 }
                 $script:InstalledSkillCount += 1
