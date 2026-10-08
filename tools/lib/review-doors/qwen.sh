@@ -51,8 +51,14 @@ native_path() {
   fi
 }
 
+# Git for Windows does not mark a .cmd/.bat launcher executable, so `-x`
+# alone misses the managed %LOCALAPPDATA%\qwen-code\bin\qwen.cmd install
+# (edge-dev, #1409). Same rule as usable_qwen_bin in bin/ai-qwen.
+qwen_door_usable_bin() {
+  [ -x "$1" ] || { case "${1,,}" in *.cmd|*.bat) [ -f "$1" ] ;; *) return 1 ;; esac; }
+}
 resolve_qwen() {
-  if [ -n "${AI_QWEN_BIN:-}" ] && [ -x "${AI_QWEN_BIN}" ]; then
+  if [ -n "${AI_QWEN_BIN:-}" ] && qwen_door_usable_bin "${AI_QWEN_BIN}"; then
     printf '%s' "$AI_QWEN_BIN"; return 0
   fi
   local c
@@ -61,7 +67,7 @@ resolve_qwen() {
            "${LOCALAPPDATA:-}/qwen-code/bin/qwen.cmd" \
            "${HOME:-}/.local/bin/qwen" \
            "${HOME:-}/.local/lib/qwen-code/bin/qwen"; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+    [ -n "$c" ] && qwen_door_usable_bin "$c" && { printf '%s' "$c"; return 0; }
   done
   printf 'qwen door: local_dependency_unavailable: qwen binary not found. This is not a Qwen provider fault. Set AI_QWEN_BIN.\n' >&2
   return 127

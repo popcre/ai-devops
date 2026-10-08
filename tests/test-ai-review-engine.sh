@@ -122,6 +122,19 @@ for _door_pair in "muse:$MUSE_DOOR" "qwen:$QWEN_DOOR" "gemini:$GEMINI_DOOR" "ste
 done
 unset _door_pair _dname _dpath _drc
 
+# Git for Windows leaves the managed qwen.cmd launcher without an execute bit;
+# the door must still find it (edge-dev, #1409), as bin/ai-qwen already does.
+echo '== Qwen door finds a non-executable Windows .cmd launcher'
+mkdir -p "$TMP/qwen-lad/qwen-code/bin"
+printf '@echo off\r\n' >"$TMP/qwen-lad/qwen-code/bin/qwen.cmd"
+chmod -x "$TMP/qwen-lad/qwen-code/bin/qwen.cmd"
+sed -n '/^qwen_door_usable_bin() {/,/^}/p;/^resolve_qwen() {/,/^}/p' "$QWEN_DOOR" >"$TMP/qwen-resolve.sh"
+_qout="$(env -i PATH=/usr/bin:/bin HOME="$TMP/qwen-nohome" LOCALAPPDATA="$TMP/qwen-lad" bash -c ". '$TMP/qwen-resolve.sh'; resolve_qwen" 2>/dev/null || true)"
+check "qwen_door_resolves_nonexec_cmd_launcher" "test '$_qout' = '$TMP/qwen-lad/qwen-code/bin/qwen.cmd'"
+_qout="$(env -i PATH=/usr/bin:/bin HOME="$TMP/qwen-nohome" LOCALAPPDATA="$TMP/qwen-none" bash -c ". '$TMP/qwen-resolve.sh'; resolve_qwen" 2>&1 || true)"
+check "qwen_door_still_reports_missing_binary" "printf '%s' '$_qout' | grep -q 'qwen binary not found'"
+unset _qout
+
 # The Linux StepFun door must launch a dynamically linked StepCode binary
 # inside its real bubblewrap command. A shell stub misses a missing ELF loader.
 echo '== StepFun door Linux loader'
