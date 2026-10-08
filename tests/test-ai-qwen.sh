@@ -19,6 +19,7 @@ TMP="$(mktemp -d "$REPO_ROOT/.ai/qwen-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/review-quarantine"
 export AI_QWEN_STATE_DIR="$TMP/state"
 export AI_QWEN_CALLER=codex
 export TMPDIR_FOR_TEST="$TMP"
@@ -112,7 +113,7 @@ if (mode === 'timeout') process.exit(124);
 if (mode === 'tool-budget') { console.error('Run aborted: tool-call budget of 3 exceeded (--max-tool-calls); observed 4.'); process.exit(55); }
 if (mode === 'wall-budget') { console.error('Run aborted: wall-clock budget of 900s exceeded (--max-wall-time).'); process.exit(55); }
 if (mode === 'turn-budget') { console.error('Reached max session turns for this session. Increase the number of turns by specifying maxSessionTurns in settings.json.'); process.exit(53); }
-if (mode === 'quota-terminal') { const m='Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at 11-01 16:00:00 UTC.'; console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:m}]}})); console.log(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:'qwen-session-1',is_error:true,error:{message:m}})); process.exit(1); }
+if (mode === 'quota-terminal') { const resetFile=path.join(root, 'quota-reset'); const date=fs.existsSync(resetFile) ? fs.readFileSync(resetFile, 'utf8').trim() : '11-01 16:00:00 UTC'; const m=`Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at ${date}.`; console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:m}]}})); console.log(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:'qwen-session-1',is_error:true,error:{message:m}})); process.exit(1); }
 if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
 if (mode.startsWith('content-filter')) {
   const error = '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY API_KEY=synthetic-secret]';
@@ -926,6 +927,16 @@ echo quota-terminal > "$TMP/mode"; QUOTA_DOCTOR="$(run doctor --live 2>&1)"
 check 'token-plan quota in the terminal record is allowance exhaustion with its reset time' "jq -e 'select(.failure_class==\"allowance-exhaustion\" and .provider_quota_reset_at==\"11-01 16:00:00 UTC\")' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'live doctor names the quota reset time' "printf '%s' \"\$QUOTA_DOCTOR\" | grep -qF 'FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)'"
 check 'token-plan quota doctor output is provider-outage, not a code defect or out-of-credit' "printf '%s' \"\$QUOTA_DOCTOR\" > '$TMP/quota-doctor.txt' && python3 '$REPO_ROOT/tools/reviewer_admission.py' classify qwen --text 'automatic qwen requalification failed' --scan '$TMP/quota-doctor.txt' | jq -e '.stream==\"provider-outage\" and .failure_class!=\"out-of-credit\"' >/dev/null"
+quota_prior_id="$(jq -r '.capacity_hold.record_id' "$AI_REVIEW_QUARANTINE_DIR/qwen.json")"
+# Model the installed gap: an earlier undated hold must gain this canary's date.
+jq '.capacity_hold.reset_at=null|.capacity_hold.next_check_epoch=.capacity_hold.observed_epoch' "$AI_REVIEW_QUARANTINE_DIR/qwen.json" > "$TMP/undated-hold.json"
+mv "$TMP/undated-hold.json" "$AI_REVIEW_QUARANTINE_DIR/qwen.json"
+quota_started="$(date +%s)"
+quota_expected="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=25)).replace(microsecond=0).isoformat().replace("+00:00","Z"))')"
+printf '%s' "$quota_expected" | sed 's/^....-//;s/T/ /;s/Z/ UTC/' > "$TMP/quota-reset"
+run doctor --live > "$TMP/quota-fresh.log" 2>&1 || quota_rc=$?
+check 'doctor consumes the exact typed canary receipt into a fresh dated allowance hold' "jq -e --arg prior '$quota_prior_id' --arg at '$quota_expected' --argjson started '$quota_started' '.capacity_hold|.failure_class==\"allowance-exhausted\" and .reset_at==\$at and .record_id!=\$prior and .observed_epoch>=\$started' '$AI_REVIEW_QUARANTINE_DIR/qwen.json' >/dev/null"
+check 'dated allowance doctor returns distinct exhaustion status' "test '${quota_rc:-0}' = 92"
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true
