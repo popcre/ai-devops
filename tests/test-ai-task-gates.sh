@@ -1147,17 +1147,190 @@ jq '.action_gates["code-only-review"].require_gate["made-up-class"] = "whatever"
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-class.json"
 jq '.reviewer_release.database["private-evidence"] = "whatever"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-release.json"
+jq '.application_source_releases["popcre/designflow-backend"].target.project = "wrong-project"' \
+  "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-application-target.json"
 newrepo "$TMP/schema-repo"
 check 'a reviewer release naming private-evidence fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-release.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
+check 'a centrally altered application release target fails schema validation' \
+  "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/bad-application-target.json'"
 check 'an action-gate naming an unknown action fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-action.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'an action-gate naming an undeclared class fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-class.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 
+# The application exception is an exact committed source target, not a generic
+# release of deployment actions or the reviewer-safety refusal.
+APP="$TMP/application-release"
+newrepo "$APP" popcre/designflow-backend
+( cd "$APP" && "$GATES" start --class deployment >/dev/null 2>&1 )
+mkdir -p "$APP/.ai-devops"
+cat > "$APP/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"gates":{"deployment":{"required":["cloud-build-release-review"]}}}
+EOF
+cat > "$APP/.ai-devops/application-release-target.json" <<'EOF'
+{"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}
+EOF
+printf 'steps: []\n' > "$APP/cloudbuild.yaml"
+mkdir -p "$APP/bin"
+printf '# application reviewer route fixture\n' > "$APP/bin/ai-review-lifecycle"
+git -C "$APP" add .ai-devops/task-gates.json .ai-devops/application-release-target.json cloudbuild.yaml bin/ai-review-lifecycle
+git -C "$APP" commit -qm 'declare reviewed sandbox source target'
+APP_HEAD="$(git -C "$APP" rev-parse HEAD)"
+APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
+check 'the exact committed application source target records its independent approval' \
+  "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
+check 'application source route refuses missing reviewer approval instead of ordinary success' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+check 'application source route rejects a reviewer REJECT' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.verdict=\"REJECT\"')\""
+check 'application source route rejects plan-review for a live action' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$APP' plan-review '$APP_HEAD')\""
+check 'application source route rejects a self-provider approval' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.provider=\"claude\"')\""
+check 'application source route rejects a stale approval' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.stale=true')\""
+check 'application source route rejects an approval for another source digest' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.source_digest=\"foreign\"')\""
+check 'application source route rejects an approval for another repository' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.repository_key=\"foreign\"')\""
+check 'application source target cannot be used for another action' \
+  "rc 3 '$APP' check --before review --application-release-target .ai-devops/application-release-target.json"
+check 'application source target cannot override an explicit comparison base' \
+  "rc 3 '$APP' check --before deploy --base HEAD --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+check 'application source target cannot combine with acknowledgement' \
+  "rc 3 '$APP' check --before deploy --acknowledge reason --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+check 'application source target cannot combine with toolkit installation arguments' \
+  "rc 3 '$APP' check --before deploy --target-head HEAD --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+check 'application source target cannot combine with small-owner entry' \
+  "rc 3 '$APP' check --before deploy --small-owner-entry https://github.com/popcre/designflow-backend/issues/1 --row-count 1 --owner-quote request --application-release-target .ai-devops/application-release-target.json"
+check 'application source target rejects a noncanonical manifest path' \
+  "rc 3 '$APP' check --before deploy --application-release-target cloudbuild.yaml --reviewer-approval '$APP_APPROVAL'"
+ jq '.reviewer_release.deploy={deployment:"generic-release"}' "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/generic-deployment-release.json"
+check 'application source route fails closed if central policy adds a generic protected deployment release' \
+  "AI_TASK_GATES_FILE='$SCHEMA_TMP/generic-deployment-release.json' rc 4 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+check 'application source override is persisted with its exact head and manifest blob' \
+  "jq -e '.overrides | any(.kind==\"application-source-release\" and .action==\"deploy\" and (.reason|contains(\"head=$APP_HEAD manifest_blob=\")))' \"\$(state_file_for '$APP')\" >/dev/null"
+
+PRIVATE_APP="$TMP/private-application"
+newrepo "$PRIVATE_APP" popcre/designflow-backend
+( cd "$PRIVATE_APP" && "$GATES" start --class code --base HEAD >/dev/null 2>&1 )
+mkdir -p "$PRIVATE_APP/.ai-devops" "$PRIVATE_APP/disney-dcpvault"
+printf '%s\n' '{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy"]}}}' > "$PRIVATE_APP/.ai-devops/task-gates.json"
+cp "$APP/.ai-devops/application-release-target.json" "$PRIVATE_APP/.ai-devops/application-release-target.json"
+printf 'id,name\n1,secret\n' > "$PRIVATE_APP/disney-dcpvault/rows.csv"
+git -C "$PRIVATE_APP" add .ai-devops disney-dcpvault && git -C "$PRIVATE_APP" commit -qm 'add private evidence to app fixture'
+check 'private application fixture is classified as private-evidence' \
+  "( cd '$PRIVATE_APP' && '$GATES' explain --json | jq -e '.effective_class==\"private-evidence\"' >/dev/null )"
+check 'application source target cannot release private-evidence changes' \
+  "rc 3 '$PRIVATE_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+
+TOOLKIT_APP="$TMP/toolkit-application"
+newrepo "$TOOLKIT_APP" u2giants/ai-devops
+( cd "$TOOLKIT_APP" && "$GATES" start --class deployment >/dev/null 2>&1 )
+mkdir -p "$TOOLKIT_APP/.ai-devops"
+printf '%s\n' '{"schema_version":1,"gates":{"deployment":{"required":["cloud-build-release-review"]}}}' > "$TOOLKIT_APP/.ai-devops/task-gates.json"
+cp "$APP/.ai-devops/application-release-target.json" "$TOOLKIT_APP/.ai-devops/application-release-target.json"
+printf 'steps: []\n' > "$TOOLKIT_APP/cloudbuild.yaml"
+git -C "$TOOLKIT_APP" add .ai-devops cloudbuild.yaml && git -C "$TOOLKIT_APP" commit -qm 'add toolkit target fixture'
+TOOLKIT_APPROVAL="$(appr "$TOOLKIT_APP" deploy "$(git -C "$TOOLKIT_APP" rev-parse HEAD)")"
+check 'application source target cannot authorize a toolkit repository' \
+  "out '$TOOLKIT_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$TOOLKIT_APPROVAL' 2>&1 | grep -q 'limited to canonical popcre/designflow-backend'"
+
+APP_OLD_APPROVAL="$APP_APPROVAL"
+printf 'source moved after review\n' >> "$APP/README.md"
+git -C "$APP" add README.md && git -C "$APP" commit -qm 'move source after prior approval'
+APP_HEAD="$(git -C "$APP" rev-parse HEAD)"
+APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
+check 'application source route rejects an approval for the previous source HEAD' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_OLD_APPROVAL'"
+APP_STATE="$(state_file_for "$APP")"
+mkdir "$APP_STATE.tmp"
+check 'application source route fails closed when exact override state cannot be recorded' \
+  "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' 2>&1 | grep -q 'exact application source-release proof could not be recorded'"
+rmdir "$APP_STATE.tmp"
+cp "$APP/.ai-devops/application-release-target.json" "$TMP/valid-application-manifest.json"
+for schema_value in true 1.0 '"1"'; do
+  cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+  python3 - "$APP/.ai-devops/application-release-target.json" "$APP/manifest.tmp" "$schema_value" <<'PY'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+value["schema_version"] = json.loads(sys.argv[3])
+pathlib.Path(sys.argv[2]).write_text(json.dumps(value) + "\n", encoding="utf-8")
+PY
+  mv "$APP/manifest.tmp" "$APP/.ai-devops/application-release-target.json"
+  git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'invalid application manifest version type'
+  APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+  check "application source route rejects schema_version type $schema_value in a committed manifest" \
+    "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+done
+for field in repository route branch project region service; do
+  cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+  case "$field" in
+    *) jq --arg k "$field" '.[$k]="unapproved"' "$APP/.ai-devops/application-release-target.json" > "$APP/manifest.tmp" ;;
+  esac
+  mv "$APP/manifest.tmp" "$APP/.ai-devops/application-release-target.json"
+  git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'invalid application manifest target binding'
+  APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+  check "application source route rejects a wrong $field binding" \
+    "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+done
+cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+printf '{"schema_version":1,"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}\n' > "$APP/.ai-devops/application-release-target.json"
+git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'duplicate application manifest key'
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+check 'application source route rejects duplicate manifest keys' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+printf '{broken\n' > "$APP/.ai-devops/application-release-target.json"
+git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'malformed application manifest JSON'
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+check 'application source route rejects malformed manifest JSON' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'restore valid application manifest'
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+printf ' ' >> "$APP/.ai-devops/application-release-target.json"
+check 'application source route rejects a dirty manifest even when its values remain valid' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+rm "$APP/.ai-devops/application-release-target.json"
+ln -s README.md "$APP/.ai-devops/application-release-target.json"
+check 'application source route rejects a symlink manifest' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+rm "$APP/.ai-devops/application-release-target.json"
+check 'application source route rejects a missing manifest' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+jq '.extra="unapproved"' "$APP/.ai-devops/application-release-target.json" > "$APP/manifest.tmp"
+mv "$APP/manifest.tmp" "$APP/.ai-devops/application-release-target.json"
+check 'application source route rejects an extra manifest property' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+git -C "$APP" checkout -q -- .ai-devops/application-release-target.json
+git -C "$APP" rm -q .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'remove application target manifest'
+cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+check 'application source route rejects an untracked manifest' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+git -C "$APP" add .ai-devops/application-release-target.json && git -C "$APP" commit -qm 'restore application target manifest'
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+printf '{"schema_version":1,"gates":{"deployment":{"required":[]}}}\n' > "$APP/.ai-devops/task-gates.json"
+check 'application source route requires the consumer declaration gate' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+git -C "$APP" checkout -q -- .ai-devops/task-gates.json
+jq '.gates.deployment.forbidden_actions=["deploy"]' "$APP/.ai-devops/task-gates.json" > "$APP/policy.tmp"
+mv "$APP/policy.tmp" "$APP/.ai-devops/task-gates.json"
+git -C "$APP" add .ai-devops/task-gates.json && git -C "$APP" commit -qm 'consumer forbids application deploy'
+APP_APPROVAL="$(appr "$APP" deploy "$(git -C "$APP" rev-parse HEAD)")"
+check 'application source target cannot bypass consumer forbidden deploy action' \
+  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
+git -C "$APP" remote set-url origin https://github.com/popcre/other.git
+ ( cd "$APP" && "$GATES" start --class deployment >/dev/null 2>&1 )
+check 'application source route rejects a foreign GitHub origin' \
+  "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' 2>&1 | grep -q 'limited to canonical popcre/designflow-backend'"
+git -C "$APP" remote set-url origin https://github.com/popcre/designflow-backend.git
+
 # A flag given without its value must fail fast, never spin: on 2026-09-17 an
 # orphaned `start --class` burned 11 CPU-hours and starved the local GLM server.
-for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --reviewer-approval' 'check --base'; do
+for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --reviewer-approval' 'check --base' 'check --application-release-target'; do
   check "missing value for '$args' fails fast instead of looping" \
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
