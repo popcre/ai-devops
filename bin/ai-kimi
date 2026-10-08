@@ -1453,10 +1453,14 @@ start_review_job() { # NAME [CONTINUE]
     # phase=starting first, then reserves note-worker/require-report,
     # then phase=running. Waiting for "not preflight" would return on
     # starting and race the reservation.
+    # A terminal phase is also a valid acknowledgement: the worker can
+    # finish or fail between one-second polls and must not be overwritten
+    # as worker-start-failed after it already recorded a real outcome.
     [ "$phase" = running ] && break
+    job_is_terminal "$dir/job.json" && break
     sleep 1; startup_waited=$((startup_waited+1))
   done
-  if [ "${phase:-preflight}" != running ]; then
+  if [ "${phase:-preflight}" != running ] && ! job_is_terminal "$dir/job.json"; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
     record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-ack-timeout --deadline-kind startup-timeout --cancellation-confirmation not-requested
