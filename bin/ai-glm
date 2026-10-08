@@ -20,6 +20,7 @@
 # what makes provider prompt caching work, and a stable agent is what keeps a review
 # session read-only.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap glm "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

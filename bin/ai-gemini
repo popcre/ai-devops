@@ -8,6 +8,7 @@
 # conversation/model and durable report gates pass. Copy edits are discarded.
 # Never add --dangerously-skip-permissions or mutate global Antigravity settings.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap gemini "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 # agy uses only its own subscription login. Generic pay-per-use key variables
 # would let it bill an API key silently, so they never reach agy (#1427).
 unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY

@@ -1345,7 +1345,7 @@ cmd_install_verify(){
   origin_url="$(git -C "$installed" config --get remote.origin.url 2>/dev/null || true)"
   if [ "${AI_TASK_GATES_INSTALL_TEST_MODE:-}" = 1 ] && [[ "$origin_url" = file://* ]]; then
     fixture_root="$(cd "${AI_TASK_GATES_TEST_ROOT:-/nonexistent}" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Linux install fixture root is unavailable.'
-    case "$fixture_root" in /tmp/*) ;; *) blocked 'ai-task-gates: STOP. Linux install fixture must be under /tmp.' ;; esac
+    case "$fixture_root" in /tmp/*) ;; *) blocked 'ai-task-gates: STOP. Linux install fixture must be under /tmp.' ;; esac  # temp-hygiene: allow
     case "$candidate_root" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux candidate is outside fixture root.' ;; esac
     case "$installed" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux installed checkout is outside fixture root.' ;; esac
     [ "$STATE_DIR" = "$fixture_root/state" ] || blocked 'ai-task-gates: STOP. Linux fixture state is outside fixture root.'

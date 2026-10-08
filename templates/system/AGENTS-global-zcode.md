@@ -279,6 +279,8 @@ the task needs the detail.
 
 ## Work discipline
 
+- Put scratch files under `$TMPDIR` (your session's own temp folder, deleted
+  when the session ends), never hand-named `/tmp/<issue>-...` paths.
 - Keep routine tool output short. Do not paste full logs, JSON, diffs, or
   command output into the conversation — save long output to a scratch file and
   return only the decisive result.

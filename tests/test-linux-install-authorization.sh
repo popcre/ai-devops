@@ -3,7 +3,9 @@
 set -euo pipefail
 [ "$(uname -s)" = Linux ] || { echo 'SKIP: Linux installer authorization tests are Linux-only'; exit 0; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"
+# install.sh --test-authorization-only accepts only a /tmp fixture, even when
+# the runner exports a session-owned TMPDIR.
+TMP="$(mktemp -d /tmp/ai-install-auth.XXXXXX)"
 printf '{"schema_version":1,"verdict":"APPROVE"}\n' > "$TMP/approval.json"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TEST_LOG="$TMP/gate.log"

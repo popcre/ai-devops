@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# ai-session-tmp-sweep — crash backup for session-owned temp roots
+# (plan_session-temp-cleanup.md step 5). The session that made a root deletes
+# it; this only removes roots whose owner is provably gone:
+#   * /var/tmp/ai-sessions-<uid>/<root>: owner.json pid dead (or reused by another
+#     process, by start ticks) AND started more than --min-age ago.
+#   * /tmp/claude-<uid>/<project>/<session>: the Claude Code scratch folder of a
+#     session whose transcript and folder have not changed for --min-age.
+# A root without a readable owner.json is kept and reported. Age alone is
+# never ownership proof. At most --max deletions per run.
+#
+# usage: ai-session-tmp-sweep [--dry-run] [--min-age SECONDS] [--max N]
+set -uo pipefail
+
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+lib="$here/../tools/lib/session-tmp.sh"
+[ -f "$lib" ] || lib="$HOME/.config/ai-devops/session-tmp.sh"
+# shellcheck source=../tools/lib/session-tmp.sh
+. "$lib"
+
+dry=0; min_age=7200; max=50
+while (($#)); do
+  case "$1" in
+    --dry-run) dry=1; shift ;;
+    --min-age) min_age="$2"; shift 2 ;;
+    --max) max="$2"; shift 2 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+base="$(ai_session_tmp_base)"
+claude_tmp="${AI_SESSION_TMP_CLAUDE_DIR:-/tmp/claude-$(id -u)}"
+claude_projects="${AI_SESSION_TMP_CLAUDE_PROJECTS:-$HOME/.claude/projects}"
+log_dir="${AI_SESSION_TMP_LOG_DIR:-$HOME/.local/state/ai-devops/logs}"
+mkdir -p "$log_dir" 2>/dev/null || true
+log="$log_dir/session-tmp-sweep.log"
+now="$(date +%s)"
+deleted=0; kept=0; reported=0
+
+say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$log" 2>/dev/null || printf '%s\n' "$*"; }
+
+remove() {
+  local path="$1" why="$2"
+  if (( deleted >= max )); then say "cap $max reached; left $path"; return 1; fi
+  if (( dry )); then say "would delete $path ($why)"
+  elif rm -rf -- "$path"; then say "deleted $path ($why)"
+  else say "could not delete $path"; return 0; fi
+  deleted=$((deleted + 1))
+}
+
+owner_alive() {  # pid start_ticks
+  local pid="$1" want="$2" have
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  [ -d "/proc/$pid" ] || return 1
+  [ -z "$want" ] && return 0
+  have="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+  [ "$have" = "$want" ]
+}
+
+json_field() { sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}[,}].*/\1/p" "$1" | head -1; }
+
+if [ -d "$base" ] && [ ! -L "$base" ]; then
+  for root in "$base"/*; do
+    [ -e "$root" ] || continue
+    if ! ai_session_tmp_is_safe_root "$root" || [ ! -d "$root" ]; then
+      say "kept $root (not a session root)"; reported=$((reported + 1)); continue
+    fi
+    if [ ! -O "$root" ]; then kept=$((kept + 1)); continue; fi
+    owner="$root/owner.json"
+    if [ ! -f "$owner" ] || [ -L "$owner" ]; then
+      say "kept $root (no owner.json)"; reported=$((reported + 1)); continue
+    fi
+    pid="$(json_field "$owner" pid)"; ticks="$(json_field "$owner" pid_start_ticks)"
+    started="$(json_field "$owner" started_epoch)"
+    if ! [[ "$pid" =~ ^[0-9]+$ && "$started" =~ ^[0-9]+$ ]]; then
+      say "kept $root (malformed owner.json)"; reported=$((reported + 1)); continue
+    fi
+    if owner_alive "$pid" "$ticks"; then kept=$((kept + 1)); continue; fi
+    if (( now - started < min_age )); then kept=$((kept + 1)); continue; fi
+    remove "$root" "owner pid $pid gone" || break
+  done
+fi
+
+# Claude Code scratch folders: /tmp/claude-<uid>/<project>/<session-uuid>.
+if [ -d "$claude_tmp" ] && [ ! -L "$claude_tmp" ] && [ -O "$claude_tmp" ]; then
+  for dir in "$claude_tmp"/*/*; do
+    [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+    sid="${dir##*/}"
+    [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
+    project="${dir%/*}"; project="${project##*/}"
+    transcript="$claude_projects/$project/$sid.jsonl"
+    newest="$(find "$dir" -newermt "@$((now - min_age))" -print -quit 2>/dev/null)"
+    [ -z "$newest" ] || { kept=$((kept + 1)); continue; }
+    if [ -f "$transcript" ]; then
+      t="$(stat -c %Y "$transcript" 2>/dev/null || echo "$now")"
+      (( now - t >= min_age )) || { kept=$((kept + 1)); continue; }
+    else
+      d="$(stat -c %Y "$dir" 2>/dev/null || echo "$now")"
+      (( now - d >= min_age )) || { kept=$((kept + 1)); continue; }
+    fi
+    remove "$dir" "claude session $sid idle" || break
+  done
+fi
+
+say "summary deleted=$deleted kept=$kept reported=$reported dry_run=$dry"

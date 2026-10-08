@@ -20,6 +20,7 @@
 # Exit status follows the wrapper contract: 0 for any VALID verdict
 # (including REJECT); the caller decides what an APPROVE authorizes.
 set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap review-pool "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }

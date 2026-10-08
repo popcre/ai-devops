@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ai-session-tmp-hook — Claude Code SessionStart / SessionEnd hook that gives
+# each Claude Code session its own temp root (plan_session-temp-cleanup.md).
+#   start: create /var/tmp/ai-sessions-<uid>/claude-<session-id>, export TMPDIR/TMP/TEMP
+#          to the session's commands through $CLAUDE_ENV_FILE.
+#   end:   delete that root.
+# Never fails the session: every error exits 0.
+set -u
+
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+lib="${AI_SESSION_TMP_LIB:-$here/../tools/lib/session-tmp.sh}"
+[ -f "$lib" ] || lib="$HOME/.config/ai-devops/session-tmp.sh"
+[ -f "$lib" ] || exit 0
+# shellcheck source=../tools/lib/session-tmp.sh
+. "$lib"
+ai_session_tmp_enabled || exit 0
+
+mode="${1:-}"
+input="$(cat 2>/dev/null || true)"
+sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$sid" ] || exit 0
+sid="$(ai_session_tmp_slug "$sid")"
+root="$(ai_session_tmp_base)/claude-$sid"
+
+# The owner is the Claude Code process: the nearest ancestor named claude.
+owner_pid() {
+  local p="$PPID" comm
+  while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+    comm="$(cat "/proc/$p/comm" 2>/dev/null || true)"
+    case "$comm" in claude|claude-code|node) printf '%s\n' "$p"; return ;; esac
+    p="$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null || true)"
+  done
+  printf '%s\n' "$PPID"
+}
+
+case "$mode" in
+  start)
+    if [ -d "$root" ] && ai_session_tmp_is_safe_root "$root" && [ -O "$root" ]; then
+      # Resumed session: reuse its root, but name the new owner process so the
+      # sweeper never treats the stale owner.json as proof the session is gone.
+      ai_session_tmp_write_owner "$root" claude "$sid" "$(owner_pid)" 2>/dev/null || exit 0
+      AI_SESSION_TMP_ROOT="$root"
+    else
+      ai_session_tmp_begin claude "$sid" "$(owner_pid)" >/dev/null 2>&1 || exit 0
+    fi
+    if [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qF "AI_SESSION_TMP_ROOT=$AI_SESSION_TMP_ROOT" "$CLAUDE_ENV_FILE" 2>/dev/null; then
+      printf 'export TMPDIR=%q TMP=%q TEMP=%q AI_SESSION_TMP_ROOT=%q\n' \
+        "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" "$AI_SESSION_TMP_ROOT" \
+        >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+    fi
+    ;;
+  end)
+    [ -d "$root" ] || exit 0
+    AI_SESSION_TMP_ROOT="$root" ai_session_tmp_end >/dev/null 2>&1 || true
+    ;;
+esac
+exit 0
