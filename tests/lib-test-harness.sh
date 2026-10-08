@@ -3,6 +3,9 @@
 # Suites keep their existing human output. Set AI_TEST_REPORT_FILE to also
 # receive stable TSV records: suite, check status, and check identity.
 
+# Keep test runs out of the live reviewer events ledger (#1435).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
+
 : "${PASS:=0}" "${FAIL:=0}" "${SKIP:=0}"
 AI_TEST_SUITE="${AI_TEST_SUITE:-$(basename "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}" .sh)}"
 

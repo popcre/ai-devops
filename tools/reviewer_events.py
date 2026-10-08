@@ -15,11 +15,27 @@ import uuid
 from reviewer_maintenance import Blocked, digest, encoded, now, physical, publish, read_json, require, snapshot
 
 
+def live_location():
+    """The real user's ledger, independent of any HOME a test substitutes."""
+    try:
+        import pwd
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError):
+        home = str(Path.home())
+    return Path(home) / ".local/state/ai-devops/reviewer-events"
+
+
 def location():
     if os.environ.get("AI_REVIEW_EVENT_DIR"):
-        return physical(os.environ["AI_REVIEW_EVENT_DIR"])
-    base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
-    return physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(Path(base) / "reviewer-events")))
+        chosen = os.environ["AI_REVIEW_EVENT_DIR"]
+    else:
+        base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
+        chosen = str(Path(base) / "reviewer-events")
+    if os.environ.get("AI_REVIEW_TEST_ISOLATION") == "1":
+        # Test runs must never add stub rows to the live spend ledger (#1435).
+        require(os.path.realpath(chosen) != os.path.realpath(str(live_location())),
+                "test run refused the live reviewer events log; set AI_REVIEW_EVENT_DIR to a private directory")
+    return physical(chosen)
 
 
 def git_value(*args):

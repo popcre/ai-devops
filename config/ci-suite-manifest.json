@@ -14,6 +14,7 @@
     "select_all_globs": [
       "tests/lib-selection.sh",
       "tests/lib-test-harness.sh",
+      "tests/lib-reviewer-events-isolation.sh",
       "tests/lib-test-timing.sh",
       "tests/test-all.sh",
       "tests/test-all.ps1",
