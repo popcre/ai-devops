@@ -135,6 +135,25 @@ reviewer_event_guard(){
   local entry_cmd="${1:-}" entry_live=0
   [ "$entry_cmd" = qualify-live ] && entry_live=1
   [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
+  # Recursion guard: the recorder hands its own child a one-use token naming
+  # this run. The child consumes it here, so the inner wrapper and anything it
+  # launches never see it. PPID alone is not proof: a launcher that forks
+  # instead of exec'ing (an `env` shim, a different coreutils) breaks the
+  # match, and every level then recorded and re-launched itself without end
+  # (~9,100 nested `doctor --live` processes on edge-dev3, 2026-10-07).
+  local reentry="${AI_REVIEW_EVENT_REENTRY:-}" depth="${AI_REVIEW_EVENT_GUARD_DEPTH:-0}"
+  unset AI_REVIEW_EVENT_REENTRY
+  [[ "$depth" =~ ^[0-9]+$ ]] || depth=0
+  if [ "$depth" -ge "${AI_REVIEW_EVENT_GUARD_MAX_DEPTH:-16}" ]; then
+    printf 'reviewer event guard: refusing nested launch at depth %s (recursion guard)\n' "$depth" >&2
+    exit 1
+  fi
+  if [ -n "$reentry" ] && [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] \
+     && [ "$reentry" = "${AI_REVIEW_EVENT_RUN_ID:-}" ]; then
+    AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+    export -n AI_REVIEW_EVENT_OWNER_PID
+    return 0
+  fi
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
     if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
@@ -200,7 +219,8 @@ reviewer_event_guard(){
     # A killed supervisor cannot remove its scope; clear those a day later.
     find "$privacy_base" -mindepth 1 -maxdepth 1 -type d -name 'scope.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
   fi
-  env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
+  AI_REVIEW_EVENT_REENTRY="$event_id" AI_REVIEW_EVENT_GUARD_DEPTH=$((depth + 1)) \
+    env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   # Record the child so loss is refused while it can still publish.
   child_pid_recorded="$(os_pid "$child")"
   env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child_pid_recorded" >/dev/null 2>&1 || true
