@@ -759,6 +759,26 @@ requalify_provider() { # PROVIDER
   fi
   file="$(qualification_file "$provider")"
   marker="$(requalify_expected_file "$provider")"
+  # Keep a capacity-deferred qualification quarantined until its own qualified
+  # allowance reset. In particular, an ordinary update must not erase this
+  # receipt and submit the same known-quota canary again. Changed bytes remain
+  # unqualified: retaining the old subject never authorizes the new wrapper.
+  if [ -f "$marker" ] && [ ! -L "$marker" ]; then
+    fresh_capacity="$(admission_store capacity-status "$provider")" || return 1
+    if jq -e --arg p "$provider" --argjson hold "$fresh_capacity" \
+      '.provider==$p and
+       (.capacity_deferral.subject.wrapper_sha256|type)=="string" and
+       (.capacity_deferral.subject.wrapper_sha256|test("^[0-9a-f]{64}$")) and
+       (.capacity_deferral.subject.identity_sha256|type)=="string" and
+       (.capacity_deferral.subject.identity_sha256|test("^[0-9a-f]{64}$")) and
+       ($hold.provider==$p and $hold.failure_class=="allowance-exhausted" and
+        ($hold.reset_at|type)=="string" and $hold.reset_at!="" and
+        ($hold.record_id|type)=="string" and $hold.record_id!="" and
+        $hold.record_id==.capacity_deferral.capacity_record_id)' "$marker" >/dev/null 2>&1; then
+      note "ai-review-preflight: $provider requalification remains deferred until its recorded allowance reset; no live canary submitted."
+      return 0
+    fi
+  fi
   if [ ! -f "$file" ]; then
     if [ ! -f "$marker" ]; then
       # The first qualification is a deliberate act (a live canary on live
