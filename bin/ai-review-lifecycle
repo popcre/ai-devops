@@ -148,7 +148,10 @@ diagnostic_observe(){
   if [ ! -f "$file" ]; then identity="$(identity_json "$repo")"; fi
   mkdir -p "$dir"; chmod 0700 "$STATE_DIR" "$dir" 2>/dev/null || true
   [ ! -L "$dir" ] && [ ! -L "$file" ] && [ ! -L "$lock" ] || die "refusing linked diagnostic storage."
-  while ! mkdir "$lock" 2>/dev/null; do
+  while :; do
+    if mkdir "$lock" 2>/dev/null && ( set -C; printf '%s\n' "$$" > "$lock/pid" ) 2>/dev/null; then
+      break
+    fi
     attempts=$((attempts+1)); owner="$(cat "$lock/pid" 2>/dev/null || true)"
     if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then
       stale="$lock.stale.$$.$RANDOM"
@@ -157,7 +160,6 @@ diagnostic_observe(){
     [ "$attempts" -lt 100 ] || die "diagnostic update is busy."
     sleep 0.02
   done
-  printf '%s\n' "$$" > "$lock/pid" || { diagnostic_unlock "$lock"; die "could not record diagnostic lock ownership."; }
   trap 'diagnostic_unlock "$lock"' EXIT INT TERM
   now="$(date -u +%FT%TZ)"
   event="$(jq -nc --arg at "$now" --arg phase "$phase" --arg observation "$observation" --argjson elapsed "$elapsed" \
