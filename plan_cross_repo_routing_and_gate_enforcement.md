@@ -22,7 +22,7 @@ part of Issue #335.
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | IN PROGRESS 2026-09-11 | Central repair #389 and Windows landed-source installation are complete; Ubuntu permission and private-memory health gates remain |
-| HTS release boundary (#1490) | Exact reviewed sandbox application-source admission | PARTIAL 2026-10-08, 1:54 PM EDT | Source 547880568055be4b629ca4fc9c54807f05ffb79b tested/approved; PR #1521 OPEN with Windows section 2 failure, installed route and live proof pending; read latest HTS handoff below |
+| HTS release boundary (#1490) | Exact reviewed sandbox application-source admission | IN PROGRESS 2026-10-08, 5:25 PM EDT | Approved 547 preserved; current main reconciled, actual Windows EOF-tree regression repaired and Linux/Windows 6/6 pass; preferred diagnostic eligibility corrected and workflow regression passes. Renewed source review, PR #1521 required checks/merge, installation and backend #94 live proof remain open. |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
 session, read this STATUS table and the newest matching OPEN handoff, and resume

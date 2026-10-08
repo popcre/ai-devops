@@ -507,8 +507,8 @@ jobs:
       needs.fast-classifier.outputs.validation_result != 'failure' &&
       (needs.fast-classifier.outputs.selection_result != 'success' ||
        needs.fast-classifier.outputs.reviewer != 'false') &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
+      github.event_name == 'workflow_dispatch' &&
+      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
@@ -550,8 +550,8 @@ jobs:
       (needs.fast-classifier.outputs.selection_result != 'success' ||
        needs.fast-classifier.outputs.reviewer != 'false') &&
       needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
+      github.event_name == 'workflow_dispatch' &&
+      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
     # Deliberate manual diagnostic on the qualified pool. Pull requests and
     # schedules use the independent hosted proof below, so a runner that turns
     # busy after this availability sample can delay only its explicitly chosen
