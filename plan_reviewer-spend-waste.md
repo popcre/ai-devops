@@ -50,7 +50,7 @@ NOT in this plan:
 
 ## 5. Current state of the code
 
-Nothing implemented. All citations re-verified on `origin/main` 3eb7c605 on 2026-10-07:
+**HISTORY — all of C1-C9 is implemented and merged (see STATUS); do not redo.** The table below records the pre-fix code as it was on `origin/main` 3eb7c605 on 2026-10-07, kept so the reasons behind each fix survive; line numbers no longer match:
 
 | Item | Location (verified) |
 |---|---|
