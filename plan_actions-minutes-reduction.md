@@ -7,7 +7,7 @@ Parent issue: https://github.com/popcre/ai-devops/issues/1464 (children: ai-devo
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 0. Baseline measurement script + numbers | ⬜ open (2026-10-07) | — |
+| 0. Baseline measurement script + numbers | ✅ done (2026-10-07) | `tools/ci/actions-minutes-report.sh`; `docs/evidence/actions-minutes-baseline-20261007.txt` — 2026-10-06 hosted: shared-db 946 est. vs 935 billed (+1.2%), ai-devops 272 vs 266, DesignFlow 6 repos 80–118 each; org 1,743 |
 | 1. Router/tiny jobs off GitHub-hosted (ai-devops `push-settle`, shared-db `route / Pick runner`) | ⬜ open | — |
 | 2. Cancel superseded runs everywhere they are missing | ⬜ open | — |
 | 3. Combine shared-db small PR workflows into one PR-checks workflow | ⬜ open | — |

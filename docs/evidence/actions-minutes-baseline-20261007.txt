@@ -1,0 +1,136 @@
+# Actions minutes baseline, generated 2026-10-07 by tools/ci/actions-minutes-report.sh
+# Gate: shared-db 2026-10-06 estimate 946 vs billing 935 (+1.2%); ai-devops 272 vs 266 (+2.3%).
+
+=== popcre/shared-db  2026-10-06 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  shared-db                        Actions Linux         935  <==
+  ai-devops                        Actions Linux         266
+  designflow-backend               Actions Linux         118
+  designflow-tracking              Actions Linux          93
+  designflow-item-master           Actions Linux          87
+  designflow-frontend              Actions Linux          83
+  designflow-bff                   Actions Linux          81
+  designflow-data-syncing          Actions Linux          80
+  ORG TOTAL                                             1743
+Workflow runs created: 2493
+Hosted job-minutes (rounded up per job): 946
+Self-hosted/Blacksmith job-minutes (not billed): 6428
+Top hosted workflow / job (minutes, jobs):
+   258    226  PR Guards / Queue-sensitive checks (aggregate)
+   230    223  Tools Offline Tests / Tools offline tests
+   224    224  ColdLion Promotion Contract Tests / Promotion contract tests (offline)
+   196    203  Database Contract Tests / Database contract applicability
+    14     14  Shared DB 2870 Catalog Observation / tests
+    12     12  Shared DB 3882 Catalog Observation / tests
+    10     10  Shared DB 2874 Catalog Observation / tests
+     2      2  Shared DB 2875 Tracking Catalog Observation / tests
+     0     14  Shared DB 2870 Catalog Observation / observe
+     0     12  Shared DB 3882 Catalog Observation / observe
+     0     10  Shared DB 2874 Catalog Observation / observe
+     0      2  Shared DB 2875 Tracking Catalog Observation / observe
+
+
+=== popcre/ai-devops  2026-10-06 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  shared-db                        Actions Linux         935
+  ai-devops                        Actions Linux         266  <==
+  designflow-backend               Actions Linux         118
+  designflow-tracking              Actions Linux          93
+  designflow-item-master           Actions Linux          87
+  designflow-frontend              Actions Linux          83
+  designflow-bff                   Actions Linux          81
+  designflow-data-syncing          Actions Linux          80
+  ORG TOTAL                                             1743
+Workflow runs created: 187
+Hosted job-minutes (rounded up per job): 272
+Self-hosted/Blacksmith job-minutes (not billed): 18075
+Top hosted workflow / job (minutes, jobs):
+   261    167  verify / push-settle
+     8      8  Reviewer membership drift / Registry matches shared-db allocator
+     3      3  Merge-queue settings drift / Offline drift checks hold
+     0      3  Merge-queue settings drift / alert
+     0      3  Merge-queue settings drift / Snapshot matches the live ruleset
+     0      2  qualify Windows runner / sections-host-pin
+
+
+# Billing API daily totals, all popcre repos
+=== popcre/x  2026-10-01 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  ai-devops                        Actions Windows      1003
+  ai-devops                        Actions Linux         245
+  shared-db                        Actions Linux         129
+  designflow-backend               Actions Linux          34
+  designflow-frontend              Actions Linux          26
+  designflow-tracking              Actions Linux          20
+  designflow-item-master           Actions Linux          20
+  designflow-data-syncing          Actions Linux          17
+  designflow-bff                   Actions Linux          17
+  ORG TOTAL                                             1511
+=== popcre/x  2026-10-02 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  ai-devops                        Actions Windows      2834
+  ai-devops                        Actions Linux        1803
+  shared-db                        Actions Linux         819
+  designflow-tracking              Actions Linux         131
+  designflow-backend               Actions Linux          82
+  designflow-frontend              Actions Linux          81
+  designflow-item-master           Actions Linux          74
+  designflow-bff                   Actions Linux          72
+  designflow-data-syncing          Actions Linux          70
+  ORG TOTAL                                             5966
+=== popcre/x  2026-10-03 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  ai-devops                        Actions Windows      1005
+  ai-devops                        Actions Linux         471
+  shared-db                        Actions Linux          94
+  designflow-tracking              Actions Linux          18
+  designflow-frontend              Actions Linux          18
+  designflow-item-master           Actions Linux          16
+  designflow-backend               Actions Linux          16
+  designflow-data-syncing          Actions Linux          15
+  designflow-bff                   Actions Linux          14
+  ORG TOTAL                                             1667
+=== popcre/x  2026-10-04 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  ai-devops                        Actions Linux          59
+  shared-db                        Actions Linux          10
+  designflow-tracking              Actions Linux           2
+  designflow-item-master           Actions Linux           2
+  designflow-frontend              Actions Linux           2
+  designflow-data-syncing          Actions Linux           2
+  designflow-bff                   Actions Linux           2
+  designflow-backend               Actions Linux           2
+  ORG TOTAL                                               81
+=== popcre/x  2026-10-05 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  ai-devops                        Actions Linux         550
+  shared-db                        Actions Linux         317
+  designflow-tracking              Actions Linux          15
+  designflow-frontend              Actions Linux          13
+  designflow-bff                   Actions Linux          13
+  designflow-item-master           Actions Linux          12
+  designflow-data-syncing          Actions Linux          12
+  designflow-backend               Actions Linux          12
+  ORG TOTAL                                              944
+=== popcre/x  2026-10-06 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  shared-db                        Actions Linux         935
+  ai-devops                        Actions Linux         266
+  designflow-backend               Actions Linux         118
+  designflow-tracking              Actions Linux          93
+  designflow-item-master           Actions Linux          87
+  designflow-frontend              Actions Linux          83
+  designflow-bff                   Actions Linux          81
+  designflow-data-syncing          Actions Linux          80
+  ORG TOTAL                                             1743
+=== popcre/x  2026-10-07 (UTC) ===
+Billing API (Actions minutes, all repos in popcre):
+  shared-db                        Actions Linux         831
+  ai-devops                        Actions Linux         452
+  designflow-backend               Actions Linux         245
+  designflow-frontend              Actions Linux         165
+  designflow-tracking              Actions Linux         108
+  designflow-item-master           Actions Linux         100
+  designflow-data-syncing          Actions Linux          60
+  designflow-bff                   Actions Linux          58
+  ORG TOTAL                                             2019
