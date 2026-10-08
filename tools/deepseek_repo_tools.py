@@ -551,6 +551,7 @@ _DSML_INVOKE = re.compile(r"<\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*invoke\s+name
 _DSML_PARAM = re.compile(r"<\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*parameter\s+name\s*=\s*\"([^\"]+)\""
                          r"(?:\s+string\s*=\s*\"(true|false)\")?\s*>(.*?)"
                          r"<\s*/\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*parameter\s*>", re.S)
+FINAL_DEMAND = "Tool budget exhausted. Give your final answer now."
 LEAK_NUDGE = ("Your last message contained tool-call markup as plain text, which is not a tool call "
               "and not an answer. Call the tool through the tools interface, or give your final answer.")
 
@@ -618,6 +619,10 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
         clean.append({"id": cid, "type": "function", "function": {"name": name, "arguments": arguments}})
     tcs = clean
     leaked = False
+    # The final-answer demand keeps the tool list so the request prefix (tools
+    # render first) stays byte-identical and the provider cache still hits.
+    final = any(m.get("role") == "user" and m.get("content") == FINAL_DEMAND
+                for m in body.get("messages", []) if isinstance(m, dict))
     if not tcs and "tools" in body:
         tcs, leaked = leaked_tool_calls(msg.get("content"), rnd)
     if not leaked and (not tcs or "tools" not in body):
@@ -642,7 +647,7 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
     with open(log_file, "a", encoding="utf-8") as log:
         for tc in tcs:
             fn = tc["function"]
-            counted = calls < MAX_TOOL_CALLS
+            counted = calls < MAX_TOOL_CALLS and not final
             if counted:
                 calls += 1
                 result = run_tool(root, fn.get("name"), fn.get("arguments"))
@@ -652,11 +657,15 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
                                   "result_chars": len(result), "refused": result.startswith("Error:"),
                                   "counted": counted}) + "\n")
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-    compact_tool_messages(messages, sent)
-    if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
-        # Last round: no tools offered, so the model must answer.
+    if final:
+        # The model ignored the final demand: refuse its calls and withhold the
+        # tools so the next request must answer (the old last-round behavior).
         body.pop("tools", None)
-        messages.append({"role": "user", "content": "Tool budget exhausted. Give your final answer now."})
+        messages.append({"role": "user", "content": FINAL_DEMAND})
+    else:
+        compact_tool_messages(messages, sent)
+        if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
+            messages.append({"role": "user", "content": FINAL_DEMAND})
     with open(req_file + ".next", "w", encoding="utf-8") as fh:
         json.dump(body, fh)
     os.replace(req_file + ".next", req_file)
