@@ -59,15 +59,30 @@ chmod +x "$TMP/bin/ai-review-preflight"
 PATH="$TMP/bin:$PATH"
 FAILED=0
 check_provider_registry > "$TMP/provider-registry.out"
-[ "$FAILED" -eq 0 ] || { echo 'FAIL: active provider quarantine failed doctor'; exit 1; }
+[ "$FAILED" -eq 0 ] || { echo 'FAIL: valid capacity hold failed doctor'; exit 1; }
 grep -q 'review provider glm is unavailable because capacity is held (out-of-credit)' "$TMP/provider-registry.out" || { echo 'FAIL: capacity hold was not reported as an availability warning'; exit 1; }
-AI_DOCTOR_TEST_PROVIDER_RESPONSE='{"provider":"glm","status":"unknown","usable":false}'
-export AI_DOCTOR_TEST_PROVIDER_RESPONSE
-FAILED=0; check_provider_registry > "$TMP/provider-unknown.out"
-[ "$FAILED" -eq 1 ] || { echo 'FAIL: unknown provider status passed doctor'; exit 1; }
-grep -q 'review provider glm status invalid' "$TMP/provider-unknown.out" || { echo 'FAIL: unknown provider status was not reported'; exit 1; }
-AI_DOCTOR_TEST_PROVIDER_RESPONSE='not-json'
-FAILED=0; check_provider_registry > "$TMP/provider-malformed.out"
-[ "$FAILED" -eq 1 ] || { echo 'FAIL: malformed provider status passed doctor'; exit 1; }
+expect_provider_warning() {
+  local label="$1" response="$2"
+  AI_DOCTOR_TEST_PROVIDER_RESPONSE="$response"; export AI_DOCTOR_TEST_PROVIDER_RESPONSE
+  FAILED=0; check_provider_registry > "$TMP/provider-$label.out"
+  [ "$FAILED" -eq 0 ] || { echo "FAIL: valid $label status failed doctor"; exit 1; }
+}
+expect_provider_failure() {
+  local label="$1" response="$2"
+  AI_DOCTOR_TEST_PROVIDER_RESPONSE="$response"; export AI_DOCTOR_TEST_PROVIDER_RESPONSE
+  FAILED=0; check_provider_registry > "$TMP/provider-$label.out"
+  [ "$FAILED" -eq 1 ] || { echo "FAIL: invalid $label status passed doctor"; exit 1; }
+}
+expect_provider_warning quarantine '{"provider":"glm","status":"quarantined","failure_class":"allowance-exhausted","usable":false}'
+grep -q 'review provider glm registered but quarantined' "$TMP/provider-quarantine.out" || { echo 'FAIL: quarantine warning was lost'; exit 1; }
+expect_provider_warning unknown '{"provider":"glm","status":"unknown","usable":false}'
+grep -q 'review provider glm live doctor unsupported' "$TMP/provider-unknown.out" || { echo 'FAIL: supported unknown warning was lost'; exit 1; }
+expect_provider_failure invented '{"provider":"glm","status":"invented-status","usable":false}'
+expect_provider_failure capacity-true '{"provider":"glm","status":"capacity-held","failure_class":"out-of-credit","usable":true}'
+expect_provider_failure capacity-no-class '{"provider":"glm","status":"capacity-held","usable":false}'
+expect_provider_failure capacity-number-class '{"provider":"glm","status":"capacity-held","failure_class":7,"usable":false}'
+expect_provider_failure capacity-no-usable '{"provider":"glm","status":"capacity-held","failure_class":"out-of-credit"}'
+expect_provider_failure capacity-string-usable '{"provider":"glm","status":"capacity-held","failure_class":"out-of-credit","usable":"false"}'
+expect_provider_failure malformed 'not-json'
 unset AI_DOCTOR_TEST_PROVIDER_RESPONSE
 echo 'PASS: doctor proves source/schema/manifest and covers Node, memory, schedule, and every reviewer provider'

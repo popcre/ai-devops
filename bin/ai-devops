@@ -149,6 +149,7 @@ check_provider_registry() {
         installed-healthy:false) c_warn "review provider $provider is installed and healthy but not in the reviewer registry, so it cannot be assigned a review" ;;
         quarantined:false) c_warn "review provider $provider registered but quarantined" ;;
         unsupported-platform:false) c_ok "review provider $provider is not offered on this platform (Ubuntu/Linux only)" ;;
+        unknown:false) c_warn "review provider $provider live doctor unsupported" ;;
         capacity-held:false)
           if [ -n "$failure_class" ] && [ "$failure_class" != invalid ]; then
             c_warn "review provider $provider is unavailable because capacity is held ($failure_class)"
