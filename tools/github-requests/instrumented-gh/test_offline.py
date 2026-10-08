@@ -44,7 +44,10 @@ class OfflineContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env = self.controlled_environment(pathlib.Path(directory))
             with patch.dict(os.environ, env, clear=True):
-                self.assertTrue(runner.validate_profile('fixture'))
+                # This observer profile requires POSIX descriptor/owner checks.
+                # Windows qualification uses the separate native fixture and
+                # must refuse this profile rather than infer POSIX security.
+                self.assertEqual(runner.validate_profile('fixture'), os.name == 'posix')
                 for name, value in (('PAGER', '/sentinel'), ('GH_PATH', '/sentinel'),
                                     ('GIT_CONFIG_GLOBAL', '/sentinel'), ('PATH', '/sentinel'),
                                     ('GH_FORCE_TTY', '1'), ('PYTHONHOME', '/sentinel')):
@@ -181,7 +184,10 @@ class OfflineContract(unittest.TestCase):
 
     def test_tracing_bodies_still_match_reviewed_dependency(self):
         import hashlib
-        current = (HERE / "httpcounter.go").read_bytes()
+        # Git may check Go text out with CRLF on Windows. Only newline encoding
+        # is normalized for this reviewed tracing-body comparison; the real
+        # source binding below remains a strict hash of the complete raw bytes.
+        current = (HERE / "httpcounter.go").read_bytes().replace(b"\r\n", b"\n")
         marker = b"type transport struct"
         # Reviewed d360ed8a tracing suffix, independent of checkout history.
         self.assertEqual(hashlib.sha256(current[current.index(marker):]).hexdigest(),
