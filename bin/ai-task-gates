@@ -63,7 +63,7 @@ usage: ai-task-gates <command> [options]
   check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
         [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
-        [--first-install]
+        [--first-install] [--application-release-target MANIFEST]
         [--action-manifest-stdin --action-stage initial-forward|original-restoration]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
@@ -491,6 +491,146 @@ reviewer_approval_summary(){
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
 }
 
+# Application source-release admission is intentionally one closed target.
+APP_RELEASE_MANIFEST_PATH='.ai-devops/application-release-target.json'
+APP_RELEASE_CONSUMER_GATE='cloud-build-release-review'
+APP_RELEASE_EXPECTED_TARGET='{"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}'
+APP_RELEASE_MANIFEST_BLOB=''; APP_RELEASE_CONSUMER_BLOB=''; APP_RELEASE_HEAD=''
+
+validate_application_release_policy(){
+  jq -e '
+    .application_source_releases as $r
+    | .reviewer_release as $rr
+    | ($r|type=="object" and keys==["popcre/designflow-backend"])
+    and ($r["popcre/designflow-backend"]
+      | type=="object"
+        and (keys==["manifest_path","required_consumer_gate","target"])
+        and .manifest_path==".ai-devops/application-release-target.json"
+        and .required_consumer_gate=="cloud-build-release-review"
+        and .target=={"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"})
+    and ($rr.deploy.deployment == null)
+  ' "$POLICY_FILE" >/dev/null 2>&1 \
+    || fail_closed 'application source-release policy is missing, open, or differs from its single approved sandbox target.'
+}
+
+application_release_json_valid(){ # RELATIVE_PATH ROLE
+  local relative="$1" role="$2" py
+  py="$(command -v python3 || command -v python)" || return 1
+  "$py" - "$TOPLEVEL" "$relative" "$role" "$APP_RELEASE_EXPECTED_TARGET" "$APP_RELEASE_CONSUMER_GATE" <<'PY'
+import json, pathlib, stat, sys
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+try:
+    root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+    relative = pathlib.PurePosixPath(sys.argv[2])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("unsafe relative path")
+    path = root.joinpath(*relative.parts)
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ValueError("not a regular nonsymlink file")
+    path.resolve(strict=True).relative_to(root)
+    with path.open("r", encoding="utf-8") as source:
+        value = json.load(source, object_pairs_hook=unique_object)
+    if sys.argv[3] == "manifest":
+        expected = json.loads(sys.argv[4], object_pairs_hook=unique_object)
+        keys = {"schema_version", "repository", "route", "branch", "project", "region", "service"}
+        if type(value) is not dict or set(value) != keys:
+            raise ValueError("manifest keys do not match")
+        if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+            raise ValueError("manifest schema version is not integer 1")
+        if any(type(value[key]) is not str for key in keys - {"schema_version"}):
+            raise ValueError("manifest fields must be strings")
+        if value != expected:
+            raise ValueError("manifest differs from approved target")
+    else:
+        if type(value) is not dict:
+            raise ValueError("consumer declaration is not an object")
+        gates = value.get("gates")
+        deployment = gates.get("deployment") if type(gates) is dict else None
+        required = deployment.get("required") if type(deployment) is dict else None
+        if type(required) is not list or any(type(item) is not str for item in required):
+            raise ValueError("consumer deployment gate list is invalid")
+        if sys.argv[5] not in required:
+            raise ValueError("consumer deployment gate is absent")
+except (OSError, ValueError, TypeError, KeyError):
+    sys.exit(1)
+PY
+}
+
+application_release_file_blob(){ # REPOSITORY_RELATIVE_PATH
+  local relative="$1" file="$TOPLEVEL/$1" tree mode head_blob work_blob
+  tree="$(git -C "$TOPLEVEL" ls-tree HEAD -- "$relative" 2>/dev/null)" || return 1
+  mode="${tree%% *}"
+  case "$mode" in 100644|100755) ;; *) return 1 ;; esac
+  git -C "$TOPLEVEL" diff --quiet HEAD -- "$relative" || return 1
+  head_blob="$(git -C "$TOPLEVEL" rev-parse "HEAD:$relative" 2>/dev/null)" || return 1
+  work_blob="$(git -C "$TOPLEVEL" hash-object -- "$file" 2>/dev/null)" || return 1
+  [ "$head_blob" = "$work_blob" ] || return 1
+  printf '%s' "$head_blob"
+}
+
+application_release_validate_target(){ # SUPPLIED_PATH EFFECTIVE_CLASS
+  local supplied="$1" effective="$2" origin consumer_relative="$CONSUMER_FILE_NAME"
+  validate_application_release_policy
+  [ "$supplied" = "$APP_RELEASE_MANIFEST_PATH" ] \
+    || blocked 'ai-task-gates: STOP. Application release manifest path differs from the centrally approved path.'
+  [ "$IDENTITY" = 'popcre/designflow-backend' ] && [ "$effective" = deployment ] \
+    || blocked 'ai-task-gates: STOP. Application source release is limited to canonical popcre/designflow-backend with effective class deployment.'
+  origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
+  case "$origin" in
+    https://github.com/popcre/designflow-backend|https://github.com/popcre/designflow-backend.git|\
+    git@github.com:popcre/designflow-backend|git@github.com:popcre/designflow-backend.git|\
+    ssh://git@github.com/popcre/designflow-backend|ssh://git@github.com/popcre/designflow-backend.git) ;;
+    *) blocked 'ai-task-gates: STOP. Application source release requires the canonical popcre/designflow-backend GitHub origin.' ;;
+  esac
+  application_release_json_valid "$consumer_relative" consumer \
+    || blocked 'ai-task-gates: STOP. The committed consumer declaration must be a contained regular file and require cloud-build-release-review for deployment.'
+  APP_RELEASE_CONSUMER_BLOB="$(application_release_file_blob "$consumer_relative")" \
+    || blocked 'ai-task-gates: STOP. The consumer deployment gate must be a clean file committed at HEAD.'
+  application_release_json_valid "$APP_RELEASE_MANIFEST_PATH" manifest \
+    || blocked 'ai-task-gates: STOP. The application release manifest is missing, malformed, duplicated, dirty, symlinked, outside the repository, or differs from the exact approved target.'
+  APP_RELEASE_MANIFEST_BLOB="$(application_release_file_blob "$APP_RELEASE_MANIFEST_PATH")" \
+    || blocked 'ai-task-gates: STOP. The application release manifest must be a regular clean file committed at HEAD.'
+  APP_RELEASE_HEAD="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
+    || blocked 'ai-task-gates: STOP. Application release source HEAD is unavailable.'
+}
+
+application_release_finish(){ # REPORT EFFECTIVE_CLASS
+  local report="$1" effective="$2" head summary summary_after reason state
+  [ -n "$report" ] \
+    || blocked 'ai-task-gates: STOP. Application source release requires --reviewer-approval with an independent final-check or security-review APPROVE.'
+  head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
+    || blocked 'ai-task-gates: STOP. Application release source HEAD is unavailable.'
+  [ "$head" = "$APP_RELEASE_HEAD" ] \
+    || blocked 'ai-task-gates: STOP. Application source changed after target validation.'
+  summary="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
+    || blocked 'ai-task-gates: STOP. Application release needs an independent lifecycle-recorded final-check or security-review APPROVE bound to this exact repository, HEAD, worktree digest, and deploy action.'
+  application_release_validate_target "$APP_RELEASE_MANIFEST_PATH" "$effective"
+  [ "$APP_RELEASE_HEAD" = "$head" ] \
+    || blocked 'ai-task-gates: STOP. Application source moved during release proof validation.'
+  summary_after="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
+    || blocked 'ai-task-gates: STOP. Application approval became invalid during release proof validation.'
+  [ "$summary_after" = "$summary" ] \
+    || blocked 'ai-task-gates: STOP. Application approval evidence changed during release proof validation.'
+  reason="head=$head manifest_blob=$APP_RELEASE_MANIFEST_BLOB consumer_blob=$APP_RELEASE_CONSUMER_BLOB approval=$summary"
+  state_record_override application-source-release deploy "$reason" "$effective" \
+    && state="$(state_path)" \
+    && jq -e --arg r "$reason" --arg c "$effective" \
+      '.overrides | any(.kind=="application-source-release" and .action=="deploy" and .observed_class==$c and .reason==$r)' \
+      "$state" >/dev/null 2>&1 \
+    || blocked 'ai-task-gates: STOP. The exact application source-release proof could not be recorded; nothing was released.'
+  printf 'ai-task-gates: application source release may start only through the reviewed Cloud Build branch-source push: %s\n' "$summary"
+  printf 'ai-task-gates: recorded exact application source-release override for HEAD %s and manifest blob %s.\n' "$head" "$APP_RELEASE_MANIFEST_BLOB"
+}
+
 # A small owner-requested entry (owner ruling 2026-10-02: "yes, small entries
 # can skip the reviewer") releases ONLY the reviewer APPROVE for the database
 # action: an owner-requested row-data write of 1..10 rows, no structure,
@@ -889,6 +1029,7 @@ cmd_check(){
   local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
+  local application_release_target="" base_explicit=0 application_release_ready=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --action-stage) need_value "$@"; action_stage="$2"; shift 2 ;;
@@ -899,11 +1040,12 @@ cmd_check(){
       --small-owner-entry) need_value "$@"; small_entry="$2"; shift 2 ;;
       --row-count) need_value "$@"; small_rows="$2"; shift 2 ;;
       --owner-quote) need_value "$@"; small_quote="$2"; shift 2 ;;
-      --base) need_value "$@"; base="$2"; shift 2 ;;
+      --base) need_value "$@"; base="$2"; base_explicit=1; shift 2 ;;
       --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
       --installed-checkout) need_value "$@"; installed_checkout="$2"; shift 2 ;;
       --installed-launcher) need_value "$@"; installed_launcher="$2"; shift 2 ;;
       --first-install) first_install=1; shift ;;
+      --application-release-target) need_value "$@"; application_release_target="$2"; shift 2 ;;
       *) die "unknown option for check: $1" ;;
     esac
   done
@@ -920,6 +1062,13 @@ cmd_check(){
     trap 'rm -f "$action_manifest_file"' EXIT
     head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
     [ "$(wc -c < "$action_manifest_file")" -le 16777216 ] || die 'action stdin exceeds native bound.'
+  fi
+  if [ -n "$application_release_target" ]; then
+    [ "$action" = deploy ] || blocked 'ai-task-gates: STOP. --application-release-target applies only to --before deploy.'
+    [ "$base_explicit" -eq 0 ] || blocked 'ai-task-gates: STOP. --application-release-target cannot be combined with explicit --base.'
+    [ -z "$acknowledge$small_entry$small_rows$small_quote$target_head$installed_checkout$installed_launcher" ] \
+      && [ "$first_install" -eq 0 ] \
+      || blocked 'ai-task-gates: STOP. --application-release-target cannot be combined with acknowledge, small-owner-entry, or toolkit installation arguments.'
   fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
@@ -1073,6 +1222,11 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
   fi
 
+  if [ -n "$application_release_target" ]; then
+    application_release_validate_target "$application_release_target" "$effective"
+    application_release_ready=1
+  fi
+
   # 1b. The shared-db promotion launch (owner ruling, Albert 2026-10-02: "let AI
   # launch it and remove that rule permanently") belongs to the shared-db class
   # only. No acknowledge or reviewer approval can carry it to another class.
@@ -1086,7 +1240,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     [ "${line%%$'\t'*}" = reviewer-safety ] && reviewer_release=1
   done
   [ "$declared" = reviewer-safety ] && reviewer_release=1
-  if [ "$action" = deploy ] && [ "$reviewer_release" -eq 1 ]; then
+  if [ "$action" = deploy ] && [ "$reviewer_release" -eq 1 ] && [ "$application_release_ready" -eq 0 ]; then
     blocked 'ai-task-gates: STOP. Reviewer-safety changes cannot use the generic deploy action; use a separate reviewed installation task.'
   fi
   required_gate="$({
@@ -1159,6 +1313,10 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
 
   [ -z "$small_entry" ] || printf 'ai-task-gates: note: "%s" is not reviewer-gated here; --small-owner-entry was not needed and was not recorded.\n' "$action" >&2
+  if [ "$application_release_ready" -eq 1 ]; then
+    application_release_finish "$reviewer_approval" "$effective"
+    return 0
+  fi
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
   return 0

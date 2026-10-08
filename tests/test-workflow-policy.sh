@@ -605,11 +605,14 @@ reviewer_aggregate="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled
 reviewer_preferred="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow")"
 reviewer_fallback="$(sed -n '/^  windows-reviewer-fallback-codex:/,/^  windows-reviewer-safety:/p' "$workflow")"
 reviewer_availability="$(sed -n '/^  reviewer-runner-availability:/,/^  windows-reviewer-preferred:/p' "$workflow")"
-! printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch' &&" &&
+printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch' &&" &&
+printf '%s' "$reviewer_availability" | grep -Fq "needs.manual-preflight.outputs.run_expensive_jobs == 'true'" &&
 printf '%s' "$reviewer_availability" | grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" &&
 printf '%s' "$reviewer_preferred" | grep -Fq "group: ai-devops-windows-reviewer-preferred" &&
 printf '%s' "$reviewer_preferred" | grep -q '^[[:space:]]*continue-on-error:[[:space:]]*true' &&
 printf '%s' "$reviewer_preferred" | grep -Fq "needs.reviewer-runner-availability.outputs.preferred_available == 'true'" &&
+printf '%s' "$reviewer_preferred" | grep -Fq "github.event_name == 'workflow_dispatch' &&" &&
+printf '%s' "$reviewer_preferred" | grep -Fq "needs.manual-preflight.outputs.run_expensive_jobs == 'true'" &&
 grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
 grep -Fq "core.setOutput('preferred_available', 'false')" "$workflow" &&
 ! printf '%s' "$reviewer_fallback" | grep -Fq 'github.event.pull_request.head.repo.full_name == github.repository' &&
@@ -624,6 +627,80 @@ printf '%s' "$reviewer_aggregate" | grep -Fq "no complete reviewer proof" || {
   printf 'FAIL: stable reviewer aggregate must accept per-suite proof and fail closed without complete proof\n' >&2
   exit 1
 }
+
+# Evaluate the actual availability and preferred-job predicates for the event
+# combinations that previously let PRs and schedules queue on the preferred
+# host. This is deliberately a small expression evaluator over the workflow's
+# own if: blocks, so a literal-only regression cannot pass.
+reviewer_if_regression() {
+  python3 - "$workflow" <<'PY'
+import re
+import sys
+
+workflow = open(sys.argv[1], encoding="utf-8").read()
+
+def predicate(job):
+    block = re.search(rf"(?ms)^  {job}:\n.*?(?=^  [A-Za-z0-9_-]+:|\Z)", workflow)
+    if not block:
+        raise SystemExit(f"missing job {job}")
+    match = re.search(r"(?m)^    if: >-\n((?:      .*\n)+)", block.group(0))
+    if not match:
+        raise SystemExit(f"missing if for {job}")
+    return " ".join(line[6:] for line in match.group(1).splitlines())
+
+availability = predicate("reviewer-runner-availability")
+preferred = predicate("windows-reviewer-preferred")
+
+atoms = [
+    ("!cancelled()", "not cancelled"),
+    ("github.event_name == 'merge_group'", "event == 'merge_group'"),
+    ("github.event_name != 'merge_group'", "event != 'merge_group'"),
+    ("github.event_name == 'pull_request'", "event == 'pull_request'"),
+    ("github.event_name != 'pull_request'", "event != 'pull_request'"),
+    ("github.event_name == 'workflow_dispatch'", "event == 'workflow_dispatch'"),
+    ("github.event_name != 'workflow_dispatch'", "event != 'workflow_dispatch'"),
+    ("github.event.pull_request.head.repo.full_name == github.repository", "same_repo"),
+    ("needs.fast-classifier.outputs.validation_result != 'failure'", "valid"),
+    ("needs.fast-classifier.outputs.selection_result != 'success'", "selection != 'success'"),
+    ("needs.fast-classifier.outputs.reviewer != 'false'", "reviewer != 'false'"),
+    ("needs.manual-preflight.outputs.run_expensive_jobs == 'true'", "expensive"),
+    ("needs.reviewer-runner-availability.outputs.preferred_available == 'true'", "available"),
+]
+
+def evaluate(expression, context):
+    translated = expression
+    for source, target in atoms:
+        translated = translated.replace(source, f"({target})")
+    translated = translated.replace("&&", " and ").replace("||", " or ")
+    return bool(eval(translated, {"__builtins__": {}}, context))
+
+cases = [
+    ("pull_request", True, True, False, True, True, True, False, False),
+    ("schedule", True, True, False, True, True, True, False, False),
+    ("workflow_dispatch", True, True, False, True, True, True, True, True),
+    ("workflow_dispatch", False, True, False, True, True, True, False, False),
+    ("workflow_dispatch", True, False, False, True, True, True, True, False),
+    ("workflow_dispatch", True, True, True, True, True, True, False, False),
+    ("merge_group", True, True, False, True, True, True, False, False),
+    ("workflow_dispatch", True, True, False, False, True, True, False, False),
+    ("workflow_dispatch", True, True, False, True, False, False, True, True),
+    ("workflow_dispatch", True, True, False, True, True, False, False, False),
+]
+
+for event, expensive, available, cancelled, valid, selection_ok, reviewer_ok, expected_availability, expected_preferred in cases:
+    context = {
+        "event": event, "expensive": expensive, "available": available,
+        "cancelled": cancelled, "valid": valid, "same_repo": True,
+        "selection": "success" if selection_ok else "unknown",
+        "reviewer": "true" if reviewer_ok else "false",
+    }
+    got_availability = evaluate(availability, context)
+    got_preferred = evaluate(preferred, context)
+    if (got_availability, got_preferred) != (expected_availability, expected_preferred):
+        raise SystemExit(f"unexpected reviewer eligibility for {event}: {(got_availability, got_preferred)}")
+PY
+}
+check 'reviewer eligibility evaluates event, manual, cancellation, and classifier gates' reviewer_if_regression
 
 aggregate_script="$(mktemp)"
 awk '
@@ -795,6 +872,17 @@ BOOTSTRAP
   assert_rejected busy-runner-selected
   sed "/needs.reviewer-runner-availability.outputs.preferred_available == 'true'/d" "$workflow" >"$mutation_dir/availability-bypass.yml"
   assert_rejected availability-bypass
+  python3 - "$workflow" "$mutation_dir/non-manual-preferred.yml" <<'PY'
+import sys
+
+source, target = sys.argv[1:]
+text = open(source, encoding='utf-8').read()
+old = "      github.event_name == 'workflow_dispatch' &&\n      needs.manual-preflight.outputs.run_expensive_jobs == 'true'"
+new = "      (github.event_name != 'workflow_dispatch' ||\n       needs.manual-preflight.outputs.run_expensive_jobs == 'true')"
+text = text.replace(old, new, 2)
+open(target, 'w', encoding='utf-8').write(text)
+PY
+  assert_rejected non-manual-preferred
   sed "/^  windows-reviewer-fallback-codex:/,/^  windows-reviewer-safety:/ s/always() && !cancelled()/always() \&\& !cancelled() \&\& github.event.pull_request.head.repo.full_name == github.repository/" "$workflow" >"$mutation_dir/fork-fallback-blocked.yml"
   assert_rejected fork-fallback-blocked
   sed '/Dir::Etc::sourceparts=-/d' "$workflow" >"$mutation_dir/third-party-apt-feed.yml"

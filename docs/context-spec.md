@@ -119,6 +119,15 @@ lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 (`--reviewer-approval`). It never releases `private-evidence`, so one licensed
 row in the change set keeps the action sealed, and it opens no other action.
 
+The central `application_source_releases` map is a separate source-only route for
+the single reviewed DesignFlow backend sandbox target. `deploy` can reach its
+existing Cloud Build branch-source push only with the exact committed central
+manifest, a committed consumer declaration requiring `cloud-build-release-review`,
+and an independent lifecycle-recorded exact-head `final-check` or
+`security-review` APPROVE. It does not authorize manual cloud changes or weaken
+any other protected action; without the explicit target flag, generic refusal
+remains in force.
+
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The
 stronger of the declared and observed classes is the effective class whose
