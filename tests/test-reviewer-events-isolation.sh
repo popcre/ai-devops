@@ -43,5 +43,12 @@ id="$(cd "$TMP/repo" && env AI_REVIEW_TEST_ISOLATION=1 AI_REVIEW_EVENT_DIR="$pri
 check "isolated begin records in the private directory" '[[ "$id" =~ ^[0-9a-f]{32}$ ]] && grep -q "$id" "$priv/events.jsonl"'
 check "isolated begin left no row in the live ledger" '! grep -qs "$id" "$live/events.jsonl"'
 
+# A suite run as a review's --tests command must not inherit the outer review
+# session (stale-manifest recovery review REJECT, 21 false failures).
+leak="$(env AI_REVIEW_OPERATION=stale-linux-manifest-recovery AI_REVIEW_GATE_MODE=final-check \
+  AI_REVIEW_IMPLEMENTER=codex AI_REVIEW_REVIEWER_APPROVAL=/x/approve.md bash -c \
+  '. "$1/tests/lib-test-harness.sh"; printf "%s|%s|%s|%s|%s" "${AI_REVIEW_OPERATION-unset}" "${AI_REVIEW_GATE_MODE-unset}" "${AI_REVIEW_IMPLEMENTER-unset}" "${AI_REVIEW_REVIEWER_APPROVAL-unset}" "$AI_REVIEW_TEST_ISOLATION"' _ "$ROOT")"
+check "harness clears the inherited outer review session" '[ "$leak" = "unset|unset|unset|unset|1" ]'
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
