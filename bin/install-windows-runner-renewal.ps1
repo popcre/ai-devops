@@ -124,7 +124,7 @@ function Register-RenewalTask {
     $service = New-Object -ComObject 'Schedule.Service'
     $service.Connect()
     $registered = $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName)
-    $registered.SetSecurityDescriptor((Get-RenewalTaskSddl -OperatorSid $OperatorSid), 0)
+    $registered.SetSecurityDescriptor((Get-RenewalTaskSddl -OperatorSid $OperatorSid), 0x10)
     $registered.Enabled = $true
   } catch {
     Unregister-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -137,7 +137,7 @@ function Get-RenewalTaskSnapshot {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $sddl = [string]$service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).GetSecurityDescriptor(0)
+  $sddl = [string]$service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).GetSecurityDescriptor(4)
   if ([string]::IsNullOrWhiteSpace($sddl)) { throw 'TASK_SDDL_UNREADABLE: elevated token is required to read the task security descriptor.' }
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
@@ -210,7 +210,7 @@ function Assert-RenewalTaskContract {
   if ($Task.user_id -cne $ExpectedOperatorSid -or $Task.logon_type -cne 'S4U' -or $Task.run_level -cne 'Limited') { throw 'STALE_INSTALLATION: renewal task principal drift.' }
   if ($Task.trigger_count -ne 2 -or $Task.startup_trigger -ne 1 -or $Task.repetition_interval -cne $expectedInterval) { throw 'STALE_INSTALLATION: renewal task schedule drift.' }
   if (-not $Task.enabled) { throw 'STALE_INSTALLATION: renewal task is disabled.' }
-  if ($Task.multiple_instances -cne 'IgnoreNew' -or $Task.sddl -cne (Get-RenewalTaskSddl -OperatorSid $ExpectedOperatorSid)) { throw 'STALE_INSTALLATION: renewal task settings or ACL drift.' }
+  if ($Task.multiple_instances -cne 'IgnoreNew' -or -not (Test-TaskDaclEquivalent -Actual ([string]$Task.sddl) -Expected (Get-RenewalTaskSddl -OperatorSid $ExpectedOperatorSid))) { throw 'STALE_INSTALLATION: renewal task settings or ACL drift.' }
 }
 
 function Remove-RenewalInstallation {
@@ -224,7 +224,7 @@ function Remove-RenewalInstallation {
     # during teardown, then unregister.
     $service = New-Object -ComObject 'Schedule.Service'
     $service.Connect()
-    $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).SetSecurityDescriptor('D:P(A;;FA;;;SY)(A;;FA;;;BA)', 0)
+    $service.GetFolder($script:RenewalTaskFolderCom).GetTask($script:RenewalTaskName).SetSecurityDescriptor('D:P(A;;FA;;;SY)(A;;FA;;;BA)', 0x10)
     Unregister-ScheduledTask -TaskPath $script:RenewalTaskFolder -TaskName $script:RenewalTaskName -Confirm:$false
   }
   if (Test-Path -LiteralPath $script:RenewalPayloadRoot) {

@@ -63,7 +63,7 @@ try {
   Case 'Task_HasNoTrigger' { Assert-True ($installer -notmatch 'New-ScheduledTaskTrigger') 'a trigger was created'; Assert-Contains $installer 'trigger_count -ne 0' }
   Case 'Task_IgnoresParallelInstance' { Assert-Contains $installer '-MultipleInstances IgnoreNew' }
   Case 'Operator_CanReadAndRunOnly' { Assert-Contains $installer '(A;;GRGX;;;' }
-  Case 'Operator_CannotChangeDeleteOrReplaceTask' { Assert-True ($installer -notmatch '\(A;;FA;;;\$OperatorSid') 'operator gets full task access'; Assert-Contains $installer 'SetSecurityDescriptor($sddl, 0)' }
+  Case 'Operator_CannotChangeDeleteOrReplaceTask' { Assert-True ($installer -notmatch '\(A;;FA;;;\$OperatorSid') 'operator gets full task access'; Assert-Contains $installer 'SetSecurityDescriptor($sddl, 0x10)' }
   Case 'Payload_IsAdministratorOwnedAndHashVerified' { Assert-Contains $installer '*S-1-5-32-544'; Assert-Contains $installer 'Get-FileHash -Algorithm SHA256'; Assert-True ($policy.payload_hashes.'windows-runner-maintenance-worker.ps1' -ceq (Get-FileHash -Algorithm SHA256 $workerPath).Hash.ToLowerInvariant()) 'policy worker hash is stale'; Assert-True ($policy.payload_hashes.'qualify-windows-runner.ps1' -ceq (Get-FileHash -Algorithm SHA256 (Join-Path $repo 'bin\qualify-windows-runner.ps1')).Hash.ToLowerInvariant()) 'policy qualification hash is stale' }
   Case 'RepositoryMutation_CannotChangeInstalledPayload' { Assert-Contains $installer 'Copy-Item -LiteralPath $source'; Assert-Contains $worker 'Test-PayloadManifest' }
   Case 'ReparsePoint_IsRejected' { Assert-Contains $installer '[IO.FileAttributes]::ReparsePoint'; Assert-Contains $worker '[IO.FileAttributes]::ReparsePoint' }
