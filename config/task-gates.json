@@ -385,6 +385,14 @@
         {
           "glob": "tools/reviewer_*",
           "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/review-action-profiles.json",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/review_action_profile.py",
+          "class": "reviewer-safety"
         }
       ],
       "gates": {}
