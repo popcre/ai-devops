@@ -178,7 +178,19 @@ without a receipt need the same one-time path. If both managed gate launchers
 are absent, use `authorize-install --first-install` with a separate exact-head
 review whose approved report contains the exact line `Approved first-managed-install.`. This applies even
 to a newly cloned checkout: a clone reflog does not establish installation
-history. If another managed launcher remains, or just one gate launcher remains,
+history. When the host already has a protected DeepSeek key but no provider
+executable, the same native review can explicitly select
+`AI_DEEPSEEK_ENGINE=attachment-api ai-review deepseek final-check --operation
+first-managed-install --implementer codex --assert-head <full SHA>`.
+This uses the existing DeepSeek API reviewer and its complete disposable source
+copy, repository read tools, and tracked-source inventory. It retains the
+shared runner's native lifecycle and exact-head approval; it cannot be selected
+for an ordinary review, another operation, or implementation. There is no
+automatic fallback. Windows commands requiring bubblewrap remain unavailable;
+the reviewer must not infer test success. Credentials must already be in the
+host's protected store, and installation still requires its normal one-use
+authority after an approving review.
+If another managed launcher remains, or just one gate launcher remains,
 use `authorize-install
 --recover-launchers` with a review naming
 `Approved partial-managed-launcher-recovery.`. The authority records hashes for every

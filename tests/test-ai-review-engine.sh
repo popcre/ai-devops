@@ -1138,6 +1138,60 @@ if [ "$rc" = 1 ] && [ ! -e "$TMP/boundary-key" ]; then PASS=$((PASS+1)); else FA
 
 set -e
 
+# First installation can explicitly use the existing attachment API when no
+# provider executable is installed. Fixtures never call a provider or read keys.
+DS_API_ROOT="$TMP/ds-api"
+mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/config/opencode" "$DS_API_ROOT/config/opencode-deepseek"
+cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
+: > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
+printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
+cat > "$DS_API_ROOT/bin/ai-deepseek-agent" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$DS_API_ARGS"
+case "${DS_API_RESULT:-approve}" in
+  missing-operation) printf 'Reviewed %s\nVERDICT: APPROVE %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
+  wrong-head) printf 'Approved first-managed-install.\nVERDICT: APPROVE wrong\n' ;;
+  reject) printf 'Reviewed %s\nVERDICT: REJECT %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
+  failure) exit 92 ;;
+  *) printf 'Reviewed %s\nApproved first-managed-install.\nVERDICT: APPROVE %s\n' "$DOOR_HEAD" "$DOOR_HEAD" ;;
+esac
+EOF
+chmod +x "$DS_API_ROOT/bin/ai-deepseek-agent"
+git init -q "$DS_API_ROOT/source"
+printf 'untrusted tracked source\n' > "$DS_API_ROOT/source/installation.sh"
+git -C "$DS_API_ROOT/source" add installation.sh
+printf 'Final check of source installation.\n' > "$DS_API_ROOT/prompt"
+ds_api_case() {
+  local engine="$1" operation="$2" contract="$3" result="$4"
+  rm -f "$DS_API_ROOT/args" "$DS_API_ROOT/report"
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_DEEPSEEK_ENGINE="$engine" \
+    DOOR_OPERATION="$operation" DOOR_REVIEW_MODE="${DS_API_REVIEW_MODE:-final-check}" DOOR_MODE="$contract" DOOR_WORKDIR="$DS_API_ROOT/source" \
+    DOOR_PACKET_DIR="$DS_API_ROOT" DOOR_PROMPT_FILE="$DS_API_ROOT/prompt" \
+    DOOR_REPORT_OUT="$DS_API_ROOT/report" DOOR_HEAD=1111111111111111111111111111111111111111 \
+    DS_API_RESULT="$result" DS_API_ARGS="$DS_API_ROOT/args" \
+    bash "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh" "$contract" > "$DS_API_ROOT/stdout" 2> "$DS_API_ROOT/stderr"
+}
+check 'attachment_api_approves_exact_native_head_and_inventory' \
+  "ds_api_case attachment-api first-managed-install review approve && grep -q 'installation.sh' '$DS_API_ROOT/args' && grep -q -- '--assert-head' '$DS_API_ROOT/args' && grep -q '^APPROVE$' '$DS_API_ROOT/report'"
+check 'attachment_api_refuses_other_operation_before_provider' \
+  "! ds_api_case attachment-api legacy-managed-launcher-refresh review approve && ! test -e '$DS_API_ROOT/args'"
+check 'attachment_api_refuses_ordinary_review_before_provider' \
+  "! ds_api_case attachment-api '' review approve && ! test -e '$DS_API_ROOT/args'"
+check 'attachment_api_refuses_other_review_mode_before_provider' \
+  "DS_API_REVIEW_MODE=diff-review; ! ds_api_case attachment-api first-managed-install review approve && ! test -e '$DS_API_ROOT/args'; unset DS_API_REVIEW_MODE"
+check 'attachment_api_refuses_implementation_before_provider' \
+  "! ds_api_case attachment-api first-managed-install implement approve && ! test -e '$DS_API_ROOT/args'"
+check 'attachment_api_refuses_wrong_terminal_head' \
+  "! ds_api_case attachment-api first-managed-install review wrong-head && ! test -s '$DS_API_ROOT/report'"
+check 'attachment_api_refuses_missing_operation_approval' \
+  "! ds_api_case attachment-api first-managed-install review missing-operation && ! test -s '$DS_API_ROOT/report'"
+check 'attachment_api_preserves_provider_rejection' \
+  "ds_api_case attachment-api first-managed-install review reject && grep -q '^REJECT$' '$DS_API_ROOT/report'"
+check 'attachment_api_preserves_credit_exit' \
+  "ds_api_case attachment-api first-managed-install review failure; test \"\$?\" = 92"
+check 'attachment_api_refuses_unknown_engine_before_provider' \
+  "! ds_api_case invented first-managed-install review approve && ! test -e '$DS_API_ROOT/args'"
+
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'
 check "engine_doctor_reports_core_stamp" "'$ENGINE' doctor | grep -q 'review-lifecycle-core/1'"

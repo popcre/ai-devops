@@ -370,9 +370,9 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # Door invocation. The door receives provider bits only; every governance
 # surface above stays here.
 # ---------------------------------------------------------------------------
-rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPORT_OUT HEAD [MAX_TURNS] [ALLOW_WRITE]
+rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPORT_OUT HEAD [MAX_TURNS] [ALLOW_WRITE] [REVIEW_MODE] [OPERATION]
   local mode="$1" door="$2" workdir="$3" packet_dir="$4" prompt_file="$5" report_out="$6" head="$7"
-  local max_turns="${8:-}" allow_write="${9:-0}" rc=0
+  local max_turns="${8:-}" allow_write="${9:-0}" review_mode="${10:-}" operation="${11:-}" rc=0
   rlc_require_runner_token || rlc_die 'door call without the runner token.'
   [ -f "$door" ] || rlc_die "door not found: $door"
   [ -f "$prompt_file" ] || rlc_die "prompt file not found: $prompt_file"
@@ -388,6 +388,8 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
       DOOR_HEAD="$head" \
       DOOR_MAX_TURNS="$max_turns" \
       DOOR_ALLOW_WRITE="$allow_write" \
+      DOOR_REVIEW_MODE="$review_mode" \
+      DOOR_OPERATION="$operation" \
       bash "$door" "$mode"
   rc=$?
   # Do not re-enable set -e before a possible non-zero return: `return N`
@@ -585,7 +587,7 @@ $operation_request"
   snapshot_before="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"
   rlc_note "step door-call"
   local door_rc=0
-  rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 || door_rc=$?
+  rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 "$mode" "$operation" || door_rc=$?
   if [ "$door_rc" -ne 0 ]; then
     # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does
     # for wrappers; the door has already printed both contract lines.
