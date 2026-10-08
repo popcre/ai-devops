@@ -401,7 +401,13 @@ capacity_admission() { # PROVIDER -> current hold, with due-only read-only refre
   if [ "$hold" != null ] && [ "$(printf '%s' "$hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
     case "$provider" in gemini|deepseek|glm|stepfun)
       credit_python="$(command -v python3 || command -v python)" || return 1
-      "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
+      # Windows: the credit reader runs bash wrappers only through the qualified
+      # Git Bash it is handed, exactly as bin/ai-review-credit-watch does.
+      case "${OSTYPE:-}" in
+        msys*|cygwin*) AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")" \
+          "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
+        *) "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
+      esac ;;
     esac
     hold="$(admission_store capacity-status "$provider")" || return 1
   fi

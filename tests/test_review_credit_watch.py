@@ -410,6 +410,35 @@ class CreditTests(unittest.TestCase):
             value = dict(result, reason=bad)
             self.assertEqual(watch.normalize('deepseek', value, NOW)['state'], 'unknown')
 
+    def test_refresh_survives_windows_reconcile_failure(self):
+        # Windows without a qualified Git Bash: both the read and the store
+        # write refuse with OSError; refresh must report failure, never crash.
+        def refuse(*args, **kwargs):
+            raise OSError('qualified-bash-unavailable')
+        with mock.patch.object(watch, 'tool_command', refuse):
+            self.assertEqual(watch.main(['refresh', 'deepseek'], run=lambda *a, **k: None), 1)
+
+    def test_refresh_releases_legacy_unscoped_paid_hold_on_positive_balance(self):
+        current = datetime.datetime.now(datetime.timezone.utc)
+        value = balance.observation('key', opener=lambda *a, **k: Response(
+            b'{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"5.00"}]}'), now=current)
+        self.assertEqual(value['state'], 'available')
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            now = int(current.timestamp())
+            # Shape written by the failure classifier / expired legacy global quarantine.
+            (state / 'deepseek.json').write_text(json.dumps({'version': 2, 'provider': 'deepseek', 'global': None, 'backoffs': {},
+                'capacity_hold': {'provider': 'deepseek', 'failure_class': 'out-of-credit', 'credential_profile_scope': None,
+                                  'model_scope': None, 'observed_epoch': now - 7200, 'reset_at': None,
+                                  'next_check_epoch': now - 60, 'record_id': 'legacy'}}))
+            def run(command, **kwargs):
+                if any(str(arg).endswith('ai-deepseek-agent') for arg in command):
+                    return subprocess.CompletedProcess(command, 0, json.dumps(value), '')
+                env = dict(os.environ, AI_REVIEW_QUARANTINE_DIR=directory, AI_DEVOPS_TEST_MODE='1')
+                return subprocess.run(command, env=env, **kwargs)
+            self.assertEqual(watch.main(['refresh', 'deepseek'], run=run), 0)
+            self.assertIsNone(json.loads((state / 'deepseek.json').read_text())['capacity_hold'])
+
     def test_tick_only_exhaustion_pauses_and_never_unpauses(self):
         calls = []
         current = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')

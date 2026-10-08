@@ -82,7 +82,12 @@ def capacity_observation(data, provider, observation, now):
     hold = data.get('capacity_hold')
     if hold and hold.get('failure_class') == 'out-of-credit' and provider in SUBSCRIPTIONS:
         return {'status': 'unchanged', 'reason': 'paid-balance-hold-not-subscription-allowance'}
-    if hold and (hold.get('credential_profile_scope') != profile or hold.get('model_scope') != model) and not (state == 'exhausted' and not hold.get('credential_profile_scope')):
+    # An unscoped paid-balance hold (written by the failure classifier or an
+    # expired legacy global quarantine) names no credential, so a fresh scoped
+    # positive balance for this provider is the evidence that lifts it.
+    legacy_paid = bool(hold and not hold.get('credential_profile_scope') and not hold.get('model_scope')
+                       and hold.get('failure_class') == 'out-of-credit' and provider not in SUBSCRIPTIONS)
+    if hold and (hold.get('credential_profile_scope') != profile or hold.get('model_scope') != model) and not (state == 'exhausted' and not hold.get('credential_profile_scope')) and not legacy_paid:
         return {'status': 'unchanged', 'reason': 'wrong-scope'}
     if hold and observed <= hold['observed_epoch']:
         return {'status': 'unchanged', 'reason': 'older-observation'}
