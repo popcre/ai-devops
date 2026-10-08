@@ -963,6 +963,7 @@ while [ \$# -gt 0 ]; do
   esac
 done
 cat > /dev/null
+if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
 cat <<'JSON'
 {"type":"sessionID","sessionID":"stub-session-1"}
 {"type":"text","part":{"text":"I read the evidence packet and every changed hunk against the stated intent. The lock release path is correct, the digest is recomputed at the terminal transition, and no path writes outside managed storage. The scoreboard append is checked and an accounting failure keeps the lock for recovery rather than reporting success. Sibling issues of the same class were checked across the module and none remain. No blocking findings in this change set."}}
@@ -989,6 +990,54 @@ check "deepseek_door_report_carries_opencode_metadata" \
 check "deepseek_door_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPORT'"
 check "deepseek_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_DEEPSEEK_OPENCODE='$STUB_OC' AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/ds-x.md' DOOR_HEAD='$HEAD_SHA' bash '$DS_DOOR' review) 2>/dev/null"
+
+# The grep presence check must not close the JSONL text producer early under
+# pipefail. Exercise a large multi-event report and retain all fail-closed
+# report shapes through the same existing OpenCode door fixture.
+python3 - "$TMP/ds-large.jsonl" <<'PY'
+import json, sys
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type":"text", "part":{"text":"## Verdict\nPROVISIONAL"}}) + "\n")
+    long_evidence = "Later multiline review evidence. " + ("x" * 120 + "\n") * 2500
+    f.write(json.dumps({"type":"text", "part":{"text":long_evidence}}) + "\n")
+    f.write(json.dumps({"type":"tool_use", "part":{"state":{"status":"ok"}}}) + "\n")
+    f.write(json.dumps({"type":"text", "part":{"text":"## Verdict\nAPPROVE"}}) + "\n")
+PY
+DS_LARGE_REPORT="$TMP/ds-large-report.md"
+DS_LARGE_RC=0
+DS_JSONL="$TMP/ds-large.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_LARGE_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_LARGE_RC=$?
+check "deepseek_large_multievent_report_keeps_exact_head_and_approve" \
+  "test '$DS_LARGE_RC' -eq 0 && grep -q '$HEAD_SHA' '$DS_LARGE_REPORT' && tail -2 '$DS_LARGE_REPORT' | grep -qx APPROVE && ! grep -q '^BLOCKED$' '$DS_LARGE_REPORT'"
+
+printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nREJECT"}}' > "$TMP/ds-reject.jsonl"
+DS_REJECT_REPORT="$TMP/ds-reject-report.md"
+DS_REJECT_RC=0
+DS_JSONL="$TMP/ds-reject.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_REJECT_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_REJECT_RC=$?
+check "deepseek_short_reject_is_preserved" \
+  "test '$DS_REJECT_RC' -eq 0 && tail -2 '$DS_REJECT_REPORT' | grep -qx REJECT"
+
+printf '%s\n' '{"type":"text","part":{"text":"No final verdict."}}' > "$TMP/ds-missing-verdict.jsonl"
+DS_MISSING_REPORT="$TMP/ds-missing-report.md"
+DS_MISSING_RC=0
+DS_JSONL="$TMP/ds-missing-verdict.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_MISSING_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review || DS_MISSING_RC=$?
+check "deepseek_absent_verdict_still_becomes_blocked" \
+  "test '$DS_MISSING_RC' -eq 0 && tail -2 '$DS_MISSING_REPORT' | grep -qx BLOCKED"
+
+printf '## Verdict\nMAYBE\n' > "$TMP/ds-malformed-report.md"
+check "lifecycle_validator_rejects_nonfinal_deepseek_verdict" \
+  "! (source '$CORE'; rlc_parse_verdict '$TMP/ds-malformed-report.md') >/dev/null 2>&1"
 
 # Full review contract for deepseek through the runner: packet + report.
 export AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR"
