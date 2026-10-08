@@ -151,6 +151,24 @@ function Set-PayloadFileAcl {
   }
 }
 
+function Repair-RuntimeResultFileAcl {
+  # A partial install made by an installer before #1312 ran icacls /T over the
+  # runtime tree and left result records with an EMPTY protected DACL, which
+  # even Administrators cannot read, so the recovery backup failed on access
+  # denied (edge-dev, 2026-10-08). Restore the install-time result grants on
+  # administrator-owned result files only, before they are backed up.
+  param([Parameter(Mandatory)][string]$OperatorSid)
+  $results = Join-Path $script:RuntimeRoot 'results'
+  if (-not (Test-Path -LiteralPath $results)) { return }
+  Assert-NoReparsePoint -LiteralPath $results
+  Assert-NoForeignOwnership -LiteralPath $results
+  foreach ($child in @(Get-ChildItem -LiteralPath $results -Force -File)) {
+    Assert-NoReparsePoint -LiteralPath $child.FullName
+    Assert-NoForeignOwnership -LiteralPath $child.FullName
+    Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r','*S-1-5-32-544:F','*S-1-5-18:F',"*${OperatorSid}:R")
+  }
+}
+
 function Set-ProtectedFilesystemAcl {
   param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
@@ -692,6 +710,7 @@ function Recover-MaintenanceInstallation {
       throw 'RECOVERY_IDENTITY_MISMATCH: scheduled task changed before unregister.'
     }
   }
+  Repair-RuntimeResultFileAcl -OperatorSid $ExpectedOperatorSid
   Backup-MaintenanceInstallation -Destination $RecoveryPath
   if ($null -ne $task) {
     Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false

@@ -155,6 +155,7 @@ try {
   Case 'Worker_AcquiresAbandonedMutex' { Assert-Contains $worker 'AbandonedMutexException' }
   Case 'ComFolder_HasNoTrailingSeparator' { Assert-Contains $installer 'GetFolder($script:TaskFolderCom)'; Assert-Contains $worker 'GetFolder(''\AiDevOps'')'; Assert-True (-not ($installer + $worker).Contains('GetFolder(''\AiDevOps\'')')) 'COM folder path ends in a separator (0x8007007B)' }
   Case 'RecoverPartial_RunsInsideTheHardenedInstaller' { Assert-Contains $installer 'function Recover-MaintenanceInstallation'; Assert-Contains $installer '[switch]$RecoverPartial'; Assert-Contains $installer 'if ($RecoverPartial) {' }
+  Case 'RecoverPartial_RepairsEmptyDaclResultsBeforeBackup' { $r=$recoverFn.IndexOf('Repair-RuntimeResultFileAcl -OperatorSid $ExpectedOperatorSid'); $b=$recoverFn.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath'); Assert-True ($r -gt 0 -and $b -gt $r) 'result records must be readable before the backup copies them'; Assert-True ($installer -match 'function Repair-RuntimeResultFileAcl[\s\S]{0,900}Assert-NoForeignOwnership -LiteralPath \$child\.FullName[\s\S]{0,200}/inheritance:r') 'only administrator-owned result files may be re-granted' }
   Case 'RecoverPartial_RefusesRunningTask' { Assert-Contains $recoverFn 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
   Case 'RecoverPartial_ExportsPinnedBundleFirst' { $b = $recoverFn.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath'); $u = $recoverFn.IndexOf('Unregister-ScheduledTask'); Assert-True ($b -gt 0 -and $u -gt $b) 'recovery removes before exporting' }
   Case 'RecoverPartial_ReverifiesPayloadRootAtItsDelete' { Assert-True ($recoverFn -match 'Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Assert-NoForeignOwnership -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Remove-Item -LiteralPath \$script:PayloadRoot -Recurse -Force') 'payload delete not re-verified immediately' }
@@ -175,6 +176,81 @@ try {
   Case 'Remove_ReverifiesPayloadRootAtItsDelete' { Assert-True ($removeFn -match 'Unregister-ScheduledTask[\s\S]{0,600}Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Assert-NoForeignOwnership -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Remove-Item -LiteralPath \$script:PayloadRoot -Recurse -Force') 'remove payload delete not re-verified immediately' }
   Case 'RecoverPartial_BackupPathBindsWithInstallAndUpdate' { Assert-True ($installer -match "ParameterSetName='Remove'\)\]\[Parameter\(ParameterSetName='Install'\)\]\[Parameter\(ParameterSetName='Update'\)\]") 'BackupPath cannot be supplied to -RecoverPartial -Install or -Update' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
+  # #262 regressions found live on EDGE-ALIEN (#1312); moved here when the
+  # renewal task that first carried them was retired.
+  $maintenanceInstaller = $installer
+  Case 'PayloadFiles_GetExplicitReadableAcl' {
+    # Real filesystem: the (OI)(CI) directory grant leaves files with an
+    # empty DACL; Set-PayloadFileAcl must give each file explicit grants.
+    $dir = Join-Path $temp 'acl-real'; New-Item -ItemType Directory -Path $dir | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $dir 'f.ps1')
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    try {
+      & 'C:\Windows\System32\icacls.exe' $dir /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' /T /C | Out-Null
+      Assert-True ((Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Access.Count -eq 0) 'precondition: icacls (OI)(CI) /T no longer empties file DACLs'
+      Set-PayloadFileAcl -LiteralPath $dir -OperatorSid $me
+      $sddl = (Get-Acl -LiteralPath (Join-Path $dir 'f.ps1')).Sddl
+      # SDDL writes well-known SIDs as aliases (NETWORK SERVICE, the
+      # self-hosted runner account, is 'NS', not 'S-1-5-20').
+      $meSddl = ([Security.AccessControl.RawSecurityDescriptor]::new("O:$me")).GetSddlForm([Security.AccessControl.AccessControlSections]::Owner).Substring(2)
+      foreach ($ace in @('(A;;FA;;;BA)', '(A;;FA;;;SY)', "(A;;0x1200a9;;;$meSddl)")) { Assert-True ($sddl.Contains($ace)) "file ACL missing $ace in $sddl" }
+      Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $dir 'f.ps1')).Trim() -eq 'payload') 'payload file not readable'
+    } finally { & 'C:\Windows\System32\icacls.exe' $dir /reset /T /C | Out-Null }
+  }
+  Case 'PayloadAcl_MaintenanceInstallerGrantsFilesExplicitly' {
+    Assert-True ($maintenanceInstaller.Contains("Set-PayloadFileAcl -LiteralPath `$LiteralPath -OperatorSid `$OperatorSid")) 'maintenance payload ACL leaves files empty'
+    $recover = $maintenanceInstaller.Substring($maintenanceInstaller.IndexOf('function Recover-MaintenanceInstallation'))
+    Assert-True ($recover.IndexOf('Set-PayloadFileAcl') -lt $recover.IndexOf("Get-Content -Raw -LiteralPath (Join-Path `$script:PayloadRoot 'manifest.json')")) 'recovery cannot read an empty-DACL manifest'
+  }
+
+  # Task DACL comparison (#1312, observed live on build 26300): flag 0 reads
+  # return '', and stored DACLs come back mapped (GRGX -> 0x1200a9) as D:PAI.
+  $expectedTaskDacl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$sid)"
+  Case 'TaskDacl_AcceptsStoredMappedForm' { Assert-True (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)" -Expected $expectedTaskDacl) 'stored mapped DACL rejected' }
+  Case 'TaskDacl_RefusesEmptyRead' { Assert-True (-not (Test-TaskDaclEquivalent -Actual '' -Expected $expectedTaskDacl)) 'empty descriptor accepted' }
+  Case 'TaskDacl_RefusesUnprotectedWithPrincipalAce' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)(A;;FR;;;$sid)" -Expected $expectedTaskDacl)) 'unsealed default DACL accepted' }
+  Case 'TaskDacl_RefusesOperatorFullControl' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;$sid)" -Expected $expectedTaskDacl)) 'operator full control accepted' }
+  Case 'TaskDacl_RefusesExtraIdentity' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;$sid)(A;;0x1200a9;;;WD)" -Expected $expectedTaskDacl)) 'extra identity accepted' }
+  Case 'TaskDacl_RefusesDenyInsteadOfAllow' { Assert-True (-not (Test-TaskDaclEquivalent -Actual "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(D;;0x1200a9;;;$sid)" -Expected $expectedTaskDacl)) 'deny ACE accepted' }
+  Case 'TaskDacl_ReadsWithDaclFlagAndSetsWithoutPrincipalAce' {
+    foreach ($text in @($maintenanceInstaller, $worker)) {
+      Assert-True ($text -notmatch 'GetSecurityDescriptor\(0\)') 'a task descriptor is still read with flag 0'
+      Assert-True ($text -notmatch 'SetSecurityDescriptor\([^)]*,\s*0\)') 'a task descriptor is still set without TASK_DONT_ADD_PRINCIPAL_ACE'
+    }
+  }
+
+  # Live on EDGE-ALIEN a triggerless task reported trigger_count 1 (because
+  # @($null).Count is 1) and its principal as the account NAME, so every
+  # verifier refused the real task (#1312).
+  Case 'TaskCounts_IgnoreNullCollections' {
+    Assert-True (@($null).Count -eq 1) 'precondition: @($null).Count changed'
+    foreach ($text in @($maintenanceInstaller, $worker)) {
+      Assert-True ($text -notmatch '@\(\$task\.(Triggers|Actions)\)\.Count') 'a task collection is counted without filtering nulls'
+    }
+  }
+  Case 'TaskPrincipal_MaintenanceVerifierAndWorkerResolveNames' {
+    Assert-True ($maintenanceInstaller.Contains('(Resolve-TaskIdentitySid -Identity $task.user_id) -cne $ExpectedOperatorSid')) 'maintenance verify compares the raw principal'
+    Assert-True ($worker.Contains('$principalSid -cne $ExpectedOperatorSid')) 'worker compares the raw principal'
+  }
+
+  # Live on EDGE-ALIEN: an S4U run-level-Limited task token for an admin
+  # account creates files owned by BUILTIN\Administrators, so the worker
+  # rejected the scheduled request (REQUEST_REJECTED). The client re-owns its
+  # own request to the caller's user SID.
+  Case 'Request_IsReownedToCallerAfterWrite' {
+    $clientText = Get-Content -Raw -LiteralPath (Join-Path $repo 'bin\invoke-windows-runner-maintenance.ps1')
+    $newRequest = [regex]::Match($clientText, 'function New-MaintenanceRequest[\s\S]*?\n}').Value
+    Assert-True ($newRequest.IndexOf('Set-RequestOwnerToCaller -LiteralPath $path') -gt $newRequest.IndexOf('$stream.Write(')) 'request not re-owned after it is written'
+    $setter = [regex]::Match($clientText, 'function Set-RequestOwnerToCaller[\s\S]*?\n}').Value
+    Assert-True ($setter.Contains('AccessControlSections]::Owner') -and $setter.Contains('WindowsIdentity]::GetCurrent().User')) 'owner change is not limited to the caller SID and owner section'
+    . (Join-Path $repo 'bin\invoke-windows-runner-maintenance.ps1')
+    $f = Join-Path $temp 'request-owner.json'; [IO.File]::WriteAllText($f, '{}')
+    $daclBefore = (Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access')
+    Set-RequestOwnerToCaller -LiteralPath $f
+    Assert-True ((Get-Acl -LiteralPath $f).GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) 'request not owned by the caller'
+    Assert-True ((Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access') -ceq $daclBefore) 'owner change altered the DACL'
+  }
+
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

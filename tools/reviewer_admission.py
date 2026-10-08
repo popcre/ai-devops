@@ -83,8 +83,12 @@ def capacity_observation(data, provider, observation, now):
     if hold and hold.get('failure_class') == 'out-of-credit' and provider in SUBSCRIPTIONS:
         return {'status': 'unchanged', 'reason': 'paid-balance-hold-not-subscription-allowance'}
     # An unscoped paid-balance hold (written by the failure classifier or an
-    # expired legacy global quarantine) names no credential, so a fresh scoped
-    # positive balance for this provider is the evidence that lifts it.
+    # expired legacy global quarantine) names no credential. Safe release rule:
+    # a newer qualified scoped 'available' observation restores it when the
+    # provider is a paid (non-subscription) account with one configured profile
+    # (DeepSeek: single key store, model pinned to deepseek-flash). That
+    # observation is the only profile that could have been held, so it is the
+    # evidence that lifts it. A scoped hold still only matches its own scope.
     legacy_paid = bool(hold and not hold.get('credential_profile_scope') and not hold.get('model_scope')
                        and hold.get('failure_class') == 'out-of-credit' and provider not in SUBSCRIPTIONS)
     if hold and (hold.get('credential_profile_scope') != profile or hold.get('model_scope') != model) and not (state == 'exhausted' and not hold.get('credential_profile_scope')) and not legacy_paid:

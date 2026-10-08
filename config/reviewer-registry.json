@@ -23,8 +23,8 @@
       "reason": "Rotation reviewer (glm-5.3). Restored by owner instruction on 2026-09-30 (\"add GLM back into the reviewer rotation\") after a 2026-09-18 weekly-usage pause; matches popcre/shared-db removing glm-5.3 from RETIRED_REVIEWERS in its historical slot. The 2026-09-17 independence ruling still binds: GLM never reviews GLM-orchestrated (ZCode) work."
     },
     "grok": {
-      "registry_state": "absent",
-      "reason": "Temporarily removed from reviewer rotation by owner instruction on 2026-10-07 (asked to take Grok out of the reviewer pool temporarily, then \"go\"). No provider fault alleged; Grok was already fallback-only for cost (popcre/shared-db #3592). Mirrors popcre/shared-db adding grok-4.6 to RETIRED_REVIEWERS as a pause. The ai-grok-review wrapper stays installed for named sessions; re-entry requires owner instruction and a reviewed registry change backed by one live well-formed verdict."
+      "registry_state": "registered",
+      "reason": "Rotation reviewer (grok-4.6, cost fallback behind the others per popcre/shared-db #3592). Paused 2026-10-07 and restored by owner instruction on 2026-10-08 (\"put Grok back in the rotation\") after a live re-entry proof on edge-dev3: `ai-grok-review doctor --live` returned live probe OK on the subscription login (no paid API key) and a live review session ended with a well-formed VERDICT APPROVE line carrying the head SHA. Mirrors popcre/shared-db removing grok-4.6 from RETIRED_REVIEWERS."
     },
     "kimi": {
       "registry_state": "absent",

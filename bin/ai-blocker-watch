@@ -134,10 +134,74 @@ gh_call(){
   # owner in the call, falls back to the personal login: nothing stops.
   local owner tok
   if [ "$BW_APP" = 1 ] && owner="$(gh_owner "$@")" && tok="$("$APP_TOKEN" token "$owner" 2>/dev/null)"; then
-    GH_TOKEN="$tok" AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+    GH_TOKEN="$tok" BW_SELECTED_APP=1 BW_SELECTED_APP_OWNER="$owner" gh_selected_call "$@"
   else
-    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+    BW_SELECTED_APP=0 BW_SELECTED_APP_OWNER='' gh_selected_call "$@"
   fi
+}
+# Share only successful identical fallback reads during this tick. Selection
+# above remains per-call: a different token or app/personal fallback has its
+# own verified local access context. Unknown contexts retain ordinary reads.
+gh_selected_call(){
+  local context key file temporary rc after
+  if [ "${AI_GH_OPERATION:-}" != bw.wake_miss ] || [ -z "${BW_WAKE_CACHE:-}" ] ||
+     ! context="$(gh_selected_context)"; then
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return
+  fi
+  key="$(printf '%s\0' "$context" "${GH_HOST:-github.com}" "$@" | sha256sum | cut -d' ' -f1)" || {
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return;
+  }
+  file="$BW_WAKE_CACHE/$key"
+  if wake_cache_valid "$BW_WAKE_CACHE" && [ -f "$file" ] && [ ! -L "$file" ]; then cat "$file"; return; fi
+  if ! wake_cache_valid "$BW_WAKE_CACHE"; then
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return;
+  fi
+  temporary="$(umask 077; mktemp "$BW_WAKE_CACHE/read.XXXXXX")" || {
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return;
+  }
+  if AI_GH_CALLER=ai-blocker-watch "$GH" "$@" > "$temporary"; then rc=0; else rc=$?; fi
+  cat "$temporary"
+  # A local login change while an opaque CLI request ran invalidates reuse.
+  if [ "$rc" = 0 ] && wake_cache_valid "$BW_WAKE_CACHE" &&
+     [ "$(wc -c < "$temporary")" -le 4096 ] &&
+     after="$(gh_selected_context)" && [ "$after" = "$context" ]; then
+    mv "$temporary" "$file" || rm -f -- "$temporary"
+  else rm -f -- "$temporary"; fi
+  return "$rc"
+}
+gh_selected_context(){
+  local context
+  if [ "${BW_SELECTED_APP:-0}" = 1 ]; then
+    # A real installation token normally has no /user identity. Only the App
+    # helper's authenticated mint metadata can qualify its selected context.
+    context="$("$APP_TOKEN" context "${BW_SELECTED_APP_OWNER:-}" 2>/dev/null)" || return 1
+    [[ "$context" =~ ^app-v1:[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$context"
+  else "$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null; fi
+}
+wake_cache_valid(){
+  local directory="$1" path name details
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  details="$(stat -c '%u %a' "$directory" 2>/dev/null)" || return 1
+  [ "$details" = "$(id -u) 700" ] || return 1
+  [ -f "$directory/.owner" ] && [ ! -L "$directory/.owner" ] || return 1
+  details="$(stat -c '%u %a' "$directory/.owner" 2>/dev/null)" || return 1
+  [ "$details" = "$(id -u) 600" ] && [ "$(stat -c %s "$directory/.owner")" -le 64 ] || return 1
+  [ "$(cat "$directory/.owner")" = blocker-watch-wake-cache-v1 ] || return 1
+  while IFS= read -r -d '' path; do
+    name="${path##*/}"
+    [[ "$name" = .owner || "$name" =~ ^[0-9a-f]{64}$ || "$name" =~ ^read\.[A-Za-z0-9]{6}$ ]] || return 1
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    details="$(stat -c '%u %a' "$path" 2>/dev/null)" || return 1
+    [ "$details" = "$(id -u) 600" ] || return 1
+    [ "$(stat -c %s "$path")" -le 4096 ] || return 1
+  done < <(find "$directory" -mindepth 1 -maxdepth 1 -print0)
+}
+wake_cache_remove(){
+  local directory="$1" path
+  wake_cache_valid "$directory" || return 1
+  while IFS= read -r -d '' path; do rm -f -- "$path" || return 1; done < <(find "$directory" -mindepth 1 -maxdepth 1 -print0)
+  rmdir "$directory"
 }
 # The repository owner a gh call targets (-R/--repo, repos/<owner>/, repo:<owner>/,
 # or a GraphQL owner= field). Prints nothing and fails when the call names none.
@@ -1250,6 +1314,13 @@ lock_take(){
   if ! mkdir "$lock" 2>/dev/null; then
     # A tick killed mid-run leaves the lock; anything older than the wake timeout is stale.
     if [ -n "$(find "$lock" -maxdepth 0 -mmin +"$(( $(cfg .wake_timeout_minutes) + 5 ))" 2>/dev/null)" ]; then
+      # Only our fixed-shape, private tick read directories can survive a
+      # killed writer. They are disposable snapshots, never wait records.
+      local cache
+      for cache in "$lock"/wake.??????; do
+        [ -d "$cache" ] && [ ! -L "$cache" ] || continue
+        wake_cache_remove "$cache" || { note 'unrecognized stale wake cache preserved'; return 1; }
+      done
       rmdir "$lock"; mkdir "$lock"
     else note "another tick is running"; return 1; fi
   fi
@@ -1281,6 +1352,13 @@ cmd_tick(){
   [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  BW_WAKE_CACHE=''
+  # POSIX mode protection is sufficient only on Linux. Windows keeps the
+  # original reads until this optional cache has a qualified NTFS ACL path.
+  if [ "$(uname -s)" = Linux ] && BW_WAKE_CACHE="$(umask 077; mktemp -d "$HOME_DIR/tick.lock/wake.XXXXXX")"; then
+    ( umask 077; printf '%s\n' blocker-watch-wake-cache-v1 > "$BW_WAKE_CACHE/.owner" )
+    trap 'wake_cache_remove "$BW_WAKE_CACHE" || true; rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true' EXIT
+  else BW_WAKE_CACHE=''; fi
   local tick_started_ms='' tick_elapsed_ms=''
   BW_TICK_RECEIPT_ID=''
   BW_TICK_CONTEXT=''
