@@ -132,6 +132,14 @@ unowned review brief is protected; no cleanup or installation occurred.
 Native Windows HTTP-channel qualification is owned by the fleet subagent;
 source/clock adapter design by the measurement subagent; host access,
 installation, merge decisions and section 13 acceptance by this coordinator.
+Windows PowerShell 5 compatibility evidence — October 8, 2026: the original
+staging diagnostic failed before its first write on the byte-backed
+`AceFlags -band` cast (19 legacy failures); explicit integer casts for both
+predicates matched the integer reference for `InheritOnly` and `Inherited`
+across 38 actual ancestor-ACE checks (`major5`, `integer_cast_pass=true`,
+`stage_absent=true`). This is diagnostic compatibility evidence only; it does
+not establish full native qualification, fleet installation, global HTTP
+savings or section 13 acceptance.
 The owner-closed credential incident is not an open installation prerequisite;
 no further rotation, revocation or redaction is authorized by that incident.
 Historical samples remain unqualified for before/after savings. #658 stays open.
