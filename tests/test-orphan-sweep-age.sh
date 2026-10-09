@@ -155,6 +155,20 @@ DEFAULT_OWNED="$("$SCRIPT" ensure-copy "$MAIN" defaultowner)"
 touch -d '3 hours ago' "$DEFAULT_OWNED/$SCRIPT_MARKER"
 "$SCRIPT" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
 check "default_caller_owner_is_protected" "[ -d '$DEFAULT_OWNED' ]"
+# A resumed session re-ensures the same tag (rebuild replaces the snapshot):
+# the lease must survive the replace, and refresh-copy must keep it too.
+echo resumed >> "$MAIN/a.txt"; git -C "$MAIN" commit -qam resumed
+REBOUND="$("$SCRIPT" ensure-copy "$MAIN" defaultowner)"
+check "same_tag_reensure_keeps_lease"   "'$SCRIPT' has-live-owner '$REBOUND'"
+echo refreshed >> "$MAIN/a.txt"; git -C "$MAIN" commit -qam refreshed
+REFRESHED="$("$SCRIPT" refresh-copy "$MAIN" defaultowner "$REBOUND")"
+check "refresh_copy_keeps_lease"        "'$SCRIPT' has-live-owner '$REFRESHED'"
+touch -d '3 hours ago' "$REFRESHED/$SCRIPT_MARKER"
+"$SCRIPT" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
+check "refreshed_live_snapshot_kept"    "[ -d '$REFRESHED' ]"
+rm -rf "$REFRESHED.leases"
+set +e; "$SCRIPT" has-live-owner "$REFRESHED"; NOOWNER_RC=$?; set -e
+check "no_live_owner_exits_3"           "[ '$NOOWNER_RC' -eq 3 ]"
 "$SCRIPT" remove-copy "$MAIN" defaultowner >/dev/null 2>&1 || true
 
 # --- the sweep is bounded: a review start never blocks behind a mass cleanup --

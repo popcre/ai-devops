@@ -878,8 +878,8 @@ cmd_ensure() {
   if [ "$force_copy" != 1 ] && ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
   mkdir -p "$SANDBOX_DIR"
   stage="$(sandbox_path "$root" "$tag")"
-  record_lease "$stage"
   create_or_refresh "$root" "$tag" "$stage"
+  record_lease "$stage"   # after the rebuild: a refresh replaces the snapshot and its leases
   printf '%s' "$stage"
 }
 
@@ -953,6 +953,7 @@ cmd_ensure_code_only() {
   mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
   "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
     || die "published code-only export failed verification."
+  record_lease "$stage"
   printf '%s' "$stage"
 }
 
@@ -1037,8 +1038,8 @@ cmd_refresh_copy() { # refresh an exact, already-recorded directory for director
   is_managed "$stage" || die "refusing to refresh $stage: it is not a managed review snapshot."
   grep -Fqx "Snapshot tag: $tag" "$stage/AI-REVIEW-SANDBOX.md" 2>/dev/null \
     || die "refusing to refresh $stage: its recorded snapshot tag does not match '$tag'."
-  record_lease "$stage"
   create_or_refresh "$root" "$tag" "$stage"
+  record_lease "$stage"   # after the rebuild: a refresh replaces the snapshot and its leases
   printf '%s' "$stage"
 }
 
@@ -1166,7 +1167,7 @@ case "${1:-}" in
   refresh-copy) shift; cmd_refresh_copy "$@" ;;
   with-copy)   shift; cmd_with_copy "$@" ;;
   sweep-orphans) shift; cmd_sweep_orphans "$@" ;;
-  has-live-owner) shift; has_live_owner "${1:?usage: has-live-owner <snapshot>}" ;;
+  has-live-owner) shift; has_live_owner "${1:?usage: has-live-owner <snapshot>}" || exit 3 ;;  # 0 live, 3 no live owner
   remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
@@ -1174,5 +1175,5 @@ case "${1:-}" in
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|ensure-code-only|verify-code-only|remove-code-only|assert-public|is-private|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|has-live-owner|ensure-code-only|verify-code-only|remove-code-only|assert-public|is-private|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac
