@@ -102,11 +102,60 @@ check "keep_flag_retains_orphan"         "[ -d '$KEEP_OLD' ]"
 check "keep_flag_release_allows_sweep"   "[ ! -d '$KEEP_OLD' ]"
 
 # --- a real snapshot from ensure-copy is swept once its marker ages out -------
-REAL="$("$SCRIPT" ensure-copy "$MAIN" orphansweep)"
+sleep 0 & DEAD_OWNER=$!; wait "$DEAD_OWNER" 2>/dev/null || true
+REAL="$(AI_REVIEW_SANDBOX_OWNER_PID="$DEAD_OWNER" "$SCRIPT" ensure-copy "$MAIN" orphansweep)"
 check "ensure_copy_creates_for_sweep"    "[ -d '$REAL' ]"
 touch -d '3 hours ago' "$REAL/$SCRIPT_MARKER"
 "$SCRIPT" sweep-orphans >/dev/null 2>&1
 check "aged_real_snapshot_removed"       "[ ! -d '$REAL' ]"
+
+# --- live owners: concurrent runs never lose a live snapshot ----------------
+# Regression for Windows 916 (2026-10-08): one review's front-door sweep deleted
+# a concurrent live GLM run's snapshot because only the marker age was checked.
+echo '== live owner leases'
+HOLD_READY="$TMP/hold.ready"; HOLD_RELEASE="$TMP/hold.release"
+# Run A: a real wrapper-shaped owner holds its snapshot through with-copy.
+"$SCRIPT" with-copy "$MAIN" liveholder -- bash -c '
+  printf "%s\n" "$AI_REVIEW_SNAPSHOT" > "$1"
+  while [ ! -e "$2" ]; do sleep 0.1; done' _ "$HOLD_READY" "$HOLD_RELEASE" >/dev/null 2>&1 &
+HOLDER=$!
+i=0; while [ ! -s "$HOLD_READY" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$(( i + 1 )); done
+LIVE_SNAP="$(cat "$HOLD_READY" 2>/dev/null)"
+check "live_holder_created_snapshot"     "[ -n '$LIVE_SNAP' ] && [ -d '$LIVE_SNAP' ]"
+check "live_holder_lease_recorded"       "[ -f '$LIVE_SNAP.leases/$HOLDER' ]"
+touch -d '3 hours ago' "$LIVE_SNAP/$SCRIPT_MARKER"
+# Run B: a second, independent run starts and sweeps with every age past due.
+sleep 0 & DEAD_OWNER=$!; wait "$DEAD_OWNER" 2>/dev/null || true
+DEAD_SNAP="$(AI_REVIEW_SANDBOX_OWNER_PID="$DEAD_OWNER" "$SCRIPT" ensure-copy "$MAIN" deadholder)"
+touch -d '3 hours ago' "$DEAD_SNAP/$SCRIPT_MARKER"
+LIVE_ERR="$TMP/live.err"
+( "$SCRIPT" sweep-orphans --max-age-seconds 0 ) 2> "$LIVE_ERR"
+check "concurrent_sweep_keeps_live_snapshot" "[ -d '$LIVE_SNAP' ] && [ -f '$LIVE_SNAP/$SCRIPT_MARKER' ]"
+check "concurrent_sweep_not_logged_for_live" "! grep -q 'deleted review snapshot.*liveholder' '$LIVE_ERR'"
+check "concurrent_sweep_removes_dead_owner"  "[ ! -d '$DEAD_SNAP' ] && [ ! -e '$DEAD_SNAP.leases' ]"
+check "has_live_owner_reports_live"          "'$SCRIPT' has-live-owner '$LIVE_SNAP'"
+touch "$HOLD_RELEASE"; wait "$HOLDER" 2>/dev/null || true
+check "owner_cleanup_still_removes_its_own"  "[ ! -d '$LIVE_SNAP' ] && [ ! -e '$LIVE_SNAP.leases' ]"
+
+# A reused PID is not the owner: the recorded start time must match.
+REUSED="$("$SCRIPT" ensure-copy "$MAIN" reusedpid)"
+rm -rf "$REUSED.leases"; mkdir -p "$REUSED.leases"
+printf '1\n' > "$REUSED.leases/$$"
+touch -d '3 hours ago' "$REUSED/$SCRIPT_MARKER"
+"$SCRIPT" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
+if [ -r "/proc/$$/stat" ]; then
+  check "reused_pid_lease_is_not_live"   "[ ! -d '$REUSED' ]"
+else
+  skip "reused_pid_lease_is_not_live (no /proc start time)"
+  "$SCRIPT" remove-copy "$MAIN" reusedpid >/dev/null 2>&1 || true
+fi
+
+# The default owner is the caller (this shell): a plain ensure-copy is live.
+DEFAULT_OWNED="$("$SCRIPT" ensure-copy "$MAIN" defaultowner)"
+touch -d '3 hours ago' "$DEFAULT_OWNED/$SCRIPT_MARKER"
+"$SCRIPT" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
+check "default_caller_owner_is_protected" "[ -d '$DEFAULT_OWNED' ]"
+"$SCRIPT" remove-copy "$MAIN" defaultowner >/dev/null 2>&1 || true
 
 # --- the sweep is bounded: a review start never blocks behind a mass cleanup --
 CAP_YOUNG="$(plant cap-young)"

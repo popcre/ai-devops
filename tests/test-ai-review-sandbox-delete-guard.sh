@@ -139,7 +139,9 @@ fi
 if [ "$linked" = 1 ]; then
   OLD_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"
   export AI_REVIEW_SANDBOX_DIR="$LINK_ROOT"
-  LINKED_SNAP="$("$SCRIPT" ensure-copy "$MAIN" guardlinkroot)"
+  # A finished owner: the sweep removes only snapshots whose run is gone.
+  sleep 0 & DEAD_OWNER=$!; wait "$DEAD_OWNER" 2>/dev/null || true
+  LINKED_SNAP="$(AI_REVIEW_SANDBOX_OWNER_PID="$DEAD_OWNER" "$SCRIPT" ensure-copy "$MAIN" guardlinkroot)"
   check "linked_root_snapshot_is_created"      "[ -d '$LINKED_SNAP' ] && [ -f '$LINKED_SNAP/.ai-review-sandbox' ]"
   # Age the marker past the sweep threshold, then sweep using the LINKED root
   # spelling — exactly what production passes from AI_REVIEW_SANDBOX_DIR.
