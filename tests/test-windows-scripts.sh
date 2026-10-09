@@ -272,5 +272,56 @@ else
   bad "Vercel must be Oracle-scoped native HTTP for Claude Code and Codex"
 fi
 
+echo "== daily housekeeping must not delete a live review snapshot =="
+# Gap left by PR #1537: the start-of-review sweep learned live-owner leases,
+# but the daily Windows cleanup still wiped any sandbox past 24h by age alone.
+HOUSE=scripts/ai-housekeeping/cleanup-ai-debris.ps1
+if grep -Fq 'function Test-SandboxLiveOwner' "$HOUSE" &&
+   grep -Fq 'SKIP live-owner sandbox' "$HOUSE" &&
+   grep -Fq "notlike '*.leases'" "$HOUSE" &&
+   grep -Fq 'Test-SandboxLiveOwner $d.FullName' "$HOUSE"; then
+  ok "housekeeping skips live-owner sandboxes and lease sidecars"
+else
+  bad "housekeeping can still wipe a live review sandbox"
+fi
+if grep -Fq '[switch]$SkipNonSandbox' "$HOUSE" && grep -Fq 'param(' "$HOUSE"; then
+  ok "housekeeping accepts a sandbox-only fixture mode"
+else
+  bad "housekeeping cannot be fixture-tested without touching live machine state"
+fi
+if [ "${OS:-}" = "Windows_NT" ]; then
+  hk_fixture="$(mktemp -d)"
+  mkdir -p "$hk_fixture/live.leases" "$hk_fixture/dead.leases" "$hk_fixture/live" "$hk_fixture/dead" "$hk_fixture/orphan"
+  # live lease: this shell's pid with the no-token marker (accepts liveness).
+  # dead lease: a reaped pid that cannot still own anything.
+  printf '%s\n' '-' > "$hk_fixture/live.leases/$$"
+  sleep 0 & hk_dead=$!; wait "$hk_dead" 2>/dev/null || true
+  printf '%s\n' '-' > "$hk_fixture/dead.leases/$hk_dead"
+  printf '%s\nsource_digest=0000000000000000000000000000000000000000\nevidence_format=1\n' "$hk_fixture/live" > "$hk_fixture/live/.ai-review-sandbox"
+  printf '%s\nsource_digest=0000000000000000000000000000000000000000\nevidence_format=1\n' "$hk_fixture/dead" > "$hk_fixture/dead/.ai-review-sandbox"
+  printf '%s\nsource_digest=0000000000000000000000000000000000000000\nevidence_format=1\n' "$hk_fixture/orphan" > "$hk_fixture/orphan/.ai-review-sandbox"
+  # Directory age is what housekeeping reads (cutoff is 24h); set it after children exist.
+  touch -d '25 hours ago' "$hk_fixture/live" "$hk_fixture/live.leases" "$hk_fixture/dead" "$hk_fixture/dead.leases" "$hk_fixture/orphan"
+  touch -d '25 hours ago' "$hk_fixture/live/.ai-review-sandbox" "$hk_fixture/dead/.ai-review-sandbox" "$hk_fixture/orphan/.ai-review-sandbox"
+  HK_LOG="$hk_fixture/housekeeping.log"
+  HK_ROOT="$(cygpath -w "$hk_fixture")"
+  HK_SCRIPT="$(cygpath -w "$REPO_ROOT/$HOUSE")"
+  HK_LOG_W="$(cygpath -w "$HK_LOG")"
+  AI_HOUSEKEEPING_LOG="$HK_LOG_W" pwsh -NoProfile -File "$HK_SCRIPT" -SandboxRoot "$HK_ROOT" -SkipNonSandbox >/dev/null 2>&1
+  if [ -d "$hk_fixture/live" ] && [ -d "$hk_fixture/live.leases" ] &&
+     [ ! -d "$hk_fixture/dead" ] && [ ! -d "$hk_fixture/dead.leases" ] &&
+     [ ! -d "$hk_fixture/orphan" ] &&
+     grep -Fq 'SKIP live-owner sandbox' "$HK_LOG" 2>/dev/null; then
+    ok "housekeeping fixture keeps a live-owner sandbox and removes age-only ones"
+  else
+    bad "housekeeping fixture deleted a live-owner sandbox or kept a removable one"
+    ls -la "$hk_fixture" 2>/dev/null | sed 's/^/       /' | head -20
+    [ -f "$HK_LOG" ] && sed 's/^/       log: /' "$HK_LOG" | tail -10
+  fi
+  rm -rf "$hk_fixture"
+else
+  ok "housekeeping live-owner fixture is reserved for Windows CI"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

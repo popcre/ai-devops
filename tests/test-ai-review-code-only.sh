@@ -62,6 +62,25 @@ pass 'ordinary snapshot and packet paths refuse private source'
 
 EXPORT="$("$SANDBOX" ensure-code-only "$R" codeonly --paths-file "$TMP/approved.json" --base "$BASE")"
 "$SANDBOX" verify-code-only "$EXPORT" --assert-head "$ORIGINAL_HEAD"
+# Owner lease (PR #1537): a live run must hold a lease beside the export so a
+# concurrent sweep or housekeeping age rule cannot delete a live snapshot.
+"$SANDBOX" has-live-owner "$EXPORT" || fail 'code-only export did not record a live owner lease'
+[ -d "$EXPORT.leases" ] || fail 'code-only export has no leases directory'
+check_codeonly_lease_pid="$(ls "$EXPORT.leases" 2>/dev/null | head -1)"
+[ -n "$check_codeonly_lease_pid" ] || fail 'code-only export lease directory is empty'
+printf '%s\n' "$check_codeonly_lease_pid" | grep -Eq '^[0-9]+$' || fail 'code-only lease file is not named by pid'
+pass 'code-only export records an owner lease'
+# A concurrent orphan sweep with every age past due must keep this live export
+# (Windows 916, 2026-10-08 class of bug), and drop only a dead-owner twin.
+sleep 0 & DEAD_CODE_OWNER=$!; wait "$DEAD_CODE_OWNER" 2>/dev/null || true
+printf '["src/app.py"]\n' > "$TMP/codeonly-dead.json"
+DEAD_EXPORT="$(AI_REVIEW_SANDBOX_OWNER_PID="$DEAD_CODE_OWNER" "$SANDBOX" ensure-code-only "$R" codeonly-dead --paths-file "$TMP/codeonly-dead.json" --base "$BASE")"
+touch -d '3 hours ago' "$EXPORT/.ai-review-sandbox" "$DEAD_EXPORT/.ai-review-sandbox"
+"$SANDBOX" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
+[ -d "$EXPORT" ] || fail 'sweep deleted a live code-only export'
+"$SANDBOX" has-live-owner "$EXPORT" || fail 'live code-only lease lost after concurrent sweep'
+[ ! -d "$DEAD_EXPORT" ] || fail 'sweep kept a dead-owner code-only export'
+pass 'concurrent sweep keeps a live code-only export and drops a dead one'
 [ "$(git -C "$EXPORT" rev-list --count HEAD)" = 2 ] || fail 'synthetic export does not have two commits'
 [ "$(git -C "$EXPORT" rev-parse HEAD^)" != "$BASE" ] || fail 'source history leaked into synthetic history'
 [ ! -e "$EXPORT.source.json/." ] || fail 'host-only sidecar is under the export'
