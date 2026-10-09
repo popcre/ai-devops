@@ -571,7 +571,7 @@ copy_source_behavior_config() { # copy_source_behavior_config SRC BUILD
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     key="${line%% *}"; value="${line#"$key"}"; value="${value# }"
-    case "$key" in core.bare|core.worktree) continue ;; esac
+    case "$key" in core.bare|core.worktree|core.longpaths) continue ;; esac
     git -C "$dst" config "$key" "$value" 2>/dev/null || true
   done < <(git -C "$src" config --local --get-regexp '^(core|filter|user)\.' 2>/dev/null || true)
 }
@@ -648,6 +648,9 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   done
 
   git -c core.longpaths=true init -q "$build" || return 1
+  # Every later checkout/ref/object read needs this on Windows, including
+  # isolated HOME runs. Source behavior config must not undo this invariant.
+  git -c core.longpaths=true -C "$build" config core.longpaths true || return 1
   # Park the unborn HEAD on a process-unique branch: fetching a candidate ref
   # into the branch HEAD points at is refused by git, and the default branch
   # name (main/master) is exactly what the candidates are. The name is never
