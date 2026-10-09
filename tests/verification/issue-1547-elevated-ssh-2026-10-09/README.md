@@ -42,6 +42,15 @@ Redaction note: in the envy `SSHD_CONFIG_LINES` output below, the values of the 
 lines were replaced with `<redacted>` because they are private network/tailnet addresses;
 everything else is verbatim.
 
+Scope note: the host identifiers recorded here (account names, SIDs, builds, hotfix
+dates, session lines) match the class of data this repository's verification records
+already carry publicly — the step-7 install proof
+(`tests/verification/windows-runner-maintenance-envy-2026-10-09/README.md`) pins the
+operator SID in full, and `IML\ahazan2` appears in `docs/windows-openssh-tailscale.md`
+and `plan_phase3-config-consolidation.md`. They are host-identity facts, not secrets;
+they grant no access, and keeping them verbatim makes this record re-pinnable under
+plan §11. No passwords, keys, or key-file contents appear anywhere below.
+
 ## Results
 
 ### envy-probe.ps1 — five hosts
