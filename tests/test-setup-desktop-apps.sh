@@ -40,6 +40,7 @@ cat > "$T/cfg/state/mcp-catalog.json" <<'EOF'
 {"1password":{"command":"/l/mcp-launch.sh","args":["npx","-y","@u2giants/1password-mcp"]},
  "playwright":{"command":"npx","args":["-y","@playwright/mcp"]},
  "railway":{"command":"npx","args":["-y","mcp-remote","https://mcp.railway.com"]},
+ "recall-ai":{"command":"/l/mcp-remote-launch.sh","args":["https://us-east-1.recall.ai/mcp","op://vibe_coding/recall-ai MCP/password","--transport","http-first"]},
  "trigger":{"command":"/l/mcp-launch.sh","args":["npx","-y","trigger.dev","mcp"]},
  "codex-cli":{"command":"/usr/bin/codex","args":["mcp-server"],"env":{"MCP_TOOL_TIMEOUT":"1"}}}
 EOF
@@ -81,8 +82,8 @@ before="$(cat "$CODEX_CONFIG")"
 "$PY3" "$ROOT/bin/mcp_policy.py" policy | "$PY3" -c '
 import json, sys
 p = json.load(sys.stdin)
-assert "recall-ai" in p["retired"] and "recall-ai" not in p["scoped"] + p["desktop"]
-assert p["scope"]["oracle"] == ["trigger", "vercel"] and "railway" in p["scope"]["popdam3"]
+assert "recall-ai" not in p["retired"]
+assert p["scope"]["oracle"] == ["trigger", "recall-ai", "vercel"] and "railway" in p["scope"]["popdam3"]
 assert {"ag-grid", "devops-mcp", "synology-monitor"} <= set(p["scoped"])
 ' && ok "policy parsed from setup-machine.ps1" || bad "policy parse wrong"
 
@@ -103,9 +104,9 @@ import json, os, sys, tomllib
 want = os.path.normcase(os.path.normpath(sys.argv[2]))
 e = next(v["mcpServers"] for k, v in json.load(open(sys.argv[1]))["projects"].items()
          if os.path.normcase(os.path.normpath(k)) == want)
-assert sorted(e) == ["mine", "trigger"], e
+assert sorted(e) == ["mine", "recall-ai", "trigger"], e
 t = tomllib.load(open(sys.argv[2] + "/.codex/config.toml", "rb"))
-assert list(t["mcp_servers"]) == ["trigger"], t
+assert list(t["mcp_servers"]) == ["recall-ai", "trigger"], t
 PY
 grep -qx '/.codex/config.toml' "$clones/oracle/.git/info/exclude" && ok "project Codex config is git-excluded" || bad "project Codex config not excluded"
 

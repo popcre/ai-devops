@@ -34,7 +34,7 @@ What it does (idempotent - safe to re-run):
      their owning repository, never globally. A setup rerun also removes retired managed
      entries instead of silently restoring them.
      - stdio via the op launcher : supabase (--read-only), trigger, 1password
-       - remote via mcp-remote shim: devops-mcp, synology-monitor
+       - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
        - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
        - native HTTP, Oracle-only  : vercel (browser OAuth; Claude Code project
                                       entry + Oracle .codex/config.toml, never global)
@@ -462,6 +462,14 @@ $McpServerCatalog["synology-monitor"] = @{
            "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token")
 }
 
+# Recall (remote/HTTP). Keep its token in the shared reference file and inject
+# it only when this Oracle-scoped server starts.
+$McpServerCatalog["recall-ai"] = @{
+  command = "cmd"
+  args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
+           "op://vibe_coding/recall-ai MCP/password", "--transport", "http-first")
+}
+
 # trigger (stdio). Wrapped in the launcher so `op` injects
 # TRIGGER_ACCESS_TOKEN (from mcp.env) at launch - no token in the config.
 $McpServerCatalog["trigger"] = @{
@@ -558,9 +566,9 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   Warn "  Install Codex, run: codex login, then re-run this script."
 }
 
-# Retired everywhere (2026-09-24, owner ruling): still treated as managed so every
-# consumer deletes the entry an earlier run wrote.
-$RetiredMcpServerNames = @("recall-ai")
+# Retired everywhere (2026-09-24): recall-ai was later restored at Albert's
+# direction on 2026-10-09, scoped exclusively to Oracle.
+$RetiredMcpServerNames = @()
 $ManagedMcpServerNames = @(@($McpServerCatalog.Keys) + $RetiredMcpServerNames)
 # codex-cli is suspended from Claude Code and Claude Desktop (2026-09-17):
 # transcript mining on edge-dev found ~34 real invocations in 1,489 Claude
@@ -594,7 +602,7 @@ $MimoMcpNames = @("1password")
 # shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3
 # (2026-09-16), so it is scoped to popdam3; revisit with fresh evidence.
 $McpProjectScope = [ordered]@{
-  "oracle"              = @("trigger", "vercel")
+  "oracle"              = @("trigger", "recall-ai", "vercel")
   "popdam3"             = @("railway", "chrome-devtools")
   "designflow-frontend" = @("ag-grid")
   "synology-monitor"    = @("devops-mcp", "synology-monitor")
