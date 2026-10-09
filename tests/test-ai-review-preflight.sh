@@ -529,6 +529,18 @@ check "failed provider is quarantined with the shared status contract" "$SCRIPT 
 check "quarantine skips provider without contact" "echo old > '$TMP/contact'; AI_REVIEW_KIMI_WRAPPER='$TMP/contact' $SCRIPT check kimi '$REPO' 2>&1 | grep -q quarantined"
 check "clear removes quarantine" "$SCRIPT clear kimi && $SCRIPT status kimi | grep -q installed-healthy"
 
+# #1544 item B: one successful live check clears a credit/capacity quarantine.
+$SCRIPT quarantine kimi out-of-credit --seconds 7200 >/dev/null 2>&1
+check "plain check still refuses an out-of-credit quarantine without contact" "! AI_REVIEW_KIMI_WRAPPER='$TMP/contact' $SCRIPT check kimi '$REPO' >/dev/null 2>&1 && $SCRIPT status kimi | jq -e '.failure_class==\"out-of-credit\"'"
+check "failed live probe keeps the out-of-credit quarantine" "! AI_REVIEW_KIMI_WRAPPER='$TMP/contact' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | jq -e '.status==\"quarantined\"'"
+$SCRIPT clear kimi >/dev/null; $SCRIPT quarantine kimi out-of-credit --seconds 7200 >/dev/null 2>&1
+check "successful live probe clears an out-of-credit quarantine" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live 2>&1 | grep -q 'health=ok' && $SCRIPT status kimi | grep -q installed-healthy"
+$SCRIPT quarantine kimi allowance-exhausted --seconds 7200 >/dev/null 2>&1
+check "successful live probe clears an allowance-exhausted quarantine" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | grep -q installed-healthy"
+$SCRIPT quarantine kimi authentication-failed --seconds 7200 >/dev/null 2>&1
+check "live check never clears a non-credit quarantine" "! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | jq -e '.failure_class==\"authentication-failed\"'"
+$SCRIPT clear kimi >/dev/null
+
 OUT="$(AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
 [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && ok "healthy provider retains complete isolated evidence checks and cleanup" || bad "healthy provider retains complete isolated evidence checks and cleanup"
 OUT="$(MOCK_PREFLIGHT_VERIFY_FAIL=1 AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
