@@ -223,14 +223,14 @@ calls:
 
 | Server | Project | Basis |
 |---|---|---|
-| `trigger` | `oracle` | owner ruling 2026-08-26 |
+| `trigger`, `recall-ai` | `oracle` | owner ruling; Recall restored to Oracle scope 2026-10-09 |
 | `railway` | `popdam3` | owner ruling 2026-08-26 |
 | `ag-grid` | `designflow-frontend` | owner ruling 2026-08-26 |
 | `chrome-devtools` | `popdam3` | 30-day transcripts: one 7-call shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3 2026-09-16 |
 | `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; never global since 2026-09-24 |
 
-`recall-ai` is retired on every machine (owner ruling 2026-09-24):
-`$RetiredMcpServerNames` keeps it managed so every consumer deletes old entries.
+Recall.ai's 2026-09-24 all-machine retirement was superseded on 2026-10-09:
+`recall-ai` is now delivered only to Oracle, alongside `trigger`.
 
 `supabase` (shared-db, licensor-source-data, dflow_plm, popdam, popcrm-web = 5
 repos) and `playwright` (popdam + popcrm-web sessions on hetz, plus the

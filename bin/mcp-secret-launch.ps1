@@ -120,6 +120,7 @@ if ($Mode -eq 'Remote') {
   $token = $null
   [Environment]::SetEnvironmentVariable('DEVOPS_MCP_TOKEN', $null, 'Process')
   [Environment]::SetEnvironmentVariable('NAS_MCP_TOKEN', $null, 'Process')
+  [Environment]::SetEnvironmentVariable('RECALL_AI_TOKEN', $null, 'Process')
   & $nodeCmd.Source $guardJs $remoteCommand $Url --header 'Authorization:${MCP_REMOTE_AUTH_HEADER}' @CommandArgs
 } else {
   if (-not $CommandArgs -or $CommandArgs.Count -eq 0) { throw 'No MCP command was supplied.' }

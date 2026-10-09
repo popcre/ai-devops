@@ -15,7 +15,7 @@ if (-not $text.Contains('mcp-runtime\node_modules\.bin\mcp-remote.cmd')) { throw
 if (-not $text.Contains('mcp-session-guard.mjs')) { throw 'The Windows launcher must start MCP helpers under the session guard.' }
 if (-not $text.Contains('[Environment]::SetEnvironmentVariable(''OP_SERVICE_ACCOUNT_TOKEN'', $null, ''Process'')')) { throw 'Unrelated MCP children must not inherit the vault service-account token.' }
 if (-not $text.Contains('[Environment]::SetEnvironmentVariable(''MCP_REMOTE_AUTH_HEADER'', "Bearer $token", ''Process'')')) { throw 'The Windows remote bearer value must stay in the child environment.' }
-foreach ($name in @('DEVOPS_MCP_TOKEN','NAS_MCP_TOKEN')) {
+foreach ($name in @('DEVOPS_MCP_TOKEN','NAS_MCP_TOKEN','RECALL_AI_TOKEN')) {
   if (-not $text.Contains("[Environment]::SetEnvironmentVariable('$name', `$null, 'Process')")) { throw "The Windows remote child must discard $name after selecting its bearer." }
 }
 if (-not $text.Contains('--header ''Authorization:${MCP_REMOTE_AUTH_HEADER}''')) { throw 'The Windows remote header must reach pinned mcp-remote as an argv placeholder.' }
