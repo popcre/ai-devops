@@ -1059,7 +1059,7 @@ cmd_check(){
   if [ "$action_manifest_stdin" -eq 1 ]; then
     [ "$action" = database ] && [ -n "$reviewer_approval" ] && [ -z "$base$small_entry" ] || die 'bounded action stdin requires database, reviewer approval, and unchanged recorded task base.'
     action_manifest_file="$(umask 077; mktemp)" || die 'cannot reserve private action stdin.'
-    trap 'rm -f "$action_manifest_file"' EXIT
+    trap "$(printf 'rm -f -- %q' "$action_manifest_file")" EXIT
     head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
     [ "$(wc -c < "$action_manifest_file")" -le 16777216 ] || die 'action stdin exceeds native bound.'
   fi

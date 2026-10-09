@@ -191,7 +191,12 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
             args += ["--action-manifest-stdin"]
         if stage:
             args += ["--action-stage", stage]
-        result = subprocess.run(args, cwd=self.repo, env=self.env, input=json.dumps(manifest or self.bound).encode() if stdin else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        scratch = self.work / "gate temporary ' $missing ;"
+        scratch.mkdir(mode=0o700, exist_ok=True)
+        self.assertEqual(list(scratch.iterdir()), [])
+        result = subprocess.run(args, cwd=self.repo, env=dict(self.env, TMPDIR=str(scratch)), input=json.dumps(manifest or self.bound).encode() if stdin else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotIn(b"unbound variable", result.stderr)
+        self.assertEqual(list(scratch.iterdir()), [], "bounded manifest temporary file leaked")
         self.assertEqual(result.returncode == 0, success, result.stderr.decode()[-1000:])
         return result
 
@@ -326,8 +331,11 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
         args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--base", "HEAD~1", "--action-profile", profile.PROFILE]
         for paths, manifest in ((self.paths, bad_path), (partial_paths, self.manifest)):
             before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
-            result = subprocess.run(args + ["--paths-file", str(paths), "--action-manifest", str(manifest)], cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            scratch = self.work / "failed-begin-temp"; scratch.mkdir(mode=0o700, exist_ok=True)
+            result = subprocess.run(args + ["--paths-file", str(paths), "--action-manifest", str(manifest)], cwd=self.repo, env=dict(self.env, TMPDIR=str(scratch)), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(list(scratch.iterdir()), [])
+            self.assertNotIn(b"unbound variable", result.stderr)
             self.assertEqual(calls.read_bytes(), count)
             created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
             self.assertEqual(len(created), 1)
@@ -335,6 +343,24 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
             self.assertEqual(row["status"], "failed")
             self.assertFalse(Path(row["lock_path"]).exists())
             self.assertNotIn("action_initial_admission", row)
+
+    def test_14_failed_dispatch_closes_native_state_and_removes_only_standalone_temps(self):
+        scratch = self.work / "failed-dispatch-temp"; scratch.mkdir(mode=0o700)
+        stub = self.work / "failed-provider"; stub.write_text("#!/bin/sh\nprintf 'synthetic dispatch failure\\n' >&2\nexit 17\n"); stub.chmod(0o700)
+        before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
+        args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--paths-file", str(self.paths), "--base", "HEAD~1", "--action-profile", profile.PROFILE, "--action-manifest", str(self.manifest)]
+        result = subprocess.run(args, cwd=self.repo, env=dict(self.env, TMPDIR=str(scratch), AI_DEEPSEEK_REVIEW_BIN=str(stub)), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(result.returncode, 17)
+        self.assertIn(b"synthetic dispatch failure", result.stderr)
+        self.assertNotIn(b"unbound variable", result.stderr)
+        self.assertEqual(list(scratch.iterdir()), [], "standalone provider result/stderr temporary file leaked")
+        created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
+        self.assertEqual(len(created), 1)
+        row = json.loads(next(iter(created)).read_text())
+        self.assertEqual(row["status"], "failed")
+        self.assertFalse(Path(row["lock_path"]).exists())
+        self.assertTrue(Path(row["code_only_export"]).is_dir())
+        self.assertNotIn("action_initial_admission", row)
 
     def test_08_genuine_message_other_than_documented_lf_normalization_refuses(self):
         transcript_path = Path(self.state["code_only_export"]) / ".ai/deepseek-sessions" / (self.state["session_id"] + ".json")
