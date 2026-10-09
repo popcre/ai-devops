@@ -529,6 +529,37 @@ check "failed provider is quarantined with the shared status contract" "$SCRIPT 
 check "quarantine skips provider without contact" "echo old > '$TMP/contact'; AI_REVIEW_KIMI_WRAPPER='$TMP/contact' $SCRIPT check kimi '$REPO' 2>&1 | grep -q quarantined"
 check "clear removes quarantine" "$SCRIPT clear kimi && $SCRIPT status kimi | grep -q installed-healthy"
 
+# #1544 item B: one successful live check clears a credit/allowance hold.
+cat > "$TMP/bin/credit-down" <<'EOF2'
+#!/usr/bin/env bash
+printf 'probe\n' >> "$MOCK_CREDIT_PROBES"
+echo 'insufficient balance' >&2; exit 1
+EOF2
+cat > "$TMP/bin/credit-hang" <<'EOF2'
+#!/usr/bin/env bash
+printf 'probe\n' >> "$MOCK_CREDIT_PROBES"
+exit 124
+EOF2
+chmod +x "$TMP/bin/credit-down" "$TMP/bin/credit-hang"
+export MOCK_CREDIT_PROBES="$TMP/credit-probes"
+$SCRIPT quarantine kimi out-of-credit --seconds 7200 >/dev/null 2>&1
+check "plain check still refuses an out-of-credit quarantine without contact" "rm -f '$MOCK_CREDIT_PROBES'; ! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/credit-down' $SCRIPT check kimi '$REPO' >/dev/null 2>&1 && test ! -e '$MOCK_CREDIT_PROBES' && $SCRIPT status kimi | jq -e '.failure_class==\"out-of-credit\"'"
+check "failed live probe calls once and keeps the same credit hold" "before=\$(python3 '$ROOT/tools/reviewer_admission.py' global kimi --directory '$TMP/state'); rm -f '$MOCK_CREDIT_PROBES'; ! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/credit-down' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && [ \$(wc -l < '$MOCK_CREDIT_PROBES') -eq 1 ] && [ \"\$(python3 '$ROOT/tools/reviewer_admission.py' global kimi --directory '$TMP/state')\" = \"\$before\" ]"
+check "timed-out live probe never downgrades the credit hold" "rm -f '$MOCK_CREDIT_PROBES'; ! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/credit-hang' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && [ \$(wc -l < '$MOCK_CREDIT_PROBES') -eq 1 ] && $SCRIPT status kimi | jq -e '.failure_class==\"out-of-credit\"'"
+printf 'synthetic terminal refusal\n' > "$TMP/credit-refusal.json"
+$SCRIPT observe-refusal kimi --profile profile-b --model model-b --run-id run-b --observed "$(date +%s)" --seconds 600 --reason usage-limit --evidence "$TMP/credit-refusal.json" >/dev/null
+check "successful live probe clears out-of-credit but keeps scoped backoffs" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live 2>&1 | grep -q 'health=ok' && $SCRIPT status kimi | grep -q installed-healthy && $SCRIPT admission kimi --profile profile-b --model model-b --json | jq -e '.state==\"backoff\"'"
+$SCRIPT clear kimi >/dev/null
+$SCRIPT quarantine kimi allowance-exhausted --seconds 7200 >/dev/null 2>&1
+check "successful live probe clears an allowance-exhausted quarantine" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | grep -q installed-healthy"
+$SCRIPT quarantine kimi authentication-failed --seconds 7200 >/dev/null 2>&1
+check "live check never clears a non-credit quarantine" "! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | jq -e '.failure_class==\"authentication-failed\"'"
+$SCRIPT clear kimi >/dev/null
+jq -nc --argjson now "$(date +%s)" '{version:2,provider:"kimi",global:null,backoffs:{},capacity_hold:{provider:"kimi",failure_class:"out-of-credit",credential_profile_scope:null,model_scope:null,observed_epoch:($now-7200),reset_at:null,next_check_epoch:($now+3600),record_id:"held-1"}}' > "$TMP/state/kimi.json"
+check "plain check still refuses a persistent capacity hold" "! AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' >/dev/null 2>&1 && $SCRIPT status kimi | jq -e '.status==\"capacity-held\"'"
+check "successful live probe clears a persistent capacity hold" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | grep -q installed-healthy"
+$SCRIPT clear kimi >/dev/null
+
 OUT="$(AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
 [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && ok "healthy provider retains complete isolated evidence checks and cleanup" || bad "healthy provider retains complete isolated evidence checks and cleanup"
 OUT="$(MOCK_PREFLIGHT_VERIFY_FAIL=1 AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
