@@ -40,6 +40,7 @@ Raw command outputs for every claim below: [transcripts.md](transcripts.md).
   (implementer mimo, run 20261009T153928-1591030-1505, security-review) for
   deploy at 63e83b0772b5b8e7a071264829b163dd863c39f6 report
   sha256:c6b89b31bad7b84f82eddabe5275ef9e02074f555e86517af02a38d1fe7acfc9`.
+- Publication note: the committed copy of `review-install-approve-66c465cd.md` has the review sandbox's `/absolute/...` link targets rewritten to inline code paths so the repository's doc-safety gate holds; every other byte is verbatim (lifecycle `report_sha256` above). Git line-ending normalization also applies to both committed copies; binding is established through the lifecycle records and the quoted gate line, not through blob hashes of these copies.
 - An earlier APPROVE at `66c465cd…` (run `20261009T145719-1504033-13300`)
   explicitly scoped the live-install axis out of its review and was **not**
   used as install authorization.
