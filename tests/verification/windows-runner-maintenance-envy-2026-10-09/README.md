@@ -5,7 +5,7 @@ completion: 12:35 PM EDT, 2026-10-09 (16:35 UTC).
 Host: `EDGE-RUNN-ENVY` (alias per plan §12; no addresses recorded anywhere in
 this directory). Scope: `plan_windows-runner-maintenance-elevation.md` step 7,
 issue #262. One host only; `edge-dev-win` untouched (child issue #962 owns it).
-Raw command outputs for every claim below: [`transcripts.md`](transcripts.md).
+Raw command outputs for every claim below: [transcripts.md](transcripts.md).
 
 ## Source and approvals (all artifacts committed here; nothing self-attested)
 
@@ -16,14 +16,14 @@ Raw command outputs for every claim below: [`transcripts.md`](transcripts.md).
   engine `mimo`, lifecycle run `20261009T150435-1526462-9371`, mode
   `security-review`, head `66c465cd8b505178a512f7d9b6e4ffca0a8258c1`):
   full report committed as
-  [`review-install-approve-66c465cd.md`](review-install-approve-66c465cd.md),
+  [review-install-approve-66c465cd.md](review-install-approve-66c465cd.md),
   SHA-256 `9d09cbdf40a5f8dd052d3a8c1074a47ba934bc05de97b53433da847c56064f0b`
   (= lifecycle `report_sha256`). That report authorizes installing on this
   host/task/payload/commands with binding preconditions.
 - **Deploy-gate security APPROVE** at the installed head (run
   `20261009T153928-1591030-1505`, head
   `63e83b0772b5b8e7a071264829b163dd863c39f6`): full report committed as
-  [`review-deploy-approve-63e83b07.md`](review-deploy-approve-63e83b07.md),
+  [review-deploy-approve-63e83b07.md](review-deploy-approve-63e83b07.md),
   SHA-256 `c6b89b31bad7b84f82eddabe5275ef9e02074f555e86517af02a38d1fe7acfc9`
   (= lifecycle `report_sha256` = the gate's binding hash below). The reviewer
   read all six payload files in full and re-verified the six hashes.
@@ -115,12 +115,12 @@ Committed harness sources (exact bytes executed on the host):
 
 | File | SHA-256 |
 |---|---|
-| [`harness/limited-context-harness.ps1`](harness/limited-context-harness.ps1) | `025e9dd1afc1f4924485aed6fc9ce7ce6d5962002383d237ba1e8295df71128a` |
-| [`harness/negproof-suite.ps1`](harness/negproof-suite.ps1) | `77e397587988a643b5f77bff3db042e10bec6407c1e9cbe11efd00f7077111df` |
-| [`harness/hostile-duplicate.ps1`](harness/hostile-duplicate.ps1) | `0ce7636f848bfb12648ea4c09cdf7f4fcc915f3a21b27719a422131abe35a11d` |
-| [`harness/install-driver.ps1`](harness/install-driver.ps1) | `0505212af1ee107c5b806613930877731e7f799e4c56e39443c41df67eb072e3` |
-| [`harness/rollback-driver.ps1`](harness/rollback-driver.ps1) | `e96e8a257dd9fe02ebd6994307da6542d0810643848dffd27b2c162c28c9c60b` |
-| [`harness/final-cycle-driver.ps1`](harness/final-cycle-driver.ps1) | `b5d9a4df79305e141b2652d6f9b9a3920bf82730c9e239b0530479243f334c43` |
+| [harness/limited-context-harness.ps1](harness/limited-context-harness.ps1) | `025e9dd1afc1f4924485aed6fc9ce7ce6d5962002383d237ba1e8295df71128a` |
+| [harness/negproof-suite.ps1](harness/negproof-suite.ps1) | `77e397587988a643b5f77bff3db042e10bec6407c1e9cbe11efd00f7077111df` |
+| [harness/hostile-duplicate.ps1](harness/hostile-duplicate.ps1) | `0ce7636f848bfb12648ea4c09cdf7f4fcc915f3a21b27719a422131abe35a11d` |
+| [harness/install-driver.ps1](harness/install-driver.ps1) | `0505212af1ee107c5b806613930877731e7f799e4c56e39443c41df67eb072e3` |
+| [harness/rollback-driver.ps1](harness/rollback-driver.ps1) | `e96e8a257dd9fe02ebd6994307da6542d0810643848dffd27b2c162c28c9c60b` |
+| [harness/final-cycle-driver.ps1](harness/final-cycle-driver.ps1) | `b5d9a4df79305e141b2652d6f9b9a3920bf82730c9e239b0530479243f334c43` |
 
 All harness/transcript files were deleted from the host after the proof
 (deletion transcript in `transcripts.md`); they remain here as the reviewable
