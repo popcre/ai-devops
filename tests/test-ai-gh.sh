@@ -408,8 +408,37 @@ fresh_quota
 FAKE_MODE=graphql-crash AI_GH_PROBE_TIMEOUT_SECONDS=1 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-slow" 2>/dev/null; rc=$?
 check 'a valid slow GraphQL response outlives the quota-probe timeout' "[ $rc -eq 0 ] && jq -e '.data.viewer.login == \"FIXTURE_PRIVATE_BODY\"' '$TMP/graphql-slow'"
 fresh_quota
-FAKE_MODE=graphql-large AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-large" 2>/dev/null; rc=$?
+FAKE_MODE=graphql-large AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-large" 2> "$TMP/graphql-large-err"; rc=$?
 check 'a large GraphQL response retains its complete output' "[ $rc -eq 0 ] && jq -e '(.data.text | length) == 100000' '$TMP/graphql-large'"
+if [ "$rc" -ne 0 ] || ! jq -e '(.data.text | length) == 100000' "$TMP/graphql-large" >/dev/null 2>&1; then
+  printf 'large GraphQL fixture: rc=%s bytes=%s text_length=%s\n' "$rc" "$(wc -c < "$TMP/graphql-large")" "$(jq -r '.data.text | length' "$TMP/graphql-large" 2>/dev/null || printf invalid-json)" >&2
+  cat "$TMP/graphql-large-err" >&2
+fi
+# The alternate utility must own both GraphQL streams and ordinary stderr.
+TEST_REAL_TEE="$(command -v gnutee || command -v tee)"; export TEST_REAL_TEE
+TEST_TEE_LOG="$TMP/tee-routing.log"; export TEST_TEE_LOG
+mkdir "$TMP/tee-routing"
+cat > "$TMP/tee-routing/gnutee" <<'EOF'
+#!/usr/bin/env bash
+printf 'gnu %s\n' "$1" >> "$TEST_TEE_LOG"
+exec "$TEST_REAL_TEE" "$@"
+EOF
+cat > "$TMP/tee-routing/tee" <<'EOF'
+#!/usr/bin/env bash
+printf 'fallback %s\n' "$1" >> "$TEST_TEE_LOG"
+exec "$TEST_REAL_TEE" "$@"
+EOF
+chmod +x "$TMP/tee-routing/gnutee" "$TMP/tee-routing/tee"
+fresh_quota
+FAKE_MODE=graphql-large PATH="$TMP/tee-routing:$PATH" AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/routed-large" 2> "$TMP/routed-err"; routed_rc=$?
+FAKE_MODE=graphql-cli-error PATH="$TMP/tee-routing:$PATH" AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/routed-ordinary" 2>/dev/null
+check 'packaged GNU tee routes classifier and both stderr paths with complete output' "[ $routed_rc -eq 0 ] && jq -e '(.data.text | length) == 100000' '$TMP/routed-large' && [ \$(grep -c '^gnu ' '$TEST_TEE_LOG') -eq 3 ] && ! grep -q '^fallback ' '$TEST_TEE_LOG' && grep -q '/stream$' '$TEST_TEE_LOG'"
+: > "$TEST_TEE_LOG"
+command(){ if [ "${1:-}" = -v ] && [ "${2:-}" = gnutee ]; then return 1; fi; builtin command "$@"; }
+export -f command
+FAKE_MODE=graphql-large PATH="$TMP/tee-routing:$PATH" AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/fallback-large" 2> "$TMP/fallback-err"; fallback_rc=$?
+export -n -f command; unset -f command
+check 'hosts without packaged GNU alternate retain ordinary tee and complete classification' "[ $fallback_rc -eq 0 ] && jq -e '(.data.text | length) == 100000' '$TMP/fallback-large' && [ \$(grep -c '^fallback ' '$TEST_TEE_LOG') -eq 2 ] && ! grep -q '^gnu ' '$TEST_TEE_LOG'"
 fresh_quota
 FAKE_MODE=graphql-crash AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/crash-output" 2>/dev/null & crash_pid=$!
 for _ in $(seq 1 30); do grep -q FIXTURE_PRIVATE_BODY "$TMP/crash-output" 2>/dev/null && break; sleep 0.1; done

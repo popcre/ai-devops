@@ -236,15 +236,20 @@ main() {
   fi
   out="$(mktemp)"
   log="$out.jsonl"
+  local -a native_review=()
+  if [ "$MODE" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
+    native_review=(--native-deepseek-review "$DOOR_WORKDIR" "$oc")
+  fi
   set +e
   (
+    export DOOR_MODE="$MODE"
     export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
            XDG_DATA_HOME="$(native_path "$xdg/data")" \
            XDG_STATE_HOME="$(native_path "$xdg/state")" \
            XDG_CACHE_HOME="$(native_path "$xdg/cache")"
     if [ -n "$DS_KEY" ]; then export DEEPSEEK_API_KEY="$DS_KEY"; else unset DEEPSEEK_API_KEY || true; fi
     printf '%s' "$(cat "$prompt_full")" \
-      | reviewer_credit_run deepseek "$log" "$out.err" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
+      | reviewer_credit_run deepseek "$log" "$out.err" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
           --format json --model "$DS_PROVIDER/$DS_MODEL" \
           --dir "$(native_path "$DOOR_WORKDIR")" \
           > "$log" 2> "$out.err"

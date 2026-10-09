@@ -603,6 +603,10 @@ if [ "$QUOTA_ACTIVE" != off ]; then
   fi
 fi
 
+# Some Linux uutils tee releases panic while duplicating large pipe reads.
+# Use the separately packaged GNU utility when present; other hosts (including
+# Git Bash) retain their existing tee. Never replace a system executable.
+TEE="$(command -v gnutee || command -v tee)" || { say "tee is required to preserve GitHub output"; exit 3; }
 err="$(mktemp)"
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 # The lock serializes call reservations (spacing, budget, back-off bookkeeping) and is
@@ -680,15 +684,15 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
   # for a stdout process substitution before the classifier reads its FIFO;
   # a later page can otherwise be missed while gh has already exited.
   rc="$({
-    exec 3> >(tee "$err" >&2); stderr_pid=$!
-    "$REAL" "$@" 2>&3 | tee "$GRAPH_FIFO" >&4
+    exec 3> >("$TEE" "$err" >&2); stderr_pid=$!
+    "$REAL" "$@" 2>&3 | "$TEE" "$GRAPH_FIFO" >&4
     graph_status=("${PIPESTATUS[@]}")
     exec 3>&-
     wait "$stderr_pid" 2>/dev/null || true
     if [ "${graph_status[1]}" -ne 0 ]; then printf '1'; else printf '%s' "${graph_status[0]}"; fi
   } 5>&1)"
 else
-  rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
+  rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | "$TEE" "$err" >&2; } 5>&1)"
 fi
 exec 4>&-
 isnum "${rc:-}" || rc=1

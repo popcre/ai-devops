@@ -135,7 +135,7 @@ jobs:
           sudo apt-get update \
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=-
-          sudo apt-get install -y jq ripgrep shellcheck
+          sudo apt-get install -y jq ripgrep shellcheck bubblewrap openssl
       - name: Verify self-hosted Linux test dependencies
         # A self-hosted host has no passwordless sudo; it must already carry
         # the tools the suites call. Fail loudly instead of passing by skipping.

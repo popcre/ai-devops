@@ -3,14 +3,25 @@
 
 Windows uses a kill-on-close Job Object. POSIX uses a new process group. The
 supervisor intentionally stays alive after the direct child exits while any
-descendant remains, so a launcher cannot orphan paid reviewer work.
+descendant remains, so a launcher cannot orphan paid reviewer work. Governed
+Linux review engines additionally require a probed private PID/user namespace;
+the supervisor and its credit inspection remain on the host.
 """
 
 from __future__ import annotations
 
 import ctypes
+import json
 import os
+import shutil
 import signal
+import selectors
+import socket
+import struct
+import threading
+import tempfile
+import stat
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -21,10 +32,679 @@ def die(message: str) -> "None":
     raise SystemExit(2)
 
 
+def trusted_system_executable(path: str) -> str:
+    path=os.path.realpath(path)
+    for ancestor in Path(path).parents:
+        info=ancestor.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022:
+            raise ValueError('system executable ancestor custody differs')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022 or not info.st_mode & 0o111 or os.read(fd,4)!=b'\x7fELF':
+            raise ValueError('system executable custody differs')
+    finally:os.close(fd)
+    return path
+
+
+def isolated_review_command(command: list[str], private_devices: bool = False) -> list[str]:
+    """Require a real Linux PID/user namespace before any model command starts."""
+    if not sys.platform.startswith("linux"):
+        die("review PID isolation requires Linux")
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        die("bubblewrap is required before a governed Linux review can start")
+    try:bwrap=trusted_system_executable(bwrap)
+    except (OSError,ValueError):
+        die('bubblewrap trusted system executable custody refused before invocation')
+    prefix = [bwrap, "--unshare-user", "--unshare-pid",
+              "--die-with-parent", "--new-session", "--bind", "/", "/",
+              "--proc", "/proc", "--cap-drop", "ALL", "--"]
+    if private_devices:
+        prefix[-1:-1] = ["--dev", "/dev"]
+        if not hasattr(os,"pidfd_open") or not hasattr(socket,"SO_PEERCRED"):
+            die("native review kernel peer ownership unavailable before provider dispatch")
+    host_pid_namespace = os.readlink("/proc/self/ns/pid")
+    host_user_namespace = os.readlink("/proc/self/ns/user")
+    probe_code = (
+        "import json,os;print(json.dumps({'pid':os.getpid(),"
+        "'pid_namespace':os.readlink('/proc/self/ns/pid'),"
+        "'user_namespace':os.readlink('/proc/self/ns/user'),"
+        "'visible_pids':[x for x in os.listdir('/proc') if x.isdigit()],"
+        "'cap_eff':[x.split()[1] for x in open('/proc/self/status') if x.startswith('CapEff:')][0]}))"
+    )
+    try:
+        result = subprocess.run(prefix + [sys.executable, "-c", probe_code],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=10, check=False)
+        proof = json.loads(result.stdout)
+        if (result.returncode != 0 or proof["pid"] != 2
+                or proof["pid_namespace"] == host_pid_namespace
+                or proof["user_namespace"] == host_user_namespace
+                or set(proof["visible_pids"]) != {"1", "2"}
+                or int(proof["cap_eff"], 16) != 0):
+            raise ValueError("namespace proof differs")
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        die("governed Linux review PID isolation unavailable; model command was not started")
+    return prefix + command
+
+
+
+# Managed DeepSeek/OpenCode native bash continuation; reviewer-safety owner #1531.
+MAX_HEADER = 1024 * 1024
+CHUNK = 32768
+MAX_QUEUE = CHUNK * 2 + 16
+
+def frame(kind, data):
+    return kind + struct.pack('!I', len(data)) + data
+
+def exact(sock, n):
+    b = b''
+    while len(b) < n:
+        part = sock.recv(n - len(b))
+        if not part:
+            raise ValueError('transport closed')
+        b += part
+    return b
+
+def native_crypto_environment():
+    # Only this host supervisor / dedicated transport client owns crypto here.
+    for key in ('OPENSSL_CONF','OPENSSL_CONF_INCLUDE','OPENSSL_MODULES',
+                'OPENSSL_ENGINES','SSLKEYLOGFILE'):
+        os.environ.pop(key,None)
+
+
+def native_shell_client(path, expected_peer, argv):
+    if len(argv) != 2 or argv[0] != '-c':
+        raise ValueError('native shell argv differs')
+    native_crypto_environment()
+    import ssl,hashlib,hmac
+    if len(expected_peer)!=64 or any(c not in '0123456789abcdef' for c in expected_peer):
+        raise ValueError('native supervisor certificate pin differs')
+    context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version=context.maximum_version=ssl.TLSVersion.TLSv1_3
+    context.check_hostname=False
+    context.verify_mode=ssl.CERT_NONE
+    context.keylog_filename=None
+    raw=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    raw.settimeout(3)
+    try:
+        raw.connect(path)
+        conn=context.wrap_socket(raw,server_hostname=None)
+    except BaseException:
+        raw.close()
+        raise
+    with conn:
+        pin=hashlib.sha256(conn.getpeercert(binary_form=True)).hexdigest()
+        if not hmac.compare_digest(pin,expected_peer):
+            raise ValueError('connected native supervisor certificate is foreign')
+        conn.settimeout(None)
+        data = json.dumps({'command': argv[1], 'cwd': os.getcwd()}, ensure_ascii=True).encode()
+        if len(data) > MAX_HEADER:
+            raise ValueError('command exceeds native transport bound')
+        conn.sendall(struct.pack('!I', len(data)) + data)
+        while True:
+            kind = exact(conn, 1)
+            size = struct.unpack('!I', exact(conn, 4))[0]
+            if size > CHUNK or (kind == b'X' and size > 3):
+                raise ValueError('output frame exceeds bound')
+            data = exact(conn, size)
+            if kind in (b'O', b'E'):
+                fd = 1 if kind == b'O' else 2
+                while data:
+                    written = os.write(fd, data)
+                    if written <= 0:
+                        raise ValueError("native output sink stopped")
+                    data = data[written:]
+            elif kind == b'X':
+                if not data.isdigit() or (len(data)>1 and data.startswith(b'0')) or int(data)>255:
+                    raise ValueError('native exit frame differs')
+                if conn.recv(1):
+                    raise ValueError('native exit is not terminal')
+                return int(data)
+            else:
+                raise ValueError('unknown output frame')
+
+class NativeShellBroker:
+
+    def __init__(self, workspace, engine):
+        try:
+            self.prepare(workspace, engine)
+        except BaseException:
+            listener=getattr(self,'listener',None)
+            if listener is not None:listener.close()
+            controlfd=getattr(self,'controlfd',None)
+            if controlfd is not None:
+                for name,attribute in (('socket','socketfd'),('client.py','client_leaf_fd')):
+                    fd=getattr(self,attribute,None)
+                    if fd is None:continue
+                    try:
+                        current=os.stat(name,dir_fd=controlfd,follow_symlinks=False);owned=os.fstat(fd)
+                        if (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino):os.unlink(name,dir_fd=controlfd)
+                    except OSError:pass
+                try:self.control.rmdir()
+                except OSError:pass
+            for attribute in ('rootfd','controlfd','socketfd','clientfd','client_leaf_fd'):
+                fd=getattr(self,attribute,None)
+                if fd is not None:
+                    try:os.close(fd)
+                    except OSError:pass
+            raise
+
+    def prepare(self, workspace, engine):
+        self.ambient_env=dict(os.environ)
+        self.workspace = Path(workspace).absolute()
+        self.alias = str(self.workspace)
+        self.engine_path = os.path.realpath(engine)
+        self.engine_stat = os.stat(self.engine_path)
+        if not self.workspace.is_dir() or self.workspace.is_symlink() or self.workspace.stat().st_uid != os.getuid():
+            raise ValueError('native workspace custody differs')
+        if not os.path.isfile(self.engine_path) or self.engine_stat.st_mode & 0o022:
+            raise ValueError('native engine custody differs')
+        self.prefix = isolated_review_command([], private_devices=True)[:-1]
+        self.tls_context,self.certificate_pin=self.tls_identity()
+        self.control = Path(tempfile.mkdtemp(prefix='ai-review-shell-'))
+        self.control.chmod(0o700)
+        self.require_engine = True
+        self.engine = None
+        self.engine_lock = threading.Lock()
+        self.engine_ready = threading.Event()
+        self.slots = threading.BoundedSemaphore(4)
+        self.rootfd = os.open(self.workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.controlfd=os.open(self.control,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        self.path = str(self.control / 'socket')
+        self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old = os.umask(0o177)
+        try:
+            self.listener.bind(self.path)
+        finally:
+            os.umask(old)
+        self.socketfd=os.open(self.path,os.O_PATH|os.O_NOFOLLOW)
+        with open(os.path.realpath(__file__),'rb') as source:
+            self.clientfd=self.sealed_data(source.read(1024*1024+1),'review-native-client')
+        self.client_path=self.control/'client.py'
+        self.client_path.touch(mode=0o500)
+        self.client_leaf_fd=os.open(self.client_path,os.O_PATH|os.O_NOFOLLOW)
+        self.launcherfd=None
+        self.launcher_leaf_fd=None
+        self.engine_data_fds=()
+        self.deadline = None
+        self.real_bash = os.path.realpath('/bin/bash')
+        self.tool_env = dict(self.ambient_env)
+        self.tool_env.pop('DEEPSEEK_API_KEY', None)
+        self.tool_env.pop('OP_SERVICE_ACCOUNT_TOKEN', None)
+        self.listener.listen(4)
+        self.listener.settimeout(0.1)
+        self.admission_closed = False
+        self.cleanup_failed = threading.Event()
+        self.jobs = set()
+        self.connections = set()
+        self.lock = threading.Lock()
+        self.threads = set()
+        self.thread = threading.Thread(target=self.accept, daemon=True)
+        self.thread.start()
+
+    @staticmethod
+    def tls_identity():
+        native_crypto_environment()
+        import ssl,hashlib
+        openssl=trusted_system_executable('/usr/bin/openssl')
+        fds=[]
+        try:
+            for name in ('native-review-key','native-review-cert'):
+                fd=os.memfd_create(name,os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+                fds.append(fd);os.fchmod(fd,0o600)
+            keyfd,certfd=fds
+            command=[openssl,'req','-x509','-newkey','ed25519','-nodes',
+                     '-keyout',f'/proc/self/fd/{keyfd}','-out',f'/proc/self/fd/{certfd}',
+                     '-subj','/CN=native-review-broker','-days','1','-config','/dev/null']
+            result=subprocess.run(command,env={'PATH':'/usr/bin:/bin','LANG':'C'},
+                                  stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE,close_fds=True,pass_fds=tuple(fds),timeout=10)
+            if result.returncode:raise ValueError('native TLS certificate generation failed')
+            if any(not 0<os.fstat(fd).st_size<=16384 for fd in fds):
+                raise ValueError('native TLS key or certificate exceeds bound')
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version=context.maximum_version=ssl.TLSVersion.TLSv1_3
+            context.keylog_filename=None
+            context.load_cert_chain(f'/proc/self/fd/{certfd}',f'/proc/self/fd/{keyfd}')
+            os.lseek(certfd,0,os.SEEK_SET)
+            certificate=os.read(certfd,16384).decode('ascii')
+            pin=hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
+            return context,pin
+        finally:
+            for fd in fds:os.close(fd)
+
+    @staticmethod
+    def sealed_data(data,name):
+        import fcntl
+        if len(data)>1024*1024:raise ValueError('native immutable client exceeds bound')
+        fd=os.memfd_create(name,os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+        transferred=False
+        try:
+            remaining=memoryview(data)
+            while remaining:
+                count=os.write(fd,remaining)
+                if count<=0:raise ValueError('native immutable bytes publication stopped')
+                remaining=remaining[count:]
+            os.fchmod(fd,0o500)
+            seals=fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL
+            fcntl.fcntl(fd,fcntl.F_ADD_SEALS,seals)
+            if fcntl.fcntl(fd,fcntl.F_GET_SEALS)&seals!=seals:raise ValueError('native immutable seals differ')
+            os.lseek(fd,0,os.SEEK_SET)
+            transferred=True
+            return fd
+        finally:
+            if not transferred:os.close(fd)
+
+    def data_mounts(self):
+        # Reopen sealed inode with independent offset: ro-bind-data consumes its FD.
+        opened=[]
+        try:
+            for fd in (self.launcherfd,self.clientfd):
+                opened.append(os.open(f'/proc/self/fd/{fd}',os.O_RDONLY|os.O_CLOEXEC))
+        except BaseException:
+            for fd in opened:os.close(fd)
+            raise
+        fds=tuple(opened)
+        mounts=['--ro-bind-fd',str(self.controlfd),str(self.control),'--ro-bind-fd',str(self.socketfd),self.path,
+                '--perms','0500','--ro-bind-data',str(fds[0]),str(self.control/'bash'),
+                '--perms','0500','--ro-bind-data',str(fds[1]),str(self.client_path)]
+        return mounts,fds
+
+    def engine_command(self,command,timeout_seconds):
+        if len(command)<4 or os.path.realpath(command[2])!=self.engine_path or command[3]!='run':raise ValueError('native launch does not match captured engine')
+        if '--dir' not in command or command[command.index('--dir')+1]!=self.alias:raise ValueError('native launch workspace differs')
+        self.deadline=time.monotonic()+timeout_seconds if timeout_seconds else None
+        launcher=self.control/'bash'
+        import shlex
+        data=('#!/bin/bash\nexec '+shlex.quote(sys.executable)+' -I '+shlex.quote(str(self.client_path))+' --native-shell-client '+shlex.quote(self.path)+' '+shlex.quote(self.certificate_pin)+' "$@"\n').encode()
+        self.launcherfd=self.sealed_data(data,'review-native-launcher')
+        launcher.touch(mode=0o500)
+        self.launcher_leaf_fd=os.open(launcher,os.O_PATH|os.O_NOFOLLOW)
+        overlay=json.loads(self.ambient_env.get('OPENCODE_CONFIG_CONTENT','{}'))
+        if not isinstance(overlay,dict):raise ValueError('native inline config is not an object')
+        overlay['shell']=str(launcher)
+        env=dict(self.ambient_env,OPENCODE_CONFIG_CONTENT=json.dumps(overlay))
+        mounts,self.engine_data_fds=self.data_mounts()
+        return self.prefix+mounts+['--',*command],env
+
+    def engine_fds(self):
+        return (self.controlfd,self.socketfd,*self.engine_data_fds)
+
+    def capture_engine(self, child):
+        if self.engine is not None:
+            return
+        pending = [child.pid]
+        seen = set()
+        while pending and len(seen) < 256:
+            pid = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            try:
+                info = os.stat('/proc/' + str(pid) + '/exe')
+                if (info.st_dev, info.st_ino) == (self.engine_stat.st_dev, self.engine_stat.st_ino):
+                    self.bind_engine(pid)
+                    return
+                for task in Path('/proc', str(pid), 'task').iterdir():
+                    pending.extend((int(x) for x in (task / 'children').read_text().split()))
+            except (OSError, ValueError):
+                continue
+
+    def stop_admission(self, signal_safe=False):
+        self.admission_closed = True
+        try:
+            self.listener.close()
+        except OSError:
+            pass
+        if signal_safe:return
+        with self.lock:
+            jobs = list(self.jobs)
+        for job in jobs:
+            try:
+                os.killpg(job.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    def active(self):
+        with self.lock:
+            return bool(self.jobs)
+
+    def bind_engine(self, pid):
+        fd=os.pidfd_open(pid)
+        transferred=False
+        try:
+            state=self.process_identity(pid)
+            if state['uid']!=os.getuid() or state['pidns']==os.readlink('/proc/self/ns/pid') or state['userns']==os.readlink('/proc/self/ns/user'):
+                raise ValueError('engine identity not isolated')
+            with self.engine_lock:
+                if self.engine is not None:return
+                self.engine=(pid,fd,state)
+                transferred=True
+                self.engine_ready.set()
+        finally:
+            if not transferred:os.close(fd)
+
+    def process_identity(self, pid):
+        base = Path('/proc') / str(pid)
+        text = (base / 'stat').read_text()
+        tail = text[text.rfind(')') + 2:].split()
+        return {'start': tail[19], 'ppid': int(tail[1]), 'uid': base.stat().st_uid, 'pidns': os.readlink(base / 'ns/pid'), 'userns': os.readlink(base / 'ns/user')}
+
+    def authenticate(self, conn, credentials=None):
+        if not self.require_engine:
+            return
+        pid, uid, gid = credentials if credentials is not None else struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
+        if not self.engine_ready.wait(3):
+            raise ValueError('owned engine startup incomplete')
+        with self.engine_lock:
+            engine = self.engine
+        if engine is None:
+            raise ValueError('owned engine is not captured')
+        anchor, fd, identity = engine
+        poll = selectors.DefaultSelector()
+        try:
+            poll.register(fd, selectors.EVENT_READ)
+            dead = bool(poll.select(0))
+        finally:
+            poll.close()
+        if dead or self.process_identity(anchor) != identity:
+            raise ValueError('owned engine exited or changed')
+        peer = self.process_identity(pid)
+        if uid != os.getuid() or peer['uid'] != uid or any((peer[k] != identity[k] for k in ('pidns', 'userns'))):
+            raise ValueError('foreign capsule peer')
+        cursor = pid
+        for _ in range(64):
+            if cursor == anchor:
+                return
+            cursor = self.process_identity(cursor)['ppid']
+            if cursor <= 1:
+                break
+        raise ValueError('peer ancestry is not owned engine')
+
+    def cwd_fd(self, cwd):
+        if not isinstance(cwd, str) or '\x00' in cwd:
+            raise ValueError('cwd type differs')
+        if cwd == self.alias:
+            parts = []
+        elif cwd.startswith(self.alias + '/'):
+            parts = cwd[len(self.alias) + 1:].split('/')
+        else:
+            raise ValueError('cwd outside fixed workspace')
+        if any((x in ('', '.', '..') for x in parts)):
+            raise ValueError('cwd components differ')
+        fd = os.dup(self.rootfd)
+        try:
+            for part in parts:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            if os.fstat(fd).st_uid != os.getuid():
+                raise ValueError('cwd ownership differs')
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def accept(self):
+        while not self.admission_closed:
+            try:
+                conn, _ = self.listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if not self.slots.acquire(blocking=False):
+                conn.close()
+                continue
+            with self.lock:
+                self.connections.add(conn)
+            thread = threading.Thread(target=self.serve, args=(conn,), daemon=True)
+            with self.lock:
+                self.threads.add(thread)
+            thread.start()
+
+    def stop_job(self, job):
+        if job.poll() is None:
+            try:os.killpg(job.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+            try:job.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:os.killpg(job.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                try:job.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    self.cleanup_failed.set()
+                    return False
+        return True
+
+    def serve(self, conn):
+        job = None
+        fd = None
+        selector = None
+        admitted = True
+        mount_fds=()
+        handshake_complete=False
+        import ssl
+        try:
+            credentials=struct.unpack('3i',conn.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,struct.calcsize('3i')))
+            handshake_deadline=min(time.monotonic()+3,self.deadline or float('inf'))
+            self.authenticate(conn,credentials)
+            remaining=handshake_deadline-time.monotonic()
+            if remaining<=0:raise ValueError('native TLS admission deadline expired')
+            conn.settimeout(remaining)
+            with self.lock:
+                if self.admission_closed:raise ValueError('native TLS admission closed')
+                wrapped=self.tls_context.wrap_socket(conn,server_side=True,do_handshake_on_connect=False)
+                self.connections.discard(conn);self.connections.add(wrapped);conn=wrapped
+            conn.do_handshake()
+            handshake_complete=True
+            conn.settimeout(3)
+            size = struct.unpack('!I', exact(conn, 4))[0]
+            if not 0 < size <= MAX_HEADER:
+                raise ValueError('request bound differs')
+
+            def unique(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError('duplicate request key')
+                    value[key] = item
+                return value
+            request = json.loads(exact(conn, size), object_pairs_hook=unique)
+            if not isinstance(request, dict) or set(request) != {'command', 'cwd'}:
+                raise ValueError('request schema differs')
+            command = request['command']
+            if not isinstance(command, str) or '\x00' in command:
+                raise ValueError('command type differs')
+            fd = self.cwd_fd(request['cwd'])
+            mounts,mount_fds=self.data_mounts()
+            args = self.prefix + mounts+['--', self.real_bash, '-c', command]
+            with self.lock:
+                if self.admission_closed:
+                    raise ValueError("owned engine admission closed")
+                self.authenticate(conn,credentials)
+                job = subprocess.Popen(args, cwd=f'/proc/self/fd/{fd}', pass_fds=(fd,self.controlfd,self.socketfd,*mount_fds), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, env=self.tool_env)
+                self.jobs.add(job)
+            for mount_fd in mount_fds:os.close(mount_fd)
+            mount_fds=()
+            conn.setblocking(False)
+            selector = selectors.DefaultSelector()
+            selector.register(conn, selectors.EVENT_READ, 'socket')
+            pipes = {job.stdout: b'O', job.stderr: b'E'}
+            registered = set()
+            queue = bytearray()
+            pending_send=None
+            write_requires_read=False
+            read_requires_write=False
+            final = False
+            deadline = self.deadline
+            while True:
+                if self.require_engine:
+                    poll = selectors.DefaultSelector()
+                    try:
+                        poll.register(self.engine[1], selectors.EVENT_READ)
+                        dead = bool(poll.select(0))
+                    finally:
+                        poll.close()
+                    if dead:
+                        raise ValueError('owned engine exited')
+                if self.admission_closed or (deadline is not None and time.monotonic() > deadline):
+                    raise ValueError('owned run deadline or parent exit')
+                for pipe in pipes:
+                    if len(queue) < MAX_QUEUE and pipe not in registered:
+                        os.set_blocking(pipe.fileno(), False)
+                        selector.register(pipe, selectors.EVENT_READ, 'pipe')
+                        registered.add(pipe)
+                if conn.pending():raise ValueError('unexpected request continuation')
+                wants_write=read_requires_write or (bool(queue) and not write_requires_read)
+                selector.modify(conn, selectors.EVENT_READ | (selectors.EVENT_WRITE if wants_write else 0), 'socket')
+                if not pipes and job.poll() is not None and (not final):
+                    rc = job.returncode if job.returncode >= 0 else 128 - job.returncode
+                    queue.extend(frame(b'X', str(rc).encode()))
+                    final = True
+                if final and (not queue):
+                    conn.setblocking(True);conn.settimeout(.2)
+                    try:conn.unwrap().close()
+                    except (OSError,ValueError):pass
+                    return
+                for key, events in selector.select(0.1):
+                    if key.data == 'socket':
+                        if queue and ((events & selectors.EVENT_WRITE and not write_requires_read) or (events & selectors.EVENT_READ and write_requires_read)):
+                            if pending_send is None:pending_send=bytes(queue)
+                            try:
+                                count=conn.send(pending_send)
+                            except ssl.SSLWantReadError:
+                                write_requires_read=True
+                            except (ssl.SSLWantWriteError,BlockingIOError):
+                                write_requires_read=False
+                            else:
+                                if count<=0:raise ValueError('native transport sink stopped')
+                                del queue[:count]
+                                pending_send=pending_send[count:] or None
+                                write_requires_read=False
+                        if (events & selectors.EVENT_READ and not write_requires_read) or (events & selectors.EVENT_WRITE and read_requires_write):
+                            try:
+                                value=conn.recv(1)
+                            except ssl.SSLWantReadError:
+                                read_requires_write=False
+                            except ssl.SSLWantWriteError:
+                                read_requires_write=True
+                            except BlockingIOError:
+                                pass
+                            else:
+                                raise ValueError('client disconnected' if not value else 'unexpected request continuation')
+                    else:
+                        pipe = key.fileobj
+                        kind = pipes[pipe]
+                        try:
+                            data = os.read(pipe.fileno(), CHUNK)
+                        except BlockingIOError:
+                            continue
+                        if data:
+                            queue.extend(frame(kind, data))
+                        else:
+                            selector.unregister(pipe)
+                            registered.remove(pipe)
+                            del pipes[pipe]
+                            pipe.close()
+                    if len(queue) >= MAX_QUEUE:
+                        for pipe in list(registered):
+                            selector.unregister(pipe)
+                            registered.remove(pipe)
+        except (OSError, ValueError, TypeError, KeyError, RecursionError, SystemExit):
+            if job is not None:
+                self.stop_job(job)
+            try:
+                if not handshake_complete:raise OSError("native TLS handshake incomplete")
+                conn.setblocking(True)
+                conn.settimeout(0.2)
+                conn.sendall(frame(b'E', b'sibling tool transport refused or interrupted\n') + frame(b'X', b'143' if job is not None else b'2'))
+            except OSError:
+                pass
+        finally:
+            for mount_fd in mount_fds:os.close(mount_fd)
+            if selector:
+                selector.close()
+            if fd is not None:
+                os.close(fd)
+            reaped = True
+            if job is not None:
+                reaped = self.stop_job(job)
+                for pipe in (job.stdout, job.stderr):
+                    if pipe and (not pipe.closed):
+                        pipe.close()
+                if reaped:
+                    with self.lock:
+                        self.jobs.discard(job)
+            with self.lock:
+                self.connections.discard(conn)
+                self.threads.discard(threading.current_thread())
+            conn.close()
+            if admitted and reaped:
+                self.slots.release()
+
+    def close(self, shutdown_deadline=None):
+        self.stop_admission()
+        with self.lock:
+            jobs = list(self.jobs)
+            connections = list(self.connections)
+        for conn in connections:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        deadline=shutdown_deadline if shutdown_deadline is not None else time.monotonic()+3
+        while any(job.poll() is None for job in jobs) and time.monotonic()<deadline:
+            time.sleep(.02)
+        for job in jobs:
+            if job.poll() is None:
+                try:os.killpg(job.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+        for job in jobs:
+            try:job.wait(timeout=1)
+            except subprocess.TimeoutExpired:self.cleanup_failed.set()
+        self.thread.join()
+        with self.lock:
+            threads = list(self.threads)
+        for thread in threads:
+            thread.join()
+        if self.engine is not None:
+            os.close(self.engine[1])
+        os.close(self.rootfd)
+        # Only exact owned inodes may be removed; a foreign replacement is retained.
+        for name,fd in (('socket',self.socketfd),('bash',self.launcher_leaf_fd),('client.py',self.client_leaf_fd)):
+            if fd is None:continue
+            try:
+                current=os.stat(name,dir_fd=self.controlfd,follow_symlinks=False)
+                owned=os.fstat(fd)
+                if (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino):os.unlink(name,dir_fd=self.controlfd)
+            except FileNotFoundError:pass
+            except OSError:
+                print('ai-process-supervisor: transport cleanup retained changed custody',file=sys.stderr)
+        try:
+            current=os.stat(self.control,follow_symlinks=False);owned=os.fstat(self.controlfd)
+            if (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino):self.control.rmdir()
+        except OSError:
+            print('ai-process-supervisor: transport cleanup retained changed custody',file=sys.stderr)
+        for fd in set((*self.engine_fds(),self.clientfd,self.client_leaf_fd,self.launcherfd,self.launcher_leaf_fd)):
+            if fd is not None:os.close(fd)
+        if self.cleanup_failed.is_set() or self.active():
+            raise RuntimeError('owned native tool closure incomplete')
+
+
 def posix_main(
-    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None
+    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None, native_options=None
 ) -> int:
-    child = subprocess.Popen(command, start_new_session=True)
+    broker = NativeShellBroker(*native_options) if native_options else None
+    env = None
+    try:
+        if broker: command,env=broker.engine_command(command,timeout_seconds)
+        child = subprocess.Popen(command, start_new_session=True,env=env,pass_fds=broker.engine_fds() if broker else ())
+    except BaseException:
+        if broker:broker.close()
+        raise
     pgid = child.pid
     stopped_by = 0
     stop_requested = False
@@ -32,6 +712,7 @@ def posix_main(
     def stop(signum: int, _frame: object) -> None:
         nonlocal stopped_by
         stopped_by = signum
+        if broker:broker.stop_admission(signal_safe=True)
         try:
             os.killpg(pgid, signal.SIGTERM)
         except ProcessLookupError:
@@ -42,54 +723,80 @@ def posix_main(
     direct_rc: int | None = None
     deadline: float | None = None
     timeout_deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
-    while True:
-        if direct_rc is None:
-            direct_rc = child.poll()
-        if stop_file and not stop_requested and os.path.exists(stop_file):
-            stop_requested = True
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 3
-        try:
-            os.killpg(pgid, 0)
-            group_alive = True
-        except ProcessLookupError:
-            group_alive = False
-        except PermissionError:
-            group_alive = True
-        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check(final=direct_rc is not None and not group_alive):
-            stop_requested = True
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 3
-        if timeout_deadline and not stop_requested and time.monotonic() >= timeout_deadline:
-            stop_requested = True
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 3
-        if direct_rc is not None and not group_alive:
-            if stop_requested:
-                if credit_monitor and credit_monitor.publication_failed:
-                    print("credit refusal receipt could not be preserved; owned provider tree stopped", file=sys.stderr)
-                    return 1
-                return 92 if credit_monitor and credit_monitor.hit else 124
-            return 128 + stopped_by if stopped_by else direct_rc
-        if stopped_by or stop_requested:
-            # Finish group escalation before the shell wrapper's five-second
-            # fallback can hard-kill this supervisor and orphan the group.
-            deadline = deadline or time.monotonic() + 3
-            if time.monotonic() >= deadline:
+    try:
+        if broker:
+            for fd in broker.engine_data_fds:os.close(fd)
+            broker.engine_data_fds=()
+        while True:
+            if broker:
+                if stopped_by:broker.stop_admission()
+                broker.capture_engine(child)
+                if broker.cleanup_failed.is_set():
+                    stop(signal.SIGTERM,None)
+            if direct_rc is None:
+                direct_rc = child.poll()
+            if stop_file and not stop_requested and os.path.exists(stop_file):
+                stop_requested = True
+                if broker:broker.stop_admission()
                 try:
-                    os.killpg(pgid, signal.SIGKILL)
+                    os.killpg(pgid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-        time.sleep(0.1)
+                deadline = time.monotonic() + 3
+            try:
+                os.killpg(pgid, 0)
+                group_alive = True
+            except ProcessLookupError:
+                group_alive = False
+            except PermissionError:
+                group_alive = True
+            if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check(final=direct_rc is not None and not group_alive):
+                stop_requested = True
+                if broker:broker.stop_admission()
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                deadline = time.monotonic() + 3
+            if timeout_deadline and not stop_requested and time.monotonic() >= timeout_deadline:
+                stop_requested = True
+                if broker:broker.stop_admission()
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                deadline = time.monotonic() + 3
+            if direct_rc is not None and not group_alive:
+                if stop_requested:
+                    if credit_monitor and credit_monitor.publication_failed:
+                        print("credit refusal receipt could not be preserved; owned provider tree stopped", file=sys.stderr)
+                        return 1
+                    return 92 if credit_monitor and credit_monitor.hit else 124
+                return 128 + stopped_by if stopped_by else direct_rc
+            if stopped_by or stop_requested:
+                # Finish group escalation before the shell wrapper's five-second
+                # fallback can hard-kill this supervisor and orphan the group.
+                deadline = deadline or time.monotonic() + 3
+                if time.monotonic() >= deadline:
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            time.sleep(0.1)
+    finally:
+        if broker or child.poll() is None:
+            # Every postlaunch exception and terminal path retains exact ownership.
+            if broker:broker.stop_admission()
+            try:os.killpg(pgid,signal.SIGTERM)
+            except ProcessLookupError:pass
+            shutdown_deadline=deadline if deadline is not None else time.monotonic()+3
+            try:
+                if broker:broker.close(shutdown_deadline)
+            finally:
+                while child.poll() is None and time.monotonic()<shutdown_deadline:time.sleep(.02)
+                try:os.killpg(pgid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                child.wait(timeout=1)
 
 
 def windows_main(
@@ -216,6 +923,20 @@ def main() -> int:
     stop_file = None
     timeout_seconds = None
     credit_options = {}
+    native_options = None
+    if args and args[0] in {"--native-deepseek-review","--native-shell-client"} and not sys.platform.startswith("linux"):
+        die("native DeepSeek review boundary requires Linux before provider dispatch")
+    if args and args[0]=="--native-shell-client":
+        if len(args)!=5:die("native shell client requires supervisor identity, socket and exact -c command")
+        try:return native_shell_client(args[1],args[2],args[3:])
+        except (OSError,ValueError):return 143
+    if args and args[0]=="--native-deepseek-review":
+        if len(args)<4:die("native DeepSeek review requires workspace and engine")
+        native_options=(args[1],args[2]);args=args[3:]
+    isolate_review = False
+    if args and args[0] == "--review-pid-isolation":
+        isolate_review = True
+        args = args[1:]
     while len(args) >= 2 and args[0] in {"--stop-file", "--timeout-seconds", "--credit-provider", "--credit-output", "--credit-stderr", "--credit-marker"}:
         option, value = args[0], args[1]
         args = args[2:]
@@ -234,6 +955,8 @@ def main() -> int:
         args = args[1:]
     if not args:
         die("usage: ai-process-supervisor [--stop-file PATH] [--timeout-seconds N] -- COMMAND [ARG ...]")
+    if isolate_review:
+        args = isolated_review_command(args)
     credit_monitor = None
     if credit_options:
         if len(credit_options) != 4:
@@ -249,10 +972,12 @@ def main() -> int:
         return (
             windows_main(args, stop_file, timeout_seconds, credit_monitor)
             if os.name == "nt"
-            else posix_main(args, stop_file, timeout_seconds, credit_monitor)
+            else posix_main(args, stop_file, timeout_seconds, credit_monitor,native_options)
         )
     except FileNotFoundError as exc:
         die(f"command not found: {exc.filename}")
+    except (ValueError, OSError):
+        die("owned native review boundary refused before or during dispatch")
     return 2
 
 

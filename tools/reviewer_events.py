@@ -1413,6 +1413,9 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
             continue
         row = json.loads(path.read_text(encoding="utf-8"))
         require(isinstance(row, dict), f"lifecycle record is not an object: {path.name}")
+        # A selected-code review cannot answer a whole-repository review request.
+        if row.get("code_only") is not None or row.get("code_only_export") is not None or row.get("evidence_scope") == "selected-code":
+            continue
         if not (row.get("schema_version") == 1 and row.get("head") == head and
                 row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
                 (provider == "any" or row.get("provider") == provider) and

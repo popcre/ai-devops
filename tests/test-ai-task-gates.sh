@@ -109,6 +109,9 @@ bin/ai-review-lifecycle|reviewer-safety
 bin/ai-task-gates|reviewer-safety
 tools/lib/task-gates.sh|reviewer-safety
 config/task-gates.json|reviewer-safety
+config/review-action-profiles.json|reviewer-safety
+tools/review_action_profile.py|reviewer-safety
+bin/ai-process-supervisor|reviewer-safety
 services/api/Dockerfile|deployment
 infra/main.tf|infrastructure
 db/migrations/001_init.sql|shared-db
@@ -1266,10 +1269,22 @@ APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
 check 'application source route rejects an approval for the previous source HEAD' \
   "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_OLD_APPROVAL'"
 APP_STATE="$(state_file_for "$APP")"
-mkdir "$APP_STATE.tmp"
+APP_STATE_BEFORE="$TMP/app-state-before-publication-failure.json"
+cp "$APP_STATE" "$APP_STATE_BEFORE"
+APP_REAL_MV="$(command -v mv)"
+mkdir "$TMP/app-mv-fail"
+cat > "$TMP/app-mv-fail/mv" <<'EOF'
+#!/usr/bin/env bash
+destination=""
+for argument in "$@"; do destination="$argument"; done
+[ "$destination" != "$AI_TEST_ATOMIC_TARGET" ] || exit 1
+exec "$AI_TEST_REAL_MV" "$@"
+EOF
+chmod +x "$TMP/app-mv-fail/mv"
+APP_WRITE_OUT="$(cd "$APP" && PATH="$TMP/app-mv-fail:$PATH" AI_TEST_ATOMIC_TARGET="$APP_STATE" AI_TEST_REAL_MV="$APP_REAL_MV" "$GATES" check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval "$APP_APPROVAL" 2>&1)"; APP_WRITE_RC=$?
 check 'application source route fails closed when exact override state cannot be recorded' \
-  "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' 2>&1 | grep -q 'exact application source-release proof could not be recorded'"
-rmdir "$APP_STATE.tmp"
+  "[ '$APP_WRITE_RC' -eq 3 ] && printf '%s' \"\$APP_WRITE_OUT\" | grep -q 'exact application source-release proof could not be recorded' && cmp -s '$APP_STATE' '$APP_STATE_BEFORE' && ! jq -e --arg h '$APP_HEAD' '.overrides | any(.kind==\"application-source-release\" and (.reason|contains(\"head=\"+\$h)))' '$APP_STATE' >/dev/null"
+
 cp "$APP/.ai-devops/application-release-target.json" "$TMP/valid-application-manifest.json"
 for schema_value in true 1.0 '"1"'; do
   cp "$TMP/valid-application-manifest.json" "$APP/.ai-devops/application-release-target.json"

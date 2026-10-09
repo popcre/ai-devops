@@ -176,7 +176,16 @@ for i in 1 2 3; do
   AI_STEPFUN_RPM=1 AI_STEPFUN_PACE_WINDOW=2 "$SCRIPT" ask --repo "$TMP/repo" x > "$TMP/burst.$i.out" 2> "$TMP/burst.$i.err" &
 done
 wait
+pace_failures_before=$FAIL
 check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer')\" = 3 ] && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 3 ] && cat '$TMP'/burst.*.err | grep -q 'stepfun pace: waiting' && ! cat '$TMP'/burst.*.err | grep -q 'rate limit reached'"
+if [ "$FAIL" -gt "$pace_failures_before" ]; then
+  printf 'paces_before_call synthetic failure diagnostics\n' >&2
+  for pace_file in "$TMP"/burst.*.out "$TMP"/burst.*.err "$STUB_ARGS.calls" "$STUB_ARGS.starts"; do
+    printf '%s bytes=%s\n' "$(basename "$pace_file")" "$(wc -c < "$pace_file" 2>/dev/null || printf missing)" >&2
+    head -c 4096 "$pace_file" >&2 2>/dev/null || true
+    printf '\n' >&2
+  done
+fi
 rm -rf "$AI_STEPFUN_STATE_DIR/pace" "$AI_STEPFUN_STATE_DIR/reports"; mode json
 out="$("$SCRIPT" ask --repo "$TMP/repo" x 2>/dev/null)"; rc=$?
 check "usage_parsed_into_report" "[ $rc = 0 ] && [ '$out' = 'final json answer' ] && jq -e -s 'any(.[]; .engine == \"stepcode\" and .provider_calls == 2 and .input_tokens == 130 and .output_tokens == 27 and .cache_read_tokens == 130 and .cache_write_tokens == 0)' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null && ! grep -l 'synthetic-session\|final json' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null"

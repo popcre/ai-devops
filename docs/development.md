@@ -12,6 +12,41 @@ see [`architecture.md`](architecture.md); for the canonical guide see
   scripts).
 - Optional: `shellcheck` for linting (`sudo apt-get install -y shellcheck`).
 
+Governed Linux DeepSeek/OpenCode reviews require Bubblewrap and working
+user/PID namespaces. The existing host credit supervisor probes the actual
+boundary only after verifying a root-owned native Bubblewrap executable and
+root-owned, non-writable resolved ancestors; PATH-shadowed substitutes refuse.
+The probe runs before provider dispatch. Engine plugins, language servers and custom
+tools remain inside the engine capsule; native Bash commands use separate
+host-created sibling capsules, preserving continuation after their own shell
+exits. All capsules have private process IDs and no effective capabilities.
+Kernel peer credentials, live engine identity and ancestry bind the per-run
+socket; commands cannot select executables, environment, mounts or host PIDs.
+The client authenticates the host supervisor using TLS 1.3 and the exact
+per-run certificate SHA256 pin before sending command bytes. The ephemeral
+private key and certificate are generated in host anonymous memory files using
+custody-checked system OpenSSL; private descriptors close before engine launch.
+The dedicated supervisor and transport client clear only ambient OpenSSL and
+key-log overrides before initializing crypto. The captured model/tool environment
+retains those values; explicit TLS contexts also disable key logging.
+Engine ownership still uses live PIDFD, kernel peer credentials, namespace,
+start time and ancestry; client authentication does not depend on PIDFD inode
+uniqueness. Unsupported namespace, TLS or trusted-binary capabilities refuse
+before provider dispatch, without a plaintext fallback.
+Sealed Linux memfd byte snapshots of the native launcher and existing client are mounted read-only in
+both engine and sibling capsules, including against writable hardlink aliases.
+Only the trusted transport client uses Python isolated startup; normal model
+and tool environments retain their existing configuration.
+Binary
+stdout/stderr and actual tool exit codes stream without response files.
+Credit refusal, timeout, cancellation, engine exit and client disconnect close
+admission and reap all owned tool groups. Direct Bubblewrap children also die
+with the host supervisor. Filesystem, networking, builds and tests preserve the
+existing review route. Other providers, Windows and implementation retain their
+existing launch and sandbox behavior; no machine policy is changed.
+This is process containment, not a general host filesystem sandbox. Unrestricted
+same-user host processes remain outside this namespace threat boundary.
+
 ## Local setup
 
 ```bash
@@ -76,6 +111,30 @@ CLI reviewers lack a proven
 path-constrained read profile for private source, so this route refuses them.
 Ordinary and plan reviews of private source are refused before provider launch.
 The default private snapshot and packet routes also refuse private source.
+On a POSIX host with descriptor-based no-follow reads, this route starts a
+prospective original-source lifecycle before dispatch and retains the genuine
+final transcript bytes. Its selected-path scope is advisory: it cannot populate
+the whole-repository passed-head cache or authorize a live action. Other
+platforms retain the sealed selected-code advisory route without original-source
+lifecycle authority. No Windows operational acceptance is claimed.
+
+Issue #1531 adds one temporary installed profile, owned jointly with shared-db
+#770: `shared-db-770-isolated-timing-rehearsal-v1`. It requires supported Linux
+custody and refuses before export or provider dispatch elsewhere. The front door
+accepts its paired `--action-profile` and protected `--action-manifest`; native
+validation binds the complete installed code closure, truthful task declaration,
+all immutable input bytes, and the canonical operational descriptor. Only the
+seven explicit review-binding fields and verdict may change during binding.
+The reviewed consumer passes the exact dictionary using
+`--action-manifest-stdin`, never JSON arguments or environment variables.
+Initial-forward admission requires every declared output absent. The explicit
+`--action-stage original-restoration` requires the same native initial database
+receipt and immutable binding, and permits only the reviewed output leaves.
+These records establish eligibility only; production, credentials, application
+callbacks, and root action permission remain excluded. Retire the fixed profile
+when #770 delivery closes; adding another action requires its own reviewed
+configuration change.
+
 All registered reviewers may review an aggregate that has been checked for
 private content and written to a public repository worktree. Declare the public
 artifact's actual task class there and use the ordinary review route from that
