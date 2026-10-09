@@ -436,15 +436,21 @@ class NativeSiblingBrokerTests(unittest.TestCase):
     def capsule(self, body, hook=None):
         broker = self.module.NativeShellBroker(str(self.base), sys.executable)
         script = self.base / "synthetic-engine.py"
-        script.write_text("""import importlib.machinery,importlib.util,json,os,pathlib,socket,struct,subprocess,sys,time
+        script.write_text("""import importlib.machinery,importlib.util,json,os,pathlib,socket,ssl,struct,subprocess,sys,time
 helper=sys.argv[1];socket_path=sys.argv[2];expected_peer=sys.argv[3]
 loader=importlib.machinery.SourceFileLoader('native_client_fixture',helper)
 spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
 def command(value):
  return subprocess.run([sys.executable,helper,'--native-shell-client',socket_path,expected_peer,'-c',value],capture_output=True,timeout=10)
+def tls_connection():
+ context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);context.check_hostname=False;context.verify_mode=ssl.CERT_NONE
+ context.minimum_version=context.maximum_version=ssl.TLSVersion.TLSv1_3;context.keylog_filename=None
+ raw=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);raw.connect(socket_path)
+ conn=context.wrap_socket(raw);assert __import__('hashlib').sha256(conn.getpeercert(binary_form=True)).hexdigest()==expected_peer
+ return conn
 def raw(value,header=None):
- with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as conn:
-  conn.connect(socket_path);conn.sendall(struct.pack('!I',len(value) if header is None else header)+value)
+ with tls_connection() as conn:
+  conn.sendall(struct.pack('!I',len(value) if header is None else header)+value)
   while True:
    kind=m.exact(conn,1);size=struct.unpack('!I',m.exact(conn,4))[0];data=m.exact(conn,size)
    if kind==b'X':return int(data)
@@ -454,7 +460,7 @@ def raw(value,header=None):
         prefix=prefix[:-len(dummy)]
         os.link(broker.client_path,self.base/'client-mutable-alias')
         os.link(broker.control/'bash',self.base/'launcher-mutable-alias')
-        child = subprocess.Popen(prefix + [sys.executable, str(script), str(broker.client_path), broker.path,broker.server_identity],
+        child = subprocess.Popen(prefix + [sys.executable, str(script), str(broker.client_path), broker.path,broker.certificate_pin],
                                  cwd=self.base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,env=env,pass_fds=broker.engine_fds())
         called = False
         try:
@@ -478,7 +484,7 @@ def raw(value,header=None):
 a=command('printf before;kill -TERM $$;printf forbidden')
 assert a.returncode==143 and a.stdout==b'before', (a.returncode,a.stdout,a.stderr)
 b=command("python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256))*400);sys.stderr.buffer.write(bytes(range(256))*400)' ")
-assert b.returncode==0 and b.stdout==bytes(range(256))*400 and b.stderr==bytes(range(256))*400
+assert b.returncode==0 and b.stdout==bytes(range(256))*400 and b.stderr==bytes(range(256))*400,(b.returncode,len(b.stdout),len(b.stderr),b.stderr[-100:])
 c=command('printf after;exit 17');assert c.returncode==17 and c.stdout==b'after'
 before=pathlib.Path(helper).read_bytes()
 pathlib.Path('client-mutable-alias').chmod(0o700)
@@ -521,7 +527,7 @@ print('malformed and foreign cwd refused without execution')
         def hook(broker,child):
             self.assertEqual(os.stat(broker.path).st_mode & 0o777,0o600)
             self.assertEqual(broker.control.stat().st_mode & 0o777,0o700)
-            cmd=[sys.executable,str(self.supervisor),'--native-shell-client',broker.path,broker.server_identity,'-c','touch forbidden']
+            cmd=[sys.executable,str(self.supervisor),'--native-shell-client',broker.path,broker.certificate_pin,'-c','touch forbidden']
             host=subprocess.run(cmd,cwd=self.base,capture_output=True,timeout=5)
             other=subprocess.run(broker.prefix+['--',*cmd],cwd=self.base,capture_output=True,timeout=5)
             self.assertNotEqual(host.returncode,0,host.stderr);self.assertNotEqual(other.returncode,0,other.stderr)
@@ -543,7 +549,7 @@ print('malformed and foreign cwd refused without execution')
         out=self.capsule("""
 connections=[]
 for _ in range(4):
- s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.connect(socket_path)
+ s=tls_connection()
  value=json.dumps({'command':'sleep 10','cwd':os.getcwd()}).encode();s.sendall(struct.pack('!I',len(value))+value);connections.append(s)
 time.sleep(.3)
 r=command('touch forbidden');assert r.returncode!=0
@@ -565,27 +571,24 @@ print('closed sink stops owned tool and next tool works')
 """)
         self.assertIn(b"closed sink",out)
 
-    def server_identity(self):
-        fd=os.pidfd_open(os.getpid())
-        try:
-            info=os.fstat(fd)
-            return f'{info.st_dev}:{info.st_ino}'
-        finally:os.close(fd)
-
     def test_client_rejects_invalid_exit_and_output_frames(self):
         import socket,struct,threading
+        context,pin=self.module.NativeShellBroker.tls_identity()
+        hostile=self.base/'client-openssl.cnf';keylog=self.base/'client-keylog'
+        hostile.write_text('openssl_conf = initialization\n[initialization]\nalg_section = algorithm_properties\n[algorithm_properties]\ndefault_properties = provider=nonexistent_audit_provider\n')
+        client_env=dict(os.environ,OPENSSL_CONF=str(hostile),SSLKEYLOGFILE=str(keylog))
         for payload in (b'X'+struct.pack('!I',1)+b'0EXTRA',b'X'+struct.pack('!I',3)+b'999',b'X'+struct.pack('!I',2)+b'-1',
                         b'X'+struct.pack('!I',2)+b'00',b'Q'+struct.pack('!I',1)+b'x',
                         b'O'+struct.pack('!I',self.module.CHUNK+1)):
             path=str(self.base/'bad-socket');server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);server.bind(path);server.listen(1)
             def reply():
-                conn,_=server.accept()
-                with conn:
+                raw,_=server.accept()
+                with context.wrap_socket(raw,server_side=True) as conn:
                     size=struct.unpack('!I',self.module.exact(conn,4))[0];self.module.exact(conn,size);conn.sendall(payload)
             thread=threading.Thread(target=reply);thread.start()
             try:
-                result=subprocess.run([sys.executable,str(self.supervisor),'--native-shell-client',path,self.server_identity(),'-c','true'],cwd=self.base,capture_output=True,timeout=5)
-                self.assertEqual(result.returncode,143)
+                result=subprocess.run([sys.executable,'-I',str(self.supervisor),'--native-shell-client',path,pin,'-c','true'],cwd=self.base,env=client_env,capture_output=True,timeout=5)
+                self.assertEqual(result.returncode,143);self.assertFalse(keylog.exists())
             finally:thread.join(timeout=2);server.close();Path(path).unlink()
 
     def test_failed_engine_capture_closes_real_acquired_pidfd(self):
@@ -665,23 +668,157 @@ print('trusted transport isolated; ordinary Python startup retained')
 """)
         self.assertIn(b'trusted transport isolated',out)
 
-    def test_foreign_server_pidfd_refused_before_request(self):
-        path=str(self.base/'foreign-socket');received=self.base/'received'
-        code="""import pathlib,socket,sys
-s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(sys.argv[1]);s.listen(1)
-c,_=s.accept();pathlib.Path(sys.argv[2]).write_bytes(c.recv(1024));c.close();s.close()
-"""
-        server=subprocess.Popen([sys.executable,'-c',code,path,str(received)])
+    def test_foreign_certificate_refused_before_request(self):
+        import socket,threading
+        context,_=self.module.NativeShellBroker.tls_identity()
+        _,expected=self.module.NativeShellBroker.tls_identity()
+        path=str(self.base/'foreign-socket');received=[]
+        server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);server.bind(path);server.listen(1)
+        def reply():
+            raw,_=server.accept()
+            with context.wrap_socket(raw,server_side=True) as conn:
+                try:received.append(conn.recv(1024))
+                except (BrokenPipeError,ConnectionResetError):received.append(b'')
+        thread=threading.Thread(target=reply);thread.start()
         try:
+            result=subprocess.run([sys.executable,str(self.supervisor),'--native-shell-client',path,expected,'-c','touch forbidden'],capture_output=True,timeout=5)
+            self.assertEqual(result.returncode,143);thread.join(timeout=3)
+            self.assertEqual(received,[b'']);self.assertFalse((self.base/'forbidden').exists())
+        finally:server.close()
+
+    def test_tls_positive_with_simulated_anonymous_pidfd_inodes(self):
+        original=os.fstat;anchor=os.pidfd_open(os.getpid());common=original(anchor)
+        def anonymous(fd):
+            try:target=os.readlink(f'/proc/self/fd/{fd}')
+            except OSError:return original(fd)
+            return common if 'pidfd' in target else original(fd)
+        try:
+            with mock.patch.object(self.module.os,'fstat',side_effect=anonymous):
+                out=self.capsule("assert command('printf pinned-tls').stdout==b'pinned-tls';print('SIMULATED anonymous PIDFD inodes; genuine pinned TLS succeeds')\n")
+            self.assertIn(b'genuine pinned TLS succeeds',out)
+        finally:os.close(anchor)
+
+    def test_tls_identity_closes_private_fds_on_generation_failure(self):
+        acquired=[];original=os.memfd_create
+        def create(*args):
+            fd=original(*args);acquired.append(fd);return fd
+        with mock.patch.object(self.module.os,'memfd_create',side_effect=create),mock.patch.object(self.module.subprocess,'run',return_value=mock.Mock(returncode=1)):
+            with self.assertRaisesRegex(ValueError,'certificate generation failed'):self.module.NativeShellBroker.tls_identity()
+        for fd in acquired:
+            with self.assertRaises(OSError):os.fstat(fd)
+
+    def test_tls_fresh_startup_clears_crypto_overrides_preserves_child_environment(self):
+        config=self.base/'openssl.cnf';keylog=self.base/'keylog'
+        config.write_text('openssl_conf = initialization\n[initialization]\nalg_section = algorithm_properties\n[algorithm_properties]\ndefault_properties = provider=nonexistent_audit_provider\n')
+        code="""import importlib.machinery,os,sys
+m=importlib.machinery.SourceFileLoader('native_tls',sys.argv[1]).load_module()
+b=m.NativeShellBroker(sys.argv[2],sys.executable)
+try:
+ assert b.tool_env['OPENSSL_CONF']==sys.argv[3] and b.tool_env['SSLKEYLOGFILE']==sys.argv[4]
+ args,env=b.engine_command(['/usr/bin/timeout','30',sys.executable,'run','--dir',sys.argv[2]],None)
+ assert env['OPENSSL_CONF']==sys.argv[3] and env['SSLKEYLOGFILE']==sys.argv[4]
+ assert 'OPENSSL_CONF' not in os.environ and 'SSLKEYLOGFILE' not in os.environ
+ assert b.tls_context.keylog_filename is None and len(b.certificate_pin)==64
+ print('fresh TLS startup succeeds; child environment preserved; no key logging')
+finally:b.close()
+"""
+        env=dict(os.environ,OPENSSL_CONF=str(config),SSLKEYLOGFILE=str(keylog),OPENSSL_MODULES=str(self.base/'missing'))
+        result=subprocess.run([sys.executable,'-I','-c',code,str(self.supervisor),str(self.base),str(config),str(keylog)],env=env,capture_output=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn(b'fresh TLS startup succeeds',result.stdout);self.assertFalse(keylog.exists())
+
+    def test_tls_generation_timeout_reaps_owned_process_and_closes_fds(self):
+        acquired=[];children=[];original_create=os.memfd_create
+        original_run=subprocess.run;original_launch=subprocess.Popen
+        def create(*args):
+            fd=original_create(*args);acquired.append(fd);return fd
+        def launch(*args,**kwargs):
+            child=original_launch(*args,**kwargs);children.append(child);return child
+        def timed_generation(command,**kwargs):
+            self.assertEqual(command[0],'/usr/bin/openssl')
+            self.assertEqual(set(kwargs['env']),{'PATH','LANG'})
+            self.assertEqual(set(kwargs['pass_fds']),set(acquired))
+            kwargs['timeout']=.05
+            return original_run([sys.executable,'-I','-c','import time;time.sleep(30)'],**kwargs)
+        with mock.patch.object(self.module.os,'memfd_create',side_effect=create),mock.patch.object(self.module.subprocess,'run',side_effect=timed_generation),mock.patch.object(self.module.subprocess,'Popen',side_effect=launch):
+            with self.assertRaises(subprocess.TimeoutExpired):self.module.NativeShellBroker.tls_identity()
+        self.assertEqual(len(children),1);self.assertIsNotNone(children[0].poll())
+        for fd in acquired:
+            with self.assertRaises(OSError):os.fstat(fd)
+
+    def test_tls_load_failure_closes_private_fds(self):
+        acquired=[];original=os.memfd_create
+        def create(*args):
+            fd=original(*args);acquired.append(fd);return fd
+        context=mock.Mock();context.load_cert_chain.side_effect=ValueError('synthetic load failure')
+        with mock.patch.object(self.module.os,'memfd_create',side_effect=create),mock.patch('ssl.SSLContext',return_value=context):
+            with self.assertRaisesRegex(ValueError,'synthetic load failure'):self.module.NativeShellBroker.tls_identity()
+        for fd in acquired:
+            with self.assertRaises(OSError):os.fstat(fd)
+
+    def test_tls_four_concurrent_binary_streams(self):
+        out=self.capsule("""
+import concurrent.futures
+value="python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256))*400);sys.stderr.buffer.write(bytes(range(256))*400)'"
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+ results=list(pool.map(command,[value]*4))
+for result in results:assert (result.returncode,result.stdout,result.stderr)==(0,bytes(range(256))*400,bytes(range(256))*400)
+assert not any('native-review-key' in os.readlink('/proc/self/fd/'+fd) or 'native-review-cert' in os.readlink('/proc/self/fd/'+fd) for fd in os.listdir('/proc/self/fd') if os.path.exists('/proc/self/fd/'+fd))
+print('four concurrent TLS streams exact; private key descriptors absent')
+""")
+        self.assertIn(b'four concurrent TLS streams exact',out)
+
+    def test_stalled_tls_handshakes_hold_four_slots_and_recover(self):
+        out=self.capsule("""
+connections=[]
+for _ in range(4):
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.connect(socket_path);connections.append(s)
+time.sleep(.2)
+assert command('touch forbidden').returncode!=0
+assert not pathlib.Path('forbidden').exists()
+for s in connections:s.close()
+time.sleep(.4)
+assert command('printf recovered').stdout==b'recovered'
+print('stalled TLS handshakes bounded and recover')
+""")
+        self.assertIn(b'stalled TLS handshakes bounded',out)
+
+    def test_close_during_stalled_tls_handshakes_reaps_connections(self):
+        def hook(broker,child):
+            marker=self.base/'handshakes-ready'
             deadline=time.monotonic()+3
-            while not Path(path).exists() and time.monotonic()<deadline:time.sleep(.01)
-            result=subprocess.run([sys.executable,str(self.supervisor),'--native-shell-client',path,self.server_identity(),'-c','touch forbidden'],capture_output=True,timeout=5)
-            self.assertEqual(result.returncode,143)
-            server.wait(timeout=3)
-            self.assertEqual(received.read_bytes(),b'')
-            self.assertFalse((self.base/'forbidden').exists())
-        finally:
-            if server.poll() is None:server.kill();server.wait()
+            while not marker.exists() and time.monotonic()<deadline:time.sleep(.01)
+            self.assertTrue(marker.exists())
+            started=time.monotonic();broker.stop_admission()
+            with broker.lock:connections=list(broker.connections)
+            for conn in connections:
+                try:conn.shutdown(__import__('socket').SHUT_RDWR)
+                except OSError:pass
+            self.assertLess(time.monotonic()-started,1)
+        out=self.capsule("""
+connections=[]
+for _ in range(4):
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.connect(socket_path);connections.append(s)
+time.sleep(.15);pathlib.Path('handshakes-ready').write_text('ready')
+for s in connections:
+ s.settimeout(3);assert s.recv(1)==b'';s.close()
+print('handshake cancellation closed all four clients')
+""",hook)
+        self.assertIn(b'closed all four clients',out)
+
+    def test_copied_public_certificate_cannot_supply_server_key(self):
+        out=self.capsule("""
+with tls_connection() as conn:
+ certificate=conn.getpeercert(binary_form=True)
+pathlib.Path('copied-public-cert.pem').write_text(ssl.DER_cert_to_PEM_cert(certificate))
+context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.keylog_filename=None
+try:context.load_cert_chain('copied-public-cert.pem')
+except ssl.SSLError:pass
+else:raise AssertionError('public certificate provided private signing key')
+assert command('printf actual-owner').stdout==b'actual-owner'
+print('copied certificate cannot impersonate server; genuine owner works')
+""")
+        self.assertIn(b'cannot impersonate server',out)
 
     def test_group_writable_engine_refused(self):
         import shutil

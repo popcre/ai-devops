@@ -32,6 +32,21 @@ def die(message: str) -> "None":
     raise SystemExit(2)
 
 
+def trusted_system_executable(path: str) -> str:
+    path=os.path.realpath(path)
+    for ancestor in Path(path).parents:
+        info=ancestor.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022:
+            raise ValueError('system executable ancestor custody differs')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022 or not info.st_mode & 0o111 or os.read(fd,4)!=b'\x7fELF':
+            raise ValueError('system executable custody differs')
+    finally:os.close(fd)
+    return path
+
+
 def isolated_review_command(command: list[str], private_devices: bool = False) -> list[str]:
     """Require a real Linux PID/user namespace before any model command starts."""
     if not sys.platform.startswith("linux"):
@@ -39,18 +54,7 @@ def isolated_review_command(command: list[str], private_devices: bool = False) -
     bwrap = shutil.which("bwrap")
     if not bwrap:
         die("bubblewrap is required before a governed Linux review can start")
-    bwrap=os.path.realpath(bwrap)
-    try:
-        for ancestor in Path(bwrap).parents:
-            info=ancestor.stat()
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022:
-                raise ValueError('bubblewrap ancestor custody differs')
-        fd=os.open(bwrap,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
-        try:
-            info=os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022 or not info.st_mode & 0o111 or os.read(fd,4)!=b'\x7fELF':
-                raise ValueError('bubblewrap executable custody differs')
-        finally:os.close(fd)
+    try:bwrap=trusted_system_executable(bwrap)
     except (OSError,ValueError):
         die('bubblewrap trusted system executable custody refused before invocation')
     prefix = [bwrap, "--unshare-user", "--unshare-pid",
@@ -103,27 +107,38 @@ def exact(sock, n):
         b += part
     return b
 
+def native_crypto_environment():
+    # Only this host supervisor / dedicated transport client owns crypto here.
+    for key in ('OPENSSL_CONF','OPENSSL_CONF_INCLUDE','OPENSSL_MODULES',
+                'OPENSSL_ENGINES','SSLKEYLOGFILE'):
+        os.environ.pop(key,None)
+
+
 def native_shell_client(path, expected_peer, argv):
     if len(argv) != 2 or argv[0] != '-c':
         raise ValueError('native shell argv differs')
-    identity=expected_peer.split(':')
-    if len(identity)!=2 or not all(x.isdigit() and len(x)<=24 for x in identity):
-        raise ValueError('native supervisor identity differs')
-    identity=tuple(int(x) for x in identity)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-        conn.connect(path)
-        # Linux UAPI SO_PEERPIDFD=77; SO_PEERCRED PID is 0 across PID namespaces.
-        peerfd=struct.unpack('i',conn.getsockopt(socket.SOL_SOCKET,77,4))[0]
-        try:
-            info=os.fstat(peerfd)
-            poll=selectors.DefaultSelector()
-            try:
-                poll.register(peerfd,selectors.EVENT_READ)
-                dead=bool(poll.select(0))
-            finally:poll.close()
-            if dead or (info.st_dev,info.st_ino)!=identity:
-                raise ValueError('connected native supervisor is foreign or exited')
-        finally:os.close(peerfd)
+    native_crypto_environment()
+    import ssl,hashlib,hmac
+    if len(expected_peer)!=64 or any(c not in '0123456789abcdef' for c in expected_peer):
+        raise ValueError('native supervisor certificate pin differs')
+    context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version=context.maximum_version=ssl.TLSVersion.TLSv1_3
+    context.check_hostname=False
+    context.verify_mode=ssl.CERT_NONE
+    context.keylog_filename=None
+    raw=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+    raw.settimeout(3)
+    try:
+        raw.connect(path)
+        conn=context.wrap_socket(raw,server_hostname=None)
+    except BaseException:
+        raw.close()
+        raise
+    with conn:
+        pin=hashlib.sha256(conn.getpeercert(binary_form=True)).hexdigest()
+        if not hmac.compare_digest(pin,expected_peer):
+            raise ValueError('connected native supervisor certificate is foreign')
+        conn.settimeout(None)
         data = json.dumps({'command': argv[1], 'cwd': os.getcwd()}, ensure_ascii=True).encode()
         if len(data) > MAX_HEADER:
             raise ValueError('command exceeds native transport bound')
@@ -169,7 +184,7 @@ class NativeShellBroker:
                     except OSError:pass
                 try:self.control.rmdir()
                 except OSError:pass
-            for attribute in ('server_pidfd','rootfd','controlfd','socketfd','clientfd','client_leaf_fd'):
+            for attribute in ('rootfd','controlfd','socketfd','clientfd','client_leaf_fd'):
                 fd=getattr(self,attribute,None)
                 if fd is not None:
                     try:os.close(fd)
@@ -177,6 +192,7 @@ class NativeShellBroker:
             raise
 
     def prepare(self, workspace, engine):
+        self.ambient_env=dict(os.environ)
         self.workspace = Path(workspace).absolute()
         self.alias = str(self.workspace)
         self.engine_path = os.path.realpath(engine)
@@ -186,21 +202,7 @@ class NativeShellBroker:
         if not os.path.isfile(self.engine_path) or self.engine_stat.st_mode & 0o022:
             raise ValueError('native engine custody differs')
         self.prefix = isolated_review_command([], private_devices=True)[:-1]
-        self.server_pidfd=os.pidfd_open(os.getpid())
-        info=os.fstat(self.server_pidfd)
-        self.server_identity=f'{info.st_dev}:{info.st_ino}'
-        # Actual kernel capability, not a version or caller permission flag.
-        try:
-            left,right=socket.socketpair()
-            try:
-                peerfd=struct.unpack('i',left.getsockopt(socket.SOL_SOCKET,77,4))[0]
-                try:
-                    peer=os.fstat(peerfd)
-                    if (peer.st_dev,peer.st_ino)!=(info.st_dev,info.st_ino):raise ValueError('kernel peer PIDFD differs')
-                finally:os.close(peerfd)
-            finally:left.close();right.close()
-        except (OSError,ValueError):
-            die('native supervisor kernel authentication unavailable before provider dispatch')
+        self.tls_context,self.certificate_pin=self.tls_identity()
         self.control = Path(tempfile.mkdtemp(prefix='ai-review-shell-'))
         self.control.chmod(0o700)
         self.require_engine = True
@@ -228,7 +230,7 @@ class NativeShellBroker:
         self.engine_data_fds=()
         self.deadline = None
         self.real_bash = os.path.realpath('/bin/bash')
-        self.tool_env = dict(os.environ)
+        self.tool_env = dict(self.ambient_env)
         self.tool_env.pop('DEEPSEEK_API_KEY', None)
         self.tool_env.pop('OP_SERVICE_ACCOUNT_TOKEN', None)
         self.listener.listen(4)
@@ -241,6 +243,37 @@ class NativeShellBroker:
         self.threads = set()
         self.thread = threading.Thread(target=self.accept, daemon=True)
         self.thread.start()
+
+    @staticmethod
+    def tls_identity():
+        native_crypto_environment()
+        import ssl,hashlib
+        openssl=trusted_system_executable('/usr/bin/openssl')
+        fds=[]
+        try:
+            for name in ('native-review-key','native-review-cert'):
+                fd=os.memfd_create(name,os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+                fds.append(fd);os.fchmod(fd,0o600)
+            keyfd,certfd=fds
+            command=[openssl,'req','-x509','-newkey','ed25519','-nodes',
+                     '-keyout',f'/proc/self/fd/{keyfd}','-out',f'/proc/self/fd/{certfd}',
+                     '-subj','/CN=native-review-broker','-days','1','-config','/dev/null']
+            result=subprocess.run(command,env={'PATH':'/usr/bin:/bin','LANG':'C'},
+                                  stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE,close_fds=True,pass_fds=tuple(fds),timeout=10)
+            if result.returncode:raise ValueError('native TLS certificate generation failed')
+            if any(not 0<os.fstat(fd).st_size<=16384 for fd in fds):
+                raise ValueError('native TLS key or certificate exceeds bound')
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version=context.maximum_version=ssl.TLSVersion.TLSv1_3
+            context.keylog_filename=None
+            context.load_cert_chain(f'/proc/self/fd/{certfd}',f'/proc/self/fd/{keyfd}')
+            os.lseek(certfd,0,os.SEEK_SET)
+            certificate=os.read(certfd,16384).decode('ascii')
+            pin=hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
+            return context,pin
+        finally:
+            for fd in fds:os.close(fd)
 
     @staticmethod
     def sealed_data(data,name):
@@ -285,14 +318,14 @@ class NativeShellBroker:
         self.deadline=time.monotonic()+timeout_seconds if timeout_seconds else None
         launcher=self.control/'bash'
         import shlex
-        data=('#!/bin/bash\nexec '+shlex.quote(sys.executable)+' -I '+shlex.quote(str(self.client_path))+' --native-shell-client '+shlex.quote(self.path)+' '+shlex.quote(self.server_identity)+' "$@"\n').encode()
+        data=('#!/bin/bash\nexec '+shlex.quote(sys.executable)+' -I '+shlex.quote(str(self.client_path))+' --native-shell-client '+shlex.quote(self.path)+' '+shlex.quote(self.certificate_pin)+' "$@"\n').encode()
         self.launcherfd=self.sealed_data(data,'review-native-launcher')
         launcher.touch(mode=0o500)
         self.launcher_leaf_fd=os.open(launcher,os.O_PATH|os.O_NOFOLLOW)
-        overlay=json.loads(os.environ.get('OPENCODE_CONFIG_CONTENT','{}'))
+        overlay=json.loads(self.ambient_env.get('OPENCODE_CONFIG_CONTENT','{}'))
         if not isinstance(overlay,dict):raise ValueError('native inline config is not an object')
         overlay['shell']=str(launcher)
-        env=dict(os.environ,OPENCODE_CONFIG_CONTENT=json.dumps(overlay))
+        env=dict(self.ambient_env,OPENCODE_CONFIG_CONTENT=json.dumps(overlay))
         mounts,self.engine_data_fds=self.data_mounts()
         return self.prefix+mounts+['--',*command],env
 
@@ -359,10 +392,10 @@ class NativeShellBroker:
         tail = text[text.rfind(')') + 2:].split()
         return {'start': tail[19], 'ppid': int(tail[1]), 'uid': base.stat().st_uid, 'pidns': os.readlink(base / 'ns/pid'), 'userns': os.readlink(base / 'ns/user')}
 
-    def authenticate(self, conn):
+    def authenticate(self, conn, credentials=None):
         if not self.require_engine:
             return
-        pid, uid, gid = struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
+        pid, uid, gid = credentials if credentials is not None else struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
         if not self.engine_ready.wait(3):
             raise ValueError('owned engine startup incomplete')
         with self.engine_lock:
@@ -452,8 +485,21 @@ class NativeShellBroker:
         selector = None
         admitted = True
         mount_fds=()
+        handshake_complete=False
+        import ssl
         try:
-            self.authenticate(conn)
+            credentials=struct.unpack('3i',conn.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,struct.calcsize('3i')))
+            handshake_deadline=min(time.monotonic()+3,self.deadline or float('inf'))
+            self.authenticate(conn,credentials)
+            remaining=handshake_deadline-time.monotonic()
+            if remaining<=0:raise ValueError('native TLS admission deadline expired')
+            conn.settimeout(remaining)
+            with self.lock:
+                if self.admission_closed:raise ValueError('native TLS admission closed')
+                wrapped=self.tls_context.wrap_socket(conn,server_side=True,do_handshake_on_connect=False)
+                self.connections.discard(conn);self.connections.add(wrapped);conn=wrapped
+            conn.do_handshake()
+            handshake_complete=True
             conn.settimeout(3)
             size = struct.unpack('!I', exact(conn, 4))[0]
             if not 0 < size <= MAX_HEADER:
@@ -478,7 +524,7 @@ class NativeShellBroker:
             with self.lock:
                 if self.admission_closed:
                     raise ValueError("owned engine admission closed")
-                self.authenticate(conn)
+                self.authenticate(conn,credentials)
                 job = subprocess.Popen(args, cwd=f'/proc/self/fd/{fd}', pass_fds=(fd,self.controlfd,self.socketfd,*mount_fds), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, env=self.tool_env)
                 self.jobs.add(job)
             for mount_fd in mount_fds:os.close(mount_fd)
@@ -489,6 +535,9 @@ class NativeShellBroker:
             pipes = {job.stdout: b'O', job.stderr: b'E'}
             registered = set()
             queue = bytearray()
+            pending_send=None
+            write_requires_read=False
+            read_requires_write=False
             final = False
             deadline = self.deadline
             while True:
@@ -508,26 +557,44 @@ class NativeShellBroker:
                         os.set_blocking(pipe.fileno(), False)
                         selector.register(pipe, selectors.EVENT_READ, 'pipe')
                         registered.add(pipe)
-                selector.modify(conn, selectors.EVENT_READ | (selectors.EVENT_WRITE if queue else 0), 'socket')
+                if conn.pending():raise ValueError('unexpected request continuation')
+                wants_write=read_requires_write or (bool(queue) and not write_requires_read)
+                selector.modify(conn, selectors.EVENT_READ | (selectors.EVENT_WRITE if wants_write else 0), 'socket')
                 if not pipes and job.poll() is not None and (not final):
                     rc = job.returncode if job.returncode >= 0 else 128 - job.returncode
                     queue.extend(frame(b'X', str(rc).encode()))
                     final = True
                 if final and (not queue):
+                    conn.setblocking(True);conn.settimeout(.2)
+                    try:conn.unwrap().close()
+                    except (OSError,ValueError):pass
                     return
                 for key, events in selector.select(0.1):
                     if key.data == 'socket':
-                        if events & selectors.EVENT_READ:
-                            value = conn.recv(1)
-                            raise ValueError('client disconnected' if not value else 'unexpected request continuation')
-                        if events & selectors.EVENT_WRITE:
+                        if queue and ((events & selectors.EVENT_WRITE and not write_requires_read) or (events & selectors.EVENT_READ and write_requires_read)):
+                            if pending_send is None:pending_send=bytes(queue)
                             try:
-                                count = conn.send(queue)
+                                count=conn.send(pending_send)
+                            except ssl.SSLWantReadError:
+                                write_requires_read=True
+                            except (ssl.SSLWantWriteError,BlockingIOError):
+                                write_requires_read=False
+                            else:
+                                if count<=0:raise ValueError('native transport sink stopped')
+                                del queue[:count]
+                                pending_send=pending_send[count:] or None
+                                write_requires_read=False
+                        if (events & selectors.EVENT_READ and not write_requires_read) or (events & selectors.EVENT_WRITE and read_requires_write):
+                            try:
+                                value=conn.recv(1)
+                            except ssl.SSLWantReadError:
+                                read_requires_write=False
+                            except ssl.SSLWantWriteError:
+                                read_requires_write=True
                             except BlockingIOError:
-                                continue
-                            if count<=0:
-                                raise ValueError("native transport sink stopped")
-                            del queue[:count]
+                                pass
+                            else:
+                                raise ValueError('client disconnected' if not value else 'unexpected request continuation')
                     else:
                         pipe = key.fileobj
                         kind = pipes[pipe]
@@ -550,6 +617,7 @@ class NativeShellBroker:
             if job is not None:
                 self.stop_job(job)
             try:
+                if not handshake_complete:raise OSError("native TLS handshake incomplete")
                 conn.setblocking(True)
                 conn.settimeout(0.2)
                 conn.sendall(frame(b'E', b'sibling tool transport refused or interrupted\n') + frame(b'X', b'143' if job is not None else b'2'))
@@ -622,7 +690,6 @@ class NativeShellBroker:
             print('ai-process-supervisor: transport cleanup retained changed custody',file=sys.stderr)
         for fd in set((*self.engine_fds(),self.clientfd,self.client_leaf_fd,self.launcherfd,self.launcher_leaf_fd)):
             if fd is not None:os.close(fd)
-        os.close(self.server_pidfd)
         if self.cleanup_failed.is_set() or self.active():
             raise RuntimeError('owned native tool closure incomplete')
 

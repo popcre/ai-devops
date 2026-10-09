@@ -22,9 +22,18 @@ host-created sibling capsules, preserving continuation after their own shell
 exits. All capsules have private process IDs and no effective capabilities.
 Kernel peer credentials, live engine identity and ancestry bind the per-run
 socket; commands cannot select executables, environment, mounts or host PIDs.
-The client verifies the kernel's supervisor peer PIDFD before sending commands;
-unsupported kernels refuse before provider dispatch. Sealed Linux memfd byte
-snapshots of the native launcher and existing client are mounted read-only in
+The client authenticates the host supervisor using TLS 1.3 and the exact
+per-run certificate SHA256 pin before sending command bytes. The ephemeral
+private key and certificate are generated in host anonymous memory files using
+custody-checked system OpenSSL; private descriptors close before engine launch.
+The dedicated supervisor and transport client clear only ambient OpenSSL and
+key-log overrides before initializing crypto. The captured model/tool environment
+retains those values; explicit TLS contexts also disable key logging.
+Engine ownership still uses live PIDFD, kernel peer credentials, namespace,
+start time and ancestry; client authentication does not depend on PIDFD inode
+uniqueness. Unsupported namespace, TLS or trusted-binary capabilities refuse
+before provider dispatch, without a plaintext fallback.
+Sealed Linux memfd byte snapshots of the native launcher and existing client are mounted read-only in
 both engine and sibling capsules, including against writable hardlink aliases.
 Only the trusted transport client uses Python isolated startup; normal model
 and tool environments retain their existing configuration.
