@@ -204,6 +204,11 @@ successor can open in a browser from anywhere:
 - For work that is not yet pushed, say so and give the intended GitHub URL
   (branch or PR) once it lands. Do not invent a `main` URL for unpushed work.
 
+   The prompt must also instruct the new session to act only as a coordinator
+   and spin up an individual subagent to tackle each of the phases, parallelize
+   work as much as possible (for things that are not dependent on previous
+   phases), and see the entire plan through to the end on its own.
+
 ## Closing report (plain English, one message)
 
 ```md

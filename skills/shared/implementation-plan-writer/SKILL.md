@@ -86,6 +86,12 @@ thin plan costs a whole session of rediscovery and a wrong build.
    - Where a step is genuinely a judgment call, say so and give the criteria.
    Group steps into **phases** when the work is large enough that a session
    would run out of context; mark the natural cut points (see `fresh-session`).
+   Write each phase as a **self-contained dispatch unit** a cold subagent can
+   execute without the coordinator's chat: its own target files, verification
+   gate, and done criteria. At the top of the plan, give a **phase dependency
+   map** — which phases must run first, and which can run in parallel — so a
+   coordinator can spin up one subagent per phase and parallelize everything
+   that is not dependent on previous phases.
 10. **Tests required** — the specific unit tests to add for the new code, and
     the existing suite/command that must stay green. Never "add tests."
 11. **Constraints, standing rules, and gotchas in force** — branch policy, DB
@@ -116,6 +122,8 @@ could always be more detailed" is NOT an item on this list.
       without reading the planning chat.
 - [ ] Rejected approaches and failed attempts are written down, with why.
 - [ ] Every step names concrete files/functions and has a verification gate.
+- [ ] Multi-phase plans mark each phase as a self-contained dispatch unit and
+      include a phase dependency map (what runs first, what can run in parallel).
 - [ ] Trust-boundary work carries an **adversarial-cases table** — every
       external input × its hostile case × the test that proves it, every row
       naming a test.
@@ -189,7 +197,9 @@ When asked whether the plan is comprehensive/detailed enough:
 - In a concurrently-edited checkout, stage only your own hunks.
 - For multi-phase work, mark the context cut points and instruct the implementer
   to **re-read the downstream phases before starting each one** (drift check);
-  pair with the `fresh-session` skill at each cut.
+  pair with the `fresh-session` skill at each cut. Structure phases so a
+  coordinator session can dispatch one subagent per phase and parallelize
+  independent phases; each phase must be executable cold from the plan alone.
 - **Every newly created plan must be registered in the handoff system.** Create
   your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file and put a
   direct relative Markdown link to the plan in it. Put a direct relative link
