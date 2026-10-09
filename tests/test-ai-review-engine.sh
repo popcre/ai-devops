@@ -984,7 +984,7 @@ cat <<'JSON'
 {"type":"text","part":{"text":"## Verdict\nAPPROVE"}}
 JSON
 EOF
-chmod +x "$STUB_OC"
+chmod 0700 "$STUB_OC"
 
 DS_REPORT="$TMP/ds-stub-report.md"
 set +e

@@ -313,6 +313,12 @@ reviewer_credit_prepare(){
 }
 reviewer_credit_run(){
   local provider="$1" output="$2" stderr="$3"; shift 3
+  local -a native_review=()
+  if [ "${1:-}" = --native-deepseek-review ]; then
+    [ "$provider" = deepseek ] && [ "${AI_REVIEW_RUNNER_CORE:-}" = review-lifecycle-core/1 ] && [ "${DOOR_MODE:-}" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ] || return 2
+    [ "$#" -ge 4 ] || return 2
+    native_review=(--native-deepseek-review "$2" "$3"); shift 3
+  fi
   [ "${1:-}" != -- ] || shift
   local python supervisor marker="$output.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json" rc=0 arg command_bin child received='' term_trap int_trap hup_trap
   [ -n "${REVIEWER_CREDIT_PYTHON:-}" ] || reviewer_credit_prepare || return 1
@@ -352,8 +358,10 @@ reviewer_credit_run(){
     done
     child_command=("$shell_launcher" --noprofile --norc -c "exec $shell_command")
   fi
+  # Only the managed native DeepSeek door requests sibling tool capsules.
+  # Other providers and implementation retain their original launch routes.
   term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
-  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
+  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" "${native_review[@]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
   trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
   trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
   trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP

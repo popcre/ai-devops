@@ -111,6 +111,7 @@ tools/lib/task-gates.sh|reviewer-safety
 config/task-gates.json|reviewer-safety
 config/review-action-profiles.json|reviewer-safety
 tools/review_action_profile.py|reviewer-safety
+bin/ai-process-supervisor|reviewer-safety
 services/api/Dockerfile|deployment
 infra/main.tf|infrastructure
 db/migrations/001_init.sql|shared-db

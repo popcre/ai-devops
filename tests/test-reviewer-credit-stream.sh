@@ -46,3 +46,19 @@ cmp -s "$TASK_TMP/expected-argv" "$TASK_TMP/actual-argv"
 [ "$(cat "$TASK_TMP/argv-out")" = fixture-header ]
 [ ! -e "$TASK_TMP/should-not-run" ]
 printf 'native supervised shebang preserves literal argv and stdin: PASS\n'
+
+# Generic provider and implementation routes remain on the host. Only the
+# actual managed DeepSeek native door can request the new sibling boundary.
+if [ "$(uname -s)" = Linux ]; then
+  AI_REVIEW_VIA_RUNNER=1 DOOR_MODE=review reviewer_credit_run deepseek \
+    "$TASK_TMP/ordinary-out" "$TASK_TMP/ordinary-err" -- "$PYTHON" \
+    -c 'import os;assert os.getpid()>2;print("ordinary-host-route")' \
+    > "$TASK_TMP/ordinary-out" 2> "$TASK_TMP/ordinary-err"
+  [ "$(cat "$TASK_TMP/ordinary-out")" = ordinary-host-route ]
+  AI_REVIEW_VIA_RUNNER=1 DOOR_MODE=implement reviewer_credit_run deepseek \
+    "$TASK_TMP/implementation-out" "$TASK_TMP/implementation-err" -- "$PYTHON" \
+    -c 'import os;assert os.getpid()>2;print("implementation-host-route")' \
+    > "$TASK_TMP/implementation-out" 2> "$TASK_TMP/implementation-err"
+  [ "$(cat "$TASK_TMP/implementation-out")" = implementation-host-route ]
+  printf 'non-native provider and implementation routes preserved: PASS\n'
+fi

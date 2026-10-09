@@ -391,6 +391,10 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/ai-process-supervisor",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "tools/lib/task-gates.sh",
           "class": "reviewer-safety"
         },

@@ -12,6 +12,32 @@ see [`architecture.md`](architecture.md); for the canonical guide see
   scripts).
 - Optional: `shellcheck` for linting (`sudo apt-get install -y shellcheck`).
 
+Governed Linux DeepSeek/OpenCode reviews require Bubblewrap and working
+user/PID namespaces. The existing host credit supervisor probes the actual
+boundary only after verifying a root-owned native Bubblewrap executable and
+root-owned, non-writable resolved ancestors; PATH-shadowed substitutes refuse.
+The probe runs before provider dispatch. Engine plugins, language servers and custom
+tools remain inside the engine capsule; native Bash commands use separate
+host-created sibling capsules, preserving continuation after their own shell
+exits. All capsules have private process IDs and no effective capabilities.
+Kernel peer credentials, live engine identity and ancestry bind the per-run
+socket; commands cannot select executables, environment, mounts or host PIDs.
+The client verifies the kernel's supervisor peer PIDFD before sending commands;
+unsupported kernels refuse before provider dispatch. Sealed Linux memfd byte
+snapshots of the native launcher and existing client are mounted read-only in
+both engine and sibling capsules, including against writable hardlink aliases.
+Only the trusted transport client uses Python isolated startup; normal model
+and tool environments retain their existing configuration.
+Binary
+stdout/stderr and actual tool exit codes stream without response files.
+Credit refusal, timeout, cancellation, engine exit and client disconnect close
+admission and reap all owned tool groups. Direct Bubblewrap children also die
+with the host supervisor. Filesystem, networking, builds and tests preserve the
+existing review route. Other providers, Windows and implementation retain their
+existing launch and sandbox behavior; no machine policy is changed.
+This is process containment, not a general host filesystem sandbox. Unrestricted
+same-user host processes remain outside this namespace threat boundary.
+
 ## Local setup
 
 ```bash
