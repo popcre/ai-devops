@@ -260,8 +260,11 @@ for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway t
 done
 if grep -Fq '$McpServerCatalog["recall-ai"]' bin/setup-machine.ps1 &&
    grep -Fq '"oracle"              = @("trigger", "recall-ai", "vercel")' bin/setup-machine.ps1 &&
-   grep -Fq 'RECALL_AI_TOKEN=op://vibe_coding/recall-ai MCP/password' config/mcp.env.example; then
-  ok "Recall.ai is Oracle-scoped and uses a managed secret reference"
+   grep -Fq 'RECALL_AI_TOKEN=op://vibe_coding/recall-ai MCP/password' config/mcp.env.example &&
+   grep -Fq '"recall-ai": {"command": remote' bin/setup-secrets.sh &&
+   grep -Fq 'recall-ai\ MCP/password' bin/setup-secrets.sh &&
+   grep -Fq 'RECALL_AI_TOKEN' bin/setup-secrets.sh; then
+  ok "Recall.ai is Oracle-scoped on Windows and Linux with a managed secret reference"
 else bad "Recall.ai must be scoped to Oracle"; fi
 if grep -Fq '"oracle"              = @("trigger", "recall-ai", "vercel")' bin/setup-machine.ps1 &&
    grep -A3 -F '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 | grep -Fq 'type = "http"' &&

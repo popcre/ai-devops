@@ -364,7 +364,7 @@ _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
 case "\$REF" in
-  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) ;;
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token|op://vibe_coding/recall-ai\ MCP/password) ;;
   *) echo "ai-devops: unmanaged remote MCP reference — not starting \$URL" >&2; exit 1 ;;
 esac
 # Resolve at launch even if the parent process still carries an older token.
@@ -378,7 +378,7 @@ TOK="\$(_aidev_flock op read "\$REF")" || {
 }
 MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"
 export MCP_REMOTE_AUTH_HEADER
-unset TOK DEVOPS_MCP_TOKEN NAS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN
+unset TOK DEVOPS_MCP_TOKEN NAS_MCP_TOKEN RECALL_AI_TOKEN OP_SERVICE_ACCOUNT_TOKEN
 exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
@@ -456,6 +456,9 @@ servers = {
     "synology-monitor": {"command": remote, "args": [
         "https://nas-mcp.designflow.app/mcp",
         "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"]},
+    "recall-ai": {"command": remote, "args": [
+        "https://us-east-1.recall.ai/mcp",
+        "op://vibe_coding/recall-ai MCP/password", "--transport", "http-first"]},
 
     # no secret at all. railway authenticates via mcp-remote's browser OAuth
     # flow, so it must NOT go through the remote launcher (that would force a
