@@ -2694,6 +2694,10 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
       compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null && continue   # a session is starting
       [ "$(stat -c %Y "$d" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
       [ "$(stat -c %Y "$d/AI-REVIEW-SANDBOX.md" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
+      # Only an explicit "no live owner" (exit 3) lets prune continue; a live
+      # owner (0) or an older sandbox tool without the command keeps it.
+      _owner_rc=0; "$SANDBOX_BIN" has-live-owner "$d" >/dev/null 2>&1 || _owner_rc=$?
+      [ "$_owner_rc" = 3 ] || continue
       sandbox_build_claim "$d" || continue   # being built right now
       # Re-check under the build lock: a session that locked or recorded this name since wins.
       if ! referenced="$(sandbox_references)"; then

@@ -73,7 +73,7 @@
 
 set -euo pipefail
 
-VERSION="1.7.0"
+VERSION="1.8.0"
 # Parameter expansion instead of a dirname process: this program starts
 # hundreds of times per review suite, and each process is slow on Windows.
 _self_dir="${BASH_SOURCE[0]}"; case "$_self_dir" in */*) _self_dir="${_self_dir%/*}" ;; *) _self_dir=. ;; esac
@@ -171,6 +171,69 @@ retain_sandbox_packets() { # retain_sandbox_packets PHYSICAL
   return $rc
 }
 
+# OWNER LEASES: a concurrent review's front-door sweep deleted a live GLM pool
+# snapshot on Windows machine 916 (2026-10-08) because age alone cannot tell a
+# killed wrapper's orphan from a live run that simply outlasted the orphan age.
+# Every create/bind therefore records a lease BESIDE the snapshot (never inside
+# it: the snapshot digest must not move): SNAPSHOT.leases/<pid> holding that
+# process's start time. The sweep skips any snapshot with a live lease.
+# Liveness reads /proc (Linux and the Git Bash/MSYS runtime both expose
+# /proc/<pid>/stat for their own PIDs) with kill -0 as the fallback, and the
+# recorded start time defeats PID reuse. The owner is AI_REVIEW_SANDBOX_OWNER_PID
+# when a caller names it, else this program's parent plus that parent's parent,
+# so a $(...) subshell parent still resolves to the wrapper. PID 1 (MSYS's
+# stand-in for a native Windows parent) is never leased; an unleased snapshot
+# keeps the plain age rule.
+proc_field() { # PID INDEX -> field INDEX (0 = state) after the comm of /proc/PID/stat
+  local stat="" rest
+  local -a f=()
+  [ -r "/proc/$1/stat" ] || return 1
+  IFS= read -r stat < "/proc/$1/stat" 2>/dev/null || [ -n "$stat" ] || return 1
+  rest="${stat##*) }"
+  read -r -a f <<< "$rest"
+  [[ "${f[$2]:-}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "${f[$2]}"
+}
+proc_start() { proc_field "$1" 19; }   # field 22: starttime
+proc_parent() { proc_field "$1" 1; }   # field 4: ppid
+pid_alive() { # PID TOKEN -> 0 when that exact process still runs
+  local pid="$1" token="$2" now
+  [ -e "/proc/$pid" ] || kill -0 "$pid" 2>/dev/null || return 1
+  [ "$token" != - ] || return 0
+  now="$(proc_start "$pid")" || return 0
+  [ "$now" = "$token" ]
+}
+record_lease() { # record_lease SNAPSHOT -- best effort, never fatal
+  local stage="$1" pid token dir
+  local -a pids=()
+  if [[ "${AI_REVIEW_SANDBOX_OWNER_PID:-}" =~ ^[0-9]+$ ]]; then pids=("$AI_REVIEW_SANDBOX_OWNER_PID")
+  else
+    pids=("$PPID")
+    if pid="$(proc_parent "$PPID" 2>/dev/null)"; then pids+=("$pid"); fi
+  fi
+  dir="$stage.leases"
+  mkdir -p -- "$dir" 2>/dev/null || { warn "could not record an owner lease for $stage"; return 0; }
+  for pid in "${pids[@]}"; do
+    [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] || continue
+    token="$(proc_start "$pid" 2>/dev/null)" || token=-
+    printf '%s\n' "$token" > "$dir/$pid" 2>/dev/null || warn "could not record an owner lease for $stage"
+  done
+  return 0
+}
+has_live_owner() { # SNAPSHOT -> 0 when any recorded owner is alive; stale leases are dropped
+  local dir="$1.leases" f pid token live=1
+  [ -d "$dir" ] || return 1
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pid="${f##*/}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    token=""; IFS= read -r token < "$f" 2>/dev/null || true
+    [ -n "$token" ] || token=-
+    if pid_alive "$pid" "$token"; then live=0; else rm -f -- "$f" 2>/dev/null || true; fi
+  done
+  return "$live"
+}
+
 remove_sandbox() {
   local d="$1" physical
   [ -e "$d" ] || return 0
@@ -200,6 +263,7 @@ remove_sandbox() {
   # them behind after any deletion path leaks the original source pointer
   # (exact-head review, 2026-09-25).
   rm -f -- "$physical.source.json" "$physical.owners.json" 2>/dev/null || warn "could not remove sidecars for $physical"
+  rm -rf -- "$physical.leases" 2>/dev/null || true
   warn "deleted review snapshot $physical"
 }
 
@@ -805,7 +869,9 @@ cmd_ensure() {
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
   if [ -f "$root/$MARKER" ] && jq -e '.mode == "code-only"' "$root/$MARKER" >/dev/null 2>&1; then
     [ "$force_copy" = 1 ] || { cmd_verify_code_only "$root"; printf '%s' "$root"; return 0; }
-    cmd_clone_code_only "$root" "$tag"
+    stage="$(cmd_clone_code_only "$root" "$tag")" || return 1
+    record_lease "$stage"
+    printf '%s' "$stage"
     return 0
   fi
   require_public_source "$root"
@@ -813,6 +879,7 @@ cmd_ensure() {
   mkdir -p "$SANDBOX_DIR"
   stage="$(sandbox_path "$root" "$tag")"
   create_or_refresh "$root" "$tag" "$stage"
+  record_lease "$stage"   # after the rebuild: a refresh replaces the snapshot and its leases
   printf '%s' "$stage"
 }
 
@@ -886,6 +953,7 @@ cmd_ensure_code_only() {
   mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
   "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
     || die "published code-only export failed verification."
+  record_lease "$stage"
   printf '%s' "$stage"
 }
 
@@ -938,7 +1006,7 @@ cmd_with_copy() { # with-copy ROOT TAG -- COMMAND [ARGS...]
   trap with_copy_cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  stage="$(cmd_ensure "$root" "$tag" 1)" || die "could not create a disposable review snapshot for $root"
+  stage="$(AI_REVIEW_SANDBOX_OWNER_PID=$$ cmd_ensure "$root" "$tag" 1)" || die "could not create a disposable review snapshot for $root"
   WITH_COPY_SNAP="$stage" WITH_COPY_ROOT="$root" WITH_COPY_TAG="$tag"
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
     warn "AI_KEEP_SANDBOX=1: snapshot kept at $stage"
@@ -971,6 +1039,7 @@ cmd_refresh_copy() { # refresh an exact, already-recorded directory for director
   grep -Fqx "Snapshot tag: $tag" "$stage/AI-REVIEW-SANDBOX.md" 2>/dev/null \
     || die "refusing to refresh $stage: its recorded snapshot tag does not match '$tag'."
   create_or_refresh "$root" "$tag" "$stage"
+  record_lease "$stage"   # after the rebuild: a refresh replaces the snapshot and its leases
   printf '%s' "$stage"
 }
 
@@ -1071,6 +1140,8 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
       mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
       age=$(( now - mtime ))
       [ "$age" -gt "$max_age" ] || continue
+      # A live owning run keeps its snapshot however old the marker is.
+      if has_live_owner "$entry"; then continue; fi
       [ "$examined" -lt "$max_removals" ] || {
         warn "$max_removals orphan examination cap reached; remaining orphans wait for the next parent run"
         return 0
@@ -1096,6 +1167,7 @@ case "${1:-}" in
   refresh-copy) shift; cmd_refresh_copy "$@" ;;
   with-copy)   shift; cmd_with_copy "$@" ;;
   sweep-orphans) shift; cmd_sweep_orphans "$@" ;;
+  has-live-owner) shift; has_live_owner "${1:?usage: has-live-owner <snapshot>}" || exit 3 ;;  # 0 live, 3 no live owner
   remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
@@ -1103,5 +1175,5 @@ case "${1:-}" in
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|ensure-code-only|verify-code-only|remove-code-only|assert-public|is-private|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|has-live-owner|ensure-code-only|verify-code-only|remove-code-only|assert-public|is-private|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac
