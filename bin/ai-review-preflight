@@ -569,7 +569,7 @@ classify_failure() { # OUTPUT
 
 explain_failure() {
   case "$1" in
-    allowance-exhausted) printf 'Quarantine this provider. Do not assign another review until the cooling period expires.\n' ;;
+    allowance-exhausted) printf 'Quarantine this provider. Do not assign another review until the cooling period expires; one successful ai-review-preflight check <provider> <repo> --live also clears it.\n' ;;
     out-of-credit) printf 'The provider account has run out of paid credit. Tell Albert in this same reply which provider needs credits and where to add them, then rotate to another reviewer. After credits are added, run: ai-review-preflight check <provider> <repo> --live (one successful live check clears it; ai-review-preflight clear <provider> also works)\n' ;;
     broken-snapshot) printf 'Rebuild once with ai-review-sandbox. If it still fails, quarantine the provider; never use a raw linked worktree.\n' ;;
     empty-assistant-turns) printf 'Stop within 2-3 minutes and report no usable answer. Do not keep retrying empty turns.\n' ;;
@@ -928,21 +928,29 @@ check_provider() { # PROVIDER REPO LIVE BASE
 ' "$provider" "${wrapper##*/}" "$wrapper" >&2
   # A credit/capacity quarantine has no other exit once the provider recovers:
   # an explicit --live check makes exactly one probe, and only its success
-  # clears that same record (#1544 item B). No loop, no retry for this path.
-  local credit_record=""
+  # clears the same records it tested (#1544 item B). No loop, no retry here.
+  # GLM has no live doctor, so its credit hold stays with ai-review-credit-watch.
+  local credit_global="" credit_hold_id="" credit_probe=0 credit_global_ok=0
   if active_quarantine "$provider"; then
     case "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // empty')" in
-      out-of-credit|allowance-exhausted)
-        if [ "$live" = 1 ] && [ "$provider" != glm ]; then credit_record="$ACTIVE_QUARANTINE"; fi ;;
+      out-of-credit|allowance-exhausted) credit_global="$ACTIVE_QUARANTINE"; credit_global_ok=1 ;;
     esac
-    if [ -z "$credit_record" ]; then
+    if [ "$credit_global_ok" != 1 ] || [ "$live" != 1 ] || [ "$provider" = glm ]; then
       printf '%s\n' "$ACTIVE_QUARANTINE" | jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' >&2
       return 3
     fi
-    note "ai-review-preflight: $provider is quarantined for $(printf '%s' "$credit_record" | jq -r .failure_class); making one live probe to see whether it has recovered."
+    credit_probe=1
   fi
   local capacity_hold
   capacity_hold="$(capacity_admission "$provider")" || return 1
+  # Only a paid-balance hold: an allowance hold already releases at its own
+  # reset through the scheduled reset requalification.
+  if [ "$capacity_hold" != null ] && [ "$live" = 1 ] && [ "$provider" != glm ] \
+    && [ "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" = out-of-credit ]; then
+    credit_hold_id="$(printf '%s' "$capacity_hold" | jq -r '.record_id // empty')"
+    [ -z "$credit_hold_id" ] || { credit_probe=1; capacity_hold=null; }
+  fi
+  [ "$credit_probe" = 0 ] || note "ai-review-preflight: $provider is held for credit/allowance; making one live probe to see whether it has recovered."
   if [ "$capacity_hold" != null ]; then
       local hold_reset hold_label
       hold_reset="$(printf '%s' "$capacity_hold" | jq -r '.reset_at // empty')"
@@ -1006,9 +1014,13 @@ check_provider() { # PROVIDER REPO LIVE BASE
     out="$(AI_GEMINI_CALLER=preflight timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
   fi
   # The credit-recovery probe is a single call: a timeout re-quarantines, never retries.
-  if [ -n "$credit_record" ] && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
-    set -e; quarantine "$provider" provider-timeout
-    printf 'ai-review-preflight: %s failed: provider-timeout\n' "$provider" >&2; return 1
+  if [ "$credit_probe" = 1 ] && [ "$rc" -ne 0 ]; then
+    # A failed or timed-out recovery probe proves nothing; the stronger credit
+    # hold stays exactly as it was (never downgraded to a shorter class).
+    set -e
+    printf 'ai-review-preflight: %s recovery probe failed (rc=%s); its credit hold stays in place.\n' "$provider" "$rc" >&2
+    printf '%s\n' "$out" | tail -12 >&2
+    return 1
   fi
   # A transient liveness timeout gets one bounded retry before it is recorded.
   # The retry is part of the timeout path: a timeout result alone never means
@@ -1045,16 +1057,6 @@ check_provider() { # PROVIDER REPO LIVE BASE
     printf '%s\n' "$out" | tail -12 >&2
     return 1
   fi
-  if [ -n "$credit_record" ]; then
-    # Clear only if the record is still the one this probe tested.
-    if active_quarantine "$provider" && [ "$ACTIVE_QUARANTINE" = "$credit_record" ]; then
-      admission_store clear "$provider" >/dev/null
-      note "ai-review-preflight: $provider live probe succeeded; cleared its $(printf '%s' "$credit_record" | jq -r .failure_class) quarantine."
-    else
-      note "ai-review-preflight: $provider quarantine changed during the probe; left the newer record in place."
-      return 3
-    fi
-  fi
   # Reject unhealthy providers before preparing evidence for a review they
   # cannot receive. A successful doctor still cannot authorize dispatch until
   # the complete isolated packet has been built and verified below.
@@ -1067,6 +1069,14 @@ check_provider() { # PROVIDER REPO LIVE BASE
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
   "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  if [ "$credit_probe" = 1 ]; then
+    if [ "$(admission_store clear-credit "$provider" --expect-record "$credit_global" --run-id "$credit_hold_id" | jq -r '.cleared // false')" = credit ]; then
+      note "ai-review-preflight: $provider live probe succeeded; cleared its credit/allowance hold (scoped backoffs kept)."
+    else
+      note "ai-review-preflight: $provider hold changed during the probe; left the newer record in place."
+      return 3
+    fi
+  fi
   printf 'PASS provider=%s repository=%s packet=verified health=ok allowance=%s\n' \
     "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
 }
