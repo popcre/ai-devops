@@ -58,23 +58,58 @@ function killTree(signal) {
   if (!child || child.pid == null) return
   const pid = child.pid
   try {
-    if (isWin) {
-      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      }).on('error', () => {})
-    } else {
-      // Same process group as us (no detached): a harness group kill takes the
-      // helper with us. Walk descendants so npx -> npm -> node all die.
-      killDescendants(pid, signal)
-      try {
-        process.kill(pid, signal)
-      } catch {
-        /* already gone */
-      }
+    // Windows shutdown owns its native teardown acknowledgement separately.
+    // Same process group as us (no detached): a harness group kill takes the
+    // helper with us. Walk descendants so npx -> npm -> node all die.
+    killDescendants(pid, signal)
+    try {
+      process.kill(pid, signal)
+    } catch {
+      /* already gone */
     }
   } catch {
     /* already gone */
+  }
+}
+
+function shutdownWindows(code) {
+  // Never submit a stale PID after this managed child has already exited.
+  if (!child || child.pid == null || child.exitCode != null || child.signalCode != null) {
+    process.exit(code)
+    return
+  }
+  let helperStopped = false, treeStopped = false, finished = false, killer = null
+  const finish = (failure) => {
+    if (finished) return
+    if (!failure && (!helperStopped || !treeStopped)) return
+    finished = true
+    clearTimeout(force)
+    if (failure) {
+      // Only the teardown subprocess we own may be stopped here. Never replay
+      // taskkill against a PID whose original helper may now be gone/reused.
+      if (killer && killer.exitCode == null && killer.signalCode == null) {
+        try { killer.kill('SIGKILL') } catch { /* already gone */ }
+      }
+      process.stderr.write(`mcp-session-guard: Windows helper teardown unconfirmed: ${failure}\n`)
+    }
+    process.exit(failure ? 1 : code)
+  }
+  // Retain the existing absolute two-second shutdown bound; it starts before
+  // native teardown and never restarts when the direct .cmd child exits.
+  const force = setTimeout(() => finish('shutdown deadline reached'), 2000)
+  if (typeof force.unref === 'function') force.unref()
+  child.once('exit', () => { helperStopped = true; finish() })
+  try {
+    killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore', windowsHide: true,
+    })
+    killer.on('error', () => finish('native teardown could not start'))
+    killer.once('exit', (status) => {
+      if (status !== 0) finish(`native teardown exited ${status}`)
+      else { treeStopped = true; finish() }
+    })
+  } catch {
+    finish('native teardown could not start')
   }
 }
 
@@ -121,6 +156,10 @@ function shutdown(reason, code) {
   if (shuttingDown) return
   shuttingDown = true
   clearInterval(orphanTimer)
+  if (isWin) {
+    shutdownWindows(code)
+    return
+  }
   killTree('SIGTERM')
   const force = setTimeout(() => {
     killTree('SIGKILL')
@@ -174,6 +213,9 @@ child.on('exit', (code, signal) => {
     process.stderr.write(`mcp-session-guard: child exit code=${code} signal=${signal}\n`)
   }
   if (shuttingDown) {
+    // The Windows direct child may exit before taskkill finishes its tree.
+    // Keep ownership until shutdownWindows confirms both outcomes.
+    if (isWin) return
     process.exit(code ?? 143)
     return
   }

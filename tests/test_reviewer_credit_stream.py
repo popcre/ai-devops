@@ -17,6 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from reviewer_credit_stream import LIMIT, Monitor, Reader, error_payload, refusal, qwen_monthly_reset
+import reviewer_admission
 
 
 class CreditStreamTests(unittest.TestCase):
@@ -124,6 +125,40 @@ class CreditStreamTests(unittest.TestCase):
         self.assertIsNone(qwen_monthly_reset(message("2026-01-01 16:00:00"), datetime.datetime(2026,2,1,tzinfo=utc)))
         self.assertIsNone(qwen_monthly_reset(message("16:00:00"), datetime.datetime(2026,2,1,tzinfo=utc)))
         self.assertIsNone(qwen_monthly_reset("The code quotes " + message("03-01 16:00:00"), datetime.datetime(2026,2,1,tzinfo=utc)))
+
+    def test_qwen_native_quota_trailer_receipt_to_hold(self):
+        # Qwen 0.24.5 formatQuotaExhaustedMessage adds this exact trailer.
+        at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=25)).replace(microsecond=0)
+        message = ("Quota exhausted: Your token-plan 1-month quota has been exhausted. "
+                   f"The quota will reset at {at.strftime('%m-%d %H:%M:%S')} UTC.")
+        trailer = "\n\nPlease retry after the reset time, or switch to another API key / auth method."
+        terminal = {"type": "result", "subtype": "error_during_execution",
+                    "is_error": True, "error": {"message": message + trailer}}
+        self.out.write_text(json.dumps(terminal) + "\n")
+        self.assertTrue(Monitor("qwen", str(self.out), str(self.err), str(self.marker)).check())
+        receipt = json.loads(self.marker.read_text())
+        expected = at.isoformat().replace("+00:00", "Z")
+        self.assertEqual(receipt.get("reset_at"), expected)
+        holds = self.base / "holds"
+        with mock.patch("sys.stdout"):
+            self.assertEqual(reviewer_admission.credit(holds, "qwen", [], True, 0, [self.marker]), 0)
+        hold = reviewer_admission.load(holds, "qwen")["capacity_hold"]
+        self.assertEqual(hold["reset_at"], expected)
+        self.assertTrue(hold["record_id"])
+        # Subscription evidence must preserve a stronger paid-balance hold.
+        state = reviewer_admission.load(holds, "qwen")
+        state["capacity_hold"]["failure_class"] = "out-of-credit"
+        state["capacity_hold"]["reset_at"] = None
+        reviewer_admission.publish(holds, "qwen", state)
+        with mock.patch("sys.stdout"):
+            reviewer_admission.credit(holds, "qwen", [], True, 0, [self.marker])
+        paid = reviewer_admission.load(holds, "qwen")["capacity_hold"]
+        self.assertEqual(paid["failure_class"], "out-of-credit")
+        self.assertIsNone(paid["reset_at"])
+        for extra in (trailer + " quoted", "\nPlease retry later", trailer.replace("API key", "key")):
+            self.assertIsNone(qwen_monthly_reset(message + extra))
+        terminal["type"] = "assistant"
+        self.assertIsNone(error_payload("qwen", terminal))
 
     def test_stderr_quoted_json_without_provider_error_ignored(self):
         self.err.write_text('"message": "out of credits"\n')

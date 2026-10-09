@@ -760,7 +760,8 @@ requalify_provider() { # PROVIDER
   file="$(qualification_file "$provider")"
   marker="$(requalify_expected_file "$provider")"
   # Keep a capacity-deferred qualification quarantined until its own qualified
-  # allowance reset. In particular, an ordinary update must not erase this
+  # allowance reset (or indefinitely when its reset is unknown). In particular,
+  # an ordinary update must not erase this
   # receipt and submit the same known-quota canary again. Refresh only the
   # deferred qualification intent; changed bytes remain unqualified until the
   # existing due-reset lane qualifies this exact current subject.
@@ -773,14 +774,14 @@ requalify_provider() { # PROVIDER
        (.capacity_deferral.subject.identity_sha256|type)=="string" and
        (.capacity_deferral.subject.identity_sha256|test("^[0-9a-f]{64}$")) and
        ($hold.provider==$p and $hold.failure_class=="allowance-exhausted" and
-        ($hold.reset_at|type)=="string" and $hold.reset_at!="" and
+        ($hold.reset_at==null or (($hold.reset_at|type)=="string" and $hold.reset_at!="")) and
         ($hold.record_id|type)=="string" and $hold.record_id!="" and
         $hold.record_id==.capacity_deferral.capacity_record_id)' "$marker" >/dev/null 2>&1; then
       attempted_subject="$(qualification_subject "$provider")" || return 1
       if [ "$(jq -c '.capacity_deferral.subject' "$marker")" != "$attempted_subject" ]; then
         write_atomic "$marker" "$(jq --argjson subject "$attempted_subject" '.capacity_deferral.subject=$subject' "$marker")"
       fi
-      note "ai-review-preflight: $provider requalification remains deferred until its recorded allowance reset; no live canary submitted."
+      note "ai-review-preflight: $provider requalification remains deferred under its recorded allowance restriction; no live canary submitted."
       return 0
     fi
   fi

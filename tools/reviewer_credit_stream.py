@@ -28,6 +28,12 @@ def qwen_monthly_reset(message: str, observed: datetime.datetime | None = None) 
     frame = re.fullmatch(r"\[API Error: ([^\r\n]*)\]", message)
     if frame:
         message = frame.group(1)
+    # Qwen 0.24.5 formatQuotaExhaustedMessage adds only this fixed advice
+    # trailer to the provider refusal. Keep the core grammar fully anchored;
+    # arbitrary following text must never become reset authority.
+    trailer = "\n\nPlease retry after the reset time, or switch to another API key / auth method."
+    if message.endswith(trailer):
+        message = message[:-len(trailer)]
     match = re.fullmatch(r"Quota exhausted: Your token-plan 1-month quota has been exhausted\. The quota will reset at ((?:\d{4}-)?\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\.", message)
     if not match:
         return None

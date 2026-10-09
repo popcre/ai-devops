@@ -268,7 +268,10 @@ git -C "$BASELINE_REPO" remote add origin https://github.com/example/timing-base
 # it, so the suite adapts to the machine instead of asserting the machine is
 # fast. budget()/poll_until() and the baseline cap live in the shared library.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+SOURCE_PROGRESS_BEFORE=0
+[ ! -f "$AI_REVIEW_SANDBOX_PROGRESS_FILE" ] || SOURCE_PROGRESS_BEFORE="$(wc -c < "$AI_REVIEW_SANDBOX_PROGRESS_FILE")"
 ai_test_measure_baseline bash -c 'cd "$1" && AI_GROK_WAIT_TIMEOUT=600 bash "$2" new timing-baseline --prompt x' _ "$BASELINE_REPO" "$SCRIPT"
+check "real baseline snapshot advances source-digest progress" "test \"\$(wc -c < '$AI_REVIEW_SANDBOX_PROGRESS_FILE')\" -gt '$SOURCE_PROGRESS_BEFORE'"
 BASELINE="$AI_TEST_BASELINE"
 
 # work_lock_labelled LABEL -> the newest work lock carrying that label.
@@ -456,7 +459,7 @@ echo hold > "$TMP/mode"
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
 poll_until_progress "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/int.err' '$TMP/int.out' '$TMP/hold-started'" \
+  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$AI_REVIEW_SANDBOX_PROGRESS_FILE' '$TMP/int.err' '$TMP/int.out' '$TMP/hold-started'" \
   "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || {
     printf '  fixture diagnostic: interrupt worker alive=%s\n' "$(kill -0 "$INT_PID" 2>/dev/null && printf yes || printf no)" >&2
     sed 's/^/  fixture stderr: /' "$TMP/int.err" >&2

@@ -448,9 +448,25 @@ LONG_PATH_A="$("$SCRIPT" path "$WT" "$LONG_TAG_A")"; LONG_PATH_B="$("$SCRIPT" pa
 check "long_tag_directory_name_is_bounded"    "test \"\$(basename '$LONG_PATH_A' | wc -c)\" -le 78"
 check "long_tags_with_shared_prefix_differ"   "test '$LONG_PATH_A' != '$LONG_PATH_B'"
 check "short_tag_directory_name_unchanged"    "basename \"\$('$SCRIPT' path '$WT' short-tag)\" | grep -Eq '^short-tag-[0-9a-f]{12}\$'"
-LONG_COPY="$("$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
+mkdir -p "$TMP/isolated-long-home"
+LONG_COPY="$(HOME="$TMP/isolated-long-home" "$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
 check "long_tag_copy_builds_and_records_full_tag" "test -f '$LONG_COPY/AI-REVIEW-SANDBOX.md' && grep -Fqx 'Snapshot tag: $LONG_TAG_A' '$LONG_COPY/AI-REVIEW-SANDBOX.md'"
+check "isolated_long_copy_keeps_bytes_and_reads_objects" "grep -qx long-path '$LONG_COPY/$LONG_REL' && HOME='$TMP/isolated-long-home' git -C '$LONG_COPY' show HEAD:a.txt | grep -qx base"
 check "long_tag_copy_removes_by_recorded_tag"     "'$SCRIPT' remove-recorded '$LONG_TAG_A' '$LONG_COPY' && test ! -e '$LONG_COPY'"
+
+# Keep false-source config on short paths: native source reads must remain
+# possible before the snapshot gets its own independent long-path support.
+FALSE_SOURCE="$TMP/short-source"
+git init -q "$FALSE_SOURCE"
+git -C "$FALSE_SOURCE" config user.email t@example.com
+git -C "$FALSE_SOURCE" config user.name Test
+printf 'short-file\n' > "$FALSE_SOURCE/a.txt"
+git -C "$FALSE_SOURCE" add a.txt
+git -C "$FALSE_SOURCE" commit -qm short-file
+git -C "$FALSE_SOURCE" config core.longpaths false
+FALSE_COPY="$(HOME="$TMP/isolated-long-home" "$SCRIPT" ensure-copy "$FALSE_SOURCE" source-false)"
+check "source_false_copy_keeps_bytes_and_reads_objects" "grep -qx short-file '$FALSE_COPY/a.txt' && HOME='$TMP/isolated-long-home' git -C '$FALSE_COPY' show HEAD:a.txt | grep -qx short-file"
+check "source_false_cannot_disable_owned_copy" "test \"\$(git -C '$FALSE_SOURCE' config --local --get core.longpaths)\" = false && test \"\$(HOME='$TMP/isolated-long-home' git -C '$FALSE_COPY' config --local --get core.longpaths)\" = true"
 
 # --- store-before-delete for packets inside a sandbox (#1111) -----------------
 # remove_sandbox must retain every managed packet before destroying the

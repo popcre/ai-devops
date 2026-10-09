@@ -376,6 +376,46 @@ printf '.ai/\n' >> "$STALE/.git/info/exclude"
 RECEIPT="$STALE/.ai/reviews/source-receipt.json"
 check "verified_packet_publishes_exact_receipt" "AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY' && jq -e --arg h \"\$(cat '$IDENTITY_PACKET/MANIFEST.sha256')\" '.packet_sha256==\$h and .schema_version==1' '$RECEIPT'"
 check "same_receipt_publication_is_idempotent" "AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+
+# Native jq may reject an existing long filename while Bash can open it.
+# Reject all filename operands here: packet JSON must enter through stdin.
+NATIVE_JQ_BIN="$TMP/native-limited-jq"; mkdir -p "$NATIVE_JQ_BIN"
+cat > "$NATIVE_JQ_BIN/jq" <<SHIM
+#!/usr/bin/env bash
+args=("\$@")
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --arg|--argjson) shift 3 ;;
+    --slurpfile|--rawfile) echo 'native fixture refuses file arguments' >&2; exit 2 ;;
+    *) if [ -f "\$1" ]; then echo 'native fixture refuses file arguments' >&2; exit 2; fi; shift ;;
+  esac
+done
+exec "$REAL_JQ" "\${args[@]}"
+SHIM
+chmod +x "$NATIVE_JQ_BIN/jq"
+check "native_limited_jq_reproduces_filename_refusal" "! '$NATIVE_JQ_BIN/jq' -e . '$IDENTITY'"
+NATIVE_PACKET="$(PATH="$NATIVE_JQ_BIN:$PATH" "$SCRIPT" build "$IDENTITY_SNAPSHOT" native-stdin --identity "$IDENTITY")"
+NATIVE_RECEIPT="$STALE/.ai/reviews/native-receipt.json"
+check "native_limited_jq_build_verify_and_receipt_succeed" "PATH='$NATIVE_JQ_BIN:$PATH' AI_REVIEW_SOURCE_RECEIPT_FILE='$NATIVE_RECEIPT' '$SCRIPT' verify '$NATIVE_PACKET' --identity '$IDENTITY' && jq -e --slurpfile id '$IDENTITY' '.identity==\$id[0]' '$NATIVE_RECEIPT'"
+NATIVE_CODE_SOURCE="$TMP/native-code-source"
+git init -q -b main "$NATIVE_CODE_SOURCE"
+git -C "$NATIVE_CODE_SOURCE" config user.name Test
+git -C "$NATIVE_CODE_SOURCE" config user.email t@example.com
+printf 'print("base")\n' > "$NATIVE_CODE_SOURCE/app.py"
+git -C "$NATIVE_CODE_SOURCE" add app.py; git -C "$NATIVE_CODE_SOURCE" commit -qm base
+printf 'print("changed")\n' > "$NATIVE_CODE_SOURCE/app.py"
+git -C "$NATIVE_CODE_SOURCE" add app.py; git -C "$NATIVE_CODE_SOURCE" commit -qm changed
+printf '["app.py"]\n' > "$TMP/native-code-paths.json"
+NATIVE_CODE_EXPORT="$(AI_REVIEW_SANDBOX_DIR="$TMP/native-code-sandboxes" "$REPO_ROOT/bin/ai-review-sandbox" ensure-code-only "$NATIVE_CODE_SOURCE" native-code --paths-file "$TMP/native-code-paths.json" --base HEAD~1)"
+PATH="$NATIVE_JQ_BIN:$PATH" "$SCRIPT" resolve "$NATIVE_CODE_EXPORT" --base HEAD~1 > "$TMP/native-code-identity.json"
+NATIVE_CODE_PACKET="$(PATH="$NATIVE_JQ_BIN:$PATH" "$SCRIPT" build "$NATIVE_CODE_EXPORT" native-code --identity "$TMP/native-code-identity.json")"
+check "native_limited_jq_code_only_resolve_build_verify_succeed" "PATH='$NATIVE_JQ_BIN:$PATH' '$SCRIPT' verify '$NATIVE_CODE_PACKET' --identity '$TMP/native-code-identity.json' && jq -e '.code_only.mode==\"code-only\"' '$TMP/native-code-identity.json'"
+printf '{malformed' > "$TMP/native-malformed-identity.json"
+check "native_limited_jq_still_refuses_malformed_identity" "! PATH='$NATIVE_JQ_BIN:$PATH' '$SCRIPT' verify '$NATIVE_PACKET' --identity '$TMP/native-malformed-identity.json'"
+jq '.head="0000000000000000000000000000000000000000"' "$IDENTITY" > "$TMP/native-changed-identity.json"
+check "native_limited_jq_still_refuses_changed_identity" "! PATH='$NATIVE_JQ_BIN:$PATH' '$SCRIPT' verify '$NATIVE_PACKET' --identity '$TMP/native-changed-identity.json'"
+printf '\ntampered\n' >> "$NATIVE_PACKET/MANIFEST.md"
+check "native_limited_jq_still_refuses_tampered_packet" "! PATH='$NATIVE_JQ_BIN:$PATH' '$SCRIPT' verify '$NATIVE_PACKET'"
 printf '{}' > "$STALE/.ai/reviews/conflicting-receipt.json"
 check "receipt_refuses_overwrite_of_other_evidence" "! AI_REVIEW_SOURCE_RECEIPT_FILE='$STALE/.ai/reviews/conflicting-receipt.json' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 check "receipt_cannot_escape_private_report_directory" "! AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/outside-receipt.json' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY' && test ! -e '$TMP/outside-receipt.json'"

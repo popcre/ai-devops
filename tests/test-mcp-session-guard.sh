@@ -41,6 +41,7 @@ ok() { echo "  ok $*"; CHECKS_PASSED=$((CHECKS_PASSED + 1)); }
 
 command -v "$NODE" >/dev/null 2>&1 || fail "node is required"
 [ -f "$GUARD" ] || fail "missing $GUARD"
+"$NODE" "$ROOT/tests/test-mcp-session-guard-shutdown.mjs"
 
 # Stand-in for an MCP server: records its pid tree and sleeps.
 # The grandchild hold is short-lived on purpose: it only needs to outlive the

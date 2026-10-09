@@ -172,7 +172,7 @@ _jq_crlf=0
 if [ "$(printf '{"v":"x"}' | jq -r .v 2>/dev/null)" = "$(printf 'x\r')" ]; then _jq_crlf=1; fi
 jqr() {
   local _v _rc=0
-  _v="$(jq -r "$@")" || _rc=$?
+  _v="$(jq -r "$1" < "$2")" || _rc=$?
   if [ "$_jq_crlf" = 1 ]; then _v="${_v%$'\r'}"; fi
   printf '%s' "$_v"
   return "$_rc"
@@ -409,7 +409,7 @@ resolve_base() { # resolve_base REPO [REQUESTED_REF]
 cmd_resolve() {
   local root want="" expected="" head merge digest code_only=0
   root="$(canon "${1:?resolve requires a repository}")"; shift
-  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$root/.ai-review-sandbox" >/dev/null 2>&1; then
+  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' < "$root/.ai-review-sandbox" >/dev/null 2>&1; then
     code_only=1
     "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$root" || die "code-only source export invalid."
   else
@@ -435,7 +435,7 @@ cmd_resolve() {
     --arg source_digest "$digest" --arg rule "$BASE_RULE" --arg requested_base "$want" \
     '{schema_version:1,repository:$repository,base:$base,head:$head,target:$target,target_ref:$target_ref,merge_base:$merge_base,source_digest:$source_digest,rule:$rule,requested_base:$requested_base}')"
   if [ "$code_only" = 1 ]; then
-    printf '%s' "$resolved" | jq --slurpfile marker "$root/.ai-review-sandbox" '. + {code_only:$marker[0]}'
+    { printf '%s\n' "$resolved"; cat "$root/.ai-review-sandbox"; } | jq -s '.[0] + {code_only:.[1]}'
   else
     printf '%s\n' "$resolved"
   fi
@@ -446,12 +446,12 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   validate_identity_schema "$file"
   source="$(jqr .repository "$file")"; head="$(jqr .head "$file")"
   base="$(jqr .base "$file")"; digest="$(jqr .source_digest "$file")"
-  if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
+  if jq -e '.code_only.mode == "code-only"' < "$file" >/dev/null 2>&1; then
     [ -n "$review" ] && [ -f "$source/.ai-review-sandbox" ] && [ -f "$review/.ai-review-sandbox" ] \
       || die "code-only source and review markers required."
-    local sealed; sealed="$(jq -Sc .code_only "$file")"
-    [ "$(jq -Sc . "$source/.ai-review-sandbox")" = "$sealed" ] \
-      && [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$sealed" ] \
+    local sealed; sealed="$(jq -Sc .code_only < "$file")"
+    [ "$(jq -Sc . < "$source/.ai-review-sandbox")" = "$sealed" ] \
+      && [ "$(jq -Sc . < "$review/.ai-review-sandbox")" = "$sealed" ] \
       || die "code-only marker and packet identity differ."
     "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$source" \
       --assert-head "$(jqr .code_only.original_head "$file")" \
@@ -459,7 +459,7 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$review" \
       --assert-head "$(jqr .code_only.original_head "$file")" \
       || die "code-only source or export changed."
-  elif [ -f "$source/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$source/.ai-review-sandbox" >/dev/null 2>&1; then
+  elif [ -f "$source/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' < "$source/.ai-review-sandbox" >/dev/null 2>&1; then
     die "code-only export lacks a sealed code-only packet identity."
   else
     "$SCRIPT_DIR/ai-review-sandbox" assert-public "$source" || die "ordinary private review identity refused."
@@ -500,7 +500,7 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
-    if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
+    if jq -e '.code_only.mode == "code-only"' < "$file" >/dev/null 2>&1; then
       review_source="$source"
     elif [ -f "$review/.ai-review-sandbox" ]; then
       review_source="$(head -1 "$review/.ai-review-sandbox")"
@@ -518,7 +518,7 @@ validate_identity_schema() { # validate the captured identity without consulting
   jq -e 'type=="object" and .schema_version==1 and
     ([.repository,.base,.head,.target,.target_ref,.merge_base,.source_digest,.rule,.requested_base] | all(type=="string")) and
     (.head|test("^[0-9a-f]{40}$")) and (.base|test("^[0-9a-f]{40}$")) and
-    (.source_digest|test("^[0-9a-f]{64}$"))' "$1" >/dev/null || die "invalid-source-identity"
+    (.source_digest|test("^[0-9a-f]{64}$"))' < "$1" >/dev/null || die "invalid-source-identity"
 }
 
 validate_retained_identity() { # validate sealed snapshot without trusting moved source
@@ -526,8 +526,8 @@ validate_retained_identity() { # validate sealed snapshot without trusting moved
   validate_identity_schema "$file"
   source="$(jqr .repository "$file")"; head="$(jqr .head "$file")"
   base="$(jqr .base "$file")"; digest="$(jqr .source_digest "$file")"
-  if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
-    [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$(jq -Sc .code_only "$file")" ] \
+  if jq -e '.code_only.mode == "code-only"' < "$file" >/dev/null 2>&1; then
+    [ "$(jq -Sc . < "$review/.ai-review-sandbox")" = "$(jq -Sc .code_only < "$file")" ] \
       || die "retained code-only marker mismatch"
     [ "$(git -C "$review" rev-parse HEAD)" = "$head" ] || die "snapshot-head-mismatch"
     [ "$($SCRIPT_DIR/ai-review-sandbox digest "$review")" = "$digest" ] || die "snapshot-digest-mismatch"
@@ -556,8 +556,8 @@ publish_receipt() { # publish_receipt PACKET HASH
   [ "$parent" = "$(canon "$source")/.ai/reviews" ] || die "source-receipt-outside-reports"
   git -C "$source" check-ignore --no-index -q -- .ai/reviews/ || die "source-receipt-reports-not-ignored"
   tmp="$(mktemp "$parent/.source-receipt.XXXXXX")" || die "source-receipt-unavailable"
-  jq -nS --slurpfile identity "$pkt/identity.json" --arg hash "$hash" \
-    '{schema_version:1,identity:$identity[0],packet_sha256:$hash}' > "$tmp" \
+  jq -sS --arg hash "$hash" \
+    '{schema_version:1,identity:.[0],packet_sha256:$hash}' < "$pkt/identity.json" > "$tmp" \
     || { rm -f "$tmp"; die "source-receipt-unavailable"; }
   if ! ln "$tmp" "$receipt" 2>/dev/null; then
     [ -f "$receipt" ] && [ ! -L "$receipt" ] && cmp -s "$tmp" "$receipt" \
@@ -614,11 +614,11 @@ cmd_build() {
   fi
 
   git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || die "$root is not a Git repository."
-  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$root/.ai-review-sandbox" >/dev/null 2>&1; then
+  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' < "$root/.ai-review-sandbox" >/dev/null 2>&1; then
     code_only=1
     [ -z "$OPT_TESTS" ] || die "code-only review refuses test output that could expose private evidence."
     if [ -n "$OPT_IDENTITY" ]; then
-      jq -e '.code_only.mode == "code-only"' "$OPT_IDENTITY" >/dev/null 2>&1 \
+      jq -e '.code_only.mode == "code-only"' < "$OPT_IDENTITY" >/dev/null 2>&1 \
         || die "code-only review identity lacks export attestation."
     fi
     [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || die "code-only review refuses original-source receipt routing."
@@ -1079,7 +1079,7 @@ cmd_verify() {
     root="$(head -1 "$pkt/$MARKER")"
     validate_identity "$pkt/identity.json" "$root"
     if [ -n "$identity" ]; then
-      [ "$(jq -Sc . "$identity")" = "$(jq -Sc . "$pkt/identity.json")" ] || die "packet-identity-mismatch"
+      [ "$(jq -Sc . < "$identity")" = "$(jq -Sc . < "$pkt/identity.json")" ] || die "packet-identity-mismatch"
     fi
     [ -s "$pkt/$MANIFEST" ] && [ -f "$pkt/$PATCH" ] || die "packet-evidence-missing"
     expected_patch="$(mktemp)"
