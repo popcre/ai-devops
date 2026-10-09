@@ -89,6 +89,11 @@ def summarize(directory):
     outcome_counts = collections.Counter()
     receipts = {}
     evidence = {}
+    local_observations = {}
+    local_counts = collections.Counter()
+    local_reasons = collections.Counter()
+    local_lower = []
+    local_upper = []
     evidence_counts = collections.Counter()
     evidence_gaps = collections.Counter()
     qualified_groups = collections.defaultdict(list)
@@ -150,6 +155,42 @@ def summarize(directory):
                             and row["event_kind"] != "unknown" and row["delivery_boundary"] == "terminal_report"
                             and row["clock_quality"] == "verified_bound" and row["latency_ms"] is not None):
                         qualified_latency.append(row["latency_ms"])
+                    continue
+                if row.get("schema") == 5:
+                    row = json.loads(line, object_pairs_hook=unique_object)
+                    if (type(row.get("schema")) is not int or set(row) != LOCAL_KEYS
+                            or row.get("measurement") != "local_workflow_observation"
+                            or row.get("caller") != "ai-pr-wait" or row.get("workflow") != "pr_wait"
+                            or not valid_workflow_id(row.get("workflow_id"))
+                            or row["workflow_id"] in local_observations
+                            or row.get("outcome") not in LOCAL_OUTCOMES
+                            or row.get("boundary") != "receipt_init_to_terminal_output"
+                            or row.get("clock_basis") not in LOCAL_CLOCK_BASES
+                            or row.get("source_verified") != "unknown"
+                            or row.get("acceptance") != "unknown"
+                            or row.get("unknown_reason") not in LOCAL_REASONS):
+                        raise ValueError("invalid local workflow observation")
+                    for field, upper in (("start_monotonic_ms", 9999999999999), ("end_monotonic_ms", 9999999999999),
+                                         ("duration_lower_ms", 604800020), ("duration_upper_ms", 604800020),
+                                         ("clock_error_bound_ms", 20)):
+                        value = row.get(field)
+                        if value is not None and (type(value) is not int or not 0 <= value <= upper):
+                            raise ValueError("invalid local observation number")
+                    reason = row["unknown_reason"]
+                    numeric = tuple(row[field] for field in ("start_monotonic_ms", "end_monotonic_ms", "duration_lower_ms", "duration_upper_ms", "clock_error_bound_ms"))
+                    if reason == "source_unknown":
+                        start, end, lower, upper, error = numeric
+                        if (row["clock_basis"] != "linux_boottime_centiseconds" or None in numeric
+                                or end < start or end - start > 604800000
+                                or error != 20 or lower != max(0, end - start - 20)
+                                or upper != end - start + 20):
+                            raise ValueError("invalid local observation interval")
+                        local_lower.append(lower); local_upper.append(upper)
+                    elif any(value is not None for value in numeric):
+                        raise ValueError("invalid unknown local observation")
+                    local_observations[row["workflow_id"]] = row
+                    local_counts[row["outcome"]] += 1
+                    local_reasons[reason] += 1
                     continue
                 if row.get("schema") == 2:
                     if (frozenset(row) not in COST_SHAPES
@@ -262,6 +303,12 @@ def summarize(directory):
             raise ValueError("workflow evidence and outcome disagree")
         if row["latency_ms"] is not None:
             qualified_groups[(row["event_kind"], row["delivery_boundary"], receipt[2])].append(row["latency_ms"])
+    for workflow_id, row in local_observations.items():
+        receipt = receipts.get(workflow_id)
+        if receipt is None:
+            raise ValueError("local observation has no outcome receipt")
+        if receipt[:2] != (row["caller"], row["workflow"]) or receipt[2] != row["outcome"]:
+            raise ValueError("local observation and outcome disagree")
     completed = sum(count for (_, _, outcome), count in outcome_counts.items() if outcome != "deadline")
     context_ordinals = {context: i + 1 for i, context in enumerate(sorted({key[0] for key in cost_windows}))}
     return {
@@ -280,6 +327,13 @@ def summarize(directory):
             for (context, reset_at), window in sorted(cost_windows.items())],
         "completed_workflow_receipts": completed,
         "workflow_evidence_records": len(evidence),
+        "local_workflow_observations": {
+            "count": len(local_observations),
+            "by_outcome": [{"outcome": outcome, "count": count} for outcome, count in sorted(local_counts.items())],
+            "reason_counts": [{"unknown_reason": reason, "count": count} for reason, count in sorted(local_reasons.items())],
+            "duration_interval_ms": {"min": min(local_lower) if local_lower else None,
+                                      "max": max(local_upper) if local_upper else None},
+        },
         "workflow_evidence": [{"event_kind": event, "unknown_reason": reason, "count": count}
                               for (event, reason), count in sorted(evidence_counts.items())],
         "workflow_evidence_gaps": dict(sorted(evidence_gaps.items())),
@@ -344,6 +398,12 @@ EVIDENCE_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow
                  "source_verified", "source_fingerprint_start", "source_fingerprint_end", "install_generation_binding",
                  "event_kind", "eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms", "delivery_boundary",
                  "clock_quality", "clock_error_bound_ms", "latency_ms", "unknown_reason"}
+LOCAL_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id", "outcome", "boundary", "clock_basis",
+              "start_monotonic_ms", "end_monotonic_ms", "duration_lower_ms", "duration_upper_ms", "clock_error_bound_ms",
+              "source_verified", "acceptance", "unknown_reason"}
+LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline"}
+LOCAL_CLOCK_BASES = {"linux_boottime_centiseconds", "unknown"}
+LOCAL_REASONS = {"source_unknown", "clock_unknown", "clock_negative", "delivery_unknown"}
 SOURCE_STATES = {"verified", "changed", "unknown"}
 EVENT_KINDS = {"pr_merged", "pr_closed", "check_completed", "unknown"}
 DELIVERY_BOUNDARIES = {"terminal_report", "unknown"}

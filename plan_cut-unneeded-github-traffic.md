@@ -589,3 +589,9 @@ commit/PR/CI; reciprocal links with `HANDOFF.d/`.
 
 S2 code landed in #948. S1 live savings, S3, and S4 remain open as stated in
 the STATUS table; the original build brief below remains the decision record.
+
+October 8, 2026, 9:09 AM EDT: the coordinator's observation-only waiter duration
+extension and corrected offline evidence are recorded in the
+[parent-plan supplement](plan_github-request-reduction.md#coordinator-evidence-supplement--october-8-2026-909-am-edt).
+S4 remains open; local duration does not establish duplicate-read savings,
+equivalent-outcome consumption, fleet installation or programme acceptance.
