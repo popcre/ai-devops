@@ -44,13 +44,7 @@ Each fleet machine was checked against a merged commit that contains #1480
    a8f293a7 once that session is gone, run the pinned install. Use a fresh task
    gate and a final-check run **on 916 itself**; the gate only accepts approvals
    recorded in the machine's own review history.
-2. **Review-copy collision fix (in flight at handoff).** A subagent of this
-   session was fixing `ai-review-sandbox` so that it never deletes a live
-   snapshot that belongs to another run. The evidence came from a Codex log on
-   916: `ai-review-sandbox: deleted review snapshot …/glm-pool-glm-5072f740ab559695-2fe7c8f8dd6c`.
-   That snapshot belonged to a live GLM run. Look for its PR among open PRs
-   titled about the review sandbox or snapshot sweep. If none exists, the work
-   is not started.
+2. **Review-copy collision fix — MERGED** in https://github.com/popcre/ai-devops/pull/1537 (2026-10-09 12:37 AM EDT): the start-of-review sweep skips snapshots whose owner run is alive. Remaining gaps: (a) the daily Windows cleanup still deletes any snapshot untouched for 24 h without an owner check; (b) no test yet for the owner record on code-only review snapshots; (c) not yet proven live on 916.
 3. **Grok sign-in on al8960ofc and edge-alien.** Grok needs a browser
    `grok login` on both machines, and edge-alien also needs Grok installed.
    That is a platform limit for an AI. Other reviewers cover rotation.
@@ -101,4 +95,4 @@ chat. It is not started as a session.
 
 ## 9. Retention
 
-Delete this file once 916 is verified and the review-copy collision fix is merged.
+Delete this file once 916 is verified and gaps 2(a)-(c) are closed.
