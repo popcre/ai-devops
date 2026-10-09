@@ -705,6 +705,52 @@ approaches, secrets policy, delivery proof and reciprocal handoff/discovery link
 No claim is made that future implementation or its acceptance is already complete.
 
 
+### Coordinator evidence supplement — October 8, 2026, 9:09 AM EDT
+
+Owner: Codex chat `01a116aa-0400-7230-97d9-3fab73f00bd1`, coordinator of [#658](https://github.com/popcre/ai-devops/issues/658) and [#660](https://github.com/popcre/ai-devops/issues/660).
+
+The coordinator has locally tested a small, observation-only waiter duration
+extension. It measures receipt initialization through the successful final
+terminal output using Linux BOOTTIME centisecond readings, including actual
+quota, cache, polling and CI waiting. It never measures remote eligibility-to-
+detection latency or subtracts unqualified external CI timestamps. Existing
+schema-3 receipts and schema-4 event evidence retain their contracts. Separate
+schema-5 observations always report source and acceptance as **unknown**; they
+do not populate qualified workflow latency or satisfy section 13.
+
+The coordinator's independent local verification reports 90 waiter checks and
+272 transport/report checks passing. A corrected twenty-pair offline overhead
+comparison used all three candidate runtime files together: waiter, telemetry
+and reporter, timed independently with Python's monotonic clock. Observed p95
+was 515.05 ms for the baseline and 524.20 ms for the candidate, a ratio of
+1.01776 (approximately 1.78% higher). The fixture retained
+one fake transport invocation and two uptime reads. An earlier comparison
+copied only the waiter and is invalid; no result from that comparison is
+acceptance evidence. These are local fixture observations, not real HTTP
+counts, installed proof, or measured normal-demand programme overhead.
+
+No new shared plan, source-binding framework, component receipt mesh,
+subprocess contract, authentication probe or polling source is introduced.
+Independent exact-head review, required CI, merged-source verification and
+separately guarded installation/live proof remain delivery requirements.
+
+Programme acceptance remains **unknown and open**. Historical receipts lack
+qualified cohort, same-target and equivalent-outcome denominators; this
+change cannot reconstruct a representative historical baseline or
+retroactively qualify them. The prepared future candidate metadata remains
+unactivated and unqualified. Root coordinator owns candidate freezing,
+installation/live proof, actual-loaded source and runtime binding, all managed
+path dispositions, comparable normal outcomes, separate request/GraphQL-point
+attribution and two genuine comparable busy reset windows. No manufactured
+demand, replay, CLI-to-HTTP substitution, or zero assigned to unknown
+consumption is allowed. Keep the existing #660/#658 acceptance work open;
+do not create a leftover-proof issue or silently weaken the targets.
+
+This supplement does not change P1/P7/P8 acceptance. Earlier dated installation
+and workload snapshots remain historical evidence, not confirmed current fleet
+state. Current exact installed hashes and normal live outcomes still require
+root-owned verification.
+
 ### Source-only destination dispositions — corrected witness audit
 
 Owner: existing #658/#660 root coordinator. Immutable source: `958c543415b312a8c37c5b6b3527716a2d243029`. No source/installation/acceptance claim beyond identified transport/delegation. Original #914/#925/#868/#1008 proofs remain accepted. Installed-caller #931/#933 proof remains separate.
