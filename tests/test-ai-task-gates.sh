@@ -204,7 +204,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-aw) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-aw|-am) for last in "$@"; do :; done; printf '%s\n' "$last" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -308,7 +308,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-am) for last in "$@"; do :; done; printf '%s\n' "$last" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -494,10 +494,24 @@ check 'command-only recovery seals present and absent paths' \
   "jq -e '.recover_launchers==true and .installed_launcher_sha256==\"\" and (.installed_cmd_sha256|length)==64 and (.managed_inventory|length)==1' '$AI_TASK_GATES_DIR/install-authorizations/$first_target.json'"
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$first_target.json" "$class_launcher.cmd"
 partial_route="$TMP/partial-route.sh"
-sed -n '/^windows_partial_launcher_route(){/,/^}/p' "$GATES" > "$partial_route"
+sed -n '/^windows_program_files(){/,/^}/p' "$GATES" > "$partial_route"
+sed -n '/^windows_partial_launcher_route(){/,/^}/p' "$GATES" >> "$partial_route"
 cat >> "$partial_route" <<'EOF'
 cygpath(){ printf '%s\n' "${@: -1}"; }
 EOF
+check 'ProgramFiles mixed-case environment is supported' \
+  "[ \"\$(PROGRAMFILES= ProgramFiles='D:\\Program Files' bash -c 'source \"$partial_route\"; windows_program_files')\" = 'D:\\Program Files' ]"
+windows_detection="$TMP/windows-detection.sh"
+cp "$partial_route" "$windows_detection"
+cat >> "$windows_detection" <<'EOF'
+[(){
+  if [[ "$#" -eq 3 && "$1" = -f && "$2" = '/c/Program Files/Git/bin/bash.exe' && "$3" = ']' ]]; then return 0; fi
+  builtin [ "$@"
+}
+cygpath(){ printf '%s\n' 'C:\Program Files'; }
+EOF
+check 'Windows shell detects existing Git when both ProgramFiles variables are absent' \
+  "[ \"\$(PROGRAMFILES= ProgramFiles= bash -c 'source \"$windows_detection\"; windows_program_files')\" = 'C:\\Program Files' ]"
 partial_launcher="$TMP/partial-gate"
 printf '#!/usr/bin/env bash\n# Managed by ai-devops install-machine-tools.ps1.\nexport HOME="C:\\Users\\fixture"\nexec "%s" "$@"\n' "$TMP/class/bin/ai-task-gates" > "$partial_launcher"
 check 'partial managed Bash launcher requires its exact supported route' \
