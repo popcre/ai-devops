@@ -249,7 +249,7 @@ printf 'Review the packet.\n' > "$POOLTMP/gd/prompt"
 cat > "$POOLTMP/gd/agy" <<EOF
 #!/usr/bin/env bash
 env > "$POOLTMP/gd/agy-env"
-printf '{"response":"Review complete.\\\\n## Verdict\\\\nAPPROVE","model":"gemini-3.8-flash-high"}\n'
+printf '{"status":"SUCCESS","response":"Review complete.\\\\n## Verdict\\\\nAPPROVE","model":"gemini-3.8-flash-high"}\n'
 EOF
 chmod +x "$POOLTMP/gd/agy"
 gemini_door() { # extra env assignments as args
