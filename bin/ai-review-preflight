@@ -473,6 +473,15 @@ health_status() { # PROVIDER
       fi
       ;;
   esac
+  if [ "$1" = grok ]; then
+    # Its ordinary doctor queries the provider catalogue. Reuse only the
+    # native door's offline executable selection before assigning work.
+    source "$REGISTRY_REAL_DIR/../tools/lib/grok-runtime.sh"
+    if ! grok_resolve_door_runtime >/dev/null 2>&1; then
+      printf '{"provider":"grok","status":"installation-unavailable","failure_class":"local-dependency-unavailable"}\n'
+      return 1
+    fi
+  fi
   if [ "$1" = deepseek ]; then
     # The attachment API doctor proves credentials, not the ordinary review
     # runtime. First-install attachment reviews remain explicitly scoped in

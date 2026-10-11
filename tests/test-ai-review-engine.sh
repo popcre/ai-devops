@@ -1291,6 +1291,31 @@ ds_missing_runtime() {
     grep -q 'local-dependency-unavailable' "$TMP/missing-runtime-report.md"
 }
 check 'ordinary_deepseek_door_refuses_the_same_missing_runtime_as_readiness' 'ds_missing_runtime'
+grok_missing_runtime() {
+  (
+    unset AI_GROK_BIN
+    export HOME="$TMP/no-grok-home"
+    mkdir -p "$HOME"
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then return 1; fi
+      builtin command "$@"
+    }
+    function [() {
+      if builtin [ "$#" = 3 ] && builtin [ "$1" = -x ]; then
+        case "$2" in /home/ai/.local/bin/grok|/usr/local/bin/grok) return 1;; esac
+      fi
+      builtin [ "$@"
+    }
+    export -f command '['
+    local rc=0
+    AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$MREPO" \
+      DOOR_PACKET_DIR="$MREPO" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+      DOOR_REPORT_OUT="$TMP/grok-missing-runtime.md" DOOR_HEAD="$HEAD_SHA" \
+      bash "$GROK_DOOR" review > "$TMP/grok-missing-runtime.out" 2> "$TMP/grok-missing-runtime.err" || rc=$?
+    [ "$rc" = 127 ] && grep -q 'local_dependency_unavailable: grok binary not found' "$TMP/grok-missing-runtime.err"
+  )
+}
+check 'ordinary_grok_door_refuses_the_same_missing_runtime_as_readiness' 'grok_missing_runtime'
 DS_API_ROOT="$TMP/ds-api"
 mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/config/opencode" "$DS_API_ROOT/config/opencode-deepseek"
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"

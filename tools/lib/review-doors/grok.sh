@@ -12,6 +12,7 @@
 set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/grok-runtime.sh"
 # Owner rule "remove the paid fallback": no grok child inherits a paid key.
 source "$DOOR_CREDIT_ROOT/tools/lib/grok-paid-keys.sh"
 grok_strip_paid_keys
@@ -62,19 +63,7 @@ GROK_PERMS=(--permission-mode default --allow Read --allow Grep
             --no-subagents --disable-web-search --no-memory)
 
 resolve_grok() {
-  if [ -n "${AI_GROK_BIN:-}" ] && [ -x "${AI_GROK_BIN}" ]; then
-    printf '%s' "$AI_GROK_BIN"; return 0
-  fi
-  local c
-  for c in "$(command -v grok 2>/dev/null || true)" \
-           "${HOME:-}/.local/bin/grok" \
-           "${HOME:-}/.grok/bin/grok" \
-           /home/ai/.local/bin/grok \
-           /usr/local/bin/grok; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
-  done
-  printf 'grok door: local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN.\n' >&2
-  return 127
+  grok_resolve_door_runtime
 }
 
 # Credentials presence only — never print a key. A missing store is a local

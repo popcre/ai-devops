@@ -136,6 +136,7 @@ esac
 EOF
 chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
+export AI_GROK_BIN="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
 export AI_DEEPSEEK_OPENCODE="$TMP/bin/good"
@@ -217,6 +218,55 @@ deepseek_missing_runtime_status() {
 check "API doctor cannot make missing ordinary DeepSeek runtime usable" "deepseek_missing_runtime_status | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"
 check "ambient first-install engine cannot bypass ordinary DeepSeek readiness" "deepseek_missing_runtime_status attachment-api | jq -e '.usable==false and .failure_class==\"local-dependency-unavailable\"'"
 check "restored ordinary DeepSeek runtime preserves unknown capacity and becomes usable" "$SCRIPT status deepseek | jq -e '.usable==true and .admission.state==\"unknown\" and .admission.quota_state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/deepseek.json'"
+grok_without_runtime() {
+  (
+    unset AI_GROK_BIN
+    export HOME="$TMP/no-grok-home"
+    mkdir -p "$HOME"
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then return 1; fi
+      builtin command "$@"
+    }
+    function [() {
+      # Model a machine without either supported shared-account installation.
+      if builtin [ "$#" = 3 ] && builtin [ "$1" = -x ]; then
+        case "$2" in /home/ai/.local/bin/grok|/usr/local/bin/grok) return 1;; esac
+      fi
+      builtin [ "$@"
+    }
+    export -f command '['
+    "$@"
+  )
+}
+check "real Grok wrapper presence cannot make missing native runtime usable" "grok_without_runtime env AI_REVIEW_GROK_WRAPPER='$ROOT/bin/ai-grok-review' $SCRIPT status grok | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"
+check "restored Grok runtime preserves unknown capacity without contacting provider" "$SCRIPT status grok | jq -e '.usable==true and .admission.state==\"unknown\" and .admission.quota_state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/grok.json'"
+grok_runtime_selection_cases() {
+  grok_without_runtime bash -c '
+    source "$1/tools/lib/grok-runtime.sh"
+    mkdir -p "$HOME/.local/bin" "$HOME/.grok/bin"
+    for path in "$HOME/explicit" "$HOME/path-runtime" "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok"; do
+      printf "#!/usr/bin/env bash\necho unexpected-provider-call > \"%s\"\n" "$HOME/contact" > "$path"
+      chmod +x "$path"
+    done
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then
+        [ -z "${FIXTURE_PATH_RUNTIME:-}" ] && return 1
+        printf "%s" "$FIXTURE_PATH_RUNTIME"; return 0
+      fi
+      builtin command "$@"
+    }
+    AI_GROK_BIN="$HOME/explicit" FIXTURE_PATH_RUNTIME="$HOME/path-runtime"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/explicit" ] || exit 1
+    AI_GROK_BIN="$HOME/absent"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/path-runtime" ] || exit 2
+    unset AI_GROK_BIN FIXTURE_PATH_RUNTIME
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.local/bin/grok" ] || exit 3
+    rm "$HOME/.local/bin/grok"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
+    [ ! -e "$HOME/contact" ] || exit 5
+  ' fixture "$ROOT"
+}
+check "shared Grok resolver preserves explicit PATH and both home fallbacks without calls" 'grok_runtime_selection_cases'
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"
