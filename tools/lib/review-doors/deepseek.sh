@@ -289,7 +289,9 @@ main() {
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current deepseek "$log" || true
-    retain_failure "$log" "$out.err" "$rc" out-of-credit || exit 1
+    if ! retain_failure "$log" "$out.err" "$rc" out-of-credit; then
+      printf 'deepseek door: private diagnostic retention refused; capacity refusal remains nonauthorizing.\n' >&2
+    fi
     rm -f "$prompt_full"
     reviewer_credit_exit
     exit 92

@@ -595,6 +595,51 @@ _crc=$?
 set -e
 check "runner_keeps_door_out_of_credit_exit_92" "test '$_crc' -eq 92 && grep -q '^AI_REVIEWER_OUT_OF_CREDIT ' '$TMP/e2e-credit.err'"
 check "runner_books_out_of_credit_failure" "grep -Rqs '\"out-of-credit\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+capacity_retention_refusal_case() {
+  local provider="$1" fixture="$TMP/capacity-retention-$1" rc=0
+  mkdir -p "$fixture/home" "$fixture/work" "$fixture/old-evidence"
+  printf 'immutable earlier diagnostic\n' > "$fixture/old-evidence/sentinel"
+  printf 'Implement the synthetic fixture.\n' > "$fixture/prompt"
+  if [ "$provider" = deepseek ]; then
+    cat > "$fixture/native" <<'EOF'
+#!/usr/bin/env bash
+cat <<'JSON'
+{"type":"error","error":{"data":{"statusCode":402,"message":"Insufficient Balance"}}}
+JSON
+exit 1
+EOF
+  else
+    cat > "$fixture/native" <<'EOF'
+#!/usr/bin/env bash
+printf '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}\n' >&2
+exit 1
+EOF
+  fi
+  chmod +x "$fixture/native"
+  HOME="$fixture/home" AI_DEVOPS_CONFIG_DIR="$fixture/config" \
+    AI_REVIEW_TEST_ISOLATION=1 AI_REVIEWER_STATE_BASE="$fixture/state" \
+    AI_REVIEW_EVENT_DIR="$fixture/events" AI_REVIEW_SCOREBOARD_DIR="$fixture/scoreboard" \
+    AI_REVIEW_SCOREBOARD_FILE="$fixture/scoreboard/events.jsonl" \
+    AI_REVIEW_QUARANTINE_DIR="$fixture/quarantine" \
+    AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    AI_DEEPSEEK_OPENCODE="$fixture/native" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+    AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$fixture/native" AI_STEPFUN_ALLOW_NO_CREDS=1 \
+    AI_STEPFUN_KEY_STORE="$fixture/no-key" AI_STEPFUN_STATE_DIR="$fixture/stepfun-state" \
+    AI_STEPFUN_RATE_RETRIES=0 AI_STEPFUN_RPM=100000 \
+    DOOR_WORKDIR="$fixture/work" DOOR_PACKET_DIR="$fixture/work" \
+    DOOR_PROMPT_FILE="$fixture/prompt" DOOR_REPORT_OUT="$fixture/report.md" \
+    DOOR_DIAGNOSTICS_DIR="$fixture/old-evidence" DOOR_HEAD="$HEAD_SHA" \
+    bash "$REPO_ROOT/tools/lib/review-doors/$provider.sh" implement \
+    > "$fixture/stdout" 2> "$fixture/stderr" || rc=$?
+  [ "$rc" = 92 ] &&
+    grep -q "AI_REVIEWER_OUT_OF_CREDIT provider=$provider" "$fixture/stderr" &&
+    grep -q 'FileExistsError' "$fixture/stderr" &&
+    grep -q 'private diagnostic retention refused' "$fixture/stderr" &&
+    grep -qx 'immutable earlier diagnostic' "$fixture/old-evidence/sentinel" &&
+    [ ! -e "$fixture/old-evidence/native.jsonl" ] && [ ! -e "$fixture/report.md" ]
+}
+check 'deepseek_capacity_exit_92_survives_real_immutable_retention_refusal' 'capacity_retention_refusal_case deepseek'
+check 'stepfun_capacity_exit_92_survives_real_immutable_retention_refusal' 'capacity_retention_refusal_case stepfun'
 unset _crc
 
 # --- --operation install-gate contract through the runner -------------------

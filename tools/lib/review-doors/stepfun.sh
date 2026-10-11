@@ -491,7 +491,9 @@ main() {
     reviewer_credit_scan stepfun "$out.err" || true
     [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
     [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
-    retain_failure "$log" "$out.err" "$rc" out-of-credit
+    if ! retain_failure "$log" "$out.err" "$rc" out-of-credit; then
+      printf 'stepfun door: private diagnostic retention refused; capacity refusal remains nonauthorizing.\n' >&2
+    fi
     rm -f "$prompt_full"
     exit 92
   fi
