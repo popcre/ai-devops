@@ -16,6 +16,6 @@
   "payload_hashes": {
     "windows-runner-maintenance-worker.ps1": "c763a9aff60f92ecca16be07ae7e1d43fc57bb608490eec0a74b59fa912f10f4",
     "launch-worker.bat": "02cccf7873d2b01b27665434600b89e5aae3fa27d106215e3cc09e2bbac32d92",
-    "qualify-windows-runner.ps1": "6dd22de447fee91b45b5414ea10ed560e988c61e424118a8db5d96b377a303c0"
+    "qualify-windows-runner.ps1": "d66e734325955a67223ac743a256f50f1208771ec272a9832f0836d462d1c618"
   }
 }

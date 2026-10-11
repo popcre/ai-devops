@@ -13,8 +13,8 @@ if (-not $tpm.TpmPresent -or -not $tpm.TpmReady) { throw 'TPM must be present an
 if (-not (Confirm-SecureBootUEFI)) { throw 'Secure Boot must be enabled.' }
 
 # Remote-admin filtering must stay at its secure defaults (issue #1547).
-# Never set LocalAccountTokenFilterPolicy, enable Windows sudo, or weaken UAC —
-# those knobs are forbidden and cannot restore pre-2026-09-09 SSH filtering.
+# Never set LocalAccountTokenFilterPolicy, enable Windows sudo, or weaken UAC.
+# Those knobs are forbidden and cannot restore pre-2026-09-09 SSH filtering.
 $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 if ($uac.EnableLUA -ne 1) { throw "UAC must remain enabled (EnableLUA=1); found '$($uac.EnableLUA)'." }
 if ($null -ne $uac.PSObject.Properties['LocalAccountTokenFilterPolicy'] -and $uac.LocalAccountTokenFilterPolicy -ne 0) {
