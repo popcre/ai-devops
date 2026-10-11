@@ -108,6 +108,7 @@ skills/shared/x/SKILL.md|code
 bin/ai-review-lifecycle|reviewer-safety
 bin/ai-task-gates|reviewer-safety
 tools/lib/task-gates.sh|reviewer-safety
+tools/application_workflow_target.py|reviewer-safety
 config/task-gates.json|reviewer-safety
 config/review-action-profiles.json|reviewer-safety
 tools/review_action_profile.py|reviewer-safety
@@ -1571,6 +1572,8 @@ rm "$WF/.ai-devops/application-workflow-target.json"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" remote set-url origin https://github.com/popcre/other.git
 check 'workflow refuses foreign origin before reaching admission' "rc 4 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+(cd "$WF" && "$GATES" start --class reviewer-safety >/dev/null)
+check 'workflow refuses declared foreign repository at canonical identity check' "out '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL' | grep -q 'requires canonical popcre/designflow-backend'"
 git -C "$WF" remote set-url origin https://github.com/popcre/designflow-backend.git
 (cd "$WF" && "$GATES" start --class production >/dev/null)
 check 'workflow refuses stronger production class' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"

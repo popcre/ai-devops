@@ -635,7 +635,7 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
 # Ordinary application-owned rows use an authenticated application workflow,
 # never the SQL/structure or cloud-action gates. This is deliberately one target.
 application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
-  local manifest="$1" report="$2" effective="$3" head blob summary reason state
+  local manifest="$1" report="$2" effective="$3" head blob summary reason state py
   [ "$IDENTITY" = popcre/designflow-backend ] \
     || blocked 'ai-task-gates: STOP. Application workflow requires canonical popcre/designflow-backend.'
   case "$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null)" in
@@ -648,7 +648,9 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
   fi
   [ "$manifest" = .ai-devops/application-workflow-target.json ] \
     || blocked 'ai-task-gates: STOP. Application workflow manifest path is not canonical.'
-  python3 "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
+  py="$(command -v python3 || command -v python)" \
+    || blocked 'ai-task-gates: STOP. Application workflow validator runtime is unavailable.'
+  "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
     || blocked 'ai-task-gates: STOP. Application workflow manifest is malformed, unsafe, or differs from the closed sandbox target.'
   blob="$(application_release_file_blob "$manifest")" \
     || blocked 'ai-task-gates: STOP. Application workflow manifest must be clean and committed at HEAD.'
@@ -661,6 +663,7 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
     && jq -e --arg r "$reason" '.overrides | any(.kind=="application-workflow" and .action=="application-workflow" and .reason==$r)' "$state" >/dev/null \
     || blocked 'ai-task-gates: STOP. Application workflow receipt could not be persisted.'
   [ "$(git -C "$TOPLEVEL" rev-parse HEAD)" = "$head" ] \
+    && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
     && [ "$(application_release_file_blob "$manifest")" = "$blob" ] \
     && [ "$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" = "$summary" ] \
     || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'

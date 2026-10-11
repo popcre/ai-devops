@@ -414,6 +414,10 @@
         {
           "glob": "tools/review_action_profile.py",
           "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/application_workflow_target.py",
+          "class": "reviewer-safety"
         }
       ],
       "gates": {}
