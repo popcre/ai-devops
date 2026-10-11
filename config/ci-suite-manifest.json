@@ -315,6 +315,7 @@
         "test-ai-review-lifecycle.sh",
         "test-ai-review-preflight.sh",
         "test-gemini-door-duration.sh",
+        "test-gemini-door-no-shell.sh",
         "test-pool-dispatch-doors.sh",
         "test-workflow-policy.sh"
       ],
