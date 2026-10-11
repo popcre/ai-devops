@@ -17,11 +17,10 @@ TARGET = {
     "project": "lithe-breaker-323913",
     "region": "us-east4",
     "service": "popcre-albert-core-sandbox",
-    "scope": "hts-non-operative-learning-replay-retrieval",
+    "scope": "hts-non-operative-shadow-writes-provider-calls-learning-replay-retrieval",
     "routes": ["POST /api/cross/evidence", "POST /api/hts-rag/precheck-v2",
                "POST /api/hts-rag/shadow-classify",
-               "GET /api/hts-rag/history", "GET /api/hts-rag/history/:id/turns",
-               "GET /api/hts-rag/debate-runs/:id"],
+               "GET /api/hts-rag/history", "GET /api/hts-rag/history/:id/turns"],
     "forbidden": ["sql", "schema", "cloud-mutation", "manual-promotion",
                   "runtime-flag-change", "rfq-apply-save", "production", "merge"],
 }
