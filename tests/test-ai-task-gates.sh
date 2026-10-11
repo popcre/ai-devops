@@ -1182,7 +1182,7 @@ jq '.reviewer_release.database["private-evidence"] = "whatever"' \
 jq '.application_source_releases["popcre/designflow-backend"].target.project = "wrong-project"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-application-target.json"
 newrepo "$TMP/schema-repo"
-check 'a reviewer release naming private-evidence fails closed' \
+check 'a reviewer release broadening the private-evidence boundary fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-release.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'a centrally altered application release target fails schema validation' \
   "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/bad-application-target.json'"
