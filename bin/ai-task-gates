@@ -888,6 +888,14 @@ cmd_explain(){
   fi
 }
 
+windows_program_files(){
+  if [ -n "${PROGRAMFILES:-${ProgramFiles:-}}" ]; then
+    printf '%s\n' "${PROGRAMFILES:-${ProgramFiles:-}}"
+  elif [ -f '/c/Program Files/Git/bin/bash.exe' ]; then
+    cygpath -aw '/c/Program Files'
+  fi
+}
+
 windows_launcher_route(){
   local expected_source="$1" installed_launcher="$2" cmd_launcher="$2.cmd"
   local launcher_target expected_target source_path cmd_route expected_programfiles expected_localappdata program_files local_app_data offset
@@ -928,7 +936,7 @@ windows_launcher_route(){
   expected_target="$(cygpath -wa "$expected_source" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   [ -n "$launcher_target" ] && [ "$launcher_target" = "$expected_target" ] || return 1
   cmd_route="${cmd_lines[$((offset+1))]}"
-  program_files="${PROGRAMFILES:-${ProgramFiles:-}}"
+  program_files="$(windows_program_files)"
   local_app_data="${LOCALAPPDATA:-${LocalAppData:-}}"
   expected_programfiles="\"${program_files}\Git\bin\bash.exe\" \"$source_path\" %*"
   expected_localappdata="\"${local_app_data}\Programs\Git\bin\bash.exe\" \"$source_path\" %*"
@@ -975,7 +983,9 @@ windows_partial_launcher_route(){
     cmd_exe="$(sed -n 's/^"\([^"]*\)" "[^"]*" %\*$/\1/p' <<< "$route")"
     source_path="$(sed -n 's/^"[^"]*" "\([^"]*\)" %\*$/\1/p' <<< "$route")"
     [ -n "$source_path" ] && [ "$(cygpath -wa "$source_path" 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "$expected_target" ] || return 1
-    [ -n "${PROGRAMFILES:-${ProgramFiles:-}}" ] && [ "$cmd_exe" = "${PROGRAMFILES:-${ProgramFiles:-}}\\Git\\bin\\bash.exe" ] ||
+    local program_files
+    program_files="$(windows_program_files)"
+    [ -n "$program_files" ] && [ "$cmd_exe" = "${program_files}\\Git\\bin\\bash.exe" ] ||
       { [ -n "${LOCALAPPDATA:-${LocalAppData:-}}" ] && [ "$cmd_exe" = "${LOCALAPPDATA:-${LocalAppData:-}}\\Programs\\Git\\bin\\bash.exe" ]; } || return 1
   fi
 }
@@ -1868,7 +1878,14 @@ cmd_authorize_install(){
   fi
   [ -z "$(git -C "$installed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout is dirty.'
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then canonical_launcher="$HOME/.local/bin/ai-task-gates"; else canonical_launcher="/usr/local/bin/ai-task-gates"; fi
-  [ "$installed_launcher" = "$canonical_launcher" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'
+  if command -v cygpath >/dev/null 2>&1; then
+    local normalized_launcher normalized_canonical
+    normalized_launcher="$(cygpath -am "$installed_launcher" | tr '[:upper:]' '[:lower:]')"
+    normalized_canonical="$(cygpath -am "$canonical_launcher" | tr '[:upper:]' '[:lower:]')"
+    [ -n "$normalized_launcher" ] && [ -n "$normalized_canonical" ] && [ "$normalized_launcher" = "$normalized_canonical" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'
+  else
+    [ "$installed_launcher" = "$canonical_launcher" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'
+  fi
   expected_source="$installed_root/bin/ai-task-gates"
   [ -f "$expected_source" ] || blocked 'ai-task-gates: STOP. Installed source missing.'
   if [ "$first_install" -eq 1 ]; then
