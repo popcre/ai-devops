@@ -553,3 +553,34 @@ MCP server was disabled.
 SIGKILL reap helpers and grandchildren; `tests/proof-mcp-session-reap.sh`
 starts/ends three sessions and requires the node count to return to baseline.
 Never launch an MCP helper outside the guard.
+
+## 2026-10-11 — edge-dev3 OOM: a failing assert diff grew to 43 GB
+
+**Impact:** at 12:13 PM EDT the kernel OOM killer killed the whole Codex
+desktop app (every Codex window), tailscaled, and Albert's remote session on
+edge-dev3 (62 GB RAM, 16 GB swap). It recurred at 12:56 PM EDT when the
+interrupted Codex session re-ran the same command.
+
+**Symptom:** the system monitor shows ~20% memory used afterwards, because the
+offending process was already killed; `journalctl -k` holds the OOM dump.
+
+**Root cause:** a Codex session ran popcre/shared-db
+`scripts/gh-read.test.mjs` ("real CLI pipe" tests, issue 3536) against the
+unfixed `gh-read.mjs` to prove the test discriminates. The truncated output
+made `assert.deepEqual` fail on two ~0.5 MB buffers, and Node's assertion
+diff of buffers that size consumed 43 GB in seconds. The revert had been done
+in place inside a Python try/finally, so the OOM kill left the worktree broken
+and the resumed session repeated the run.
+
+**Fix:** the test now byte-compares with `Buffer.equals` and reports only the
+two lengths on failure (failing case uses ~0.08 GB). Machine protection, no
+sudo needed: user systemd drop-ins
+`~/.config/systemd/user/{app-.scope,app-.service,actions-runner-.service}.d/50-memory-cap.conf`
+cap every desktop app and CI runner at MemoryHigh=20G / MemoryMax=24G /
+MemorySwapMax=4G, and `systemd-oomd` is installed and enabled system-wide.
+
+**Prevention:** never deepEqual/strictEqual large buffers or strings; prove
+"old code fails" in a disposable copy, never by reverting the real worktree;
+run large-payload tests under `systemd-run --user --scope -p MemoryMax=2G`.
+Claude sessions cannot sudo (no_new_privs); a root step is launched through
+`systemd-run --user konsole -e <script>` so Albert types the password himself.
