@@ -677,13 +677,17 @@ door_probe(){
 }
 
 cmd_doctor(){
-  local live=0 write_runners=""
+  local live=0 write_runners="" read_only=0
   for a in "$@"; do
     case "$a" in
       --live) live=1 ;;
       --write-runners) write_runners=--write-runners ;;
+      --read-only) read_only=1 ;;
     esac
   done
+  if [ "$read_only" = 1 ] && { [ "$live" = 1 ] || [ -n "$write_runners" ]; }; then
+    die 'read-only doctor cannot run live calls or write runners'
+  fi
   require_engine
   printf 'PASS  engine: %s\n' "$ENGINE"
   case "$ENGINE" in
@@ -709,6 +713,9 @@ cmd_doctor(){
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
       else
+        if [ "$read_only" = 1 ] && [ ! -f "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}" ]; then
+          printf 'FAIL Windows runner allowlist missing (read-only readiness)\n'; exit 1
+        fi
         if [ -n "${AI_STEPFUN_PLATFORM:-}" ] && [ -z "${AI_STEPFUN_RUNNERS_JSON:-}" ] && [ "$(uname -s 2>/dev/null | cut -c1-5)" != MINGW ] && [ "$(uname -s 2>/dev/null | cut -c1-4)" != MSYS ]; then
           : # forced platform on non-Windows host (CI stub): skip provisioning
         else
@@ -926,7 +933,7 @@ ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--
 ai-stepfun ask [--repo DIR] PROMPT                              second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
-ai-stepfun doctor [--live] [--write-runners]                      health check; Windows may re-pin runner allowlist
+ai-stepfun doctor [--live] [--write-runners] [--read-only]          health check; read-only refuses setup or provider calls
 ai-stepfun store-key [--if-missing] [--key-fd 3..9]               protected credential setup; descriptor avoids a vault read
 Engine: StepCode on Linux (bubblewrap) or OpenCode on Windows (folder + test shell).
 EOF

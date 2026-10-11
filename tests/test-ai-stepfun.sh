@@ -446,6 +446,9 @@ export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
 check "StepFun keeps its qualified compaction settings" "jq -e '.compaction == {auto:true,prune:false,tail_turns:8,reserved:32768}' '$ROOT/config/opencode-stepfun/opencode.json' >/dev/null"
 check "macOS and unknown systems are refused" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
 check "Windows is allowed with OpenCode (folder + test shell)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); printf '%s' \"\$out\" | grep -q 'OK engine=opencode'"
+check "read-only Windows doctor refuses missing runner setup without creating it" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON='$TMP/missing-readonly-runners.json' '$SCRIPT' doctor --read-only 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'FAIL Windows runner allowlist missing (read-only readiness)' && test ! -e '$TMP/missing-readonly-runners.json'"
+check "read-only doctor refuses paid live calls" "out=\$('$SCRIPT' doctor --read-only --live 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'read-only doctor cannot run live calls or write runners'"
+check "read-only doctor refuses runner rewrites" "out=\$('$SCRIPT' doctor --read-only --write-runners 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'read-only doctor cannot run live calls or write runners'"
 # Regression (#1266 residual): jq.exe on Windows ends every -r line with CRLF.
 # One shim, built unconditionally, serves the Windows-host allowlist checks
 # below and the Linux review check in the OpenCode block.

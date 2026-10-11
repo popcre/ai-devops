@@ -164,6 +164,39 @@ check "registered DeepSeek with failed local installation is never usable" "AI_R
 check "empty successful local doctor cannot prove readiness" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-empty' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 check "local doctor timeout cannot prove readiness" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-slow' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 check "restored local executable recovers without a stale quarantine" "$SCRIPT status codex | jq -e '.usable==true' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/codex.json'"
+for local_provider in stepfun muse; do
+  if [ "$local_provider" = muse ]; then wrapper_var=AI_REVIEW_MUSE_WRAPPER; else wrapper_var=AI_REVIEW_STEPFUN_WRAPPER; fi
+  check "$local_provider nonzero local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-failed' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider empty local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-empty' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider bounded local doctor refuses timeout" "env AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 $wrapper_var='$TMP/bin/local-slow' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider healthy local doctor restores readiness without inventing capacity" "$SCRIPT status $local_provider | jq -e '.usable==true and .admission.state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/$local_provider.json'"
+done
+check "Muse readiness preserves preflight caller" "AI_REVIEW_MUSE_WRAPPER='$TMP/bin/requires-muse-caller' $SCRIPT status muse | jq -e '.usable==true'"
+check "Muse readiness uses its independent offline doctor budget" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=4 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT status muse | jq -e '.usable==true'"
+cat > "$TMP/bin/stepfun-offline-runner" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in --help) echo 'step - AI coding assistant';; --version) echo '0.1.1';; *) exit 91;; esac
+EOF
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/offline-bwrap"
+chmod +x "$TMP/bin/stepfun-offline-runner" "$TMP/bin/offline-bwrap"
+actual_stepfun_readiness() {
+  (
+    export HOME="$TMP/actual-stepfun-home" USERPROFILE=''
+    export AI_STEPFUN_STATE_DIR="$TMP/actual-stepfun-state" AI_STEPFUN_KEY_STORE="$TMP/actual-stepfun-private/key"
+    export AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_BWRAP="$TMP/bin/offline-bwrap"
+    export AI_STEPFUN_STEP_BIN="$TMP/bin/stepfun-offline-runner" AI_REVIEW_STEPFUN_WRAPPER="$ROOT/bin/ai-stepfun"
+    mkdir -p "$HOME"
+    case "$1" in
+      runner-missing) export AI_STEPFUN_STEP_BIN="$TMP/bin/no-stepfun";;
+      healthy) printf 'synthetic-readiness-key\n' | bash "$ROOT/bin/ai-stepfun" store-key --if-missing --key-fd 9 9<&0 >/dev/null || return;;
+    esac
+    "$SCRIPT" status stepfun
+  )
+}
+check "actual StepFun wrapper refuses missing supported runner" "actual_stepfun_readiness runner-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "actual StepFun wrapper refuses missing protected key" "actual_stepfun_readiness key-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "actual StepFun wrapper recovers after supported protected setup" "actual_stepfun_readiness healthy | jq -e '.usable==true and .admission.state==\"unknown\"'"
+check "actual Muse offline wrapper refuses an empty installation" "HOME='$TMP/actual-muse-home' USERPROFILE='' AI_MUSE_ENGINE=opencode AI_REVIEW_MUSE_WRAPPER='$ROOT/bin/ai-muse' $SCRIPT status muse | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 deepseek_missing_runtime_status() {
   (
     unset AI_DEEPSEEK_OPENCODE AI_DEEPSEEK_ENGINE

@@ -455,10 +455,18 @@ health_status() { # PROVIDER
     return 1
   fi
   case "$1" in
-    claude|codex|deepseek)
+    claude|codex|deepseek|stepfun|muse)
       # These doctors validate the configured command and local safety tools
       # without contacting the provider. A missing CLI must never be drawn.
-      out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)" || rc=$?
+      local doctor_timeout="$DOCTOR_PROBE_TIMEOUT"
+      local -a doctor_env=() doctor_args=(doctor)
+      if [ "$1" = muse ]; then
+        doctor_env=(env AI_MUSE_CALLER=preflight)
+        doctor_timeout="${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}"
+      elif [ "$1" = stepfun ]; then
+        doctor_args+=(--read-only)
+      fi
+      out="$("${doctor_env[@]}" timeout "${doctor_timeout}s" "$wrapper" "${doctor_args[@]}" 2>&1)" || rc=$?
       if [ "$rc" -ne 0 ] || [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
         jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"local-doctor-failed"}'
         return 1
