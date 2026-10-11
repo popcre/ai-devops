@@ -58,6 +58,7 @@ QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 # independence recording keys off this value. Fail closed when unknown.
 # Help/usage/version never start a review and need no caller identity.
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/gemini-review-contract.sh"
 CALLER=''
 case "${1:-}" in
   --version|-h|--help|help) : ;;
@@ -643,8 +644,8 @@ call(){
   # inventory so any change between turns, outside a Gemini turn, still refuses.
   [ "$bd" = "$ad" ] || write "$ACTIVE_META" "$(jq -c --arg tree "$ad" '.review_tree_sha256=$tree' "$ACTIVE_META")" || die 'could not retain post-provider review inventory'
 }
-brief(){ if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. This is a disposable review copy.
+brief(){ gemini_review_contract "$2"; if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
+This is a disposable review copy.
 OUTPUT FORMAT — follow exactly. Write your findings first, with file paths. No line anywhere in your reply may begin with APPROVE, REJECT, REVISE, PASS, FAIL, LGTM, or OK, and do not write a "## Verdict" heading. The very last line of your reply must be exactly one of:
 VERDICT: APPROVE $GOVERNED_HEAD
 VERDICT: REVISE $GOVERNED_HEAD
@@ -654,7 +655,7 @@ Write nothing after that line.
 $1
 EOF
 else cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. Start your response with exactly two lines:
+Start your response with exactly two lines:
 ## Verdict
 APPROVE
 Replace APPROVE with REJECT or BLOCKED when appropriate. Put no text between the heading and that one allowed verdict word. Then provide concise findings with file paths. This is a disposable review copy.

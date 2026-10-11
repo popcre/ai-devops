@@ -14,6 +14,7 @@
 set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/gemini-review-contract.sh"
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -153,6 +154,7 @@ main() {
   # disposable copy. The runner owns seal/store; this only points the model.
   prompt_full="$(mktemp)"
   {
+    gemini_review_contract "$DOOR_PACKET_DIR"
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"

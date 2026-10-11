@@ -11,6 +11,27 @@ mkdir -p "$TMP/work" "$TMP/packet"
 printf 'Review the sealed packet.\n' > "$TMP/prompt"
 cat > "$TMP/agy" <<'STUB'
 #!/usr/bin/env bash
+if [ "${GEMINI_CONTRACT_CASE:-0}" = 1 ]; then
+  prompt=''
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --print) prompt="$2"; shift 2 ;;
+      --dangerously-skip-permissions) exit 90 ;;
+      *) shift ;;
+    esac
+  done
+  # Model the real headless native boundary: requesting execution without
+  # an explicit file-tool-only contract auto-denies RunCommand and ends empty.
+  if ! printf '%s' "$prompt" | grep -q 'Shell commands are NOT available' \
+    || ! printf '%s' "$prompt" | grep -q 'file-reading tools instead' \
+    || ! printf '%s' "$prompt" | grep -q 'never claim command execution'; then
+    printf '%s\n' '{"status":"SUCCESS","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}'
+    exit 0
+  fi
+  grep -q 'if count < 0:' allocation.py || exit 91
+  printf '%s\n' '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":"allocation.py accepts count zero because its check is count < 0, then divides by zero instead of raising ValueError. Native file tools read that source. Terminal checks were not executed because this runtime does not support them.\n## Verdict\nREJECT"}'
+  exit 0
+fi
 cat "$GEMINI_FIXTURE"
 printf '%s\n' 'private provider diagnostic sentinel' >&2
 exit "${GEMINI_NATIVE_EXIT:-0}"
@@ -58,9 +79,19 @@ run_case empty empty-response-text '{"status":"SUCCESS","model":"gemini-3.8-flas
 run_case whitespace empty-response-text '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":" \n\t"}'
 run_case response-object empty-response-text '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":{"message":"APPROVE"}}'
 run_case status provider-status-failed '{"status":"ERROR","model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE","error":"private provider diagnostic sentinel"}'
-run_case denied native-tool-denied '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE","denied_actions":[{"action":"private provider diagnostic sentinel"}]}'
+run_case denied native-tool-denied '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE","denied_actions":[{"action":"command","display_name":"RunCommand"}]}'
 run_case wrong-model model-mismatch '{"status":"SUCCESS","model":"other-model","response":"## Verdict\nAPPROVE"}'
 run_case invalid invalid-response-json '{broken-json'
 run_case array invalid-response-json '[{"status":"SUCCESS"}]'
 run_case native-error provider-call-failed '{"status":"ERROR","error":"private provider diagnostic sentinel"}' 1
+printf 'def allocation(total, count):\n    if count < 0:\n        raise ValueError("count must be positive")\n    return total / count\n' > "$TMP/work/allocation.py"
+printf 'Review allocation.py. Execute python3 -m unittest when supported; otherwise report the unsupported capability.\n' > "$TMP/prompt"
+export DOOR_REPORT_OUT="$TMP/contract.report" DOOR_DIAGNOSTICS_DIR="$TMP/contract.diagnostics"
+GEMINI_CONTRACT_CASE=1 bash "$ROOT/tools/lib/review-doors/gemini.sh" review > "$TMP/contract.out" 2> "$TMP/contract.err"
+grep -q '^REJECT$' "$DOOR_REPORT_OUT"
+grep -q 'count < 0' "$DOOR_REPORT_OUT"
+grep -q 'checks were not executed' "$DOOR_REPORT_OUT"
+[ ! -e "$DOOR_DIAGNOSTICS_DIR" ]
+printf '%s\n' 'headless native stub reads the defect and returns REJECT without unsupported command execution'
+passed=$((passed+1))
 printf '%s Gemini native-envelope checks passed\n' "$passed"
