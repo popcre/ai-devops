@@ -340,6 +340,21 @@ rlc_lifecycle_finish() { # rlc_lifecycle_finish STATE VERDICT REPORT ELAPSED [PA
 
 rlc_lifecycle_fail() { # rlc_lifecycle_fail STATE ELAPSED FAILURE [REPORT] [PACKET_DIR] [PACKET_SHA]
   local state="$1" elapsed="$2" failure="$3" report="${4:-}" packet_dir="${5:-}" packet_sha="${6:-}"
+  local retained="$state.failure-diagnostics" diagnostic_provider
+  # Failure evidence has the same lifetime as its lifecycle, including invalid
+  # verdicts, report-floor failures and stale source. Never reference a temp
+  # report that the caller immediately removes after this transition.
+  case "$report" in "$state.diagnostics"/report.md) ;;
+    *)
+      diagnostic_provider="$(jq -r '.provider // "unknown"' "$state" 2>/dev/null || printf unknown)"
+      python3 "$RLC_ROOT/tools/review_door_diagnostics.py" "$diagnostic_provider" \
+        "${report:-$state.no-output}" "$state.no-stderr" 1 "$failure" \
+        "$retained.report.tmp" "$retained" \
+        || rlc_die 'private failure evidence could not be retained; lifecycle remains for recovery.'
+      rm -f "$retained.report.tmp"
+      report="$retained/report.md"
+      ;;
+  esac
   local -a args=(--state "$state" --elapsed "$elapsed" --failure "$failure")
   [ -z "$report" ] || args+=(--report "$report")
   [ -z "$packet_dir" ] || args+=(--packet-dir "$packet_dir")

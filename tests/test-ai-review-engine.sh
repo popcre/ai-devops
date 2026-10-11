@@ -639,6 +639,18 @@ FLOOR_RC=$?
 set -e
 check "runner_refuses_report_below_floor" "test '$FLOOR_RC' -ne 0 && grep -qi 'floor' '$TMP/floor.err'"
 check "floor_refusal_is_terminal_blocked" "grep -Rqs '\"failure_class\": \"report-floor\"' '$AI_REVIEW_LIFECYCLE_DIR/runs' || grep -Rqs '\"failure_class\":\"report-floor\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+check "floor_failure_report_survives_temp_cleanup_with_bound_native_body" \
+  "python3 - '$AI_REVIEW_LIFECYCLE_DIR/runs' <<'PY'
+import hashlib, json, pathlib, sys
+states = [json.loads(p.read_text()) for p in pathlib.Path(sys.argv[1]).rglob('*.json')]
+state = next(d for d in states if d.get('failure_class') == 'report-floor')
+report = pathlib.Path(state['report_path'])
+assert report.is_file() and hashlib.sha256(report.read_bytes()).hexdigest() == state['report_sha256']
+summary = json.loads(report.read_text().splitlines()[-1])
+native = report.parent / 'native.jsonl'
+assert native.is_file() and hashlib.sha256(native.read_bytes()).hexdigest() == summary['native_stdout_sha256']
+assert b'## Verdict' in native.read_bytes()
+PY"
 
 # --- store-before-delete: store failure retains the sandbox -----------------
 echo '== store-before-delete'
