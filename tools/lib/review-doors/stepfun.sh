@@ -233,6 +233,11 @@ write_stepcode_catalog() { # write_stepcode_catalog DEST
 # Parse the provider envelope into OUR report shape: findings first, verdict
 # last under a literal '## Verdict' heading. OpenCode speaks the text/tool_use
 # JSONL of the other OpenCode doors; StepCode prints its answer on stdout.
+retain_failure() { # native stdout, native stderr, actual exit, fixed reason
+  printf '%s\n' "$SF_KEY" | AI_REVIEW_DIAGNOSTICS_SECRET_STDIN=1 \
+    python3 "$SF_ROOT/tools/review_door_diagnostics.py" stepfun "$1" "$2" "$3" "$4" "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}"
+}
+
 extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
   local result="$1" dest="$2" head="$3" mode="$4" engine="$5" text
   if [ "$engine" = opencode ]; then
@@ -358,7 +363,7 @@ main() {
     [ "$MODE" != review ] || printf 'Work in your current directory: it is a private writable copy of the review workdir, discarded afterwards; never write to the original path.\n'
     printf '\n'
     cat "$DOOR_PROMPT_FILE"
-    printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
+    printf '\n\n---\nFormatting requirement: end with the literal heading ## Verdict on its own line, immediately followed on the next line by exactly one plain word: APPROVE, REJECT, or BLOCKED. Do not insert a blank line or Markdown styling between the heading and word. Do not give an earlier or provisional decision or a second verdict.\n'
   } > "$prompt_full"
   chmod 600 "$prompt_full" 2>/dev/null || true
 
@@ -476,7 +481,6 @@ main() {
     rm -f "$model_catalog"; rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
   set -e
-  SF_KEY=""
   reviewer_capacity_current stepfun "$log" || true
 
   # Out of credit: the one shared classifier reads the provider error lines
@@ -487,21 +491,25 @@ main() {
     reviewer_credit_scan stepfun "$out.err" || true
     [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
     [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
+    retain_failure "$log" "$out.err" "$rc" out-of-credit
     rm -f "$prompt_full"
     exit 92
   fi
   if [ "$rc" -ne 0 ] || [ ! -s "$log" ]; then
+    retain_failure "$log" "$out.err" "$rc" native-execution-failed
     printf 'stepfun door: provider call failed (exit %s)\n' "$rc" >&2
-    [ -s "$out.err" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$out.err" | tail -20 >&2 || true
+    printf 'stepfun door: sanitized native diagnostics retained privately.\n' >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
   if ! extract_report "$log" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE" "$engine"; then
+    retain_failure "$log" "$out.err" "$rc" no-assistant-text
     rm -f "$prompt_full"
     exit 1
   fi
   rm -f "$prompt_full"
+  SF_KEY=""
   exit 0
 }
 
