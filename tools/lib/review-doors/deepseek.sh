@@ -275,6 +275,10 @@ main() {
   fi
   set +e
   (
+    # --dir is an engine option, not the operating-system working directory.
+    # Native plugins and inherited subprocesses must start in the same owned
+    # scratch as the command broker, before any engine code can execute.
+    cd "$oc_dir" || exit 127
     export DOOR_MODE="$MODE"
     export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
            XDG_DATA_HOME="$(native_path "$xdg/data")" \

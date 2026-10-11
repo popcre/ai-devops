@@ -991,9 +991,11 @@ while [ \$# -gt 0 ]; do
 done
 cat > /dev/null
 if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
-  printf '%s' "\$dir" > "\$DS_TEST_DIR_RECORD"
-  (cd "\$dir" && python3 -m unittest test_allocation.py) >&2 || exit 1
-  test -d "\$dir/__pycache__" || exit 1
+  # Exercise inherited process cwd, not merely the advertised --dir option.
+  printf '%s' "\$PWD" > "\$DS_TEST_DIR_RECORD"
+  test "\$PWD" = "\$dir" || exit 1
+  python3 -m unittest test_allocation.py >&2 || exit 1
+  test -d __pycache__ || exit 1
 fi
 if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
 cat <<'JSON'
