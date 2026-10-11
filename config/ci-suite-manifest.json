@@ -268,13 +268,169 @@
       ],
       "tests/proof-mcp-session-reap.sh": [
         "test-mcp-session-guard.sh"
+      ],
+      "tools/lib/grok-paid-keys.sh": [
+        "test-ai-grok-implement.sh",
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/muse-credential-boundary.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-muse-part2.sh",
+        "test-ai-muse-part3.sh",
+        "test-ai-muse.sh",
+        "test-ai-review-engine.sh",
+        "test-pool-dispatch-doors.sh",
+        "test-ubuntu-install-stages.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/lib/provider-wrapper-common.sh": [
+        "test-ai-gemini.sh",
+        "test-ai-glm.sh",
+        "test-ai-kimi.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-qwen-part2.sh",
+        "test-ai-qwen.sh",
+        "test-provider-wrapper-common.sh",
+        "test-reviewer-caller-detection.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/lib/review-doors/deepseek.sh": [
+        "test-ai-deepseek-agent.sh",
+        "test-ai-deepseek.sh",
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/review-doors/gemini.sh": [
+        "test-ai-gemini-request-precheck.sh",
+        "test-ai-gemini-usage.sh",
+        "test-ai-gemini.sh",
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-gemini-door-duration.sh",
+        "test-pool-dispatch-doors.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/lib/review-doors/grok.sh": [
+        "test-ai-grok-implement.sh",
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/review-doors/muse.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-muse-code-part2.sh",
+        "test-ai-muse-code.sh",
+        "test-ai-muse-credential-lock.sh",
+        "test-ai-muse-part2.sh",
+        "test-ai-muse-part3.sh",
+        "test-ai-muse.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-pool-dispatch-doors.sh",
+        "test-ubuntu-install-stages.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/lib/review-doors/qwen.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-qwen-cli.sh",
+        "test-ai-qwen-part2.sh",
+        "test-ai-qwen.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/review-doors/stepfun.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-preflight.sh",
+        "test-ai-stepfun-windows-shell.sh",
+        "test-ai-stepfun.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/review-lifecycle-core.sh": [
+        "test-ai-review-engine.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/stepfun-pace.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-stepfun-windows-shell.sh",
+        "test-ai-stepfun.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/lib/stepfun-sandbox.sh": [
+        "test-ai-grok-review.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-stepfun-windows-shell.sh",
+        "test-ai-stepfun.sh",
+        "test-pool-dispatch-doors.sh"
+      ],
+      "tools/reviewer_credit_stream.py": [
+        "test-ai-gemini.sh",
+        "test-reviewer-credit-stream.sh"
+      ],
+      "tools/reviewer_credit_watch.py": [
+        "test-ai-review-credit-watch.sh",
+        "test-ai-review-preflight.sh"
+      ],
+      "tools/reviewer_maintenance.py": [
+        "test-ai-gemini-request-precheck.sh",
+        "test-ai-gemini.sh",
+        "test-ai-reviewer-issue.sh",
+        "test-ai-stepfun.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/reviewer_usage.py": [
+        "test-ai-deepseek-agent.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-muse-part2.sh",
+        "test-ai-muse-part3.sh",
+        "test-ai-muse.sh"
+      ],
+      "tests/test_deepseek_repo_tools.py": [
+        "test-ai-deepseek-agent.sh"
+      ],
+      "tests/test_glm_credit_reset.py": [
+        "test-ai-review-credit-watch.sh"
+      ],
+      "tests/test_review_credit_watch.py": [
+        "test-ai-review-credit-watch.sh"
+      ],
+      "tests/test_reviewer_admission.py": [
+        "test-ai-review-preflight.sh"
+      ],
+      "tests/test_reviewer_credit_stream.py": [
+        "test-reviewer-credit-stream.sh"
       ]
     },
     "companion_suites": {
-      "bin/ai-review*": ["test-ai-review-action-profile.sh"],
-      "bin/ai-task-gates": ["test-ai-review-action-profile.sh"],
-      "tools/review_action_profile.py": ["test-ai-review-action-profile.sh"],
-      "config/review-action-profiles.json": ["test-ai-review-action-profile.sh"],
+      "bin/ai-review*": [
+        "test-ai-review-action-profile.sh"
+      ],
+      "bin/ai-task-gates": [
+        "test-ai-review-action-profile.sh"
+      ],
+      "tools/review_action_profile.py": [
+        "test-ai-review-action-profile.sh"
+      ],
+      "config/review-action-profiles.json": [
+        "test-ai-review-action-profile.sh"
+      ],
       "bin/*.cmd": [
         "test-bin-cmd-launchers.sh"
       ]
