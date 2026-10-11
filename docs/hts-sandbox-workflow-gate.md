@@ -30,6 +30,31 @@ prove the installed command accepts only the declared sandbox workflow. Then ref
 the live backend source, review its exact workflow declaration and execute the
 genuine HTS case. Preserve every previous proof and refusal.
 
+## Exact audited retry after provider credit recovery
+
+The original five-route declaration remains accepted unchanged. A second closed
+declaration, `RECOVERY_TARGET` in the same validator, additionally admits the
+existing admin debate read, audited retry and read-only `POST /getRFQItemById`.
+Its exact metadata binds one requeue to the already-observed issue94 failed run,
+RFQ item17543, positive verified provider credit, zero eligible queue backlog,
+an immutable full pre-snapshot, and the existing bounded automatic scheduler.
+The validator uses strict JSON types: booleans and floats cannot substitute for
+numeric bounds. No arbitrary route, run, item, budget or forbidden-list change
+is admitted. Independent exact-head workflow approval is still mandatory.
+
+This receipt grants no administrator identity or SQL execution. The caller must
+use its existing authorized administrator for the audited retry, preserve the
+full original row/error/provider/audit snapshot, and use a one-use execution
+marker before the single POST; unknown outcomes are observed, never reposted.
+The scheduler's model/attempt/evidence/time bounds remain unchanged, and manual
+drain is excluded. The admin read contains parsed positions and hashes rather
+than full native responses; native proof retains the separately authorized,
+target-asserted read-only observer. RFQ reads retain normal role/factory checks
+and may not Apply/Save, invent facts or alter pricing. No SQL write, promotion,
+flag change, cloud mutation, production action or DesignFlow merge is admitted.
+The closed retry profile can be retired after #94 acceptance; Codex owns its
+verification and retirement under existing ai-devops #335. PR171 remains Uma's.
+
 Verification checkpoint, October11, 8:58 AM EDT: behavioral source
 `911a1ce6` was archived from Git and tested on the isolated vps2-direct host after
 its collision check passed. The complete task-gate suite passed358/0, including
