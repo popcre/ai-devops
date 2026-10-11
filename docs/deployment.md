@@ -5,6 +5,11 @@ is no cloud release, container, or CI/CD. Canonical guide:
 [`../AGENTS.md`](../AGENTS.md). First-time / disaster restore:
 [`restore-from-zero.md`](restore-from-zero.md).
 
+For the dated edge-dev3 HTS continuation, see the
+[visible maintenance-route feasibility record](verification/hts-maintenance-route-feasibility-20261011.md).
+It distinguishes the supported visible installer from this session's unavailable
+native desktop access; it grants no privilege or installation authority.
+
 The one application-source exception is the centrally sealed DesignFlow
 backend sandbox target. Its approved source push uses the repository's existing
 Cloud Build route and requires the committed target manifest, local review-gate
