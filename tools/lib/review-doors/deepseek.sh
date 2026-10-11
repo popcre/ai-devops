@@ -240,26 +240,6 @@ main() {
   [ -f "$DOOR_PROMPT_FILE" ] || { printf 'deepseek door: prompt file missing: %s\n' "$DOOR_PROMPT_FILE" >&2; exit 2; }
   [ -n "$OC_VERSION" ] || [ -x "${AI_DEEPSEEK_OPENCODE:-}" ] || true
 
-  # Packet preamble: the sealed evidence is the subject; the workdir is the
-  # disposable copy. The runner owns seal/store; this only points the model.
-  prompt_full="$(mktemp)"
-  {
-    printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
-    printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
-    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
-    [ "$MODE" != review ] || printf 'Run commands and tests in your current directory, a private writable copy. The original review snapshot and its evidence packet must remain unchanged.\n\n'
-    cat "$DOOR_PROMPT_FILE"
-    printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
-  } > "$prompt_full"
-
-  xdg="$(mktemp -d)"
-  if ! install_profile "$xdg" 2>"$out.err"; then
-    retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
-    rm -rf "$xdg"
-    rm -f "$prompt_full"
-    exit 127
-  fi
-  local -a native_review=()
   local oc_dir="$DOOR_WORKDIR"
   if [ "$MODE" = review ]; then
     DS_SCRATCH="$(mktemp -d)"
@@ -270,6 +250,30 @@ main() {
       exit 127
     }
   fi
+  # Packet preamble: the sealed evidence is the subject; the workdir is the
+  # disposable copy. The runner owns seal/store; this only points the model.
+  prompt_full="$(mktemp)"
+  {
+    printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
+    printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
+    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    [ "$MODE" != review ] || printf 'Run commands and tests in your current directory, a private writable copy. The original review snapshot and its evidence packet must remain unchanged.\n\n'
+    cat "$DOOR_PROMPT_FILE"
+    printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
+    if [ "$MODE" = review ]; then
+      printf '\nTrusted execution workspace: %s\n' "$(native_path "$oc_dir")"
+      printf 'This workspace pointer takes precedence for every tool working directory. Run all commands, tests, and source edits only in this selected private workspace. Original MANIFEST snapshot paths are immutable provenance only, never execution or edit targets. Read the original evidence packet only; keep its snapshot and packet unchanged.\n'
+    fi
+  } > "$prompt_full"
+
+  xdg="$(mktemp -d)"
+  if ! install_profile "$xdg" 2>"$out.err"; then
+    retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
+    rm -rf "$xdg"
+    rm -f "$prompt_full"
+    exit 127
+  fi
+  local -a native_review=()
   if [ "$MODE" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
     native_review=(--native-deepseek-review "$oc_dir" "$oc")
   fi

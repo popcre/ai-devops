@@ -989,11 +989,19 @@ while [ \$# -gt 0 ]; do
     *) shift ;;
   esac
 done
-cat > /dev/null
+prompt="\$(cat)"
 if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
+  # Model the native engine following MANIFEST's original directory unless
+  # the final trusted instruction explicitly binds its execution workspace.
+  original="\$(sed -n 's/^Directory you are reading: //p' "\$DS_TEST_MANIFEST")"
+  selected="\$(printf '%s\\n' "\$prompt" | sed -n 's/^Trusted execution workspace: //p' | tail -1)"
+  target="\${selected:-\$original}"
+  test "\$target" = "\$dir" || exit 1
+  printf '%s\\n' "\$prompt" | grep -q 'Original MANIFEST snapshot paths are immutable provenance only' || exit 1
   # Exercise inherited process cwd, not merely the advertised --dir option.
   printf '%s' "\$PWD" > "\$DS_TEST_DIR_RECORD"
   test "\$PWD" = "\$dir" || exit 1
+  cd "\$target" || exit 1
   python3 -m unittest test_allocation.py >&2 || exit 1
   test -d __pycache__ || exit 1
 fi
@@ -1046,9 +1054,10 @@ import unittest
 class AllocationTest(unittest.TestCase):
     def test_example(self): self.assertEqual(2 + 2, 4)
 PY
+printf 'Directory you are reading: %s\n' "$DS_ARTIFACT_SOURCE" > "$DS_ARTIFACT_SOURCE/MANIFEST.md"
 DS_ARTIFACT_DIGEST="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
 DS_ARTIFACT_RC=0
-DS_TEST_RUN_UNITTEST=1 DS_TEST_DIR_RECORD="$TMP/ds-artifact-dir" \
+DS_TEST_RUN_UNITTEST=1 DS_TEST_MANIFEST="$DS_ARTIFACT_SOURCE/MANIFEST.md" DS_TEST_DIR_RECORD="$TMP/ds-artifact-dir" \
   AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_DEEPSEEK_OPENCODE="$STUB_OC" \
   AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR="$DS_ARTIFACT_SOURCE" \
   DOOR_PACKET_DIR="$DS_ARTIFACT_SOURCE" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
