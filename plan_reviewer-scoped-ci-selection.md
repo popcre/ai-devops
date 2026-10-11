@@ -8,15 +8,15 @@ Handoff registration: [HANDOFF.d/2026-10-11T1500Z-edge-dev3-claude-reviewer-scop
 
 | Step | State | Evidence |
 |---|---|---|
-| 0. Baseline measurement script + numbers recorded | ⬜ open | — |
-| 1. Per-reviewer door files map to their own suites | ⬜ open | — |
-| 2. Split `tools/lib/**` select-all into reviewer-local vs truly shared | ⬜ open | — |
-| 3. Split `tools/reviewer_*` select-all into mapped suites | ⬜ open | — |
-| 4. Selector regression tests | ⬜ open | — |
-| 5. Safety net confirmed (merge queue / schedule still run everything) | ⬜ open | — |
-| 6. After-measurement + live proof on a real reviewer-only PR | ⬜ open | — |
+| 0. Baseline measurement script + numbers recorded | ✅ done | `tools/ci/measure-selection.sh`; [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/baseline.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/baseline.md) reproduces 31/60 |
+| 1. Per-reviewer door files map to their own suites | ✅ done | `path_suites` entries for all six doors (deepseek door: 7 suites, not 145) |
+| 2. Split `tools/lib/**` select-all into reviewer-local vs truly shared | ✅ done | mapped by proven consumers; `task-gates.sh`, `session-tmp.sh`, `local-watch.sh`, `review-operation.sh` stay select-all |
+| 3. Split `tools/reviewer_*` select-all into mapped suites | ✅ done | 4 of 7 mapped; `reviewer_admission.py`, `reviewer_event_guard.sh`, `reviewer_events.py` stay select-all (consumed by `bin/ai-review*` with no dedicated suite) |
+| 4. Selector regression tests | ✅ done | `tests/test-test-selection.sh` 28/28 incl. 7 new cases; deleted mapped file now fails closed |
+| 5. Safety net confirmed (merge queue / schedule still run everything) | ✅ done | `verify.yml` passes no base on `merge_group`; see [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md) |
+| 6. After-measurement + live proof on a real reviewer-only PR | 🟡 measured | [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md) 27/60; live proof waits for the next reviewer-only PR |
 
-Fresh session starts at Step 0.
+Steps 0–5 landed; only the Step 6 live proof remains.
 
 ## 1. Ultimate goal
 
@@ -50,7 +50,7 @@ NOT in this plan:
 - Rules data: `config/ci-suite-manifest.json` `.affected_suite_rules` with keys `path_suites` (path → suites), `companion_suites`, `select_all_globs`. Current `select_all_globs` include `tools/lib/**`, `tools/reviewer_*`, `tools/ci/**`, `.github/workflows/**`, `config/ci-suite-manifest.json`, `config/task-gates.json`, test harness libs.
 - Reviewer suites exist per engine: `tests/test-ai-deepseek*.sh`, `test-ai-glm.sh`, `test-ai-qwen*.sh`, `test-ai-muse*.sh`, `test-ai-gemini*.sh`, `test-ai-grok-*.sh`, `test-ai-kimi.sh`, StepFun suites, plus shared `test-ai-review-*.sh`.
 - Selector tests: `tests/test-test-selection.sh`, `tests/test-windows-bash-selection.sh`.
-- Nothing from this plan is implemented.
+- Steps 0–5 implemented (issue #1563).
 
 ## 6. Key findings
 

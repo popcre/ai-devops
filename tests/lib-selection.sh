@@ -206,6 +206,12 @@ selection_affected_suites() {
       local mapped=''
       mapped="$(jq -r --arg p "$path" '.affected_suite_rules.path_suites[$p][]? // empty' <<<"$rules" 2>/dev/null)"
       if [ -n "$mapped" ]; then
+        # A mapped file that no longer exists (deleted or renamed) may leave
+        # dangling references the mapped suites do not cover (issue #1563).
+        if [ ! -e "$root/$path" ]; then
+          select_all=true
+          continue
+        fi
         local added=0
         while IFS= read -r suite; do
           [ -n "$suite" ] || continue
