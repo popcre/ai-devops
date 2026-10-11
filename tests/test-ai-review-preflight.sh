@@ -145,6 +145,18 @@ printf '%064d\n' 0 | tr 0 c > "$AI_QWEN_TEST_PRELOADER_FILE"
 printf '%064d\n' 0 | tr 0 a > "$MOCK_AGY_SHA_FILE"
 
 echo '== ai-review-preflight'
+check "missing executable wrapper is never usable" "AI_REVIEW_DEEPSEEK_WRAPPER='$TMP/bin/absent' $SCRIPT status deepseek | jq -e '.usable==false and .failure_class==\"wrapper-missing\"'"
+printf '#!/usr/bin/env bash\necho missing-codex >&2\nexit 1\n' > "$TMP/bin/local-failed"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/local-empty"
+printf '#!/usr/bin/env bash\nsleep 4\necho healthy\n' > "$TMP/bin/local-slow"
+chmod +x "$TMP/bin/local-failed" "$TMP/bin/local-empty"
+chmod +x "$TMP/bin/local-slow"
+check "registered Codex with failed local doctor is never usable" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-failed' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "registered Claude with failed local doctor is never usable" "AI_REVIEW_CLAUDE_WRAPPER='$TMP/bin/local-failed' $SCRIPT usable claude | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "registered DeepSeek with failed local installation is never usable" "AI_REVIEW_DEEPSEEK_WRAPPER='$TMP/bin/local-failed' $SCRIPT status deepseek | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "empty successful local doctor cannot prove readiness" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-empty' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "local doctor timeout cannot prove readiness" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-slow' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "restored local executable recovers without a stale quarantine" "$SCRIPT status codex | jq -e '.usable==true' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/codex.json'"
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"

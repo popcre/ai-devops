@@ -413,6 +413,7 @@ capacity_admission() { # PROVIDER -> current hold, with due-only read-only refre
 }
 
 health_status() { # PROVIDER
+  local wrapper out rc=0
   # A standing known-broken ruling wins over every other health signal,
   # including a current live qualification: the provider is un-drawable until
   # the blocking issue lands. Reported as provider_unavailable so the recovery
@@ -445,6 +446,25 @@ health_status() { # PROVIDER
     printf '%s\n' "$capacity_hold" | jq -c '. + {status:"capacity-held"}'
     return 1
   fi
+  # Registry membership and the absence of holds do not prove an executable
+  # installation. Keep this check local: network-dependent provider doctors
+  # must not replace Gemini/Qwen's exact-byte qualification with a new probe.
+  wrapper="$(provider_wrapper "$1")"
+  if [ ! -f "$wrapper" ] || [ ! -x "$wrapper" ]; then
+    jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"wrapper-missing"}'
+    return 1
+  fi
+  case "$1" in
+    claude|codex|deepseek)
+      # These doctors validate the configured command and local safety tools
+      # without contacting the provider. A missing CLI must never be drawn.
+      out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)" || rc=$?
+      if [ "$rc" -ne 0 ] || [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
+        jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"local-doctor-failed"}'
+        return 1
+      fi
+      ;;
+  esac
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"
 }
