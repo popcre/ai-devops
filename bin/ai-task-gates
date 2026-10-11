@@ -65,6 +65,7 @@ usage: ai-task-gates <command> [options]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install] [--application-release-target MANIFEST]
         [--action-manifest-stdin --action-stage initial-forward|original-restoration]
+        [--application-workflow-target .ai-devops/application-workflow-target.json]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
         --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
@@ -83,7 +84,7 @@ usage: ai-task-gates <command> [options]
   version
 
 ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
-  shared-db-promotion
+  shared-db-promotion application-workflow
 
 shared-db-promotion is the one owner-authorized (Albert, 2026-10-02) launch of
 shared-db's merged-preview run that starts its automatic production promotion
@@ -631,6 +632,44 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
   printf 'ai-task-gates: recorded exact application source-release override for HEAD %s and manifest blob %s.\n' "$head" "$APP_RELEASE_MANIFEST_BLOB"
 }
 
+# Ordinary application-owned rows use an authenticated application workflow,
+# never the SQL/structure or cloud-action gates. This is deliberately one target.
+application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
+  local manifest="$1" report="$2" effective="$3" head blob summary reason state py
+  [ "$IDENTITY" = popcre/designflow-backend ] \
+    || blocked 'ai-task-gates: STOP. Application workflow requires canonical popcre/designflow-backend.'
+  case "$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null)" in
+    https://github.com/popcre/designflow-backend|https://github.com/popcre/designflow-backend.git|git@github.com:popcre/designflow-backend|git@github.com:popcre/designflow-backend.git|ssh://git@github.com/popcre/designflow-backend|ssh://git@github.com/popcre/designflow-backend.git) ;;
+    *) blocked 'ai-task-gates: STOP. Application workflow origin is not canonical.' ;;
+  esac
+  case "$effective" in reviewer-safety|ui-live-workflow) ;; *) blocked 'ai-task-gates: STOP. Application workflow requires reviewer-safety or ui-live-workflow; stronger/private classes stay sealed.' ;; esac
+  if merged_gate "$IDENTITY" "$effective" | grep -qx $'forbidden\tapplication-workflow'; then
+    blocked 'ai-task-gates: STOP. A repository-specific application-workflow prohibition remains binding.'
+  fi
+  [ "$manifest" = .ai-devops/application-workflow-target.json ] \
+    || blocked 'ai-task-gates: STOP. Application workflow manifest path is not canonical.'
+  py="$(command -v python3 || command -v python)" \
+    || blocked 'ai-task-gates: STOP. Application workflow validator runtime is unavailable.'
+  "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
+    || blocked 'ai-task-gates: STOP. Application workflow manifest is malformed, unsafe, or differs from the closed sandbox target.'
+  blob="$(application_release_file_blob "$manifest")" \
+    || blocked 'ai-task-gates: STOP. Application workflow manifest must be clean and committed at HEAD.'
+  head="$(git -C "$TOPLEVEL" rev-parse HEAD)"
+  summary="$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" \
+    || blocked 'ai-task-gates: STOP. Application workflow requires independent lifecycle-recorded exact-head final-check or security-review APPROVE.'
+  reason="head=$head manifest_blob=$blob approval=$summary"
+  state_record_override application-workflow application-workflow "$reason" "$effective" \
+    && state="$(state_path)" \
+    && jq -e --arg r "$reason" --arg c "$effective" '.overrides | any(.kind=="application-workflow" and .action=="application-workflow" and .observed_class==$c and .reason==$r)' "$state" >/dev/null \
+    || blocked 'ai-task-gates: STOP. Application workflow receipt could not be persisted.'
+  [ "$(git -C "$TOPLEVEL" rev-parse HEAD)" = "$head" ] \
+    && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
+    && [ "$(application_release_file_blob "$manifest")" = "$blob" ] \
+    && [ "$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" = "$summary" ] \
+    || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
+  printf 'ai-task-gates: reviewed authenticated HTS sandbox workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
+}
+
 # A small owner-requested entry (owner ruling 2026-10-02: "yes, small entries
 # can skip the reviewer") releases ONLY the reviewer APPROVE for the database
 # action: an owner-requested row-data write of 1..10 rows, no structure,
@@ -1029,7 +1068,7 @@ cmd_check(){
   local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
-  local application_release_target="" base_explicit=0 application_release_ready=0
+  local application_release_target="" application_workflow_target="" base_explicit=0 application_release_ready=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --action-stage) need_value "$@"; action_stage="$2"; shift 2 ;;
@@ -1046,6 +1085,7 @@ cmd_check(){
       --installed-launcher) need_value "$@"; installed_launcher="$2"; shift 2 ;;
       --first-install) first_install=1; shift ;;
       --application-release-target) need_value "$@"; application_release_target="$2"; shift 2 ;;
+      --application-workflow-target) need_value "$@"; application_workflow_target="$2"; shift 2 ;;
       *) die "unknown option for check: $1" ;;
     esac
   done
@@ -1072,6 +1112,12 @@ cmd_check(){
   fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
+  if [ "$action" = application-workflow ] || [ -n "$application_workflow_target" ]; then
+    [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] && [ -n "$reviewer_approval" ] \
+      && [ -z "$base$acknowledge$small_entry$application_release_target$target_head$installed_checkout$installed_launcher" ] \
+      && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
+      || blocked 'ai-task-gates: STOP. Application workflow needs only its committed target and independent review; alternate action, base or bypass arguments are refused.'
+  fi
   if [ "$action" = deploy ]; then
     resolve_repo
     if [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
@@ -1129,7 +1175,7 @@ cmd_check(){
   # helper on central defaults alone.
   if [ "$IDENTITY_RESOLVED" != true ]; then
     case "$action" in
-      deploy|database|infrastructure|production|shared-db-promotion)
+      deploy|database|infrastructure|production|shared-db-promotion|application-workflow)
         fail_closed "repository identity is unresolved; refusing to start '$action'." ;;
     esac
   fi
@@ -1167,7 +1213,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
-        deploy|database|infrastructure|production|shared-db-promotion|code-only-review)
+        deploy|database|infrastructure|production|shared-db-promotion|code-only-review|application-workflow)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
       esac
       # An action bound to per-action proofs can never take the empty-change-set
@@ -1222,6 +1268,10 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
   fi
 
+  if [ "$action" = application-workflow ]; then
+    application_workflow_finish "$application_workflow_target" "$reviewer_approval" "$effective"
+    return 0
+  fi
   if [ -n "$application_release_target" ]; then
     application_release_validate_target "$application_release_target" "$effective"
     application_release_ready=1

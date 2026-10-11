@@ -108,6 +108,7 @@ skills/shared/x/SKILL.md|code
 bin/ai-review-lifecycle|reviewer-safety
 bin/ai-task-gates|reviewer-safety
 tools/lib/task-gates.sh|reviewer-safety
+tools/application_workflow_target.py|reviewer-safety
 config/task-gates.json|reviewer-safety
 config/review-action-profiles.json|reviewer-safety
 tools/review_action_profile.py|reviewer-safety
@@ -1530,5 +1531,63 @@ rm -rf "$SWAP"
 
 JQR_FN="$(sed -n '/^jqr(){$/,/^}$/p' "$GATES")"
 check 'jqr strips CR, keeps trailing blank lines, and returns jq status' "eval \"\$JQR_FN\"; a=\"\$(printf '[\"a\\\\r\",\"\",\"\"]' | jqr '.[]'; printf x)\"; [ \"\$a\" = \$'a\\n\\n\\nx' ] && ! printf 'nope' | jqr . >/dev/null 2>&1"
+
+WF="$TMP/application-workflow"
+newrepo "$WF" popcre/designflow-backend
+(cd "$WF" && "$GATES" start --class reviewer-safety >/dev/null)
+mkdir -p "$WF/.ai-devops"
+python3 - "$ROOT" "$WF" <<'PY'
+import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(mod.TARGET))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare ordinary sandbox workflow'
+WF_HEAD="$(git -C "$WF" rev-parse HEAD)"
+WF_APPROVAL="$(appr "$WF" application-workflow "$WF_HEAD")"
+WF_ARGS="--before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+check 'exact independent workflow admission succeeds' "rc 0 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+WF_STATE="$(state_file_for "$WF")"
+cp "$WF_STATE" "$TMP/wf-state-before"
+WF_WRITE_OUT="$(cd "$WF" && PATH="$TMP/app-mv-fail:$PATH" AI_TEST_ATOMIC_TARGET="$WF_STATE" AI_TEST_REAL_MV="$APP_REAL_MV" "$GATES" check $WF_ARGS --reviewer-approval "$WF_APPROVAL" 2>&1)"; WF_WRITE_RC=$?
+check 'workflow fails closed without a durable receipt' "[ '$WF_WRITE_RC' -eq 3 ] && printf '%s' \"\$WF_WRITE_OUT\" | grep -q 'receipt could not be persisted' && cmp -s '$WF_STATE' '$TMP/wf-state-before'"
+check 'ordinary database action remains sealed' "rc 3 '$WF' check --before database --reviewer-approval '$WF_APPROVAL'"
+check 'workflow cannot omit explicit target' "rc 3 '$WF' check --before application-workflow --reviewer-approval '$WF_APPROVAL'"
+check 'workflow cannot omit review' "rc 3 '$WF' check $WF_ARGS"
+check 'workflow cannot override base' "rc 3 '$WF' check $WF_ARGS --base HEAD --reviewer-approval '$WF_APPROVAL'"
+check 'workflow cannot use plan review' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$WF' plan-review '$WF_HEAD')\""
+check 'workflow refuses stale approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.stale=true')\""
+check 'workflow refuses foreign digest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.source_digest=\"foreign\"')\""
+check 'workflow refuses non-independent approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.provider=.implementer_engine')\""
+cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"
+printf ' ' >> "$WF/.ai-devops/application-workflow-target.json"
+check 'workflow refuses dirty manifest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
+jq '.service="production"' "$TMP/wf-original" > "$WF/.ai-devops/application-workflow-target.json"
+check 'workflow refuses wrong service' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+printf '{"schema_version":1,"schema_version":1}\n' > "$WF/.ai-devops/application-workflow-target.json"
+check 'workflow refuses duplicate keys' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+rm "$WF/.ai-devops/application-workflow-target.json"
+ln -s "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
+check 'workflow refuses symlink manifest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+rm "$WF/.ai-devops/application-workflow-target.json"
+cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
+git -C "$WF" remote set-url origin https://github.com/popcre/other.git
+check 'workflow refuses foreign origin before reaching admission' "rc 4 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+(cd "$WF" && "$GATES" start --class reviewer-safety >/dev/null)
+check 'workflow refuses declared foreign repository at canonical identity check' "out '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL' | grep -q 'requires canonical popcre/designflow-backend'"
+git -C "$WF" remote set-url origin https://github.com/popcre/designflow-backend.git
+(cd "$WF" && "$GATES" start --class production >/dev/null)
+check 'workflow refuses stronger production class' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+(cd "$WF" && "$GATES" start --class private-evidence >/dev/null)
+check 'workflow refuses private evidence class' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+(cd "$WF" && "$GATES" start --class reviewer-safety >/dev/null)
+printf '{"schema_version":1,"gates":{"reviewer-safety":{"forbidden_actions":["application-workflow"]}}}' > "$WF/.ai-devops/task-gates.json"
+git -C "$WF" add .ai-devops/task-gates.json
+git -C "$WF" commit -qm 'local workflow prohibition'
+WF_APPROVAL="$(appr "$WF" application-workflow)"
+check 'workflow preserves consumer prohibition' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
