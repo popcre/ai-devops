@@ -26,6 +26,7 @@
     "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
+    "application-workflow",
     "review",
     "code-only-review",
     "pr-wait",
