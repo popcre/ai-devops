@@ -43,9 +43,17 @@ if [ -n "${SYSTEMROOT:-}" ]; then
   target="$(cygpath -w "$original")"; parent="$(cygpath -w "$(dirname "$original")")"
   AI_DEVOPS_PRIVATE_HELPER="$helper" AI_DEVOPS_PRIVATE_TARGET="$target" AI_DEVOPS_PRIVATE_PARENT="$parent" powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_TARGET; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_PARENT' >/dev/null
   ok 'native owner and SYSTEM only file and parent ACL'
+  python_dir="$(dirname "$(command -v python)")"
+  fallback_path="/usr/bin:/bin:/mingw64/bin:/c/Windows/System32:/c/Windows/System32/WindowsPowerShell/v1.0:$python_dir"
+  core_modules="$(cygpath -w '/c/Program Files/PowerShell/7/Modules')"
+  parent_modules="${PSModulePath:-}"
+  PSModulePath="$core_modules" PATH="$fallback_path" bash "$SCRIPT" store-key --if-missing >/dev/null
+  [ "${PSModulePath:-}" = "$parent_modules" ]; ok 'real Windows PowerShell fallback isolates inherited Core modules without changing parent'
   AI_DEVOPS_PRIVATE_TARGET="$target" powershell.exe -NoProfile -Command '& icacls.exe $env:AI_DEVOPS_PRIVATE_TARGET /grant "*S-1-5-32-545:(R)" | Out-Null; exit $LASTEXITCODE'
   if printf 'replacement-must-not-land\n' | bash "$SCRIPT" store-key --if-missing --key-fd 9 9<&0 >/dev/null 2>&1; then exit 1; fi
   cmp "$original" <(printf 'synthetic-stepfun-credential\n'); ok 'native insecure existing file refused without replacement'
+  if PSModulePath="$core_modules" PATH="$fallback_path" bash "$SCRIPT" store-key --if-missing >/dev/null 2>&1; then exit 1; fi
+  ok 'Windows PowerShell fallback still refuses broad native ACL'
   if printf 'replacement-must-not-land\n' | env -u SYSTEMROOT -u SystemRoot bash "$SCRIPT" store-key --if-missing --key-fd 9 9<&0 >/dev/null 2>&1; then exit 1; fi
   cmp "$original" <(printf 'synthetic-stepfun-credential\n'); ok 'native ACL refusal survives absent optional Windows environment'
 else
