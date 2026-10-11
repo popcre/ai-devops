@@ -15,6 +15,9 @@ set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 source "$DOOR_CREDIT_ROOT/tools/lib/gemini-review-contract.sh"
+# Match the managed wrapper: ordinary native calls must not silently replace
+# the runtime whose bytes are bound to the live qualification.
+export AGY_CLI_DISABLE_AUTO_UPDATE=1
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a

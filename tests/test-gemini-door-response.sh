@@ -11,6 +11,9 @@ mkdir -p "$TMP/work" "$TMP/packet"
 printf 'Review the sealed packet.\n' > "$TMP/prompt"
 cat > "$TMP/agy" <<'STUB'
 #!/usr/bin/env bash
+if [ "${AGY_CLI_DISABLE_AUTO_UPDATE:-}" != 1 ]; then
+  printf 'silently replaced runtime\n' > "$GEMINI_RUNTIME_MARKER"
+fi
 if [ "${GEMINI_CONTRACT_CASE:-0}" = 1 ]; then
   prompt=''
   while [ "$#" -gt 0 ]; do
@@ -37,6 +40,9 @@ printf '%s\n' 'private provider diagnostic sentinel' >&2
 exit "${GEMINI_NATIVE_EXIT:-0}"
 STUB
 chmod +x "$TMP/agy"
+export AGY_CLI_DISABLE_AUTO_UPDATE=0 GEMINI_RUNTIME_MARKER="$TMP/runtime-marker"
+printf 'qualified runtime bytes\n' > "$GEMINI_RUNTIME_MARKER"
+cp "$GEMINI_RUNTIME_MARKER" "$TMP/runtime-before"
 export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_GEMINI_BIN="$TMP/agy"
 export DOOR_WORKDIR="$TMP/work" DOOR_PACKET_DIR="$TMP/packet" DOOR_PROMPT_FILE="$TMP/prompt"
 export DOOR_HEAD=0123456789012345678901234567890123456789 DOOR_TIMEOUT=10
@@ -93,5 +99,8 @@ grep -q 'count < 0' "$DOOR_REPORT_OUT"
 grep -q 'checks were not executed' "$DOOR_REPORT_OUT"
 [ ! -e "$DOOR_DIAGNOSTICS_DIR" ]
 printf '%s\n' 'headless native stub reads the defect and returns REJECT without unsupported command execution'
+passed=$((passed+1))
+cmp "$TMP/runtime-before" "$GEMINI_RUNTIME_MARKER"
+printf '%s\n' 'native calls preserve qualified runtime bytes despite inherited update permission'
 passed=$((passed+1))
 printf '%s Gemini native-envelope checks passed\n' "$passed"
