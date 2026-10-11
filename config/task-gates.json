@@ -22,7 +22,9 @@
     "action, only while the EFFECTIVE class is named there AND that repository declares the named gate",
     "for that class in its own .ai-devops/task-gates.json. It never starts the action without an",
     "assigned AI reviewer exact-head final-check or security-review APPROVE, and it can never",
-    "release private-evidence: one licensed path in the change set keeps the action sealed.",
+    "release ordinary private-evidence actions. The sole private-evidence database exception requires",
+    "DesignFlow's synthetic boundary plus native stdin admission for the closed #770 isolated timing",
+    "profile; generic approvals, acknowledgements, and small owner entries cannot open it.",
     "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
@@ -52,7 +54,8 @@
   },
   "reviewer_release": {
     "database": {
-      "private-tooling": "reviewed-private-data-writer"
+      "private-tooling": "reviewed-private-data-writer",
+      "private-evidence": "synthetic-fixtures-only"
     }
   },
   "application_source_releases": {
