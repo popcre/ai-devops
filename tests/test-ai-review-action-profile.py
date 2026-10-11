@@ -370,5 +370,78 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
         transcript_path.write_bytes(raw)
 
 
+    def test_15_refused_public_evidence_closes_native_state_without_dispatch(self):
+        calls = self.work / "curl-calls"
+        count = calls.read_bytes()
+        probe = self.bin / "realpath"
+        public_file = str(ROOT / "tools/review_action_profile.py")
+        probe.write_text('#!/bin/sh\nif [ "$#" = 2 ] && [ "$1" = -- ] && [ "$2" = "' + public_file + '" ]; then printf "%s\\n" /noncanonical-public-evidence; exit 0; fi\nexec /usr/bin/realpath "$@"\n')
+        probe.chmod(0o700)
+        before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
+        args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--paths-file", str(self.paths), "--base", "HEAD~1", "--action-profile", profile.PROFILE, "--action-manifest", str(self.manifest)]
+        try:
+            result = subprocess.run(args, cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(result.returncode, 3)
+            self.assertIn(b"public action-scope evidence unavailable", result.stderr)
+            self.assertEqual(calls.read_bytes(), count)
+            created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
+            self.assertEqual(len(created), 1)
+            row = json.loads(next(iter(created)).read_text())
+            self.assertEqual(row["status"], "failed")
+            self.assertFalse(Path(row["lock_path"]).exists())
+            self.assertNotIn("action_initial_admission", row)
+        finally:
+            probe.unlink(missing_ok=True)
+
+
+class InstalledActionEvidenceTests(unittest.TestCase):
+    """Exercise the actual shell helper's disclosure boundary without a provider."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.files = ["tools/review_action_profile.py", "config/review-action-profiles.json", "bin/ai-review-code-only.py", "bin/ai-task-gates"]
+        for name in self.files:
+            p = self.root / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("public enforcement fixture")
+        source = (ROOT / "bin/ai-review").read_text()
+        self.helper = "action_review_evidence_args(){" + source.split("action_review_evidence_args(){", 1)[1].split("\n}", 1)[0] + "\n}"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_helper(self):
+        script = self.helper + '\nREAL_DIR="$1/bin"\nif action_review_evidence_args; then printf "%s\\0" "${action_evidence_args[@]}"; else exit 3; fi'
+        return subprocess.run(["bash", "-c", script, "fixture", str(self.root)], capture_output=True)
+
+    def test_actual_installed_public_files_only(self):
+        (self.root / "private-manifest.json").write_text("PRIVATE-MANIFEST-SENTINEL")
+        r = self.run_helper()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        args = r.stdout.decode().rstrip("\0").split("\0")
+        self.assertEqual(args[::2], ["--file"] * 4)
+        self.assertEqual(args[1::2], [str(self.root / name) for name in self.files])
+        self.assertNotIn("private-manifest", r.stdout.decode())
+
+    def test_missing_public_enforcement_refuses_before_dispatch(self):
+        (self.root / self.files[0]).unlink()
+        r = self.run_helper()
+        self.assertEqual((r.returncode, r.stdout), (3, b""))
+
+    def test_linked_file_refuses_before_dispatch(self):
+        p = self.root / self.files[0]
+        p.unlink()
+        p.symlink_to(self.root / self.files[1])
+        r = self.run_helper()
+        self.assertEqual((r.returncode, r.stdout), (3, b""))
+
+    def test_linked_parent_refuses_before_dispatch(self):
+        p = self.root / "tools"
+        p.rename(self.root / "hidden")
+        p.symlink_to(self.root / "hidden", target_is_directory=True)
+        r = self.run_helper()
+        self.assertEqual((r.returncode, r.stdout), (3, b""))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
