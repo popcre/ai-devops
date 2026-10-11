@@ -52,6 +52,8 @@ export PATH="$TMP/mockbin:$PATH"
 # Keep every runner artifact inside the suite temp dir.
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle-state"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard-state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard-state/reviews.jsonl"
 export AI_REVIEW_PACKET_STORE="$TMP/packet-store"
 export AI_REVIEW_IMPLEMENT_ROOT="$TMP/implement"
 
@@ -1072,6 +1074,41 @@ check "deepseek_lifecycle_records_completed_verdict_with_packet" \
   "test -n '$DS_STATE_FILE' && jq -e '.status==\"completed\" and .verdict==\"APPROVE\"' '$DS_STATE_FILE' && jq -e '.packet_sha256|test(\"^[0-9a-f]{64}\")' '$DS_STATE_FILE'"
 check "deepseek_review_cleanup_removed_working_sandbox_after_store" \
   "! find '$AI_REVIEW_SANDBOX_DIR' -maxdepth 1 -type d -name 'rlc-deepseek-*' 2>/dev/null | grep -q ."
+
+# A native error is a failed invocation even if an earlier text part looks
+# like approval. Exact raw evidence survives temp cleanup, but no model or
+# secret text is echoed into the diagnostic summary.
+cat > "$TMP/ds-native-error.jsonl" <<'JSON'
+{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}
+{"type":"error","error":{"data":{"statusCode":503,"message":"synthetic-secret-should-stay-private"}}}
+JSON
+DS_FAILED_RC=0
+( cd "$MREPO" && DS_JSONL="$TMP/ds-native-error.jsonl" \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR" \
+  "$ENGINE" review --provider deepseek --name engine-ds-native-error --repo "$MREPO" \
+  --mode diff-review --caller codex ) >"$TMP/ds-failed.out" 2>"$TMP/ds-failed.err" || DS_FAILED_RC=$?
+check "deepseek_native_error_never_authorizes_earlier_approval" "test '$DS_FAILED_RC' -ne 0"
+DS_FAILED_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -name engine-ds-native-error.json | head -1)"
+# Lifecycle IDs are generated; select the failed DeepSeek state by verdict.
+DS_FAILED_STATE="$(python3 - "$AI_REVIEW_LIFECYCLE_DIR/runs" <<'PY'
+import json, pathlib, sys
+for p in pathlib.Path(sys.argv[1]).rglob('*.json'):
+    try: d = json.loads(p.read_text())
+    except ValueError: continue
+    if d.get('provider') == 'deepseek' and d.get('failure_class') == 'provider-native-error':
+        print(p); break
+PY
+)"
+DS_FAILED_REPORT="$(jq -r '.report_path // empty' "$DS_FAILED_STATE" 2>/dev/null || true)"
+check "deepseek_failed_lifecycle_keeps_durable_nonempty_diagnostic" \
+  "test -s '$DS_FAILED_REPORT' && grep -q native-error-envelope '$DS_FAILED_REPORT' && grep -q 503 '$DS_FAILED_REPORT'"
+check "deepseek_diagnostic_summary_excludes_provider_text" \
+  "! grep -q synthetic-secret-should-stay-private '$DS_FAILED_REPORT'"
+check "deepseek_private_native_failure_retains_exact_bytes" \
+  "cmp '$TMP/ds-native-error.jsonl' '${DS_FAILED_REPORT%/*}/native.jsonl'"
+check "deepseek_private_diagnostic_permissions" \
+  "test \"\$(stat -c %a '${DS_FAILED_REPORT%/*}' 2>/dev/null)\" = 700 && test \"\$(stat -c %a '$DS_FAILED_REPORT' 2>/dev/null)\" = 600"
 
 # Both contracts stay in the runner: deepseek implement runs through it too.
 export AI_REVIEW_DOOR_DEEPSEEK="$IMPL_DOOR_OK"

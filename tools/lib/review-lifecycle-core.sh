@@ -385,6 +385,7 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
       DOOR_PACKET_DIR="$packet_dir" \
       DOOR_PROMPT_FILE="$prompt_file" \
       DOOR_REPORT_OUT="$report_out" \
+      DOOR_DIAGNOSTICS_DIR="${RLC_DOOR_DIAGNOSTICS_DIR:-}" \
       DOOR_HEAD="$head" \
       DOOR_MAX_TURNS="$max_turns" \
       DOOR_ALLOW_WRITE="$allow_write" \
@@ -587,17 +588,32 @@ $operation_request"
   snapshot_before="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"
   rlc_note "step door-call"
   local door_rc=0
+  RLC_DOOR_DIAGNOSTICS_DIR="$state.diagnostics"
   rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 "$mode" "$operation" || door_rc=$?
   if [ "$door_rc" -ne 0 ]; then
+    local door_failure=provider-failed diagnostic_reason=""
+    # Door diagnostics are private and already durably published outside the
+    # sealed packet. Keep the lifecycle reference after session temp cleanup.
+    if [ -f "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ] && [ ! -L "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ]; then
+      body_file="$RLC_DOOR_DIAGNOSTICS_DIR/report.md"
+      diagnostic_reason="$(tail -n 1 "$body_file" | jq -r '.reason // empty' 2>/dev/null || true)"
+      case "$diagnostic_reason" in
+        local-dependency-unavailable) door_failure=local_dependency_unavailable ;;
+        native-execution-failed) door_failure=native-execution-failed ;;
+        native-error-envelope) door_failure=provider-native-error ;;
+        no-assistant-text) door_failure=empty-report ;;
+      esac
+    fi
     # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does
     # for wrappers; the door has already printed both contract lines.
     if [ "$door_rc" -eq 92 ]; then
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" out-of-credit "$body_file" "$packet_dir" "$packet_sha"
     else
-      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" provider-failed "$body_file" "$packet_dir" "$packet_sha"
+      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" "$door_failure" "$body_file" "$packet_dir" "$packet_sha"
     fi
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
-    rm -f "$brief" "$body_file" "$identity_file"
+    rm -f "$brief" "$identity_file"
+    case "$body_file" in "$RLC_DOOR_DIAGNOSTICS_DIR"/*) ;; *) rm -f "$body_file";; esac
     [ "$door_rc" -ne 92 ] || { rlc_note "door $provider is out of credit."; exit 92; }
     rlc_die "door $provider exited nonzero; diagnostic retained in the lifecycle record."
   fi

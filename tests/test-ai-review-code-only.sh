@@ -9,6 +9,11 @@ PACKET="$ROOT/bin/ai-review-packet"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle-state"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard-state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard-state/reviews.jsonl"
+export AI_REVIEW_EVENT_DIR="$TMP/event-state"
+export AI_REVIEW_TEST_ISOLATION=1
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 PASS=0

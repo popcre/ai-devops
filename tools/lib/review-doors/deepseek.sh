@@ -155,6 +155,14 @@ extract_report() { # extract_report LOG_JSONL DEST HEAD MODE
   } > "$dest"
 }
 
+retain_failure() { # native stdout, native stderr, actual exit, fixed reason
+  # Never copy provider/model text into the public-facing report. Exact native
+  # bytes belong only in owner-only private diagnostics, before temp cleanup.
+  local log="$1" err="$2" rc="$3" reason="$4"
+  printf '%s\n' "$DS_KEY" | AI_REVIEW_DIAGNOSTICS_SECRET_STDIN=1 \
+    python3 "$DS_ROOT/tools/review_door_diagnostics.py" deepseek "$log" "$err" "$rc" "$reason" "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}"
+}
+
 attachment_api_review() {
   # This is an explicit first-install engine, never a dependency fallback.
   [ "$MODE" = review ] && [ "${DOOR_REVIEW_MODE:-}" = final-check ] && [ "${DOOR_OPERATION:-}" = first-managed-install ] || {
@@ -211,8 +219,20 @@ main() {
     *) printf 'deepseek door: unsupported explicit engine %s.\n' "$DS_ENGINE" >&2; return 2 ;;
   esac
   local oc xdg prompt_full out log rc
-  oc="$(resolve_opencode)" || exit $?
-  require_credentials || exit $?
+  out="$(mktemp)"; log="$out.jsonl"; : > "$log"; : > "$out.err"
+  rc=0
+  oc="$(resolve_opencode 2>"$out.err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$log" "$out.err" "$rc" local-dependency-unavailable || exit 1
+    printf 'deepseek door: local OpenCode dependency unavailable; private diagnostics retained.\n' >&2
+    exit "$rc"
+  fi
+  require_credentials 2>"$out.err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$log" "$out.err" "$rc" local-dependency-unavailable || exit 1
+    printf 'deepseek door: local credentials unavailable; private diagnostics retained.\n' >&2
+    exit "$rc"
+  fi
   [ -d "$DOOR_WORKDIR" ] || { printf 'deepseek door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
   [ -f "$DOOR_PROMPT_FILE" ] || { printf 'deepseek door: prompt file missing: %s\n' "$DOOR_PROMPT_FILE" >&2; exit 2; }
   [ -n "$OC_VERSION" ] || [ -x "${AI_DEEPSEEK_OPENCODE:-}" ] || true
@@ -229,13 +249,12 @@ main() {
   } > "$prompt_full"
 
   xdg="$(mktemp -d)"
-  if ! install_profile "$xdg"; then
+  if ! install_profile "$xdg" 2>"$out.err"; then
+    retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
     rm -rf "$xdg"
     rm -f "$prompt_full"
     exit 127
   fi
-  out="$(mktemp)"
-  log="$out.jsonl"
   local -a native_review=()
   if [ "$MODE" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
     native_review=(--native-deepseek-review "$DOOR_WORKDIR" "$oc")
@@ -256,27 +275,36 @@ main() {
   )
   rc=$?
   set -e
-  DS_KEY=""
   rm -rf "$xdg"
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current deepseek "$log" || true
+    retain_failure "$log" "$out.err" "$rc" out-of-credit || exit 1
     rm -f "$prompt_full"
     reviewer_credit_exit
     exit 92
   fi
   if [ "$rc" -ne 0 ] || [ ! -s "$log" ]; then
+    retain_failure "$log" "$out.err" "$rc" native-execution-failed || exit 1
     printf 'deepseek door: provider call failed (exit %s)\n' "$rc" >&2
-    [ -s "$out.err" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$out.err" | tail -20 >&2 || true
+    printf 'deepseek door: sanitized native diagnostics retained privately.\n' >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
+  if jq -se 'any(.[]; .type == "error")' "$log" >/dev/null 2>&1; then
+    retain_failure "$log" "$out.err" "$rc" native-error-envelope || exit 1
+    printf 'deepseek door: native engine reported an error; private diagnostics retained.\n' >&2
+    rm -f "$prompt_full"
+    exit 1
+  fi
   if ! extract_report "$log" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE"; then
+    retain_failure "$log" "$out.err" "$rc" no-assistant-text || exit 1
     rm -f "$prompt_full"
     exit 1
   fi
   rm -f "$prompt_full"
+  DS_KEY=""
   exit 0
 }
 
