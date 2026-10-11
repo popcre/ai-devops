@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/events" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard"
+source "$ROOT/tests/lib-test-harness.sh"
 mkdir -p "$TMP/work" "$TMP/packet"
 printf 'Review the sealed packet.\n' > "$TMP/prompt"
 cat > "$TMP/agy" <<'STUB'
@@ -32,11 +35,21 @@ run_case() {
     cmp "$GEMINI_FIXTURE" "$DOOR_DIAGNOSTICS_DIR/native.jsonl"
     grep -q 'private provider diagnostic sentinel' "$DOOR_DIAGNOSTICS_DIR/native.stderr"
     ! grep -q 'private provider diagnostic sentinel' "$DOOR_REPORT_OUT" "$TMP/$name.err"
-    python3 - "$DOOR_DIAGNOSTICS_DIR" <<'PY'
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" \
+        AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$DOOR_DIAGNOSTICS_DIR")" \
+        powershell.exe -NoProfile -NonInteractive -Command \
+          '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET; Get-ChildItem -LiteralPath $env:AI_DEVOPS_PRIVATE_TARGET | ForEach-Object { Assert-AiDevOpsPrivateAcl -Path $_.FullName }' \
+          > "$TMP/$name.acl-proof" 2>&1
+        ;;
+      *) python3 - "$DOOR_DIAGNOSTICS_DIR" <<'PY'
 import pathlib,stat,sys
 p=pathlib.Path(sys.argv[1]);assert stat.S_IMODE(p.stat().st_mode)==0o700
 assert all(stat.S_IMODE(f.stat().st_mode)==0o600 for f in p.iterdir())
 PY
+        ;;
+    esac
   fi
   passed=$((passed+1))
 }

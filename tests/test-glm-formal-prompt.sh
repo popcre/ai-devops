@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/events" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard"
+source "$ROOT/tests/lib-test-harness.sh"
 export AI_DEVOPS_CONFIG_DIR="$TMP/config" AI_REVIEWER_STATE_BASE="$TMP/state"
 source "$ROOT/bin/ai-glm"
 PROMPT_FILE=''
