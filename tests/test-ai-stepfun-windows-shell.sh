@@ -6,6 +6,16 @@ GATE="$ROOT/bin/ai-stepfun-windows-shell"
 FIX="$ROOT/tests/fixtures/stepfun-windows-shell/pkg"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Real Windows key custody checks require a private native ACL; chmod alone
+# does not protect the synthetic key used by the doctor below.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" \
+    AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$TMP")" \
+    env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
+      '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory' >/dev/null
+    ;;
+esac
 
 pass=0; fail=0
 check(){ # check "name" cmd...

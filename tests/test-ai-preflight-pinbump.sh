@@ -218,6 +218,8 @@ ensure_qual() { # PROVIDER WRAPPER_PATH OLD_PIN POLICY_FILE
   [ "$(jq -r '.wrapper_sha256 // ""' "$rec")" = "$w" ] || seed_qual "$prov" "$wrapper" "$old" "$pfile"
 }
 run_pb() {
+  # Ordinary readiness resolves the real door runtime, independently of the
+  # policy command. Bind that runtime to our fixture, never the host's Grok.
   # pin-bump-qualify is a PIN-ONLY lane and refuses without proof. Inject the
   # assertion from the fixture policy so call sites stay readable: TO is always
   # the pin the fixture currently declares, FROM is the seeded prior pin.
@@ -231,6 +233,7 @@ run_pb() {
     env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+        AI_GROK_BIN="${AI_GROK_BIN:-$TMP/bin/fakegrok}" \
         AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor" \
         AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
         PATH="$TMP/bin:$PATH" \
@@ -239,6 +242,7 @@ run_pb() {
     env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+        AI_GROK_BIN="${AI_GROK_BIN:-$TMP/bin/fakegrok}" \
         AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor" \
         AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
         PATH="$TMP/bin:$PATH" \
