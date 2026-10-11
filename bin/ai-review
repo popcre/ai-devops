@@ -11,6 +11,18 @@ if command -v readlink >/dev/null 2>&1; then
   REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
   [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
 fi
+# #1531: the reviewer must see the public code enforcing its action scope.
+# Fixed installed paths only: never attach the private operational manifest.
+action_review_evidence_args(){
+  local evidence_root relative file
+  evidence_root="$(cd "$REAL_DIR/.." && pwd -P)" || return 1
+  action_evidence_args=()
+  for relative in tools/review_action_profile.py config/review-action-profiles.json bin/ai-review-code-only.py bin/ai-task-gates; do
+    file="$evidence_root/$relative"
+    [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1
+    action_evidence_args+=(--file "$file")
+  done
+}
 pool_provider=""
 review_provider="${1:-}"
 case "${1:-}" in
@@ -318,6 +330,11 @@ if [ "$code_only" -eq 1 ]; then
     code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated destination identity sha256:$target_identity schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
   fi
   lifecycle_started=$SECONDS
+  action_evidence_args=()
+  if [ -n "$action_profile" ]; then
+    action_review_evidence_args || { printf 'ai-review: installed public action-scope evidence unavailable; no provider was dispatched.\n' >&2; exit 3; }
+    code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
+  fi
   result_file=""; error_file=""; diagnostics_printed=0
   code_only_abort() {
     "$lifecycle" fail --state "$lifecycle_state" --elapsed "$((SECONDS-lifecycle_started))" --failure incomplete-code-only-invocation >/dev/null 2>&1 || true
@@ -329,7 +346,7 @@ if [ "$code_only" -eq 1 ]; then
   trap 'exit 143' TERM
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
   error_file="$(mktemp)" || { printf 'ai-review: cannot reserve private reviewer diagnostics.\n' >&2; exit 3; }
-  if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
+  if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" "${action_evidence_args[@]+"${action_evidence_args[@]}"}" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
   cat "$error_file" >&2
   diagnostics_printed=1
   # DeepSeek retains its packet and transcript under this sanitized repository.
