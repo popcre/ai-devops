@@ -54,10 +54,16 @@ def protect_windows(path, directory=False):
     helper = pathlib.Path(__file__).resolve().parent.parent / 'bin/windows-private-file.ps1'
     environment = dict(os.environ, AI_DEVOPS_PRIVATE_HELPER=str(helper),
                        AI_DEVOPS_PRIVATE_TARGET=str(path))
+    # PowerShell 7's modules cannot be loaded by Windows PowerShell 5. Rebuild
+    # only this trusted child's module path; leave the caller's environment.
+    for name in list(environment):
+        if name.casefold() == 'psmodulepath':
+            environment.pop(name)
     command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath '
                '-Path $env:AI_DEVOPS_PRIVATE_TARGET' + (' -Directory' if directory else '') +
                '; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET')
-    result = subprocess.run([executable, '-NoProfile', '-NonInteractive', '-Command', command],
+    result = subprocess.run([executable, '-NoProfile', '-NonInteractive',
+                             '-ExecutionPolicy', 'Bypass', '-Command', command],
                             capture_output=True, env=environment, timeout=15)
     if result.returncode: raise ValueError('private diagnostic ACL refused')
 if destination:

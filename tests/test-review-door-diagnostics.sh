@@ -5,21 +5,22 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 python3 - "$ROOT/tools/review_door_diagnostics.py" "$TMP" <<'PYTEST'
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, shutil, subprocess, sys
 helper, root = sys.argv[1], pathlib.Path(sys.argv[2])
 log, err = root/'out', root/'err'
 secret = b'actual-managed-secret-value'
 log.write_bytes(b'{"type":"error","error":{"data":{"statusCode":503,"message":"actual-managed-secret-value"}}}\n')
 err.write_bytes(b'Bearer other-secret\nAPI_KEY=third-secret\nactual-managed-secret-value\n')
-def run(name, reason='native-error-envelope', rc=1):
+def run(name, reason='native-error-envelope', rc=1, extra_environment=None):
     report, dest = root/(name+'.md'), root/name
     env = dict(os.environ, AI_REVIEW_DIAGNOSTICS_SECRET_STDIN='1')
+    env.update(extra_environment or {})
     result = subprocess.run([sys.executable, helper, 'deepseek', str(log), str(err),
                              str(rc), reason, str(report), str(dest)],
                             input=secret+b'\n', env=env, capture_output=True)
     return result, report, dest
 result, report, dest = run('first')
-assert result.returncode == 0
+assert result.returncode == 0, result.stderr.decode(errors='replace')
 summary = json.loads(report.read_text().splitlines()[-1])
 assert summary['http_status_codes'] == [503] and summary['native_error_envelopes'] == 1
 assert secret not in (dest/'native.jsonl').read_bytes()
@@ -45,5 +46,39 @@ if os.name != 'nt':
                              'native-execution-failed', str(root/'linked.md'),
                              str(root/'linked-parent'/'forbidden')], capture_output=True)
     assert result.returncode != 0 and not (root/'forbidden').exists()
+else:
+    # Actual Windows PowerShell fallback under a PowerShell 7 parent's
+    # incompatible modules and restrictive process policy. No machine policy
+    # changes, mock ACL cmdlets, providers or real credentials are involved.
+    powershell = shutil.which('powershell')
+    assert powershell, 'supported Windows PowerShell fallback is missing'
+    child_path = os.pathsep.join([str(pathlib.Path(powershell).parent),
+                                 str(pathlib.Path(os.environ['SystemRoot'])/'System32')])
+    inherited = {'PATH': child_path, 'PSExecutionPolicyPreference': 'Restricted',
+                 'PSModulePath': str(root/'incompatible-parent-modules')}
+    (root/'incompatible-parent-modules').mkdir()
+    parent_environment = dict(os.environ)
+    log.write_text('synthetic failed native invocation\n')
+    result, report, dest = run('mixed-shell', extra_environment=inherited)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')
+    assert (dest/'native.jsonl').read_text() == log.read_text()
+    # Independently inspect real private ACLs without the hostile inherited
+    # environment. Failure must still leave no native bytes when ACL refuses.
+    acl_helper = pathlib.Path(helper).resolve().parent.parent/'bin/windows-private-file.ps1'
+    env = dict(os.environ, AI_DEVOPS_PRIVATE_HELPER=str(acl_helper),
+               AI_DEVOPS_PRIVATE_TARGET=str(dest))
+    for name in list(env):
+        if name.casefold() == 'psmodulepath':
+            env.pop(name)
+    code = '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET; Get-ChildItem -LiteralPath $env:AI_DEVOPS_PRIVATE_TARGET | ForEach-Object { Assert-AiDevOpsPrivateAcl -Path $_.FullName }'
+    checked = subprocess.run([powershell, '-NoProfile', '-NonInteractive',
+                              '-ExecutionPolicy', 'Bypass', '-Command', code],
+                             env=env, capture_output=True)
+    assert checked.returncode == 0, checked.stderr.decode(errors='replace')
+    refused, _, refused_dest = run('acl-refusal', extra_environment=dict(inherited, AI_DEVOPS_TEST_ICACLS_FAIL='1'))
+    assert refused.returncode != 0
+    assert not (refused_dest/'native.jsonl').exists()
+    assert dict(os.environ) == parent_environment
+    print('Windows mixed-shell diagnostic custody passed: restrictive policy, inherited modules, real private ACLs, refusal before bytes, parent environment unchanged.')
 print('Private diagnostic checks passed: classification, secret redaction, permissions, immutable evidence, timeout/tool distinction, bounded capture, linked-parent refusal.')
 PYTEST
