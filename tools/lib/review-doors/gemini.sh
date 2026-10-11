@@ -116,6 +116,39 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   } > "$dest"
 }
 
+write_provider_brief() {
+  local first mode expected matches
+  IFS= read -r first < "$DOOR_PROMPT_FILE" || [ -n "$first" ]
+  matches="$(awk '/^[[:space:]]*You are performing/ { n++ } END { print n+0 }' "$DOOR_PROMPT_FILE")"
+  if [[ "$first" == 'You are performing a '* ]]; then
+    mode="${first#You are performing a }"; mode="${mode%%.*}"
+    case "$mode" in plan-review|diff-review|security-review|visual-review|final-check|implement) ;;
+      *) printf 'gemini door: unrecognized core capability paragraph; no provider call.\n' >&2; return 2;; esac
+    if { [ "$MODE" = implement ] && [ "$mode" != implement ]; } || { [ "$MODE" = review ] && [ "$mode" = implement ]; }; then
+      printf 'gemini door: core capability mode differs from provider mode; no provider call.\n' >&2
+      return 2
+    fi
+    expected="You are performing a ${mode}. You MAY run shell commands, builds and tests"
+    if [ "$mode" = implement ]; then expected+=', and edit files'; else expected+=', and edit files to test a hypothesis'; fi
+    expected+=", but only inside your disposable copy at ${DOOR_WORKDIR}: your edits are discarded and are never part of the change under review unless this is implement mode. Never commit, push, merge, or touch any remote or any checkout outside your copy. No web search."
+    if [ "$first" != "$expected" ] || [ "$matches" != 1 ]; then
+      printf 'gemini door: ambiguous or changed core capability paragraph; no provider call.\n' >&2
+      return 2
+    fi
+  elif [ "$matches" != 0 ]; then
+    printf 'gemini door: displaced core capability paragraph; no provider call.\n' >&2
+    return 2
+  else
+    mode="$MODE"
+  fi
+  printf '%s\n' "You are performing a ${mode}. Gemini provider capabilities: you may read and edit files only inside your disposable copy at ${DOOR_WORKDIR}; edits are discarded unless this is implement mode. Shell commands, builds and test execution are unavailable in this headless runtime. Never call run_command or any terminal tool: a denied command ends the turn without output. Inspect source and test code with file-reading tools, and independently assess the supplied pre-executed test evidence. Distinguish recorded test results from tests you personally executed; report missing evidence honestly. Never commit, push, merge, touch remotes or any checkout outside your copy, use the network, open URLs, or invoke MCP tools. Read the sealed evidence packet first and preserve it unchanged."
+  if [[ "$first" == 'You are performing a '* ]]; then
+    tail -n +2 "$DOOR_PROMPT_FILE"
+  else
+    cat "$DOOR_PROMPT_FILE"
+  fi
+}
+
 main() {
   local agy prompt_full prompt_text out rc
   agy="$(resolve_agy)" || exit $?
@@ -130,7 +163,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
-    cat "$DOOR_PROMPT_FILE"
+    write_provider_brief || { rm -f "$prompt_full"; exit 2; }
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
   prompt_text="$(cat "$prompt_full")"
