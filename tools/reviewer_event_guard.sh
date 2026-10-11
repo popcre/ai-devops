@@ -321,7 +321,7 @@ reviewer_credit_run(){
     local seconds
     seconds="$("${REVIEWER_CREDIT_PYTHON:-$(command -v python3 || command -v python)}" - "$2" <<'PY'
 import math, re, sys
-m = re.fullmatch(r'([0-9]+(?:\.[0-9]*)?|\.[0-9]+)([smhd]?)', sys.argv[1])
+m = re.fullmatch(r'(\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)([smhd]?)', sys.argv[1])
 if not m:
     raise SystemExit(2)
 n = float(m[1]) * {'': 1, 's': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]

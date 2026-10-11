@@ -331,6 +331,12 @@ class CreditStreamTests(unittest.TestCase):
         command = prefix + f'reviewer_credit_run muse {shlex.quote(str(self.out))} {shlex.quote(str(self.err))} --timeout-seconds .01m -- {shlex.quote(sys.executable)} -c {shlex.quote("import time;time.sleep(20)")}'
         result = subprocess.run(["bash", "-c", command], capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 124, result.stderr)
+        for duration in ("1e-2s", "+1e-2s", "+.01s", "1E-2s", "+1s"):
+            timed = command.replace("--timeout-seconds .01m", "--timeout-seconds " + duration)
+            self.assertEqual(subprocess.run(["bash", "-c", timed], capture_output=True, timeout=5).returncode, 124)
+        for duration in ("+0s", "0e2m"):
+            disabled = prefix + f'reviewer_credit_run muse {shlex.quote(str(self.out))} {shlex.quote(str(self.err))} --timeout-seconds {duration} -- true'
+            self.assertEqual(subprocess.run(["bash", "-c", disabled], capture_output=True, timeout=5).returncode, 0)
         for duration in ("nan", "inf", "-1", "1;touch bad"):
             bad = prefix + f'reviewer_credit_run muse {shlex.quote(str(self.out))} {shlex.quote(str(self.err))} --timeout-seconds {shlex.quote(duration)} -- true'
             self.assertEqual(subprocess.run(["bash", "-c", bad], capture_output=True, timeout=5).returncode, 2)
@@ -960,6 +966,16 @@ time.sleep(30)
                         options=['--credit-provider','muse','--credit-output',str(out),'--credit-stderr',str(err),'--credit-marker',str(marker)]
                         env['SYNTHETIC_CREDIT_OUTPUT']=str(out)
                     args=[sys.executable,str(self.supervisor),'--native-deepseek-review',str(self.base),str(engine),*options,'--','/usr/bin/timeout','30',str(engine),'run','--dir',str(self.base)]
+                    if stage == 'timeout':
+                        # Exercise shared-helper option ordering with the real
+                        # native capsule route, not an argv-only mock.
+                        env.update(AI_REVIEW_RUNNER_CORE='review-lifecycle-core/1', DOOR_MODE='review')
+                        words = ['deepseek', str(out), str(err), '--timeout-seconds', '+1e0s',
+                                 '--native-deepseek-review', str(self.base), str(engine), '--',
+                                 '/usr/bin/timeout', '30', str(engine), 'run', '--dir', str(self.base)]
+                        shell = 'source ' + shlex.quote(str(ROOT / 'tools/reviewer_event_guard.sh'))
+                        shell += '; reviewer_credit_run ' + shlex.join(words)
+                        args = ['bash', '-c', shell]
                     child=subprocess.Popen(args,cwd=self.base,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
                     try:
                         deadline=time.monotonic()+5
