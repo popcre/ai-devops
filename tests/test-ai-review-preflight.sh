@@ -138,6 +138,7 @@ chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
+export AI_DEEPSEEK_OPENCODE="$TMP/bin/good"
 export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
 export MOCK_ADMISSION_PYTHON="$(command -v python3 || command -v python)" MOCK_ADMISSION_TOOL="$ROOT/tools/reviewer_admission.py"
@@ -163,6 +164,26 @@ check "registered DeepSeek with failed local installation is never usable" "AI_R
 check "empty successful local doctor cannot prove readiness" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-empty' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 check "local doctor timeout cannot prove readiness" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-slow' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 check "restored local executable recovers without a stale quarantine" "$SCRIPT status codex | jq -e '.usable==true' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/codex.json'"
+deepseek_missing_runtime_status() {
+  (
+    unset AI_DEEPSEEK_OPENCODE AI_DEEPSEEK_ENGINE
+    [ -z "${1:-}" ] || export AI_DEEPSEEK_ENGINE="$1"
+    export HOME="$TMP/no-opencode-home" USERPROFILE=''
+    mkdir -p "$HOME"
+    # Hide only the provider runtime; retain real Python/curl and the actual
+    # offline API doctor. This fixture never contacts a provider or reads keys.
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = opencode ]; then return 1; fi
+      builtin command "$@"
+    }
+    export -f command
+    DEEPSEEK_API_KEY=synthetic-offline-fixture \
+      AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" status deepseek
+  )
+}
+check "API doctor cannot make missing ordinary DeepSeek runtime usable" "deepseek_missing_runtime_status | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"
+check "ambient first-install engine cannot bypass ordinary DeepSeek readiness" "deepseek_missing_runtime_status attachment-api | jq -e '.usable==false and .failure_class==\"local-dependency-unavailable\"'"
+check "restored ordinary DeepSeek runtime preserves unknown capacity and becomes usable" "$SCRIPT status deepseek | jq -e '.usable==true and .admission.state==\"unknown\" and .admission.quota_state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/deepseek.json'"
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"

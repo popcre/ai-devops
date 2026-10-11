@@ -33,6 +33,7 @@ case "$MODE" in review|implement) ;; *) printf 'deepseek door: usage: deepseek.s
 # Repository root, for the pinned OpenCode install and the profile source.
 DS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DS_ROOT/tools/reviewer_event_guard.sh"
+source "$DS_ROOT/tools/lib/deepseek-opencode.sh"
 PROFILE_SRC="$DS_ROOT/config/opencode-deepseek"
 OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || true)"
 
@@ -65,21 +66,7 @@ native_path() {
 }
 
 resolve_opencode() {
-  if [ -n "${AI_DEEPSEEK_OPENCODE:-}" ] && [ -x "${AI_DEEPSEEK_OPENCODE}" ]; then
-    printf '%s' "$AI_DEEPSEEK_OPENCODE"; return 0
-  fi
-  local home_dir="$HOME" pinned c
-  if [ "$IS_WINDOWS" = 1 ] && [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
-    home_dir="$(cygpath -u "$USERPROFILE")"
-  fi
-  if [ -n "$OC_VERSION" ]; then
-    pinned="$home_dir/.local/lib/ai-devops/opencode/$OC_VERSION/node_modules/opencode-ai/bin/opencode.exe"
-    [ -x "$pinned" ] && { printf '%s' "$pinned"; return 0; }
-  fi
-  c="$(command -v opencode 2>/dev/null || true)"
-  [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
-  printf 'deepseek door: local_dependency_unavailable: OpenCode binary not found. This is not a DeepSeek provider fault. Set AI_DEEPSEEK_OPENCODE or run bin/setup-opencode-glm.sh.\n' >&2
-  return 127
+  deepseek_resolve_opencode "$DS_ROOT"
 }
 
 # Credentials presence only — never print a key. A missing store is a local

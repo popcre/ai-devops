@@ -465,6 +465,16 @@ health_status() { # PROVIDER
       fi
       ;;
   esac
+  if [ "$1" = deepseek ]; then
+    # The attachment API doctor proves credentials, not the ordinary review
+    # runtime. First-install attachment reviews remain explicitly scoped in
+    # their door; they do not make ordinary allocation usable without OpenCode.
+    source "$REGISTRY_REAL_DIR/../tools/lib/deepseek-opencode.sh"
+    if ! deepseek_resolve_opencode "$REGISTRY_REAL_DIR/.." >/dev/null 2>&1; then
+      printf '{"provider":"deepseek","status":"installation-unavailable","failure_class":"local-dependency-unavailable"}\n'
+      return 1
+    fi
+  fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"
 }
