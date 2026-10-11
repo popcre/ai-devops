@@ -546,7 +546,17 @@ run_stage required "Configuration migration and validation" migrate_configuratio
 # First prune symlinks that point into this repo's bin/ but whose target is gone.
 # Without this, a retired command (e.g. ai-glm-agent.ps1) leaves a dangling link on
 # PATH forever: the loop below skips it because there is no source file to link from.
+protect_review_enforcement() {
+  local relative source
+  for relative in tools/review_action_profile.py config/review-action-profiles.json bin/ai-review-code-only.py bin/ai-task-gates; do
+    source="$REPO_ROOT/$relative"
+    [ -f "$source" ] && [ ! -L "$source" ] && [ "$(realpath -- "$source")" = "$source" ] || return 1
+    chmod go-w "$source" || return 1
+  done
+}
+
 install_entrypoints() {
+  protect_review_enforcement || return 1
   local dest target src name conflicts=0
   for dest in "$BIN_TARGET"/*; do
     [ -L "$dest" ] || continue
