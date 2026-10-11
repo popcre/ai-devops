@@ -28,7 +28,7 @@ record merely to reduce the file count.
 | [`plan_agent_evidence_and_jujutsu_pilot.md`](../plan_agent_evidence_and_jujutsu_pilot.md) | [#903](https://github.com/popcre/ai-devops/issues/903) | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
 | [`plan_ai-muse-native-engine-parity.md`](../plan_ai-muse-native-engine-parity.md) | [#542](https://github.com/popcre/ai-devops/issues/542) | Phase A coordination done; remaining phases open |
 | [`plan_cut-unneeded-github-traffic.md`](../plan_cut-unneeded-github-traffic.md) | (see plan STATUS) | Measure and reduce remaining unneeded traffic; preserve workflow and separate quota buckets |
-| [`plan_reviewer-scoped-ci-selection.md`](../plan_reviewer-scoped-ci-selection.md) | [#1563](https://github.com/popcre/ai-devops/issues/1563) | Steps 0–5 done; Step 6 live proof pending |
+| [`plan_reviewer-scoped-ci-selection.md`](../plan_reviewer-scoped-ci-selection.md) | [#1563](https://github.com/popcre/ai-devops/issues/1563) | Complete — live proof PR #1571 (7 of 143 suites) |
 | [`plan_github-request-reduction.md`](../plan_github-request-reduction.md) | [#658](https://github.com/popcre/ai-devops/issues/658) | P5 (BlockerWatch → existing App) before any multi-App split |
 | [`plan_mimo-windows-support.md`](../plan_mimo-windows-support.md) | (see plan STATUS) | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` |
 | [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md) | [#782](https://github.com/popcre/ai-devops/issues/782) | Steps 5–6 open: re-adopt globals on edge-dev, land PR, add router row |
