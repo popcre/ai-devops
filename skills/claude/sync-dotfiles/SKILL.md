@@ -96,8 +96,9 @@ clone + `./install.sh` (Ubuntu) first.
    checkout unchanged until that route permits advancement. Use the full Windows
    installer or Linux candidate `update.sh`; a bare `git pull` or Windows
    `-SourceGateOnly` is not an installation. Continue only after the installed
-   source, managed launchers, source receipt, and reviewer qualification agree
-   with the pinned release. Preserve capacity holds; installation does not prove
+   source, managed launchers, source receipt, and required reviewer qualification
+   stages agree with the pinned release, including supported capacity deferrals.
+   Preserve capacity holds; installation does not prove
    provider credit availability. On failure, STOP and report — never force or reset.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
