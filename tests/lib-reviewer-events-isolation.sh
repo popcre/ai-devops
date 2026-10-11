@@ -25,3 +25,9 @@ if [ -z "${AI_REVIEW_EVENT_DIR:-}" ]; then
   }
   export AI_REVIEW_EVENT_DIR
 fi
+# A nested offline suite must not inherit the caller's live outcome ledger.
+# Events already had a private home, but lifecycle failure fixtures still
+# appended synthetic failures to the real scoreboard through its default.
+# Suites may select their own fixture ledger after sourcing this helper.
+export AI_REVIEW_SCOREBOARD_DIR="$AI_REVIEW_EVENT_DIR/scoreboard"
+export AI_REVIEW_SCOREBOARD_FILE="$AI_REVIEW_SCOREBOARD_DIR/reviews.jsonl"

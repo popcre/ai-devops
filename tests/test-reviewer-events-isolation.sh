@@ -15,6 +15,20 @@ resolve(){ (cd "$ROOT/tools" && env "$@" "$PY" -c 'import reviewer_events; print
 check "harness exports the test isolation marker" '[ "${AI_REVIEW_TEST_ISOLATION:-}" = 1 ]'
 check "harness gives the suite a private events directory" '[ -n "${AI_REVIEW_EVENT_DIR:-}" ] && [ -d "$AI_REVIEW_EVENT_DIR" ]'
 check "private events directory is not the live ledger" '[ "$(cd "$AI_REVIEW_EVENT_DIR" && pwd -P)" != "$live" ]'
+check "harness isolates outcome ledger beside private events" '[ "$AI_REVIEW_SCOREBOARD_FILE" = "$AI_REVIEW_EVENT_DIR/scoreboard/reviews.jsonl" ]'
+
+# Exercise a real outcome append with hostile inherited caller locations.
+# The sentinel represents the caller's ledger; never touch the actual live log.
+mkdir -p "$TMP/parent-ledger"
+printf 'caller-owned-sentinel\n' > "$TMP/parent-ledger/reviews.jsonl"
+printf '{"run_id":"isolated-outcome-proof","caller":"codex"}\n' > "$TMP/outcome.json"
+env AI_REVIEW_EVENT_DIR="$TMP/child-events" \
+  AI_REVIEW_SCOREBOARD_DIR="$TMP/parent-ledger" \
+  AI_REVIEW_SCOREBOARD_FILE="$TMP/parent-ledger/reviews.jsonl" bash -c \
+  '. "$1/tests/lib-test-harness.sh"; "$1/bin/ai-review-scoreboard" append deepseek "$2" --elapsed 1 --failure incomplete-code-only-invocation >/dev/null' \
+  _ "$ROOT" "$TMP/outcome.json"
+check "nested test outcome records only in its private ledger" 'grep -q isolated-outcome-proof "$TMP/child-events/scoreboard/reviews.jsonl"'
+check "nested test cannot append into inherited caller ledger" '[ "$(cat "$TMP/parent-ledger/reviews.jsonl")" = caller-owned-sentinel ]'
 
 out="$(resolve AI_REVIEW_TEST_ISOLATION=1 AI_REVIEW_EVENT_DIR="$live" 2>&1)"; rc=$?
 check "marker refuses an explicit live events directory" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "refused the live reviewer events log"'
