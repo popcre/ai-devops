@@ -44,6 +44,9 @@ DS_PROVIDER="deepseek-api"
 DS_MODEL="${AI_DEEPSEEK_MODEL:-deepseek-flash}"
 DS_TIMEOUT="${DOOR_TIMEOUT:-${AI_DEEPSEEK_TIMEOUT:-3600}}"
 DS_ENGINE="${AI_DEEPSEEK_ENGINE:-opencode}"
+DS_SCRATCH=""
+cleanup_scratch() { [ -z "$DS_SCRATCH" ] || rm -rf -- "$DS_SCRATCH"; }
+trap cleanup_scratch EXIT
 if [ "$MODE" = implement ]; then
   DS_AGENT="deepseek-implement"
 else
@@ -244,6 +247,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    [ "$MODE" != review ] || printf 'Run commands and tests in your current directory, a private writable copy. The original review snapshot and its evidence packet must remain unchanged.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -256,8 +260,18 @@ main() {
     exit 127
   fi
   local -a native_review=()
+  local oc_dir="$DOOR_WORKDIR"
+  if [ "$MODE" = review ]; then
+    DS_SCRATCH="$(mktemp -d)"
+    oc_dir="$DS_SCRATCH/work"
+    cp -a "$DOOR_WORKDIR" "$oc_dir" || {
+      retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
+      printf 'deepseek door: could not prepare its disposable review workspace.\n' >&2
+      exit 127
+    }
+  fi
   if [ "$MODE" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
-    native_review=(--native-deepseek-review "$DOOR_WORKDIR" "$oc")
+    native_review=(--native-deepseek-review "$oc_dir" "$oc")
   fi
   set +e
   (
@@ -270,7 +284,7 @@ main() {
     printf '%s' "$(cat "$prompt_full")" \
       | reviewer_credit_run deepseek "$log" "$out.err" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
           --format json --model "$DS_PROVIDER/$DS_MODEL" \
-          --dir "$(native_path "$DOOR_WORKDIR")" \
+          --dir "$(native_path "$oc_dir")" \
           > "$log" 2> "$out.err"
   )
   rc=$?

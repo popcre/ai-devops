@@ -990,6 +990,11 @@ while [ \$# -gt 0 ]; do
   esac
 done
 cat > /dev/null
+if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
+  printf '%s' "\$dir" > "\$DS_TEST_DIR_RECORD"
+  (cd "\$dir" && python3 -m unittest test_allocation.py) >&2 || exit 1
+  test -d "\$dir/__pycache__" || exit 1
+fi
 if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
 cat <<'JSON'
 {"type":"sessionID","sessionID":"stub-session-1"}
@@ -1030,6 +1035,29 @@ for broken_event in '{invalid-json' '[]'; do
   check "deepseek_invalid_native_event_${bad_id}_never_accepts_prior_approval" \
     "test '$bad_rc' -ne 0 && grep -q invalid-response-json '$TMP/ds-invalid-$bad_id.private/report.md' && ! grep -q '^APPROVE$' '$TMP/ds-invalid-$bad_id.md'"
 done
+# Real Python test execution creates bytecode. It belongs in the door's own
+# scratch workspace, never the runner's immutable source snapshot.
+DS_ARTIFACT_SOURCE="$TMP/artifact-source"
+cp -a "$MREPO" "$DS_ARTIFACT_SOURCE"
+cat > "$DS_ARTIFACT_SOURCE/test_allocation.py" <<'PY'
+import unittest
+class AllocationTest(unittest.TestCase):
+    def test_example(self): self.assertEqual(2 + 2, 4)
+PY
+DS_ARTIFACT_DIGEST="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
+DS_ARTIFACT_RC=0
+DS_TEST_RUN_UNITTEST=1 DS_TEST_DIR_RECORD="$TMP/ds-artifact-dir" \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_DEEPSEEK_OPENCODE="$STUB_OC" \
+  AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR="$DS_ARTIFACT_SOURCE" \
+  DOOR_PACKET_DIR="$DS_ARTIFACT_SOURCE" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+  DOOR_REPORT_OUT="$TMP/ds-artifact-report" DOOR_HEAD="$HEAD_SHA" \
+  bash "$DS_DOOR" review >"$TMP/ds-artifact-out" 2>"$TMP/ds-artifact-err" || DS_ARTIFACT_RC=$?
+DS_ARTIFACT_AFTER="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
+DS_ACTUAL_WORKDIR="$(cat "$TMP/ds-artifact-dir" 2>/dev/null || true)"
+check "deepseek_real_unittest_keeps_immutable_snapshot_digest" \
+  "test '$DS_ARTIFACT_RC' -eq 0 && test '$DS_ARTIFACT_DIGEST' = '$DS_ARTIFACT_AFTER' && test ! -d '$DS_ARTIFACT_SOURCE/__pycache__'"
+check "deepseek_tests_run_in_owned_scratch_and_remove_it" \
+  "test -n '$DS_ACTUAL_WORKDIR' && test '$DS_ACTUAL_WORKDIR' != '$DS_ARTIFACT_SOURCE' && test ! -e '$DS_ACTUAL_WORKDIR'"
 
 # The grep presence check must not close the JSONL text producer early under
 # pipefail. Exercise a large multi-event report and retain all fail-closed
