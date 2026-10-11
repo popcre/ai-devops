@@ -12,7 +12,12 @@ export AI_REVIEW_EVENT_DIR="$TMP/events"
 unset AI_STEPFUN_KEY STEPFUN_API_KEY STEP_API_KEY
 export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20 AI_STEPFUN_RPM=100000
 mkdir -p "$TMP/bin" "$HOME"
+chmod 700 "$HOME"
 printf 'stub-key\n' > "$AI_STEPFUN_KEY_STORE"; chmod 600 "$AI_STEPFUN_KEY_STORE"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$AI_STEPFUN_KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$HOME")" \
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_PARENT -Directory; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null || exit 1
+fi
 git -C "$TMP" init -q repo; git -C "$TMP/repo" config user.email t@example.com; git -C "$TMP/repo" config user.name T
 printf 'x\n' > "$TMP/repo/f"; git -C "$TMP/repo" add f; git -C "$TMP/repo" commit -qm init
 HEAD_SHA="$(git -C "$TMP/repo" rev-parse HEAD)"
@@ -284,6 +289,7 @@ if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind /usr /usr --symlink usr/bin /
   # A home outside /tmp, so only the sandbox's empty-home mount can hide it.
   mkdir -p "$ROOT/.ai"; RH="$(mktemp -d "$ROOT/.ai/stepfun-test-home.XXXXXX")"
   mkdir -p "$RH/.ssh" "$RH/probe-bin" "$RH/.config/ai-devops/secrets"; printf 'secret\n' > "$RH/.ssh/id_test"
+  chmod 700 "$RH/.config/ai-devops/secrets"
   cp "$AI_STEPFUN_KEY_STORE" "$RH/.config/ai-devops/secrets/stepfun-api-key"; chmod 600 "$RH/.config/ai-devops/secrets/stepfun-api-key"
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
