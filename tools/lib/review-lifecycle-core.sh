@@ -615,8 +615,11 @@ $operation_request"
       case "$diagnostic_reason" in
         local-dependency-unavailable) door_failure=local_dependency_unavailable ;;
         native-execution-failed) door_failure=native-execution-failed ;;
-        native-error-envelope) door_failure=provider-native-error ;;
-        no-assistant-text) door_failure=empty-report ;;
+        native-error-envelope|provider-status-failed) door_failure=provider-native-error ;;
+        invalid-response-json) door_failure=provider-invalid-response ;;
+        native-tool-denied) door_failure=permission-denied ;;
+        model-mismatch) door_failure=model-mismatch ;;
+        no-assistant-text|empty-response-text|report-extraction-failed) door_failure=empty-report ;;
       esac
     fi
     # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does

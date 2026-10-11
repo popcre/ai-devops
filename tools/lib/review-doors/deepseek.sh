@@ -292,6 +292,12 @@ main() {
     exit 1
   fi
 
+  if ! jq -se 'length > 0 and all(.[]; type == "object")' "$log" >/dev/null 2>&1; then
+    retain_failure "$log" "$out.err" "$rc" invalid-response-json || exit 1
+    printf 'deepseek door: invalid native event stream; private diagnostics retained.\n' >&2
+    rm -f "$prompt_full"
+    exit 1
+  fi
   if jq -se 'any(.[]; .type == "error")' "$log" >/dev/null 2>&1; then
     retain_failure "$log" "$out.err" "$rc" native-error-envelope || exit 1
     printf 'deepseek door: native engine reported an error; private diagnostics retained.\n' >&2

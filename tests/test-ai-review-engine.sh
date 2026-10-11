@@ -1018,6 +1018,19 @@ check "deepseek_door_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPOR
 check "deepseek_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_DEEPSEEK_OPENCODE='$STUB_OC' AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/ds-x.md' DOOR_HEAD='$HEAD_SHA' bash '$DS_DOOR' review) 2>/dev/null"
 
+for broken_event in '{invalid-json' '[]'; do
+  bad_id="${bad_id:-0}"; bad_id=$((bad_id + 1))
+  printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}' "$broken_event" > "$TMP/ds-invalid-$bad_id.jsonl"
+  bad_rc=0
+  DS_JSONL="$TMP/ds-invalid-$bad_id.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+    DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+    DOOR_REPORT_OUT="$TMP/ds-invalid-$bad_id.md" DOOR_DIAGNOSTICS_DIR="$TMP/ds-invalid-$bad_id.private" \
+    DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review > "$TMP/ds-invalid-$bad_id.out" 2>&1 || bad_rc=$?
+  check "deepseek_invalid_native_event_${bad_id}_never_accepts_prior_approval" \
+    "test '$bad_rc' -ne 0 && grep -q invalid-response-json '$TMP/ds-invalid-$bad_id.private/report.md' && ! grep -q '^APPROVE$' '$TMP/ds-invalid-$bad_id.md'"
+done
+
 # The grep presence check must not close the JSONL text producer early under
 # pipefail. Exercise a large multi-event report and retain all fail-closed
 # report shapes through the same existing OpenCode door fixture.
