@@ -660,7 +660,7 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
   reason="head=$head manifest_blob=$blob approval=$summary"
   state_record_override application-workflow application-workflow "$reason" "$effective" \
     && state="$(state_path)" \
-    && jq -e --arg r "$reason" '.overrides | any(.kind=="application-workflow" and .action=="application-workflow" and .reason==$r)' "$state" >/dev/null \
+    && jq -e --arg r "$reason" --arg c "$effective" '.overrides | any(.kind=="application-workflow" and .action=="application-workflow" and .observed_class==$c and .reason==$r)' "$state" >/dev/null \
     || blocked 'ai-task-gates: STOP. Application workflow receipt could not be persisted.'
   [ "$(git -C "$TOPLEVEL" rev-parse HEAD)" = "$head" ] \
     && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \

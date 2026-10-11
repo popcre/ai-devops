@@ -76,6 +76,7 @@ tools/lib/review-operation.sh
 tools/lib/stepfun-pace.sh
 tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh
+tools/application_workflow_target.py
 tools/reviewer_admission.py
 tools/reviewer_credit_stream.py
 tests/test_reviewer_credit_stream.py

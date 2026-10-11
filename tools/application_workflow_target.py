@@ -20,7 +20,8 @@ TARGET = {
     "scope": "hts-non-operative-learning-replay-retrieval",
     "routes": ["POST /api/cross/evidence", "POST /api/hts-rag/precheck-v2",
                "POST /api/hts-rag/shadow-classify",
-               "GET /api/hts-rag/history", "GET /api/hts-rag/debate-runs"],
+               "GET /api/hts-rag/history", "GET /api/hts-rag/history/:id/turns",
+               "GET /api/hts-rag/debate-runs/:id"],
     "forbidden": ["sql", "schema", "cloud-mutation", "manual-promotion",
                   "runtime-flag-change", "rfq-apply-save", "production", "merge"],
 }
