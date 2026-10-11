@@ -566,6 +566,44 @@ the shell that host actually runs.
 
 Both hosts were verified reachable this way on 2026-09-02.
 
+### What token an SSH session gets (since September 2026)
+
+Since the 2026-09-09 Windows cumulative update, fresh SSH sessions on every
+probed Windows pool host yield a FULL elevated administrator token (High
+Mandatory Level, BUILTIN\Administrators enabled, no linked limited token). The
+historical expectation of a filtered token — and the
+`plan_windows-runner-maintenance-elevation.md` §3 repro where
+`#Requires -RunAsAdministrator` refuses over SSH — no longer reproduces. This
+was diagnosed on 2026-10-09 as a fleet-wide Windows servicing regression; see
+the [issue #1547 diagnosis comment](https://github.com/popcre/ai-devops/issues/1547#issuecomment-6088987231)
+and the raw evidence in
+[`tests/verification/issue-1547-elevated-ssh-2026-10-09/README.md`](../tests/verification/issue-1547-elevated-ssh-2026-10-09/README.md).
+
+Verify the posture of a fresh session rather than assuming it:
+
+```bash
+ssh <host-alias> "whoami /groups"
+```
+
+Interpret the result: `High Mandatory Level` together with Administrators as an
+`Enabled group` means the session is elevated — treat it as host-admin.
+`Medium Mandatory Level` with `Group used for deny only` means the token is
+filtered (the pre-September behavior).
+
+Implications: scripts needing Administrator now SUCCEED over SSH — do not
+mistake this for a misconfigured boundary. Any negative privilege test must run
+from a proven non-elevated operator context (Medium Mandatory Level,
+Administrators deny-only), per the host adaptation in
+[`plan_windows-runner-maintenance-elevation.md`](../plan_windows-runner-maintenance-elevation.md)
+§10.
+
+Decision recorded in issue #1547: no host-side hardening. Do not set
+`LocalAccountTokenFilterPolicy`, do not enable Windows sudo, do not change UAC —
+those knobs stay at their secure defaults and setting them is forbidden; they
+would not restore filtering anyway (see the
+[diagnosis comment](https://github.com/popcre/ai-devops/issues/1547#issuecomment-6088987231)).
+Future host proofs record their token posture as a fact of that proof.
+
 ## Status and troubleshooting
 
 Repository runner status:
