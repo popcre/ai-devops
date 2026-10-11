@@ -397,6 +397,18 @@ evidence rows only in the wrapper-written header before `## Result`; rows in
 reviewer text never count. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
 
+The bounded private #770 review sends a native-generated, allowlisted evidence
+projection alongside the public enforcement implementation. It contains scope
+flags, opaque commitments, selected code hashes and verified installed source
+identity, never private manifest values, credentials or row data. It is not a
+verdict or live rehearsal proof. Conditional reviewer approval remains bound to
+the unchanged private descriptor, genuine provider completion, and fresh native
+checks at finish, initial-forward and original-restoration. Public enforcement
+and the installation receipt are bound too: source movement requires a fresh
+review. Hold the installer's existing checkout lock throughout any authorized
+rehearsal and mandatory restoration; installation must remain serialized with
+those actions.
+
 Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
 
 - Run `update.sh` from the candidate worktree, never from the installed

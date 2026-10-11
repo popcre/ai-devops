@@ -342,13 +342,23 @@ if [ "$code_only" -eq 1 ]; then
   action_evidence_args=()
   if [ -n "$action_profile" ]; then
     action_review_evidence_args || { printf 'ai-review: installed public action-scope evidence unavailable; no provider was dispatched.\n' >&2; exit 3; }
+    action_evidence_dir="$(mktemp -d "$snapshot/.ai-review-action-scope.XXXXXXXX")" || exit 3
+    action_evidence_file="$action_evidence_dir/evidence.json"
+    python3 "$REAL_DIR/../tools/review_action_profile.py" evidence "$lifecycle_state" --manifest "$action_manifest" --profile "$action_profile" > "$action_evidence_file" || { printf 'ai-review: native private action evidence refused; no provider was dispatched.\n' >&2; exit 3; }
+    action_evidence_sha256="$(sha256sum "$action_evidence_file" | cut -d' ' -f1)" || exit 3
+    action_evidence_args+=(--file "$action_evidence_file")
     code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
+    code_prompt="$code_prompt The attached native-validated-private-action-commitment is an allowlisted non-authorizing projection produced after fresh native validation of all actual private inputs. Its opaque descriptor commitment is intentionally not remotely recomputable: private values remain local. Judge whether the reviewed implementation and attached enforcement safely constrain that committed action. Any approval is conditional on the native finish and initial-forward/original-restoration checks revalidating the same commitment, genuine provider completion and installed profile; it is neither independent remote inspection of private values nor evidence of a rehearsal already run. The future provider completion/admission receipts do not exist before your verdict. Do not request private manifests, credentials or row data; withhold approval if the conditional enforcement is insufficient."
   fi
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
   error_file="$(mktemp)" || { printf 'ai-review: cannot reserve private reviewer diagnostics.\n' >&2; exit 3; }
   if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" "${action_evidence_args[@]+"${action_evidence_args[@]}"}" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
   cat "$error_file" >&2
   diagnostics_printed=1
+  if [ -n "$action_profile" ] && [ "$(sha256sum "$action_evidence_file" | cut -d' ' -f1)" != "$action_evidence_sha256" ]; then
+    printf 'ai-review: native action evidence changed during review; verdict refused.\n' >&2
+    exit 3
+  fi
   # DeepSeek retains its packet and transcript under this sanitized repository.
   # Keep it after dispatch, including a failed or stale response, for recovery.
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed during code-only review; verdict refused. Retained evidence: %s\n' "$snapshot" >&2; exit 3; }

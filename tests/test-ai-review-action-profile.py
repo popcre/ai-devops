@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """#1531 full synthetic native provider/profile proofs; never contacts a provider."""
 import copy
+import contextlib
 import hashlib
 import importlib.util
 import json
+import io
 import os
 from pathlib import Path
 import shutil
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
@@ -138,6 +141,10 @@ import json,sys,re,os
 from pathlib import Path
 a=sys.argv; out=a[a.index('-o')+1]; req=json.loads(Path(a[a.index('-d')+1][1:]).read_text()); text='\\n'.join(x['content'] for x in req['messages']); head=re.search(r'Synthetic review HEAD: ([a-f0-9]{40})',text)[1]; descriptor_match=re.search(r'Exact canonical operational descriptor sha256: ([a-f0-9]{64})',text); descriptor=descriptor_match[1] if descriptor_match else '0'*64
 assert 'synthetic-never-transmitted' not in text and 'synthetic770destination' not in text
+if descriptor_match:
+ assert '"evidence_kind": "native-validated-private-action-commitment"' in text
+ assert '"action_authorized": false' in text
+ assert '"issue_isolated_credentials": false' in text
 with (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'curl-calls').open('a') as calls: calls.write('dispatch\\n')
 content='The complete selected runtime code and typed contract were reviewed. The immutable operational descriptor covers exactly the isolated timing rehearsal, disabled credentials and callbacks, and mandatory original restoration. This approval is bounded to the stated profile and descriptor and confers no production or root action authority.\\nAction scope: shared-db-770-isolated-timing-rehearsal-v1 descriptor sha256:'+descriptor+'.\\nVERDICT: APPROVE '+head+'\\n\\n'
 if (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'mock-revise').exists(): content=content.replace('VERDICT: APPROVE ', 'VERDICT: REVISE ')
@@ -169,6 +176,14 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
                     candidate = json.loads(path.read_text())
                     if candidate.get("status") == "preflight":
                         profile.action_binding(candidate, cls.m, "capture")
+                    if candidate.get("action_profile_binding"):
+                        # Synthetic fixture diagnosis only; never edits a state
+                        # or publishes a verdict/receipt from the failed run.
+                        with mock.patch.dict(os.environ, cls.env):
+                            binding = profile.action_binding(candidate, cls.m, "capture")
+                            if binding != candidate["action_profile_binding"]:
+                                raise AssertionError("synthetic evidence changed keys: " + str([k for k in binding if binding[k] != candidate["action_profile_binding"].get(k)]))
+                            profile.review_evidence(candidate, cls.m, binding)
             raise AssertionError("native fixture exit " + str(result.returncode) + ": " + result.stderr.decode()[-1500:])
         return result
 
@@ -393,6 +408,125 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
         finally:
             probe.unlink(missing_ok=True)
 
+    def test_16_actual_provider_projection_contains_no_private_values_or_paths(self):
+        files = list(Path(self.state["code_only_export"]).glob(".ai-review-action-scope.*/evidence.json"))
+        self.assertEqual(len(files), 1)
+        raw = files[0].read_bytes()
+        evidence = json.loads(raw)
+        for value in (self.target_ref, "synthetic-never-transmitted", str(self.inputs), str(self.repo)):
+            self.assertNotIn(value.encode(), raw)
+        self.assertEqual(evidence["manifest_descriptor_sha256"], self.state["action_profile_binding"]["manifest_descriptor_sha256"])
+        self.assertEqual(evidence["immutable_input_count"], 77)
+        self.assertEqual(set(evidence["selected_code_input_sha256"]), set(self.p["paths"]))
+        self.assertEqual(evidence["validated_scope"], {"preparation_scope": "TIMING_ONLY", "issue_isolated_credentials": False, "acceptance_callback": False, "original_restoration_required": True})
+        self.assertFalse(evidence["action_authorized"])
+        self.assertFalse(evidence["live_rehearsal_proven"])
+        self.assertEqual(evidence["installed_enforcement"]["kind"], "NONAUTHORIZING_TEST_FIXTURE")
+
+    def test_17_changed_commitment_refuses_projection_without_disclosing_values(self):
+        state = copy.deepcopy(self.state); state["status"] = "running"
+        state_path = self.work / "projection-state.json"; state_path.write_text(json.dumps(state)); state_path.chmod(0o600)
+        changed = copy.deepcopy(self.m); changed["issue_isolated_credentials"] = True
+        manifest = self.work / "changed-projection.json"; manifest.write_text(json.dumps(changed)); manifest.chmod(0o600)
+        r = subprocess.run([sys.executable, str(ROOT / "tools/review_action_profile.py"), "evidence", str(state_path), "--manifest", str(manifest)], cwd=self.repo, env=self.env, capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, b"")
+        self.assertNotIn(self.target_ref.encode(), r.stderr)
+
+    def test_18_changed_enforcement_refuses_before_admission(self):
+        state = copy.deepcopy(self.state); state["status"] = "running"
+        state_path = self.work / "enforcement-state.json"; state_path.write_text(json.dumps(state)); state_path.chmod(0o600)
+        original = state_path.read_bytes()
+        changed = copy.deepcopy(state["action_profile_binding"]["installed_enforcement"])
+        changed["public_enforcement_sha256"]["bin/ai-task-gates"] = "0" * 64
+        output = io.StringIO()
+        with mock.patch.object(profile, "installed_enforcement", return_value=changed), mock.patch.object(profile, "admit") as admit, mock.patch.object(sys, "argv", ["profile", "evidence", str(state_path), "--manifest", str(self.manifest)]), contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(profile.main(), 1)
+            admit.assert_not_called()
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(state_path.read_bytes(), original)
+
+    def test_19_private_value_in_source_identity_refuses_without_disclosure(self):
+        state = copy.deepcopy(self.state); state["status"] = "running"; state["source_digest"] = "PRIVATE-IDENTITY-SENTINEL"
+        path = self.work / "private-identity-state.json"; path.write_text(json.dumps(state)); path.chmod(0o600)
+        r = subprocess.run([sys.executable, str(ROOT / "tools/review_action_profile.py"), "evidence", str(path), "--manifest", str(self.manifest)], cwd=self.repo, env=self.env, capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, b"")
+        self.assertNotIn(b"PRIVATE-IDENTITY-SENTINEL", r.stderr)
+
+    def test_20_tampered_projection_is_terminal_without_admission(self):
+        stub = self.work / "tampering-provider"
+        stub.write_text("#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\na=sys.argv; paths=[a[i+1] for i,x in enumerate(a[:-1]) if x=='--file']; p=Path(paths[-1]); p.write_text('tampered public projection'); raise SystemExit(17)\n")
+        stub.chmod(0o700)
+        before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
+        args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--paths-file", str(self.paths), "--base", "HEAD~1", "--action-profile", profile.PROFILE, "--action-manifest", str(self.manifest)]
+        r = subprocess.run(args, cwd=self.repo, env=dict(self.env, AI_DEEPSEEK_REVIEW_BIN=str(stub)), capture_output=True)
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn(b"native action evidence changed", r.stderr)
+        created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
+        self.assertEqual(len(created), 1)
+        row = json.loads(next(iter(created)).read_text())
+        self.assertEqual(row["status"], "failed")
+        self.assertFalse(Path(row["lock_path"]).exists())
+        self.assertNotIn("action_initial_admission", row)
+
+
+class InstalledEnforcementTests(unittest.TestCase):
+    """Real clean Git source with fake external receipts; no system writes."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.files = ("tools/review_action_profile.py", "config/review-action-profiles.json", "bin/ai-review-code-only.py", "bin/ai-task-gates")
+        for name in self.files:
+            path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text("public fixture\n"); path.chmod(0o644)
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(self.root), *args], stderr=subprocess.DEVNULL)
+        git("init", "-q"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.com")
+        git("add", "."); git("commit", "-qm", "public enforcement fixture")
+        self.head = git("rev-parse", "HEAD").decode().strip()
+        self.receipt = ("meta\tsource_sha\t" + self.head + "\t-\nsymlink\t/usr/local/bin/ai-task-gates\t" + str(self.root / "bin/ai-task-gates") + "\t" + profile.sha((self.root / "bin/ai-task-gates").read_bytes()) + "\n").encode()
+        self.resolve = Path.resolve
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def proof(self, receipt=None, wrong_launcher=False):
+        def resolve(path, *args, **kwargs):
+            if str(path) == "/usr/local/bin/ai-task-gates":
+                return self.root / ("bin/wrong" if wrong_launcher else "bin/ai-task-gates")
+            return self.resolve(path, *args, **kwargs)
+        with mock.patch.object(profile, "ROOT", self.root), mock.patch.dict(os.environ, {"AI_DEVOPS_TEST_MODE": "0"}), mock.patch.object(Path, "resolve", resolve), mock.patch.object(profile._native, "private_read", return_value=self.receipt if receipt is None else receipt):
+            return profile.installed_enforcement()
+
+    def test_matching_committed_source_and_installed_receipt(self):
+        proof = self.proof()
+        self.assertEqual(proof["kind"], "VERIFIED_INSTALLED_SOURCE")
+        self.assertEqual(proof["source_head"], self.head)
+        self.assertEqual(set(proof["public_enforcement_sha256"]), set(self.files))
+
+    def test_stale_receipt_refuses(self):
+        with self.assertRaises(ValueError): self.proof(self.receipt.replace(self.head.encode(), b"0" * 40))
+
+    def test_foreign_launcher_refuses(self):
+        with self.assertRaises(ValueError): self.proof(wrong_launcher=True)
+
+    def test_modified_enforcement_refuses(self):
+        (self.root / self.files[0]).write_text("modified\n")
+        with self.assertRaises(ValueError): self.proof()
+
+    def test_duplicate_source_receipt_refuses(self):
+        with self.assertRaises(ValueError): self.proof(self.receipt + self.receipt.splitlines(keepends=True)[0])
+
+    def test_group_writable_source_is_fixture_only_and_real_installation_refuses(self):
+        for name in self.files:
+            (self.root / name).chmod(0o664)
+        with self.assertRaises(ValueError): self.proof()
+        with mock.patch.object(profile, "ROOT", self.root), mock.patch.dict(os.environ, {"AI_DEVOPS_TEST_MODE": "1"}):
+            proof = profile.installed_enforcement()
+        self.assertEqual(proof["kind"], "NONAUTHORIZING_TEST_FIXTURE")
+        self.assertNotIn("source_head", proof)
+        self.assertNotIn("installation_receipt_sha256", proof)
+
 
 class InstalledActionEvidenceTests(unittest.TestCase):
     """Exercise the actual shell helper's disclosure boundary without a provider."""
@@ -441,6 +575,35 @@ class InstalledActionEvidenceTests(unittest.TestCase):
         p.symlink_to(self.root / "hidden", target_is_directory=True)
         r = self.run_helper()
         self.assertEqual((r.returncode, r.stdout), (3, b""))
+
+    def test_installer_preserves_execution_and_removes_external_writes(self):
+        source = (ROOT / "install.sh").read_text()
+        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
+        for name in self.files:
+            (self.root / name).chmod(0o775 if name.startswith("bin/") else 0o664)
+        script = helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement'
+        r = subprocess.run(["bash", "-c", script, "fixture", str(self.root)], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in self.files:
+            self.assertEqual((self.root / name).stat().st_mode & 0o777, 0o755 if name.startswith("bin/") else 0o644)
+
+    def test_installer_refuses_linked_enforcement_without_chmod_target(self):
+        source = (ROOT / "install.sh").read_text()
+        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
+        target = self.root / "foreign-file"; target.write_text("preserved fixture"); target.chmod(0o664)
+        path = self.root / self.files[0]; path.unlink(); path.symlink_to(target)
+        r = subprocess.run(["bash", "-c", helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement', "fixture", str(self.root)], capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o664)
+
+    def test_installer_refuses_linked_parent_without_chmod_target(self):
+        source = (ROOT / "install.sh").read_text()
+        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
+        parent = self.root / "tools"; parent.rename(self.root / "hidden"); parent.symlink_to(self.root / "hidden", target_is_directory=True)
+        target = self.root / "hidden/review_action_profile.py"; target.chmod(0o664)
+        r = subprocess.run(["bash", "-c", helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement', "fixture", str(self.root)], capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o664)
 
 
 if __name__ == "__main__":
