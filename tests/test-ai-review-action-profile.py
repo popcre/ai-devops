@@ -20,6 +20,24 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("profile", ROOT / "tools/review_action_profile.py")
 profile = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(profile)
+scope_spec = importlib.util.spec_from_file_location("code_only_scope", ROOT / "bin/ai-review-code-only.py")
+scope_module = importlib.util.module_from_spec(scope_spec)
+scope_spec.loader.exec_module(scope_module)
+
+
+class ActionScopeSyntax(unittest.TestCase):
+    def test_exact_identity_allows_only_optional_sentence_period(self):
+        binding = {"profile": profile.PROFILE, "manifest_descriptor_sha256": "a" * 64}
+        line = "Action scope: " + profile.PROFILE + " descriptor sha256:" + "a" * 64
+        for suffix in ("", "."):
+            self.assertTrue(scope_module.has_exact_action_scope("Approved bounded operation.\n" + line + suffix + "\nVERDICT: APPROVE " + "b" * 40, binding))
+
+    def test_missing_changed_duplicate_or_decorated_scope_refuses(self):
+        binding = {"profile": profile.PROFILE, "manifest_descriptor_sha256": "a" * 64}
+        line = "Action scope: " + profile.PROFILE + " descriptor sha256:" + "a" * 64
+        for content in ("", line.replace("a" * 64, "b" * 64), line.replace(profile.PROFILE, "another-profile"), line + "extra", line + "..", " " + line, line + " ", line + "\n" + line, line + ".\n" + line, line + "\n " + line.replace("a" * 64, "b" * 64), "`" + line + "`", line.replace("a" * 64, "a" * 63)):
+            with self.subTest(content=content):
+                self.assertFalse(scope_module.has_exact_action_scope(content, binding))
 
 
 class NativeProfile(unittest.TestCase):
@@ -147,6 +165,7 @@ if descriptor_match:
  assert '"issue_isolated_credentials": false' in text
 with (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'curl-calls').open('a') as calls: calls.write('dispatch\\n')
 content='The complete selected runtime code and typed contract were reviewed. The immutable operational descriptor covers exactly the isolated timing rehearsal, disabled credentials and callbacks, and mandatory original restoration. This approval is bounded to the stated profile and descriptor and confers no production or root action authority.\\nAction scope: shared-db-770-isolated-timing-rehearsal-v1 descriptor sha256:'+descriptor+'.\\nVERDICT: APPROVE '+head+'\\n\\n'
+if (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'mock-scope-no-period').exists(): content=content.replace(descriptor+'.\\n',descriptor+'\\n')
 if (Path(os.environ['AI_DEEPSEEK_TEST_DIR'])/'mock-revise').exists(): content=content.replace('VERDICT: APPROVE ', 'VERDICT: REVISE ')
 Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'usage':None})); print('200',end='')
 ''')
@@ -449,6 +468,27 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
         self.assertFalse(evidence["action_authorized"])
         self.assertFalse(evidence["live_rehearsal_proven"])
         self.assertEqual(evidence["installed_enforcement"]["kind"], "NONAUTHORIZING_TEST_FIXTURE")
+
+    def test_16b_native_unpunctuated_scope_preserves_genuine_response_and_completes(self):
+        marker = self.work / "mock-scope-no-period"
+        marker.touch()
+        before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
+        args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--paths-file", str(self.paths), "--base", "HEAD~1", "--action-profile", profile.PROFILE, "--action-manifest", str(self.manifest)]
+        try:
+            self.run_command(args)
+            created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
+            self.assertEqual(len(created), 1)
+            state = json.loads(next(iter(created)).read_text())
+            self.assertEqual(state["status"], "completed")
+            report = Path(state["report_path"]).read_text()
+            line = "Action scope: " + profile.PROFILE + " descriptor sha256:" + state["action_profile_binding"]["manifest_descriptor_sha256"]
+            self.assertIn(line, report.splitlines())
+            self.assertNotIn(line + ".", report.splitlines())
+            transcript = json.loads((Path(state["code_only_export"]) / ".ai/deepseek-sessions" / (state["session_id"] + ".json")).read_text())
+            self.assertEqual(report, transcript[-1]["content"])
+            self.assertNotIn("action_initial_admission", state)
+        finally:
+            marker.unlink(missing_ok=True)
 
     def test_17_changed_commitment_refuses_projection_without_disclosing_values(self):
         state = copy.deepcopy(self.state); state["status"] = "running"
