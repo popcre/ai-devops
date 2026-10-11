@@ -27,3 +27,12 @@ merge through normal queue, install through the existing reviewed Linux route an
 prove the installed command accepts only the declared sandbox workflow. Then refresh
 the live backend source, review its exact workflow declaration and execute the
 genuine HTS case. Preserve every previous proof and refusal.
+
+Verification checkpoint, October11, 8:58 AM EDT: behavioral source
+`911a1ce6` was archived from Git and tested on the isolated vps2-direct host after
+its collision check passed. The complete task-gate suite passed358/0, including
+failure to persist the workflow receipt. The CI-reported missing reviewer-path
+registration is corrected; the focused guard covers75 dependencies and passes.
+Bash syntax, policy schema and whitespace checks pass. Actual history-detail and
+admin-detail route patterns are now explicit. These are source/test results;
+merge, protected installation and DesignFlow #94 live acceptance remain open.
