@@ -34,6 +34,11 @@ Accepted S1/S2 and #914/#925/#868/#1008 proofs remain accepted. Comparable
 savings, two busy windows and useful-work latency are unknown; source,
 compilation and CLI invocation counts do not close an issue.
 
+Native qualification disposition — October 9, 2026 EDT: the 916 native helper
+run and the independently approved cold-overhead gate amendment are recorded in
+the parent plan STATUS (staged counter namespace manifest 186c0b14). Stage is
+not fleet install; t16 trusted access and section 13/S4 remain open.
+
 > **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.
 
 | Step | State | Owner / dependency | Evidence required to accept |
