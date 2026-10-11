@@ -104,7 +104,7 @@ triggered** — audited 2026-07-16:
   machine. `crontab -l` and `systemctl list-timers` on `hetz` show nothing
   skill-related.
 - A machine only updates when someone says **"sync my dotfiles"** (the
-  `sync-dotfiles` skill: `git pull --ff-only` → `bin/ai-adopt-globals`) or runs
+  `sync-dotfiles` skill: supported pinned installation → `bin/ai-adopt-globals`) or runs
   the guarded adopter by hand. The adopter refreshes skills through
   `ai-install-skills`, replaces the shared instruction bodies, preserves each
   detected machine section, and verifies both pieces before succeeding.

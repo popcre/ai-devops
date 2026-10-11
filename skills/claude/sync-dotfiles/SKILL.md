@@ -90,12 +90,15 @@ clone + `./install.sh` (Ubuntu) first.
 
 ## Procedure
 
-1. **Update the hub.** On Windows, run `powershell -ExecutionPolicy Bypass
-   -File <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo>
-   -SourceGateOnly`; it checks the installed source receipt before advancing
-   the checkout and stops protected updates for task gate preflight. On Ubuntu,
-   run `git pull --ff-only`. If the update fails (local changes / diverged
-   history), STOP and report — do not force, do not `git reset`.
+1. **Complete the supported toolkit update first.** Follow the pinned installation
+   route in `docs/deployment.md` on both platforms, including separate candidates
+   and exact-head reviewer authorization when required. Keep the installed
+   checkout unchanged until that route permits advancement. Use the full Windows
+   installer or Linux candidate `update.sh`; a bare `git pull` or Windows
+   `-SourceGateOnly` is not an installation. Continue only after the installed
+   source, managed launchers, source receipt, and reviewer qualification agree
+   with the pinned release. Preserve capacity holds; installation does not prove
+   provider credit availability. On failure, STOP and report — never force or reset.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
