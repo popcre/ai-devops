@@ -1550,7 +1550,7 @@ read_prompt() { # read_prompt -> path to a temp file holding the prompt
         helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/windows-private-file.ps1"
         if ! AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" \
              AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$f")" \
-             powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
+             env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
              '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' \
              >/dev/null 2>&1; then
           rm -f "$f"; die 'could not protect retained implementation prompt.'
