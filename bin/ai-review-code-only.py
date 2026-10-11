@@ -33,6 +33,14 @@ def fail(message):
     raise ValueError(message)
 
 
+def has_exact_action_scope(content, binding):
+    expected = "Action scope: " + binding["profile"] + " descriptor sha256:" + binding["manifest_descriptor_sha256"]
+    scopes = [line for line in content.splitlines() if line.lstrip().startswith("Action scope:")]
+    # Sentence punctuation has no authority. The profile, complete descriptor
+    # and unique unindented line remain exact; do not normalize other wording.
+    return len(scopes) == 1 and scopes[0] in (expected, expected + ".")
+
+
 # Absolute repository-location variables in the inherited environment (set by
 # git hooks and some wrappers) override `git -C`, which would point the
 # synthetic export's git calls at the private source instead of the stage.
@@ -547,8 +555,7 @@ def lifecycle_proof(args):
         fail("native packet verification refused")
     if state.get("action_profile_binding"):
         binding = state["action_profile_binding"]
-        expected_line = "Action scope: " + binding["profile"] + " descriptor sha256:" + binding["manifest_descriptor_sha256"] + "."
-        if verdicts[0] == "APPROVE" and content.splitlines().count(expected_line) != 1:
+        if verdicts[0] == "APPROVE" and not has_exact_action_scope(content, binding):
             fail("native approval does not explicitly cover the exact bounded action")
         action = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "tools/review_action_profile.py"), "finish", args.state, "--manifest", state["action_manifest"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE) if not args.completed else None
         if not args.completed and action.returncode:
