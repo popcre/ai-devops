@@ -86,6 +86,32 @@ require_credentials() {
   return 0
 }
 
+# Preserve the exact native result privately; public lifecycle reports contain
+# only a fixed reason. An empty answer cannot establish an outage or credit loss.
+retain_failure() { # STDOUT EXIT REASON
+  python3 "$DOOR_CREDIT_ROOT/tools/review_door_diagnostics.py" gemini \
+    "$1" "$1.err" "$2" "$3" "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}"
+}
+
+response_failure() { # RESULT_JSON
+  local result="$1"
+  if ! jq -e 'type == "object"' "$result" >/dev/null 2>&1; then
+    printf 'invalid-response-json'; return
+  fi
+  if ! jq -e '.status == "SUCCESS"' "$result" >/dev/null 2>&1; then
+    printf 'provider-status-failed'; return
+  fi
+  if jq -e '(.denied_actions | type) == "array" and (.denied_actions | length) > 0' "$result" >/dev/null 2>&1; then
+    printf 'native-tool-denied'; return
+  fi
+  if ! jq -e --arg model "$GE_MODEL" '.model == $model' "$result" >/dev/null 2>&1; then
+    printf 'model-mismatch'; return
+  fi
+  if ! jq -e '.response | type == "string" and test("[^[:space:]]")' "$result" >/dev/null 2>&1; then
+    printf 'empty-response-text'; return
+  fi
+}
+
 # Parse the agy JSON envelope into OUR report shape: findings first, verdict
 # last under a literal '## Verdict' heading. Same grammar the pool and
 # lifecycle consume. The reviewed head is recorded before the verdict so the
@@ -117,7 +143,7 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
 }
 
 main() {
-  local agy prompt_full prompt_text out rc
+  local agy prompt_full prompt_text out rc reason
   agy="$(resolve_agy)" || exit $?
   require_credentials || exit $?
   [ -d "$DOOR_WORKDIR" ] || { printf 'gemini door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
@@ -159,14 +185,23 @@ main() {
     rm -f "$prompt_full"
     exit 92
   fi
-  if [ "$rc" -ne 0 ] || ! jq -e 'has("response")' "$out" >/dev/null 2>&1; then
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$out" "$rc" provider-call-failed
     printf 'gemini door: provider call failed (exit %s)\n' "$rc" >&2
-    [ -s "$out.err" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$out.err" | tail -20 >&2 || true
+    rm -f "$prompt_full"
+    exit 1
+  fi
+
+  reason="$(response_failure "$out")"
+  if [ -n "$reason" ]; then
+    retain_failure "$out" "$rc" "$reason"
+    printf 'gemini door: provider response refused (%s); private native diagnostics retained.\n' "$reason" >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
   if ! extract_report "$out" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE"; then
+    retain_failure "$out" "$rc" report-extraction-failed
     rm -f "$prompt_full"
     exit 1
   fi
