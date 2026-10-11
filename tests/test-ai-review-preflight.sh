@@ -6,6 +6,12 @@ SCRIPT="$ROOT/bin/ai-review-preflight"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_TEST_ISOLATION=1
+export AI_REVIEWER_STATE_BASE="$TMP/reviewer-state"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard/reviews.jsonl"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/state"
