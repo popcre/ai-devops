@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# deepseek.sh — DeepSeek (OpenCode harness) door for the shared review runner.
+# deepseek.sh — DeepSeek (OpenCode harness) door for the shared review runner
+# (its CI scope is the narrowed reviewer selection, #1563).
 #
 # Provider bits ONLY: OpenCode binary/profile selection, credentials presence,
 # model pin, provider tool set (the agent profile), and parse to our report
