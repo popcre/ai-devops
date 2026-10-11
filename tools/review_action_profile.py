@@ -163,9 +163,12 @@ def tree_inventory(root, expected=None):
 def installed_enforcement():
     """Bind the public enforcement bytes to their actual supported installation."""
     files = ("tools/review_action_profile.py", "config/review-action-profiles.json", "bin/ai-review-code-only.py", "bin/ai-task-gates")
-    hashes = {path: file_hash(ROOT / path)[0] for path in files}
     if os.environ.get("AI_DEVOPS_TEST_MODE") == "1":
+        # Offline fixtures run from ordinary, sometimes group-writable CI
+        # checkouts. Their content commitment never claims installed custody.
+        hashes = {path: sha((ROOT / path).read_bytes()) for path in files}
         return {"kind": "NONAUTHORIZING_TEST_FIXTURE", "public_enforcement_sha256": hashes}
+    hashes = {path: file_hash(ROOT / path)[0] for path in files}
     require(Path("/usr/local/bin/ai-task-gates").resolve(strict=True) == ROOT / "bin/ai-task-gates", "native enforcement is not the installed launcher source")
     head = git(ROOT, "rev-parse", "HEAD").decode().strip()
     require(not git(ROOT, "status", "--porcelain"), "installed source is not clean")

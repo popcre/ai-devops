@@ -517,6 +517,16 @@ class InstalledEnforcementTests(unittest.TestCase):
     def test_duplicate_source_receipt_refuses(self):
         with self.assertRaises(ValueError): self.proof(self.receipt + self.receipt.splitlines(keepends=True)[0])
 
+    def test_group_writable_source_is_fixture_only_and_real_installation_refuses(self):
+        for name in self.files:
+            (self.root / name).chmod(0o664)
+        with self.assertRaises(ValueError): self.proof()
+        with mock.patch.object(profile, "ROOT", self.root), mock.patch.dict(os.environ, {"AI_DEVOPS_TEST_MODE": "1"}):
+            proof = profile.installed_enforcement()
+        self.assertEqual(proof["kind"], "NONAUTHORIZING_TEST_FIXTURE")
+        self.assertNotIn("source_head", proof)
+        self.assertNotIn("installation_receipt_sha256", proof)
+
 
 class InstalledActionEvidenceTests(unittest.TestCase):
     """Exercise the actual shell helper's disclosure boundary without a provider."""
