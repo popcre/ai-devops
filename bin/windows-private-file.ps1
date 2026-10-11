@@ -72,7 +72,20 @@ function Set-AiDevOpsPrivateFileAtomic {
       Assert-AiDevOpsPrivateAcl -Path $backup
     }
 
-    [IO.File]::Move($candidate, $Path, $true)
+    if (Test-Path -LiteralPath $Path) {
+      # Windows PowerShell 5 has no overwrite overload of File.Move. Replace
+      # preserves destination metadata, so tighten the old file's ACL before
+      # publishing the new private bytes. The prior bytes are backed up above.
+      Protect-AiDevOpsPrivatePath -Path $Path
+      Assert-AiDevOpsPrivateAcl -Path $Path
+      # PowerShell 5 binds a null string argument as an empty path. Keep the
+      # replacement API's temporary backup inside the protected staging dir;
+      # the independently preserved backup above remains the returned copy.
+      $replacementBackup = Join-Path $staging 'replaced-original'
+      [IO.File]::Replace($candidate, $Path, $replacementBackup)
+    } else {
+      [IO.File]::Move($candidate, $Path)
+    }
     Assert-AiDevOpsPrivateAcl -Path $Path
     return $backup
   } finally {
