@@ -28,6 +28,8 @@
 #   Exact resume is `--resume SESSION_ID`; `--continue` means newest for the
 #     project and is never used. Sessions are directory-bound, so persistent
 #     implementation reconstructs the same stable worktree path each turn.
+#   Both input and output use stream-json. A complete user message travels on
+#     stdin through Docker relaunch, rather than a size-limited --prompt argument.
 #   `stream-json` is NDJSON. Completion is ONLY a terminal `type:"result"`,
 #     `subtype:"success"`, `is_error:false` record. It carries session_id,
 #     num_turns, result, usage, permission_denials, and timing.
@@ -989,6 +991,7 @@ mark_impl_recovery_required() { # META TERMINAL
 RUN_TURN_RC=unavailable
 RUN_TURN_PID=""
 RUN_TURN_ENV_FILE=""
+RUN_TURN_INPUT_FILE=""
 PLAIN_REVIEW_META=""
 PLAIN_REVIEW_OUT=""
 QUALIFICATION_ACTIVE=0
@@ -998,6 +1001,8 @@ QUALIFICATION_PRELOADER_SHA=""
 QUALIFICATION_WRAPPER_SHA=""
 QUALIFICATION_DIAGNOSTIC_PATH=""
 cleanup_run_turn_env() {
+  [ -z "${RUN_TURN_INPUT_FILE:-}" ] || rm -f -- "$RUN_TURN_INPUT_FILE" 2>/dev/null || true
+  RUN_TURN_INPUT_FILE=""
   [ -z "${RUN_TURN_SECRET_FILE:-}" ] || rm -f -- "$RUN_TURN_SECRET_FILE" 2>/dev/null || true
   RUN_TURN_SECRET_FILE=""
   [ -z "$RUN_TURN_ENV_FILE" ] || rm -f -- "$RUN_TURN_ENV_FILE" 2>/dev/null || true
@@ -1030,7 +1035,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   else
     max_turns="$IMPLEMENT_MAX_TURNS"; max_tool_calls="$IMPLEMENT_MAX_TOOL_CALLS"; max_wall_time="$IMPLEMENT_MAX_WALL_TIME"
   fi
-  local args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
+  local args=(--model "$QWEN_MODEL" --auth-type openai --input-format stream-json --output-format stream-json --safe-mode
     --max-session-turns "$max_turns" --max-wall-time "$max_wall_time"
     --max-tool-calls "$max_tool_calls" --max-subagent-depth 1)
   [ -z "$sid" ] || args+=(--resume "$sid")
@@ -1061,7 +1066,14 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     # Preserve the complete implementation toolset, including shell and tests.
     args+=(--sandbox --approval-mode yolo)
   fi
-  # Current Qwen supports stdin, keeping the brief out of the process list.
+  # Stream input survives the vendor's Docker relaunch on stdin. Text input is
+  # converted by Qwen into one --prompt argument, which fails with E2BIG for a
+  # large governed brief and exposes the brief in process arguments.
+  secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before preparing input.'
+  RUN_TURN_INPUT_FILE="$(mktemp "$QWEN_HOME_DIR/tmp/.qwen-input.XXXXXX")" || die 'could not reserve private Qwen stream input.'
+  chmod 600 "$RUN_TURN_INPUT_FILE" || die 'could not protect private Qwen stream input.'
+  protect_windows_path "$RUN_TURN_INPUT_FILE" file || die 'could not enforce private Qwen stream-input ACL.'
+  jq -cRs '{type:"user",message:{role:"user",content:.},parent_tool_use_id:null}' "$pf" > "$RUN_TURN_INPUT_FILE" || die 'could not encode the complete Qwen prompt.'
 
   [ -x "$QWEN_BASH_BIN" ] && [ -x "$QWEN_ENV_BIN" ] || die "trusted absolute Bash/env executables are required: $QWEN_BASH_BIN and $QWEN_ENV_BIN"
   case "$QWEN_BASH_BIN:$QWEN_ENV_BIN" in /*:/*) ;; *) die 'trusted Bash/env executable paths must be absolute.' ;; esac
@@ -1076,7 +1088,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   chmod 600 "$RUN_TURN_SECRET_FILE" 2>/dev/null || die 'could not protect private Qwen secret handoff.'
   protect_windows_path "$RUN_TURN_SECRET_FILE" file || die 'could not enforce private Qwen secret-handoff ACL.'
   set +e
-  ( cd "$repo" && reviewer_credit_run qwen "$out" "$out.err" -- "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  ( cd "$repo" && reviewer_credit_run qwen "$out" "$out.err" -- "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$RUN_TURN_INPUT_FILE" ) > "$out" 2>"$out.err" &
   RUN_TURN_PID=$!
   # A cold start that never writes one stream byte hangs past Qwen's own
   # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own
