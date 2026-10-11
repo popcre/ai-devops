@@ -14,7 +14,7 @@ Handoff registration: [HANDOFF.d/2026-10-11T1500Z-edge-dev3-claude-reviewer-scop
 | 3. Split `tools/reviewer_*` select-all into mapped suites | ✅ done | 4 of 7 mapped; `reviewer_admission.py`, `reviewer_event_guard.sh`, `reviewer_events.py` stay select-all (consumed by `bin/ai-review*` with no dedicated suite) |
 | 4. Selector regression tests | ✅ done | `tests/test-test-selection.sh` 28/28 incl. 7 new cases; deleted mapped file now fails closed |
 | 5. Safety net confirmed (merge queue / schedule still run everything) | ✅ done | `verify.yml` passes no base on `merge_group`; see [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md) |
-| 6. After-measurement + live proof on a real reviewer-only PR | 🟡 measured | [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md) 27/60; live proof waits for the next reviewer-only PR |
+| 6. After-measurement + live proof on a real reviewer-only PR | ✅ done | [tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md](tests/verification/reviewer-scoped-ci/2026-10-11T1600Z/after.md) 27/60; live: [PR #1571](https://github.com/popcre/ai-devops/pull/1571) ran 7 of 143 suites (4+3+0+0 across shards) |
 
 Steps 0–5 landed; only the Step 6 live proof remains.
 
