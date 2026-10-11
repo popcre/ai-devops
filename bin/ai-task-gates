@@ -1880,8 +1880,8 @@ cmd_authorize_install(){
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then canonical_launcher="$HOME/.local/bin/ai-task-gates"; else canonical_launcher="/usr/local/bin/ai-task-gates"; fi
   if command -v cygpath >/dev/null 2>&1; then
     local normalized_launcher normalized_canonical
-    normalized_launcher="$(cygpath -am "$installed_launcher" | tr '[:upper:]' '[:lower:]')"
-    normalized_canonical="$(cygpath -am "$canonical_launcher" | tr '[:upper:]' '[:lower:]')"
+    normalized_launcher="$(cygpath -am -- "$installed_launcher" | tr '[:upper:]' '[:lower:]')"
+    normalized_canonical="$(cygpath -am -- "$canonical_launcher" | tr '[:upper:]' '[:lower:]')"
     [ -n "$normalized_launcher" ] && [ -n "$normalized_canonical" ] && [ "$normalized_launcher" = "$normalized_canonical" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'
   else
     [ "$installed_launcher" = "$canonical_launcher" ] || blocked 'ai-task-gates: STOP. Launcher is not canonical managed path.'

@@ -203,7 +203,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-aw|-am) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-aw|-am) printf '%s\n' "${@: -1}" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -307,7 +307,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-am) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-am) printf '%s\n' "${@: -1}" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -504,7 +504,7 @@ windows_detection="$TMP/windows-detection.sh"
 cp "$partial_route" "$windows_detection"
 cat >> "$windows_detection" <<'EOF'
 [(){
-  if [[ "$*" = '-f /c/Program Files/Git/bin/bash.exe' ]]; then return 0; fi
+  if [[ "$#" -eq 3 && "$1" = -f && "$2" = '/c/Program Files/Git/bin/bash.exe' && "$3" = ']' ]]; then return 0; fi
   builtin [ "$@"
 }
 cygpath(){ printf '%s\n' 'C:\Program Files'; }
