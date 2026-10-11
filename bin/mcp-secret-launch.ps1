@@ -16,6 +16,8 @@ $ErrorActionPreference = 'Stop'
 $cfgDir = Join-Path $HOME '.config\ai-devops'
 $tokenFile = Join-Path $cfgDir 'op-service-account'
 $envFile = Join-Path $cfgDir 'mcp.env'
+# The Capture child reads the filtered copy Ensure-Cache hands it, if any.
+if ($Mode -eq 'Capture' -and $env:AIDEVOPS_MCP_ENV_FILE) { $envFile = $env:AIDEVOPS_MCP_ENV_FILE }
 $cacheFile = Join-Path $cfgDir 'mcp-secrets.dpapi.json'
 $cacheMinutes = 15
 
@@ -50,7 +52,31 @@ function Ensure-Cache {
       if (-not (Test-Path -LiteralPath $tokenFile)) { throw "Missing 1Password token file: $tokenFile" }
       $env:OP_SERVICE_ACCOUNT_TOKEN = (Get-Content -Raw -LiteralPath $tokenFile).Trim()
       & op run --no-masking --env-file=$envFile -- pwsh -NoProfile -File $PSCommandPath -Mode Capture
-      if ($LASTEXITCODE -ne 0) { throw "The single 1Password environment refresh failed (exit $LASTEXITCODE)." }
+      if ($LASTEXITCODE -ne 0) {
+        # One bad reference (a rotated or renamed item) must not take down every
+        # MCP. Drop each reference 1Password cannot resolve, name it, and refresh
+        # with the rest. Only an all-references failure stops the launch.
+        $kept = [Collections.Generic.List[string]]::new(); $good = 0
+        foreach ($line in Get-Content -LiteralPath $envFile) {
+          if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=(op://.+)$') {
+            $value = & op read --no-newline $Matches[2] 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($value)) { $kept.Add($line); $good++ }
+            else { [Console]::Error.WriteLine("ai-devops: skipping $($Matches[1]): 1Password cannot resolve its reference") }
+            $value = $null
+          } else { $kept.Add($line) }
+        }
+        if ($good -eq 0) { throw 'The single 1Password environment refresh failed: no reference resolved.' }
+        $filtered = Join-Path $cfgDir 'mcp.env.resolvable'
+        Set-Content -LiteralPath $filtered -Value $kept -Encoding utf8
+        try {
+          $env:AIDEVOPS_MCP_ENV_FILE = $filtered
+          & op run --no-masking --env-file=$filtered -- pwsh -NoProfile -File $PSCommandPath -Mode Capture
+          if ($LASTEXITCODE -ne 0) { throw "The 1Password environment refresh failed (exit $LASTEXITCODE)." }
+        } finally {
+          Remove-Item Env:AIDEVOPS_MCP_ENV_FILE -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $filtered -ErrorAction SilentlyContinue
+        }
+      }
     }
   } finally {
     try { $mutex.ReleaseMutex() } catch { }

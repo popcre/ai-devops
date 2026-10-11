@@ -9,7 +9,10 @@ $text = Get-Content -Raw -LiteralPath $script
 foreach ($required in @('Threading.Mutex', 'op run', 'ConvertFrom-SecureString', 'ConvertTo-SecureString', 'cacheMinutes = 15')) {
   if (-not $text.Contains($required)) { throw "Missing concurrency/cache safeguard: $required" }
 }
-if ($text -match '\bop read\b') { throw 'The Windows launcher must resolve the shared environment once, not call op read per key.' }
+# Healthy path: one op run. Per-key op read is allowed only as the fallback that
+# isolates an unresolvable reference after that single refresh has failed.
+$firstRun = $text.IndexOf('op run'); $firstRead = $text.IndexOf('op read')
+if ($firstRead -ge 0 -and ($firstRun -lt 0 -or $firstRead -lt $firstRun -or -not $text.Contains('skipping $($Matches[1])'))) { throw 'The Windows launcher must resolve the shared environment once, not call op read per key.' }
 if ($text -match '& npx') { throw 'The Windows launcher must not resolve an MCP package on the startup hot path.' }
 if (-not $text.Contains('mcp-runtime\node_modules\.bin\mcp-remote.cmd')) { throw 'The Windows launcher must use the pinned MCP runtime.' }
 if (-not $text.Contains('mcp-session-guard.mjs')) { throw 'The Windows launcher must start MCP helpers under the session guard.' }
