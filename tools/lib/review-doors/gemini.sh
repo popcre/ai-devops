@@ -12,6 +12,7 @@
 #   bash gemini.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+umask 077
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 source "$DOOR_CREDIT_ROOT/tools/lib/gemini-review-contract.sh"
@@ -108,7 +109,7 @@ response_failure() { # RESULT_JSON
   if jq -e '(.denied_actions | type) == "array" and (.denied_actions | length) > 0' "$result" >/dev/null 2>&1; then
     printf 'native-tool-denied'; return
   fi
-  if ! jq -e --arg model "$GE_MODEL" '.model == $model' "$result" >/dev/null 2>&1; then
+  if ! jq -e --arg model "$GE_MODEL" '.init_model == $model' "$result" >/dev/null 2>&1; then
     printf 'model-mismatch'; return
   fi
   if ! jq -e '.response | type == "string" and test("[^[:space:]]")' "$result" >/dev/null 2>&1; then
@@ -123,7 +124,7 @@ response_failure() { # RESULT_JSON
 extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   local result="$1" dest="$2" head="$3" mode="$4" text model
   text="$(jq -r '.response // ""' "$result" 2>/dev/null || true)"
-  model="$(jq -r '.model // "unknown"' "$result" 2>/dev/null || echo unknown)"
+  model="$(jq -r '.init_model // "unknown"' "$result" 2>/dev/null || echo unknown)"
   [ -n "$text" ] || {
     printf 'gemini door: provider returned no response text.\n' >&2
     return 1
@@ -147,7 +148,7 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
 }
 
 main() {
-  local agy prompt_full prompt_text out rc reason
+  local agy prompt_full prompt_text out rc reason raw stream_input
   agy="$(resolve_agy)" || exit $?
   require_credentials || exit $?
   [ -d "$DOOR_WORKDIR" ] || { printf 'gemini door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
@@ -167,46 +168,55 @@ main() {
   prompt_text="$(cat "$prompt_full")"
 
   out="$(mktemp)"
+  raw="$out.stream"
+  stream_input="$out.input"
+  printf %s "$prompt_text" | jq -cRs '{event:"user",message:{role:"user",content:[{type:"text",text:.}]}}' > "$stream_input"
+  trap 'rm -f "$prompt_full" "$out" "$raw" "$raw.err" "$stream_input"' EXIT
   set +e
   (
     cd "$DOOR_WORKDIR" || exit 1
     unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
     if [ "$MODE" = implement ]; then
-      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
-        --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
-        > "$out" 2> "$out.err"
+      reviewer_credit_run gemini "$raw" "$raw.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
+        --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
+        < "$stream_input" > "$raw" 2> "$raw.err"
     else
-      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
-        --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
-        > "$out" 2> "$out.err"
+      reviewer_credit_run gemini "$raw" "$raw.err" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
+        --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
+        < "$stream_input" > "$raw" 2> "$raw.err"
     fi
   )
   rc=$?
   set -e
 
   if [ "$rc" -eq 92 ]; then
-    reviewer_capacity_current gemini "$out" || true
+    reviewer_capacity_current gemini "$raw" || true
     reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi
   if [ "$rc" -ne 0 ]; then
-    retain_failure "$out" "$rc" provider-call-failed
+    retain_failure "$raw" "$rc" provider-call-failed
     printf 'gemini door: provider call failed (exit %s)\n' "$rc" >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
+  if ! gemini_normalize_stream "$raw" > "$out" 2>/dev/null; then
+    retain_failure "$raw" 1 invalid-response-json
+    printf 'gemini door: native stream conversation/result refused; private diagnostics retained.\n' >&2
+    exit 1
+  fi
   reason="$(response_failure "$out")"
   if [ -n "$reason" ]; then
-    retain_failure "$out" "$rc" "$reason"
+    retain_failure "$raw" "$rc" "$reason"
     printf 'gemini door: provider response refused (%s); private native diagnostics retained.\n' "$reason" >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
   if ! extract_report "$out" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE"; then
-    retain_failure "$out" "$rc" report-extraction-failed
+    retain_failure "$raw" "$rc" report-extraction-failed
     rm -f "$prompt_full"
     exit 1
   fi

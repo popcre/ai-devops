@@ -17,7 +17,7 @@ while [ "$#" -gt 0 ]; do
   fi
   shift
 done
-printf '{"status":"SUCCESS","response":"Review complete.\\n## Verdict\\nAPPROVE","model":"gemini-3.8-flash-high"}\n'
+printf '%s\n' '{"event":"init","conversation_id":"native","init":{"model":"gemini-3.8-flash-high"}}' '{"event":"result","result":{"conversation_id":"native","status":"SUCCESS","response":"Review complete.\n## Verdict\nAPPROVE"}}'
 EOF
 chmod +x "$TMP/agy"
 export DURATION_FIXTURE="$TMP" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_GEMINI_BIN="$TMP/agy"

@@ -11,14 +11,25 @@ mkdir -p "$TMP/work" "$TMP/packet"
 printf 'Review the sealed packet.\n' > "$TMP/prompt"
 cat > "$TMP/agy" <<'STUB'
 #!/usr/bin/env bash
+prompt="$(jq -er 'select(.event=="user" and .message.role=="user") | .message.content[0].text')" || exit 93
+stream_in=0; stream_out=0; empty_print=0
+for arg in "$@"; do [ "$arg" != --dangerously-skip-permissions ] || exit 90; done
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --input-format) [ "$2" = stream-json ] || exit 94; stream_in=1; shift 2 ;;
+    --output-format) [ "$2" = stream-json ] || exit 94; stream_out=1; shift 2 ;;
+    --print) [ "$2" = '' ] || exit 94; empty_print=1; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ "$stream_in$stream_out$empty_print" = 111 ] || exit 94
 if [ "${AGY_CLI_DISABLE_AUTO_UPDATE:-}" != 1 ]; then
   printf 'silently replaced runtime\n' > "$GEMINI_RUNTIME_MARKER"
 fi
 if [ "${GEMINI_CONTRACT_CASE:-0}" = 1 ]; then
-  prompt=''
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --print) prompt="$2"; shift 2 ;;
+      --print) [ "$2" = '' ] || exit 92; shift 2 ;;
       --dangerously-skip-permissions) exit 90 ;;
       *) shift ;;
     esac
@@ -32,7 +43,7 @@ if [ "${GEMINI_CONTRACT_CASE:-0}" = 1 ]; then
     exit 0
   fi
   grep -q 'if count < 0:' allocation.py || exit 91
-  printf '%s\n' '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":"allocation.py accepts count zero because its check is count < 0, then divides by zero instead of raising ValueError. Native file tools read that source. Terminal checks were not executed because this runtime does not support them.\n## Verdict\nREJECT"}'
+  printf '%s\n' '{"event":"init","conversation_id":"contract","init":{"model":"gemini-3.8-flash-high"}}' '{"event":"result","result":{"conversation_id":"contract","status":"SUCCESS","response":"allocation.py accepts count zero because its check is count < 0, then divides by zero instead of raising ValueError. Native file tools read that source. Terminal checks were not executed because this runtime does not support them.\n## Verdict\nREJECT"}}'
   exit 0
 fi
 cat "$GEMINI_FIXTURE"
@@ -51,6 +62,10 @@ passed=0
 run_case() {
   local name="$1" expected="$2" json="$3" native_exit="${4:-0}" rc=0
   printf '%s\n' "$json" > "$GEMINI_FIXTURE"
+  if jq -e 'type=="object" and (has("event")|not)' "$GEMINI_FIXTURE" >/dev/null 2>&1; then
+    jq -c '. as $r | {event:"init",conversation_id:"native",init:(if $r|has("model") then {model:$r.model} else {} end)}, {event:"result",result:($r + {conversation_id:"native"})}' "$GEMINI_FIXTURE" > "$GEMINI_FIXTURE.stream"
+    mv "$GEMINI_FIXTURE.stream" "$GEMINI_FIXTURE"
+  fi
   export DOOR_REPORT_OUT="$TMP/$name.report" DOOR_DIAGNOSTICS_DIR="$TMP/$name.diagnostics" GEMINI_NATIVE_EXIT="$native_exit"
   bash "$ROOT/tools/lib/review-doors/gemini.sh" review > "$TMP/$name.out" 2> "$TMP/$name.err" || rc=$?
   if [ "$expected" = success ]; then
@@ -87,6 +102,19 @@ run_case response-object empty-response-text '{"status":"SUCCESS","model":"gemin
 run_case status provider-status-failed '{"status":"ERROR","model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE","error":"private provider diagnostic sentinel"}'
 run_case denied native-tool-denied '{"status":"SUCCESS","model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE","denied_actions":[{"action":"command","display_name":"RunCommand"}]}'
 run_case wrong-model model-mismatch '{"status":"SUCCESS","model":"other-model","response":"## Verdict\nAPPROVE"}'
+run_case missing-model model-mismatch '{"status":"SUCCESS","response":"## Verdict\nAPPROVE"}'
+run_case spoofed-result-model model-mismatch '{"status":"SUCCESS","init_model":"gemini-3.8-flash-high","response":"## Verdict\nAPPROVE"}'
+run_case mismatch invalid-response-json '{"event":"init","conversation_id":"a","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"result","result":{"conversation_id":"b","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}'
+run_case multi-result invalid-response-json '{"event":"init","conversation_id":"a","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"result","result":{"conversation_id":"a","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}
+{"event":"result","result":{"conversation_id":"a","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}'
+run_case missing-init invalid-response-json '{"event":"result","result":{"conversation_id":"a","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}'
+run_case empty-conversation invalid-response-json '{"event":"init","conversation_id":"","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"result","result":{"conversation_id":"","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}'
+run_case multi-init invalid-response-json '{"event":"init","conversation_id":"a","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"init","conversation_id":"a","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"result","result":{"conversation_id":"a","status":"SUCCESS","response":"## Verdict\nAPPROVE"}}'
 run_case invalid invalid-response-json '{broken-json'
 run_case array invalid-response-json '[{"status":"SUCCESS"}]'
 run_case native-error provider-call-failed '{"status":"ERROR","error":"private provider diagnostic sentinel"}' 1
@@ -102,5 +130,9 @@ printf '%s\n' 'headless native stub reads the defect and returns REJECT without 
 passed=$((passed+1))
 cmp "$TMP/runtime-before" "$GEMINI_RUNTIME_MARKER"
 printf '%s\n' 'native calls preserve qualified runtime bytes despite inherited update permission'
+passed=$((passed+1))
+GEMINI_CONTRACT_CASE=1 bash "$ROOT/tools/lib/review-doors/gemini.sh" implement > "$TMP/implement.out" 2> "$TMP/implement.err"
+grep -q '^REJECT$' "$DOOR_REPORT_OUT"
+printf '%s\n' 'review and implement use native stream model evidence and STDIN user events'
 passed=$((passed+1))
 printf '%s Gemini native-envelope checks passed\n' "$passed"

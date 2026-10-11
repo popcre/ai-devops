@@ -616,17 +616,7 @@ call(){
   ) > "$output" 2>"$o.stderr" & ACTIVE_CHILD=$!
   rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''
   if [ "$streamed" -eq 1 ]; then
-    if ! jq -se '
-      . as $events |
-      [$events[] | select(.event=="init")] as $starts |
-      [$events[] | select(.event=="result")] as $ends |
-      if ($starts|length)==1 and ($ends|length)==1
-         and ($starts[0].conversation_id|type)=="string"
-         and $ends[0].result.conversation_id==$starts[0].conversation_id
-      then $ends[0].result + (if ($starts[0].init.model|type)=="string" then {init_model:$starts[0].init.model} else {} end)
-      else error("Gemini stream has no single matching conversation result")
-      end
-    ' "$output" > "$o"; then
+    if ! gemini_normalize_stream "$output" > "$o"; then
       preserve_failure "$ACTIVE_META" "$o" provider-stream
       gemini_credit_stop "$o"
       die 'Gemini stream result or conversation was invalid; evidence preserved'

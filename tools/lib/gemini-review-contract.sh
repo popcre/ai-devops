@@ -6,3 +6,20 @@
 gemini_review_contract() { # sealed packet directory
   printf '%s\n' "Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are NOT available in this headless runtime: never call run_command, RunCommand, or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $1. Read $1/MANIFEST.md first. If requested checks require terminal tools, state that those checks were not executed; never claim command execution."
 }
+
+# Owner: Gemini provider. Shared native normalization preserves the actual
+# init-event model evidence and rejects ambiguous conversation/result streams.
+gemini_normalize_stream() { # native events file -> normalized result JSON
+  jq -se '
+    . as $events |
+    [$events[] | select(.event=="init")] as $starts |
+    [$events[] | select(.event=="result")] as $ends |
+    if ($starts|length)==1 and ($ends|length)==1
+       and ($starts[0].conversation_id|type)=="string"
+       and ($starts[0].conversation_id|length)>0
+       and $ends[0].result.conversation_id==$starts[0].conversation_id
+    then ($ends[0].result | del(.init_model)) + (if ($starts[0].init.model|type)=="string" then {init_model:$starts[0].init.model} else {} end)
+    else error("Gemini stream has no single matching conversation result")
+    end
+  ' "$1"
+}
