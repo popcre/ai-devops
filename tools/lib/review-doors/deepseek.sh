@@ -134,11 +134,9 @@ extract_report() { # extract_report LOG_JSONL DEST HEAD MODE
       "$tools" "$errs" "${session:-none}"
     printf '| reviewed commit | `%s` |\n\n' "$head"
     printf -- '---\n\n'
-    if grep -qF '## Verdict' <<< "$text"; then
+    if grep -Eq '^## Verdict[[:space:]]*$' <<< "$text"; then
       printf '### Findings and reasoning\n\n'
-      printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
-      printf '\n---\n\n'
-      printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+      printf '%s\n' "$text" | deepseek_terminal_report || return 1
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'
@@ -198,7 +196,7 @@ attachment_api_review() {
   {
     printf '# DeepSeek first managed installation — attachment API\n\n'
     printf '| field | value |\n|---|---|\n| harness | `attachment-api` |\n| reviewed commit | `%s` |\n\n' "$DOOR_HEAD"
-    cat "$raw"
+    deepseek_terminal_report < "$raw" || return 1
   } > "$DOOR_REPORT_OUT"
   rm -f "$raw"
 }
