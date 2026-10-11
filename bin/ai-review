@@ -330,11 +330,6 @@ if [ "$code_only" -eq 1 ]; then
     code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated destination identity sha256:$target_identity schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
   fi
   lifecycle_started=$SECONDS
-  action_evidence_args=()
-  if [ -n "$action_profile" ]; then
-    action_review_evidence_args || { printf 'ai-review: installed public action-scope evidence unavailable; no provider was dispatched.\n' >&2; exit 3; }
-    code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
-  fi
   result_file=""; error_file=""; diagnostics_printed=0
   code_only_abort() {
     "$lifecycle" fail --state "$lifecycle_state" --elapsed "$((SECONDS-lifecycle_started))" --failure incomplete-code-only-invocation >/dev/null 2>&1 || true
@@ -344,6 +339,11 @@ if [ "$code_only" -eq 1 ]; then
   trap code_only_abort EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  action_evidence_args=()
+  if [ -n "$action_profile" ]; then
+    action_review_evidence_args || { printf 'ai-review: installed public action-scope evidence unavailable; no provider was dispatched.\n' >&2; exit 3; }
+    code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
+  fi
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
   error_file="$(mktemp)" || { printf 'ai-review: cannot reserve private reviewer diagnostics.\n' >&2; exit 3; }
   if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" "${action_evidence_args[@]+"${action_evidence_args[@]}"}" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi

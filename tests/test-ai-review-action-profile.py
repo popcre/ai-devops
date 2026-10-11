@@ -370,6 +370,30 @@ Path(out).write_text(json.dumps({'choices':[{'message':{'content':content}}],'us
         transcript_path.write_bytes(raw)
 
 
+    def test_15_refused_public_evidence_closes_native_state_without_dispatch(self):
+        calls = self.work / "curl-calls"
+        count = calls.read_bytes()
+        probe = self.bin / "realpath"
+        public_file = str(ROOT / "tools/review_action_profile.py")
+        probe.write_text('#!/bin/sh\nif [ "$#" = 2 ] && [ "$1" = -- ] && [ "$2" = "' + public_file + '" ]; then printf "%s\\n" /noncanonical-public-evidence; exit 0; fi\nexec /usr/bin/realpath "$@"\n')
+        probe.chmod(0o700)
+        before = set((self.work / "lifecycle/runs").glob("*/*/*/*.json"))
+        args = [str(ROOT / "bin/ai-review"), "deepseek", "final-check", "--implementer", "codex", "--code-only", "--paths-file", str(self.paths), "--base", "HEAD~1", "--action-profile", profile.PROFILE, "--action-manifest", str(self.manifest)]
+        try:
+            result = subprocess.run(args, cwd=self.repo, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(result.returncode, 3)
+            self.assertIn(b"public action-scope evidence unavailable", result.stderr)
+            self.assertEqual(calls.read_bytes(), count)
+            created = set((self.work / "lifecycle/runs").glob("*/*/*/*.json")) - before
+            self.assertEqual(len(created), 1)
+            row = json.loads(next(iter(created)).read_text())
+            self.assertEqual(row["status"], "failed")
+            self.assertFalse(Path(row["lock_path"]).exists())
+            self.assertNotIn("action_initial_admission", row)
+        finally:
+            probe.unlink(missing_ok=True)
+
+
 class InstalledActionEvidenceTests(unittest.TestCase):
     """Exercise the actual shell helper's disclosure boundary without a provider."""
     def setUp(self):
