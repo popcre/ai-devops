@@ -1570,7 +1570,7 @@ check 'workflow refuses symlink manifest' "rc 3 '$WF' check $WF_ARGS --reviewer-
 rm "$WF/.ai-devops/application-workflow-target.json"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" remote set-url origin https://github.com/popcre/other.git
-check 'workflow refuses foreign origin' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+check 'workflow refuses foreign origin before reaching admission' "rc 4 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 git -C "$WF" remote set-url origin https://github.com/popcre/designflow-backend.git
 (cd "$WF" && "$GATES" start --class production >/dev/null)
 check 'workflow refuses stronger production class' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
