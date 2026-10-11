@@ -33,4 +33,9 @@ PROMPT_FILE=''
 PROMPT_TEXT='Implement a parser for VERDICT: lines.'
 out="$(read_prompt implement)"
 [ "$(cat "$out")" = "$PROMPT_TEXT" ]; rm -f "$out"
-printf '5 GLM formal-presentation checks passed\n'
+mkdir "$TMP/ownership" "$TMP/session-temp"
+out="$(TMPDIR="$TMP/session-temp" read_prompt implement "$TMP/ownership/job.json")"
+rm -rf "$TMP/session-temp"
+[ "$(cat "$out")" = "$PROMPT_TEXT" ]
+[ "$(dirname "$out")" = "$TMP/ownership" ]; rm -f "$out"
+printf '6 GLM formal-presentation and prompt-retention checks passed\n'
