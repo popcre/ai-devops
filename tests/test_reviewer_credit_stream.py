@@ -294,6 +294,47 @@ class CreditStreamTests(unittest.TestCase):
             self.assertEqual(child.returncode, code, err)
             self.assertFalse(self.marker.exists())
 
+    def test_deadline_reaps_descendant_after_direct_parent_exits(self):
+        heartbeat = self.base / "owned-heartbeat"
+        parent_done = self.base / "parent-exited"
+        descendant = (
+            "import pathlib,time; p=pathlib.Path(" + repr(str(heartbeat)) + "); "
+            "\nwhile True: p.write_text(str(time.monotonic())); time.sleep(.03)"
+        )
+        parent = (
+            "import subprocess,sys,pathlib,time; "
+            f"subprocess.Popen([sys.executable,'-c',{descendant!r}]); "
+            f"p=pathlib.Path({str(heartbeat)!r}); "
+            "\nwhile not p.exists(): time.sleep(.01)\n"
+            f"pathlib.Path({str(parent_done)!r}).write_text('direct parent exiting'); "
+            "raise SystemExit(0)"
+        )
+        sentinel = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(20)"])
+        started = time.monotonic()
+        try:
+            result = subprocess.run([sys.executable, str(ROOT / "bin/ai-process-supervisor"),
+                "--timeout-seconds", "1.25", "--", sys.executable, "-c", parent],
+                capture_output=True, timeout=6)
+            self.assertEqual(result.returncode, 124, result.stderr)
+            self.assertTrue(parent_done.exists())
+            self.assertTrue(heartbeat.exists())
+            self.assertLess(time.monotonic() - started, 5)
+            before = heartbeat.read_bytes(); time.sleep(.15)
+            self.assertEqual(heartbeat.read_bytes(), before)
+            self.assertIsNone(sentinel.poll(), "unrelated process was terminated")
+        finally:
+            sentinel.terminate(); sentinel.wait(timeout=5)
+
+    @unittest.skipIf(os.name == "nt", "Git Bash helper exercised by native shell suite")
+    def test_helper_forwards_explicit_fractional_gnu_duration(self):
+        prefix = f'source {shlex.quote(str(ROOT / "tools/reviewer_event_guard.sh"))}; '
+        command = prefix + f'reviewer_credit_run muse {shlex.quote(str(self.out))} {shlex.quote(str(self.err))} --timeout-seconds .01m -- {shlex.quote(sys.executable)} -c {shlex.quote("import time;time.sleep(20)")}'
+        result = subprocess.run(["bash", "-c", command], capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        for duration in ("nan", "inf", "-1", "1;touch bad"):
+            bad = prefix + f'reviewer_credit_run muse {shlex.quote(str(self.out))} {shlex.quote(str(self.err))} --timeout-seconds {shlex.quote(duration)} -- true'
+            self.assertEqual(subprocess.run(["bash", "-c", bad], capture_output=True, timeout=5).returncode, 2)
+
     def test_final_check_bypasses_interval_and_finds_bounded_terminal_tail(self):
         monitor = Monitor("qwen", str(self.out), str(self.err), str(self.marker))
         self.assertFalse(monitor.check())

@@ -177,11 +177,11 @@ main() {
     cd "$DOOR_WORKDIR" || exit 1
     unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
     if [ "$MODE" = implement ]; then
-      reviewer_credit_run gemini "$raw" "$raw.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
+      reviewer_credit_run gemini "$raw" "$raw.err" --timeout-seconds "$GE_TIMEOUT" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
         --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
         < "$stream_input" > "$raw" 2> "$raw.err"
     else
-      reviewer_credit_run gemini "$raw" "$raw.err" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
+      reviewer_credit_run gemini "$raw" "$raw.err" --timeout-seconds "$GE_TIMEOUT" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
         --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
         < "$stream_input" > "$raw" 2> "$raw.err"
     fi

@@ -177,7 +177,7 @@ main() {
   (
     cd "$DOOR_WORKDIR" || exit 1
     if [ -n "$QWEN_KEY" ]; then export OPENAI_API_KEY="$QWEN_KEY"; else unset OPENAI_API_KEY || true; fi
-    reviewer_credit_run qwen "$out" "$out.err" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
+    reviewer_credit_run qwen "$out" "$out.err" --timeout-seconds "$QWEN_TIMEOUT" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
   )
   rc=$?
   set -e

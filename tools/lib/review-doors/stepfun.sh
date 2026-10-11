@@ -400,7 +400,7 @@ main() {
                XDG_CACHE_HOME="$(native_path "$xdg/cache")"
         if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
         printf '%s' "$(cat "$prompt_full")" \
-          | reviewer_credit_run stepfun "$log" "$out.err" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+          | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
               --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
               --dir "$(native_path "$oc_dir")" \
               > "$log" 2> "$out.err"

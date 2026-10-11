@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import math
 import os
 import shutil
 import signal
@@ -695,7 +696,7 @@ class NativeShellBroker:
 
 
 def posix_main(
-    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None, native_options=None
+    command: list[str], stop_file: str | None = None, timeout_seconds: float | None = None, credit_monitor=None, native_options=None
 ) -> int:
     broker = NativeShellBroker(*native_options) if native_options else None
     env = None
@@ -800,7 +801,7 @@ def posix_main(
 
 
 def windows_main(
-    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None
+    command: list[str], stop_file: str | None = None, timeout_seconds: float | None = None, credit_monitor=None
 ) -> int:
     from ctypes import wintypes
 
@@ -946,11 +947,11 @@ def main() -> int:
             credit_options[option] = value
         else:
             try:
-                timeout_seconds = int(value)
+                timeout_seconds = float(value)
             except ValueError:
-                die("--timeout-seconds must be a positive whole number")
-            if timeout_seconds <= 0:
-                die("--timeout-seconds must be a positive whole number")
+                die("--timeout-seconds must be finite positive seconds")
+            if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+                die("--timeout-seconds must be finite positive seconds")
     if args and args[0] == "--":
         args = args[1:]
     if not args:

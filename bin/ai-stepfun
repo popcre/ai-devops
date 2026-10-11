@@ -418,7 +418,7 @@ run_opencode_turn(){
       cp "$win_home/shim/bash" "$win_home/shim/bash.exe"
       printf '@echo off\r\nbash "%%~dp0bash" %%*\r\n' > "$win_home/shim/bash.cmd"
       export PATH="$win_home/shim:$gate_path"
-      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
+      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" --timeout-seconds "$TIMEOUT" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
         --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
         > "$log" 2>"$out.stderr"
     )
@@ -451,7 +451,7 @@ run_opencode_turn(){
     export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
       XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
       XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
-    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" --timeout-seconds "$TIMEOUT" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \

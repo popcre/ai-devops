@@ -609,9 +609,9 @@ call(){
     cd "$d" && a="$(agy)"
     if [ -n "$c" ]; then set -- --conversation "$c"; else set -- --new-project; fi
     if [ "$streamed" -eq 1 ]; then
-      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
+      reviewer_credit_run gemini "$output" "$o.stderr" --timeout-seconds "$TIMEOUT" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
     else
-      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
+      reviewer_credit_run gemini "$output" "$o.stderr" --timeout-seconds "$TIMEOUT" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
     fi
   ) > "$output" 2>"$o.stderr" & ACTIVE_CHILD=$!
   rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''

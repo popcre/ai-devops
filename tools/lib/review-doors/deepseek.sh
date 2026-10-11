@@ -277,7 +277,7 @@ main() {
            XDG_CACHE_HOME="$(native_path "$xdg/cache")"
     if [ -n "$DS_KEY" ]; then export DEEPSEEK_API_KEY="$DS_KEY"; else unset DEEPSEEK_API_KEY || true; fi
     printf '%s' "$(cat "$prompt_full")" \
-      | reviewer_credit_run deepseek "$log" "$out.err" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
+      | reviewer_credit_run deepseek "$log" "$out.err" --timeout-seconds "$DS_TIMEOUT" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
           --format json --model "$DS_PROVIDER/$DS_MODEL" \
           --dir "$(native_path "$oc_dir")" \
           > "$log" 2> "$out.err"
