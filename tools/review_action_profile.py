@@ -160,6 +160,25 @@ def tree_inventory(root, expected=None):
     return sha(canonical(rows)), rows
 
 
+def installed_enforcement():
+    """Bind the public enforcement bytes to their actual supported installation."""
+    files = ("tools/review_action_profile.py", "config/review-action-profiles.json", "bin/ai-review-code-only.py", "bin/ai-task-gates")
+    hashes = {path: file_hash(ROOT / path)[0] for path in files}
+    if os.environ.get("AI_DEVOPS_TEST_MODE") == "1":
+        return {"kind": "NONAUTHORIZING_TEST_FIXTURE", "public_enforcement_sha256": hashes}
+    require(Path("/usr/local/bin/ai-task-gates").resolve(strict=True) == ROOT / "bin/ai-task-gates", "native enforcement is not the installed launcher source")
+    head = git(ROOT, "rev-parse", "HEAD").decode().strip()
+    require(not git(ROOT, "status", "--porcelain"), "installed source is not clean")
+    for path, digest in hashes.items():
+        require(sha(git(ROOT, "show", head + ":" + path)) == digest, "installed enforcement differs from committed source")
+    receipt_path = Path("/etc/ai-devops/install-manifest.tsv")
+    receipt = _native.private_read(receipt_path)
+    rows = [line.split("\t") for line in receipt.decode().splitlines()]
+    require([row[2] for row in rows if len(row) == 4 and row[:2] == ["meta", "source_sha"]] == [head], "installed source receipt differs")
+    require([row[3] for row in rows if len(row) == 4 and row[:2] == ["symlink", "/usr/local/bin/ai-task-gates"] and row[2] == str(ROOT / "bin/ai-task-gates")] == [hashes["bin/ai-task-gates"]], "installed gate receipt differs")
+    return {"kind": "VERIFIED_INSTALLED_SOURCE", "source_head": head, "installation_receipt_sha256": sha(receipt), "public_enforcement_sha256": hashes}
+
+
 def action_binding(state, manifest, phase, stage="initial-forward"):
     profile, profile_digest = profiles()
     require(state["normalized_upstream"] == profile["repository"], "foreign original repository cannot use this profile")
@@ -236,11 +255,54 @@ def action_binding(state, manifest, phase, stage="initial-forward"):
                 mount_private(item)
                 file_hash(item, private=True)
     descriptor = {key: value for key, value in manifest.items() if key not in BINDINGS}
-    return {"profile": PROFILE, "profile_sha256": profile_digest, "action": "database", "manifest_descriptor_sha256": sha(canonical(descriptor)), "immutable_input_sha256": sha(canonical(actual)), "task": task_identity(repo), "path_set_sha256": profile["path_set_sha256"], "entrypoint": profile["entrypoint"], "target_ref": manifest["target_ref"], "target_ref_sha256": profile["target_ref_sha256"], "schema": profile["schema"], "root_action_authority": False, "future_output_leaves": sorted(manifest["future_outputs_nonexistence"])}
+    return {"profile": PROFILE, "profile_sha256": profile_digest, "action": "database", "manifest_descriptor_sha256": sha(canonical(descriptor)), "immutable_input_sha256": sha(canonical(actual)), "task": task_identity(repo), "path_set_sha256": profile["path_set_sha256"], "entrypoint": profile["entrypoint"], "target_ref": manifest["target_ref"], "target_ref_sha256": profile["target_ref_sha256"], "schema": profile["schema"], "root_action_authority": False, "future_output_leaves": sorted(manifest["future_outputs_nonexistence"]), "installed_enforcement": installed_enforcement()}
 
 
 def receipt_binding(state, binding):
     return {"schema_version": 1, "stage": "initial-forward", "source_head": state["head"], "source_digest": state["source_digest"], "native_completion": state["code_only_completion"], "action_profile_binding": binding}
+
+
+def review_evidence(state, manifest, binding):
+    """Allowlisted facts from native validation, never private descriptor values.
+
+    This is conditional review evidence, not a verdict, live rehearsal proof,
+    installation receipt, or action authorization. The opaque private commitment
+    remains unchanged and is checked again at finish and both action stages.
+    """
+    profile, profile_digest = profiles()
+    require(binding == state["action_profile_binding"] and binding["profile_sha256"] == profile_digest, "native evidence binding changed")
+    require(state["head"] == state["code_only"]["original_head"] and state["source_digest"] == state["code_only"]["source_digest"], "native evidence source identity differs")
+    repo = Path(state["repository_root"])
+    return {
+        "schema_version": 1,
+        "evidence_kind": "native-validated-private-action-commitment",
+        "action_authorized": False,
+        "live_rehearsal_proven": False,
+        "private_values_disclosed": False,
+        "original_source_head": state["head"],
+        "original_source_digest": state["source_digest"],
+        "synthetic_review_head": state["code_only"]["export_head"],
+        "profile": binding["profile"],
+        "profile_sha256": binding["profile_sha256"],
+        "manifest_descriptor_sha256": binding["manifest_descriptor_sha256"],
+        "immutable_input_set_sha256": binding["immutable_input_sha256"],
+        "target_ref_sha256": binding["target_ref_sha256"],
+        "schema": profile["schema"],
+        "entrypoint": profile["entrypoint"],
+        "validated_scope": {
+            "preparation_scope": profile["preparation_scope"],
+            "issue_isolated_credentials": profile["issue_isolated_credentials"],
+            "acceptance_callback": profile["acceptance_callback"],
+            "original_restoration_required": profile["original_restoration_required"],
+        },
+        "immutable_input_count": len(manifest["input_sha256"]),
+        "selected_code_input_sha256": {path: manifest["input_sha256"][str(repo / path)] for path in profile["paths"]},
+        "path_set_sha256": binding["path_set_sha256"],
+        "runtime_closure_sha256": profile["postwrite_runtime_closure_sha256"],
+        "installed_enforcement": binding["installed_enforcement"],
+        "future_output_count": len(manifest["future_outputs_nonexistence"]),
+        "native_validation": "Complete private inputs, encrypted custody, exact source/export, parser/runtime closures and absent future outputs checked locally; unchanged commitment rechecked before approval and execution.",
+    }
 
 
 def admit(state_path, state, binding, stage, publish):
@@ -292,7 +354,7 @@ def admit(state_path, state, binding, stage, publish):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("capture", "finish", "preaction"))
+    parser.add_argument("phase", choices=("capture", "evidence", "finish", "preaction"))
     parser.add_argument("state")
     parser.add_argument("--manifest")
     parser.add_argument("--profile", default=PROFILE)
@@ -303,21 +365,21 @@ def main():
         require(sys.platform == "linux" and fcntl is not None, "isolated action profile requires supported Linux custody")
         require(args.profile == PROFILE, "unknown installed action profile")
         state = decode(_native.private_read(args.state))
-        require(state["status"] == ({"capture": "preflight", "finish": "running", "preaction": "completed"}[args.phase]), "wrong prospective lifecycle phase")
+        require(state["status"] == ({"capture": "preflight", "evidence": "running", "finish": "running", "preaction": "completed"}[args.phase]), "wrong prospective lifecycle phase")
         if args.manifest:
             mount_private(args.manifest)
             manifest = decode(_native.private_read(args.manifest))
         else:
             raw = sys.stdin.buffer.read(LIMIT + 1)
             manifest = decode(raw)
-        binding = action_binding(state, manifest, args.phase, args.stage)
+        binding = action_binding(state, manifest, "capture" if args.phase == "evidence" else args.phase, args.stage)
         if args.phase != "capture":
             require(binding == state["action_profile_binding"], "current action, installed profile or original task changed")
         if args.phase == "preaction":
             admit(args.state, state, binding, args.stage, args.admit)
         else:
             require(args.stage == "initial-forward" and not args.admit, "restoration is not a capture or finish bypass")
-        print(json.dumps(binding, sort_keys=True))
+        print(json.dumps(review_evidence(state, manifest, binding) if args.phase == "evidence" else binding, sort_keys=True))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, RecursionError):
         print("ai-review-action-profile: native bounded action validation refused", file=sys.stderr)
         return 1
