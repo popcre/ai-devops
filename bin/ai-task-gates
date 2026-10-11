@@ -84,7 +84,7 @@ usage: ai-task-gates <command> [options]
   version
 
 ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
-  shared-db-promotion
+  shared-db-promotion application-workflow
 
 shared-db-promotion is the one owner-authorized (Albert, 2026-10-02) launch of
 shared-db's merged-preview run that starts its automatic production promotion
