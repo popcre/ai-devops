@@ -107,6 +107,11 @@ fi
 # The core exports the runner token before any door is invoked, so a door
 # that is called without it refuses (second structural refusal).
 rlc_init
+# Resolve the actual door before creating a lifecycle invocation. Providers
+# using legacy pool routes (for example GLM) must fail here, not leave an
+# unfinishable running review when they are sent to this runner by mistake.
+rlc_capture admitted_door rlc_door_path "$provider"
+[ -r "$admitted_door" ] || die "provider door is not readable: $admitted_door"
 rlc_export_runner_token
 
 case "$contract" in

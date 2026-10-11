@@ -475,6 +475,32 @@ git -C "$MREPO" commit -qm ignore
 HEAD_SHA="$(git -C "$MREPO" rev-parse HEAD)"
 git -C "$MREPO" status --porcelain
 
+# A provider still routed through the legacy pool has no engine door. Reject
+# the mistaken request before any invocation or sandbox can be created.
+for unavailable_contract in review implement; do
+  unavailable_state="$TMP/unavailable-$unavailable_contract-state"
+  unavailable_sandbox="$TMP/unavailable-$unavailable_contract-sandboxes"
+  unavailable_rc=0
+  AI_REVIEW_LIFECYCLE_DIR="$unavailable_state" \
+    AI_REVIEW_SANDBOX_DIR="$unavailable_sandbox" \
+    bash "$ENGINE" "$unavailable_contract" --provider glm --name no-glm-door \
+      --repo "$MREPO" >"$TMP/unavailable-$unavailable_contract.out" \
+      2>"$TMP/unavailable-$unavailable_contract.err" || unavailable_rc=$?
+  check "engine_${unavailable_contract}_missing_door_creates_no_invocation" \
+    "test '$unavailable_rc' -ne 0 && grep -q 'no door registered' '$TMP/unavailable-$unavailable_contract.err' && test ! -d '$unavailable_state/runs' && test ! -d '$unavailable_sandbox'"
+done
+
+missing_override_rc=0
+AI_REVIEW_DOOR_GROK="$TMP/missing-provider-door.sh" \
+  AI_REVIEW_LIFECYCLE_DIR="$TMP/missing-override-state" \
+  AI_REVIEW_SCOREBOARD_DIR="$TMP/missing-override-scoreboard" \
+  AI_REVIEW_SCOREBOARD_FILE="$TMP/missing-override-scoreboard/reviews.jsonl" \
+  bash "$ENGINE" review --provider grok --name missing-door-override \
+    --repo "$MREPO" >"$TMP/missing-override.out" \
+    2>"$TMP/missing-override.err" || missing_override_rc=$?
+check "engine_missing_door_override_is_local_admission_failure" \
+  "test '$missing_override_rc' -ne 0 && grep -q 'door override is not a file' '$TMP/missing-override.err' && test ! -d '$TMP/missing-override-state/runs' && test ! -e '$TMP/missing-override-scoreboard/reviews.jsonl'"
+
 PREFLIGHT_STUB="$TMP/preflight-stub"
 cat > "$PREFLIGHT_STUB" <<'EOF'
 #!/usr/bin/env bash
