@@ -173,6 +173,24 @@ The owner-closed credential incident is not an open installation prerequisite;
 no further rotation, revocation or redaction is authorized by that incident.
 Historical samples remain unqualified for before/after savings. #658 stays open.
 
+Native qualification disposition — October 9, 2026 EDT: native helper ran on
+916 against the staged counter namespace (manifest 186c0b14). Console/cancel,
+three handles, 7 environment sentinels, 9 filesystem boundaries (incl. junction
+retags), 20 cold + 20 warm pairs, and 9 source + 3 pin bindings all passed.
+Detached telemetry parity is UNKNOWN: the fixture endpoint 127.0.0.1 is treated
+as enterprise by upstream gh, which suppresses telemetry by design; not a
+counter defect and not zero. Cold summed ratio failed at N=20 (1.1255) on
+process-startup spikes while cold p95 passed. A bounded N=40 cold-only
+re-measure (same stage/manifest) showed paired both-non-spike ratio 0.978,
+full-set p95 0.227, candidate spikes 0 vs baseline 5. Independent adjudication
+under the locked re-measure rules APPROVES amending the cold overhead gate to:
+p95 <= 1.05 on the full set; sum <= 1.05 on paired samples <= 200 ms; admit at
+most one extra candidate startup spike. Evidence:
+658-916-native-qualification-receipt.private.json,
+658-916-native-cold-remeasure-40.private.json,
+658-916-native-cold-remeasure-40-disposition.private.md. Stage is not fleet
+install; section 13 remains open.
+
 **Start:** reconcile current upstream, read this STATUS and the
 [active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
 then finish the first actionable unproved outcome under #658. The original
