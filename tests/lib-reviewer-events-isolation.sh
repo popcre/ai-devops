@@ -13,6 +13,16 @@ export AI_REVIEW_TEST_ISOLATION=1
 # tests/test-ai-grok-review.sh refuse during a stale-manifest recovery review.
 # Suites set these inline per case when a case needs one.
 unset AI_REVIEW_OPERATION AI_REVIEW_GATE_MODE AI_REVIEW_IMPLEMENTER AI_REVIEW_REVIEWER_APPROVAL
+# Offline child suites own their fixture doors and lifecycle state. The outer
+# review exports these invocation variables to its native tools; inheriting
+# them here can create failure evidence at the still-running review's live
+# destination or overwrite its report. Clear only test-child context, leaving
+# normal reviewer tool environments and explicit later fixture setup intact.
+for ai_test_outer_context in $(compgen -v DOOR_) $(compgen -v RLC_); do
+  unset "$ai_test_outer_context"
+done
+unset ai_test_outer_context
+unset AI_REVIEW_RUNNER_CORE AI_REVIEW_VIA_RUNNER AI_REVIEW_RUNNER_NAME
 if [ -z "${AI_REVIEW_EVENT_DIR:-}" ]; then
   # Suites own their EXIT traps, so this helper cannot remove its directory at
   # exit. Instead it removes its own private directories left by runs that
