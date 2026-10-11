@@ -203,7 +203,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-aw|-am) printf '%s\n' "${@: -1}" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-aw|-am) for last in "$@"; do :; done; printf '%s\n' "$last" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -307,7 +307,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-am) printf '%s\n' "${@: -1}" ;; *) exit 2 ;; esac
+case "$1" in -u|-wa|-am) for last in "$@"; do :; done; printf '%s\n' "$last" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
