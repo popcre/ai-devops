@@ -43,7 +43,10 @@ gh_measure_clock(){
   if [[ "$stamp" =~ ^[0-9]{16}$ ]]; then
     GH_MEASURE_CLOCK="${stamp:0:13}"
   else
-    GH_MEASURE_CLOCK=$(date +%s%3N)
+    # Never date's three-digit fraction: uutils coreutils 0.10 drops its leading zeros.
+    stamp=$(date +%s%N)
+    if [[ "$stamp" =~ ^[0-9]{19}$ ]]; then GH_MEASURE_CLOCK=$(( 10#$stamp / 1000000 ))
+    else GH_MEASURE_CLOCK=$(( $(date +%s) * 1000 )); fi
   fi
 }
 

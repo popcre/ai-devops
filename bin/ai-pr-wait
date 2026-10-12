@@ -139,6 +139,15 @@ esac
 DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAIT_STARTED_SECONDS=$SECONDS
 
+# Never use date's three-digit fraction format: uutils coreutils 0.10 drops the fraction's
+# leading zeros (12.045s prints as 12.450s). Prefer Bash's EPOCHREALTIME; full %N is the fallback.
+utc_ms(){
+  local t="${EPOCHREALTIME:-}"; t="${t//[!0-9]/}"
+  if [ "${#t}" -eq 16 ]; then echo $(( 10#$t / 1000 )); return; fi
+  t="$(date -u +%s%N 2>/dev/null || true)"
+  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); fi
+}
+
 bounded_gh() {
   local now remaining limit complete_status=0
   if [ "${1:-}" = --complete-status ]; then complete_status=1; shift; fi
@@ -461,7 +470,7 @@ while :; do
   fi
 
   STATE="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.state')"
-  PR_WAIT_OBSERVED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
+  PR_WAIT_OBSERVED_UTC_MS="$(utc_ms)"
   LAST_HEAD="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
@@ -477,7 +486,7 @@ while :; do
     PR_WAIT_DELIVERY_BOUNDARY=terminal_report
     say "PR #$PR MERGED  merge commit $MERGE_SHA"
     capture_local_end
-    PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
+    PR_WAIT_DELIVERED_UTC_MS="$(utc_ms)"
     emit_workflow_evidence
     exit 0
   fi
@@ -487,7 +496,7 @@ while :; do
     PR_WAIT_DELIVERY_BOUNDARY=terminal_report
     say "PR #$PR CLOSED without merging - it will not merge on its own"
     capture_local_end
-    PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
+    PR_WAIT_DELIVERED_UTC_MS="$(utc_ms)"
     emit_workflow_evidence
     exit 1
   fi
@@ -509,7 +518,7 @@ while :; do
     say "  Look at the merge_group run, not the pull request run:"
     say "    gh run list --repo $REPO --event merge_group --limit 5"
     capture_local_end
-    PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
+    PR_WAIT_DELIVERED_UTC_MS="$(utc_ms)"
     emit_workflow_evidence
     exit 1
     fi
@@ -561,7 +570,7 @@ while :; do
       fi
     fi
     capture_local_end
-    PR_WAIT_DELIVERED_UTC_MS="$(date -u +%s%3N 2>/dev/null || true)"
+    PR_WAIT_DELIVERED_UTC_MS="$(utc_ms)"
     emit_workflow_evidence
     exit 1
   fi
