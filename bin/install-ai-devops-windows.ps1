@@ -320,7 +320,10 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     }
     if ($FirstInstall) {
         if ((Test-Path -LiteralPath $expectedLauncher) -or (Test-Path -LiteralPath "$expectedLauncher.cmd") -or
-            $auth.installed_source_sha256 -cne (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            $auth.installed_source_sha256 -cne (Get-CommittedGateHash $Path $InstalledHead)) {
+            # Hash the gate as recorded at the approved starting commit, not the
+            # working tree: a reviewed first install may advance the checkout
+            # before the launcher refresh re-runs this check.
             throw 'First-install source or launcher state changed after approval.'
         }
     }
