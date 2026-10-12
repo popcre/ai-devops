@@ -29,7 +29,20 @@ assert secret not in report.read_bytes() and b'503' in report.read_bytes()
 if os.name != 'nt':
     assert dest.stat().st_mode & 0o777 == 0o700
     assert (dest/'report.md').stat().st_mode & 0o777 == 0o600
-assert run('first')[0].returncode != 0 # old evidence cannot be replaced
+original = {f.name: f.read_bytes() for f in dest.iterdir()}
+again = run('first')[0]
+assert again.returncode != 0 # old evidence cannot be replaced
+assert {f.name: f.read_bytes() for f in dest.iterdir()} == original
+# A pre-existing (e.g. test-stub polluted) directory never loses real evidence:
+# both are retained and the call still fails closed (#1562 WinError 183).
+polluted = root/'polluted'
+polluted.mkdir(); (polluted/'stub.txt').write_text('STUB dir=x PWD!=DIR\n')
+result, report, _ = run('polluted')
+assert result.returncode != 0 and b'both retained' in result.stderr
+assert (polluted/'stub.txt').read_text() == 'STUB dir=x PWD!=DIR\n'
+kept = [d for d in root.iterdir() if d.name.startswith('polluted.collision-')]
+assert len(kept) == 1 and (kept[0]/'report.md').exists()
+assert secret not in (kept[0]/'native.jsonl').read_bytes()
 log.write_text('{"type":"tool_use","part":{"state":{"status":"error","message":"HTTP 402"}}}\n')
 result, report, _ = run('tool-failure', 'native-execution-failed', 124)
 summary = json.loads(report.read_text().splitlines()[-1])

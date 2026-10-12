@@ -380,8 +380,17 @@ PY
   fi
   # Only the managed native DeepSeek door requests sibling tool capsules.
   # Other providers and implementation retain their original launch routes.
+  # The native reviewer, and every command or test it runs inside its copy,
+  # must never see the live run's door or lifecycle custody paths: a suite
+  # using ${DOOR_DIAGNOSTICS_DIR:-...} would otherwise write stubs into the
+  # real private evidence directory (#1562, DeepSeek WinError 183).
+  local scrubbed_name; local -a custody_scrub=()
+  for scrubbed_name in $(compgen -e); do
+    case "$scrubbed_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+      custody_scrub+=(-u "$scrubbed_name");; esac
+  done
   term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
-  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" "${native_review[@]}" "${wall_deadline[@]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
+  env "${custody_scrub[@]}" MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" "${native_review[@]}" "${wall_deadline[@]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
   trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
   trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
   trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP

@@ -646,7 +646,9 @@ EOF
     > "$fixture/stdout" 2> "$fixture/stderr" || rc=$?
   [ "$rc" = 92 ] &&
     grep -q "AI_REVIEWER_OUT_OF_CREDIT provider=$provider" "$fixture/stderr" &&
-    grep -q 'FileExistsError' "$fixture/stderr" &&
+    grep -q 'both retained' "$fixture/stderr" &&
+    ls -d "$fixture"/old-evidence.collision-* >/dev/null 2>&1 &&
+    test -s "$(ls -d "$fixture"/old-evidence.collision-* | head -1)/report.md" &&
     grep -q 'private diagnostic retention refused' "$fixture/stderr" &&
     grep -qx 'immutable earlier diagnostic' "$fixture/old-evidence/sentinel" &&
     [ ! -e "$fixture/old-evidence/native.jsonl" ] && [ ! -e "$fixture/report.md" ]
