@@ -170,7 +170,7 @@ for local_provider in stepfun muse; do
   check "$local_provider nonzero local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-failed' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
   check "$local_provider empty local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-empty' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
   check "$local_provider bounded local doctor refuses timeout" "env AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 $wrapper_var='$TMP/bin/local-slow' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
-  check "$local_provider healthy local doctor restores readiness without inventing capacity" "$SCRIPT status $local_provider | jq -e '.usable==true and .admission.state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/$local_provider.json'"
+  check "$local_provider healthy local doctor restores readiness without inventing capacity" "env $wrapper_var='$TMP/bin/good' $SCRIPT status $local_provider | jq -e '.usable==true and .admission.state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/$local_provider.json'"
 done
 check "Muse readiness preserves preflight caller" "AI_REVIEW_MUSE_WRAPPER='$TMP/bin/requires-muse-caller' $SCRIPT status muse | jq -e '.usable==true'"
 check "Muse readiness uses its independent offline doctor budget" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=4 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT status muse | jq -e '.usable==true'"
@@ -204,15 +204,16 @@ deepseek_missing_runtime_status() {
     [ -z "${1:-}" ] || export AI_DEEPSEEK_ENGINE="$1"
     export HOME="$TMP/no-opencode-home" USERPROFILE=''
     mkdir -p "$HOME"
-    # Hide only the provider runtime; retain real Python/curl and the actual
-    # offline API doctor. This fixture never contacts a provider or reads keys.
+    # Hide only the provider runtime. The actual wrapper's doctor reads the
+    # operating-system profile's protected key store, which clean CI runners
+    # lack, so a passing offline doctor stands in for it here; the runtime
+    # gate under test lives in preflight, not in the wrapper.
     command() {
       if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = opencode ]; then return 1; fi
       builtin command "$@"
     }
     export -f command
-    DEEPSEEK_API_KEY=synthetic-offline-fixture \
-      AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" status deepseek
+    AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good" "$SCRIPT" status deepseek
   )
 }
 check "API doctor cannot make missing ordinary DeepSeek runtime usable" "deepseek_missing_runtime_status | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"

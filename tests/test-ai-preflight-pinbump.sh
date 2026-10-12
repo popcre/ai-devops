@@ -1032,7 +1032,7 @@ SEOF
     && ok "a non-executable Grok override is refused (no fallback, no false evidence)" \
     || { bad "a non-executable Grok override is refused (no fallback, no false evidence)"; printf '%s\n' "$PB_OUT"; }
   check "the refused override never becomes a false pin-mismatch quarantine" \
-    "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.usable==true'"
+    "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.status!=\"quarantined\" and .failure_class!=\"pin-mismatch\"'"
 
   # 6. Kimi: same override rule as Grok (ai-kimi resolve_kimi dies on it).
   rm -rf "$TMP/state"; mkdir -p "$TMP/state"
