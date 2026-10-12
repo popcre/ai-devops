@@ -210,6 +210,10 @@ STATE_LEGACY="$("$SCRIPT" begin --provider muse --repo "$R" --run-id owner-legac
 "$SCRIPT" join "$STATE_LEGACY" >/dev/null
 check "record_without_owner_is_never_guessed_interrupted" "jq -e '.status==\"running\"' '$STATE_LEGACY'"
 kill "$LIVE_OWNER" 2>/dev/null; wait "$LIVE_OWNER" 2>/dev/null
+# Every production begin call site must name its owner, or its killed runs can
+# never be reconciled.
+UNOWNED_BEGINS="$(grep -nE '(LIFECYCLE|lifecycle)"? +(begin|"\$\{lifecycle_args)' "$REPO_ROOT"/bin/ai-review "$REPO_ROOT"/bin/ai-review-pool "$REPO_ROOT"/bin/ai-codex-review "$REPO_ROOT"/bin/ai-claude-review "$REPO_ROOT"/tools/lib/review-lifecycle-core.sh | grep -vE ':[0-9]+: *#' | grep -v 'AI_REVIEW_LIFECYCLE_OWNER_PID=' || true)"
+check "every_lifecycle_begin_call_site_names_its_owner" "test -z \"\$UNOWNED_BEGINS\""
 
 STATE_ACCOUNT="$($SCRIPT begin --provider glm --repo "$R" --run-id accounting --caller codex)"
 AI_TEST_SCOREBOARD_FAIL=1 "$SCRIPT" fail --state "$STATE_ACCOUNT" --elapsed 4 --failure provider-timeout >/dev/null 2>&1 || true
