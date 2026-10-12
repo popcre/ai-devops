@@ -16,6 +16,7 @@ done
 
 # 2. A vendor failure is recorded as escalate, never as clean or agree.
 mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 7\n' > "$T/bin/curl"; chmod +x "$T/bin/curl"
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/op"; chmod +x "$T/bin/op"
 out="$(echo '{"last_assistant_message":"All done.","session_id":"t","prompt_id":"p"}' \
   | PATH="$T/bin:$PATH" TYPESAFE_API_KEY=dummy AI_JEV_SHADOW_LOG="$T/log" "$ROOT/bin/ai-jev-completion-shadow" 2>&1)"
 [[ "$out" == *"escalate=1"* ]] && ok || bad "outage not recorded as escalate: $out"

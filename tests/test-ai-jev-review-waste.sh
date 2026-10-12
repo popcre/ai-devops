@@ -13,6 +13,9 @@ PIN="$(jq -r .model_pin "$ROOT/config/jev-decisions.json")"
 
 # --- stub curl that records request and writes a canned 200 body ---
 mkdir -p "$T/bin"
+# Fail fast if anything tries 1Password in CI (must never hang).
+printf '#!/bin/sh\necho op-stub >&2\nexit 1\n' > "$T/bin/op"
+chmod +x "$T/bin/op"
 cat > "$T/bin/curl" <<EOS
 #!/bin/sh
 out=""
