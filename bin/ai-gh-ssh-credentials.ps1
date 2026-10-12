@@ -15,6 +15,7 @@
 # `gh auth login --web --insecure-storage` in an interactive session), 1 error.
 [CmdletBinding()]
 param(
+    [string]$ExpectedLogin = 'u2giants',
     [string]$GhGate = '',
     [string]$Bash = '',
     [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials'),
@@ -96,6 +97,7 @@ if (-not (Test-FileToken)) {
         Write-Output 'No working GitHub login to share with SSH sessions. In an interactive session run: gh auth login --web --insecure-storage'
         exit 2
     }
+    if (($login.Output -join '') -ne $ExpectedLogin) { throw "Refusing to share the GitHub login for $($login.Output -join ''); expected $ExpectedLogin." }
     Backup-File $hosts
     # The token flows gate-to-gate inside one bash pipe and never reaches PowerShell.
     $pipe = 'set -o pipefail; unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST; export AI_GH_CALLER=ai-gh-ssh-credentials; "$0" auth token --hostname github.com | "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
@@ -116,5 +118,6 @@ if ($check.ExitCode -ne 0) {
     Write-Output 'The stored GitHub login is rejected by GitHub. In an interactive session run: gh auth login --web --insecure-storage'
     exit 2
 }
+if (($check.Output -join '') -ne $ExpectedLogin) { throw "The stored GitHub login is $($check.Output -join ''), not $ExpectedLogin." }
 Write-Output "GitHub login shared with SSH sessions for $($check.Output -join '')."
 exit 0

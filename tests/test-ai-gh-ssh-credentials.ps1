@@ -22,7 +22,7 @@ current() {
   printf '%s' "$t"
 }
 case "$1 $2" in
-  "api --hostname") [ "$(current)" = GOOD ] && { echo u2giants; exit 0; }; exit 1 ;;
+  "api --hostname") case "$(current)" in GOOD) echo u2giants; exit 0 ;; POPCRE) echo popcre; exit 0 ;; esac; exit 1 ;;
   "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
   "auth login") t="$(cat | tr -d '\r\n')"
     printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" >> "$hosts"
@@ -70,6 +70,10 @@ try {
     $r = Invoke-Case 'broad' 'GOOD' -Broad
     Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "a folder readable by Everyone is refused (exit $($r.Exit))"
     Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -notmatch 'oauth_token') 'no token written into a broad folder'
+
+    $r = Invoke-Case 'other-account' 'POPCRE'
+    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "another GitHub account is refused (exit $($r.Exit))"
+    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -notmatch 'oauth_token') 'no other-account token written'
 
     $r = Invoke-Case 'dead' 'BAD'
     Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"
