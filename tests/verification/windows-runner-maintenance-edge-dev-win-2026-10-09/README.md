@@ -70,7 +70,7 @@ RECOVERED`, then `PASS: Windows runner maintenance installation verified`.
 | Case | Result |
 |---|---|
 | Elevated `-Verify` after recovery+install | `PASS: Windows runner maintenance installation verified` |
-| Non-elevated invoke `refresh-qualification` | Task ran; bounded result `OPERATION_FAILED` (see host preconditions); result schema fields exactly `schema_version,request_id,operation,host,started_at_utc,ended_at_utc,result,exit_code,message`; no evidence content, no stack/stdout/stderr |
+| Non-elevated invoke `refresh-qualification` | 2026-10-09 (Secure Boot off): bounded `OPERATION_FAILED` (safe schema, no evidence leak). 2026-10-12 (Secure Boot on): `SUCCESS` rc 0, evidence mtime 2026-09-03 → 2026-10-12, message `Windows runner qualification evidence was refreshed.` Result schema fields exactly `schema_version,request_id,operation,host,started_at_utc,ended_at_utc,result,exit_code,message`; no evidence content, no stack/stdout/stderr |
 | Audit record | `requester_sid` = operator SID, host, operation, start/end, result; ledger recorded the new request id |
 | Live wrong-owner | Audit shows `REQUEST_REJECTED` with `requester_sid=S-1-5-32-544` (Administrators) — admin-owned raw write refused |
 | Unknown operation | Client `ValidateSet` refuses (`N2 UNKNOWN_OP=REFUSED`) |
@@ -82,21 +82,27 @@ RECOVERED`, then `PASS: Windows runner maintenance installation verified`.
 | Second install (idempotent) | `PASS` |
 | `-Verify` after all mutations | `PASS` |
 
-## Host preconditions for refresh SUCCESS (reported as-is, never faked)
+## Refresh-qualification SUCCESS (2026-10-12)
 
-- `Confirm-SecureBootUEFI` = **False** (firmware; not changeable remotely).
-  Qualify script throws `Secure Boot must be enabled.` — evidence mtime stays
-  `2026-09-03`.
-- Runner service **Stopped** / GitHub runner `edge-dev-win` **offline**.
-  Qualify requires exactly one *running* automatic runner service. The service
-  was **not** started, stopped, or reconfigured by this work.
-- TPM present and ready.
+After the owner enabled Secure Boot in EDGE-DEV firmware (machine reboot
+2026-10-12T16:46:27-04:00): `Confirm-SecureBootUEFI=True`, TPM present/ready,
+runner service Running/Auto/NETWORK SERVICE. Non-elevated invoke returned
+`SUCCESS` rc 0 (`request_id` `88616a7e-353e-4136-be5b-b8b9ddeda7bb`), message
+`Windows runner qualification evidence was refreshed.` Evidence mtime advanced
+2026-09-03 → 2026-10-12T16:50:27 (content never printed). Audit recorded
+`SUCCESS` with operator SID; ledger recorded the request id. `-Verify` still
+PASS. Runner labels unchanged (unqualified).
 
-Consequence: the maintenance boundary is proven (recovery, install, verify,
-invoke envelope, negatives, concurrency, rollback, idempotency). The one
-bounded **refresh-qualification SUCCESS with fresh evidence** waits on Secure
-Boot being re-enabled in firmware and the runner service being returned to
-Running by its normal operator — both outside this maintenance install.
+## Host preconditions (resolved 2026-10-12)
+
+- Secure Boot was False during the 2026-10-09 recovery/install proof; the
+  refresh then returned a bounded `OPERATION_FAILED` (not faked). After the
+  firmware change the same invoke returned `SUCCESS`.
+- Runner service was Stopped / GitHub `edge-dev-win` offline on 2026-10-09
+  (unchanged by this work). It is Running again as of 2026-10-12.
+- TPM present and ready throughout.
+
+The maintenance boundary and the one bounded refresh SUCCESS are both proven.
 
 ## Runner qualification
 

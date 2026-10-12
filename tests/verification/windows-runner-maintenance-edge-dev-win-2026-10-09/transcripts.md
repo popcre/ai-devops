@@ -96,3 +96,37 @@ PASS: Windows runner maintenance installation verified   # final -Verify
 ```
 {"busy":false,"labels":["self-hosted","Windows","X64","edge-dev","ai-devops-windows"],"name":"edge-dev-win","status":"offline"}
 ```
+
+## 9. Refresh-qualification SUCCESS (2026-10-12, after Secure Boot enabled)
+
+Host preconditions after owner firmware change (machine rebooted 2026-10-12T16:46:27-04:00):
+
+```
+SECUREBOOT=True
+TPM present=True ready=True
+SVC actions.runner.popcre-ai-devops.edge-dev-win status=Running start=Auto account=NT AUTHORITY\NETWORK SERVICE
+```
+
+Non-elevated invoke (`admin=False`):
+
+```
+{
+  "request_id": "88616a7e-353e-4136-be5b-b8b9ddeda7bb",
+  "result": "SUCCESS",
+  "exit_code": 0,
+  "message": "Windows runner qualification evidence was refreshed."
+}
+RC=0
+```
+
+Evidence metadata only (content never printed):
+
+```
+EVIDENCE len=338 mtime=2026-10-12T16:50:27.9545187-04:00   # was 2026-09-03T23:09:52
+AUDIT result=SUCCESS sid=S-1-5-21-3782134917-2737737491-2203520143-1001
+LEDGER {"request_id":"88616a7e-353e-4136-be5b-b8b9ddeda7bb"}
+RESULT fields=ended_at_utc,exit_code,host,message,operation,request_id,result,schema_version,started_at_utc
+```
+
+Post-SUCCESS: `-Verify` PASS; runner labels still
+`self-hosted,Windows,X64,edge-dev,ai-devops-windows` (unqualified); task Ready.
