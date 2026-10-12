@@ -41,7 +41,7 @@ if [ -n "${SYSTEMROOT:-}" ]; then
   export AI_STEPFUN_KEY_STORE="$original"
   helper="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")"
   target="$(cygpath -w "$original")"; parent="$(cygpath -w "$(dirname "$original")")"
-  AI_DEVOPS_PRIVATE_HELPER="$helper" AI_DEVOPS_PRIVATE_TARGET="$target" AI_DEVOPS_PRIVATE_PARENT="$parent" powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_TARGET; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_PARENT' >/dev/null
+  AI_DEVOPS_PRIVATE_HELPER="$helper" AI_DEVOPS_PRIVATE_TARGET="$target" AI_DEVOPS_PRIVATE_PARENT="$parent" env -u PSModulePath powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_TARGET; Assert-AiDevOpsPrivateAcl $env:AI_DEVOPS_PRIVATE_PARENT' >/dev/null
   ok 'native owner and SYSTEM only file and parent ACL'
   python_dir="$(dirname "$(command -v python)")"
   fallback_path="/usr/bin:/bin:/mingw64/bin:/c/Windows/System32:/c/Windows/System32/WindowsPowerShell/v1.0:$python_dir"

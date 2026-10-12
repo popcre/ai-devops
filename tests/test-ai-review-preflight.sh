@@ -245,7 +245,7 @@ grok_runtime_selection_cases() {
   grok_without_runtime bash -c '
     source "$1/tools/lib/grok-runtime.sh"
     mkdir -p "$HOME/.local/bin" "$HOME/.grok/bin"
-    for path in "$HOME/explicit" "$HOME/path-runtime" "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok"; do
+    for path in "$HOME/explicit" "$HOME/path-runtime" "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok" "$HOME/.grok/bin/grok.exe"; do
       printf "#!/usr/bin/env bash\necho unexpected-provider-call > \"%s\"\n" "$HOME/contact" > "$path"
       chmod +x "$path"
     done
@@ -264,10 +264,12 @@ grok_runtime_selection_cases() {
     [ "$(grok_resolve_door_runtime)" = "$HOME/.local/bin/grok" ] || exit 3
     rm "$HOME/.local/bin/grok"
     [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
+    rm "$HOME/.grok/bin/grok"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 6
     [ ! -e "$HOME/contact" ] || exit 5
   ' fixture "$ROOT"
 }
-check "shared Grok resolver preserves explicit PATH and both home fallbacks without calls" 'grok_runtime_selection_cases'
+check "shared Grok resolver preserves explicit PATH and every home fallback (including grok.exe) without calls" 'grok_runtime_selection_cases'
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"
