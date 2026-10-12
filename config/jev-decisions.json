@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "purpose": "One bounded TypeSafe Jev decision policy. Frozen questions, closed labels, calibrated thresholds. Jev is read-only labeling; it never opens a gate.",
+  "endpoint": "https://api.typesafe.ai/v1/systemone",
+  "models_endpoint": "https://api.typesafe.ai/v1/models",
+  "model_pin": "jev-1.13.0",
+  "model_pin_verified_at": "2026-09-20",
+  "model_alias_forbidden_for_calibration": "jev-latest",
+  "connect_timeout_seconds": 10,
+  "call_timeout_seconds": 20,
+  "max_request_bytes": 262144,
+  "max_response_bytes": 262144,
+  "max_calls_per_run": 200,
+  "rate_interval_seconds": 0.2,
+  "public_repository_only": true,
+  "secret": {
+    "env": "TYPESAFE_API_KEY",
+    "op_reference_file_candidates": [
+      "config/mcp.env",
+      "config/mcp.env.example"
+    ],
+    "op_reference_prefix": "TYPESAFE_API_KEY=op://"
+  },
+  "decisions": {
+    "chunk_filter": {
+      "type": "choice",
+      "frozen": true,
+      "question_id": "chunk_filter",
+      "instructions": "Does this transcript chunk contain a real review interaction (a change was sent to a reviewer, a reviewer verdict or finding was produced, or an author reaction/fix to a review), as opposed to general chat, copied policy text that merely mentions review, tool dumps, or meta-discussion of reviewer tooling without an actual review of a change?",
+      "criteria": {
+        "review_interaction": "A change was actually reviewed or a review verdict/finding/reaction for a specific change appears here.",
+        "meta_discussion": "Talking about reviewers, review policy, or review tooling, but no change was reviewed in this chunk.",
+        "unrelated": "No review of a change and no meta-discussion of review; general work, tool output, policy copy, or unrelated chat."
+      },
+      "allowed_labels": [
+        "review_interaction",
+        "meta_discussion",
+        "unrelated"
+      ],
+      "selected_label_means_marked": "review_interaction",
+      "threshold": {
+        "mode": "choice_confidence",
+        "min_confidence": 0.75,
+        "status": "frozen_synthetic_20261012T180611Z"
+      }
+    },
+    "value_level": {
+      "type": "score",
+      "frozen": true,
+      "question_id": "value_level",
+      "instructions": "For this complete review interaction (dispatch or PR head, then reviewer verdict/finding, then author reaction or fix), what value did the review add to the work? Score the ordered levels only. Do not treat a mandatory safety-gate review that found nothing as discretionary waste; if the interaction is a mandatory safety review that found nothing, prefer the 'none' face level and the caller will bucket it separately.",
+      "criteria": [
+        "negative: the reviewer identified something that ended up being wrong (author pushed back with evidence and the reviewer withdrew/softened, or the resulting fix was later reverted/undone as wrong)",
+        "none: the review added nothing of value or the arc is uncertain on value",
+        "low: only minor style or cosmetic suggestions",
+        "medium: named a real problem but did not know or give the solution",
+        "highest: named a real problem and gave a useful suggestion or fix"
+      ],
+      "level_labels": [
+        "negative",
+        "none",
+        "low",
+        "medium",
+        "highest"
+      ],
+      "level_index": {
+        "0": "negative",
+        "1": "none",
+        "2": "low",
+        "3": "medium",
+        "4": "highest"
+      },
+      "threshold": {
+        "mode": "score_confidence",
+        "min_confidence": 0.7,
+        "abstain_below": true,
+        "negative_requires_arc_evidence": true,
+        "status": "frozen_synthetic_20261012T180611Z"
+      },
+      "bucket_rule": "mandatory_safety_gate interactions with face level none are counted in a separate assurance bucket, never as discretionary waste"
+    }
+  },
+  "usage_note": "Calibration freezes thresholds and may rewrite instructions once on the tuning split only. A model_pin change invalidates calibration."
+}

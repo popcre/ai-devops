@@ -13,13 +13,15 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 0. Session setup (worktree, gates) | ⬜ open | | |
-| 1. Inventory + read-all cost baseline | ⬜ open | | |
-| 2. Shared Jev client + decision config | ⬜ open | | |
-| 3. Chunk filter (Noul) + calibration | ⬜ open | | |
-| 4. Review-arc stitch + value Score | ⬜ open | | |
-| 5. Aggregation + waste report | ⬜ open | | |
-| 6. Decision brief for the owner | ⬜ open | | |
+| 0. Session setup (worktree, gates) | done | 2026-10-12 | worktree C:/repos/ai-devops-wt-jev-review-waste branch mimo/jev-review-waste-mining; task class code |
+| 1. Inventory + read-all cost baseline | done | 2026-10-12 | 	ests/verification/jev/review-waste-inventory-20261012T162801Z.md |
+| 2. Shared Jev client + decision config | done | 2026-10-12 | 	ools/lib/jev-client.sh, config/jev-decisions.json; pin tests 37/0; contracts 24/0; scripts suite 6/0 |
+| 3. Chunk filter + calibration | done | 2026-10-12 | 
+eview-waste-chunk-shadow-20261012T180611Z.md; fixtures 	ests/fixtures/jev/review-waste-chunk-labels.json |
+| 4. Review-arc stitch + value Score | done | 2026-10-12 | 
+eview-waste-value-shadow-20261012T180611Z.md; 	ools/jev_review_waste_arc.py; pipeline tests 17/0 |
+| 5. Aggregation + waste report | done | 2026-10-12 | 	ests/verification/jev/review-waste-report-20261012T180833Z.md (bounded 12-file sample; slices n≥5 suppressed) |
+| 6. Decision brief for the owner | done | 2026-10-12 | Decision brief section of the waste report (options only; no policy change) |
 
 **Where a fresh session starts:** Step 0. Re-read this STATUS table first — do not re-derive or re-plan. Every row stays `⬜ open` until its verification gate passes and the evidence cell names an artifact a reader can open.
 
