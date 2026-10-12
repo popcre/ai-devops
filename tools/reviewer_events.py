@@ -1479,7 +1479,10 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
         # Bash records Git Bash paths (/tmp/..., /c/...); Windows Python must
         # convert them before opening. The recorded string is still returned.
         if os.name == "nt" and report.startswith("/") and not report.startswith("//"):
-            converted = subprocess.run(["cygpath", "-w", report], capture_output=True, text=True, timeout=30)
+            try:
+                converted = subprocess.run(["cygpath", "-w", report], capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                continue  # no usable cygpath: skip this report, not the whole lookup
             if converted.returncode != 0 or not converted.stdout.strip():
                 continue
             report_path = Path(converted.stdout.strip())

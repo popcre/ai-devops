@@ -148,7 +148,7 @@ file and note in it that migration is still pending.
 
 ### The contract block (REQUIRED where the repo enforces it; good practice everywhere)
 
-`u2giants/ai-devops` (the ai-devops repository) enforces it: every `HANDOFF.d/`
+`popcre/ai-devops` (the ai-devops repository) enforces it: every `HANDOFF.d/`
 file there MUST open with the contract block below.
 
 **Open every `HANDOFF.d/` file with the issue that would prove it finished:**
@@ -178,7 +178,7 @@ repo with `gh issue create`, or, if the work genuinely has no issue, write
 as `UNPROVABLE` by `ai-housekeeping`. A workstream worth a handoff is worth an
 issue; without one, nothing can ever tell that the handoff is finished.
 
-**Enforced in `u2giants/ai-devops` and `popcre/shared-db`** — in `shared-db` by the
+**Enforced in `popcre/ai-devops` and `popcre/shared-db`** — in `shared-db` by the
 `Handoff Contract Guard` (added 2026-08-13,
 issue #658). It fails a pull request only for a handoff file **that pull request
 touches**, never for anybody else's, and it asks you to retire your file in the same

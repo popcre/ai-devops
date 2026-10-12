@@ -26,9 +26,7 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 | 7 | Schedule the report and give it a log nobody has to remember | ⬜ open | — |
 | 8 | Run it once, act on what it finds, record the result here | ⬜ open | — |
 
-**A fresh session starts at step 1.** Steps 1 and 2 are two-line doc fixes and
-are independent of everything else; do them first so the repo stops teaching
-sessions a rule the owner overruled.
+**A fresh session starts at step 4.** Steps 1–3 are done (see the table).
 
 **When you execute any step, you own updating this table** in the same commit.
 Mark it `✅ done` with a real artifact in the evidence cell: a commit SHA, a test
