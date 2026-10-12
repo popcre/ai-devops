@@ -167,10 +167,6 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    # agy print mode soft-denies every terminal command and then ends the turn
-    # with SUCCESS and an empty response (issue #1577), so say so up front,
-    # exactly as bin/ai-gemini's own brief does.
-    printf 'Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
