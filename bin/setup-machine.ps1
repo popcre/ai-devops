@@ -1200,7 +1200,7 @@ if (Test-Path $gitBash) {
   $escapedHk = $hkScript.Replace('"', '""')
   $hkLauncherBody = @"
 Set shell = CreateObject("WScript.Shell")
-exitCode = shell.Run("""$escapedBash"" -lc ""'$escapedHk' --log --quiet""", 0, True)
+exitCode = shell.Run("""$escapedBash"" -lc ""cd '$posix' && '$escapedHk' --log --quiet""", 0, True)
 WScript.Quit exitCode
 "@
   Set-Content -LiteralPath $hkLauncher -Value $hkLauncherBody -Encoding ascii

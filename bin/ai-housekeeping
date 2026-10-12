@@ -106,8 +106,10 @@ cron_job_line() {
   hour="${DAILY_AT%%:*}"
   # --log already writes the dated block to $LOG; do not also shell-redirect
   # stdout there, or the report is stored twice outside the retention blocks.
-  printf '%s %s * * * %s --log --quiet' \
-    "$minute" "$hour" "'$SELF'"
+  # cd into the repo first: a scheduled shell has no worktree, and the tool
+  # exits before logging when run outside one.
+  printf '%s %s * * * cd "%s" && %s --log --quiet' \
+    "$minute" "$hour" "$REPO_ROOT" "'$SELF'"
 }
 
 cmd_schedule() {
@@ -121,8 +123,8 @@ cmd_schedule() {
     mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
     {
       printf '%s\n' 'Set shell = CreateObject("WScript.Shell")'
-      printf 'exitCode = shell.Run("""%s"" -lc ""%s --log --quiet""", 0, True)\n' \
-        "$(cygpath -w "$(command -v bash)")" "'$posix'"
+      printf 'exitCode = shell.Run("""%s"" -lc ""cd \\"%s\\" && %s --log --quiet""", 0, True)\n' \
+        "$(cygpath -w "$(command -v bash)")" "$REPO_ROOT" "'$posix'"
       printf '%s\n' 'WScript.Quit exitCode'
     } >"$launcher"
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
