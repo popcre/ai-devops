@@ -17,7 +17,8 @@
 param(
     [string]$GhGate = '',
     [string]$Bash = '',
-    [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials')
+    [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials'),
+    [string]$GitConfig = (Join-Path $HOME '.gitconfig')
 )
 $ErrorActionPreference = 'Stop'
 
@@ -33,7 +34,7 @@ function Invoke-Gate([string[]]$Arguments) {
     $prior = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $call = @('--noprofile', '--norc', '-c', 'AI_GH_CALLER=ai-gh-ssh-credentials "$0" "$@"', $gate) + $Arguments
+        $call = @('--noprofile', '--norc', '-c', 'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST; AI_GH_CALLER=ai-gh-ssh-credentials "$0" "$@"', $gate) + $Arguments
         $out = @(& $Bash @call 2>$null)
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
     } finally { $ErrorActionPreference = $prior }
@@ -42,6 +43,11 @@ function Invoke-Gate([string[]]$Arguments) {
 function Backup-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+    # Backups may hold credentials: this user and SYSTEM only.
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls $BackupRoot /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not make $BackupRoot private." }
+    Assert-PrivateFolder $BackupRoot
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     Copy-Item -LiteralPath $Path -Destination (Join-Path $BackupRoot ("{0}.{1}.bak" -f (Split-Path -Leaf $Path), $stamp))
 }
@@ -78,14 +84,14 @@ Assert-PrivateFolder $configDir
 if (Test-Path -LiteralPath $hosts) { Assert-PrivateFolder $hosts }
 
 if (-not (Test-FileToken)) {
-    $login = Invoke-Gate @('api', 'user', '--jq', '.login')
+    $login = Invoke-Gate @('api', '--hostname', 'github.com', 'user', '--jq', '.login')
     if ($login.ExitCode -ne 0) {
         Write-Output 'No working GitHub login to share with SSH sessions. In an interactive session run: gh auth login --web --insecure-storage'
         exit 2
     }
     Backup-File $hosts
     # The token flows gate-to-gate inside one bash pipe and never reaches PowerShell.
-    $pipe = 'set -o pipefail; export AI_GH_CALLER=ai-gh-ssh-credentials; "$0" auth token --hostname github.com | "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
+    $pipe = 'set -o pipefail; unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST; export AI_GH_CALLER=ai-gh-ssh-credentials; "$0" auth token --hostname github.com | "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
     $prior = $ErrorActionPreference
     try { $ErrorActionPreference = 'Continue'; & $Bash --noprofile --norc -c $pipe $gate 2>$null | Out-Null; $moved = $LASTEXITCODE }
     finally { $ErrorActionPreference = $prior }
@@ -93,11 +99,12 @@ if (-not (Test-FileToken)) {
     Assert-PrivateFolder $hosts
 }
 
-Backup-File (Join-Path $HOME '.gitconfig')
+Backup-File $GitConfig
+$env:GIT_CONFIG_GLOBAL = $GitConfig
 $setup = Invoke-Gate @('auth', 'setup-git', '--hostname', 'github.com')
 if ($setup.ExitCode -ne 0) { throw 'Pointing Git at the GitHub CLI failed.' }
 
-$check = Invoke-Gate @('api', 'user', '--jq', '.login')
+$check = Invoke-Gate @('api', '--hostname', 'github.com', 'user', '--jq', '.login')
 if ($check.ExitCode -ne 0) {
     Write-Output 'The stored GitHub login is rejected by GitHub. In an interactive session run: gh auth login --web --insecure-storage'
     exit 2

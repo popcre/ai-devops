@@ -16,12 +16,13 @@ $fake = Join-Path $TempRoot 'ai-gh'
 cfg="$GH_CONFIG_DIR"; hosts="$cfg/hosts.yml"; keyring="$cfg/keyring.txt"
 printf '%s|%s\n' "$AI_GH_CALLER" "$*" >> "$cfg/calls.log"
 current() {
+  [ -n "$GH_TOKEN" ] && { printf "%s" "$GH_TOKEN"; return; }
   t="$(awk '/^[^ ]/{h=($1=="github.com:")} h&&/oauth_token:/{print $2}' "$hosts" 2>/dev/null)"
   [ -n "$t" ] || t="$(cat "$keyring" 2>/dev/null | tr -d '\r\n')"
   printf '%s' "$t"
 }
 case "$1 $2" in
-  "api user") [ "$(current)" = GOOD ] && { echo u2giants; exit 0; }; exit 1 ;;
+  "api --hostname") [ "$(current)" = GOOD ] && { echo u2giants; exit 0; }; exit 1 ;;
   "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
   "auth login") t="$(cat | tr -d '\r\n')"
     printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" >> "$hosts"
@@ -37,12 +38,19 @@ function Invoke-Case([string]$Name, [string]$Keyring, [string]$Hosts = 'github.c
     # Mirror a real profile folder: only this user and SYSTEM.
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     & icacls $dir /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "FAIL: could not set the fixture ACL on $dir" }
     $Hosts | Set-Content -LiteralPath (Join-Path $dir 'hosts.yml')
     if ($Keyring) { $Keyring | Set-Content -LiteralPath (Join-Path $dir 'keyring.txt') }
-    if ($Broad) { & icacls $dir /grant '*S-1-1-0:(OI)(CI)R' | Out-Null }
+    if ($Broad) {
+        & icacls $dir /grant '*S-1-1-0:(OI)(CI)R' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "FAIL: could not widen the fixture ACL on $dir" }
+    }
     $env:GH_CONFIG_DIR = $dir
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake -BackupRoot (Join-Path $dir 'backups') 2>&1
-    return [pscustomobject]@{ Exit = $LASTEXITCODE; Output = ($out -join ' '); Dir = $dir }
+    $ErrorActionPreference = 'Continue'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake -BackupRoot (Join-Path $dir 'backups') -GitConfig (Join-Path $dir 'gitconfig') 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    return [pscustomobject]@{ Exit = $code; Output = ($out -join ' '); Dir = $dir }
 }
 
 try {
@@ -69,6 +77,11 @@ try {
 
     $r = Invoke-Case 'none' ''
     Assert-True ($r.Exit -eq 2) "missing login reports exit 2 (got $($r.Exit))"
+
+    $env:GH_TOKEN = 'AMBIENT'; $env:GH_HOST = 'ghe.example.com'
+    $r = Invoke-Case 'env-token' 'GOOD'
+    Remove-Item Env:GH_TOKEN, Env:GH_HOST
+    Assert-True ($r.Exit -eq 0) 'ambient token variables are ignored'
 
     Write-Output 'PASS test-ai-gh-ssh-credentials'
 } finally {
