@@ -582,9 +582,21 @@ $operation_request"
   fi
 
   if [ -n "$tests_cmd" ]; then
-    if ( cd "$review_dir" && bash -c "$tests_cmd" ) >/dev/null 2>&1; then
-      tests_result="$tests_cmd (exit 0 — passed in the review snapshot before dispatch)"
+    # Keep the executed output: the reviewer must see what ran, not only that
+    # it exited 0 (a reviewer that cannot run tests itself has no other source).
+    local tests_out tests_tail="${AI_REVIEW_TEST_OUTPUT_TAIL:-60}"
+    case "$tests_tail" in ""|*[!0-9]*) tests_tail=60 ;; esac
+    tests_out="$(mktemp)"
+    if ( cd "$review_dir" && bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
+      tests_result="$tests_cmd (exit 0 — passed in the review snapshot before dispatch)
+
+Executed test output (last ${tests_tail} lines, captured by the runner in the review snapshot before dispatch; this supersedes any packet line saying no tests were run):
+\`\`\`
+$(tail -n "$tests_tail" "$tests_out")
+\`\`\`"
+      rm -f "$tests_out"
     else
+      rm -f "$tests_out"
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-command-failed
       rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
       rlc_die 'tests command failed; no review was dispatched.'
