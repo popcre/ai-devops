@@ -160,12 +160,14 @@ cmd_schedule() {
     echo "ai-housekeeping: schedule needs schtasks (Windows) or crontab (Linux/macOS)" >&2
     return 2
   }
-  local tmp rc=0 existing
+  local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)"
-  # crontab -l exits 1 when no crontab exists (normal empty start). Capture
-  # whatever is readable and preserve it; refuse only when a read that should
-  # succeed produces nothing while a crontab is present.
-  existing="$(crontab -l 2>/dev/null || true)"
+  existing="$(crontab -l 2>/dev/null)" || read_rc=$?
+  if [[ "$read_rc" -ne 0 && -n "$existing" ]]; then
+    echo "ai-housekeeping: crontab read failed with content; refusing to replace it" >&2
+    rm -f "$tmp"; return 2
+  fi
+  # read_rc != 0 with empty output is the normal "no crontab yet" case.
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >>"$tmp" || :
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
@@ -194,9 +196,13 @@ cmd_unschedule() {
     echo "ai-housekeeping: unschedule needs schtasks or crontab" >&2
     return 2
   }
-  local tmp rc=0 existing
+  local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)"
-  existing="$(crontab -l 2>/dev/null || true)"
+  existing="$(crontab -l 2>/dev/null)" || read_rc=$?
+  if [[ "$read_rc" -ne 0 && -n "$existing" ]]; then
+    echo "ai-housekeeping: crontab read failed with content; refusing to replace it" >&2
+    rm -f "$tmp"; return 2
+  fi
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >"$tmp" || :
   crontab "$tmp" || rc=$?
   rm -f "$tmp"

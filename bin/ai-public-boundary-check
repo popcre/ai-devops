@@ -6,7 +6,7 @@ root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDA
 failed=0
 while IFS= read -r path; do
   case "$path" in
-    .ai/*)
+    [.]ai/*|[.]AI/*)
       # .ai/reviewer-issues/ is an intentional publish (PR #1626): redacted
       # incident packages kept on github.com for diagnosis. Only prose/data
       # extensions are allowed there; secret-bearing names and forms still fail
