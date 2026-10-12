@@ -1112,7 +1112,10 @@ if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
   printf '%s' "\$PWD" > "\$DS_TEST_DIR_RECORD"
   test "\$PWD" = "\$dir" || exit 1
   cd "\$target" || exit 1
-  python3 -m unittest test_allocation.py >&2 || exit 1
+  # Force bytecode even when the caller's environment suppresses or redirects
+  # it (edge-dev3 exports PYTHONDONTWRITEBYTECODE=1), so the immutability
+  # check below always faces real __pycache__ writes.
+  env -u PYTHONDONTWRITEBYTECODE -u PYTHONPYCACHEPREFIX python3 -m unittest test_allocation.py >&2 || exit 1
   test -d __pycache__ || exit 1
 fi
 if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
@@ -1167,6 +1170,9 @@ PY
 printf 'Directory you are reading: %s\n' "$DS_ARTIFACT_SOURCE" > "$DS_ARTIFACT_SOURCE/MANIFEST.md"
 DS_ARTIFACT_DIGEST="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
 DS_ARTIFACT_RC=0
+# Regression: an ambient bytecode-suppressing environment must not break the
+# fixture on any machine; pin it here so every run exercises that hazard.
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$TMP/ds-pycache-prefix" \
 DS_TEST_RUN_UNITTEST=1 DS_TEST_MANIFEST="$DS_ARTIFACT_SOURCE/MANIFEST.md" DS_TEST_DIR_RECORD="$TMP/ds-artifact-dir" \
   AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_DEEPSEEK_OPENCODE="$STUB_OC" \
   AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR="$DS_ARTIFACT_SOURCE" \
