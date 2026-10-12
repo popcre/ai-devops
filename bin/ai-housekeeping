@@ -161,7 +161,15 @@ cmd_schedule() {
   }
   local tmp rc=0
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || :; } >>"$tmp"
+  # A failed crontab read must not be treated as an empty list: that would
+  # let the subsequent crontab write erase unrelated jobs.
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || {
+      if [[ "${PIPESTATUS[0]:-1}" -ne 0 ]]; then
+        echo "ai-housekeeping: cannot read crontab; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+      :
+    }; } >>"$tmp"
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
@@ -191,7 +199,13 @@ cmd_unschedule() {
   }
   local tmp rc=0
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || :; } >"$tmp"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || {
+      if [[ "${PIPESTATUS[0]:-1}" -ne 0 ]]; then
+        echo "ai-housekeeping: cannot read crontab; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+      :
+    }; } >"$tmp"
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }
