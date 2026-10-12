@@ -229,6 +229,9 @@ successor can open in a browser from anywhere:
   did NOT do, and where it is written down — or "nothing came up"]
 - Workspace: [uncommitted files decided; branch deleted/kept + why; worktree
   removed/kept + why]
+- Housekeeping: [run `ai-housekeeping` and paste its one-screen summary here in
+  plain English so Albert sees the current candidates. Report-only: never act
+  on the findings from inside the wrap-up.]
 
 Then, as the last thing in the message, the fenced next-session prompt from
 step 7 (or the single line saying the workstream is closed). If work is
