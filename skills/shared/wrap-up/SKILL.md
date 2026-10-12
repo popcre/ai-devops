@@ -159,6 +159,11 @@ incomplete, and so is a session that ends holding an unreleased claim.
      `cleanup-worktree` skill — it owns the safety audit, recovers unique work,
      and never treats age as proof that deletion is safe. If anything is
      unmerged or uncertain, LEAVE THE WORKTREE and name it in the report.
+   - **Housekeeping inventory:** run `ai-housekeeping` (see
+     [`docs/housekeeping.md`](../../../docs/housekeeping.md)) and include its
+     plain-English summary in the closing report so Albert sees the current
+     candidates. It is report-only; never act on its findings from inside the
+     tool.
    - **Never** delete a branch, worktree, or checkout that another session is
      using, and never delete unmerged work to make the report look clean.
 
