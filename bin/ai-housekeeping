@@ -97,14 +97,17 @@ retain_log_blocks() {
 # timer named AiDevOps-Housekeeping, independent of ai-memory-sync.
 TASK_NAME='AiDevOps-Housekeeping'
 CRON_MARKER='# ai-devops housekeeping (managed by ai-housekeeping schedule; unschedule removes)'
+CRON_REM='ai-housekeeping'"'"' --log'
 DAILY_AT="${AI_HOUSEKEEPING_DAILY_AT:-07:17}"   # minute picked to avoid :00/:30 fleet sync
 
 cron_job_line() {
   local minute hour
   minute="${DAILY_AT#*:}"
   hour="${DAILY_AT%%:*}"
-  printf '%s %s * * * %s --log --quiet >> %s 2>&1' \
-    "$minute" "$hour" "'$SELF'" "'$LOG'"
+  # --log already writes the dated block to $LOG; do not also shell-redirect
+  # stdout there, or the report is stored twice outside the retention blocks.
+  printf '%s %s * * * %s --log --quiet' \
+    "$minute" "$hour" "'$SELF'"
 }
 
 cmd_schedule() {
@@ -112,15 +115,16 @@ cmd_schedule() {
     # Mirror bin/setup-machine.ps1 section 5d exactly: hidden VBS launcher,
     # 15-minute ExecutionTimeLimit, IgnoreNew, StartWhenAvailable, no wake.
     # A bare schtasks /Create would replace that task with an unbounded one.
-    local self posix launcher
-    self="$(cygpath -m "$SELF")"
-    posix="/$(printf '%s' "$self" | sed 's/^[Aa-Zz]://;s|\\|/|g')"
+    local posix launcher
+    posix="$(cygpath -u "$SELF")"
     launcher="$HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
     mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
-    printf '%s\n' \
-      'Set shell = CreateObject("WScript.Shell")' \
-      "exitCode = shell.Run(\"\"\"$(cygpath -w "$(command -v bash)")\"\" -lc \"\"'$posix' --log --quiet\"\"\", 0, True)" \
-      'WScript.Quit exitCode' >"$launcher"
+    {
+      printf '%s\n' 'Set shell = CreateObject("WScript.Shell")'
+      printf 'exitCode = shell.Run("""%s"" -lc ""%s --log --quiet""", 0, True)\n' \
+        "$(cygpath -w "$(command -v bash)")" "'$posix'"
+      printf '%s\n' 'WScript.Quit exitCode'
+    } >"$launcher"
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
       \$ErrorActionPreference = 'Stop'
       \$hkAction = New-ScheduledTaskAction -Execute \"\$env:WINDIR\System32\wscript.exe\" -Argument \"//B //NoLogo \`\"$launcher\`\"\"
@@ -139,7 +143,7 @@ cmd_schedule() {
   }
   local tmp rc=0
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$SELF' --log" || :; } >>"$tmp"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || :; } >>"$tmp"
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
@@ -149,8 +153,18 @@ cmd_schedule() {
 
 cmd_unschedule() {
   if command -v schtasks.exe >/dev/null 2>&1; then
-    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1 || true
-    log "removed $TASK_NAME"
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1
+    local rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      log "removed $TASK_NAME"
+    else
+      # schtasks exit 1 also means "task does not exist" — only warn on real failure
+      if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" >/dev/null 2>&1; then
+        echo "ai-housekeeping: could not delete $TASK_NAME" >&2
+        return 2
+      fi
+      log "removed $TASK_NAME (was already absent)"
+    fi
     return 0
   fi
   command -v crontab >/dev/null 2>&1 || {
@@ -159,7 +173,7 @@ cmd_unschedule() {
   }
   local tmp rc=0
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$SELF' --log" || :; } >"$tmp"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || :; } >"$tmp"
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }
