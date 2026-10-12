@@ -265,7 +265,15 @@ grok_runtime_selection_cases() {
     rm "$HOME/.local/bin/grok"
     [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
     rm "$HOME/.grok/bin/grok"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 6
+    resolved="$(grok_resolve_door_runtime)"
+    # Git Bash/Cygwin report "grok" executable while only grok.exe exists; that
+    # alias is the same file, so accept it there only if no real "grok" remains.
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        [ "$resolved" = "$HOME/.grok/bin/grok.exe" ] ||
+          { [ "$resolved" = "$HOME/.grok/bin/grok" ] && [ -z "$(find "$HOME/.grok/bin" -maxdepth 1 -name grok -print)" ]; } || exit 6 ;;
+      *) [ "$resolved" = "$HOME/.grok/bin/grok.exe" ] || exit 6 ;;
+    esac
     [ ! -e "$HOME/contact" ] || exit 5
   ' fixture "$ROOT"
 }
