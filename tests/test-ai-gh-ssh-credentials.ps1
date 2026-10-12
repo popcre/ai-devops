@@ -69,7 +69,7 @@ try {
     $rc = Get-Content (Join-Path $r.Dir 'home\.bashrc') -Raw
     Assert-True ($rc -match "alias ll='ls -l'") 'existing bashrc kept'
     $sshFwd = (Join-Path $r.Dir 'gh-ssh') -replace '\\', '/'
-    Assert-True ($rc.Contains('[ -f "' + $sshFwd + '/hosts.yml" ]; then') -and $rc.Contains('  export GH_CONFIG_DIR="' + $sshFwd + '"')) 'bashrc points SSH sessions at the copy'
+    Assert-True ($rc.Contains("[ -f '" + $sshFwd + "'/hosts.yml ]; then") -and $rc.Contains("  export GH_CONFIG_DIR='" + $sshFwd + "'")) 'bashrc points SSH sessions at the copy'
     # Real Git Bash login startup, with a non-interactive early return in .bashrc.
     $env:SSH_CONNECTION = '127.0.0.1 1 127.0.0.1 22'
     $oldHome = $env:HOME; $env:HOME = (Join-Path $r.Dir 'home').Replace('\', '/')
@@ -81,7 +81,7 @@ try {
     Assert-True ($psSeen -eq (Join-Path $r.Dir 'gh-ssh')) "PowerShell profile sets GH_CONFIG_DIR in SSH sessions (got '$psSeen')"
     Assert-True (-not $psNoSsh) 'PowerShell profile leaves interactive sessions alone'
     Assert-True ($seen -eq $sshFwd) "bashrc block sets GH_CONFIG_DIR in SSH sessions (got '$seen')"
-    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter '.bashrc.*.bak').Count -eq 1) 'bashrc backed up first'
+    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter '.bashrc.home.*.bak').Count -eq 1) 'bashrc backed up first'
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     foreach ($p in @((Join-Path $r.Dir 'gh-ssh'), $sshHosts, (Join-Path $r.Dir 'backups'))) {
         $sids = @((Get-Acl $p).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })

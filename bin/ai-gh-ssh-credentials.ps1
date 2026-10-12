@@ -57,7 +57,8 @@ function Invoke-Gate([string]$Script) {
 }
 
 function Set-PrivateAcl([string]$Path) {
-    & icacls $Path /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    $inherit = if (Test-Path -LiteralPath $Path -PathType Container) { '(OI)(CI)' } else { '' }
+    & icacls $Path /inheritance:r /grant:r "*${me}:${inherit}F" "*S-1-5-18:${inherit}F" "*S-1-5-32-544:${inherit}F" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not make $Path private." }
     foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
         $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
@@ -69,8 +70,9 @@ function Backup-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
     Set-PrivateAcl $BackupRoot
-    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
-    Copy-Item -LiteralPath $Path -Destination (Join-Path $BackupRoot ("{0}.{1}.bak" -f (Split-Path -Leaf $Path), $stamp))
+    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
+    $parent = Split-Path -Leaf (Split-Path -Parent $Path)
+    Copy-Item -LiteralPath $Path -Destination (Join-Path $BackupRoot ("{0}.{1}.{2}.bak" -f (Split-Path -Leaf $Path), $parent, $stamp))
 }
 
 $login = Invoke-Gate '"$0" api --hostname github.com user --jq .login'
@@ -87,6 +89,7 @@ Backup-File (Join-Path $SshConfigDir 'hosts.yml')
 $copy = Invoke-Gate '"$0" auth token --hostname github.com | GH_CONFIG_DIR="$1" "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
 if ($copy.ExitCode -ne 0) { throw 'The GitHub CLI could not save the SSH copy of the login.' }
 Set-PrivateAcl $SshConfigDir
+foreach ($file in Get-ChildItem -LiteralPath $SshConfigDir -File) { Set-PrivateAcl $file.FullName }
 
 $check = Invoke-Gate 'GH_CONFIG_DIR="$1" "$0" api --hostname github.com user --jq .login'
 if ($check.ExitCode -ne 0 -or $check.Output -ne $ExpectedLogin) { throw "The SSH copy of the GitHub login does not work (got '$($check.Output)')." }
@@ -107,18 +110,20 @@ function Set-ManagedBlock([string]$Path, [string]$Block, [string]$Begin, [string
 # SSH sessions only: Git Bash, then Windows PowerShell and PowerShell 7.
 $begin = '# >>> ai-devops gh-ssh (managed by bin/ai-gh-ssh-credentials.ps1) >>>'
 $end = '# <<< ai-devops gh-ssh <<<'
+$bashPath = "'" + $sshDir.Replace("'", "'\''") + "'"
 $bashBlock = @(
     $begin,
-    ('if [ -n "${SSH_CONNECTION:-}" ] && [ -f "' + $sshDir + '/hosts.yml" ]; then'),
-    ('  export GH_CONFIG_DIR="' + $sshDir + '"'),
+    ('if [ -n "${SSH_CONNECTION:-}" ] && [ -f ' + $bashPath + '/hosts.yml ]; then'),
+    ('  export GH_CONFIG_DIR=' + $bashPath),
     'fi',
     $end
 ) -join "`n"
 Set-ManagedBlock $BashRc $bashBlock $begin $end
+$psPath = "'" + $SshConfigDir.Replace("'", "''") + "'"
 $psBlock = @(
     $begin,
-    ("if (`$env:SSH_CONNECTION -and (Test-Path -LiteralPath '" + $SshConfigDir + "\hosts.yml')) {"),
-    ("    `$env:GH_CONFIG_DIR = '" + $SshConfigDir + "'"),
+    ('if ($env:SSH_CONNECTION -and (Test-Path -LiteralPath (Join-Path ' + $psPath + " 'hosts.yml'))) {"),
+    ('    $env:GH_CONFIG_DIR = ' + $psPath),
     '}',
     $end
 ) -join "`n"
