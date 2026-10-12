@@ -61,6 +61,11 @@ try {
     $calls = Get-Content (Join-Path $r.Dir 'calls.log') -Raw
     Assert-True ($calls -notmatch 'GOOD') 'token never passed as an argument'
     Assert-True ($calls -match 'auth setup-git') 'git pointed at gh'
+    $hostsAcl = (Get-Acl (Join-Path $r.Dir 'hosts.yml'))
+    Assert-True ($hostsAcl.AreAccessRulesProtected) 'login file does not inherit folder grants'
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $sids = @($hostsAcl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
+    Assert-True (@($sids | Where-Object { @($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $_ }).Count -eq 0) 'login file readable only by this user, SYSTEM and Administrators'
     Assert-True (@((Get-Content (Join-Path $r.Dir 'calls.log')) | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
 
     $r = Invoke-Case 'other-host' 'GOOD' "ghe.example.com:`n    oauth_token: OTHER`ngithub.com:"

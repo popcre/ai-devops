@@ -54,7 +54,7 @@ function Backup-File([string]$Path) {
 }
 
 # Refuse to store a token where anyone beyond the expected principals can read it.
-function Assert-PrivateFolder([string]$Path) {
+function Assert-PrivateFolder([string]$Path, [switch]$NoSandbox) {
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544', 'S-1-3-0')
     $sandbox = $null
@@ -68,7 +68,7 @@ function Assert-PrivateFolder([string]$Path) {
         try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = $rule.IdentityReference.Value }
         if ($allowed -contains $sid) { continue }
         # The local Codex sandbox group may read, never write (repair-codex-github-cli-access.ps1).
-        if ($sandbox -and $sid -eq $sandbox -and ($rule.FileSystemRights -band $writeMask) -eq 0) { continue }
+        if (-not $NoSandbox -and $sandbox -and $sid -eq $sandbox -and ($rule.FileSystemRights -band $writeMask) -eq 0) { continue }
         throw "Refusing to store the GitHub login: $($rule.IdentityReference.Value) can read $Path."
     }
 }
@@ -89,7 +89,17 @@ function Test-FileToken {
 
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 Assert-PrivateFolder $configDir
-if (Test-Path -LiteralPath $hosts) { Assert-PrivateFolder $hosts }
+
+# The folder stays readable by the Codex sandbox (config.yml); the login file
+# itself is limited to this user, SYSTEM and Administrators.
+function Protect-HostsFile {
+    if (-not (Test-Path -LiteralPath $hosts)) { New-Item -ItemType File -Path $hosts | Out-Null }
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls $hosts /inheritance:r /grant:r "*${me}:F" '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not make $hosts private." }
+    Assert-PrivateFolder $hosts -NoSandbox
+}
+Protect-HostsFile
 
 if (-not (Test-FileToken)) {
     $login = Invoke-Gate @('api', '--hostname', 'github.com', 'user', '--jq', '.login')
@@ -105,7 +115,7 @@ if (-not (Test-FileToken)) {
     try { $ErrorActionPreference = 'Continue'; & $Bash --noprofile --norc -c $pipe $gate 2>$null | Out-Null; $moved = $LASTEXITCODE }
     finally { $ErrorActionPreference = $prior }
     if ($moved -ne 0 -or -not (Test-FileToken)) { throw 'The GitHub CLI could not save the login to its config file.' }
-    Assert-PrivateFolder $hosts
+    Protect-HostsFile
 }
 
 Backup-File $GitConfig
