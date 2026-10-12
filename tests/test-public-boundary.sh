@@ -43,6 +43,12 @@ git -C "$TMP/repo" reset -q HEAD .ai/scratch/issue.json; rm -rf "$TMP/repo/.ai/s
 # .ai/reviewer-issues/ is an intentional publish (PR #1626) and must pass.
 mkdir -p "$TMP/repo/.ai/reviewer-issues"; printf '{}\n' > "$TMP/repo/.ai/reviewer-issues/issue.json"; git -C "$TMP/repo" add -f .ai/reviewer-issues/issue.json
 bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1 || { echo 'FAIL: reviewer-issues publish path rejected'; exit 1; }
+# Secret-bearing extensions must fail even under the publish path.
+for ext in env pem key; do
+  printf 'x\n' > "$TMP/repo/.ai/reviewer-issues/leak.$ext"; git -C "$TMP/repo" add -f ".ai/reviewer-issues/leak.$ext"
+  if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo "FAIL: reviewer-issues .$ext fixture passed"; exit 1; fi
+  git -C "$TMP/repo" reset -q HEAD ".ai/reviewer-issues/leak.$ext"; rm -f "$TMP/repo/.ai/reviewer-issues/leak.$ext"
+done
 git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/repo/.ai/reviewer-issues"
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
 echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; the allowlist clears words without laundering identifiers'

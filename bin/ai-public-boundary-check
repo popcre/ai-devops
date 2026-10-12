@@ -9,8 +9,11 @@ while IFS= read -r path; do
     .ai/*)
       # .ai/reviewer-issues/ is an intentional publish (PR #1626): redacted
       # incident packages kept on github.com for diagnosis. Everything else
-      # under .ai/ stays machine-local.
+      # under .ai/ stays machine-local. Secret-bearing extensions still fail
+      # everywhere, including under the publish path.
       case "$path" in
+        *.env|*.pem|*.key)
+          echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
         .ai/reviewer-issues/*) ;;
         *) echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
       esac ;;
