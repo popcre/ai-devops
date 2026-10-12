@@ -622,7 +622,7 @@ $(tail -n "$tests_tail" "$tests_out")
   snapshot_before="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"
   rlc_note "step door-call"
   local door_rc=0
-  RLC_DOOR_DIAGNOSTICS_DIR="$state.diagnostics"
+  local RLC_DOOR_DIAGNOSTICS_DIR="$state.diagnostics"  # this review only, never a later call
   rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 "$mode" "$operation" || door_rc=$?
   if [ "$door_rc" -ne 0 ]; then
     local door_failure=provider-failed diagnostic_reason=""
@@ -792,6 +792,9 @@ rlc_run_implement() {
   fi
 
   rlc_capture door rlc_door_path "$provider"
+  # Implement has no diagnostics custody of its own; never forward one inherited
+  # from a caller or an earlier review in this shell (#1562).
+  local RLC_DOOR_DIAGNOSTICS_DIR=""
   set +e
   rlc_call_door implement "$door" "$worktree" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 1
   rc=$?

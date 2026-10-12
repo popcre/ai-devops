@@ -821,6 +821,18 @@ check "implement_success_returns_worktree" "test '$IMPL_OK_RC' -eq 0 && test -d 
 check "implement_success_kept_worktree_on_request" "test -f '$IMPL_WT/impl.txt'"
 check "implement_leaves_report_and_packet" "find '$MREPO/.ai/reviews' -name '*implement*' | grep -q ."
 
+# An inherited diagnostics destination must not reach the implement door (#1562).
+IMPL_DOOR_DIAG="$TMP/impl-door-diag.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s" "${DOOR_DIAGNOSTICS_DIR:-}" > "%s"\nexit 1\n' "$TMP/impl-diag-seen" > "$IMPL_DOOR_DIAG"
+chmod +x "$IMPL_DOOR_DIAG"
+mkdir -p "$TMP/inherited-diag"
+set +e
+( cd "$MREPO" && timeout 90 env AI_REVIEW_DOOR_GROK="$IMPL_DOOR_DIAG" RLC_DOOR_DIAGNOSTICS_DIR="$TMP/inherited-diag" \
+    "$ENGINE" implement --provider grok --name engine-impl-diag --repo "$MREPO" \
+    --prompt-file "$TMP/impl-prompt.txt" --caller codex ) >/dev/null 2>&1
+set -e
+check "implement_door_gets_no_inherited_diagnostics_dir" "test -f '$TMP/impl-diag-seen' && test ! -s '$TMP/impl-diag-seen'"
+
 # --- grok door with a stub binary (provider-bits path, still offline) -------
 echo '== grok door with stub provider binary'
 STUB_GROK="$TMP/stub-grok"
