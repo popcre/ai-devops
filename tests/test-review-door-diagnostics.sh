@@ -15,9 +15,16 @@ def run(name, reason='native-error-envelope', rc=1, extra_environment=None):
     report, dest = root/(name+'.md'), root/name
     env = dict(os.environ, AI_REVIEW_DIAGNOSTICS_SECRET_STDIN='1')
     env.update(extra_environment or {})
+    import time
+    started = time.monotonic()
     result = subprocess.run([sys.executable, helper, 'deepseek', str(log), str(err),
                              str(rc), reason, str(report), str(dest)],
                             input=secret+b'\n', env=env, capture_output=True)
+    elapsed = time.monotonic() - started
+    # Windows used to spawn PowerShell four times per call (~22s); batching
+    # must keep one call near a single spawn (#1562).
+    if os.name == 'nt' and name == 'first':
+        assert elapsed < 15, f'diagnostics took {elapsed:.1f}s; ACL batching regressed'
     return result, report, dest
 result, report, dest = run('first')
 assert result.returncode == 0, result.stderr.decode(errors='replace')
