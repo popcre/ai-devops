@@ -38,7 +38,7 @@ function Invoke-Script([string]$Dir) {
     $env:FAKE_DEFAULT = $Dir
     $ErrorActionPreference = 'Continue'
     $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake `
-        -SshConfigDir (Join-Path $Dir 'gh-ssh') -BashRc (Join-Path $Dir 'bashrc') `
+        -SshConfigDir (Join-Path $Dir 'gh-ssh') -BashRc (Join-Path $Dir 'home\.bashrc') -PowerShellProfiles (Join-Path $Dir 'ps\profile.ps1') `
         -GitConfig (Join-Path $Dir 'gitconfig') -BackupRoot (Join-Path $Dir 'backups') 2>&1
     $code = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
@@ -49,12 +49,14 @@ function Invoke-Case([string]$Name, [string]$Token, [string]$BashRcText = '') {
     $dir = Join-Path $TempRoot $Name
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     if ($Token) { $Token | Set-Content -LiteralPath (Join-Path $dir 'token') }
-    if ($BashRcText) { [IO.File]::WriteAllText((Join-Path $dir 'bashrc'), $BashRcText) }
+    New-Item -ItemType Directory -Force -Path (Join-Path $dir 'home') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dir 'home\.bash_profile'), "test -f ~/.bashrc && . ~/.bashrc`n")
+    if ($BashRcText) { [IO.File]::WriteAllText((Join-Path $dir 'home\.bashrc'), $BashRcText) }
     return Invoke-Script $dir
 }
 
 try {
-    $r = Invoke-Case 'copies' 'GOOD' "alias ll='ls -l'`n"
+    $r = Invoke-Case 'copies' 'GOOD' "case `$- in *i*) ;; *) return ;; esac`nalias ll='ls -l'`n"
     Assert-True ($r.Exit -eq 0) "working login is copied (exit $($r.Exit): $($r.Output))"
     $sshHosts = Join-Path $r.Dir 'gh-ssh\hosts.yml'
     Assert-True ((Get-Content $sshHosts -Raw) -match 'oauth_token: GOOD') 'token saved in the SSH folder'
@@ -64,15 +66,22 @@ try {
     Assert-True (@($calls | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
     Assert-True (@($calls | Where-Object { $_ -match '\|default\|auth login' }).Count -eq 0) 'the normal gh folder is never rewritten'
     Assert-True ((Get-Content (Join-Path $r.Dir 'gitconfig') -Raw) -match 'helper') 'git pointed at gh'
-    $rc = Get-Content (Join-Path $r.Dir 'bashrc') -Raw
+    $rc = Get-Content (Join-Path $r.Dir 'home\.bashrc') -Raw
     Assert-True ($rc -match "alias ll='ls -l'") 'existing bashrc kept'
     $sshFwd = (Join-Path $r.Dir 'gh-ssh') -replace '\\', '/'
     Assert-True ($rc.Contains('[ -f "' + $sshFwd + '/hosts.yml" ]; then') -and $rc.Contains('  export GH_CONFIG_DIR="' + $sshFwd + '"')) 'bashrc points SSH sessions at the copy'
+    # Real Git Bash login startup, with a non-interactive early return in .bashrc.
     $env:SSH_CONNECTION = '127.0.0.1 1 127.0.0.1 22'
-    $seen = & "$env:ProgramFiles\Git\bin\bash.exe" --noprofile --norc -c '. "$1"; printf %s "$GH_CONFIG_DIR"' x ((Join-Path $r.Dir 'bashrc') -replace '\\', '/')
+    $oldHome = $env:HOME; $env:HOME = (Join-Path $r.Dir 'home').Replace('\', '/')
+    $seen = & "$env:ProgramFiles\Git\bin\bash.exe" -lc 'printf %s "$GH_CONFIG_DIR"'
+    $env:HOME = $oldHome
+    $psSeen = & powershell.exe -NoProfile -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; `$env:GH_CONFIG_DIR"
     Remove-Item Env:SSH_CONNECTION
+    $psNoSsh = & powershell.exe -NoProfile -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; [string]`$env:GH_CONFIG_DIR"
+    Assert-True ($psSeen -eq (Join-Path $r.Dir 'gh-ssh')) "PowerShell profile sets GH_CONFIG_DIR in SSH sessions (got '$psSeen')"
+    Assert-True (-not $psNoSsh) 'PowerShell profile leaves interactive sessions alone'
     Assert-True ($seen -eq $sshFwd) "bashrc block sets GH_CONFIG_DIR in SSH sessions (got '$seen')"
-    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter 'bashrc.*.bak').Count -eq 1) 'bashrc backed up first'
+    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter '.bashrc.*.bak').Count -eq 1) 'bashrc backed up first'
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     foreach ($p in @((Join-Path $r.Dir 'gh-ssh'), $sshHosts, (Join-Path $r.Dir 'backups'))) {
         $sids = @((Get-Acl $p).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
@@ -81,7 +90,7 @@ try {
 
     $r2 = Invoke-Script $r.Dir
     Assert-True ($r2.Exit -eq 0) "rerun succeeds (exit $($r2.Exit))"
-    $rc = Get-Content (Join-Path $r.Dir 'bashrc') -Raw
+    $rc = Get-Content (Join-Path $r.Dir 'home\.bashrc') -Raw
     Assert-True (([regex]::Matches($rc, 'ai-devops gh-ssh \(managed')).Count -eq 1) 'rerun keeps one managed block'
 
     $env:GH_TOKEN = 'AMBIENT'; $env:GH_HOST = 'ghe.example.com'

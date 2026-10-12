@@ -5,8 +5,8 @@
 # token invalid and Git's credential manager cannot read or store anything.
 # This script copies the working interactive login into a private gh config
 # folder (gh's supported `--insecure-storage` file store) that only this user,
-# SYSTEM and Administrators can read, and adds a managed ~/.bashrc block that
-# points gh at that folder only inside SSH sessions. The normal gh folder, the
+# SYSTEM and Administrators can read, and adds managed blocks to ~/.bashrc and
+# the PowerShell profiles that point gh at that folder only inside SSH sessions. The normal gh folder, the
 # keyring and the Codex sandbox's read-only access to the normal folder stay
 # untouched. Git is pointed at gh for github.com (`gh auth setup-git`), so Git
 # uses the keyring interactively and the private copy over SSH. Every GitHub
@@ -24,6 +24,10 @@ param(
     # which would hide the folder from SSH logons.
     [string]$SshConfigDir = (Join-Path $HOME '.ai-devops\gh-ssh'),
     [string]$BashRc = (Join-Path $HOME '.bashrc'),
+    [string[]]$PowerShellProfiles = @(
+        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\profile.ps1'),
+        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.ps1')
+    ),
     [string]$GitConfig = (Join-Path $HOME '.gitconfig'),
     [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials')
 )
@@ -87,28 +91,38 @@ Set-PrivateAcl $SshConfigDir
 $check = Invoke-Gate 'GH_CONFIG_DIR="$1" "$0" api --hostname github.com user --jq .login'
 if ($check.ExitCode -ne 0 -or $check.Output -ne $ExpectedLogin) { throw "The SSH copy of the GitHub login does not work (got '$($check.Output)')." }
 
-# Managed ~/.bashrc block: SSH sessions only.
+# Put a managed block at the TOP of a startup file (before any early return
+# for non-interactive shells), replacing an earlier copy of the block.
+function Set-ManagedBlock([string]$Path, [string]$Block, [string]$Begin, [string]$End) {
+    $current = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
+    $pattern = '(?s)' + [regex]::Escape($Begin) + '.*?' + [regex]::Escape($End) + '\r?\n?'
+    $rest = [regex]::Replace($current, $pattern, '').TrimStart("`r", "`n")
+    $updated = $Block + "`n" + $(if ($rest) { "`n" + $rest } else { '' })
+    if ($updated -eq $current) { return }
+    Backup-File $Path
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    [IO.File]::WriteAllText($Path, $updated, (New-Object Text.UTF8Encoding $false))
+}
+
+# SSH sessions only: Git Bash, then Windows PowerShell and PowerShell 7.
 $begin = '# >>> ai-devops gh-ssh (managed by bin/ai-gh-ssh-credentials.ps1) >>>'
 $end = '# <<< ai-devops gh-ssh <<<'
-$block = @(
+$bashBlock = @(
     $begin,
     ('if [ -n "${SSH_CONNECTION:-}" ] && [ -f "' + $sshDir + '/hosts.yml" ]; then'),
     ('  export GH_CONFIG_DIR="' + $sshDir + '"'),
     'fi',
     $end
 ) -join "`n"
-$current = if (Test-Path -LiteralPath $BashRc) { [IO.File]::ReadAllText($BashRc) } else { '' }
-$pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
-if ($current -match $pattern) {
-    $updated = [regex]::Replace($current, $pattern, $block.Replace('$', '$$'))
-} else {
-    $sep = if ($current) { "`n`n" } else { '' }
-    $updated = $current.TrimEnd("`r", "`n") + $sep + $block + "`n"
-}
-if ($updated -ne $current) {
-    Backup-File $BashRc
-    [IO.File]::WriteAllText($BashRc, $updated, (New-Object Text.UTF8Encoding $false))
-}
+Set-ManagedBlock $BashRc $bashBlock $begin $end
+$psBlock = @(
+    $begin,
+    ("if (`$env:SSH_CONNECTION -and (Test-Path -LiteralPath '" + $SshConfigDir + "\hosts.yml')) {"),
+    ("    `$env:GH_CONFIG_DIR = '" + $SshConfigDir + "'"),
+    '}',
+    $end
+) -join "`n"
+foreach ($profilePath in $PowerShellProfiles) { Set-ManagedBlock $profilePath $psBlock $begin $end }
 
 Backup-File $GitConfig
 $setup = Invoke-Gate 'GIT_CONFIG_GLOBAL="$2" "$0" auth setup-git --hostname github.com'
