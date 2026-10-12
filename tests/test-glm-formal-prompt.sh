@@ -19,6 +19,10 @@ for shape in 'VERDICT: APPROVE exact-head' $'Findings\n## Verdict\nAPPROVE'; do
   grep -q 'Emit exactly one' "$out"
   grep -q 'provisional decision' "$out"
   grep -q 'independent judgment' "$out"
+  # A decorated verdict line ("REJECT — head ...") fails the pool's bare-word
+  # parser after a paid turn (#1562, GLM PopDAM 3c3e18a3). Require the rule.
+  grep -q 'exactly one plain word' "$out"
+  grep -q 'no dash, head SHA' "$out"
   [ "$(head -c "${#shape}" "$out")" = "$shape" ]
   rm -f "$out"
 done
