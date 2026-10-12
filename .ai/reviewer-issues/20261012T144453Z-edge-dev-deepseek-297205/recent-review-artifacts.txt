@@ -1,0 +1,10 @@
+.ai/reviews/.ai-devops-private-reviews-v1	32 bytes
+.ai/reviews/.muse-stage.gTEvgl	0 bytes
+.ai/reviews/20260729-public-execute-lockdown-glm.md	11833 bytes
+.ai/reviews/20260802-taxonomy-alert-ack-rpc-glm52.md	7460 bytes
+.ai/reviews/20260809-a2b-rehearsal-rerun-codex.md	7678 bytes
+.ai/reviews/20260809-pr608-apply-set-grok45.md	13400 bytes
+.ai/reviews/20260811-batch-b3-production-apply.md	18822 bytes
+.ai/reviews/20260811-ec137b2-skill-corrections-codex-gpt56.md	15857 bytes
+.ai/reviews/automatic-gates-provider-neutral-correction.md	1185 bytes
+.ai/reviews/automatic-gates-repo-implementation-compact.md	2170 bytes

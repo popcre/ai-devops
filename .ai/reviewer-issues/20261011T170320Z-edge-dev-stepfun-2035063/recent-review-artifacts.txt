@@ -1,0 +1,10 @@
+.ai/reviews/20260729-public-execute-lockdown-glm.md	11935 bytes
+.ai/reviews/20260802-taxonomy-alert-ack-rpc-glm52.md	7514 bytes
+.ai/reviews/20260809-a2b-rehearsal-rerun-codex.md	7786 bytes
+.ai/reviews/20260809-pr608-apply-set-grok45.md	13631 bytes
+.ai/reviews/20260811-batch-b3-production-apply.md	19167 bytes
+.ai/reviews/20260811-ec137b2-skill-corrections-codex-gpt56.md	16099 bytes
+.ai/reviews/automatic-gates-provider-neutral-correction.md	1190 bytes
+.ai/reviews/automatic-gates-repo-implementation-compact.md	2189 bytes
+.ai/reviews/automatic-production-gates-implementation-prompt.md	2619 bytes
+.ai/reviews/automatic-production-gates-plan-prompt.md	1811 bytes

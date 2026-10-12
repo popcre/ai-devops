@@ -1,0 +1,48 @@
+Incident 20261006T123753Z-edge-dev-codex-950377 — live retest success evidence
+Machine: edge-dev. Shell: Git Bash at C:\Program Files\Git\bin\bash.exe.
+Time: 2026-10-06 ~8:55 PM EST (2026-10-07T00:55Z).
+
+Landed fix commit (merge of PR #1323):
+  b1bd3ad8c3d8e656daa12092c51ec2ad9c43e8c0
+  Confirmed ancestor of origin/main. Contains:
+  - tools/reviewer_event_guard.sh  (nested pool-runner run_id inheritance + reviewer_event_run_is_open)
+  - tools/reviewer_events.py       (sandbox_source_chain walk in bind_sandbox)
+  - further fix e71ba048: qualify-live probes never open-run-inherit a review run_id
+
+Retest setup:
+  Worktree: C:/repos/ai-devops-wt-inc950377 (branch mimo/inc950377-retest, based on b1bd3ad8)
+  Disposable fixture: tests/test-inc950377-retest-fixture.sh (tiny code fixture)
+  Head under review (full 40-char): 5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd
+  Command: bin/ai-review codex final-check --base b1bd3ad8c3d8e656daa12092c51ec2ad9c43e8c0 --assert-head 5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd
+  (No --implementer mimo; not in config/reviewer-registry.json.)
+
+SUCCESS EVIDENCE 1 — durable report path on disk with "## Verdict" and full head SHA:
+  C:/repos/ai-devops-wt-inc950377/.ai/reviews/codex-final-check-20261007T005115-1537840-2011.md
+  Decisive lines from that report:
+    | reviewed commit | `5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd` |
+    ## Verdict
+    APPROVE
+
+SUCCESS EVIDENCE 2 — event ledger line showing run published / evidence_state=verified:
+  File: ~/.local/state/ai-devops/reviewer-events/events.jsonl
+  Decisive line (finished event):
+    {"caller":"codex","event":"finished","evidence_references":["83741ca0e6b8403caeab08853e7a9abb/1666d0b9db5265fdec8a0ea1183142aa9b32f71db52874052223fb9ab441b5ed"],"evidence_state":"verified","exit_code":0,"head":"5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd","operation":"invocation","parent_run_id":null,"provider":"codex","repo":"C:/repos/ai-devops-wt-inc950377","run_id":"83741ca0e6b8403caeab08853e7a9abb","schema_version":1,"timestamp":"2026-10-07T00:55:20.148303+00:00","wrapper_exit_code":0}
+  Started event:
+    {"caller":"codex","event":"started","head":"5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd","operation":"invocation","parent_run_id":null,"provider":"codex","repo":"C:/repos/ai-devops-wt-inc950377","run_id":"83741ca0e6b8403caeab08853e7a9abb","schema_version":1,"timestamp":"2026-10-07T00:51:14.062869+00:00"}
+
+SUCCESS EVIDENCE 3 — event ledger evidence artifacts (sandbox bind + report publish):
+  ~/.local/state/ai-devops/reviewer-events/evidence/83741ca0e6b8403caeab08853e7a9abb/required.json
+    {"caller":"codex","head":"5cb1831951b5c53927d93f5e8d3cf03b5f1b42dd","provider":"codex","run_id":"83741ca0e6b8403caeab08853e7a9abb","schema_version":1}
+  ~/.local/state/ai-devops/reviewer-events/evidence/83741ca0e6b8403caeab08853e7a9abb/1666d0b9db5265fdec8a0ea1183142aa9b32f71db52874052223fb9ab441b5ed.report.json
+    phase=report-publication, report_sha256=1666d0b9db5265fdec8a0ea1183142aa9b32f71db52874052223fb9ab441b5ed, full report text captured.
+
+Original failure quote (for contrast) was:
+  "reviewer event recording: sandbox evidence requirement is missing; cleanup refused"
+  "ai-review-sandbox: sandbox evidence is not reconciled; retained for local recovery"
+That publication refusal is GONE. The retest published a durable report and the ledger verified it.
+
+Residual noted (does NOT block resolution of the original publication failure):
+  During the pre-review orphan sweep, old pre-fix orphaned sandboxes still print
+  "evidence has no unique matching invocation" / "sandbox evidence is not reconciled"
+  and the sweep hits its 16-orphan examination cap. Those are remnants from BEFORE
+  the landed guard; the current run's own sandbox bind + report publish verified cleanly.

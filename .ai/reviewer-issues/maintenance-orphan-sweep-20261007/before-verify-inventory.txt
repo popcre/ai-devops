@@ -1,0 +1,62 @@
+FAIL|code-only-1791367922-3162758-17621-5b0f2ffa3784|reviewer event recording: code-only review source is unavailable
+FAIL|code-only-1791367944-3164018-16657-5b0f2ffa3784|reviewer event recording: code-only review source is unavailable
+OK|codex-diff-review-20261007T005233-1552960-10527-96ae9a73b6e9
+OK|codex-final-check-20261006T144722-1918179-4087-8a376c54f4e9
+OK|codex-final-check-20261006T225953-526296-29730-8e592e4d421e
+FAIL|gemini-78de3670a55f-mimo-rev3957s1g-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+OK|gemini-78de3670a55f-mimo-rev3957s1gm-76ef4e55a21c
+OK|gemini-95db159b77d8-mimo-qual-20261007T034851Z-2099437-63ade068a374
+FAIL|gemini-a46488c7fe8a-codex-dupsrc-d6bf8d7f77bd|reviewer event recording: evidence has no unique matching invocation
+FAIL|gemini-a637da372a25-zcode-pool-gemini-719f3d79401fc021-b8f7429586cc|reviewer event recording: required report is not durably published; cleanup and replay refused
+OK|gemini-f95dae9e2aff-mimo-qual-20261007T035049Z-2105904-f6690e377506
+FAIL|glm-rev3947risk3a-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947risk3c-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947risk3d-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947risk3e-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947risk3g-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947risk3h-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947s3risk2-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3947s3risk-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3957s1glm2-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-rev3957s4g-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+FAIL|glm-testglm-quick-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+OK|grok-rev3947risk-grok1-76ef4e55a21c
+FAIL|grok-rev3957s4gr-76ef4e55a21c|reviewer event recording: required report is not durably published; cleanup and replay refused
+OK|muse-codex-muse-baseline-6e7-live-20261007-4f1a1b730bc5
+OK|muse-codex-muse-systemdrive-gitbash-live-20261007-6d4866c424fa
+OK|muse-codex-stepfun-win-shell-probe-final-20261007-470d28dc8550
+OK|muse-mimo-rev3957s2m-76ef4e55a21c
+OK|preflight-codex-796159-96ae9a73b6e9
+OK|preflight-grok-750673-96ae9a73b6e9
+OK|preflight-muse-1165523-96ae9a73b6e9
+FAIL|qwen-budget-followup-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-content-filter-assistant-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-content-filter-result-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-content-filter-stderr-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-content-filter-stderr-success-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-drift-committed-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-drift-dirty-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-drift-untracked-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-filter-followup-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-insecure-key-store-60aa16a16db3|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-insecure-key-store-9842b7a3431f|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-insecure-key-store-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-long-nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn-031cff5fc62f-60aa16a16db3|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-long-nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn-031cff5fc62f-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-publication-failed-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+OK|qwen-rev3947risk-q1-76ef4e55a21c
+OK|qwen-rev3947risk-q2-76ef4e55a21c
+OK|qwen-rev3947risk-q3-76ef4e55a21c
+OK|qwen-rev3957s1q-76ef4e55a21c
+FAIL|qwen-review-1-60aa16a16db3|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-review-1-9842b7a3431f|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-reviewer-only-1-60aa16a16db3|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-reviewer-only-1-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-tool-budget-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-turn-budget-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-wall-budget-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-wrong-model-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+FAIL|qwen-wrong-model-followup-9e8d31aff6ad|reviewer event recording: evidence has no unique matching invocation
+OK|rlc-grok-93fc0146ae1a-0fa5efe8eb6b
+OK|rlc-grok-9ebcdb09b982-0fa5efe8eb6b
+OK|rlc-grok-db1d0b312adb-0fa5efe8eb6b

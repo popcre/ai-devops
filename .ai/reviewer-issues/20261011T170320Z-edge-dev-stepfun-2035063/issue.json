@@ -1,0 +1,48 @@
+{
+  "schema_version": 3,
+  "id": "20261011T170320Z-edge-dev-stepfun-2035063",
+  "created_at": "2026-10-11T17:03:20Z",
+  "provider": "stepfun",
+  "summary": "[edge-dev] stepfun shell spawn dead (ChildProcess.spawn) on Windows",
+  "reported_command": "node scripts/run-governed-review.mjs --pr 4169 --head-sha 42a96ee22e2e34e8431f9f45857d548bbec518cd --issue 4173 --reviewer stepfun-step-5-preview --wrapper ai-stepfun --worktree C:\\repos\\shared-db\\.ai\\worktrees\\2336-lp2 -- review --assert-head 42a96ee22e2e34e8431f9f45857d548bbec518cd --prompt-file <brief>",
+  "failure_stream": "code-defect",
+  "failure_class": "code-config",
+  "code_defect": true,
+  "join": {
+    "run_id": null,
+    "session_id": null,
+    "caller": null,
+    "source_digest": null,
+    "lifecycle_state": null,
+    "event_sha256": null
+  },
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20261011T170320Z-edge-dev-stepfun-2035063",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/popcre/shared-db.git",
+    "branch": "mimo/2336-live-proof",
+    "head": "00e371844d4f3910a5321d3ccf4301cb7a7a237b",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26300 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": null,
+    "complete_matching_review_reports_captured": 0,
+    "recent_provider_logs": null,
+    "recent_provider_logs_captured": 0,
+    "latest_scoreboard_entry": null,
+    "latest_scoreboard_entry_captured": 0,
+    "exact_diagnostic_envelope": null,
+    "exact_diagnostic_envelope_captured": 0,
+    "session_details": "details.redacted.txt",
+    "complete_error_log": null
+  }
+}

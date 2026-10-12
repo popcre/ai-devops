@@ -1,0 +1,22 @@
+Computer: edge-dev. Failure is observed only on edge-dev.
+
+During a formal installation receipt refresh for merged PR #1317 (DeepSeek token-volume cut), Codex exact-head final-check of origin/main 19de73a5da6a2ec9d5a882d273122cc0b69ea485 first returned BLOCKED ("Required behavioral tests were not run"). After running test-ai-stepfun.sh (6 passed) and test-ai-stepfun-windows-shell.sh (21 passed), subsequent Codex review runs failed to publish a durable report.
+
+Wrapper errors:
+- reviewer event recording: sandbox evidence requirement is missing; cleanup refused
+- ai-review-sandbox: sandbox evidence is not reconciled; retained for local recovery
+- ai-review-sandbox sweep-orphans: 16 orphan examination cap reached; remaining orphans wait for the next parent run
+
+Expected: a published exact-head APPROVE report bound to 19de73a5 so ai-task-gates authorize-install can proceed.
+
+Actual: report publication refused; authorize-install still STOPs because the prior bb9762cfa9ac8d28b61deed06f0f354f8728c358 APPROVE does not bind this exact target.
+
+Attempts: multiple bin/ai-review codex final-check runs; ai-review-sandbox sweep-orphans.
+
+Unusual: sandbox evidence required.json gaps persist across runs and block cleanup as well as new publication.
+
+Worktrees: C:/repos/ai-devops-wt-inst1317 and C:/repos/ai-devops-wt-rev1317.
+
+Partial report path: C:/repos/ai-devops-wt-rev1317/.ai/reviews/codex-final-check-20261006T120527-657494-21963.md
+
+Note: the new DeepSeek token budgets from PR #1317 are already live on edge-dev (installed checkout at 19de73a5; launchers exec the checkout; Oct 5 install at 6bb1846 already contained the merge). The blocked item is only the formal managed-launcher receipt refresh.

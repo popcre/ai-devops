@@ -1,0 +1,48 @@
+{
+  "schema_version": 3,
+  "id": "20261012T144453Z-edge-dev-deepseek-297205",
+  "created_at": "2026-10-12T14:44:53Z",
+  "provider": "deepseek",
+  "summary": "[edge-dev] deepseek-flash conversation not created, no verdict",
+  "reported_command": "node scripts/run-governed-review.mjs --issue 3298 --pr 4221 --head-sha ac3b81df3c6d9877160c049d4d7e8292e484c073 --reviewer deepseek-v4.1-flash --wrapper ai-deepseek-agent --worktree C:\\repos\\shared-db\\.ai\\worktrees\\3298-migration-a --review-slot 2 -- send --prompt-file <brief> --review",
+  "failure_stream": "code-defect",
+  "failure_class": "code-config",
+  "code_defect": true,
+  "join": {
+    "run_id": null,
+    "session_id": null,
+    "caller": "codex",
+    "source_digest": null,
+    "lifecycle_state": null,
+    "event_sha256": null
+  },
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20261012T144453Z-edge-dev-deepseek-297205",
+  "repository": {
+    "root": "C:/repos/shared-db/.ai/worktrees/3298-migration-a",
+    "remote": "https://github.com/popcre/shared-db.git",
+    "branch": "mimo/3298-migration-a-clean",
+    "head": "1410503f7486657e00b1d370b3846108dc8315ea",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26300 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": null,
+    "complete_matching_review_reports_captured": 0,
+    "recent_provider_logs": null,
+    "recent_provider_logs_captured": 0,
+    "latest_scoreboard_entry": null,
+    "latest_scoreboard_entry_captured": 0,
+    "exact_diagnostic_envelope": null,
+    "exact_diagnostic_envelope_captured": 0,
+    "session_details": "details.redacted.txt",
+    "complete_error_log": "error.redacted.txt"
+  }
+}

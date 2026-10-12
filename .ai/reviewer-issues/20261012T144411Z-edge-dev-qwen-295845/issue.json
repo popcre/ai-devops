@@ -1,0 +1,48 @@
+{
+  "schema_version": 3,
+  "id": "20261012T144411Z-edge-dev-qwen-295845",
+  "created_at": "2026-10-12T14:44:11Z",
+  "provider": "qwen",
+  "summary": "[edge-dev] qwen3.8-max repeatedly returns no verdict (exit 4)",
+  "reported_command": "node scripts/run-governed-review.mjs --issue 3298 --pr 4221 --head-sha c047eca454d337e69cf2d7a15a8945713c704267 --reviewer qwen-3.8-max --wrapper ai-qwen --worktree C:\\repos\\shared-db\\.ai\\worktrees\\3298-migration-a --review-slot 1 -- new pr4221-c047eca4 --prompt-file <brief>",
+  "failure_stream": "code-defect",
+  "failure_class": "code-config",
+  "code_defect": true,
+  "join": {
+    "run_id": null,
+    "session_id": null,
+    "caller": "codex",
+    "source_digest": null,
+    "lifecycle_state": null,
+    "event_sha256": null
+  },
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20261012T144411Z-edge-dev-qwen-295845",
+  "repository": {
+    "root": "C:/repos/shared-db/.ai/worktrees/3298-migration-a",
+    "remote": "https://github.com/popcre/shared-db.git",
+    "branch": "mimo/3298-migration-a-clean",
+    "head": "1410503f7486657e00b1d370b3846108dc8315ea",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26300 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": null,
+    "complete_matching_review_reports_captured": 0,
+    "recent_provider_logs": null,
+    "recent_provider_logs_captured": 0,
+    "latest_scoreboard_entry": null,
+    "latest_scoreboard_entry_captured": 0,
+    "exact_diagnostic_envelope": null,
+    "exact_diagnostic_envelope_captured": 0,
+    "session_details": "details.redacted.txt",
+    "complete_error_log": "error.redacted.txt"
+  }
+}
