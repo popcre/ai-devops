@@ -48,7 +48,7 @@ DeepSeek review run `20261012T090026-2925715-17164` on EDGE-ALIEN (`--tests "bas
 - The door exported `DOOR_DIAGNOSTICS_DIR` etc. into its own environment; the native OpenCode process and every command the model ran in its copy inherited them. tests/test-review-door-diagnostics.sh does not source `tests/lib-test-harness.sh`, so nothing scrubbed them, and a `${DOOR_DIAGNOSTICS_DIR:-...}` default wrote into the live path.
 - Earlier env-isolation fix (2026-10-11, attempt #3) only scrubbed suites that source the harness; the native launch boundary is the right single place.
 - The `STUB dir=... PWD!=DIR` string is not in the repo; the reviewer model generated it inside its copy.
-- EDGE-ALIEN's Tailscale IP is now **100.112.207.98** (was 100.65.60.70); host key had to be accepted anew.
+- EDGE-ALIEN's Tailscale address changed this session; take the current one from `tailscale status` and accept the new host key.
 
 ## 6. Exact next steps
 
@@ -61,7 +61,7 @@ Reviewer-safety class: independent non-Claude exact-head review, merge queue. ED
 
 ## 8. Access and environment
 
-EDGE-ALIEN: `ssh -i ~/.ssh/916-alien 100.112.207.98` (Tailscale only). 4837: see memory/atlas. No secrets appeared this session.
+EDGE-ALIEN: Tailscale only, 916-alien key, current address from `tailscale status`. 4837: see memory/atlas. No secrets appeared this session.
 
 ## 9. Open questions and risks
 
