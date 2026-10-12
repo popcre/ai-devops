@@ -1,25 +1,31 @@
-# Make GitHub CLI and Git credentials readable from SSH logons on Windows.
+# Give SSH logons on Windows their own copy of the GitHub CLI login.
 #
 # Key-based OpenSSH logons cannot unlock the user's DPAPI master key, so the
 # Windows Credential Manager ("keyring") is empty for them: gh reports the
 # token invalid and Git's credential manager cannot read or store anything.
-# The supported gh alternative is its own config store (hosts.yml, written by
-# `gh auth login --insecure-storage`). This script copies a working keyring
-# login there (the keyring entry stays for interactive use), after proving only this user, SYSTEM, Administrators and the
-# read-only Codex sandbox group can read that folder, and points Git at gh for
-# github.com (`gh auth setup-git`), so interactive and SSH sessions share one
-# credential. Every GitHub CLI call goes through the shared ai-gh gate; the
-# token only ever travels through a pipe.
+# This script copies the working interactive login into a private gh config
+# folder (gh's supported `--insecure-storage` file store) that only this user,
+# SYSTEM and Administrators can read, and adds a managed ~/.bashrc block that
+# points gh at that folder only inside SSH sessions. The normal gh folder, the
+# keyring and the Codex sandbox's read-only access to the normal folder stay
+# untouched. Git is pointed at gh for github.com (`gh auth setup-git`), so Git
+# uses the keyring interactively and the private copy over SSH. Every GitHub
+# CLI call goes through the shared ai-gh gate; the token only travels through
+# a pipe inside one bash process.
 #
-# Exit codes: 0 ready, 2 no working GitHub login to move (run
-# `gh auth login --web --insecure-storage` in an interactive session), 1 error.
+# Run it from an interactive session. Exit codes: 0 ready, 2 no working
+# interactive GitHub login to copy (run `gh auth login --web` interactively), 1 error.
 [CmdletBinding()]
 param(
     [string]$ExpectedLogin = 'u2giants',
     [string]$GhGate = '',
     [string]$Bash = '',
-    [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials'),
-    [string]$GitConfig = (Join-Path $HOME '.gitconfig')
+    # Under the profile root: packaged desktop apps virtualize AppData writes,
+    # which would hide the folder from SSH logons.
+    [string]$SshConfigDir = (Join-Path $HOME '.ai-devops\gh-ssh'),
+    [string]$BashRc = (Join-Path $HOME '.bashrc'),
+    [string]$GitConfig = (Join-Path $HOME '.gitconfig'),
+    [string]$BackupRoot = (Join-Path $HOME '.ai-devops\backups\gh-ssh-credentials')
 )
 $ErrorActionPreference = 'Stop'
 
@@ -30,104 +36,83 @@ if (-not $Bash) {
 }
 if (-not $Bash) { throw 'Git Bash is required to reach the shared GitHub gate.' }
 $gate = $GhGate -replace '\\', '/'
+$sshDir = $SshConfigDir -replace '\\', '/'
+$gitCfg = $GitConfig -replace '\\', '/'
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
-function Invoke-Gate([string[]]$Arguments) {
+# Run the gate in bash ($0 gate, $1 SSH folder, $2 Git config); ambient token
+# and host settings never choose the account.
+function Invoke-Gate([string]$Script) {
     $prior = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $call = @('--noprofile', '--norc', '-c', 'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST; AI_GH_CALLER=ai-gh-ssh-credentials "$0" "$@"', $gate) + $Arguments
-        $out = @(& $Bash @call 2>$null)
-        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
+        $body = 'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST GH_CONFIG_DIR; export AI_GH_CALLER=ai-gh-ssh-credentials; set -o pipefail; ' + $Script
+        $out = @(& $Bash --noprofile --norc -c $body $gate $sshDir $gitCfg 2>$null)
+        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join '') }
     } finally { $ErrorActionPreference = $prior }
+}
+
+function Set-PrivateAcl([string]$Path) {
+    & icacls $Path /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not make $Path private." }
+    foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if (@($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $sid) { throw "Refusing to store the GitHub login: $($rule.IdentityReference.Value) can read $Path." }
+    }
 }
 
 function Backup-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
-    # Backups may hold credentials: this user and SYSTEM only.
-    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls $BackupRoot /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not make $BackupRoot private." }
-    Assert-PrivateFolder $BackupRoot
+    Set-PrivateAcl $BackupRoot
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     Copy-Item -LiteralPath $Path -Destination (Join-Path $BackupRoot ("{0}.{1}.bak" -f (Split-Path -Leaf $Path), $stamp))
 }
 
-# Refuse to store a token where anyone beyond the expected principals can read it.
-function Assert-PrivateFolder([string]$Path, [switch]$NoSandbox) {
-    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544', 'S-1-3-0')
-    $sandbox = $null
-    try { $sandbox = ([Security.Principal.NTAccount]"$env:COMPUTERNAME\CodexSandboxUsers").Translate([Security.Principal.SecurityIdentifier]).Value } catch { }
-    $writeMask = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteAttributes, WriteExtendedAttributes, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
-    $acl = Get-Acl -LiteralPath $Path
-    $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
-    if (@($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $owner) { throw "Refusing to store the GitHub login: $Path is owned by $($acl.Owner)." }
-    foreach ($rule in $acl.Access) {
-        if ($rule.AccessControlType -ne 'Allow') { continue }
-        try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = $rule.IdentityReference.Value }
-        if ($allowed -contains $sid) { continue }
-        # The local Codex sandbox group may read, never write (repair-codex-github-cli-access.ps1).
-        if (-not $NoSandbox -and $sandbox -and $sid -eq $sandbox -and ($rule.FileSystemRights -band $writeMask) -eq 0) { continue }
-        throw "Refusing to store the GitHub login: $($rule.IdentityReference.Value) can read $Path."
-    }
+$login = Invoke-Gate '"$0" api --hostname github.com user --jq .login'
+if ($login.ExitCode -ne 0) {
+    Write-Output 'No working interactive GitHub login to copy for SSH sessions. In an interactive session run: gh auth login --web'
+    exit 2
 }
+if ($login.Output -ne $ExpectedLogin) { throw "Refusing to share the GitHub login for $($login.Output); expected $ExpectedLogin." }
 
-$configDir = if ($env:GH_CONFIG_DIR) { $env:GH_CONFIG_DIR } else { Join-Path $env:APPDATA 'GitHub CLI' }
-$hosts = Join-Path $configDir 'hosts.yml'
+# Private folder first, so the token never lands somewhere readable by others.
+New-Item -ItemType Directory -Force -Path $SshConfigDir | Out-Null
+Set-PrivateAcl $SshConfigDir
+Backup-File (Join-Path $SshConfigDir 'hosts.yml')
+$copy = Invoke-Gate '"$0" auth token --hostname github.com | GH_CONFIG_DIR="$1" "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
+if ($copy.ExitCode -ne 0) { throw 'The GitHub CLI could not save the SSH copy of the login.' }
+Set-PrivateAcl $SshConfigDir
 
-# True when the github.com section of hosts.yml holds a token.
-function Test-FileToken {
-    if (-not (Test-Path -LiteralPath $hosts)) { return $false }
-    $inGithub = $false
-    foreach ($line in Get-Content -LiteralPath $hosts) {
-        if ($line -match '^(\S[^:]*):') { $inGithub = ($Matches[1] -eq 'github.com'); continue }
-        if ($inGithub -and $line -match '^\s+oauth_token:\s*\S') { return $true }
-    }
-    return $false
+$check = Invoke-Gate 'GH_CONFIG_DIR="$1" "$0" api --hostname github.com user --jq .login'
+if ($check.ExitCode -ne 0 -or $check.Output -ne $ExpectedLogin) { throw "The SSH copy of the GitHub login does not work (got '$($check.Output)')." }
+
+# Managed ~/.bashrc block: SSH sessions only.
+$begin = '# >>> ai-devops gh-ssh (managed by bin/ai-gh-ssh-credentials.ps1) >>>'
+$end = '# <<< ai-devops gh-ssh <<<'
+$block = @(
+    $begin,
+    ('if [ -n "${SSH_CONNECTION:-}" ] && [ -f "' + $sshDir + '/hosts.yml" ]; then'),
+    ('  export GH_CONFIG_DIR="' + $sshDir + '"'),
+    'fi',
+    $end
+) -join "`n"
+$current = if (Test-Path -LiteralPath $BashRc) { [IO.File]::ReadAllText($BashRc) } else { '' }
+$pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
+if ($current -match $pattern) {
+    $updated = [regex]::Replace($current, $pattern, $block.Replace('$', '$$'))
+} else {
+    $sep = if ($current) { "`n`n" } else { '' }
+    $updated = $current.TrimEnd("`r", "`n") + $sep + $block + "`n"
 }
-
-New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-Assert-PrivateFolder $configDir
-
-# The folder stays readable by the Codex sandbox (config.yml); the login file
-# itself is limited to this user, SYSTEM and Administrators.
-function Protect-HostsFile {
-    if (-not (Test-Path -LiteralPath $hosts)) { New-Item -ItemType File -Path $hosts | Out-Null }
-    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls $hosts /inheritance:r /grant:r "*${me}:F" '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not make $hosts private." }
-    Assert-PrivateFolder $hosts -NoSandbox
-}
-Protect-HostsFile
-
-if (-not (Test-FileToken)) {
-    $login = Invoke-Gate @('api', '--hostname', 'github.com', 'user', '--jq', '.login')
-    if ($login.ExitCode -ne 0) {
-        Write-Output 'No working GitHub login to share with SSH sessions. In an interactive session run: gh auth login --web --insecure-storage'
-        exit 2
-    }
-    if (($login.Output -join '') -ne $ExpectedLogin) { throw "Refusing to share the GitHub login for $($login.Output -join ''); expected $ExpectedLogin." }
-    Backup-File $hosts
-    # The token flows gate-to-gate inside one bash pipe and never reaches PowerShell.
-    $pipe = 'set -o pipefail; unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST; export AI_GH_CALLER=ai-gh-ssh-credentials; "$0" auth token --hostname github.com | "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
-    $prior = $ErrorActionPreference
-    try { $ErrorActionPreference = 'Continue'; & $Bash --noprofile --norc -c $pipe $gate 2>$null | Out-Null; $moved = $LASTEXITCODE }
-    finally { $ErrorActionPreference = $prior }
-    if ($moved -ne 0 -or -not (Test-FileToken)) { throw 'The GitHub CLI could not save the login to its config file.' }
-    Protect-HostsFile
+if ($updated -ne $current) {
+    Backup-File $BashRc
+    [IO.File]::WriteAllText($BashRc, $updated, (New-Object Text.UTF8Encoding $false))
 }
 
 Backup-File $GitConfig
-$env:GIT_CONFIG_GLOBAL = $GitConfig
-$setup = Invoke-Gate @('auth', 'setup-git', '--hostname', 'github.com')
+$setup = Invoke-Gate 'GIT_CONFIG_GLOBAL="$2" "$0" auth setup-git --hostname github.com'
 if ($setup.ExitCode -ne 0) { throw 'Pointing Git at the GitHub CLI failed.' }
 
-$check = Invoke-Gate @('api', '--hostname', 'github.com', 'user', '--jq', '.login')
-if ($check.ExitCode -ne 0) {
-    Write-Output 'The stored GitHub login is rejected by GitHub. In an interactive session run: gh auth login --web --insecure-storage'
-    exit 2
-}
-if (($check.Output -join '') -ne $ExpectedLogin) { throw "The stored GitHub login is $($check.Output -join ''), not $ExpectedLogin." }
-Write-Output "GitHub login shared with SSH sessions for $($check.Output -join '')."
+Write-Output "GitHub login for $ExpectedLogin copied for SSH sessions."
 exit 0

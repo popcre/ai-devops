@@ -9,88 +9,96 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "FAIL: $Message" }
 }
 
-# Fake ai-gh gate: keyring token lives in keyring.txt, "valid" when it equals GOOD.
+# Fake ai-gh gate. The interactive login lives in $FAKE_DEFAULT/token (stands
+# in for the keyring); GH_CONFIG_DIR selects a file store instead. A token is
+# valid as u2giants when GOOD, as popcre when POPCRE.
 $fake = Join-Path $TempRoot 'ai-gh'
 @'
 #!/usr/bin/env bash
-cfg="$GH_CONFIG_DIR"; hosts="$cfg/hosts.yml"; keyring="$cfg/keyring.txt"
-printf '%s|%s\n' "$AI_GH_CALLER" "$*" >> "$cfg/calls.log"
+printf '%s|%s|%s\n' "$AI_GH_CALLER" "${GH_CONFIG_DIR:-default}" "$*" >> "$FAKE_DEFAULT/calls.log"
 current() {
-  [ -n "$GH_TOKEN" ] && { printf "%s" "$GH_TOKEN"; return; }
-  t="$(awk '/^[^ ]/{h=($1=="github.com:")} h&&/oauth_token:/{print $2}' "$hosts" 2>/dev/null)"
-  [ -n "$t" ] || t="$(cat "$keyring" 2>/dev/null | tr -d '\r\n')"
-  printf '%s' "$t"
+  [ -n "$GH_TOKEN" ] && { printf '%s' "$GH_TOKEN"; return; }
+  if [ -n "$GH_CONFIG_DIR" ]; then
+    awk '/^[^ ]/{h=($1=="github.com:")} h&&/oauth_token:/{print $2}' "$GH_CONFIG_DIR/hosts.yml" 2>/dev/null
+  else
+    tr -d '\r\n' < "$FAKE_DEFAULT/token" 2>/dev/null
+  fi
 }
 case "$1 $2" in
   "api --hostname") case "$(current)" in GOOD) echo u2giants; exit 0 ;; POPCRE) echo popcre; exit 0 ;; esac; exit 1 ;;
   "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
-  "auth login") t="$(cat | tr -d '\r\n')"
-    printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" >> "$hosts"
-    rm -f "$keyring"; exit 0 ;;
-  "auth setup-git") exit 0 ;;
+  "auth login") t="$(cat | tr -d '\r\n')"; [ -n "$GH_CONFIG_DIR" ] || exit 4
+    printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" > "$GH_CONFIG_DIR/hosts.yml"; exit 0 ;;
+  "auth setup-git") printf 'helper\n' >> "$GIT_CONFIG_GLOBAL"; exit 0 ;;
 esac
 exit 3
 '@.Replace("`r`n", "`n") | Set-Content -LiteralPath $fake -NoNewline
 
-function Invoke-Case([string]$Name, [string]$Keyring, [string]$Hosts = 'github.com:', [switch]$Broad) {
-    $dir = Join-Path $TempRoot $Name
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    # Mirror a real profile folder: only this user and SYSTEM.
-    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls $dir /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "FAIL: could not set the fixture ACL on $dir" }
-    $Hosts | Set-Content -LiteralPath (Join-Path $dir 'hosts.yml')
-    if ($Keyring) { $Keyring | Set-Content -LiteralPath (Join-Path $dir 'keyring.txt') }
-    if ($Broad) {
-        & icacls $dir /grant '*S-1-1-0:(OI)(CI)R' | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "FAIL: could not widen the fixture ACL on $dir" }
-    }
-    $env:GH_CONFIG_DIR = $dir
+function Invoke-Script([string]$Dir) {
+    $env:FAKE_DEFAULT = $Dir
     $ErrorActionPreference = 'Continue'
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake -BackupRoot (Join-Path $dir 'backups') -GitConfig (Join-Path $dir 'gitconfig') 2>&1
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake `
+        -SshConfigDir (Join-Path $Dir 'gh-ssh') -BashRc (Join-Path $Dir 'bashrc') `
+        -GitConfig (Join-Path $Dir 'gitconfig') -BackupRoot (Join-Path $Dir 'backups') 2>&1
     $code = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
-    return [pscustomobject]@{ Exit = $code; Output = ($out -join ' '); Dir = $dir }
+    return [pscustomobject]@{ Exit = $code; Output = ($out -join ' '); Dir = $Dir }
+}
+
+function Invoke-Case([string]$Name, [string]$Token, [string]$BashRcText = '') {
+    $dir = Join-Path $TempRoot $Name
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if ($Token) { $Token | Set-Content -LiteralPath (Join-Path $dir 'token') }
+    if ($BashRcText) { [IO.File]::WriteAllText((Join-Path $dir 'bashrc'), $BashRcText) }
+    return Invoke-Script $dir
 }
 
 try {
-    $r = Invoke-Case 'moves' 'GOOD'
-    Assert-True ($r.Exit -eq 0) "working keyring login is shared (exit $($r.Exit): $($r.Output))"
-    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -match 'oauth_token: GOOD') 'token saved in gh config'
-    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter 'hosts.yml.*.bak').Count -eq 1) 'hosts.yml backed up first'
-    $calls = Get-Content (Join-Path $r.Dir 'calls.log') -Raw
-    Assert-True ($calls -notmatch 'GOOD') 'token never passed as an argument'
-    Assert-True ($calls -match 'auth setup-git') 'git pointed at gh'
-    $hostsAcl = (Get-Acl (Join-Path $r.Dir 'hosts.yml'))
-    Assert-True ($hostsAcl.AreAccessRulesProtected) 'login file does not inherit folder grants'
+    $r = Invoke-Case 'copies' 'GOOD' "alias ll='ls -l'`n"
+    Assert-True ($r.Exit -eq 0) "working login is copied (exit $($r.Exit): $($r.Output))"
+    $sshHosts = Join-Path $r.Dir 'gh-ssh\hosts.yml'
+    Assert-True ((Get-Content $sshHosts -Raw) -match 'oauth_token: GOOD') 'token saved in the SSH folder'
+    Assert-True ((Get-Content (Join-Path $r.Dir 'token') -Raw) -match 'GOOD') 'interactive login left in place'
+    $calls = @(Get-Content (Join-Path $r.Dir 'calls.log'))
+    Assert-True (@($calls | Where-Object { $_ -match 'GOOD' }).Count -eq 0) 'token never passed as an argument'
+    Assert-True (@($calls | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
+    Assert-True (@($calls | Where-Object { $_ -match '\|default\|auth login' }).Count -eq 0) 'the normal gh folder is never rewritten'
+    Assert-True ((Get-Content (Join-Path $r.Dir 'gitconfig') -Raw) -match 'helper') 'git pointed at gh'
+    $rc = Get-Content (Join-Path $r.Dir 'bashrc') -Raw
+    Assert-True ($rc -match "alias ll='ls -l'") 'existing bashrc kept'
+    $sshFwd = (Join-Path $r.Dir 'gh-ssh') -replace '\\', '/'
+    Assert-True ($rc.Contains('[ -f "' + $sshFwd + '/hosts.yml" ]; then') -and $rc.Contains('  export GH_CONFIG_DIR="' + $sshFwd + '"')) 'bashrc points SSH sessions at the copy'
+    $env:SSH_CONNECTION = '127.0.0.1 1 127.0.0.1 22'
+    $seen = & "$env:ProgramFiles\Git\bin\bash.exe" --noprofile --norc -c '. "$1"; printf %s "$GH_CONFIG_DIR"' x ((Join-Path $r.Dir 'bashrc') -replace '\\', '/')
+    Remove-Item Env:SSH_CONNECTION
+    Assert-True ($seen -eq $sshFwd) "bashrc block sets GH_CONFIG_DIR in SSH sessions (got '$seen')"
+    Assert-True (@(Get-ChildItem (Join-Path $r.Dir 'backups') -Filter 'bashrc.*.bak').Count -eq 1) 'bashrc backed up first'
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $sids = @($hostsAcl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
-    Assert-True (@($sids | Where-Object { @($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $_ }).Count -eq 0) 'login file readable only by this user, SYSTEM and Administrators'
-    Assert-True (@((Get-Content (Join-Path $r.Dir 'calls.log')) | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
+    foreach ($p in @((Join-Path $r.Dir 'gh-ssh'), $sshHosts, (Join-Path $r.Dir 'backups'))) {
+        $sids = @((Get-Acl $p).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
+        Assert-True (@($sids | Where-Object { @($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $_ }).Count -eq 0) "$p readable only by this user, SYSTEM and Administrators"
+    }
 
-    $r = Invoke-Case 'other-host' 'GOOD' "ghe.example.com:`n    oauth_token: OTHER`ngithub.com:"
-    Assert-True ($r.Exit -eq 0) "another host's token does not skip github.com (exit $($r.Exit): $($r.Output))"
-    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -match 'oauth_token: GOOD') 'github.com token saved beside the other host'
-
-    $r = Invoke-Case 'broad' 'GOOD' -Broad
-    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "a folder readable by Everyone is refused (exit $($r.Exit))"
-    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -notmatch 'oauth_token') 'no token written into a broad folder'
-
-    $r = Invoke-Case 'other-account' 'POPCRE'
-    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "another GitHub account is refused (exit $($r.Exit))"
-    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -notmatch 'oauth_token') 'no other-account token written'
-
-    $r = Invoke-Case 'dead' 'BAD'
-    Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"
-    Assert-True ($r.Output -match 'insecure-storage') 'dead login names the re-login step'
-
-    $r = Invoke-Case 'none' ''
-    Assert-True ($r.Exit -eq 2) "missing login reports exit 2 (got $($r.Exit))"
+    $r2 = Invoke-Script $r.Dir
+    Assert-True ($r2.Exit -eq 0) "rerun succeeds (exit $($r2.Exit))"
+    $rc = Get-Content (Join-Path $r.Dir 'bashrc') -Raw
+    Assert-True (([regex]::Matches($rc, 'ai-devops gh-ssh \(managed')).Count -eq 1) 'rerun keeps one managed block'
 
     $env:GH_TOKEN = 'AMBIENT'; $env:GH_HOST = 'ghe.example.com'
     $r = Invoke-Case 'env-token' 'GOOD'
     Remove-Item Env:GH_TOKEN, Env:GH_HOST
-    Assert-True ($r.Exit -eq 0) 'ambient token variables are ignored'
+    Assert-True ($r.Exit -eq 0) "ambient token variables are ignored (exit $($r.Exit): $($r.Output))"
+
+    $r = Invoke-Case 'other-account' 'POPCRE'
+    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "another GitHub account is refused (exit $($r.Exit))"
+    Assert-True (-not (Test-Path (Join-Path $r.Dir 'gh-ssh\hosts.yml'))) 'no other-account token written'
+
+    $r = Invoke-Case 'dead' 'BAD'
+    Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"
+    Assert-True ($r.Output -match 'gh auth login --web') 'dead login names the re-login step'
+
+    $r = Invoke-Case 'none' ''
+    Assert-True ($r.Exit -eq 2) "missing login reports exit 2 (got $($r.Exit))"
 
     Write-Output 'PASS test-ai-gh-ssh-credentials'
 } finally {

@@ -40,8 +40,7 @@ LOCAL_OR_TEXT = {
         "gh auth login --web --git-protocol https </dev/tty || die 'GitHub authorization did not complete.'",
     },
     "ai-gh-ssh-credentials.ps1": {
-        "Write-Output 'No working GitHub login to share with SSH sessions. In an interactive session run: gh auth login --web --insecure-storage'",
-        "Write-Output 'The stored GitHub login is rejected by GitHub. In an interactive session run: gh auth login --web --insecure-storage'",
+        "Write-Output 'No working interactive GitHub login to copy for SSH sessions. In an interactive session run: gh auth login --web'",
     },
     "install-ai-devops-windows.ps1": {
         'Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"',
