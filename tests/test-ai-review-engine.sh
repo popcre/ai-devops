@@ -687,6 +687,17 @@ check "operation_review_succeeds_through_runner" "test '$OP_RC' -eq 0"
 OP_REPORT="$(tail -1 "$TMP/op.out" 2>/dev/null || true)"
 check "operation_report_records_operation" "test -s '$OP_REPORT' && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
 check "operation_brief_requests_exact_line" "test -s '$OP_REPORT' && grep -Fqx 'Approved legacy-managed-launcher-refresh.' '$OP_REPORT'"
+# The executed --tests output reaches the reviewer (#1562): a reviewer that
+# cannot run tests itself must see what ran, not only that it exited 0.
+rm -f "$AI_REVIEW_LIFECYCLE_DIR/runs"/* 2>/dev/null || true
+set +e
+( cd "$MREPO" && env AI_REVIEW_DOOR_QWEN="$OP_DOOR" timeout 90 "$ENGINE" review --provider qwen \
+    --name engine-tests-evidence --repo "$MREPO" --mode final-check --caller codex \
+    --tests 'echo evidence-sentinel-1562; echo 7 passed, 0 failed' ) >"$TMP/te.out" 2>"$TMP/te.err"
+TE_RC=$?
+set -e
+TE_REPORT="$(tail -1 "$TMP/te.out" 2>/dev/null || true)"
+check "executed_tests_output_reaches_reviewer" "test '$TE_RC' -eq 0 && test -s '$TE_REPORT' && grep -Fq 'Executed test output' '$TE_REPORT' && grep -Fqx 'evidence-sentinel-1562' '$TE_REPORT' && grep -Fqx '7 passed, 0 failed' '$TE_REPORT'"
 # An unknown operation must never dispatch, and a non-final-check mode must
 # never dispatch either.
 rm -f "$AI_REVIEW_LIFECYCLE_DIR/runs"/* 2>/dev/null || true
