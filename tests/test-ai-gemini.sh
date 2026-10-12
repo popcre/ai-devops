@@ -152,6 +152,31 @@ EOF
 chmod +x "$TMP/bin/agy-envspy"; rm -f "$TMP/agy-spy-env"
 GEMINI_API_KEY=fake-gem-1427 GOOGLE_API_KEY=fake-google-1427 AI_GEMINI_KEY=fake-aigem-1427 AI_GEMINI_BIN="$TMP/bin/agy-envspy" "$SCRIPT" doctor --identity >/dev/null 2>&1 || true
 check 'gemini_ignores_generic_api_keys' "test -s '$TMP/agy-spy-env' && ! grep -q 'fake-.*-1427' '$TMP/agy-spy-env'"
+# #1562: the sandbox-capability probe must not race SIGPIPE. A help text that
+# names --sandbox early and then keeps writing must pass every time, while a
+# help text without --sandbox (or a failing --help) must still refuse.
+for kind in early missing failing; do
+cat > "$TMP/bin/agy-help-$kind" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = --help ]; then
+  case $kind in
+    early) printf '  --sandbox  run sandboxed\n' ;;
+    failing) printf '  --sandbox  run sandboxed\n'; exit 2 ;;
+  esac
+  head -c 524288 /dev/zero | tr '\0' 'x'; printf '\n'
+  exit 0
+fi
+exec "$TMP/bin/agy" "\$@"
+EOF
+chmod +x "$TMP/bin/agy-help-$kind"
+done
+HELP_RACE_FAILS=0
+for _ in 1 2 3 4 5; do AI_GEMINI_BIN="$TMP/bin/agy-help-early" "$SCRIPT" doctor --identity >/dev/null 2>&1 || HELP_RACE_FAILS=$((HELP_RACE_FAILS+1)); done
+check 'sandbox probe tolerates a help writer that outlives the match (no SIGPIPE false refusal)' "test '$HELP_RACE_FAILS' -eq 0"
+set +e; MISSING_OUT="$(AI_GEMINI_BIN="$TMP/bin/agy-help-missing" "$SCRIPT" doctor --identity 2>&1)"; MISSING_RC=$?; set -e
+check 'sandbox probe still refuses an agy whose help lacks --sandbox' "test '$MISSING_RC' -ne 0 && printf '%s' \"\$MISSING_OUT\" | grep -q 'agy lacks --sandbox'"
+set +e; FAILING_OUT="$(AI_GEMINI_BIN="$TMP/bin/agy-help-failing" "$SCRIPT" doctor --identity 2>&1)"; FAILING_RC=$?; set -e
+check 'sandbox probe refuses when agy --help itself fails' "test '$FAILING_RC' -ne 0 && printf '%s' \"\$FAILING_OUT\" | grep -q 'agy --help failed'"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools/lib"

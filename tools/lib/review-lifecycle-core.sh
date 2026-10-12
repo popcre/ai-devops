@@ -324,7 +324,7 @@ rlc_lifecycle_begin() { # rlc_lifecycle_begin PROVIDER REPO RUN_ID CALLER [BASE]
   [ -z "$base" ] || args+=(--base "$base")
   [ -z "$session" ] || args+=(--session-id "$session")
   [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] || args+=(--reviewer-approval "$AI_REVIEW_REVIEWER_APPROVAL")
-  AI_REVIEW_RUNNER_CORE="$RLC_STAMP" "$RLC_LIFECYCLE" begin "${args[@]}" \
+  AI_REVIEW_LIFECYCLE_OWNER_PID="$$" AI_REVIEW_RUNNER_CORE="$RLC_STAMP" "$RLC_LIFECYCLE" begin "${args[@]}" \
     || rlc_die 'provider preflight failed; no review was assigned.'
 }
 
