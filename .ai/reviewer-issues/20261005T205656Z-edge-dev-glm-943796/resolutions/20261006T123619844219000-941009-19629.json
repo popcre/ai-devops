@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "partially-resolved",
+  "summary": "Wrappers ai-gemini and ai-glm now resolve caller from explicit AI_*_CALLER (or --caller) or harness detection (mimo/claude/codex/zcode) and fail closed with caller_identity_missing instead of defaulting to codex/claude. Under MiMo, caller=mimo is auto-detected from MIMO_* process markers. Residual: shared-db run-governed-review.mjs detectReviewCaller still only knows claude/codex and throws before spawning the wrapper; that launcher fix is out of scope for this repo.",
+  "resolved_at": "2026-10-06T12:36:19Z",
+  "repair_repository": "C:/repos/ai-devops-wt-caller-detect",
+  "repair_commits": [
+    "6a71ca1dfd0c8b221fbc21a6d3ef211592cdc3fa"
+  ],
+  "evidence": [
+    "C:/repos/ai-devops-wt-caller-detect/caller-repair-evidence.txt"
+  ],
+  "details": null
+}

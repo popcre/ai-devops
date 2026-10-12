@@ -1,0 +1,1 @@
+ai-review-preflight: Gemini wrapper, runtime, or model changed during qualification; untested bytes are not authorized and the previous qualification version stays valid.

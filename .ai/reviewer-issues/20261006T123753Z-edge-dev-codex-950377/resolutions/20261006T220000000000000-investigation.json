@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "open",
+  "summary": "Root cause identified and fixed in PR #1323 (nested pool-runner inheritance + sandbox_source_chain walk in tools/reviewer_event_guard.sh and tools/reviewer_events.py). PR #1323 head 740dc59b83295035b78b2da9724d5f7060e85ceb is queued to merge (auto-merge set, all checks SUCCESS, mergeStateStatus CLEAN) but not yet merged to origin/main. Cannot retest codex final-check without the landed guard on origin/main. Waiting on merge queue to process #1323.",
+  "resolved_at": null,
+  "repair_repository": "C:/repos/ai-devops-wt-reviewer-durable-publish",
+  "repair_commits": [
+    "740dc59b83295035b78b2da9724d5f7060e85ceb"
+  ],
+  "evidence": [
+    "https://github.com/popcre/ai-devops/pull/1323",
+    "C:/repos/ai-devops/.ai/reviewer-issues/20261006T123753Z-edge-dev-codex-950377/details.redacted.txt"
+  ],
+  "details": "Decisive failure (from details.redacted.txt): 'reviewer event recording: sandbox evidence requirement is missing; cleanup refused' and 'ai-review-sandbox: sandbox evidence is not reconciled; retained for local recovery'. This is the sandbox-source / durable-publish class, not capacity/cancel. Root cause: nested pool-runners started a second invocation instead of inheriting the open run_id, and bind_sandbox compared only immediate source rather than walking the managed-copy chain. Both fixed in PR #1323. Investigation complete. Remaining blocker: PR #1323 merge queue throughput. Once merged, retest with: bin/ai-review codex final-check --assert-head <full-40-char-SHA> on a small disposable branch. Do NOT use --implementer mimo (not in config/reviewer-registry.json)."
+}

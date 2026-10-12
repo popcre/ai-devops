@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "resolved",
+  "summary": "Pin already tracks supported Muse Code 1.4.2-R4684.1 (config/muse-code/version). Hardened mismatch path: doctor and require_runtime name found vs supported, never execute hash-unverified binary. PR #1329 merged f34c401.",
+  "resolved_at": "2026-10-06T14:22:45Z",
+  "repair_repository": "C:/repos/ai-devops-wt-muse-doctor-pin",
+  "repair_commits": [
+    "f34c401d694f939469e594789bca2f05fc9e3e7a"
+  ],
+  "evidence": [
+    "C:/repos/ai-devops-wt-muse-doctor-pin/.ai/reviews/muse-final-check-20261006T130756-1267861-15205.md"
+  ],
+  "details": null
+}

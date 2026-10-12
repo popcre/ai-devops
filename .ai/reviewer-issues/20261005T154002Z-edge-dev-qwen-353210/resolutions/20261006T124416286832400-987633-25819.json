@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "resolved",
+  "summary": "ai-review-preflight now reports known-broken providers un-drawable (usable:false, failure_class provider_unavailable) before a replacement sequence is consumed, even when a live qualification is current; quarantined providers stay un-drawable. This is the preflight-refuses-before-sequence path. +4 focused tests pass (suite 158/13 vs clean baseline 154/13, same 13 environmental failures). Qwen not re-qualified.",
+  "resolved_at": "2026-10-06T12:44:16Z",
+  "repair_repository": "C:/repos/ai-devops-wt-qwen-skip-broken",
+  "repair_commits": [
+    "fd4c79b0c3c1631afab1742b04d5237616206a9a"
+  ],
+  "evidence": [
+    "C:/repos/ai-devops-wt-qwen-skip-broken/.evidence-20261005T154002Z.md"
+  ],
+  "details": null
+}

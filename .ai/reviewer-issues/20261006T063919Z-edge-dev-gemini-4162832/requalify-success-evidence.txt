@@ -1,0 +1,60 @@
+Gemini requalification success evidence
+Incident: 20261006T063919Z-edge-dev-gemini-4162832
+Machine: edge-dev
+Captured by: MiMo subagent T3
+
+ORIGINAL FAILURE LINE (from details.redacted.txt, verbatim):
+ai-review-preflight: Gemini wrapper, runtime, or model changed during qualification; untested bytes are not authorized and the previous qualification version stays valid.
+
+Source of that line: bin/ai-review-preflight:617 (qualify_gemini drift guard).
+It is NOT the ERROR_UNTRUSTED_MOUNT_POINT junction error that hit incident
+20261006T022654Z-edge-dev-gemini-3639834. This incident is the mid-qualification
+drift guard: wrapper SHA, agy version, agy SHA, or model changed between the
+pre-canary doctor --identity snapshot and the post-canary one. Prior
+qualification versions are preserved across the failure (issue #1112).
+
+JUNCTION STATE (checked 2026-10-06 ~5:42 PM EDT):
+C:\Users\ahazan\.gemini is a healthy Mount Point reparse tag 0xa0000003
+Substitute Name: \??\D:\ai-data\gemini
+Not implicated in this failure.
+
+RETRY / REQUALIFICATION ATTEMPTS:
+1. bin/ai-review-preflight requalify gemini
+   -> "ai-review-preflight: gemini live qualification is current."  (exit 0)
+   (hash-level staleness check only; no canary run because installed bytes
+   already matched the stored qualification)
+2. bin/ai-review-preflight qualify gemini   (forced live canary)
+   START 2026-10-06T21:46:07Z (5:46:07 PM EDT)
+   -> "ai-review-preflight: Gemini live qualification recorded for wrapper
+       021ac7c9a3f81581150474f38420a612b54121cfab6da517a20374901d87645d,
+       agy 1.3.0, and model gemini-3.8-flash-high."
+   EXIT=0
+   END   2026-10-06T21:48:18Z (5:48:18 PM EDT)
+3. bin/ai-review-preflight requalify gemini  (confirmation)
+   -> "ai-review-preflight: gemini live qualification is current."  (exit 0)
+
+Canary attempts needed: 1. Retries needed: 0 (passed first try).
+
+DECISIVE SUCCESS LINE (verbatim):
+ai-review-preflight: Gemini live qualification recorded for wrapper 021ac7c9a3f81581150474f38420a612b54121cfab6da517a20374901d87645d, agy 1.3.0, and model gemini-3.8-flash-high.
+
+QUALIFICATION RECORD:
+path: C:/Users/ahazan/.local/state/ai-devops/review-quarantine/gemini-live-qualified.json
+     (MSYS: ~/.local/state/ai-devops/review-quarantine/gemini-live-qualified.json)
+schema version: 2
+versions array length: 5 (same-identity canary refreshes the existing entry
+  rather than appending a duplicate; see publish_qualification_version)
+top-level entry after the canary:
+  wrapper_sha256: 021ac7c9a3f81581150474f38420a612b54121cfab6da517a20374901d87645d
+  agy_version:    1.3.0
+  agy_sha256:     c1b0001989c4051a41f5104484de182db5014fa155053c8088baacf1663063bf
+  model:          gemini-3.8-flash-high
+  qualified_epoch: 1791323296 = 2026-10-06T21:48:16Z = 2026-10-06 5:48:16 PM EDT
+
+INSTALLED IDENTITY (bin/ai-gemini doctor --identity, before and after canary):
+IDENTITY agy=1.3.0 agy_sha256=c1b0001989c4051a41f5104484de182db5014fa155053c8088baacf1663063bf model=gemini-3.8-flash-high disposable-copy=yes containment=--sandbox+byte-inventory
+
+STATUS AFTER (bin/ai-review-preflight status gemini):
+{"provider":"gemini","status":"installed-healthy",...,"usable":true,...}
+
+No code, configuration, or infrastructure change was made.

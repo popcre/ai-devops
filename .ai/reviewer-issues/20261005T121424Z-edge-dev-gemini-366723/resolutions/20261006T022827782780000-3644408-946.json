@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "partially-resolved",
+  "summary": "Durable-publish root cause fixed: nested pool runners inherit one open invocation and bind_sandbox accepts the managed-copy chain. Verified with muse final-check storing ## Verdict + full head SHA 53be241e9529162d77966c9f645e146b84e3dd2c. Remaining: gemini stays quarantined (live-qualification-required); MiMo implementer still not in reviewer-registry.",
+  "resolved_at": "2026-10-06T02:28:27Z",
+  "repair_repository": "C:/repos/ai-devops-wt-reviewer-durable-publish",
+  "repair_commits": [
+    "9b1cb9f4db4d95ad95d043b6a86e64bb531da86c"
+  ],
+  "evidence": [
+    "C:/repos/ai-devops-wt-reviewer-durable-publish/.ai/reviews/muse-final-check-20261006T021601-3569665-25348.md",
+    "https://github.com/popcre/ai-devops/pull/1323"
+  ],
+  "details": null
+}
