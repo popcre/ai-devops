@@ -1478,9 +1478,12 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
         report_path = Path(report)
         # Bash records Git Bash paths (/tmp/..., /c/...); Windows Python must
         # convert them before opening. The recorded string is still returned.
+        # A missing or hanging cygpath skips this candidate instead of aborting
+        # the whole approval lookup (#1562).
         if os.name == "nt" and report.startswith("/") and not report.startswith("//"):
             try:
-                converted = subprocess.run(["cygpath", "-w", report], capture_output=True, text=True, timeout=30)
+                converted = subprocess.run(["cygpath", "-w", report],
+                                           capture_output=True, text=True, timeout=5)
             except (OSError, subprocess.SubprocessError):
                 continue  # no usable cygpath: skip this report, not the whole lookup
             if converted.returncode != 0 or not converted.stdout.strip():
