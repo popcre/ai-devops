@@ -263,9 +263,9 @@ grok_runtime_selection_cases() {
     unset AI_GROK_BIN FIXTURE_PATH_RUNTIME
     [ "$(grok_resolve_door_runtime)" = "$HOME/.local/bin/grok" ] || exit 3
     rm "$HOME/.local/bin/grok"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
-    rm "$HOME/.grok/bin/grok"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 6
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 4
+    rm "$HOME/.grok/bin/grok.exe"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 6
     [ ! -e "$HOME/contact" ] || exit 5
   ' fixture "$ROOT"
 }

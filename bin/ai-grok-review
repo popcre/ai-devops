@@ -276,8 +276,8 @@ resolve_grok() {
   local c
   for c in "$(command -v grok 2>/dev/null || true)" \
            "$HOME/.local/bin/grok" \
-           "$HOME/.grok/bin/grok" \
            "$HOME/.grok/bin/grok.exe" \
+           "$HOME/.grok/bin/grok" \
            /home/ai/.local/bin/grok \
            /usr/local/bin/grok; do
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
