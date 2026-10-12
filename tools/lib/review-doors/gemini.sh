@@ -196,6 +196,9 @@ main() {
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current gemini "$raw" || true
+    if ! retain_failure "$raw" "$rc" out-of-credit; then
+      printf 'gemini door: private diagnostic retention refused; capacity refusal remains nonauthorizing.\n' >&2
+    fi
     reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92

@@ -140,6 +140,22 @@ run_case multi-init invalid-response-json '{"event":"init","conversation_id":"a"
 run_case invalid invalid-response-json '{broken-json'
 run_case array invalid-response-json '[{"status":"SUCCESS"}]'
 run_case native-error provider-call-failed '{"status":"ERROR","error":"private provider diagnostic sentinel"}' 1
+# Credit exhaustion keeps exit 92 and the capacity hold, and still retains the
+# native result privately like every other refused provider call (#1562).
+test_case=out-of-credit
+cp "$ROOT/tests/fixtures/reviewer-credit/gemini-prepay.json" "$GEMINI_FIXTURE"
+export DOOR_REPORT_OUT="$TMP/credit.report" DOOR_DIAGNOSTICS_DIR="$TMP/credit.diagnostics" GEMINI_NATIVE_EXIT=0
+credit_rc=0
+bash "$ROOT/tools/lib/review-doors/gemini.sh" review > "$TMP/credit.out" 2> "$TMP/credit.err" || credit_rc=$?
+[ "$credit_rc" -eq 92 ]
+grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=gemini code=insufficient_quota' "$TMP/credit.err"
+"$(command -v python3 || command -v python)" "$ROOT/tools/reviewer_admission.py" capacity-status gemini --directory "$AI_REVIEW_QUARANTINE_DIR" | jq -e '.failure_class=="out-of-credit"' >/dev/null
+grep -q '"reason": "out-of-credit"' "$DOOR_DIAGNOSTICS_DIR/report.md"
+cmp "$GEMINI_FIXTURE" "$DOOR_DIAGNOSTICS_DIR/native.jsonl"
+grep -q 'private provider diagnostic sentinel' "$DOOR_DIAGNOSTICS_DIR/native.stderr"
+! grep -q 'private provider diagnostic sentinel' "$TMP/credit.err"
+printf '%s\n' 'credit exhaustion exits 92, records capacity, and retains private native diagnostics'
+passed=$((passed+1))
 test_case=file-tool-contract
 printf 'def allocation(total, count):\n    if count < 0:\n        raise ValueError("count must be positive")\n    return total / count\n' > "$TMP/work/allocation.py"
 printf 'Review allocation.py. Execute python3 -m unittest when supported; otherwise report the unsupported capability.\n' > "$TMP/prompt"
