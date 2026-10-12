@@ -1,0 +1,480 @@
+#!/usr/bin/env bash
+# ai-housekeeping — read-only inventory of housekeeping candidates in this repo.
+#
+#   ai-housekeeping            # print the report
+#   ai-housekeeping --details  # print every supported artifact
+#   ai-housekeeping --log      # also append the report to the housekeeping log
+#   ai-housekeeping --quiet    # print nothing when there are no review candidates
+#
+# READ-ONLY BY DESIGN: it never deletes, commits, checks out, or prunes
+# anything. Findings name the governed cleanup procedure; they do not print
+# copy-paste deletion commands.
+# There is deliberately no --apply. See plan_repo-housekeeping-visibility.md.
+set -uo pipefail
+
+# --- flags -----------------------------------------------------------------
+DETAILS=0
+LOGGING=0
+QUIET=0
+for arg in "$@"; do
+  case "$arg" in
+    --details) DETAILS=1 ;;
+    --log) LOGGING=1 ;;
+    --quiet) QUIET=1 ;;
+    -h|--help)
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "ai-housekeeping: unknown option '$arg' (try --help)" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# --- home / env (sane defaults; nothing hard-coded that should be configurable)
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+else
+  BASE_HOME="$HOME"
+fi
+LOG="${AI_HOUSEKEEPING_LOG:-$BASE_HOME/.cache/ai-housekeeping.log}"
+STATE_DIR="${AI_HOUSEKEEPING_STATE_DIR:-$BASE_HOME/.local/state/ai-devops}"
+
+# --- helpers ---------------------------------------------------------------
+c_head() { printf '\033[1m%s\033[0m\n' "$1"; }
+c_warn() { printf '\033[33m⚠  %s\033[0m\n' "$1"; }
+
+OUT=""
+emit() { OUT="${OUT}${1}"$'\n'; }
+emit_warn() { OUT="${OUT}$(printf '\033[33m⚠  %s\033[0m' "$1")"$'\n'; }
+
+
+# --- A. Preflight ----------------------------------------------------------
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ai-housekeeping: not inside a git repository — nothing to inventory." >&2
+  exit 1
+fi
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Only the repo's governed GitHub transport is allowed; tests override with
+# AI_HOUSEKEEPING_GH (set it empty or to a stub path). There is no bare-CLI
+# fallback — that would bypass the shared admission path. Every GitHub call
+# is time-bounded so a locked or hung transport cannot freeze the report.
+GH=""
+if [[ -n "${AI_HOUSEKEEPING_GH+x}" ]]; then
+  GH="${AI_HOUSEKEEPING_GH}"
+else
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [[ -x "$ROOT/bin/ai-gh" ]]; then
+    GH="$ROOT/bin/ai-gh"
+  fi
+fi
+
+gh_call() {
+  # Bounded GitHub invocation. Returns non-zero on timeout or failure.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 30 "$GH" "$@"
+  else
+    "$GH" "$@"
+  fi
+}
+
+GH_OK=0
+if [[ -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
+  if gh_call auth status >/dev/null 2>&1; then
+    GH_OK=1
+  fi
+fi
+
+# One GitHub round-trip for every PR we may need. Open PRs take precedence;
+# otherwise a merged PR qualifies only on an exact headRefOid match (D3a).
+PR_DATA=""
+if [[ "$GH_OK" -eq 1 ]]; then
+  PR_DATA="$(gh_call pr list --state all --limit 200 \
+    --json state,headRefName,headRefOid,mergedAt,url 2>/dev/null || true)"
+fi
+
+pr_lookup() {
+  # $1 = branch name. Prints: <state>|<headRefOid>|<url>  (state may be
+  # OPEN / MERGED / UNKNOWN). Empty output when no PR is known.
+  local branch="$1" best_state="" best_oid="" best_url="" st oid url
+  [[ -n "$PR_DATA" ]] || return 0
+  # Prefer an open PR over any merged one.
+  while IFS=$'\t' read -r st oid url; do
+    [[ "$st" == "OPEN" ]] || continue
+    printf '%s|%s|%s\n' "$st" "$oid" "$url"
+    return 0
+  done < <(jq -r --arg b "$branch" \
+    '.[] | select(.headRefName==$b) | .state + "\t" + .headRefOid + "\t" + .url' \
+    <<<"$PR_DATA" 2>/dev/null)
+  # Otherwise take a merged PR (exact headRefOid match is decided by caller).
+  while IFS=$'\t' read -r st oid url; do
+    [[ "$st" == "MERGED" ]] || continue
+    if [[ -z "$best_state" ]]; then
+      best_state="$st"; best_oid="$oid"; best_url="$url"
+    fi
+  done < <(jq -r --arg b "$branch" \
+    '.[] | select(.headRefName==$b and .state=="MERGED") | .state + "\t" + .headRefOid + "\t" + .url' \
+    <<<"$PR_DATA" 2>/dev/null)
+  if [[ -n "$best_state" ]]; then
+    printf '%s|%s|%s\n' "$best_state" "$best_oid" "$best_url"
+  fi
+}
+
+classify_ref() {
+  # $1 = local HEAD SHA, $2 = branch name. Prints LIVE / MERGED CANDIDATE / UNKNOWN.
+  local head_sha="$1" branch="$2" line st oid
+  if [[ "$GH_OK" -ne 1 ]]; then
+    echo "UNKNOWN"
+    return 0
+  fi
+  line="$(pr_lookup "$branch")"
+  [[ -n "$line" ]] || { echo "UNKNOWN"; return 0; }
+  st="${line%%|*}"
+  oid="$(cut -d'|' -f2 <<<"$line")"
+  if [[ "$st" == "OPEN" ]]; then
+    echo "LIVE"
+    return 0
+  fi
+  if [[ "$st" == "MERGED" && -n "$oid" && "$oid" == "$head_sha" ]]; then
+    echo "MERGED CANDIDATE"
+    return 0
+  fi
+  echo "UNKNOWN"
+}
+
+issue_state() {
+  # $1 = issue number. Prints OPEN / CLOSED / UNKNOWN.
+  local n="$1" st
+  if [[ "$GH_OK" -ne 1 ]]; then
+    echo "UNKNOWN"
+    return 0
+  fi
+  st="$(gh_call issue view "$n" --json state --jq .state 2>/dev/null || true)"
+  case "$st" in
+    OPEN|CLOSED) echo "$st" ;;
+    *) echo "UNKNOWN" ;;
+  esac
+}
+
+# --- collect: B. Worktrees (MACHINE-LOCAL) --------------------------------
+WT_ROWS=()          # path|branch|dirty|class
+WT_LIVE=0; WT_MERGED=0; WT_UNKNOWN=0
+declare -A WT_BRANCHES=()
+wt_flush() {
+  [[ -n "${wt_path:-}" ]] || return 0
+  local dirty="clean" sha="" class="UNKNOWN" br="${wt_branch:-}" st_out
+  if [[ ! -d "$wt_path" ]]; then
+    dirty="missing"
+  elif st_out="$(git --no-optional-locks -C "$wt_path" status --porcelain 2>/dev/null)"; then
+    if [[ -n "$st_out" ]]; then dirty="dirty"; else dirty="clean"; fi
+  else
+    dirty="unknown"
+  fi
+  sha="$(git --no-optional-locks -C "$wt_path" rev-parse HEAD 2>/dev/null || echo "")"
+  if [[ -n "$br" ]]; then
+    WT_BRANCHES["$br"]=1
+  fi
+  if [[ "$dirty" == "dirty" ]]; then
+    class="LIVE"
+  elif [[ -n "$br" && "$dirty" == "clean" ]]; then
+    class="$(classify_ref "$sha" "$br")"
+  else
+    class="UNKNOWN"
+  fi
+  WT_ROWS+=("${wt_path}|${br:-detached}|${dirty}|${class}")
+  case "$class" in
+    LIVE) WT_LIVE=$((WT_LIVE + 1)) ;;
+    "MERGED CANDIDATE") WT_MERGED=$((WT_MERGED + 1)) ;;
+    *) WT_UNKNOWN=$((WT_UNKNOWN + 1)) ;;
+  esac
+  wt_path=""; wt_branch=""
+}
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      wt_flush
+      wt_path="${line#worktree }"
+      wt_branch=""
+      ;;
+    branch\ *)
+      wt_branch="${line#branch }"
+      wt_branch="${wt_branch#refs/heads/}"
+      ;;
+    ""|HEAD\ *|detached|bare|locked\ *|prunable\ *)
+      ;;
+  esac
+done < <(git worktree list --porcelain 2>/dev/null)
+wt_flush
+
+# --- collect: C. Branches (MACHINE-LOCAL unless separately pushed) ---------
+BR_ROWS=()          # name|sha|class|flags
+BR_LIVE=0; BR_MERGED=0; BR_UNKNOWN=0
+BR_IDENTICAL=0; BR_NOWT=0
+declare -A SHA_COUNT=()
+declare -A SHA_FIRST=()
+while IFS= read -r br; do
+  [[ "$br" == "main" || "$br" == "master" ]] && continue
+  sha="$(git rev-parse "$br" 2>/dev/null || echo "")"
+  [[ -n "$sha" ]] || continue
+  if [[ -n "${SHA_COUNT[$sha]:-}" ]]; then
+    SHA_COUNT[$sha]=$(( ${SHA_COUNT[$sha]} + 1 ))
+  else
+    SHA_COUNT[$sha]=1
+    SHA_FIRST[$sha]="$br"
+  fi
+  flags=""
+  if [[ -z "${WT_BRANCHES[$br]:-}" ]]; then
+    flags="no-worktree"
+    BR_NOWT=$((BR_NOWT + 1))
+  fi
+  class="$(classify_ref "$sha" "$br")"
+  BR_ROWS+=("${br}|${sha}|${class}|${flags}")
+  case "$class" in
+    LIVE) BR_LIVE=$((BR_LIVE + 1)) ;;
+    "MERGED CANDIDATE") BR_MERGED=$((BR_MERGED + 1)) ;;
+    *) BR_UNKNOWN=$((BR_UNKNOWN + 1)) ;;
+  esac
+done < <(git for-each-ref refs/heads --format='%(refname:short)' 2>/dev/null)
+for sha in "${!SHA_COUNT[@]}"; do
+  if [[ "${SHA_COUNT[$sha]}" -gt 1 ]]; then
+    BR_IDENTICAL=$((BR_IDENTICAL + ${SHA_COUNT[$sha]}))
+  fi
+done
+
+# --- collect: D. Handoff files (GIT-SHARED) --------------------------------
+HO_ROWS=()          # file|class|issue|owner
+HO_SUCCESSOR=0; HO_OPEN=0; HO_UNPROVABLE=0; HO_UNATTRIBUTED=0
+if [[ -d "$REPO_ROOT/HANDOFF.d" ]]; then
+  for f in "$REPO_ROOT/HANDOFF.d"/*.md; do
+    [[ -f "$f" ]] || continue
+    base="${f##*/}"
+    issue=""; owner=""; saw_contract=0
+    n=0
+    while IFS= read -r ln && [[ $n -lt 30 ]]; do
+      n=$((n + 1))
+      case "$ln" in
+        issue:*)
+          issue="${ln#issue:}"
+          issue="${issue%%#*}"
+          # strip surrounding whitespace without spawning tr
+          issue="${issue#"${issue%%[![:space:]]*}"}"
+          issue="${issue%"${issue##*[![:space:]]}"}"
+          saw_contract=1 ;;
+        status:*)
+          saw_contract=1 ;;
+        owner:*)
+          owner="${ln#owner:}"
+          owner="${owner%%#*}"
+          owner="${owner#"${owner%%[![:space:]]*}"}"
+          owner="${owner%"${owner##*[![:space:]]}"}"
+          saw_contract=1 ;;
+      esac
+    done < "$f"
+    if [[ "$saw_contract" -eq 0 ]]; then
+      class="UNATTRIBUTED"
+      HO_UNATTRIBUTED=$((HO_UNATTRIBUTED + 1))
+      [[ -n "$owner" ]] || owner="OWNER UNKNOWN"
+      HO_ROWS+=("${base}|${class}|-|${owner}")
+      continue
+    fi
+    [[ -n "$owner" ]] || owner="OWNER UNKNOWN"
+    if [[ "$issue" == "none" || -z "$issue" ]]; then
+      class="UNPROVABLE"
+      HO_UNPROVABLE=$((HO_UNPROVABLE + 1))
+      HO_ROWS+=("${base}|${class}|${issue:-none}|${owner}")
+      continue
+    fi
+    if [[ "$issue" =~ ^[0-9]+$ ]]; then
+      ist="$(issue_state "$issue")"
+      if [[ "$ist" == "CLOSED" ]]; then
+        class="SUCCESSOR REVIEW"
+        HO_SUCCESSOR=$((HO_SUCCESSOR + 1))
+      else
+        class="OPEN"
+        HO_OPEN=$((HO_OPEN + 1))
+      fi
+    else
+      class="UNPROVABLE"
+      HO_UNPROVABLE=$((HO_UNPROVABLE + 1))
+    fi
+    HO_ROWS+=("${base}|${class}|${issue}|${owner}")
+  done
+fi
+
+# --- collect: E. Plan files (GIT-SHARED, classify only) --------------------
+PL_ROWS=()          # file|class
+PL_ACTIVE=0; PL_DONE=0
+for pf in "$REPO_ROOT"/plan_*.md; do
+  [[ -f "$pf" ]] || continue
+  base="${pf##*/}"
+  open_rows=0; done_rows=0
+  while IFS= read -r ln; do
+    case "$ln" in
+      \|*)
+        # status cell is the 4th pipe-separated field (empty|num|step|status|...)
+        IFS='|' read -r _ _ _ cell _ <<<"$ln"
+        [[ -n "${cell:-}" ]] || continue
+        case "$cell" in
+          *✅*|*done*) done_rows=$((done_rows + 1)) ;;
+          *⬜*|*open*|*partial*|*blocked*) open_rows=$((open_rows + 1)) ;;
+        esac
+        ;;
+    esac
+  done < "$pf"
+  if [[ "$open_rows" -gt 0 ]]; then
+    PL_ROWS+=("${base}|active")
+    PL_ACTIVE=$((PL_ACTIVE + 1))
+  elif [[ "$done_rows" -gt 0 ]]; then
+    PL_ROWS+=("${base}|all-steps-done")
+    PL_DONE=$((PL_DONE + 1))
+  else
+    PL_ROWS+=("${base}|active")
+    PL_ACTIVE=$((PL_ACTIVE + 1))
+  fi
+done
+
+# --- collect: F. Agent job records (MACHINE-LOCAL) -------------------------
+JOB_LINES=()
+for prov in glm kimi qwen; do
+  dir="$STATE_DIR/$prov"
+  if [[ -d "$dir" ]]; then
+    n="$(find "$dir" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    oldest="$(find "$dir" -type f -printf '%T+\n' 2>/dev/null | sort | head -n 1)"
+    [[ -n "$oldest" ]] || oldest="unknown"
+    JOB_LINES+=("$prov $n (oldest $oldest)")
+  else
+    JOB_LINES+=("$prov 0")
+  fi
+done
+
+# --- collect: G. Odd refs (CLONE-LOCAL unless proven pushed) ---------------
+ODD_REFS="$(git for-each-ref 'refs/codex/turn-diffs/checkpoints/*' --format='%(refname)' 2>/dev/null | wc -l | tr -d ' ')"
+
+# --- classification counters for the summary ------------------------------
+REVIEW_CANDIDATES=$((WT_MERGED + BR_MERGED + HO_SUCCESSOR + HO_UNATTRIBUTED + HO_UNPROVABLE))
+
+# --- H. Footer / summary --------------------------------------------------
+if [[ "$GH_OK" -ne 1 ]]; then
+  GH_LINE="UNKNOWN (GitHub unavailable)"
+else
+  GH_LINE="available"
+fi
+
+emit "Housekeeping summary — $REPO_ROOT"
+emit "GitHub: $GH_LINE"
+emit "Worktrees (machine-local): $WT_LIVE LIVE, $WT_MERGED MERGED CANDIDATE, $WT_UNKNOWN UNKNOWN"
+emit "Branches (machine-local): $BR_LIVE LIVE, $BR_MERGED MERGED CANDIDATE, $BR_UNKNOWN UNKNOWN, $BR_IDENTICAL identical-SHA, $BR_NOWT no-worktree"
+emit "Handoffs (git-shared): $HO_OPEN OPEN, $HO_SUCCESSOR SUCCESSOR REVIEW, $HO_UNPROVABLE UNPROVABLE, $HO_UNATTRIBUTED UNATTRIBUTED"
+emit "Plans (git-shared): $PL_ACTIVE active, $PL_DONE retained record"
+emit "Agent job records (machine-local): ${JOB_LINES[*]}"
+emit "Odd refs (clone-local): $ODD_REFS unowned"
+if [[ "$GH_OK" -ne 1 ]]; then
+  emit_warn "GitHub unavailable — merged-ness is UNKNOWN for every worktree and branch above. Install and authenticate gh, then re-run. Never trust an ancestry fallback."
+fi
+emit "Log: $LOG"
+emit "Nothing was changed."
+
+if [[ "$DETAILS" -eq 1 ]]; then
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'A. Preflight')"
+  emit "  repo: $REPO_ROOT"
+  emit "  gh: $GH_LINE"
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'B. Worktrees — MACHINE-LOCAL')"
+  if [[ "${#WT_ROWS[@]}" -eq 0 ]]; then
+    emit "  (none)"
+  else
+    for row in "${WT_ROWS[@]}"; do
+      IFS='|' read -r p b d c <<<"$row"
+      emit "  $c  $p  branch=$b  $d"
+      if [[ "$c" == "MERGED CANDIDATE" ]]; then
+        emit "    next review: use the cleanup-worktree skill on $p   (a human or an informed session, never this tool)"
+      fi
+    done
+  fi
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'C. Branches — MACHINE-LOCAL unless separately pushed')"
+  if [[ "${#BR_ROWS[@]}" -eq 0 ]]; then
+    emit "  (none)"
+  else
+    for row in "${BR_ROWS[@]}"; do
+      IFS='|' read -r n s c f <<<"$row"
+      extra=""
+      [[ -n "$f" ]] && extra="  [$f]"
+      if [[ -n "${SHA_COUNT[$s]:-}" && "${SHA_COUNT[$s]}" -gt 1 ]]; then
+        extra="$extra  [identical-SHA with ${SHA_FIRST[$s]}]"
+      fi
+      emit "  $c  $n  ${s:0:8}$extra"
+      if [[ "$c" == "MERGED CANDIDATE" ]]; then
+        emit "    next review: use the cleanup-worktree skill on branch $n   (a human or an informed session, never this tool)"
+      fi
+    done
+  fi
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'D. Handoff files — GIT-SHARED')"
+  if [[ "${#HO_ROWS[@]}" -eq 0 ]]; then
+    emit "  (none)"
+  else
+    for row in "${HO_ROWS[@]}"; do
+      IFS='|' read -r f c i o <<<"$row"
+      emit "  $c  $f  issue=$i  owner=$o"
+      if [[ "$c" == "SUCCESSOR REVIEW" ]]; then
+        emit "    next review: apply the successor rule (handoff-writer skill) — a closed issue is a review trigger, not proof of completion"
+      elif [[ "$c" == "UNATTRIBUTED" ]]; then
+        emit "    next review: author must add the contract block (issue:/status:/owner:) — reported as UNATTRIBUTED"
+      fi
+    done
+  fi
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'E. Plan files — GIT-SHARED, classify only')"
+  if [[ "${#PL_ROWS[@]}" -eq 0 ]]; then
+    emit "  (none)"
+  else
+    for row in "${PL_ROWS[@]}"; do
+      IFS='|' read -r f c <<<"$row"
+      if [[ "$c" == "all-steps-done" ]]; then
+        emit "  retained record — review by hand, do not delete  $f"
+      else
+        emit "  active  $f"
+      fi
+    done
+  fi
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'F. Agent job records — MACHINE-LOCAL')"
+  for line in "${JOB_LINES[@]}"; do
+    emit "  $line"
+  done
+  emit "  remedy: ai-glm doctor / ai-kimi doctor / ai-qwen doctor and the wrappers' own delete subcommands. No TTL."
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'G. Odd refs — CLONE-LOCAL unless proven pushed')"
+  emit "  $ODD_REFS refs/codex/turn-diffs/checkpoints/* (nobody currently owns them; no remedy is known)"
+  emit ""
+  emit "$(printf '\033[1m%s\033[0m' 'H. Footer')"
+  emit "  ${HO_SUCCESSOR} handoff(s) need successor review, ${WT_MERGED} merged worktree candidate(s), ${ODD_REFS} unowned refs. Nothing was changed."
+fi
+
+# --- output / quiet / log -------------------------------------------------
+if [[ "$QUIET" -eq 1 && "$REVIEW_CANDIDATES" -eq 0 && "$GH_OK" -eq 1 ]]; then
+  : # print nothing when there is nothing to review and the CLI is available
+elif [[ "$QUIET" -eq 1 && "$REVIEW_CANDIDATES" -eq 0 && "$GH_OK" -ne 1 ]]; then
+  # Offline quiet: still silent on stdout, but the log records the unknown.
+  :
+else
+  printf '%s' "$OUT"
+fi
+
+if [[ "$LOGGING" -eq 1 ]]; then
+  mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+  {
+    printf '===== %s ai-housekeeping =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf '%s' "$OUT"
+  } >>"$LOG" 2>/dev/null || true
+fi
+
+exit 0

@@ -268,6 +268,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops version` | Print the toolkit version |
 | `ai-devops paths` | Print the paths this toolkit uses |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
+| `ai-housekeeping` | Read-only inventory of housekeeping candidates (worktrees, branches, handoffs, plans, job records) |
 | `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |
 | `ai-review <provider> <mode>` | Start a gated review; the only supported front door (registry decides the pool) |
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review (call it through `ai-review`; a plan review started directly is refused) |
