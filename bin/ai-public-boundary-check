@@ -5,13 +5,12 @@ root="${1:-.}"
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDARY FAIL: not a git repo' >&2; exit 1; }
 failed=0
 while IFS= read -r path; do
-  case "$path" in
-    [.]ai/*|[.]AI/*)
+  lowered="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    .ai/*|./.ai/*)
       # .ai/reviewer-issues/ is an intentional publish (PR #1626): redacted
       # incident packages kept on github.com for diagnosis. Only prose/data
-      # extensions are allowed there; secret-bearing names and forms still fail
-      # (case-insensitive, so TOKEN.txt and Secret.json are caught).
-      lowered="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+      # extensions are allowed there; secret-bearing names and forms still fail.
       case "$lowered" in
         *.env*|*.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.kdbx|\
         */auth.json|*/credentials.json|*/id_rsa*|*/id_ed25519*|*/id_ecdsa*|*/id_dsa*|\

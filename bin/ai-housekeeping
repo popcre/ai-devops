@@ -163,11 +163,17 @@ cmd_schedule() {
   local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)"
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
-  if [[ "$read_rc" -ne 0 && -n "$existing" ]]; then
-    echo "ai-housekeeping: crontab read failed with content; refusing to replace it" >&2
-    rm -f "$tmp"; return 2
+  if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
+    # Distinguish "no crontab yet" from "unreadable crontab": if the spool
+    # has a file for this user we cannot read, refuse rather than erase it.
+    local spool
+    for spool in /var/spool/cron/crontabs /var/spool/cron /var/spool/cron/tabs; do
+      if [[ -f "$spool/$(id -un 2>/dev/null || whoami)" ]]; then
+        echo "ai-housekeeping: crontab exists but cannot be read; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+    done
   fi
-  # read_rc != 0 with empty output is the normal "no crontab yet" case.
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >>"$tmp" || :
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
@@ -199,9 +205,14 @@ cmd_unschedule() {
   local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)"
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
-  if [[ "$read_rc" -ne 0 && -n "$existing" ]]; then
-    echo "ai-housekeeping: crontab read failed with content; refusing to replace it" >&2
-    rm -f "$tmp"; return 2
+  if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
+    local spool
+    for spool in /var/spool/cron/crontabs /var/spool/cron /var/spool/cron/tabs; do
+      if [[ -f "$spool/$(id -un 2>/dev/null || whoami)" ]]; then
+        echo "ai-housekeeping: crontab exists but cannot be read; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+    done
   fi
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >"$tmp" || :
   crontab "$tmp" || rc=$?

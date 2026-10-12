@@ -49,8 +49,8 @@ for f in leak.env leak.env.production leak.pem leak.key auth.json credentials.js
   if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo "FAIL: reviewer-issues $f fixture passed"; exit 1; fi
   git -C "$TMP/repo" reset -q HEAD ".ai/reviewer-issues/$f"; rm -f "$TMP/repo/.ai/reviewer-issues/$f"
 done
-# Directory-case variants must also fail (.AI/ bypasses a .ai/ case match).
-for dir in ".ai/reviewer-issues" ".AI/reviewer-issues"; do
+# Directory-case variants must also fail (.AI/, .Ai/, .aI/ bypass a .ai/ match).
+for dir in ".ai/reviewer-issues" ".AI/reviewer-issues" ".Ai/reviewer-issues" ".aI/reviewer-issues"; do
   mkdir -p "$TMP/repo/$dir"; printf 'x\n' > "$TMP/repo/$dir/secret.txt"; git -C "$TMP/repo" add -f "$dir/secret.txt"
   if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo "FAIL: $dir/secret.txt fixture passed"; exit 1; fi
   git -C "$TMP/repo" reset -q HEAD "$dir/secret.txt"; rm -rf "$TMP/repo/$dir"
