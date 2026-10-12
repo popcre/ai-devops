@@ -265,7 +265,15 @@ grok_runtime_selection_cases() {
     rm "$HOME/.local/bin/grok"
     [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
     rm "$HOME/.grok/bin/grok"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 6
+    resolved="$(grok_resolve_door_runtime)"
+    # Git Bash/Cygwin report "grok" executable while only grok.exe exists; that
+    # alias is the same file, so accept it there only if no real "grok" remains.
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        [ "$resolved" = "$HOME/.grok/bin/grok.exe" ] ||
+          { [ "$resolved" = "$HOME/.grok/bin/grok" ] && [ -z "$(find "$HOME/.grok/bin" -maxdepth 1 -name grok -print)" ]; } || exit 6 ;;
+      *) [ "$resolved" = "$HOME/.grok/bin/grok.exe" ] || exit 6 ;;
+    esac
     [ ! -e "$HOME/contact" ] || exit 5
   ' fixture "$ROOT"
 }
@@ -820,9 +828,18 @@ printf '# gemini final-check\n\n| reviewed commit | `%s` |\n| source digest | `%
 jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REPORT" --arg s "$(sha256sum "$PH_REPORT" | cut -d' ' -f1)" \
   '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
   > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
+# Native Windows jq/Python may record and print C:/ paths (CRLF-terminated) for
+# a Git Bash /tmp path; elsewhere the comparison stays exact.
+same_path(){
+  local a="${1%$'\r'}" b="${2%$'\r'}"
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  if command -v cygpath >/dev/null 2>&1; then
+    a="$(cygpath -m "$a")" && b="$(cygpath -m "$b")" && [ -n "$a" ] && [ "$a" = "$b" ]
+  else [ "$a" = "$b" ]; fi
+}
 ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
 PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
-[ "$PH_RC" -eq 0 ] && [ "$(jq -r .report <<<"$PH_OUT")" = "$PH_REPORT" ] && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
+[ "$PH_RC" -eq 0 ] && same_path "$(jq -r .report <<<"$PH_OUT")" "$PH_REPORT" && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
   && ok "no_extra_reviewer_on_passed_head" || bad "no_extra_reviewer_on_passed_head"
 cp "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" "$TMP/ph-unscoped.json"
 jq '.evidence_scope="selected-code"|.code_only={paths:["README.md"]}' "$TMP/ph-unscoped.json" > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
@@ -851,7 +868,7 @@ ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-poo
   "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
 rm -f "$TMP/ph-pool-args"
 PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
-[ "$PH_RC" -eq 0 ] && [ "$(printf '%s\n' "$PH_FRONT" | tail -1)" = "$PH_REPORT" ] && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
+[ "$PH_RC" -eq 0 ] && same_path "$(printf '%s\n' "$PH_FRONT" | tail -1)" "$PH_REPORT" && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
   && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
 ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
