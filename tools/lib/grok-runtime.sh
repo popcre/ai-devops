@@ -12,7 +12,9 @@ grok_resolve_door_runtime() {
            "${HOME:-}/.grok/bin/grok.exe" \
            /home/ai/.local/bin/grok \
            /usr/local/bin/grok; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+    # Git Bash: [ -x .../grok ] also succeeds for grok.exe; return the real
+    # file, which native Windows processes can actually launch.
+    [ -n "$c" ] && [ -x "$c" ] && { [ "${c%.exe}" != "$c" ] || ! [ -e "$c.exe" ] || ! [ "$c" -ef "$c.exe" ] || c="$c.exe"; printf '%s' "$c"; return 0; }
   done
   printf 'grok door: local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN.\n' >&2
   return 127
