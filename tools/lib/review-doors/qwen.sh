@@ -162,7 +162,14 @@ main() {
   chmod 600 "$prompt_full" 2>/dev/null || true
 
   containment="$(review_containment)"
-  local -a args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
+  # Same input contract as bin/ai-qwen (#1581): one complete stream-json user
+  # message on stdin, which survives the sandbox relaunch that raw text does not.
+  local stream_input
+  stream_input="$(mktemp)"
+  chmod 600 "$stream_input" 2>/dev/null || true
+  jq -cRs '{type:"user",message:{role:"user",content:.},parent_tool_use_id:null}' "$prompt_full" > "$stream_input"
+  mv -f "$stream_input" "$prompt_full"
+  local -a args=(--model "$QWEN_MODEL" --auth-type openai --input-format stream-json --output-format stream-json --safe-mode
     --max-session-turns "$QWEN_MAX_TURNS" --max-subagent-depth 1)
   if [ "$MODE" = implement ]; then
     args+=(--sandbox --approval-mode yolo)

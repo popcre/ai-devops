@@ -22,7 +22,13 @@ def live_location():
         import pwd
         home = pwd.getpwuid(os.getuid()).pw_dir
     except (ImportError, KeyError, AttributeError):
-        home = str(Path.home())
+        # Windows has no pwd. Path.home() reads USERPROFILE, which a caller
+        # (or a test) may blank; the profile's HOMEDRIVE/HOMEPATH still names
+        # the real user, and HOME is the last resort.
+        try:
+            home = str(Path.home())
+        except RuntimeError:
+            home = (os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")) or os.environ["HOME"]
     return Path(home) / ".local/state/ai-devops/reviewer-events"
 
 
