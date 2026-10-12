@@ -67,6 +67,10 @@
       "bin/ai-winpath": [
         "test-ai-winpath.sh"
       ],
+      "bin/ai-winpath.cmd": [
+        "test-ai-winpath.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
       "bin/ai-sync-memory": [
         "test-ai-memory-sync.sh",
         "test-ai-sync-memory-public-containment.sh",
