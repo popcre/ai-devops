@@ -22,6 +22,9 @@ codex_chats/
 
 # Playwright MCP scratch output (page snapshots), generated during a session.
 .playwright-mcp/
+.playwright-cli/
+test-results/
+playwright-report/
 
 # Real machine-local config (lives in /etc/ai-devops, never committed).
 # Only *.env.example belongs in git.
