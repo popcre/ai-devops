@@ -16,19 +16,37 @@ import uuid
 from reviewer_maintenance import Blocked, digest, encoded, now, physical, publish, read_json, require, snapshot
 
 
-def live_location():
-    """The real user's ledger, independent of any HOME a test substitutes."""
+def _profile_home():
+    """The operating-system profile directory, or None; never the cwd.
+
+    POSIX uses the password database. Windows asks the shell for the profile
+    folder, because USERPROFILE can be blanked by a caller (or a test) and
+    Path.home() then silently resolves relative to the current directory.
+    """
     try:
         import pwd
-        home = pwd.getpwuid(os.getuid()).pw_dir
+        return pwd.getpwuid(os.getuid()).pw_dir
     except (ImportError, KeyError, AttributeError):
-        # Windows has no pwd. Path.home() reads USERPROFILE, which a caller
-        # (or a test) may blank; the profile's HOMEDRIVE/HOMEPATH still names
-        # the real user, and HOME is the last resort.
-        try:
-            home = str(Path.home())
-        except RuntimeError:
-            home = (os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")) or os.environ["HOME"]
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x28, None, 0, buf) == 0 and os.path.isabs(buf.value):
+            return buf.value
+    except (ImportError, AttributeError, OSError):
+        pass
+    for candidate in (os.environ.get("USERPROFILE", ""),
+                      os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")):
+        if candidate and os.path.isabs(candidate):
+            return candidate
+    return None
+
+
+def live_location():
+    """The real user's ledger, independent of any HOME a test substitutes."""
+    home = _profile_home()
+    require(home is not None, "could not resolve the operating-system user profile for the reviewer events log")
     return Path(home) / ".local/state/ai-devops/reviewer-events"
 
 
@@ -36,7 +54,9 @@ def location():
     if os.environ.get("AI_REVIEW_EVENT_DIR"):
         chosen = os.environ["AI_REVIEW_EVENT_DIR"]
     else:
-        base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
+        home = os.environ.get("HOME") or _profile_home()
+        require(bool(home), "could not resolve a home directory for the reviewer events log; set AI_REVIEW_EVENT_DIR")
+        base = os.environ.get("AI_REVIEWER_STATE_BASE") or home + "/.local/state/ai-devops"
         chosen = str(Path(base) / "reviewer-events")
     if os.environ.get("AI_REVIEW_TEST_ISOLATION") == "1":
         # Test runs must never add stub rows to the live spend ledger (#1435).

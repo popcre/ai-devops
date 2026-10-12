@@ -88,6 +88,7 @@ tests/test-reviewer-credit-stream.sh
 tests/test_glm_credit_reset.py
 tools/reviewer_event_guard.sh
 tools/reviewer_events.py
+tests/test-reviewer-events-profile-home.sh
 tools/reviewer_maintenance.py
 tools/reviewer_usage.py
 tools/deepseek_balance.py
