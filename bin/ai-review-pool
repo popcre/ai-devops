@@ -288,7 +288,7 @@ trap 'cleanup || true' EXIT
 trap cleanup INT TERM
 
 SOURCE_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || die 'source identity refused before review dispatch.'
-STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
+STATE="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$$ $LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
 # The paid review runs against a DISPOSABLE SNAPSHOT, exactly like the
 # claude/codex wrappers: the copy excludes git-ignored files, the session
 # runner is launched from inside it, and its digest (baselined AFTER the

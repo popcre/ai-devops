@@ -206,6 +206,42 @@ release_lock(){ # STATE
   rm -f "$lock/token" "$lock/state"; rmdir "$lock" || die "could not release lifecycle lock: $lock"
 }
 
+# #1562: a review is owned by the process that will call finish/fail. The lock
+# token's PID is this short-lived helper, so it cannot say whether the review is
+# still alive. Callers name the owner in AI_REVIEW_LIFECYCLE_OWNER_PID; its start
+# time (when /proc exposes it) guards against PID reuse. A record without an
+# owner is never guessed to be interrupted.
+proc_start(){ local stat; stat="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; stat="${stat##*) }"; awk '{print $20}' <<<"$stat"; }
+owner_alive(){ # PID START
+  local pid="$1" start="$2"
+  if [ -d /proc ] && [ -r /proc/self/stat ]; then [ -d "/proc/$pid" ] || return 1
+  else kill -0 "$pid" 2>/dev/null || return 1; fi
+  [ -z "$start" ] || [ "$(proc_start "$pid")" = "$start" ]
+}
+reconcile_state(){ # STATE DETECTED-BY
+  local state="$1" by="$2" status pid start lock token row
+  status="$(jq -r .status "$state")"
+  case "$status" in running|preflight) ;; *) return 0;; esac
+  pid="$(jq -r '.owner_pid // empty' "$state")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  start="$(jq -r '.owner_start // empty' "$state")"
+  owner_alive "$pid" "$start" && return 0
+  row="$(jq --arg now "$(date -u +%FT%TZ)" --arg by "$by" \
+    '.interruption={detected_at:$now,detected_by:$by,owner_pid:.owner_pid,owner_exited:true,status_before:.status,last_updated_at:.updated_at}|.status="interrupted"|.verdict="BLOCKED"|.failure_class="interrupted"|.updated_at=$now|.finished_at=$now' "$state")"
+  atomic_json "$state" "$row"
+  lock="$(jq -r .lock_path "$state")"; token="$(jq -r .lock_token "$state")"
+  if [ -d "$lock" ] && [ "$(cat "$lock/token" 2>/dev/null || true)" = "$token" ]; then
+    rm -f "$lock/token" "$lock/state"; rmdir "$lock" 2>/dev/null || true
+  fi
+}
+reconcile_siblings(){ # REPOSITORY-KEY PROVIDER
+  local f
+  for f in "$STATE_DIR/runs/$1/$2"/*/*.json; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    ( reconcile_state "$(state_checked "$f")" begin ) >/dev/null 2>&1 || true
+  done
+}
+
 begin(){
   local provider="" repo="" run="" session="" caller="" base="" mode=standard reviewer_approval="" identity key lock token state now preflight_rc=0 preflight_out row
   local action_profile="" action_manifest="" action_binding=""
@@ -250,6 +286,9 @@ begin(){
   else
   ( cd "$repo" && tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" )     || die "task gate refused this review; no lock, no state, and no provider call were created."
   fi
+  reconcile_siblings "$(jq -r .repository_key <<<"$identity")" "$provider"
+  local owner="${AI_REVIEW_LIFECYCLE_OWNER_PID:-}" owner_start=""
+  if [[ "$owner" =~ ^[1-9][0-9]*$ ]] && owner_alive "$owner" ""; then owner_start="$(proc_start "$owner")"; else owner=""; fi
   key="$(sha "$(jq -r .normalized_upstream <<<"$identity")|$provider|$caller|$run")"
   lock="$STATE_DIR/locks/$key.lock"; token="$$-$(date +%s)-$RANDOM"
   state="$STATE_DIR/runs/$(jq -r .repository_key <<<"$identity")/$provider/$caller/$run.json"
@@ -264,6 +303,7 @@ begin(){
   [ -z "$implementer" ] || valid_id "$implementer" || die "AI_REVIEW_IMPLEMENTER is invalid."
   row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" --arg rmode "$review_mode" --arg impl "$implementer" \
     '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,review_mode:(if $rmode=="" then null else $rmode end),implementer_engine:(if $impl=="" then null else $impl end),base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
+  row="$(jq --arg owner "$owner" --arg start "$owner_start" '.owner_pid=(if $owner=="" then null else ($owner|tonumber) end)|.owner_start=(if $start=="" then null else $start end)' <<<"$row")"
   row="$(jq --arg export "$export_root" --argjson binding "$export_record" 'if $export!="" then .code_only_export=$export|.code_only=$binding|.evidence_scope="selected-code" else . end' <<<"$row")"
   atomic_json "$state" "$row"
   if [ -n "$action_profile$action_manifest" ]; then
@@ -283,9 +323,14 @@ begin(){
     preflight_out="$(mktemp)"
     set +e; "$PREFLIGHT" "${preflight_args[@]}" >"$preflight_out" 2>&1; preflight_rc=$?; set -e
     if [ "$preflight_rc" -ne 0 ]; then
-      row="$(jq --arg now "$(date -u +%FT%TZ)" --arg output "$(tail -20 "$preflight_out")" --argjson rc "$preflight_rc" '.status="preflight_failed"|.preflight={exit_code:$rc,summary:$output}|.updated_at=$now|.finished_at=$now' "$state")"
+      # #1562: a held provider's refusal names its class (for example
+      # out-of-credit) from the preflight's own status record, never from text.
+      local held_class=""
+      held_class="$("$PREFLIGHT" status "$provider" 2>/dev/null | jq -r 'if (.status|IN("quarantined","capacity-held","paused","known-broken")) then (.failure_class // empty) else empty end' 2>/dev/null || true)"
+      valid_safe_atom "$held_class" || held_class=""
+      row="$(jq --arg now "$(date -u +%FT%TZ)" --arg output "$(tail -20 "$preflight_out")" --argjson rc "$preflight_rc" --arg class "$held_class" '.status="preflight_failed"|.preflight={exit_code:$rc,summary:$output,failure_class:(if $class=="" then null else $class end)}|.failure_class=(if $class=="" then null else $class end)|.updated_at=$now|.finished_at=$now' "$state")"
       rm -f "$preflight_out"; atomic_json "$state" "$row"; release_lock "$state"; BEGIN_LOCK=""; BEGIN_TOKEN=""; trap - EXIT INT TERM
-      die "provider preflight failed; terminal state recorded at $state"
+      die "provider preflight failed${held_class:+ ($held_class)}; terminal state recorded at $state"
     fi
     rm -f "$preflight_out"
   fi
@@ -353,6 +398,7 @@ terminal(){ # finish|fail args
 
 join(){
   local state; state="$(state_checked "${1:-}")"
+  reconcile_state "$state" join
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class,packet_dir,packet_sha256}' "$state"
 }
 

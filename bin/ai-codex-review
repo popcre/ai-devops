@@ -197,7 +197,7 @@ trap interrupt_review HUP INT TERM
 SOURCE_IDENTITY="$(mktemp)" || die 'could not reserve source identity'
 "$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$SOURCE_IDENTITY" \
   || die 'source identity refused before snapshot creation'
-STATE="$($LIFECYCLE begin --provider codex --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" \
+STATE="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$$ $LIFECYCLE begin --provider codex --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" \
   || die 'provider preflight failed; no review was assigned.'
 REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" $SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create the review snapshot.'; }
