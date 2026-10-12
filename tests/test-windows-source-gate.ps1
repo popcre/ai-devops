@@ -46,7 +46,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $authPath=Join-Path $authDir "$Target.json"
   $launcherHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath $Fixture.Launcher)) { (Get-FileHash -LiteralPath $Fixture.Launcher -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
   $cmdHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath "$($Fixture.Launcher).cmd")) { (Get-FileHash -LiteralPath "$($Fixture.Launcher).cmd" -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
-  $installedSourceHash = (& $bash -c 'set -o pipefail; git -C "$1" cat-file blob "$2:bin/ai-task-gates" | sha256sum | cut -d" " -f1' 'ai-devops' $Fixture.Repo $Base).Trim()
+  $installedSourceHash = (& $bash -c 'set -o pipefail; git -C "$1" cat-file blob "$2:bin/ai-task-gates" | sha256sum | cut -c1-64' 'ai-devops' $Fixture.Repo $Base).Trim()
   $receiptSha = ''
   if (-not $RecoverLaunchers -and (Test-Path -LiteralPath $Fixture.Launcher)) {
     foreach ($line in @(Get-Content -LiteralPath $Fixture.Launcher)) {

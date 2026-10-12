@@ -44,7 +44,13 @@ OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || 
 # --auto is the OpenCode non-interactive form; no web, no subagents.
 DS_PROVIDER="deepseek-api"
 DS_MODEL="${AI_DEEPSEEK_MODEL:-deepseek-flash}"
-DS_TIMEOUT="${DOOR_TIMEOUT:-${AI_DEEPSEEK_TIMEOUT:-3600}}"
+# Windows hosts run full suites several times slower (single runs of 880-895s
+# on alien/916, #1562), so the default bound is larger there; it stays bounded.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) DS_DEFAULT_TIMEOUT=7200 ;;
+  *) DS_DEFAULT_TIMEOUT=3600 ;;
+esac
+DS_TIMEOUT="${DOOR_TIMEOUT:-${AI_DEEPSEEK_TIMEOUT:-$DS_DEFAULT_TIMEOUT}}"
 DS_ENGINE="${AI_DEEPSEEK_ENGINE:-opencode}"
 DS_SCRATCH=""
 cleanup_scratch() { [ -z "$DS_SCRATCH" ] || rm -rf -- "$DS_SCRATCH"; }
@@ -244,6 +250,7 @@ main() {
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
     [ "$MODE" != review ] || printf 'Run commands and tests in your current directory, a private writable copy. The original review snapshot and its evidence packet must remain unchanged.\n\n'
+    [ "$MODE" != review ] || printf 'Executed test output in this brief, when present, was produced by the review runner on the exact head and is authoritative. Do not re-run full test suites to reproduce it; run only the narrow tests or commands a specific finding requires.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
     if [ "$MODE" = review ]; then

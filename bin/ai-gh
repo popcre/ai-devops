@@ -252,9 +252,25 @@ while [ "$(now)" -lt "$until_ts" ]; do
   acquire
   until_ts="$(readnum "$STATE/backoff_until")"
 done
+# Record one request-start reservation (taken under the lock). The optional
+# AI_GH_RESERVATION_LOG lets tests check spacing between reservations instead of
+# child-process launch times, which drift on loaded machines.
+reserve_start(){
+  local ms; ms="$(now_ms)"
+  put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$ms"
+  [ -z "${AI_GH_RESERVATION_LOG:-}" ] || printf 'reserve %s %s %s\n' "$ms" "$$" "$1" >> "$AI_GH_RESERVATION_LOG"
+}
 # Spacing in milliseconds: whole-second timestamps let two starts land almost
 # together across a second boundary.
-now_ms(){ local t; t="$(date +%s%3N)"; isnum "$t" && echo "$t" || echo $(( $(now) * 1000 )); }
+# Never use date's three-digit fraction format: uutils coreutils 0.10 drops the fraction's leading
+# zeros (12.045s prints as 12.450s), so the clock jumps up to ~0.9s and spacing
+# collapses. Bash's EPOCHREALTIME needs no child process; full %N is the fallback.
+now_ms(){
+  local t="${EPOCHREALTIME:-}"; t="${t//[!0-9]/}"
+  if [ "${#t}" -eq 16 ]; then echo $(( 10#$t / 1000 )); return; fi
+  t="$(date +%s%N)"
+  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); else echo $(( $(now) * 1000 )); fi
+}
 sleep_ms(){ [ "$1" -gt 0 ] && sleep "$(( $1 / 1000 )).$(printf '%03d' $(( $1 % 1000 )))"; return 0; }
 # Launch latency varies across Git Bash/WSL processes. Leave a small margin so
 # observed gh process starts, not just wrapper bookkeeping, respect spacing.
@@ -437,7 +453,7 @@ if [ "$QUOTA_ACTIVE" != off ] && [[ "$API_HOST" =~ ^[a-z0-9][a-z0-9.-]*$ ]] && c
       # that negative lookup briefly to avoid a new request on every call.
       # This is an actual API request and must be paced like other probes.
       sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
-      put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+      reserve_start identity
       principal="$(timeout "$PROBE_TIMEOUT" "$REAL" api user "${PROBE_HOST[@]}" --jq .id 2>/dev/null | tr -d '\r\n')"
       lookup_status=$?
       IDENTITY_REQUESTED=1
@@ -502,7 +518,7 @@ failure_quota_snapshot(){
   AI_GH_NO_WAIT=1 acquire
   [ "$(now)" -ge "$(readnum "$STATE/backoff_until")" ] || return 75
   sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
-  put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+  reserve_start snapshot
   release
   timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER"
 }
@@ -530,6 +546,8 @@ probe_quota(){
       access_context="$(AI_GH_STATE_DIR="$STATE" AI_GH_REAL_GH="$REAL" GH_HOST="$API_HOST" "$context_helper" 2>/dev/null || true)"
     fi
   fi
+  sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
+  reserve_start probe
   q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER" 2>/dev/null | tr -d '\r')"
   if [ "$MEASURE_READY" = 1 ]; then
     gh_measure_quota_rows "$q" "$access_context" || say "request measurement unavailable: quota snapshot not saved"
@@ -608,7 +626,7 @@ fi
 # Git Bash) retain their existing tee. Never replace a system executable.
 TEE="$(command -v gnutee || command -v tee)" || { say "tee is required to preserve GitHub output"; exit 3; }
 err="$(mktemp)"
-put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+reserve_start call
 # The lock serializes call reservations (spacing, budget, back-off bookkeeping) and is
 # released before gh runs. GitHub limits count requests, not concurrency, so a
 # long clone or a hung request must never hold every other session hostage, and

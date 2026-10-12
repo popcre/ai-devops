@@ -139,11 +139,12 @@ file and note in it that migration is still pending.
   > informed than anyone as to whether something is finished or not."
 
   Twenty concurrent workstreams legitimately means twenty files. A count cap bills
-  whoever shows up next for a mess somebody else left. **Count STALE files instead
-  — files whose issue is already closed — and the target for those is ZERO.**
-  Report those in the closing report, named, with their owner from the contract
-  block. Any earlier "more than 5 is a warning" wording in this or any other skill
-  is **superseded**.
+  whoever shows up next for a mess somebody else left. **Do not count files. Count
+  SUCCESSOR REVIEW candidates — those whose `issue:` is already closed — and report
+  those by name with their `owner:`. A closed issue is a review trigger, not proof
+  that the handoff is finished; apply the successor rule before deletion. There is
+  no limit on the total.** (Owner ruling 2026-08-13.) Any earlier "more than 5 is a
+  warning" wording in this or any other skill is **superseded**.
 
 ### The contract block (REQUIRED where the repo enforces it; good practice everywhere)
 

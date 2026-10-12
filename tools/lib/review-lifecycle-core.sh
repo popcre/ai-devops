@@ -587,7 +587,14 @@ $operation_request"
     local tests_out tests_tail="${AI_REVIEW_TEST_OUTPUT_TAIL:-60}"
     case "$tests_tail" in ""|*[!0-9]*) tests_tail=60 ;; esac
     tests_out="$(mktemp)"
-    if ( cd "$review_dir" && bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
+    # The suite runs as an offline child: never hand it live door/lifecycle
+    # custody (diagnostics, report, runner token) to write into (#1562).
+    local tests_name; local -a tests_scrub=()
+    for tests_name in $(compgen -e); do
+      case "$tests_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+        tests_scrub+=(-u "$tests_name");; esac
+    done
+    if ( cd "$review_dir" && env "${tests_scrub[@]}" bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
       tests_result="$tests_cmd (exit 0 — passed in the review snapshot before dispatch)
 
 Executed test output (last ${tests_tail} lines, captured by the runner in the review snapshot before dispatch; this supersedes any packet line saying no tests were run):

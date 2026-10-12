@@ -646,7 +646,9 @@ EOF
     > "$fixture/stdout" 2> "$fixture/stderr" || rc=$?
   [ "$rc" = 92 ] &&
     grep -q "AI_REVIEWER_OUT_OF_CREDIT provider=$provider" "$fixture/stderr" &&
-    grep -q 'FileExistsError' "$fixture/stderr" &&
+    grep -q 'both retained' "$fixture/stderr" &&
+    ls -d "$fixture"/old-evidence.collision-* >/dev/null 2>&1 &&
+    test -s "$(ls -d "$fixture"/old-evidence.collision-* | head -1)/report.md" &&
     grep -q 'private diagnostic retention refused' "$fixture/stderr" &&
     grep -qx 'immutable earlier diagnostic' "$fixture/old-evidence/sentinel" &&
     [ ! -e "$fixture/old-evidence/native.jsonl" ] && [ ! -e "$fixture/report.md" ]
@@ -958,6 +960,19 @@ check "doors_registry_keeps_grok_beside_deepseek" \
 
 check "deepseek_adapter_source_has_no_packet_remove" "! grep -nE 'PACKET(_BIN)?[[:space:]]+remove|ai-review-packet[[:space:]]+remove' '$DS_DOOR' | grep -q ."
 check "deepseek_adapter_source_has_no_sandbox_delete" "! grep -nE 'remove-copy|remove_code_only|sandbox.*remove' '$DS_DOOR' | grep -q ."
+# #1562: runner-executed test output is authoritative; Windows gets a larger,
+# still bounded default timeout. Evaluate the door's real timeout block under a
+# faked platform so the default is proven, not only grepped.
+check "deepseek_brief_trusts_runner_test_output" \
+  "grep -Fq 'was produced by the review runner on the exact head and is authoritative. Do not re-run full test suites' '$DS_DOOR'"
+ds_timeout_for() {
+  ( _os="$1"; uname() { printf '%s\n' "$_os"; }; unset DOOR_TIMEOUT AI_DEEPSEEK_TIMEOUT; [ -z "${2:-}" ] || export AI_DEEPSEEK_TIMEOUT="$2"
+    eval "$(sed -n '/^case "$(uname -s .*in$/,/^DS_TIMEOUT=/p' "$DS_DOOR")"; printf '%s' "$DS_TIMEOUT" )
+}
+check "deepseek_timeout_default_linux_3600" "[ \"\$(ds_timeout_for Linux)\" = 3600 ]"
+check "deepseek_timeout_default_windows_7200" "[ \"\$(ds_timeout_for MINGW64_NT-10.0)\" = 7200 ] && [ \"\$(ds_timeout_for MSYS_NT-10.0)\" = 7200 ]"
+check "deepseek_timeout_override_still_wins" "[ \"\$(ds_timeout_for MINGW64_NT-10.0 900)\" = 900 ]"
+check "deepseek_timeout_stays_bounded" "grep -Fq -- '--timeout-seconds \"\$DS_TIMEOUT\"' '$DS_DOOR' && grep -Fq -- '-- timeout \"\$DS_TIMEOUT\"' '$DS_DOOR'"
 check "deepseek_adapter_source_has_no_lifecycle_terminal" "! grep -nE 'ai-review-lifecycle|rlc_lifecycle|lifecycle (finish|fail|begin)' '$DS_DOOR' | grep -q ."
 check "deepseek_adapter_keeps_provider_bits" \
   "grep -q 'DS_MODEL=' '$DS_DOOR' && grep -q 'resolve_opencode' '$DS_DOOR' && grep -q 'extract_report' '$DS_DOOR' && grep -q 'install_profile' '$DS_DOOR'"
