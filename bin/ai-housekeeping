@@ -51,8 +51,18 @@ LOG="${AI_HOUSEKEEPING_LOG:-$BASE_HOME/.cache/ai-housekeeping.log}"
 STATE_DIR="${AI_HOUSEKEEPING_STATE_DIR:-$BASE_HOME/.local/state/ai-devops}"
 HOST="$(hostname 2>/dev/null || printf unknown)"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-# Derived from SELF so schedule/unschedule work from any cwd (including a
-# scheduled shell that is not inside the worktree).
+# Resolve symlinks so an installed link (/usr/local/bin/ai-housekeeping)
+# still points at the checkout that owns the script.
+while [[ -L "$SELF" ]]; do
+  _link="$(readlink "$SELF")"
+  case "$_link" in
+    /*) SELF="$_link" ;;
+    *) SELF="$(dirname "$SELF")/$_link" ;;
+  esac
+done
+SELF="$(cd "$(dirname "$SELF")" && pwd)/$(basename "$SELF")"
+# Derived from the real script path so schedule/unschedule work from any cwd
+# (including a scheduled shell that is not inside the worktree).
 REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 
 # --- helpers ---------------------------------------------------------------
