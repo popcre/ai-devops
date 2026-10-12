@@ -16,19 +16,46 @@ import uuid
 from reviewer_maintenance import Blocked, digest, encoded, now, physical, publish, read_json, require, snapshot
 
 
-def live_location():
-    """The real user's ledger, independent of any HOME a test substitutes."""
+def _profile_home():
+    """The operating-system profile directory, or None; never the cwd.
+
+    POSIX uses the password database. Windows asks the shell for the profile
+    folder, because USERPROFILE can be blanked by a caller (or a test) and
+    Path.home() then silently resolves relative to the current directory.
+    """
     try:
         import pwd
-        home = pwd.getpwuid(os.getuid()).pw_dir
+        return pwd.getpwuid(os.getuid()).pw_dir
     except (ImportError, KeyError, AttributeError):
-        # Windows has no pwd. Path.home() reads USERPROFILE, which a caller
-        # (or a test) may blank; the profile's HOMEDRIVE/HOMEPATH still names
-        # the real user, and HOME is the last resort.
-        try:
-            home = str(Path.home())
-        except RuntimeError:
-            home = (os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")) or os.environ["HOME"]
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x28, None, 0, buf) == 0 and os.path.isabs(buf.value):
+            return buf.value
+    except (ImportError, AttributeError, OSError):
+        pass
+    for candidate in (os.environ.get("USERPROFILE", ""),
+                      os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")):
+        if candidate and os.path.isabs(candidate):
+            return candidate
+    return None
+
+
+def _home():
+    """HOME when it is absolute, else the profile; refuse rather than use the cwd."""
+    home = os.environ.get("HOME", "")
+    if not (home and os.path.isabs(home)):
+        home = _profile_home()
+    require(bool(home), "could not resolve an absolute home directory; set HOME or the explicit state directory")
+    return home
+
+
+def live_location():
+    """The real user's ledger, independent of any HOME a test substitutes."""
+    home = _profile_home()
+    require(home is not None, "could not resolve the operating-system user profile for the reviewer events log")
     return Path(home) / ".local/state/ai-devops/reviewer-events"
 
 
@@ -36,7 +63,7 @@ def location():
     if os.environ.get("AI_REVIEW_EVENT_DIR"):
         chosen = os.environ["AI_REVIEW_EVENT_DIR"]
     else:
-        base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
+        base = os.environ.get("AI_REVIEWER_STATE_BASE") or _home() + "/.local/state/ai-devops"
         chosen = str(Path(base) / "reviewer-events")
     if os.environ.get("AI_REVIEW_TEST_ISOLATION") == "1":
         # Test runs must never add stub rows to the live spend ledger (#1435).
@@ -1091,7 +1118,7 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
         # different AI_KIMI_STATE_DIR than the review that wrote the report.
         # Plus any root the worker itself recorded: a fully custom state dir
         # is only discoverable from the run's own evidence.
-        default_state = Path.home() / ".local/state/ai-devops/kimi"
+        default_state = Path(_home()) / ".local/state/ai-devops/kimi"
         env_state = Path(os.environ.get("AI_KIMI_STATE_DIR") or default_state)
         for state in (env_state, default_state):
             jobs = state / "jobs"
@@ -1100,7 +1127,7 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
         # Sibling kimi state roots under the shared base (custom AI_KIMI_STATE_DIR
         # values that still live next to the default). An unreadable base is an
         # incomplete search — fail closed rather than inventing a loss.
-        base = Path.home() / ".local/state/ai-devops"
+        base = Path(_home()) / ".local/state/ai-devops"
         base_stat = _examined(base)
         if base_stat is not None and stat_module.S_ISDIR(base_stat.st_mode):
             try:
@@ -1115,7 +1142,7 @@ def _report_search_roots(provider, source, directory=None, run_id=None):
         if run_id is not None:
             event_dir = Path(directory) if directory is not None else (
                 Path(os.environ.get("AI_REVIEW_EVENT_DIR") or
-                     (Path.home() / ".local/state/ai-devops/reviewer-events")))
+                     (Path(_home()) / ".local/state/ai-devops/reviewer-events")))
             recorded = evidence_root(event_dir, run_id) / "report_search_roots"
             recorded_stat = _examined(recorded)
             if recorded_stat is not None and stat_module.S_ISREG(recorded_stat.st_mode):
@@ -1372,8 +1399,7 @@ def lifecycle_location():
     """The lifecycle state store, resolved exactly as bin/ai-review-lifecycle does."""
     if os.environ.get("AI_REVIEW_LIFECYCLE_DIR"):
         return physical(os.environ["AI_REVIEW_LIFECYCLE_DIR"])
-    home = os.environ.get("HOME") or str(Path.home())
-    return physical(str(Path(home) / ".local/state/ai-devops/review-lifecycle"))
+    return physical(str(Path(_home()) / ".local/state/ai-devops/review-lifecycle"))
 
 
 def report_verdict(text):

@@ -9,6 +9,7 @@ grok_resolve_door_runtime() {
   for c in "$(command -v grok 2>/dev/null || true)" \
            "${HOME:-}/.local/bin/grok" \
            "${HOME:-}/.grok/bin/grok" \
+           "${HOME:-}/.grok/bin/grok.exe" \
            /home/ai/.local/bin/grok \
            /usr/local/bin/grok; do
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }

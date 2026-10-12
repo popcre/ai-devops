@@ -1197,6 +1197,7 @@ check 'qwen_door_ignores_ambient_openai_key' "test '$QD_RC' -eq 127 && test ! -e
 printf 'sk-sp-store-1427\n' > "$QD/store"; chmod 600 "$QD/store"
 qwen_door AI_QWEN_KEY_STORE="$QD/store"; QD_RC=$?
 check 'qwen door forwards only the protected store key' "test '$QD_RC' -eq 0 && grep -q '^OPENAI_API_KEY=sk-sp-store-1427$' '$QD/qwen-env' && ! grep -q 'fake-.*-1427' '$QD/qwen-env'"
+check 'qwen door keeps the complete multi-line result and its verdict' "grep -q '^ok$' '$QD/report' && grep -q '^## Verdict$' '$QD/report' && test \"\$(tail -1 '$QD/report')\" = APPROVE"
 check 'qwen door sends the complete brief as one stream-json user event on stdin' "grep -q -- '--input-format stream-json' '$QD/qwen-args' && jq -e 'select(.type==\"user\") | .message.content | contains(\"Review.\") and contains(\"MANIFEST.md\")' '$QD/qwen-stdin' >/dev/null && ! grep -q 'Review\\.' '$QD/qwen-args'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

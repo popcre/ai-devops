@@ -1886,7 +1886,7 @@ with event_lock(sys.argv[2]):
         prior = os.environ.get("AI_KIMI_STATE_DIR")
         os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "other-kimi-state")
         try:
-            with patch.object(Path, "home", return_value=fake_home):
+            with patch.dict(os.environ, {"HOME": str(fake_home)}):
                 with self.assertRaises(events.Blocked):
                     events.reconcile_lost(self.root, "kimi", sandbox, "report in default state tree")
         finally:
@@ -1913,7 +1913,7 @@ with event_lock(sys.argv[2]):
         prior = os.environ.get("AI_KIMI_STATE_DIR")
         os.environ["AI_KIMI_STATE_DIR"] = str(self.root / "kimi-state-b")
         try:
-            with patch.object(Path, "home", return_value=self.root / "other-home"):
+            with patch.dict(os.environ, {"HOME": str(self.root / "other-home")}):
                 with self.assertRaises(events.Blocked):
                     events.reconcile_lost(self.root, "kimi", sandbox, "report in recorded custom root")
         finally:
