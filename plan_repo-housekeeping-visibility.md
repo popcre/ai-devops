@@ -19,7 +19,7 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 |---|---|---|---|
 | 1 | Retract the superseded "more than 5 files" rule in `skills/shared/wrap-up/SKILL.md` | ✅ done | Terminology corrected: "Count STALE" → SUCCESSOR REVIEW in `skills/shared/handoff-writer/SKILL.md` and `templates/system/handoff-standard.md`; wrap-up already agreed. Verify: `grep -rn "Count STALE\|STALE files" skills/shared/ templates/system/` returns no live instruction. (Owner ruling 2026-08-13: no cap; closed issue = review trigger, not completion.) |
 | 2 | Repair the dangling `HANDOFF.d/` pointer in `AGENTS.md` | ✅ done | Dangling pointer removed in AGENTS.md slim-down (`c7270d4b`); current `AGENTS.md` has no `HANDOFF.d` file reference that fails to resolve. Lesson added to handoff-writer retention: deleting a handoff without updating the router regenerates staleness one level up. Verify: `grep -n "HANDOFF.d" AGENTS.md` — all refs are generic or resolve. |
-| 3 | Make the handoff contract block MANDATORY in this repo | ⬜ open | — |
+| 3 | Make the handoff contract block MANDATORY in this repo | ✅ done | Contract block mandatory in `skills/shared/handoff-writer/SKILL.md`, `AGENTS.md`, `templates/system/handoff-standard.md`; `issue: none` / `UNPROVABLE` / `UNATTRIBUTED` rules added; PR for #1587 |
 | 4 | Build `bin/ai-housekeeping` — report-only inventory | ⬜ open | — |
 | 5 | Add `tests/test-ai-housekeeping.sh` | ⬜ open | — |
 | 6 | Register the command (installer catalog, router, docs) | ⬜ open | — |

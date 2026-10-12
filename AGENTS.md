@@ -110,6 +110,14 @@ pipeline. The recovery procedure lives in
 | Documentation-only cleanup | [`README.md`](README.md) and affected docs | Do not touch source code except to verify accuracy |
 | Markdown reachability gate or rollout | [`docs/doc-reachability.md`](docs/doc-reachability.md), `bin/ai-doc-reachability`, `.doc-reachability.json`, and its tests | Gate only PR-added or moved Markdown; do not make legacy orphans block unrelated work |
 
+**Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
+(`issue:`, `status:`, `owner:`).** A file without it cannot be retired by
+anyone but its author, and will be reported as `UNATTRIBUTED` by
+`ai-housekeeping`. When there is no GitHub issue, do not invent a parallel
+tracker: open one on this repo with `gh issue create`, or if the work genuinely
+has no issue write `issue: none` plus a one-line reason. `issue: none` is legal
+but will be reported as `UNPROVABLE`.
+
 ## Editing and delivery
 
 - Search before reading large files. Follow [`docs/development.md`](docs/development.md),
