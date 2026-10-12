@@ -122,9 +122,12 @@ cmd_schedule() {
     launcher="$HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
     mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
     {
+      # VBS quoting matches setup-machine.ps1: """ is one literal quote, and
+      # the -lc argument is wrapped in "" pairs. Single quotes inside the bash
+      # command need no VBS escaping.
       printf '%s\n' 'Set shell = CreateObject("WScript.Shell")'
-      printf 'exitCode = shell.Run("""%s"" -lc ""cd \\"%s\\" && %s --log --quiet""", 0, True)\n' \
-        "$(cygpath -w "$(command -v bash)")" "$REPO_ROOT" "'$posix'"
+      printf 'exitCode = shell.Run("""%s"" -lc ""cd '"'"'%s'"'"' && '"'"'%s'"'"' --log --quiet""", 0, True)\n' \
+        "$(cygpath -w "$(command -v bash)")" "$REPO_ROOT" "$posix"
       printf '%s\n' 'WScript.Quit exitCode'
     } >"$launcher"
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
