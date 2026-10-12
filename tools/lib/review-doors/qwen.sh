@@ -111,7 +111,9 @@ review_containment() {
 extract_report() { # extract_report LOG DEST HEAD MODE
   local log="$1" dest="$2" head="$3" mode="$4" text stop turns
   stop="$(jq -r 'select(.type=="result") | if .is_error then "error" else "stop" end' "$log" 2>/dev/null | tail -1 || echo unknown)"
-  text="$(jq -r 'select(.type=="result") | .result // ""' "$log" 2>/dev/null | tail -1 || true)"
+  # Select the last result ROW first; a multi-line result printed raw and
+  # then cut with tail would keep only its final line (findings and heading lost).
+  text="$(jq -c 'select(.type=="result")' "$log" 2>/dev/null | tail -1 | jq -r '.result // ""' 2>/dev/null || true)"
   turns="$(jq -r 'select(.type=="result") | .num_turns // "?"' "$log" 2>/dev/null | tail -1 || echo '?')"
   case "$stop" in
     stop) ;;
