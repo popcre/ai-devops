@@ -6,15 +6,15 @@ grok_resolve_door_runtime() {
     printf '%s' "$AI_GROK_BIN"; return 0
   fi
   local c
-  # grok.exe first: on Windows Git Bash, [ -x .../grok ] also succeeds for
-  # grok.exe, which would otherwise return a name that is not the real file.
   for c in "$(command -v grok 2>/dev/null || true)" \
            "${HOME:-}/.local/bin/grok" \
-           "${HOME:-}/.grok/bin/grok.exe" \
            "${HOME:-}/.grok/bin/grok" \
+           "${HOME:-}/.grok/bin/grok.exe" \
            /home/ai/.local/bin/grok \
            /usr/local/bin/grok; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+    # Git Bash: [ -x .../grok ] also succeeds for grok.exe; return the real
+    # file, which native Windows processes can actually launch.
+    [ -n "$c" ] && [ -x "$c" ] && { [ "${c%.exe}" != "$c" ] || ! [ -e "$c.exe" ] || ! [ "$c" -ef "$c.exe" ] || c="$c.exe"; printf '%s' "$c"; return 0; }
   done
   printf 'grok door: local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN.\n' >&2
   return 127

@@ -263,13 +263,17 @@ grok_runtime_selection_cases() {
     unset AI_GROK_BIN FIXTURE_PATH_RUNTIME
     [ "$(grok_resolve_door_runtime)" = "$HOME/.local/bin/grok" ] || exit 3
     rm "$HOME/.local/bin/grok"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 4
-    rm "$HOME/.grok/bin/grok.exe"
-    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 6
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
+    rm "$HOME/.grok/bin/grok"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 6
+    # Windows Git Bash makes .../grok an alias of grok.exe; a hard link models
+    # that here. The resolver must return the real .exe, not the alias.
+    ln "$HOME/.grok/bin/grok.exe" "$HOME/.grok/bin/grok"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok.exe" ] || exit 7
     [ ! -e "$HOME/contact" ] || exit 5
   ' fixture "$ROOT"
 }
-check "shared Grok resolver preserves explicit PATH and every home fallback (including grok.exe) without calls" 'grok_runtime_selection_cases'
+check "shared Grok resolver preserves explicit PATH and every home fallback, returning the real grok.exe for a Windows alias, without calls" 'grok_runtime_selection_cases'
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"

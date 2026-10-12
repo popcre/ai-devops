@@ -1155,7 +1155,7 @@ provider_cli_binary() { # PROVIDER
       for c in "$(command -v "$cmd" 2>/dev/null || true)" \
                "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok" "$HOME/.grok/bin/grok.exe" \
                /home/ai/.local/bin/grok /usr/local/bin/grok; do
-        [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+        [ -n "$c" ] && [ -x "$c" ] && { [ "${c%.exe}" != "$c" ] || ! [ -e "$c.exe" ] || ! [ "$c" -ef "$c.exe" ] || c="$c.exe"; printf '%s' "$c"; return 0; }
       done
       return 1 ;;
     kimi)
