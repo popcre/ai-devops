@@ -1476,13 +1476,6 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
                 Path(report).name == f"{row['provider']}-{mode}-{run_id}.md"):
             continue
         report_path = Path(report)
-        # Bash records Git Bash paths (/tmp/..., /c/...); Windows Python must
-        # convert them before opening. The recorded string is still returned.
-        if os.name == "nt" and report.startswith("/") and not report.startswith("//"):
-            converted = subprocess.run(["cygpath", "-w", report], capture_output=True, text=True, timeout=30)
-            if converted.returncode != 0 or not converted.stdout.strip():
-                continue
-            report_path = Path(converted.stdout.strip())
         if report_path.is_symlink() or not report_path.is_file():
             continue
         data = report_path.read_bytes()
@@ -1495,7 +1488,7 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
             continue
         finished = row.get("finished_at") or ""
         if best is None or finished > best[0]:
-            best = (finished, report, row)
+            best = (finished, str(report_path), row)
     if best is None or (latest_judgment and latest_judgment >= best[0]):
         return None
     return {"report": best[1], "provider": best[2]["provider"], "run_id": best[2]["run_id"],
