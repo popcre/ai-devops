@@ -9,40 +9,39 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "FAIL: $Message" }
 }
 
-# Fake gh: keyring token lives in keyring.txt, "valid" when it equals GOOD.
-$fake = Join-Path $TempRoot 'gh.ps1'
+# Fake ai-gh gate: keyring token lives in keyring.txt, "valid" when it equals GOOD.
+$fake = Join-Path $TempRoot 'ai-gh'
 @'
-$cfg = $env:GH_CONFIG_DIR
-$hosts = Join-Path $cfg 'hosts.yml'
-$keyring = Join-Path $cfg 'keyring.txt'
-$log = Join-Path $cfg 'calls.log'
-Add-Content -LiteralPath $log -Value ($args -join ' ')
-function Current {
-    if ((Test-Path $hosts) -and ((Get-Content $hosts -Raw) -match 'oauth_token:\s*(\S+)')) { return $Matches[1] }
-    if (Test-Path $keyring) { return (Get-Content $keyring -Raw).Trim() }
-    return ''
+#!/usr/bin/env bash
+cfg="$GH_CONFIG_DIR"; hosts="$cfg/hosts.yml"; keyring="$cfg/keyring.txt"
+printf '%s|%s\n' "$AI_GH_CALLER" "$*" >> "$cfg/calls.log"
+current() {
+  t="$(awk '/^[^ ]/{h=($1=="github.com:")} h&&/oauth_token:/{print $2}' "$hosts" 2>/dev/null)"
+  [ -n "$t" ] || t="$(cat "$keyring" 2>/dev/null | tr -d '\r\n')"
+  printf '%s' "$t"
 }
-switch ($args[0] + ' ' + $args[1]) {
-    'api user'   { if ((Current) -eq 'GOOD') { 'u2giants'; exit 0 } else { exit 1 } }
-    'auth token' { $t = Current; if ($t) { $t; exit 0 } else { exit 1 } }
-    'auth login' {
-        $t = (@($input) -join '').Trim()
-        Set-Content -LiteralPath $hosts -Value "github.com:`n    oauth_token: $t`n    user: u2giants"
-        Remove-Item -LiteralPath $keyring -ErrorAction SilentlyContinue
-        exit 0
-    }
-    'auth setup-git' { exit 0 }
-}
+case "$1 $2" in
+  "api user") [ "$(current)" = GOOD ] && { echo u2giants; exit 0; }; exit 1 ;;
+  "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
+  "auth login") t="$(cat | tr -d '\r\n')"
+    printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" >> "$hosts"
+    rm -f "$keyring"; exit 0 ;;
+  "auth setup-git") exit 0 ;;
+esac
 exit 3
-'@ | Set-Content -LiteralPath $fake
+'@.Replace("`r`n", "`n") | Set-Content -LiteralPath $fake -NoNewline
 
-function Invoke-Case([string]$Name, [string]$Keyring) {
+function Invoke-Case([string]$Name, [string]$Keyring, [string]$Hosts = 'github.com:', [switch]$Broad) {
     $dir = Join-Path $TempRoot $Name
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    'github.com:' | Set-Content -LiteralPath (Join-Path $dir 'hosts.yml')
+    # Mirror a real profile folder: only this user and SYSTEM.
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls $dir /inheritance:r /grant:r "*${me}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    $Hosts | Set-Content -LiteralPath (Join-Path $dir 'hosts.yml')
     if ($Keyring) { $Keyring | Set-Content -LiteralPath (Join-Path $dir 'keyring.txt') }
+    if ($Broad) { & icacls $dir /grant '*S-1-1-0:(OI)(CI)R' | Out-Null }
     $env:GH_CONFIG_DIR = $dir
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhCommand $fake -BackupRoot (Join-Path $dir 'backups')
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -GhGate $fake -BackupRoot (Join-Path $dir 'backups') 2>&1
     return [pscustomobject]@{ Exit = $LASTEXITCODE; Output = ($out -join ' '); Dir = $dir }
 }
 
@@ -54,8 +53,15 @@ try {
     $calls = Get-Content (Join-Path $r.Dir 'calls.log') -Raw
     Assert-True ($calls -notmatch 'GOOD') 'token never passed as an argument'
     Assert-True ($calls -match 'auth setup-git') 'git pointed at gh'
-    $acl = (Get-Acl (Join-Path $r.Dir 'hosts.yml')).Access
-    Assert-True (-not ($acl | Where-Object { $_.IdentityReference -match 'Users|Everyone|Authenticated' })) 'login file not readable by other users'
+    Assert-True (@((Get-Content (Join-Path $r.Dir 'calls.log')) | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
+
+    $r = Invoke-Case 'other-host' 'GOOD' "ghe.example.com:`n    oauth_token: OTHER`ngithub.com:"
+    Assert-True ($r.Exit -eq 0) "another host's token does not skip github.com (exit $($r.Exit): $($r.Output))"
+    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -match 'oauth_token: GOOD') 'github.com token saved beside the other host'
+
+    $r = Invoke-Case 'broad' 'GOOD' -Broad
+    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "a folder readable by Everyone is refused (exit $($r.Exit))"
+    Assert-True ((Get-Content (Join-Path $r.Dir 'hosts.yml') -Raw) -notmatch 'oauth_token') 'no token written into a broad folder'
 
     $r = Invoke-Case 'dead' 'BAD'
     Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"

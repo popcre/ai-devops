@@ -39,6 +39,10 @@ LOCAL_OR_TEXT = {
         "[ -r /dev/tty ] || die 'GitHub CLI is not authenticated; run: gh auth login'",
         "gh auth login --web --git-protocol https </dev/tty || die 'GitHub authorization did not complete.'",
     },
+    "ai-gh-ssh-credentials.ps1": {
+        "Write-Output 'No working GitHub login to share with SSH sessions. In an interactive session run: gh auth login --web --insecure-storage'",
+        "Write-Output 'The stored GitHub login is rejected by GitHub. In an interactive session run: gh auth login --web --insecure-storage'",
+    },
     "install-ai-devops-windows.ps1": {
         'Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"',
         'Write-Note "GitHub CLI not found. Install when needed: winget install GitHub.cli"',
