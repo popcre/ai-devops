@@ -232,6 +232,9 @@
       "bin/promote-windows-runner-to-service.ps1": [
         "test-runner-github-admission.ps1"
       ],
+      "bin/ai-gh-ssh-credentials.ps1": [
+        "test-ai-gh-ssh-credentials.ps1"
+      ],
       "bin/runner-github-admission.ps1": [
         "test-runner-github-admission.ps1"
       ],
