@@ -33,5 +33,12 @@ try:
     r.location(); raise SystemExit("FAIL location() resolved without any home")
 except Blocked:
     print("ok   location() refuses without HOME or a profile (no KeyError, no cwd)")
+os.environ["HOME"] = "."
+for fn in (r.location, r.lifecycle_location):
+    try:
+        fn(); raise SystemExit(f"FAIL {fn.__name__} accepted a relative HOME")
+    except Blocked:
+        pass
+print("ok   a relative HOME is refused by location() and lifecycle_location()")
 PY
 printf 'reviewer-events profile home: passed\n'
