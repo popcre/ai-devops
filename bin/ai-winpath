@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ai-winpath — print the physical path of a file or directory.
+#
+# Windows junctions (mount points) that sit in a user profile and point at
+# another volume are fine in interactive logons, but SSH sessions hit
+# ERROR_UNTRUSTED_MOUNT_POINT (WinError 448) when a path walk follows them.
+# Python's os.listdir / os.path.isdir / os.path.realpath all fail; bash can
+# often still list the junction, which hides the break until a non-bash tool
+# runs. Query the reparse point itself (fsutil / Get-Item can still see it)
+# and return the Print Name target instead.
+#
+# Usage: ai-winpath PATH
+# Prints PATH unchanged when it is not a Windows mount point, when the query
+# fails, or when not on Windows.
+set -euo pipefail
+
+p="${1:?usage: ai-winpath PATH}"
+
+if [[ "${OS:-}" != "Windows_NT" && -z "${USERPROFILE:-}" ]]; then
+  printf '%s\n' "$p"
+  exit 0
+fi
+
+win_p="$p"
+if command -v cygpath >/dev/null 2>&1; then
+  win_p="$(cygpath -w "$p")"
+fi
+
+query=""
+if command -v fsutil >/dev/null 2>&1; then
+  query="$(fsutil reparsepoint query "$win_p" 2>/dev/null || true)"
+fi
+
+target=""
+if [[ -n "$query" ]]; then
+  # fsutil: "Print Name:            D:\ai-data\claude\projects"
+  target="$(printf '%s\n' "$query" | sed -n 's/^Print Name:[[:space:]]*//p' | head -1)"
+fi
+
+# Only consult PowerShell when fsutil could not answer. "not a reparse point"
+# is a definitive no — do not pay for a PowerShell launch on every normal path.
+if [[ -z "$target" && "$query" != *"not a reparse point"* ]] && \
+   command -v powershell >/dev/null 2>&1; then
+  target="$(powershell -NoProfile -Command \
+    "try { (Get-Item -LiteralPath '$win_p').Target } catch { }" 2>/dev/null | head -1 | tr -d '\r')"
+fi
+
+if [[ -n "$target" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$target"
+  else
+    printf '%s\n' "$target"
+  fi
+  exit 0
+fi
+
+printf '%s\n' "$p"

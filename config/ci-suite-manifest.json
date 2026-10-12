@@ -64,6 +64,9 @@
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"
       ],
+      "bin/ai-winpath": [
+        "test-ai-winpath.sh"
+      ],
       "bin/ai-sync-memory": [
         "test-ai-memory-sync.sh",
         "test-ai-sync-memory-public-containment.sh",
