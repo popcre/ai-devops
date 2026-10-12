@@ -85,6 +85,17 @@ check "offline child retains real native evidence in its fixture" 'test -s "$TMP
 check "offline child never creates parent live diagnostic destination" 'test ! -e "$TMP/parent-custody/diagnostics"'
 check "offline child never overwrites parent live report" '[ "$(cat "$TMP/parent-custody/report.md")" = parent-report-sentinel ]'
 
+# The native reviewer launch and the runner's --tests command must both strip
+# live door/lifecycle custody from the child environment (#1562).
+probe="$TMP/custody-probe"
+printf '#!/usr/bin/env bash\nprintf "%%s|%%s|%%s|%%s" "${DOOR_DIAGNOSTICS_DIR-unset}" "${RLC_DOOR_DIAGNOSTICS_DIR-unset}" "${DOOR_REPORT_OUT-unset}" "${AI_REVIEW_RUNNER_CORE-unset}" > "$1"\n' > "$probe"
+chmod +x "$probe"
+custody_seen="$(env DOOR_DIAGNOSTICS_DIR="$TMP/live/diag" RLC_DOOR_DIAGNOSTICS_DIR="$TMP/live/diag" \
+  DOOR_REPORT_OUT="$TMP/live/report" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  bash -c '. "$1/tools/reviewer_event_guard.sh"; reviewer_credit_run deepseek "$2/out" "$2/err" -- "$3" "$2/seen" </dev/null >/dev/null 2>&1; cat "$2/seen" 2>/dev/null' _ "$ROOT" "$TMP" "$probe")"
+check "native reviewer child never sees live door custody" '[ "$custody_seen" = "unset|unset|unset|unset" ]'
+check "lifecycle --tests command scrubs live door custody" 'grep -q "env \"\${tests_scrub\[@\]}\" bash -c \"\$tests_cmd\"" "$ROOT/tools/lib/review-lifecycle-core.sh"'
+
 # Every offline suite that drives the review pool must source the shared
 # isolation helper, directly or through lib-test-harness.sh.
 unisolated=""

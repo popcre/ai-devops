@@ -71,7 +71,21 @@ if destination:
     # Lifecycle-owned storage, never a model-controlled symlink or old result.
     for ancestor in [dest.parent, *dest.parent.parents]:
         if ancestor.is_symlink(): raise SystemExit('diagnostic storage is linked')
-    os.mkdir(dest, 0o700)
+    try:
+        os.mkdir(dest, 0o700)
+    except FileExistsError:
+        # Never lose real evidence to a pre-existing (possibly polluted)
+        # directory: keep it untouched, retain this run's evidence beside it,
+        # and still fail closed so nothing treats either one as authoritative.
+        for attempt in range(100):
+            sibling = dest.with_name(f'{dest.name}.collision-{os.getpid()}-{attempt}')
+            try: os.mkdir(sibling, 0o700); break
+            except FileExistsError: continue
+        else:
+            raise SystemExit(f'diagnostic storage exists and no collision slot: {dest}')
+        dest, collided = sibling, pathlib.Path(destination)
+    else:
+        collided = None
     # Secure the empty directory before any native bytes are written. Files
     # inherit only the current user and SYSTEM; verify each file before write.
     protect_windows(dest, directory=True)
@@ -93,4 +107,7 @@ if destination:
     except Exception:
         # Partial evidence remains private and nonauthorizing for recovery.
         raise
+if destination and collided is not None:
+    # Fail closed before the caller-visible report is written.
+    raise SystemExit(f'diagnostic storage already existed; both retained: {collided} and {dest}')
 pathlib.Path(report).write_text(text)
