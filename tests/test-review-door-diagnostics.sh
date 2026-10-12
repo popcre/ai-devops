@@ -21,8 +21,8 @@ def run(name, reason='native-error-envelope', rc=1, extra_environment=None):
                              str(rc), reason, str(report), str(dest)],
                             input=secret+b'\n', env=env, capture_output=True)
     elapsed = time.monotonic() - started
-    # Windows used to spawn PowerShell four times per call (~22s); batching
-    # must keep one call near a single spawn (#1562).
+    # Windows used to spawn PowerShell four times per call (~22s); two
+    # calls (directory then batched files) must stay well under that (#1562).
     if os.name == 'nt' and name == 'first':
         assert elapsed < 15, f'diagnostics took {elapsed:.1f}s; ACL batching regressed'
     return result, report, dest
