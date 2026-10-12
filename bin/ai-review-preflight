@@ -413,6 +413,7 @@ capacity_admission() { # PROVIDER -> current hold, with due-only read-only refre
 }
 
 health_status() { # PROVIDER
+  local wrapper out rc=0
   # A standing known-broken ruling wins over every other health signal,
   # including a current live qualification: the provider is un-drawable until
   # the blocking issue lands. Reported as provider_unavailable so the recovery
@@ -444,6 +445,52 @@ health_status() { # PROVIDER
   if [ "$capacity_hold" != null ]; then
     printf '%s\n' "$capacity_hold" | jq -c '. + {status:"capacity-held"}'
     return 1
+  fi
+  # Registry membership and the absence of holds do not prove an executable
+  # installation. Keep this check local: network-dependent provider doctors
+  # must not replace Gemini/Qwen's exact-byte qualification with a new probe.
+  wrapper="$(provider_wrapper "$1")"
+  if [ ! -f "$wrapper" ] || [ ! -x "$wrapper" ]; then
+    jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"wrapper-missing"}'
+    return 1
+  fi
+  case "$1" in
+    claude|codex|deepseek|stepfun|muse)
+      # These doctors validate the configured command and local safety tools
+      # without contacting the provider. A missing CLI must never be drawn.
+      local doctor_timeout="$DOCTOR_PROBE_TIMEOUT"
+      local -a doctor_env=() doctor_args=(doctor)
+      if [ "$1" = muse ]; then
+        doctor_env=(env AI_MUSE_CALLER=preflight)
+        doctor_timeout="${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}"
+      elif [ "$1" = stepfun ]; then
+        doctor_args+=(--read-only)
+      fi
+      out="$("${doctor_env[@]}" timeout "${doctor_timeout}s" "$wrapper" "${doctor_args[@]}" 2>&1)" || rc=$?
+      if [ "$rc" -ne 0 ] || [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
+        jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"local-doctor-failed"}'
+        return 1
+      fi
+      ;;
+  esac
+  if [ "$1" = grok ]; then
+    # Its ordinary doctor queries the provider catalogue. Reuse only the
+    # native door's offline executable selection before assigning work.
+    source "$REGISTRY_REAL_DIR/../tools/lib/grok-runtime.sh"
+    if ! grok_resolve_door_runtime >/dev/null 2>&1; then
+      printf '{"provider":"grok","status":"installation-unavailable","failure_class":"local-dependency-unavailable"}\n'
+      return 1
+    fi
+  fi
+  if [ "$1" = deepseek ]; then
+    # The attachment API doctor proves credentials, not the ordinary review
+    # runtime. First-install attachment reviews remain explicitly scoped in
+    # their door; they do not make ordinary allocation usable without OpenCode.
+    source "$REGISTRY_REAL_DIR/../tools/lib/deepseek-opencode.sh"
+    if ! deepseek_resolve_opencode "$REGISTRY_REAL_DIR/.." >/dev/null 2>&1; then
+      printf '{"provider":"deepseek","status":"installation-unavailable","failure_class":"local-dependency-unavailable"}\n'
+      return 1
+    fi
   fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"

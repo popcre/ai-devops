@@ -147,29 +147,82 @@ step_bin(){
 version_ge(){ [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; }
 
 key_store_ok(){
-  [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
-  # stat -c %a is meaningless on NTFS (returns a synthesised mode). Windows
-  # accepts a present, non-empty, non-link file (owner 2026-09-30 folder +
-  # test shell); Linux keeps the mode-600 rule.
-  if [ "$IS_WINDOWS" = 1 ]; then return 0; fi
-  [ "$IS_LINUX" = 1 ] || return 1
-  [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
+  stepfun_store_path_safe && [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
+  stepfun_private_path "$(dirname "$KEY_STORE")" directory assert && stepfun_private_path "$KEY_STORE" file assert
+}
+
+stepfun_store_path_safe(){
+  local path="$KEY_STORE" parent
+  case "$path" in /*) ;; *) return 1;; esac
+  while [ "$path" != / ]; do
+    [ ! -L "$path" ] || return 1
+    parent="$(dirname "$path")"; [ "$parent" != "$path" ] || return 1
+    path="$parent"
+  done
+}
+
+stepfun_private_path(){
+  local path="$1" kind="$2" action="$3" mode=600 ps helper
+  [ "$kind" != directory ] || mode=700
+  [ ! -L "$path" ] || return 1
+  if [ "$kind" = directory ]; then [ -d "$path" ] || return 1; else [ -f "$path" ] || return 1; fi
+  # Query the actual host, independently of runner overrides or optional env.
+  local host_platform
+  host_platform="$(/usr/bin/uname -s)" || return 1
+  if [[ "$host_platform" = MINGW* || "$host_platform" = MSYS* || "$host_platform" = CYGWIN* ]]; then
+    ps="$(command -v pwsh.exe || command -v pwsh || command -v powershell.exe)" || return 1
+    helper="$REAL_DIR/windows-private-file.ps1"
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$path")" AI_STEPFUN_PRIVATE_KIND="$kind" AI_STEPFUN_PRIVATE_ACTION="$action" \
+      env -u PSModulePath "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; $p=$env:AI_DEVOPS_PRIVATE_TARGET; $item=Get-Item -LiteralPath $p -Force -ErrorAction Stop; if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Linked credential path refused"}; $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $owner=(Get-Acl -LiteralPath $p).GetOwner([Security.Principal.SecurityIdentifier]).Value; if($owner -ne $sid){throw "Foreign credential owner refused"}; if($env:AI_STEPFUN_PRIVATE_ACTION -eq "protect"){Protect-AiDevOpsPrivatePath -Path $p -Directory:($env:AI_STEPFUN_PRIVATE_KIND -eq "directory")}; Assert-AiDevOpsPrivateAcl -Path $p' >/dev/null 2>&1
+  else
+    [ "$(stat -c %u "$path" 2>/dev/null || stat -f %u "$path" 2>/dev/null)" = "$(id -u)" ] || return 1
+    [ "$action" != protect ] || chmod "$mode" "$path" || return 1
+    [ "$(stat -c %a "$path" 2>/dev/null || stat -f %Lp "$path" 2>/dev/null)" = "$mode" ]
+  fi
 }
 
 cmd_store_key(){
-  case "${1:-}" in
-    --if-missing) if key_store_ok; then printf 'StepFun key store already present: %s\n' "$KEY_STORE"; return 0; fi ;;
-    '') ;; *) die "store-key: unknown option $1" ;;
-  esac
-  command -v op >/dev/null 2>&1 || die 'store-key needs the 1Password CLI (op) on PATH.'
-  local dir tmp; dir="$(dirname "$KEY_STORE")"
-  [ ! -L "$KEY_STORE" ] || die "key store path is a link; refusing to write through it: $KEY_STORE"
-  mkdir -p "$dir"; chmod 700 "$dir"
-  tmp="$(mktemp "$dir/.stepfun-key.XXXXXX")"; chmod 600 "$tmp"
+  # Explicit protected transfer: store-key [--if-missing] [--key-fd 3..9].
+  # A descriptor contains bytes, never a credential value in the arguments.
+  local if_missing=0 fd='' fd_seen=0 dir tmp
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --if-missing) [ "$if_missing" = 0 ] || die 'duplicate --if-missing'; if_missing=1; shift;;
+      --key-fd) [ "$fd_seen" = 0 ] && [ "$#" -ge 2 ] || die 'invalid --key-fd'; fd="$2"; fd_seen=1; shift 2;;
+      *) die 'store-key: unsupported option';;
+    esac
+  done
+  if [ "$fd_seen" = 1 ]; then
+    case "$fd" in [3-9]) ;; *) die 'store-key: descriptor must be between 3 and 9';; esac
+  fi
+  stepfun_store_path_safe || die 'linked credential path refused'
+  if [ -e "$KEY_STORE" ]; then
+    key_store_ok || die 'existing credential store is insecure'
+    [ "$if_missing" = 0 ] || { printf 'StepFun protected key store already present.\n'; return 0; }
+  fi
+  dir="$(dirname "$KEY_STORE")"
+  if [ -e "$dir" ]; then
+    stepfun_private_path "$dir" directory assert || die 'credential parent is insecure'
+  else
+    (umask 077; mkdir -p "$dir") || die 'credential parent creation failed'
+    stepfun_private_path "$dir" directory protect || die 'credential parent protection failed'
+  fi
+  tmp="$(umask 077; mktemp "$dir/.stepfun-key.XXXXXX")" || die 'credential staging failed'
+  stepfun_private_path "$tmp" file protect || { rm -f "$tmp"; die 'credential staging protection failed'; }
   # The key moves op -> file directly; it never enters argv or this output.
-  if ! op read "$OP_REF" </dev/null > "$tmp" || [ ! -s "$tmp" ]; then rm -f "$tmp"; die 'could not read the StepFun key from 1Password.'; fi
-  mv -f "$tmp" "$KEY_STORE"
-  printf 'StepFun key stored in the protected per-user store: %s\n' "$KEY_STORE"
+  if [ -n "$fd" ]; then
+    cat <&"$fd" > "$tmp" || { rm -f "$tmp"; die 'credential descriptor read failed'; }
+  elif ! command -v op >/dev/null 2>&1 || ! op read "$OP_REF" </dev/null > "$tmp"; then
+    rm -f "$tmp"; die 'could not read StepFun credential';
+  fi
+  local runtime
+  runtime="$(command -v python3 || command -v python)" || { rm -f "$tmp"; die 'credential validation runtime unavailable'; }
+  "$runtime" -c 'import os,pathlib,sys; p=pathlib.Path(sys.argv[1]); f=p.open("r+b"); b=f.read(4098); v=b.rstrip(b"\r\n"); valid=0<len(v)<=4096 and all(33<=c<=126 for c in v) and b in (v,v+b"\n",v+b"\r\n"); sys.exit(1) if not valid else None; f.seek(0); f.write(v+b"\n"); f.truncate(); f.flush(); os.fsync(f.fileno()); f.close()' "$tmp" || { rm -f "$tmp"; die 'malformed credential refused'; }
+  stepfun_store_path_safe && stepfun_private_path "$dir" directory assert && stepfun_private_path "$tmp" file assert || { rm -f "$tmp"; die 'credential staging changed'; }
+  mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'credential replacement failed'; }
+  "$runtime" -c 'import os,sys; p=sys.argv[1]; d=os.open(p,os.O_RDONLY|os.O_DIRECTORY) if os.name!="nt" else None; os.fsync(d) if d is not None else None; os.close(d) if d is not None else None' "$dir" || die 'credential durability verification failed'
+  key_store_ok || die 'credential protection verification failed'
+  printf 'StepFun protected key store refreshed.\n'
 }
 
 load_key(){
@@ -365,7 +418,7 @@ run_opencode_turn(){
       cp "$win_home/shim/bash" "$win_home/shim/bash.exe"
       printf '@echo off\r\nbash "%%~dp0bash" %%*\r\n' > "$win_home/shim/bash.cmd"
       export PATH="$win_home/shim:$gate_path"
-      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
+      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" --timeout-seconds "$TIMEOUT" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
         --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
         > "$log" 2>"$out.stderr"
     )
@@ -398,7 +451,7 @@ run_opencode_turn(){
     export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
       XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
       XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
-    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" --timeout-seconds "$TIMEOUT" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \
@@ -624,13 +677,17 @@ door_probe(){
 }
 
 cmd_doctor(){
-  local live=0 write_runners=""
+  local live=0 write_runners="" read_only=0
   for a in "$@"; do
     case "$a" in
       --live) live=1 ;;
       --write-runners) write_runners=--write-runners ;;
+      --read-only) read_only=1 ;;
     esac
   done
+  if [ "$read_only" = 1 ] && { [ "$live" = 1 ] || [ -n "$write_runners" ]; }; then
+    die 'read-only doctor cannot run live calls or write runners'
+  fi
   require_engine
   printf 'PASS  engine: %s\n' "$ENGINE"
   case "$ENGINE" in
@@ -656,6 +713,9 @@ cmd_doctor(){
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
       else
+        if [ "$read_only" = 1 ] && [ ! -f "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}" ]; then
+          printf 'FAIL Windows runner allowlist missing (read-only readiness)\n'; exit 1
+        fi
         if [ -n "${AI_STEPFUN_PLATFORM:-}" ] && [ -z "${AI_STEPFUN_RUNNERS_JSON:-}" ] && [ "$(uname -s 2>/dev/null | cut -c1-5)" != MINGW ] && [ "$(uname -s 2>/dev/null | cut -c1-4)" != MSYS ]; then
           : # forced platform on non-Windows host (CI stub): skip provisioning
         else
@@ -873,7 +933,8 @@ ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--
 ai-stepfun ask [--repo DIR] PROMPT                              second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
-ai-stepfun doctor [--live] [--write-runners]                      health check; Windows may re-pin runner allowlist
+ai-stepfun doctor [--live] [--write-runners] [--read-only]          health check; read-only refuses setup or provider calls
+ai-stepfun store-key [--if-missing] [--key-fd 3..9]               protected credential setup; descriptor avoids a vault read
 Engine: StepCode on Linux (bubblewrap) or OpenCode on Windows (folder + test shell).
 EOF
 }

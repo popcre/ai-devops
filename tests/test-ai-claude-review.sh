@@ -47,6 +47,9 @@ MODELS="$TMP/models.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5
 printf '{"version":1,"providers":{"claude":{"registry_state":"registered","reason":"offline adapter fixture"}}}\n' > "$TMP/reviewer-registry.json"
 export AI_DEVOPS_MODELS_ENV="$MODELS" AI_CLAUDE_TEST_ARGS="$TMP/args" AI_CLAUDE_STUB_SOURCE="$R" AI_REVIEW_REGISTRY_FILE="$TMP/reviewer-registry.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle" AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+# The shared isolation harness also sets an explicit file. Keep it bound to
+# this suite's directory rather than its earlier harness temporary root.
+export AI_REVIEW_SCOREBOARD_FILE="$AI_REVIEW_SCOREBOARD_DIR/reviews.jsonl"
 
 echo '== ai-claude-review'
 IDENTITY_CALLS_BEFORE="$(find "$TMP/args" -name 'args-*' | wc -l)"

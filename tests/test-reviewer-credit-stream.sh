@@ -47,6 +47,19 @@ cmp -s "$TASK_TMP/expected-argv" "$TASK_TMP/actual-argv"
 [ ! -e "$TASK_TMP/should-not-run" ]
 printf 'native supervised shebang preserves literal argv and stdin: PASS\n'
 
+# Existing GNU fractions/suffixes become an owned deadline on both operating
+# systems, without replacing the command's original timeout semantics.
+deadline_rc=0
+reviewer_credit_run muse "$TASK_TMP/deadline-out" "$TASK_TMP/deadline-err" \
+  --timeout-seconds .02m -- "$PYTHON" -c 'import time;time.sleep(20)' \
+  > "$TASK_TMP/deadline-out" 2> "$TASK_TMP/deadline-err" || deadline_rc=$?
+[ "$deadline_rc" -eq 124 ]
+reviewer_credit_run muse "$TASK_TMP/zero-out" "$TASK_TMP/zero-err" \
+  --timeout-seconds 0m -- "$PYTHON" -c 'print("zero-disabled")' \
+  > "$TASK_TMP/zero-out" 2> "$TASK_TMP/zero-err"
+[ "$(tr -d '\r\n' < "$TASK_TMP/zero-out")" = zero-disabled ]
+printf 'explicit owned fractional deadline and zero-disabled budget: PASS\n'
+
 # Generic provider and implementation routes remain on the host. Only the
 # actual managed DeepSeek native door can request the new sibling boundary.
 if [ "$(uname -s)" = Linux ]; then

@@ -15,6 +15,20 @@ resolve(){ (cd "$ROOT/tools" && env "$@" "$PY" -c 'import reviewer_events; print
 check "harness exports the test isolation marker" '[ "${AI_REVIEW_TEST_ISOLATION:-}" = 1 ]'
 check "harness gives the suite a private events directory" '[ -n "${AI_REVIEW_EVENT_DIR:-}" ] && [ -d "$AI_REVIEW_EVENT_DIR" ]'
 check "private events directory is not the live ledger" '[ "$(cd "$AI_REVIEW_EVENT_DIR" && pwd -P)" != "$live" ]'
+check "harness isolates outcome ledger beside private events" '[ "$AI_REVIEW_SCOREBOARD_FILE" = "$AI_REVIEW_EVENT_DIR/scoreboard/reviews.jsonl" ]'
+
+# Exercise a real outcome append with hostile inherited caller locations.
+# The sentinel represents the caller's ledger; never touch the actual live log.
+mkdir -p "$TMP/parent-ledger"
+printf 'caller-owned-sentinel\n' > "$TMP/parent-ledger/reviews.jsonl"
+printf '{"run_id":"isolated-outcome-proof","caller":"codex"}\n' > "$TMP/outcome.json"
+env AI_REVIEW_EVENT_DIR="$TMP/child-events" \
+  AI_REVIEW_SCOREBOARD_DIR="$TMP/parent-ledger" \
+  AI_REVIEW_SCOREBOARD_FILE="$TMP/parent-ledger/reviews.jsonl" bash -c \
+  '. "$1/tests/lib-test-harness.sh"; "$1/bin/ai-review-scoreboard" append deepseek "$2" --elapsed 1 --failure incomplete-code-only-invocation >/dev/null' \
+  _ "$ROOT" "$TMP/outcome.json"
+check "nested test outcome records only in its private ledger" 'grep -q isolated-outcome-proof "$TMP/child-events/scoreboard/reviews.jsonl"'
+check "nested test cannot append into inherited caller ledger" '[ "$(cat "$TMP/parent-ledger/reviews.jsonl")" = caller-owned-sentinel ]'
 
 out="$(resolve AI_REVIEW_TEST_ISOLATION=1 AI_REVIEW_EVENT_DIR="$live" 2>&1)"; rc=$?
 check "marker refuses an explicit live events directory" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "refused the live reviewer events log"'
@@ -49,6 +63,27 @@ leak="$(env AI_REVIEW_OPERATION=stale-linux-manifest-recovery AI_REVIEW_GATE_MOD
   AI_REVIEW_IMPLEMENTER=codex AI_REVIEW_REVIEWER_APPROVAL=/x/approve.md bash -c \
   '. "$1/tests/lib-test-harness.sh"; printf "%s|%s|%s|%s|%s" "${AI_REVIEW_OPERATION-unset}" "${AI_REVIEW_GATE_MODE-unset}" "${AI_REVIEW_IMPLEMENTER-unset}" "${AI_REVIEW_REVIEWER_APPROVAL-unset}" "$AI_REVIEW_TEST_ISOLATION"' _ "$ROOT")"
 check "harness clears the inherited outer review session" '[ "$leak" = "unset|unset|unset|unset|1" ]'
+
+# Real diagnostic writes must use the child fixture, never inherited live
+# door/lifecycle custody. Empty parent destination catches first-write pollution;
+# an existing report sentinel catches a separate report overwrite.
+mkdir -p "$TMP/parent-custody" "$TMP/child-custody"
+printf 'parent-report-sentinel\n' > "$TMP/parent-custody/report.md"
+printf 'synthetic child native failure\n' > "$TMP/child-custody/native.stderr"
+: > "$TMP/child-custody/native.jsonl"
+env DOOR_DIAGNOSTICS_DIR="$TMP/parent-custody/diagnostics" \
+  DOOR_REPORT_OUT="$TMP/parent-custody/report.md" DOOR_HEAD=parent-head \
+  RLC_DOOR_DIAGNOSTICS_DIR="$TMP/parent-custody/diagnostics" RLC_STAMP=parent-stamp \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_REVIEW_VIA_RUNNER=1 \
+  AI_REVIEW_RUNNER_NAME=parent-run bash -c '
+    . "$1/tests/lib-test-harness.sh"
+    printf "%s|%s|%s|%s|%s|%s|%s|%s" "${DOOR_DIAGNOSTICS_DIR-unset}" "${DOOR_REPORT_OUT-unset}" "${DOOR_HEAD-unset}" "${RLC_DOOR_DIAGNOSTICS_DIR-unset}" "${RLC_STAMP-unset}" "${AI_REVIEW_RUNNER_CORE-unset}" "${AI_REVIEW_VIA_RUNNER-unset}" "${AI_REVIEW_RUNNER_NAME-unset}" > "$2/context.txt"
+    "$3" "$1/tools/review_door_diagnostics.py" deepseek "$2/native.jsonl" "$2/native.stderr" 2 synthetic-child-failure "${DOOR_REPORT_OUT:-$2/report.md}" "${DOOR_DIAGNOSTICS_DIR:-$2/diagnostics}"
+  ' _ "$ROOT" "$TMP/child-custody" "$PY"
+check "offline child clears inherited door and runner custody context" '[ "$(cat "$TMP/child-custody/context.txt")" = "unset|unset|unset|unset|unset|unset|unset|unset" ]'
+check "offline child retains real native evidence in its fixture" 'test -s "$TMP/child-custody/diagnostics/native.stderr" && grep -q synthetic-child-failure "$TMP/child-custody/diagnostics/report.md"'
+check "offline child never creates parent live diagnostic destination" 'test ! -e "$TMP/parent-custody/diagnostics"'
+check "offline child never overwrites parent live report" '[ "$(cat "$TMP/parent-custody/report.md")" = parent-report-sentinel ]'
 
 # Every offline suite that drives the review pool must source the shared
 # isolation helper, directly or through lib-test-harness.sh.

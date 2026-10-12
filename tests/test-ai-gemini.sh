@@ -158,7 +158,7 @@ mkdir -p "$TMP/tools/lib"
 cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
 cp "$ROOT/tools/reviewer_credit_stream.py" "$TMP/tools/"
 cp "$ROOT/bin/ai-process-supervisor" "$TMP/bin/"
-cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
+cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$ROOT/tools/lib/gemini-review-contract.sh" "$TMP/tools/lib/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -250,7 +250,7 @@ check 'disposable review copy has no git remote' "test -z \"\$(git -C \"\$(jq -r
 check 'copy-edit review completes and records the post-turn copy inventory' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = COMPLETE"
 R2="$TMP/repo2"; make_repo "$R2"; printf prior > "$R2/.ignored"
 check 'reviewer may edit an ignored file inside its disposable copy' "new_run '$R2' ignored mutate-ignored | grep -q '^PASS' && test \"\$(cat '$R2/.ignored')\" = prior"
-check 'review prompt no longer says read-only and grants disposable-copy file edits' "! grep -q 'without editing files, running commands' '$SCRIPT' && grep -q 'you may read and edit files there' '$SCRIPT' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
+check 'review prompt no longer says read-only and grants disposable-copy file edits' "! grep -q 'without editing files, running commands' '$ROOT/tools/lib/gemini-review-contract.sh' && grep -q 'you may read and edit files there' '$ROOT/tools/lib/gemini-review-contract.sh' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
 R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$SENT"; export MOCK_SENTINEL="$SENT"
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R3B="$TMP/repo3b"; make_repo "$R3B"; export MOCK_PROTECTED="$R3B"
@@ -563,7 +563,7 @@ else
   printf '  note drive-letter spelling check needs cygpath (Windows only)
 '
 fi
-check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
+check 'actual native prompts preserve file tools and forbid unavailable terminal commands' "test \"\$(grep -c 'never call run_command' '$MOCK_AGY_CALLS')\" -ge 2 && grep -q 'file-reading tools instead' '$MOCK_AGY_CALLS' && grep -q 'never claim command execution' '$MOCK_AGY_CALLS' && ! grep -q 'you may run commands' '$MOCK_AGY_CALLS'"
 set +e; (gov_run govdenied denied) >"$TMP/govdenied.out" 2>"$TMP/govdenied.err"; GOVDENIED_RC=$?; set -e
 check 'governed denied-tool turn fails naming the denied tool' "test '$GOVDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
 check 'governed denied-tool turn is a review-step failure (exit 81 + marker)' "test '$GOVDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/govdenied.err'"

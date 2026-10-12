@@ -52,10 +52,25 @@ export PATH="$TMP/mockbin:$PATH"
 # Keep every runner artifact inside the suite temp dir.
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle-state"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard-state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard-state/reviews.jsonl"
 export AI_REVIEW_PACKET_STORE="$TMP/packet-store"
 export AI_REVIEW_IMPLEMENT_ROOT="$TMP/implement"
 
 echo '== review-lifecycle-core library'
+. "$REPO_ROOT/tools/lib/deepseek-opencode.sh"
+printf 'Reviewed exact source\n## Verdict\nAPPROVE\nCompaction summary preserves all findings.\n' > "$TMP/deepseek-summary.txt"
+deepseek_terminal_report < "$TMP/deepseek-summary.txt" > "$TMP/deepseek-normalized.txt"
+check "deepseek_summary_keeps_reasoning_and_terminal_install_shape" "grep -qx 'Compaction summary preserves all findings.' '$TMP/deepseek-normalized.txt' && [ \"\$(tail -2 '$TMP/deepseek-normalized.txt')\" = \"\$(printf '## Verdict\\nAPPROVE')\" ]"
+printf 'Early findings\n## Verdict\nAPPROVE\nLater blocking finding\n## Verdict\nREJECT\nSummary after final decision\n' > "$TMP/deepseek-multiple.txt"
+deepseek_terminal_report < "$TMP/deepseek-multiple.txt" > "$TMP/deepseek-last.txt"
+check "deepseek_normalization_uses_authentic_last_decision" "[ \"\$(tail -2 '$TMP/deepseek-last.txt')\" = \"\$(printf '## Verdict\\nREJECT')\" ] && grep -qx 'Later blocking finding' '$TMP/deepseek-last.txt' && grep -qx 'Summary after final decision' '$TMP/deepseek-last.txt'"
+printf '## Verdict\nAPPROVE\n## Verdict\nPROVISIONAL\n' > "$TMP/deepseek-invalid-final.txt"
+check "deepseek_invalid_final_never_resurrects_earlier_approval" "! deepseek_terminal_report < '$TMP/deepseek-invalid-final.txt' > '$TMP/deepseek-invalid-normalized.txt' && test ! -s '$TMP/deepseek-invalid-normalized.txt'"
+printf 'Findings without a verdict\n' > "$TMP/deepseek-no-verdict.txt"
+check "deepseek_normalization_never_invents_absent_approval" "! deepseek_terminal_report < '$TMP/deepseek-no-verdict.txt' > '$TMP/deepseek-none-normalized.txt' && test ! -s '$TMP/deepseek-none-normalized.txt'"
+printf '## Verdict\nAPPROVE\n## Verdict\n' > "$TMP/deepseek-empty-final.txt"
+check "deepseek_empty_final_never_resurrects_earlier_approval" "! deepseek_terminal_report < '$TMP/deepseek-empty-final.txt' > '$TMP/deepseek-empty-normalized.txt' && test ! -s '$TMP/deepseek-empty-normalized.txt'"
 check "core_declares_one_stamp" "grep -q 'RLC_STAMP=\"review-lifecycle-core/1\"' '$CORE'"
 check "core_owns_report_floor" "grep -q 'MIN_REPORT_CHARS=' '$CORE' && grep -q 'rlc_report_substance' '$CORE'"
 check "core_owns_store_before_delete" "grep -q 'rlc_packet_store' '$CORE' && grep -q 'rlc_cleanup_after_store' '$CORE'"
@@ -473,6 +488,32 @@ git -C "$MREPO" commit -qm ignore
 HEAD_SHA="$(git -C "$MREPO" rev-parse HEAD)"
 git -C "$MREPO" status --porcelain
 
+# A provider still routed through the legacy pool has no engine door. Reject
+# the mistaken request before any invocation or sandbox can be created.
+for unavailable_contract in review implement; do
+  unavailable_state="$TMP/unavailable-$unavailable_contract-state"
+  unavailable_sandbox="$TMP/unavailable-$unavailable_contract-sandboxes"
+  unavailable_rc=0
+  AI_REVIEW_LIFECYCLE_DIR="$unavailable_state" \
+    AI_REVIEW_SANDBOX_DIR="$unavailable_sandbox" \
+    bash "$ENGINE" "$unavailable_contract" --provider glm --name no-glm-door \
+      --repo "$MREPO" >"$TMP/unavailable-$unavailable_contract.out" \
+      2>"$TMP/unavailable-$unavailable_contract.err" || unavailable_rc=$?
+  check "engine_${unavailable_contract}_missing_door_creates_no_invocation" \
+    "test '$unavailable_rc' -ne 0 && grep -q 'no door registered' '$TMP/unavailable-$unavailable_contract.err' && test ! -d '$unavailable_state/runs' && test ! -d '$unavailable_sandbox'"
+done
+
+missing_override_rc=0
+AI_REVIEW_DOOR_GROK="$TMP/missing-provider-door.sh" \
+  AI_REVIEW_LIFECYCLE_DIR="$TMP/missing-override-state" \
+  AI_REVIEW_SCOREBOARD_DIR="$TMP/missing-override-scoreboard" \
+  AI_REVIEW_SCOREBOARD_FILE="$TMP/missing-override-scoreboard/reviews.jsonl" \
+  bash "$ENGINE" review --provider grok --name missing-door-override \
+    --repo "$MREPO" >"$TMP/missing-override.out" \
+    2>"$TMP/missing-override.err" || missing_override_rc=$?
+check "engine_missing_door_override_is_local_admission_failure" \
+  "test '$missing_override_rc' -ne 0 && grep -q 'door override is not a file' '$TMP/missing-override.err' && test ! -d '$TMP/missing-override-state/runs' && test ! -e '$TMP/missing-override-scoreboard/reviews.jsonl'"
+
 PREFLIGHT_STUB="$TMP/preflight-stub"
 cat > "$PREFLIGHT_STUB" <<'EOF'
 #!/usr/bin/env bash
@@ -567,6 +608,51 @@ _crc=$?
 set -e
 check "runner_keeps_door_out_of_credit_exit_92" "test '$_crc' -eq 92 && grep -q '^AI_REVIEWER_OUT_OF_CREDIT ' '$TMP/e2e-credit.err'"
 check "runner_books_out_of_credit_failure" "grep -Rqs '\"out-of-credit\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+capacity_retention_refusal_case() {
+  local provider="$1" fixture="$TMP/capacity-retention-$1" rc=0
+  mkdir -p "$fixture/home" "$fixture/work" "$fixture/old-evidence"
+  printf 'immutable earlier diagnostic\n' > "$fixture/old-evidence/sentinel"
+  printf 'Implement the synthetic fixture.\n' > "$fixture/prompt"
+  if [ "$provider" = deepseek ]; then
+    cat > "$fixture/native" <<'EOF'
+#!/usr/bin/env bash
+cat <<'JSON'
+{"type":"error","error":{"data":{"statusCode":402,"message":"Insufficient Balance"}}}
+JSON
+exit 1
+EOF
+  else
+    cat > "$fixture/native" <<'EOF'
+#!/usr/bin/env bash
+printf '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}\n' >&2
+exit 1
+EOF
+  fi
+  chmod +x "$fixture/native"
+  HOME="$fixture/home" AI_DEVOPS_CONFIG_DIR="$fixture/config" \
+    AI_REVIEW_TEST_ISOLATION=1 AI_REVIEWER_STATE_BASE="$fixture/state" \
+    AI_REVIEW_EVENT_DIR="$fixture/events" AI_REVIEW_SCOREBOARD_DIR="$fixture/scoreboard" \
+    AI_REVIEW_SCOREBOARD_FILE="$fixture/scoreboard/events.jsonl" \
+    AI_REVIEW_QUARANTINE_DIR="$fixture/quarantine" \
+    AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    AI_DEEPSEEK_OPENCODE="$fixture/native" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+    AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$fixture/native" AI_STEPFUN_ALLOW_NO_CREDS=1 \
+    AI_STEPFUN_KEY_STORE="$fixture/no-key" AI_STEPFUN_STATE_DIR="$fixture/stepfun-state" \
+    AI_STEPFUN_RATE_RETRIES=0 AI_STEPFUN_RPM=100000 \
+    DOOR_WORKDIR="$fixture/work" DOOR_PACKET_DIR="$fixture/work" \
+    DOOR_PROMPT_FILE="$fixture/prompt" DOOR_REPORT_OUT="$fixture/report.md" \
+    DOOR_DIAGNOSTICS_DIR="$fixture/old-evidence" DOOR_HEAD="$HEAD_SHA" \
+    bash "$REPO_ROOT/tools/lib/review-doors/$provider.sh" implement \
+    > "$fixture/stdout" 2> "$fixture/stderr" || rc=$?
+  [ "$rc" = 92 ] &&
+    grep -q "AI_REVIEWER_OUT_OF_CREDIT provider=$provider" "$fixture/stderr" &&
+    grep -q 'FileExistsError' "$fixture/stderr" &&
+    grep -q 'private diagnostic retention refused' "$fixture/stderr" &&
+    grep -qx 'immutable earlier diagnostic' "$fixture/old-evidence/sentinel" &&
+    [ ! -e "$fixture/old-evidence/native.jsonl" ] && [ ! -e "$fixture/report.md" ]
+}
+check 'deepseek_capacity_exit_92_survives_real_immutable_retention_refusal' 'capacity_retention_refusal_case deepseek'
+check 'stepfun_capacity_exit_92_survives_real_immutable_retention_refusal' 'capacity_retention_refusal_case stepfun'
 unset _crc
 
 # --- --operation install-gate contract through the runner -------------------
@@ -637,6 +723,18 @@ FLOOR_RC=$?
 set -e
 check "runner_refuses_report_below_floor" "test '$FLOOR_RC' -ne 0 && grep -qi 'floor' '$TMP/floor.err'"
 check "floor_refusal_is_terminal_blocked" "grep -Rqs '\"failure_class\": \"report-floor\"' '$AI_REVIEW_LIFECYCLE_DIR/runs' || grep -Rqs '\"failure_class\":\"report-floor\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+check "floor_failure_report_survives_temp_cleanup_with_bound_native_body" \
+  "python3 - '$AI_REVIEW_LIFECYCLE_DIR/runs' <<'PY'
+import hashlib, json, pathlib, sys
+states = [json.loads(p.read_text()) for p in pathlib.Path(sys.argv[1]).rglob('*.json')]
+state = next(d for d in states if d.get('failure_class') == 'report-floor')
+report = pathlib.Path(state['report_path'])
+assert report.is_file() and hashlib.sha256(report.read_bytes()).hexdigest() == state['report_sha256']
+summary = json.loads(report.read_text().splitlines()[-1])
+native = report.parent / 'native.jsonl'
+assert native.is_file() and hashlib.sha256(native.read_bytes()).hexdigest() == summary['native_stdout_sha256']
+assert b'## Verdict' in native.read_bytes()
+PY"
 
 # --- store-before-delete: store failure retains the sandbox -----------------
 echo '== store-before-delete'
@@ -975,7 +1073,22 @@ while [ \$# -gt 0 ]; do
     *) shift ;;
   esac
 done
-cat > /dev/null
+prompt="\$(cat)"
+if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
+  # Model the native engine following MANIFEST's original directory unless
+  # the final trusted instruction explicitly binds its execution workspace.
+  original="\$(sed -n 's/^Directory you are reading: //p' "\$DS_TEST_MANIFEST")"
+  selected="\$(printf '%s\\n' "\$prompt" | sed -n 's/^Trusted execution workspace: //p' | tail -1)"
+  target="\${selected:-\$original}"
+  test "\$target" = "\$dir" || exit 1
+  printf '%s\\n' "\$prompt" | grep -q 'Original MANIFEST snapshot paths are immutable provenance only' || exit 1
+  # Exercise inherited process cwd, not merely the advertised --dir option.
+  printf '%s' "\$PWD" > "\$DS_TEST_DIR_RECORD"
+  test "\$PWD" = "\$dir" || exit 1
+  cd "\$target" || exit 1
+  python3 -m unittest test_allocation.py >&2 || exit 1
+  test -d __pycache__ || exit 1
+fi
 if [ -n "\${DS_JSONL:-}" ]; then cat "\$DS_JSONL"; exit 0; fi
 cat <<'JSON'
 {"type":"sessionID","sessionID":"stub-session-1"}
@@ -1003,6 +1116,43 @@ check "deepseek_door_report_carries_opencode_metadata" \
 check "deepseek_door_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPORT'"
 check "deepseek_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_DEEPSEEK_OPENCODE='$STUB_OC' AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/ds-x.md' DOOR_HEAD='$HEAD_SHA' bash '$DS_DOOR' review) 2>/dev/null"
+
+for broken_event in '{invalid-json' '[]'; do
+  bad_id="${bad_id:-0}"; bad_id=$((bad_id + 1))
+  printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}' "$broken_event" > "$TMP/ds-invalid-$bad_id.jsonl"
+  bad_rc=0
+  DS_JSONL="$TMP/ds-invalid-$bad_id.jsonl" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+    DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+    DOOR_REPORT_OUT="$TMP/ds-invalid-$bad_id.md" DOOR_DIAGNOSTICS_DIR="$TMP/ds-invalid-$bad_id.private" \
+    DOOR_HEAD="$HEAD_SHA" bash "$DS_DOOR" review > "$TMP/ds-invalid-$bad_id.out" 2>&1 || bad_rc=$?
+  check "deepseek_invalid_native_event_${bad_id}_never_accepts_prior_approval" \
+    "test '$bad_rc' -ne 0 && grep -q invalid-response-json '$TMP/ds-invalid-$bad_id.private/report.md' && ! grep -q '^APPROVE$' '$TMP/ds-invalid-$bad_id.md'"
+done
+# Real Python test execution creates bytecode. It belongs in the door's own
+# scratch workspace, never the runner's immutable source snapshot.
+DS_ARTIFACT_SOURCE="$TMP/artifact-source"
+cp -a "$MREPO" "$DS_ARTIFACT_SOURCE"
+cat > "$DS_ARTIFACT_SOURCE/test_allocation.py" <<'PY'
+import unittest
+class AllocationTest(unittest.TestCase):
+    def test_example(self): self.assertEqual(2 + 2, 4)
+PY
+printf 'Directory you are reading: %s\n' "$DS_ARTIFACT_SOURCE" > "$DS_ARTIFACT_SOURCE/MANIFEST.md"
+DS_ARTIFACT_DIGEST="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
+DS_ARTIFACT_RC=0
+DS_TEST_RUN_UNITTEST=1 DS_TEST_MANIFEST="$DS_ARTIFACT_SOURCE/MANIFEST.md" DS_TEST_DIR_RECORD="$TMP/ds-artifact-dir" \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_DEEPSEEK_OPENCODE="$STUB_OC" \
+  AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR="$DS_ARTIFACT_SOURCE" \
+  DOOR_PACKET_DIR="$DS_ARTIFACT_SOURCE" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+  DOOR_REPORT_OUT="$TMP/ds-artifact-report" DOOR_HEAD="$HEAD_SHA" \
+  bash "$DS_DOOR" review >"$TMP/ds-artifact-out" 2>"$TMP/ds-artifact-err" || DS_ARTIFACT_RC=$?
+DS_ARTIFACT_AFTER="$($REPO_ROOT/bin/ai-review-sandbox digest "$DS_ARTIFACT_SOURCE")"
+DS_ACTUAL_WORKDIR="$(cat "$TMP/ds-artifact-dir" 2>/dev/null || true)"
+check "deepseek_real_unittest_keeps_immutable_snapshot_digest" \
+  "test '$DS_ARTIFACT_RC' -eq 0 && test '$DS_ARTIFACT_DIGEST' = '$DS_ARTIFACT_AFTER' && test ! -d '$DS_ARTIFACT_SOURCE/__pycache__'"
+check "deepseek_tests_run_in_owned_scratch_and_remove_it" \
+  "test -n '$DS_ACTUAL_WORKDIR' && test '$DS_ACTUAL_WORKDIR' != '$DS_ARTIFACT_SOURCE' && test ! -e '$DS_ACTUAL_WORKDIR'"
 
 # The grep presence check must not close the JSONL text producer early under
 # pipefail. Exercise a large multi-event report and retain all fail-closed
@@ -1073,6 +1223,41 @@ check "deepseek_lifecycle_records_completed_verdict_with_packet" \
 check "deepseek_review_cleanup_removed_working_sandbox_after_store" \
   "! find '$AI_REVIEW_SANDBOX_DIR' -maxdepth 1 -type d -name 'rlc-deepseek-*' 2>/dev/null | grep -q ."
 
+# A native error is a failed invocation even if an earlier text part looks
+# like approval. Exact raw evidence survives temp cleanup, but no model or
+# secret text is echoed into the diagnostic summary.
+cat > "$TMP/ds-native-error.jsonl" <<'JSON'
+{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}
+{"type":"error","error":{"data":{"statusCode":503,"message":"synthetic-secret-should-stay-private"}}}
+JSON
+DS_FAILED_RC=0
+( cd "$MREPO" && DS_JSONL="$TMP/ds-native-error.jsonl" \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR" \
+  "$ENGINE" review --provider deepseek --name engine-ds-native-error --repo "$MREPO" \
+  --mode diff-review --caller codex ) >"$TMP/ds-failed.out" 2>"$TMP/ds-failed.err" || DS_FAILED_RC=$?
+check "deepseek_native_error_never_authorizes_earlier_approval" "test '$DS_FAILED_RC' -ne 0"
+DS_FAILED_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -name engine-ds-native-error.json | head -1)"
+# Lifecycle IDs are generated; select the failed DeepSeek state by verdict.
+DS_FAILED_STATE="$(python3 - "$AI_REVIEW_LIFECYCLE_DIR/runs" <<'PY'
+import json, pathlib, sys
+for p in pathlib.Path(sys.argv[1]).rglob('*.json'):
+    try: d = json.loads(p.read_text())
+    except ValueError: continue
+    if d.get('provider') == 'deepseek' and d.get('failure_class') == 'provider-native-error':
+        print(p); break
+PY
+)"
+DS_FAILED_REPORT="$(jq -r '.report_path // empty' "$DS_FAILED_STATE" 2>/dev/null || true)"
+check "deepseek_failed_lifecycle_keeps_durable_nonempty_diagnostic" \
+  "test -s '$DS_FAILED_REPORT' && grep -q native-error-envelope '$DS_FAILED_REPORT' && grep -q 503 '$DS_FAILED_REPORT'"
+check "deepseek_diagnostic_summary_excludes_provider_text" \
+  "! grep -q synthetic-secret-should-stay-private '$DS_FAILED_REPORT'"
+check "deepseek_private_native_failure_retains_exact_bytes" \
+  "cmp '$TMP/ds-native-error.jsonl' '${DS_FAILED_REPORT%/*}/native.jsonl'"
+check "deepseek_private_diagnostic_permissions" \
+  "test \"\$(stat -c %a '${DS_FAILED_REPORT%/*}' 2>/dev/null)\" = 700 && test \"\$(stat -c %a '$DS_FAILED_REPORT' 2>/dev/null)\" = 600"
+
 # Both contracts stay in the runner: deepseek implement runs through it too.
 export AI_REVIEW_DOOR_DEEPSEEK="$IMPL_DOOR_OK"
 set +e
@@ -1140,9 +1325,59 @@ set -e
 
 # First installation can explicitly use the existing attachment API when no
 # provider executable is installed. Fixtures never call a provider or read keys.
+ds_without_runtime() {
+  (
+    unset AI_DEEPSEEK_OPENCODE AI_DEEPSEEK_ENGINE
+    export HOME="$TMP/no-opencode-home" USERPROFILE=''
+    mkdir -p "$HOME"
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = opencode ]; then return 1; fi
+      builtin command "$@"
+    }
+    export -f command
+    "$@"
+  )
+}
+ds_missing_runtime() {
+  local rc=0
+  ds_without_runtime env AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+    DOOR_REPORT_OUT="$TMP/missing-runtime-report.md" DOOR_HEAD="$HEAD_SHA" \
+    DOOR_DIAGNOSTICS_DIR="$TMP/missing-runtime-native" \
+    bash "$DEEPSEEK_DOOR" review > "$TMP/missing-runtime.out" 2> "$TMP/missing-runtime.err" || rc=$?
+  [ "$rc" = 127 ] && grep -q 'local OpenCode dependency unavailable' "$TMP/missing-runtime.err" &&
+    grep -q 'local-dependency-unavailable' "$TMP/missing-runtime-report.md"
+}
+check 'ordinary_deepseek_door_refuses_the_same_missing_runtime_as_readiness' 'ds_missing_runtime'
+grok_missing_runtime() {
+  (
+    unset AI_GROK_BIN
+    export HOME="$TMP/no-grok-home"
+    mkdir -p "$HOME"
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then return 1; fi
+      builtin command "$@"
+    }
+    function [() {
+      if builtin [ "$#" = 3 ] && builtin [ "$1" = -x ]; then
+        case "$2" in /home/ai/.local/bin/grok|/usr/local/bin/grok) return 1;; esac
+      fi
+      builtin [ "$@"
+    }
+    export -f command '['
+    local rc=0
+    AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$MREPO" \
+      DOOR_PACKET_DIR="$MREPO" DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" \
+      DOOR_REPORT_OUT="$TMP/grok-missing-runtime.md" DOOR_HEAD="$HEAD_SHA" \
+      bash "$GROK_DOOR" review > "$TMP/grok-missing-runtime.out" 2> "$TMP/grok-missing-runtime.err" || rc=$?
+    [ "$rc" = 127 ] && grep -q 'local_dependency_unavailable: grok binary not found' "$TMP/grok-missing-runtime.err"
+  )
+}
+check 'ordinary_grok_door_refuses_the_same_missing_runtime_as_readiness' 'grok_missing_runtime'
 DS_API_ROOT="$TMP/ds-api"
 mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/config/opencode" "$DS_API_ROOT/config/opencode-deepseek"
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
+cp "$REPO_ROOT/tools/lib/deepseek-opencode.sh" "$DS_API_ROOT/tools/lib/deepseek-opencode.sh"
 : > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
 printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
 sed -n '/^review_verdict() {/,/^take_governed_head()/p' "$REPO_ROOT/bin/ai-deepseek-agent" | sed '$d' > "$DS_API_ROOT/validator"
@@ -1186,7 +1421,7 @@ ds_api_case() {
     bash "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh" "$contract" > "$DS_API_ROOT/stdout" 2> "$DS_API_ROOT/stderr"
 }
 check 'attachment_api_approves_exact_native_head_and_inventory' \
-  "ds_api_case attachment-api first-managed-install review approve && grep -q 'installation.sh' '$DS_API_ROOT/args' && grep -q -- '--assert-head' '$DS_API_ROOT/args' && grep -q '^APPROVE$' '$DS_API_ROOT/report'"
+  "ds_without_runtime ds_api_case attachment-api first-managed-install review approve && grep -q 'installation.sh' '$DS_API_ROOT/args' && grep -q -- '--assert-head' '$DS_API_ROOT/args' && grep -q '^APPROVE$' '$DS_API_ROOT/report'"
 check 'attachment_api_refuses_other_operation_before_provider' \
   "! ds_api_case attachment-api legacy-managed-launcher-refresh review approve && ! test -e '$DS_API_ROOT/args'"
 check 'attachment_api_refuses_ordinary_review_before_provider' \

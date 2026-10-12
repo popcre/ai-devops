@@ -243,7 +243,7 @@ main() {
     (
       XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}" XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}" XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
       muse_clean_environment "$HOME" muse-code /usr/bin/env 0
-      reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
+      reviewer_credit_run muse "$log" "$out.err" --timeout-seconds "$MU_TIMEOUT" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
         --workspace "$workspace" --disable-approval --disable-web-tools \
         --no-foreign-personal-context --user-input-auto-resolve \
         --prompt-file "$(native_path "$prompt_full")" \
@@ -262,7 +262,7 @@ main() {
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
       muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
-        | reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
+        | reviewer_credit_run muse "$log" "$out.err" --timeout-seconds "$MU_TIMEOUT" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
             --format json --model "$MU_MODEL" \
             --dir "$(native_path "$DOOR_WORKDIR")" \
             > "$log" 2> "$out.err"

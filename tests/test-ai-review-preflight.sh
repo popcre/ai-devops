@@ -6,6 +6,12 @@ SCRIPT="$ROOT/bin/ai-review-preflight"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_TEST_ISOLATION=1
+export AI_REVIEWER_STATE_BASE="$TMP/reviewer-state"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard/reviews.jsonl"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/state"
@@ -130,8 +136,10 @@ esac
 EOF
 chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
+export AI_GROK_BIN="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
+export AI_DEEPSEEK_OPENCODE="$TMP/bin/good"
 export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
 export MOCK_ADMISSION_PYTHON="$(command -v python3 || command -v python)" MOCK_ADMISSION_TOOL="$ROOT/tools/reviewer_admission.py"
@@ -145,6 +153,121 @@ printf '%064d\n' 0 | tr 0 c > "$AI_QWEN_TEST_PRELOADER_FILE"
 printf '%064d\n' 0 | tr 0 a > "$MOCK_AGY_SHA_FILE"
 
 echo '== ai-review-preflight'
+check "missing executable wrapper is never usable" "AI_REVIEW_DEEPSEEK_WRAPPER='$TMP/bin/absent' $SCRIPT status deepseek | jq -e '.usable==false and .failure_class==\"wrapper-missing\"'"
+printf '#!/usr/bin/env bash\necho missing-codex >&2\nexit 1\n' > "$TMP/bin/local-failed"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/local-empty"
+printf '#!/usr/bin/env bash\nsleep 4\necho healthy\n' > "$TMP/bin/local-slow"
+chmod +x "$TMP/bin/local-failed" "$TMP/bin/local-empty"
+chmod +x "$TMP/bin/local-slow"
+check "registered Codex with failed local doctor is never usable" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-failed' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "registered Claude with failed local doctor is never usable" "AI_REVIEW_CLAUDE_WRAPPER='$TMP/bin/local-failed' $SCRIPT usable claude | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "registered DeepSeek with failed local installation is never usable" "AI_REVIEW_DEEPSEEK_WRAPPER='$TMP/bin/local-failed' $SCRIPT status deepseek | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "empty successful local doctor cannot prove readiness" "AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-empty' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "local doctor timeout cannot prove readiness" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_CODEX_WRAPPER='$TMP/bin/local-slow' $SCRIPT status codex | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "restored local executable recovers without a stale quarantine" "$SCRIPT status codex | jq -e '.usable==true' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/codex.json'"
+for local_provider in stepfun muse; do
+  if [ "$local_provider" = muse ]; then wrapper_var=AI_REVIEW_MUSE_WRAPPER; else wrapper_var=AI_REVIEW_STEPFUN_WRAPPER; fi
+  check "$local_provider nonzero local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-failed' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider empty local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-empty' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider bounded local doctor refuses timeout" "env AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 $wrapper_var='$TMP/bin/local-slow' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+  check "$local_provider healthy local doctor restores readiness without inventing capacity" "env $wrapper_var='$TMP/bin/good' $SCRIPT status $local_provider | jq -e '.usable==true and .admission.state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/$local_provider.json'"
+done
+check "Muse readiness preserves preflight caller" "AI_REVIEW_MUSE_WRAPPER='$TMP/bin/requires-muse-caller' $SCRIPT status muse | jq -e '.usable==true'"
+check "Muse readiness uses its independent offline doctor budget" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=4 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT status muse | jq -e '.usable==true'"
+cat > "$TMP/bin/stepfun-offline-runner" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in --help) echo 'step - AI coding assistant';; --version) echo '0.1.1';; *) exit 91;; esac
+EOF
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/offline-bwrap"
+chmod +x "$TMP/bin/stepfun-offline-runner" "$TMP/bin/offline-bwrap"
+actual_stepfun_readiness() {
+  (
+    export HOME="$TMP/actual-stepfun-home" USERPROFILE=''
+    export AI_STEPFUN_STATE_DIR="$TMP/actual-stepfun-state" AI_STEPFUN_KEY_STORE="$TMP/actual-stepfun-private/key"
+    export AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_BWRAP="$TMP/bin/offline-bwrap"
+    export AI_STEPFUN_STEP_BIN="$TMP/bin/stepfun-offline-runner" AI_REVIEW_STEPFUN_WRAPPER="$ROOT/bin/ai-stepfun"
+    mkdir -p "$HOME"
+    case "$1" in
+      runner-missing) export AI_STEPFUN_STEP_BIN="$TMP/bin/no-stepfun";;
+      healthy) printf 'synthetic-readiness-key\n' | bash "$ROOT/bin/ai-stepfun" store-key --if-missing --key-fd 9 9<&0 >/dev/null || return;;
+    esac
+    "$SCRIPT" status stepfun
+  )
+}
+check "actual StepFun wrapper refuses missing supported runner" "actual_stepfun_readiness runner-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "actual StepFun wrapper refuses missing protected key" "actual_stepfun_readiness key-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+check "actual StepFun wrapper recovers after supported protected setup" "actual_stepfun_readiness healthy | jq -e '.usable==true and .admission.state==\"unknown\"'"
+check "actual Muse offline wrapper refuses an empty installation" "HOME='$TMP/actual-muse-home' USERPROFILE='' AI_MUSE_ENGINE=opencode AI_REVIEW_MUSE_WRAPPER='$ROOT/bin/ai-muse' $SCRIPT status muse | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
+deepseek_missing_runtime_status() {
+  (
+    unset AI_DEEPSEEK_OPENCODE AI_DEEPSEEK_ENGINE
+    [ -z "${1:-}" ] || export AI_DEEPSEEK_ENGINE="$1"
+    export HOME="$TMP/no-opencode-home" USERPROFILE=''
+    mkdir -p "$HOME"
+    # Hide only the provider runtime. The actual wrapper's doctor reads the
+    # operating-system profile's protected key store, which clean CI runners
+    # lack, so a passing offline doctor stands in for it here; the runtime
+    # gate under test lives in preflight, not in the wrapper.
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = opencode ]; then return 1; fi
+      builtin command "$@"
+    }
+    export -f command
+    AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good" "$SCRIPT" status deepseek
+  )
+}
+check "API doctor cannot make missing ordinary DeepSeek runtime usable" "deepseek_missing_runtime_status | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"
+check "ambient first-install engine cannot bypass ordinary DeepSeek readiness" "deepseek_missing_runtime_status attachment-api | jq -e '.usable==false and .failure_class==\"local-dependency-unavailable\"'"
+check "restored ordinary DeepSeek runtime preserves unknown capacity and becomes usable" "$SCRIPT status deepseek | jq -e '.usable==true and .admission.state==\"unknown\" and .admission.quota_state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/deepseek.json'"
+grok_without_runtime() {
+  (
+    unset AI_GROK_BIN
+    export HOME="$TMP/no-grok-home"
+    mkdir -p "$HOME"
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then return 1; fi
+      builtin command "$@"
+    }
+    function [() {
+      # Model a machine without either supported shared-account installation.
+      if builtin [ "$#" = 3 ] && builtin [ "$1" = -x ]; then
+        case "$2" in /home/ai/.local/bin/grok|/usr/local/bin/grok) return 1;; esac
+      fi
+      builtin [ "$@"
+    }
+    export -f command '['
+    "$@"
+  )
+}
+check "real Grok wrapper presence cannot make missing native runtime usable" "grok_without_runtime env AI_REVIEW_GROK_WRAPPER='$ROOT/bin/ai-grok-review' $SCRIPT status grok | jq -e '.usable==false and .status==\"installation-unavailable\" and .failure_class==\"local-dependency-unavailable\" and .admission.state==\"unknown\"'"
+check "restored Grok runtime preserves unknown capacity without contacting provider" "$SCRIPT status grok | jq -e '.usable==true and .admission.state==\"unknown\" and .admission.quota_state==\"unknown\"' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/grok.json'"
+grok_runtime_selection_cases() {
+  grok_without_runtime bash -c '
+    source "$1/tools/lib/grok-runtime.sh"
+    mkdir -p "$HOME/.local/bin" "$HOME/.grok/bin"
+    for path in "$HOME/explicit" "$HOME/path-runtime" "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok"; do
+      printf "#!/usr/bin/env bash\necho unexpected-provider-call > \"%s\"\n" "$HOME/contact" > "$path"
+      chmod +x "$path"
+    done
+    command() {
+      if [ "$#" = 2 ] && [ "$1" = -v ] && [ "$2" = grok ]; then
+        [ -z "${FIXTURE_PATH_RUNTIME:-}" ] && return 1
+        printf "%s" "$FIXTURE_PATH_RUNTIME"; return 0
+      fi
+      builtin command "$@"
+    }
+    AI_GROK_BIN="$HOME/explicit" FIXTURE_PATH_RUNTIME="$HOME/path-runtime"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/explicit" ] || exit 1
+    AI_GROK_BIN="$HOME/absent"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/path-runtime" ] || exit 2
+    unset AI_GROK_BIN FIXTURE_PATH_RUNTIME
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.local/bin/grok" ] || exit 3
+    rm "$HOME/.local/bin/grok"
+    [ "$(grok_resolve_door_runtime)" = "$HOME/.grok/bin/grok" ] || exit 4
+    [ ! -e "$HOME/contact" ] || exit 5
+  ' fixture "$ROOT"
+}
+check "shared Grok resolver preserves explicit PATH and both home fallbacks without calls" 'grok_runtime_selection_cases'
 grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"

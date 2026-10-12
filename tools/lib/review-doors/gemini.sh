@@ -12,8 +12,13 @@
 #   bash gemini.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+umask 077
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/gemini-review-contract.sh"
+# Match the managed wrapper: ordinary native calls must not silently replace
+# the runtime whose bytes are bound to the live qualification.
+export AGY_CLI_DISABLE_AUTO_UPDATE=1
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -86,6 +91,32 @@ require_credentials() {
   return 0
 }
 
+# Preserve the exact native result privately; public lifecycle reports contain
+# only a fixed reason. An empty answer cannot establish an outage or credit loss.
+retain_failure() { # STDOUT EXIT REASON
+  python3 "$DOOR_CREDIT_ROOT/tools/review_door_diagnostics.py" gemini \
+    "$1" "$1.err" "$2" "$3" "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}"
+}
+
+response_failure() { # RESULT_JSON
+  local result="$1"
+  if ! jq -e 'type == "object"' "$result" >/dev/null 2>&1; then
+    printf 'invalid-response-json'; return
+  fi
+  if ! jq -e '.status == "SUCCESS"' "$result" >/dev/null 2>&1; then
+    printf 'provider-status-failed'; return
+  fi
+  if jq -e '(.denied_actions | type) == "array" and (.denied_actions | length) > 0' "$result" >/dev/null 2>&1; then
+    printf 'native-tool-denied'; return
+  fi
+  if ! jq -e --arg model "$GE_MODEL" '.init_model == $model' "$result" >/dev/null 2>&1; then
+    printf 'model-mismatch'; return
+  fi
+  if ! jq -e '.response | type == "string" and test("[^[:space:]]")' "$result" >/dev/null 2>&1; then
+    printf 'empty-response-text'; return
+  fi
+}
+
 # Parse the agy JSON envelope into OUR report shape: findings first, verdict
 # last under a literal '## Verdict' heading. Same grammar the pool and
 # lifecycle consume. The reviewed head is recorded before the verdict so the
@@ -93,7 +124,7 @@ require_credentials() {
 extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   local result="$1" dest="$2" head="$3" mode="$4" text model
   text="$(jq -r '.response // ""' "$result" 2>/dev/null || true)"
-  model="$(jq -r '.model // "unknown"' "$result" 2>/dev/null || echo unknown)"
+  model="$(jq -r '.init_model // "unknown"' "$result" 2>/dev/null || echo unknown)"
   [ -n "$text" ] || {
     if jq -e '(.denied_actions|type)=="array" and (.denied_actions|length)>0' "$result" >/dev/null 2>&1; then
       printf 'gemini door: provider returned no response text after the headless runtime denied a tool (%s).\n' \
@@ -122,7 +153,7 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
 }
 
 main() {
-  local agy prompt_full prompt_text out rc
+  local agy prompt_full prompt_text out rc reason raw stream_input
   agy="$(resolve_agy)" || exit $?
   require_credentials || exit $?
   [ -d "$DOOR_WORKDIR" ] || { printf 'gemini door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
@@ -132,50 +163,65 @@ main() {
   # disposable copy. The runner owns seal/store; this only points the model.
   prompt_full="$(mktemp)"
   {
+    gemini_review_contract "$DOOR_PACKET_DIR"
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    # agy print mode soft-denies every terminal command and then ends the turn
-    # with SUCCESS and an empty response (issue #1577), so say so up front,
-    # exactly as bin/ai-gemini's own brief does.
-    printf 'Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
   prompt_text="$(cat "$prompt_full")"
 
   out="$(mktemp)"
+  raw="$out.stream"
+  stream_input="$out.input"
+  printf %s "$prompt_text" | jq -cRs '{event:"user",message:{role:"user",content:[{type:"text",text:.}]}}' > "$stream_input"
+  trap 'rm -f "$prompt_full" "$out" "$raw" "$raw.err" "$stream_input"' EXIT
   set +e
   (
     cd "$DOOR_WORKDIR" || exit 1
     unset GEMINI_API_KEY GOOGLE_API_KEY AI_GEMINI_KEY
     if [ "$MODE" = implement ]; then
-      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
-        --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
-        > "$out" 2> "$out.err"
+      reviewer_credit_run gemini "$raw" "$raw.err" --timeout-seconds "$GE_TIMEOUT" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
+        --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
+        < "$stream_input" > "$raw" 2> "$raw.err"
     else
-      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
-        --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
-        > "$out" 2> "$out.err"
+      reviewer_credit_run gemini "$raw" "$raw.err" --timeout-seconds "$GE_TIMEOUT" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
+        --input-format stream-json --output-format stream-json --print-timeout "$GE_TIMEOUT" --print '' \
+        < "$stream_input" > "$raw" 2> "$raw.err"
     fi
   )
   rc=$?
   set -e
 
   if [ "$rc" -eq 92 ]; then
-    reviewer_capacity_current gemini "$out" || true
+    reviewer_capacity_current gemini "$raw" || true
     reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi
-  if [ "$rc" -ne 0 ] || ! jq -e 'has("response")' "$out" >/dev/null 2>&1; then
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$raw" "$rc" provider-call-failed
     printf 'gemini door: provider call failed (exit %s)\n' "$rc" >&2
-    [ -s "$out.err" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$out.err" | tail -20 >&2 || true
+    rm -f "$prompt_full"
+    exit 1
+  fi
+
+  if ! gemini_normalize_stream "$raw" > "$out" 2>/dev/null; then
+    retain_failure "$raw" 1 invalid-response-json
+    printf 'gemini door: native stream conversation/result refused; private diagnostics retained.\n' >&2
+    exit 1
+  fi
+  reason="$(response_failure "$out")"
+  if [ -n "$reason" ]; then
+    retain_failure "$raw" "$rc" "$reason"
+    printf 'gemini door: provider response refused (%s); private native diagnostics retained.\n' "$reason" >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
   if ! extract_report "$out" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE"; then
+    retain_failure "$raw" "$rc" report-extraction-failed
     rm -f "$prompt_full"
     exit 1
   fi
