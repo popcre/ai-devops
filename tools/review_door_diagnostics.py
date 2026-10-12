@@ -47,25 +47,32 @@ for line in native_log.splitlines():
             if code not in summary['http_status_codes']:
                 summary['http_status_codes'].append(code)
 text = '# Reviewer failed invocation\n\n' + json.dumps(summary, sort_keys=True) + '\n'
-def protect_windows(directory, files=()):
-    # One PowerShell child secures the directory and every file. The previous
-    # per-path spawn cost ~5s each on Windows and blew the suite budget (#1562).
+def protect_windows(path, directory=False):
     if os.name != 'nt': return
+    _run_protect([str(path)], directory)
+def protect_windows_files(files):
+    # One PowerShell child for every file; the previous per-file spawn cost
+    # ~5s each on Windows and blew the suite budget (#1562).
+    if os.name != 'nt': return
+    _run_protect([str(p) for p in files], False)
+def _run_protect(paths, directory):
     executable = shutil.which('pwsh') or shutil.which('powershell')
     if not executable: raise ValueError('private diagnostic ACL unavailable')
     helper = pathlib.Path(__file__).resolve().parent.parent / 'bin/windows-private-file.ps1'
     environment = dict(os.environ, AI_DEVOPS_PRIVATE_HELPER=str(helper),
-                       AI_DEVOPS_PRIVATE_DIR=str(directory),
-                       AI_DEVOPS_PRIVATE_FILES='\n'.join(str(p) for p in files))
+                       AI_DEVOPS_PRIVATE_FILES='\n'.join(paths))
     # PowerShell 7's modules cannot be loaded by Windows PowerShell 5. Rebuild
     # only this trusted child's module path; leave the caller's environment.
     for name in list(environment):
         if name.casefold() == 'psmodulepath':
             environment.pop(name)
-    command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; '
-               'Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_DIR -Directory; '
-               'foreach ($p in $env:AI_DEVOPS_PRIVATE_FILES -split "`n") { '
-               'if ($p) { Protect-AiDevOpsPrivatePath -Path $p } }')
+    if directory:
+        command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; '
+                   'Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_FILES -Directory')
+    else:
+        command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; '
+                   'foreach ($p in $env:AI_DEVOPS_PRIVATE_FILES -split "`n") { '
+                   'if ($p) { Protect-AiDevOpsPrivatePath -Path $p } }')
     result = subprocess.run([executable, '-NoProfile', '-NonInteractive',
                              '-ExecutionPolicy', 'Bypass', '-Command', command],
                             capture_output=True, env=environment, timeout=30)
@@ -90,15 +97,17 @@ if destination:
         dest, collided = sibling, pathlib.Path(destination)
     else:
         collided = None
-    # Create the empty files first (no native bytes yet), then one PowerShell
-    # invocation secures the directory and every file before any write.
-    # ACL refusal removes the empty files so nothing looks like retained evidence.
+    # Secure the empty directory before any file exists so created files
+    # inherit only the current user and SYSTEM, then one batched PowerShell
+    # call verifies every file before any native bytes are written (#1562).
+    protect_windows(dest, directory=True)
     payloads = [(native_log, 'native.jsonl'), (native_err, 'native.stderr'),
                 (text.encode(), 'report.md')]
-    fds = [os.open(dest / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-           for _, name in payloads]
+    fds = []
     try:
-        protect_windows(dest, [dest / name for _, name in payloads])
+        for _, name in payloads:
+            fds.append(os.open(dest / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        protect_windows_files([dest / name for _, name in payloads])
         for i, (data, _) in enumerate(payloads):
             with os.fdopen(fds[i], 'wb') as f:
                 fds[i] = -1
