@@ -124,7 +124,7 @@ def test_arc() -> None:
         )
         text_dir = td_path / "chunks"
         text_dir.mkdir()
-        # three fragments that share the same head → one interaction
+        # three fragments that share the same head -> one interaction
         chunk_rows = []
         for i, snippet in enumerate([
             f"dispatch to reviewer for commit {head}",
@@ -153,7 +153,7 @@ def test_arc() -> None:
             bad(f"arc stitcher failed: {r.stderr}")
         lines = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines() if x]
         if len(lines) == 1:
-            ok("three fragments + one event → exactly one interaction")
+            ok("three fragments + one event -> exactly one interaction")
         else:
             bad(f"expected 1 interaction, got {len(lines)}")
         if lines and lines[0].get("head") == head:
