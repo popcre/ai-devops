@@ -150,10 +150,10 @@ incomplete, and so is a session that ends holding an unreleased claim.
      work, and never touch a file you did not create this session (another
      session may own it — see `concurrent-session-clobber-hazards`).
    - **Branch:** delete the local and remote branch ONLY after proving the work
-     landed — `gh pr view <n> --json state,mergedAt` shows `MERGED`, or the
-     commits are reachable from `origin/main`. A squash merge rewrites SHAs, so
-     test with `git branch --merged origin/main` or by confirming the PR state,
-     not by comparing SHAs. If it is not merged, keep the branch and say so.
+     landed — `gh pr view <n> --json state,mergedAt` shows `MERGED`. A squash
+     merge rewrites SHAs, so never compare SHAs and never use `git branch
+     --merged` (squash merges destroy ancestry and it misreports). Confirm
+     the PR state on GitHub. If it is not merged, keep the branch and say so.
    - **Worktree:** remove this session's worktree only when its tree is clean
      AND its branch is merged or intentionally preserved. Use the
      `cleanup-worktree` skill — it owns the safety audit, recovers unique work,
