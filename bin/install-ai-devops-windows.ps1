@@ -1360,7 +1360,14 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     if ($ghProbe.ExitCode -eq 75) {
         Write-Note "GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable."
     } elseif ($ghProbe.ExitCode -ne 0) {
-        Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
+        Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login --web --insecure-storage"
+    }
+    # SSH logons cannot read Credential Manager; share the login through gh's
+    # own config store so remote sessions and Git work too.
+    $sshCreds = Join-Path $PSScriptRoot 'ai-gh-ssh-credentials.ps1'
+    if ($ghProbe.ExitCode -eq 0 -and (Test-Path -LiteralPath $sshCreds) -and -not $SkillsDryRun) {
+        $sshProbe = Invoke-NativeProbe -Command 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sshCreds)
+        Write-Note "GitHub login for SSH sessions: $($sshProbe.Output -join ' ')"
     }
 } else {
     Write-Note "GitHub CLI not found. Install when needed: winget install GitHub.cli"
