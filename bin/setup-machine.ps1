@@ -291,8 +291,10 @@ if (Get-Command railway -ErrorAction SilentlyContinue) { Ok "railway $(railway -
 # GitHub CLI creates its config folder with inheritance disabled on some Windows
 # installations. Codex's restricted task account can then see the workspace but
 # `gh` fails before it can run because config.yml is unreadable. Repair only that
-# folder and grant only read/execute; credentials remain in Windows Credential
-# Manager and no token is copied or exposed.
+# folder and grant only read/execute. The installer's ai-gh-ssh-credentials.ps1
+# also keeps a copy of the github.com login in this folder so SSH logons can
+# use it; that folder stays limited to this user, SYSTEM, Administrators and
+# this read-only grant.
 $repairGhAccess = Join-Path $RepoPath "bin\repair-codex-github-cli-access.ps1"
 if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhAccess)) {
   Step "GitHub CLI access for restricted Codex tasks"

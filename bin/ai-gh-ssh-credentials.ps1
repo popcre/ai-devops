@@ -4,8 +4,8 @@
 # Windows Credential Manager ("keyring") is empty for them: gh reports the
 # token invalid and Git's credential manager cannot read or store anything.
 # The supported gh alternative is its own config store (hosts.yml, written by
-# `gh auth login --insecure-storage`). This script moves a working keyring
-# login there, after proving only this user, SYSTEM, Administrators and the
+# `gh auth login --insecure-storage`). This script copies a working keyring
+# login there (the keyring entry stays for interactive use), after proving only this user, SYSTEM, Administrators and the
 # read-only Codex sandbox group can read that folder, and points Git at gh for
 # github.com (`gh auth setup-git`), so interactive and SSH sessions share one
 # credential. Every GitHub CLI call goes through the shared ai-gh gate; the
@@ -56,11 +56,18 @@ function Backup-File([string]$Path) {
 function Assert-PrivateFolder([string]$Path) {
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544', 'S-1-3-0')
-    foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+    $sandbox = $null
+    try { $sandbox = ([Security.Principal.NTAccount]"$env:COMPUTERNAME\CodexSandboxUsers").Translate([Security.Principal.SecurityIdentifier]).Value } catch { }
+    $writeMask = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteAttributes, WriteExtendedAttributes, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
+    $acl = Get-Acl -LiteralPath $Path
+    $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
+    if (@($me, 'S-1-5-18', 'S-1-5-32-544') -notcontains $owner) { throw "Refusing to store the GitHub login: $Path is owned by $($acl.Owner)." }
+    foreach ($rule in $acl.Access) {
         if ($rule.AccessControlType -ne 'Allow') { continue }
         try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = $rule.IdentityReference.Value }
         if ($allowed -contains $sid) { continue }
-        if ($rule.IdentityReference.Value -match '\\CodexSandboxUsers$') { continue }
+        # The local Codex sandbox group may read, never write (repair-codex-github-cli-access.ps1).
+        if ($sandbox -and $sid -eq $sandbox -and ($rule.FileSystemRights -band $writeMask) -eq 0) { continue }
         throw "Refusing to store the GitHub login: $($rule.IdentityReference.Value) can read $Path."
     }
 }
