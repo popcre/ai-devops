@@ -126,6 +126,11 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   text="$(jq -r '.response // ""' "$result" 2>/dev/null || true)"
   model="$(jq -r '.init_model // "unknown"' "$result" 2>/dev/null || echo unknown)"
   [ -n "$text" ] || {
+    if jq -e '(.denied_actions|type)=="array" and (.denied_actions|length)>0' "$result" >/dev/null 2>&1; then
+      printf 'gemini door: provider returned no response text after the headless runtime denied a tool (%s).\n' \
+        "$(jq -r '[.denied_actions[]|(.display_name // .action // "unknown")|tostring]|join(",")' "$result")" >&2
+      return 1
+    fi
     printf 'gemini door: provider returned no response text.\n' >&2
     return 1
   }
@@ -161,7 +166,11 @@ main() {
     gemini_review_contract "$DOOR_PACKET_DIR"
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
-    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
+    # agy print mode soft-denies every terminal command and then ends the turn
+    # with SUCCESS and an empty response (issue #1577), so say so up front,
+    # exactly as bin/ai-gemini's own brief does.
+    printf 'Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"

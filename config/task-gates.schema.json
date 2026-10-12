@@ -38,7 +38,7 @@
       }
     },
     "reviewer_release": {
-      "description": "Central only (#1239): action name to {protected class: gate}. A forbidden action for that protected EFFECTIVE class reaches the assigned-AI-reviewer-approval step (never starts without it) only while the class's merged required gates contain the named gate, i.e. the repository declared it. private-evidence can never be named.",
+      "description": "Central only (#1239): action name to {protected class: gate}. A forbidden action for that protected EFFECTIVE class reaches the assigned-AI-reviewer-approval step (never starts without it) only while the class's merged required gates contain the named gate, i.e. the repository declared it. private-evidence permits only database/synthetic-fixtures-only; the runtime additionally requires the closed DesignFlow #770 native stdin profile and refuses owner shortcuts.",
       "type": "object",
       "additionalProperties": {
         "type": "object",

@@ -137,7 +137,10 @@ validate_action_gates(){
     [ -n "$action" ] || continue
     valid_action "$action" || fail_closed "reviewer_release names undeclared action '$action'."
     valid_class "$class" || fail_closed "reviewer_release names undeclared class '$class' for action '$action'."
-    [ "$class" != private-evidence ] || fail_closed "reviewer_release may never release private-evidence."
+    if [ "$class" = private-evidence ]; then
+      [ "$action" = database ] && [ "$gate" = synthetic-fixtures-only ] \
+        || fail_closed "reviewer_release cannot broaden the closed private-evidence database boundary."
+    fi
     [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
   done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
@@ -1324,6 +1327,17 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       if [ -n "$release_gate" ] && ! printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -qx -- "$release_gate"; then
         release_gate=""
       fi
+    fi
+    # This release retains the protected class. Stdin forces the existing
+    # selected-code/native profile validator below, which accepts only the
+    # closed isolated #770 descriptor and publishes both stage receipts.
+    # Ordinary reviews and every owner/acknowledgement shortcut stay sealed.
+    if [ "$effective" = private-evidence ]; then
+      [ "$action" = database ] && [ "$release_gate" = synthetic-fixtures-only ] \
+        && [ "$IDENTITY" = popcre/designflow-backend ] \
+        && [ "$action_manifest_stdin" -eq 1 ] && [ -z "$small_entry" ] \
+        && [ -z "$acknowledge" ] \
+        || release_gate=""
     fi
     if [ "$protected" = true ] && [ -z "$release_gate" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
