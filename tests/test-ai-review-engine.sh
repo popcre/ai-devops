@@ -1097,10 +1097,23 @@ check "front_door_deepseek_respects_reviewer_registry" \
 # OpenCode binary: the same runner contracts (packet + report + lifecycle) as
 # the native grok door, offline.
 echo '== deepseek review contract through the runner (stub OpenCode)'
+# Same directory can appear as MSYS $PWD (C:/...) and cygpath -w (C:\...).
+# Workdir identity must compare resolved paths, not raw path spellings.
+PATH_ID_SH="$TMP/path_id.sh"
+cat > "$PATH_ID_SH" <<'PID'
+path_id() {
+  # Collapse Windows backslashes so MSYS C:/... and cygpath -w C:\... compare
+  # equal; Linux paths have no backslashes and pass through unchanged.
+  python3 -c 'import sys; print(sys.argv[1].replace("\\", "/"), end="")' "$1"
+}
+PID
+. "$PATH_ID_SH"
+
 STUB_OC="$TMP/stub-opencode"
 cat > "$STUB_OC" <<EOF
 #!/usr/bin/env bash
 # Offline stub OpenCode: accepts the door's run contract and emits JSONL.
+. "$PATH_ID_SH" || exit 1
 out=''
 dir=''
 while [ \$# -gt 0 ]; do
@@ -1118,11 +1131,11 @@ if [ "\${DS_TEST_RUN_UNITTEST:-0}" = 1 ]; then
   original="\$(sed -n 's/^Directory you are reading: //p' "\$DS_TEST_MANIFEST")"
   selected="\$(printf '%s\\n' "\$prompt" | sed -n 's/^Trusted execution workspace: //p' | tail -1)"
   target="\${selected:-\$original}"
-  test "\$target" = "\$dir" || exit 1
+  test "\$(path_id "\$target")" = "\$(path_id "\$dir")" || exit 1
   printf '%s\\n' "\$prompt" | grep -q 'Original MANIFEST snapshot paths are immutable provenance only' || exit 1
   # Exercise inherited process cwd, not merely the advertised --dir option.
   printf '%s' "\$PWD" > "\$DS_TEST_DIR_RECORD"
-  test "\$PWD" = "\$dir" || exit 1
+  test "\$(path_id "\$PWD")" = "\$(path_id "\$dir")" || exit 1
   cd "\$target" || exit 1
   # Force bytecode even when the caller's environment suppresses or redirects
   # it (edge-dev3 exports PYTHONDONTWRITEBYTECODE=1), so the immutability
@@ -1197,6 +1210,13 @@ check "deepseek_real_unittest_keeps_immutable_snapshot_digest" \
   "test '$DS_ARTIFACT_RC' -eq 0 && test '$DS_ARTIFACT_DIGEST' = '$DS_ARTIFACT_AFTER' && test ! -d '$DS_ARTIFACT_SOURCE/__pycache__'"
 check "deepseek_tests_run_in_owned_scratch_and_remove_it" \
   "test -n '$DS_ACTUAL_WORKDIR' && test '$DS_ACTUAL_WORKDIR' != '$DS_ARTIFACT_SOURCE' && test ! -e '$DS_ACTUAL_WORKDIR'"
+# Adversarial: equivalent Windows spellings are the same workdir; a different
+# directory is never accepted. Guards against loosening workdir identity into
+# a raw-string mismatch or a prefix/any-path match.
+check "deepseek_workdir_identity_matches_equivalent_path_spellings" \
+  "test \"\$(path_id 'C:/Users/x/work')\" = \"\$(path_id 'C:\\Users\\x\\work')\""
+check "deepseek_workdir_identity_rejects_different_directory" \
+  "test \"\$(path_id 'C:/Users/x/work')\" != \"\$(path_id 'C:/Users/x/other')\" && test \"\$(path_id 'C:/Users/x/work')\" != \"\$(path_id 'C:/Users/x/work/child')\""
 
 # The grep presence check must not close the JSONL text producer early under
 # pipefail. Exercise a large multi-event report and retain all fail-closed
