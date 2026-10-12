@@ -6,20 +6,24 @@ root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDA
 failed=0
 while IFS= read -r path; do
   lowered="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  # Match .ai/ case-insensitively for the block; the publish exception inside
+  # only fires for the exact lowercase .ai/reviewer-issues/ path.
   case "$lowered" in
-    .ai/*|./.ai/*)
-      # .ai/reviewer-issues/ is an intentional publish (PR #1626): redacted
-      # incident packages kept on github.com for diagnosis. Only prose/data
-      # extensions are allowed there; secret-bearing names and forms still fail.
+    .ai/*)
       case "$lowered" in
         *.env*|*.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.kdbx|\
         */auth.json|*/credentials.json|*/id_rsa*|*/id_ed25519*|*/id_ecdsa*|*/id_dsa*|\
         *token*|*secret*|*private*|*passwd*|*password*)
           echo "BOUNDARY FAIL: secret-bearing file name tracked at $path" >&2; failed=1 ;;
         .ai/reviewer-issues/*)
-          case "$lowered" in
-            *.json|*.txt|*.md|*.log|*.csv|*.err|*.out) ;;
-            *) echo "BOUNDARY FAIL: non-prose file tracked at $path" >&2; failed=1 ;;
+          # Publish exception: exact lowercase .ai/ path only.
+          case "$path" in
+            .ai/reviewer-issues/*)
+              case "$lowered" in
+                *.json|*.txt|*.md|*.log|*.csv|*.err|*.out) ;;
+                *) echo "BOUNDARY FAIL: non-prose file tracked at $path" >&2; failed=1 ;;
+              esac ;;
+            *) echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
           esac ;;
         *) echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
       esac ;;

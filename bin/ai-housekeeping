@@ -72,7 +72,7 @@ c_warn() { printf '\033[33m⚠  %s\033[0m\n' "$1"; }
 # Same log()/tee pattern as bin/ai-memory-sync: timestamp + host, stdout and log.
 log() {
   mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
-  printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST" "$*" | tee -a "$LOG"
+  printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST" "$*" | tee -a "$LOG" || return 1
 }
 
 OUT=""
@@ -656,7 +656,10 @@ if [[ "$LOGGING" -eq 1 ]]; then
     else
       printf '%s' "$OUT"
     fi
-  } | tee -a "$LOG" >/dev/null
+  } | tee -a "$LOG" >/dev/null || {
+    echo "ai-housekeeping: failed to write log $LOG" >&2
+    exit 1
+  }
   retain_log_blocks
 fi
 
