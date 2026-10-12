@@ -23,6 +23,11 @@ Assert ($setup -match 'Register-ScheduledTask -TaskName "AiDevOps-Housekeeping"'
 Assert ($setup -match 'New-ScheduledTaskTrigger -Daily') 'trigger must be daily (decision b)'
 Assert ($setup -notmatch '-WakeToRun\b') 'task must never wake a sleeping machine'
 Assert ($setup -match '--log --quiet') 'task must run the log-and-quiet report form'
+# The housekeeping block must use the same escaped backslash as the memory-sync
+# block: -replace '\\','/' not -replace '\','/' (invalid regex).
+$hkBlock = $setup.Substring($setup.IndexOf('Housekeeping schedule'))
+Assert ($hkBlock -match "-replace '\\\\','/'") 'housekeeping posix path must escape the backslash like memory-sync'
+Assert ($hkBlock -notmatch "-replace '\\','/'") 'housekeeping must not use an unescaped backslash replace'
 
 Assert ($tool -match 'AI_HOUSEKEEPING_LOG') 'log path must be environment-overridable'
 Assert ($tool -match 'retain_log_blocks') 'tool must retain a bounded number of log blocks'

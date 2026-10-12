@@ -109,15 +109,28 @@ cron_job_line() {
 
 cmd_schedule() {
   if command -v schtasks.exe >/dev/null 2>&1; then
-    local bash_exe self
-    bash_exe="$(cygpath -w "$(command -v bash)")"
+    # Mirror bin/setup-machine.ps1 section 5d exactly: hidden VBS launcher,
+    # 15-minute ExecutionTimeLimit, IgnoreNew, StartWhenAvailable, no wake.
+    # A bare schtasks /Create would replace that task with an unbounded one.
+    local self posix launcher
     self="$(cygpath -m "$SELF")"
-    # conhost --headless keeps a console from flashing. /F re-points an
-    # existing task. Never /WAKE: a sleeping machine stays asleep (plan step 7).
-    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC DAILY /ST "$DAILY_AT" /TN "$TASK_NAME" \
-      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' --log --quiet\"" >/dev/null \
-      || { echo "ai-housekeeping: schtasks refused $TASK_NAME" >&2; return 2; }
-    log "scheduled daily at $DAILY_AT as $TASK_NAME"
+    posix="/$(printf '%s' "$self" | sed 's/^[Aa-Zz]://;s|\\|/|g')"
+    launcher="$HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
+    mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
+    printf '%s\n' \
+      'Set shell = CreateObject("WScript.Shell")' \
+      "exitCode = shell.Run(\"\"\"$(cygpath -w "$(command -v bash)")\"\" -lc \"\"'$posix' --log --quiet\"\"\", 0, True)" \
+      'WScript.Quit exitCode' >"$launcher"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+      \$ErrorActionPreference = 'Stop'
+      \$hkAction = New-ScheduledTaskAction -Execute \"\$env:WINDIR\System32\wscript.exe\" -Argument \"//B //NoLogo \`\"$launcher\`\"\"
+      \$hkTrigger = New-ScheduledTaskTrigger -Daily -At $DAILY_AT
+      \$hkSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
+      \$hkPrincipal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+      Register-ScheduledTask -TaskName 'AiDevOps-Housekeeping' -Action \$hkAction -Trigger \$hkTrigger -Settings \$hkSettings -Principal \$hkPrincipal -Description 'Daily AI housekeeping report (report-only; logs to ~/.cache/ai-housekeeping.log)' -Force | Out-Null
+    " >/dev/null 2>&1 \
+      || { echo "ai-housekeeping: could not register $TASK_NAME" >&2; return 2; }
+    log "scheduled daily at $DAILY_AT as $TASK_NAME (hidden; 15 min limit; no wake)"
     return 0
   fi
   command -v crontab >/dev/null 2>&1 || {

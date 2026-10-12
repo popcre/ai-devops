@@ -1191,7 +1191,7 @@ WScript.Quit exitCode
 # UNKNOWN and exits 0. Never wakes a sleeping machine.
 Step "Housekeeping schedule (daily report)"
 if (Test-Path $gitBash) {
-  $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\','/')
+  $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\\','/')
   $hkScript = "$posix/bin/ai-housekeeping"
   $taskDir = Join-Path $HOME ".config\ai-devops"
   $hkLauncher = Join-Path $taskDir "ai-housekeeping-hidden.vbs"
