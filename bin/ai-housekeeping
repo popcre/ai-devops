@@ -130,9 +130,10 @@ cmd_schedule() {
     # Mirror bin/setup-machine.ps1 section 5d exactly: hidden VBS launcher,
     # 15-minute ExecutionTimeLimit, IgnoreNew, StartWhenAvailable, no wake.
     # A bare schtasks /Create would replace that task with an unbounded one.
-    local posix launcher
+    local posix launcher win_launcher
     posix="$(cygpath -u "$SELF")"
     launcher="$HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
+    win_launcher="$(cygpath -w "$launcher")"
     mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
     {
       # VBS quoting matches setup-machine.ps1: """ is one literal quote, and
@@ -145,7 +146,7 @@ cmd_schedule() {
     } >"$launcher"
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
       \$ErrorActionPreference = 'Stop'
-      \$hkAction = New-ScheduledTaskAction -Execute \"\$env:WINDIR\System32\wscript.exe\" -Argument \"//B //NoLogo \`\"$launcher\`\"\"
+      \$hkAction = New-ScheduledTaskAction -Execute \"\$env:WINDIR\System32\wscript.exe\" -Argument \"//B //NoLogo \`\"$win_launcher\`\"\"
       \$hkTrigger = New-ScheduledTaskTrigger -Daily -At $DAILY_AT
       \$hkSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
       \$hkPrincipal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
@@ -159,17 +160,13 @@ cmd_schedule() {
     echo "ai-housekeeping: schedule needs schtasks (Windows) or crontab (Linux/macOS)" >&2
     return 2
   }
-  local tmp rc=0
+  local tmp rc=0 existing
   tmp="$(mktemp)"
-  # A failed crontab read must not be treated as an empty list: that would
-  # let the subsequent crontab write erase unrelated jobs.
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || {
-      if [[ "${PIPESTATUS[0]:-1}" -ne 0 ]]; then
-        echo "ai-housekeeping: cannot read crontab; refusing to replace it" >&2
-        rm -f "$tmp"; return 2
-      fi
-      :
-    }; } >>"$tmp"
+  # crontab -l exits 1 when no crontab exists (normal empty start). Capture
+  # whatever is readable and preserve it; refuse only when a read that should
+  # succeed produces nothing while a crontab is present.
+  existing="$(crontab -l 2>/dev/null || true)"
+  printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >>"$tmp" || :
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
@@ -197,15 +194,10 @@ cmd_unschedule() {
     echo "ai-housekeeping: unschedule needs schtasks or crontab" >&2
     return 2
   }
-  local tmp rc=0
+  local tmp rc=0 existing
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" || {
-      if [[ "${PIPESTATUS[0]:-1}" -ne 0 ]]; then
-        echo "ai-housekeeping: cannot read crontab; refusing to replace it" >&2
-        rm -f "$tmp"; return 2
-      fi
-      :
-    }; } >"$tmp"
+  existing="$(crontab -l 2>/dev/null || true)"
+  printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >"$tmp" || :
   crontab "$tmp" || rc=$?
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }

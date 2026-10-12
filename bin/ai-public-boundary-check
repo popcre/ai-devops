@@ -9,14 +9,16 @@ while IFS= read -r path; do
     .ai/*)
       # .ai/reviewer-issues/ is an intentional publish (PR #1626): redacted
       # incident packages kept on github.com for diagnosis. Only prose/data
-      # extensions are allowed there; secret-bearing names and forms still fail.
-      case "$path" in
+      # extensions are allowed there; secret-bearing names and forms still fail
+      # (case-insensitive, so TOKEN.txt and Secret.json are caught).
+      lowered="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+      case "$lowered" in
         *.env*|*.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.kdbx|\
         */auth.json|*/credentials.json|*/id_rsa*|*/id_ed25519*|*/id_ecdsa*|*/id_dsa*|\
         *token*|*secret*|*private*|*passwd*|*password*)
           echo "BOUNDARY FAIL: secret-bearing file name tracked at $path" >&2; failed=1 ;;
         .ai/reviewer-issues/*)
-          case "$path" in
+          case "$lowered" in
             *.json|*.txt|*.md|*.log|*.csv|*.err|*.out) ;;
             *) echo "BOUNDARY FAIL: non-prose file tracked at $path" >&2; failed=1 ;;
           esac ;;
