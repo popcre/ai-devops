@@ -137,6 +137,13 @@ machines. An explicit full manual run may select
 The registrations remain available only for deliberate manual workflows that
 ask for `edge-dev`.
 
+> **Update 2026-10-12:** `edge-dev-win` now runs as the Windows service
+> `actions.runner.popcre-ai-devops.edge-dev-win` (NETWORK SERVICE, delayed auto
+> start) with labels `edge-dev,ai-devops-windows`. Its `C:\actions-runner`
+> folder had been deleted (not in the 2026-10-11 shadow copy either), so it was
+> re-registered with `--replace --runasservice`. `edge-dev-win-2` is no longer
+> registered on GitHub.
+
 Neither is a Windows service — installing one requires an elevated shell. At
 most one registration and scheduled task may be active on this physical host.
 A deliberate manual diagnostic selects one; the other must remain stopped or
