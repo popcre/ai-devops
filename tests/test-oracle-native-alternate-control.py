@@ -115,7 +115,7 @@ class Controls(unittest.TestCase):
     def test_context_failure_and_damaged_git_never_read_candidate(self):
         spec=importlib.util.spec_from_file_location('routing_failure',ROOT/'tools/review_action_profile.py')
         routing=importlib.util.module_from_spec(spec);spec.loader.exec_module(routing)
-        for failure in (ValueError('insecure executable'),OSError('damaged git'),subprocess.TimeoutExpired('git',5)):
+        for failure in (ValueError('insecure executable'),OSError('damaged git'),RuntimeError('context unavailable'),subprocess.TimeoutExpired('git',5)):
             reader=mock.Mock(side_effect=AssertionError('candidate read'))
             with mock.patch.object(control,'oracle_state_context',side_effect=failure), mock.patch.object(routing.importlib.util,'module_from_spec',return_value=control), mock.patch.object(routing.importlib.util,'spec_from_file_location',return_value=SimpleNamespace(loader=SimpleNamespace(exec_module=lambda _:None))), mock.patch.object(routing._native,'private_read',reader), mock.patch.object(sys,'argv',['tool','preaction','/untrusted/capture.json']):
                 self.assertEqual(routing.main(),1)
@@ -176,6 +176,29 @@ class Controls(unittest.TestCase):
             env={**os.environ,'SCRIPT_DIR':str(scripts),'REAL_DIR':str(scripts),'AI_REVIEW_LIFECYCLE_DIR':str(self.root)}
             result=subprocess.run(['/bin/bash','-c',program,'fixture',str(report),head,str(ROOT),publish],env=env,capture_output=True)
             self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,b'');self.assertNotIn(b'unbound',result.stderr)
+
+    def test_explicit_foreign_unknown_profile_in_oracle_context_never_reads(self):
+        spec=importlib.util.spec_from_file_location('explicit_routing',ROOT/'tools/review_action_profile.py')
+        routing=importlib.util.module_from_spec(spec);spec.loader.exec_module(routing)
+        oracle=self.root/'explicit-oracle';oracle.mkdir()
+        foreign=self.root/'explicit-foreign';foreign.mkdir()
+        for repo,url in ((oracle,'https://github.com/u2giants/theoracle'),(foreign,'https://github.com/popcre/designflow-backend')):
+            for args in [('init','-q'),('remote','add','origin',url)]:subprocess.run(['/usr/bin/git','-C',str(repo),*args],check=True,capture_output=True)
+        previous=os.getcwd()
+        try:
+            for repo,path in ((oracle,self.root/'capture.json'),(foreign,self.path)):
+                os.chdir(repo)
+                for selected in ('shared-db-770-isolated-timing-rehearsal-v1','unknown-profile'):
+                    reader=mock.Mock(side_effect=AssertionError('forbidden candidate read'))
+                    with mock.patch.object(routing._native,'private_read',reader),mock.patch.object(sys,'argv',['tool','preaction',str(path),'--profile',selected]):
+                        self.assertEqual(routing.main(),1)
+                    reader.assert_not_called()
+            os.chdir(foreign)
+            reader=mock.Mock(return_value=b'{}')
+            with mock.patch.object(routing._native,'private_read',reader),mock.patch.object(sys,'argv',['tool','preaction',str(self.root/'foreign-state.json'),'--profile',routing.PROFILE]):
+                self.assertEqual(routing.main(),1)
+            reader.assert_called_once()
+        finally:os.chdir(previous)
 
 
 if __name__=='__main__':unittest.main()
