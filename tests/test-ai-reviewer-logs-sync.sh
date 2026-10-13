@@ -45,7 +45,7 @@ run(){
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
     bash "$ROOT/bin/ai-reviewer-logs-sync" "$@"
 }
-view(){ rm -rf "$TMP/plain"; run view "$TMP/plain" >/dev/null 2>&1; }
+view(){ rm -rf "$TMP/plain"; run view "$TMP/plain" >/dev/null 2>"$TMP/view.err" || { cat "$TMP/view.err" >&2; return 1; }; }
 
 run sync 2> "$TMP/out1" || { cat "$TMP/out1" >&2; exit 1; }
 VIEW="$TMP/view"; git clone -q "$REMOTE" "$VIEW"
@@ -146,6 +146,9 @@ MSYS2_ARG_CONV_EXCL='*' openssl cms -encrypt -binary -aes-256-cbc -outform DER -
 git -C "$VIEW" add -A && git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm evil2 && git -C "$VIEW" push -q origin HEAD:main
 check 'bundles with Windows-style escaping paths are not unpacked' "! run view '$TMP/plain' >/dev/null 2>'$TMP/out15' && grep -q 'unsafe path' '$TMP/out15' && [ ! -e '$TMP/outside.txt' ]"
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q test-box/bundles/99991231T000000000000001Z-evil.tar.cms
+# The forged test bundles were removed on purpose: record them as known losses.
+printf '%s\n' test-box/bundles/99991231T000000000000000Z-evil.tar.cms test-box/bundles/99991231T000000000000001Z-evil.tar.cms >> "$VIEW/test-box/LOST-BUNDLES.txt"
+git -C "$VIEW" add test-box/LOST-BUNDLES.txt
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm unevil && git -C "$VIEW" push -q origin HEAD:main
 
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
@@ -227,6 +230,20 @@ check 'archive commits always carry the owner identity' "[ \"\$(cat '$TMP/idents
 mkdir -p "$TMP/fake-uname"; printf '#!/bin/sh\necho Darwin\n' > "$TMP/fake-uname/uname"; chmod +x "$TMP/fake-uname/uname"
 PATH="$TMP/fake-uname:$PATH" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out23" 2>&1 || true
 check 'unsupported systems are refused clearly' "grep -q 'Linux and Windows' '$TMP/out23'"
+# Cleaned machine names never collide with a literal name.
+printf 'm\n' >> "$STATE/reviewer-events/events.jsonl"
+AI_REVIEWER_LOGS_MACHINE=build_1 run sync > /dev/null 2>&1 || true
+git -C "$REMOTE" ls-tree --name-only main > "$TMP/machines"
+check 'cleaned machine names get a fingerprint' "grep -qE '^build-1-[0-9a-f]{8}\$' '$TMP/machines'"
+
+# A rejected push leaves the bundle recorded locally; the next run publishes it.
+printf '#!/bin/sh\nexit 1\n' > "$REMOTE/hooks/pre-receive"; chmod +x "$REMOTE/hooks/pre-receive"
+printf 'evidence during an outage\n' > "$ISSUES/pkg/outage.log"
+run sync > /dev/null 2>&1 || true
+rm -f "$REMOTE/hooks/pre-receive"
+run sync 2> "$TMP/out24" || { cat "$TMP/out24" >&2; exit 1; }
+view
+check 'bundles from a failed push are published by the next run' "grep -q 'restored' '$TMP/out24' && grep -q 'during an outage' '$P/reviewer-issues/pkg/outage.log'"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"

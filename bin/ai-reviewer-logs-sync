@@ -69,7 +69,13 @@ CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-80000000}"
 [ "$CHUNK_BYTES" -le 80000000 ] || die "AI_REVIEWER_LOGS_CHUNK_BYTES may not exceed 80000000"
 [ "$MAX_BYTES" -le "$CHUNK_BYTES" ] || MAX_BYTES="$CHUNK_BYTES"
 CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
-MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
+MACHINE_RAW="${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}"
+MACHINE="$(printf '%s' "$MACHINE_RAW" | lower | tr -c 'a-z0-9.-' '-')"
+# If cleaning the name changed it, add a fingerprint of the original so names
+# such as build_1 and build-1 never share one archive folder.
+if [ "$MACHINE" != "$(printf '%s' "$MACHINE_RAW" | lower)" ]; then
+  MACHINE="$MACHINE-$(printf '%s' "$MACHINE_RAW" | sha256sum | cut -c1-8)"
+fi
 case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
 LOG="$HOME_DIR/sync.log"
 
@@ -365,6 +371,13 @@ cmd_sync(){
     rm -rf "$WORK"; exit 1
   fi
 
+  # Keep the recovery copy and ledger entry BEFORE publishing: if this run dies
+  # after the push, nothing is unknown; if the push fails, the next run finds the
+  # bundle missing from the archive and publishes it from this copy.
+  for bundle in ${bundles[@]+"${bundles[@]}"}; do
+    mkdir -p "$HOME_DIR/sent"; cp -f "$HUB/$bundle" "$HOME_DIR/sent/$(basename "$bundle")"
+    grep -qxF -- "$bundle" "$HOME_DIR/pushed-bundles" 2>/dev/null || printf '%s\n' "$bundle" >> "$HOME_DIR/pushed-bundles"
+  done
   if ! git -C "$HUB" diff --cached --quiet; then
     # Owner identity, always: never whatever this machine happens to have set.
     GIT_AUTHOR_NAME="Albert Hazan" GIT_AUTHOR_EMAIL="u2giants@users.noreply.github.com" \
@@ -387,10 +400,6 @@ cmd_sync(){
     done < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new"
     mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
   fi
-  for bundle in ${bundles[@]+"${bundles[@]}"}; do
-    mkdir -p "$HOME_DIR/sent"; cp -f "$HUB/$bundle" "$HOME_DIR/sent/$(basename "$bundle")"
-    printf '%s\n' "$bundle" >> "$HOME_DIR/pushed-bundles"
-  done
   if [ "$partial" = 0 ]; then
     save_seen
     printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha256"
