@@ -53,10 +53,11 @@ LOG="$HOME_DIR/sync.log"
 SECRET_RE='Basic[[:space:]]+[A-Za-z0-9+/]{8,}|npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
 R='[REDACTED-SECRET]'
 # Credential labels, including composite names such as AWS_SECRET_ACCESS_KEY.
-LABEL="[A-Za-z0-9_.-]*(api[_ -]?key|access[_ -]?key|private[_ -]?key|token|secret|password|passwd|pwd|authorization|credential)[A-Za-z0-9_.-]*"
-# A labeled value that is neither already masked nor a plain count (token counts
-# stay readable; a digit-led value of 16+ characters is still treated as secret).
-VALUE="([^\"'[:space:],}[0-9]|[0-9][^[:space:],}\"']{15,})"
+# Anything after the keyword must start with a separator, so usage counters such
+# as input_tokens or max_tokens are not credential labels and stay readable.
+LABEL="[A-Za-z0-9_.-]*(api[_ -]?key|access[_ -]?key|private[_ -]?key|token|secret|password|passwd|pwd|authorization|credential)([_.-][A-Za-z0-9_.-]*)?"
+# Any labeled value that is not already masked.
+VALUE="[^\"'[:space:],}[]"
 LABELED_RE="$LABEL[\"']?[[:space:]]*[:=][[:space:]]*[\"']?$VALUE"
 
 log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
@@ -83,8 +84,8 @@ scrub(){
     -e "s/eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]*/$R/g" \
     -e "s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]{12,}/\\1$R/g" \
     -e "s/(Basic[[:space:]]+)[A-Za-z0-9+\/]{8,}={0,2}/\\1$R/g" \
-    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*\")([^\"0-9[][^\"]*|[0-9][^\"]{15,})\"/\\1$R\"/Ig" \
-    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*')([^'0-9[][^']*|[0-9][^']{15,})'/\\1$R'/Ig" \
+    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*\")[^\"[][^\"]*\"/\\1$R\"/Ig" \
+    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*')[^'[][^']*'/\\1$R'/Ig" \
     -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*)$VALUE.*$/\\1$R/Ig" \
     "$1"
 }
@@ -94,6 +95,10 @@ copy_tree(){
   local src="$1" dest="$HUB/$MACHINE/$2" file rel target size line digest
   [ -d "$src" ] || return 0
   # One hashing pass per tree: a file is re-collected whenever its content changes.
+  # Unreadable or vanished files are recorded in $ERRS and fail the run at the end.
+  local sums="$HOME_DIR/sums.$$"
+  find "$src" -type f ! -name '*.tmp' -print0 2>>"$ERRS" | xargs -0 -r sha1sum -z -- > "$sums" 2>>"$ERRS" \
+    || printf 'hashing failed under %s\n' "$2" >> "$ERRS"
   while IFS= read -r -d '' line; do
     # "<40-hex digest><space><' ' or '*' mode marker><path>"
     digest="${line:0:40}"; file="${line:42}"
@@ -122,7 +127,8 @@ copy_tree(){
     if [ -f "$target" ] && cmp -s "$target.tmp" "$target"; then rm -f "$target.tmp"; continue; fi
     mv -f "$target.tmp" "$target"
     COPIED=$((COPIED + 1))
-  done < <(find "$src" -type f ! -name '*.tmp' -print0 2>/dev/null | xargs -0 -r sha1sum -z --)
+  done < "$sums"
+  rm -f "$sums"
 }
 
 ensure_hub(){
@@ -177,6 +183,17 @@ everything else is the original text. Nothing is ever deleted here.
 EOF
 }
 
+# Evidence that could not be read never passes silently: list it and exit 2.
+report_errors(){
+  if [ -s "$ERRS" ]; then
+    log "PARTIAL: some evidence could not be read:"
+    sed 's/^/  /' "$ERRS" | tee -a "$LOG" >&2
+    rm -f "$ERRS"
+    exit 2
+  fi
+  rm -f "$ERRS"
+}
+
 save_seen(){
   local k
   for k in "${!NEW_SEEN[@]}"; do printf '%s\0%s\0' "$k" "${NEW_SEEN[$k]}"; done > "$HOME_DIR/seen.new"
@@ -201,6 +218,7 @@ cmd_sync(){
   mkdir -p "$HUB/$MACHINE"
   SKIPPED="$HUB/$MACHINE/SKIPPED.txt.new"; : > "$SKIPPED"
   COPIED=0
+  ERRS="$HOME_DIR/errors.$$"; : > "$ERRS"
   # Size and modification time of every source already collected (local only).
   declare -gA SEEN=() NEW_SEEN=()
   local key val
@@ -243,7 +261,7 @@ cmd_sync(){
     exit 1
   fi
   if git -C "$HUB" diff --cached --quiet; then
-    save_seen; log "$MACHINE: nothing new"; unlock "$HOME_DIR/sync.lock"; return 0
+    save_seen; log "$MACHINE: nothing new"; unlock "$HOME_DIR/sync.lock"; report_errors; return 0
   fi
   printf 'machine: %s\nlast sync: %s\nfiles updated this run: %s\n' "$MACHINE" "$(stamp)" "$COPIED" > "$HUB/$MACHINE/LAST-SYNC.txt"
   git -C "$HUB" add "$MACHINE/LAST-SYNC.txt"
@@ -252,6 +270,7 @@ cmd_sync(){
   save_seen
   log "$MACHINE: sync complete ($COPIED files updated)"
   unlock "$HOME_DIR/sync.lock"
+  report_errors
 }
 
 case "${1:-sync}" in

@@ -107,7 +107,22 @@ check 'env variants and uppercase secret names withheld' "[ ! -e '$M/reviewer-is
 check 'same-size same-time rewrites are collected' "grep -q BBBB '$M/state/review-lifecycle/runs/r1/same.json'"
 check 'path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"
 
+# Digit-led short secrets are masked; unreadable evidence fails the run loudly.
+printf 'password=1234\napi_key=1abc\n' > "$ISSUES/20261013-pkg/digits.log"
+run sync 2> "$TMP/out9" || { cat "$TMP/out9" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'digit-led short secrets masked' "! grep -q 1234 '$M/reviewer-issues/20261013-pkg/digits.log' && ! grep -q 1abc '$M/reviewer-issues/20261013-pkg/digits.log'"
+printf 'locked\n' > "$ISSUES/20261013-pkg/locked.log"
+mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
+printf '#!/usr/bin/env bash
+case " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac
+exec "%s" "$@"
+' "$real_sha1" > "$TMP/badbin/sha1sum"; chmod +x "$TMP/badbin/sha1sum"
+rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out10" || rc=$?
+check 'hashing failures fail the run' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out10'"
+
 # A symbolic link committed to the repository stops the sync before any write.
+git -C "$VIEW" pull -q
 git -C "$VIEW" config user.name t; git -C "$VIEW" config user.email t@example.invalid
 printf '%s' "$TMP/outside" > "$TMP/target"
 blob="$(git -C "$VIEW" hash-object -w "$TMP/target")"
