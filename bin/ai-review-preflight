@@ -554,6 +554,13 @@ installed_toolkit_preflight() {
   local installed self
   installed="$(command -v ai-review-preflight 2>/dev/null)" || return 1
   [ -n "$installed" ] || return 1
+  # Windows installs a generated launcher (install-machine-tools.ps1) rather
+  # than a symlink; follow its managed exec line to the real copy (#1698).
+  local target
+  if [ -f "$installed" ] && head -n 3 "$installed" 2>/dev/null | grep -q '^# Managed by ai-devops install-machine-tools.ps1\.$'; then
+    target="$(sed -n 's/^exec "\([^"]*\)" "\$@"$/\1/p' "$installed" | tail -n 1)"
+    [ -n "$target" ] && installed="$target"
+  fi
   installed="$(readlink -f "$installed" 2>/dev/null)" || return 1
   self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null)" || return 1
   [ "$installed" = "$self" ]
