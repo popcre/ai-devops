@@ -322,3 +322,39 @@ Albert, verbatim: "i can't unlock the wallet every time i want to remote control
   half-finished test connections against the live service; use port 4838.
 - A local Ubuntu FreeRDP 3.31 client cannot finish a session (no H.264), so live proof
   needs Albert's Windows client after a reboot.
+
+## 2026-10-12 evening: lock screen, flash-and-close, black screen, two screens
+
+Fixed with Albert between about 7:50 and 8:30 PM EDT, after the 6:51 PM EDT reboot.
+Albert's final check: one screen (the left one), full screen, keyboard and mouse working.
+
+1. **Lock screen ignored input.** The session auto-locked at 7:06 PM EDT. It was unlocked with
+   `loginctl unlock-session 2` over SSH (needs no sudo). Auto-lock was turned off in
+   `~/.config/kscreenlockerrc` (`[Daemon] Autolock=false`, `LockOnResume=false`), with a backup
+   at `kscreenlockerrc.bak-20261012`.
+2. **Flash-and-close (`PostConnect ... failed`).** This was the locked-KWallet failure from 2026-10-01: `ahazan2`
+   cannot log in after a reboot. Albert's Windows client also had an old saved credential
+   (`LegacyGeneric:target=TERMSRV/edge-dev3`, user `ahazan`) with a wrong password. It was
+   deleted with `cmdkey /delete`. `mstsc` never prompts, because server NLA is off, so Albert
+   re-saved `edge-dev3` / `ahazan` / Linux password in Windows Credential Manager. After that,
+   `PAM authentication succeeded for user "ahazan"`.
+   Owner decision (2026-10-12, verbatim): "don't worry about ahazan2". Log in as `ahazan` only.
+3. **Black screen for 2 seconds, then disconnect.** PAM and the portal both started, then logged
+   `Portal session was closed!` about 2 seconds later, with no other error. It was fixed by
+   restarting the portal and KRDP in this order:
+   `systemctl --user restart plasma-xdg-desktop-portal-kde xdg-desktop-portal`, then
+   `systemctl --user restart app-org.kde.krdpserver`. The root cause was not proven.
+   The unit is `plasma-xdg-desktop-portal-kde`, not `xdg-desktop-portal-kde`.
+4. **Only the left screen.** edge-dev3 has two screens: HDMI-A-2 is the left, 4K one, and
+   HDMI-A-1 is the right, 1080p one. A drop-in at
+   `~/.config/systemd/user/app-org.kde.krdpserver.service.d/single-monitor.conf` sets
+   `ExecStart=/usr/bin/krdpserver --monitor 1`. In KRDP numbering, index 0 is the right
+   screen and index 1 is the left one. The client `Default.rdp` already had
+   `screen mode id:i:2` (full screen).
+
+**Fast triage order for next time:**
+1. Check `loginctl show-session 2 -p Active -p LockedHint`.
+2. Read `journalctl --user -u app-org.kde.krdpserver --since -15min`. If you see
+   `PostConnect failed`, the credentials are wrong. If you see `Portal session was closed!`,
+   restart the portal and then KRDP.
+3. Check `/var/log/dpkg.log` for FreeRDP upgrades.
