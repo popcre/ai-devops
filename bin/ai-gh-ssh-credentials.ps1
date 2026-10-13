@@ -8,8 +8,8 @@
 # SYSTEM and Administrators can read, and adds managed blocks to ~/.bashrc and
 # the PowerShell profiles that point gh at that folder only inside SSH sessions. The normal gh folder, the
 # keyring and the Codex sandbox's read-only access to the normal folder stay
-# untouched. Git is pointed at gh for github.com (`gh auth setup-git`), so Git
-# uses the keyring interactively and the private copy over SSH. Every GitHub
+# untouched. Git asks gh (through ai-gh) for github.com credentials; ai-gh
+# also picks up the private copy in any SSH shell, cmd.exe included. Every GitHub
 # CLI call goes through the shared ai-gh gate; the token only travels through
 # a pipe inside one bash process.
 #
@@ -51,9 +51,12 @@ function Invoke-Gate([string]$Script) {
     try {
         $ErrorActionPreference = 'Continue'
         $body = 'unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST GH_CONFIG_DIR; export AI_GH_CALLER=ai-gh-ssh-credentials; set -o pipefail; ' + $Script
-        $out = @(& $Bash --noprofile --norc -c $body $gate $sshDir $gitCfg 2>$null)
+        # Windows PowerShell strips double quotes from native arguments, so the
+        # script travels in an environment variable and the -c text has none.
+        $env:AI_GH_SSH_BODY = $body
+        $out = @(& $Bash --noprofile --norc -c 'set -f; eval $AI_GH_SSH_BODY' $gate $sshDir $gitCfg 2>$null)
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join '') }
-    } finally { $ErrorActionPreference = $prior }
+    } finally { $ErrorActionPreference = $prior; Remove-Item Env:AI_GH_SSH_BODY -ErrorAction SilentlyContinue }
 }
 
 function Set-PrivateAcl([string]$Path) {
@@ -130,8 +133,10 @@ $psBlock = @(
 foreach ($profilePath in $PowerShellProfiles) { Set-ManagedBlock $profilePath $psBlock $begin $end }
 
 Backup-File $GitConfig
-$setup = Invoke-Gate 'GIT_CONFIG_GLOBAL="$2" "$0" auth setup-git --hostname github.com'
-if ($setup.ExitCode -ne 0) { throw 'Pointing Git at the GitHub CLI failed.' }
+# Git asks the shared gate for github.com credentials, so it finds the SSH
+# copy from any SSH shell (Git runs helpers through its own sh).
+$setup = Invoke-Gate 'k=credential.https://github.com.helper; q="$(printf "\047")"; git config --file "$2" --unset-all "$k"; git config --file "$2" --add "$k" '''' && git config --file "$2" --add "$k" "!$q$0$q auth git-credential"'
+if ($setup.ExitCode -ne 0) { throw 'Pointing Git at the shared GitHub gate failed.' }
 
 Write-Output "GitHub login for $ExpectedLogin copied for SSH sessions."
 exit 0

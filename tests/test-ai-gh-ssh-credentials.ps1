@@ -29,7 +29,6 @@ case "$1 $2" in
   "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
   "auth login") t="$(cat | tr -d '\r\n')"; [ -n "$GH_CONFIG_DIR" ] || exit 4
     printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" > "$GH_CONFIG_DIR/hosts.yml"; exit 0 ;;
-  "auth setup-git") printf 'helper\n' >> "$GIT_CONFIG_GLOBAL"; exit 0 ;;
 esac
 exit 3
 '@.Replace("`r`n", "`n") | Set-Content -LiteralPath $fake -NoNewline
@@ -65,7 +64,8 @@ try {
     Assert-True (@($calls | Where-Object { $_ -match 'GOOD' }).Count -eq 0) 'token never passed as an argument'
     Assert-True (@($calls | Where-Object { $_ -notmatch '^ai-gh-ssh-credentials\|' }).Count -eq 0) 'every call goes through the gate with a caller label'
     Assert-True (@($calls | Where-Object { $_ -match '\|default\|auth login' }).Count -eq 0) 'the normal gh folder is never rewritten'
-    Assert-True ((Get-Content (Join-Path $r.Dir 'gitconfig') -Raw) -match 'helper') 'git pointed at gh'
+    $helpers = @(& git config --file (Join-Path $r.Dir 'gitconfig') --get-all credential.https://github.com.helper)
+    Assert-True ($helpers.Count -eq 2 -and $helpers[0] -eq '' -and $helpers[1] -eq ("!'" + $fake.Replace('\', '/') + "' auth git-credential")) "git asks the gate for github.com credentials (got: $($helpers -join ' | '))"
     $rc = Get-Content (Join-Path $r.Dir 'home\.bashrc') -Raw
     Assert-True ($rc -match "alias ll='ls -l'") 'existing bashrc kept'
     $sshFwd = (Join-Path $r.Dir 'gh-ssh') -replace '\\', '/'
