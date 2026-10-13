@@ -1322,7 +1322,15 @@ lock_take(){
         wake_cache_remove "$cache" || { note 'unrecognized stale wake cache preserved'; return 1; }
       done
       rmdir "$lock"; mkdir "$lock"
-    else note "another tick is running"; return 1; fi
+    else
+      # A fire that lands on a live tick is owed a run. Windows Task Scheduler
+      # IgnoreNew and Linux cron both drop that fire; the running tick reads
+      # this marker when it finishes and catches up so the detection gap stays
+      # at one interval instead of two (#658 section 13 item 7).
+      note "another tick is running"
+      : > "$HOME_DIR/tick.misd" 2>/dev/null || true
+      return 1
+    fi
   fi
   trap 'rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true' EXIT
   return 0
@@ -1351,7 +1359,37 @@ cmd_tick(){
   # The offline suite never mints real tokens.
   [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
-  lock_take || return 0
+  local rc=0
+  if run_tick_body; then
+    # A fire that hit this tick's lock is owed a scan now, not one interval later.
+    if [ -f "$HOME_DIR/tick.misd" ] && [ "$DRY" != 1 ]; then
+      rm -f "$HOME_DIR/tick.misd"
+      note "tick catch-up after a concurrent fire hit the live lock"
+      # Release this run's lock, including any Linux wake cache, or catch-up
+      # cannot take the lock (rmdir fails on a non-empty directory) and later
+      # ticks stay blocked on the leaked lock.
+      if [ -n "${BW_WAKE_CACHE:-}" ]; then
+        wake_cache_remove "$BW_WAKE_CACHE" || true
+        BW_WAKE_CACHE=''
+      fi
+      rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true
+      trap - EXIT
+      run_tick_body || rc=$?
+      [ "$rc" = 2 ] && rc=0
+    fi
+  else
+    rc=$?
+    # 2 = lock held by another live tick; that tick performs the catch-up
+    [ "$rc" = 2 ] && rc=0
+  fi
+  return "$rc"
+}
+
+run_tick_body(){
+  lock_take || return 2
+  # A leftover marker belongs to a fire that hit a previous lock; this run is
+  # that owed work. Clear it so only a fire during *this* run requests catch-up.
+  rm -f "$HOME_DIR/tick.misd"
   BW_WAKE_CACHE=''
   # POSIX mode protection is sufficient only on Linux. Windows keeps the
   # original reads until this optional cache has a qualified NTFS ACL path.
@@ -1396,7 +1434,7 @@ cmd_tick(){
     if reap_one "$reap_f" 0; then reap_n=$((reap_n + 1)); fi
   done
   [ "$reap_n" -eq 0 ] || note "tick reaped $reap_n aged task/session record(s)"
-  [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+  [ "$FAILED" = 0 ] || { note "tick finished with failures"; return 1; }
   if [ -n "$BW_TICK_RECEIPT_ID" ]; then
     gh_measure_clock
     tick_elapsed_ms=$(( GH_MEASURE_CLOCK - tick_started_ms ))
@@ -1422,6 +1460,18 @@ cron_job_line(){
   local every off; every="$(cfg .schedule_every_minutes)"; off="$(tick_offset "$every")"
   printf '%s-59/%s * * * * %s tick >> %s 2>&1' "$off" "$every" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"
 }
+# schtasks defaults drop fires: IgnoreNew never queues a run that lands on a
+# live instance, StartWhenAvailable=false discards a missed run, and the
+# battery flags refuse to start on a laptop. Those defaults produced measured
+# detection gaps over the ten-minute ceiling (#658 section 13 item 7).
+# MultipleInstances=1 (Queue) makes a fire wait for the live tick instead of
+# vanishing; the tool's tick.misd catch-up covers Linux cron, which cannot queue.
+schedule_windows_reliability(){
+  command -v powershell.exe >/dev/null 2>&1 || { note 'powershell.exe missing; blocker-watch schedule reliability settings not applied'; return 1; }
+  MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -Command "\$s=Get-ScheduledTask -TaskName 'blocker-watch' -TaskPath '\\ai-devops\\'; \$s.Settings.StartWhenAvailable=\$true; \$s.Settings.DisallowStartIfOnBatteries=\$false; \$s.Settings.StopIfGoingOnBatteries=\$false; \$s.Settings.MultipleInstances=1; Set-ScheduledTask -TaskName 'blocker-watch' -TaskPath '\\ai-devops\\' -Settings \$s.Settings | Out-Null" >/dev/null 2>&1 \
+    || { note 'could not apply blocker-watch schedule reliability settings'; return 1; }
+  return 0
+}
 cmd_schedule(){
   local every self
   every="$(cfg .schedule_every_minutes)"
@@ -1432,6 +1482,7 @@ cmd_schedule(){
     # /F re-points an existing task, so rerunning the installer stays safe.
     MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /ST "$(printf '00:%02d' "$(tick_offset "$every")")" /TN "$TASK_NAME" \
       /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
+    schedule_windows_reliability
     note "scheduled every $every minutes as $TASK_NAME"
     return
   fi
