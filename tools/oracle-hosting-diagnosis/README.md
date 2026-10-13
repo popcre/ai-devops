@@ -48,7 +48,7 @@ revision labels remain explicit mismatches. Empty OCI labels serialize as empty
 strings. Credential NUL/newline/oversize inputs refuse before child launch;
 secret/helper creation and secret reads use nofollow descriptors.
 
-Verification: ten synthetic tests pass, covering wrong contract/host key,
+Verification: thirteen synthetic tests pass, covering wrong contract/host key,
 foreign namespace/roles, injected sensitive fields, duplicate/oversized output,
 preserved unhealthy/missing roles, secret-free child environment and protected
 custody/cleanup, vendor-image drift, absent vendor revisions, credential bounds
