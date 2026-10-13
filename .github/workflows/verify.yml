@@ -243,10 +243,25 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Reachability compares against the PR or queue base commit.
+          fetch-depth: 0
       - name: Whole-repo public boundary and local Markdown links
         run: |
           bash tests/test-public-boundary.sh
           bash tests/test-markdown-links.sh
+      # docs-reachability.yml is workflow_call-only and had no caller here, so
+      # unreachable docs merged unchecked (#1698). Pull requests and queue
+      # groups check against their base; events with no base have nothing to add.
+      - name: Added or moved Markdown is reachable
+        env:
+          DOC_REACHABILITY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -z "$DOC_REACHABILITY_BASE_SHA" ]; then
+            echo "doc reachability: no base commit for ${{ github.event_name }}; nothing added to check"
+          else
+            python3 bin/ai-doc-reachability --repo .
+          fi
 
   # Ordinary pull requests divide the Windows-sensitive lane into twelve declared
   # sections that run at the same time on independent machines (#210): idle
