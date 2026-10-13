@@ -28,6 +28,18 @@ strategy remediation, so old clones must be replaced after that rewrite.
 
 ## Set up a new machine (start here)
 
+> ### ⚠️ Machine classes — read before installing anything
+>
+> **`edge-alien`, `edge-runn-envy`, and `edge-runn-xps` are NOT development
+> machines.** They get **networking only**: SSH key, SSH config, hostnames,
+> Tailscale. Nothing else.
+>
+> **Never** install the ai-devops toolkit on them — no `bootstrap-windows-dev.ps1`,
+> no `install.sh`, no `setup-machine.ps1`, no skills/MCP/reviewers/agents.
+> This mistake has happened repeatedly. **Check the hostname before any install.**
+>
+> Full rule: [docs/deployment.md](docs/deployment.md) § Machine classes.
+
 Goal: on a brand-new computer, run **one script**, complete GitHub's one-time
 browser authorization for the private restore inputs, paste **one 1Password
 code once**, and then Claude works everywhere with all passwords filled in

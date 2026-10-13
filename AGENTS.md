@@ -16,6 +16,10 @@ pipeline. The recovery procedure lives in
   `Albert Hazan <u2giants@users.noreply.github.com>`.
 - The canonical local checkout is landing-only. Every write-capable Codex or Claude task uses its own current-upstream worktree. Stage only task-owned
   files; never use broad staging, destructive resets, or force-pushes.
+- **Machine classes:** `edge-alien`, `edge-runn-envy`, and `edge-runn-xps` are
+  **networking-only** (SSH key, SSH config, hostnames, Tailscale). Never install
+  the ai-devops toolkit on them. See [`docs/deployment.md`](docs/deployment.md)
+  § Machine classes. This mistake keeps happening — check the hostname first.
 - Custom code belongs in `bin/`, lifecycle scripts, `config/`, `templates/`,
   `docs/`, `skills/`, `tools/`, `mcp/`, `memory/`, or `tests/`. Runtime config
   belongs under `/etc/ai-devops/`; never commit `.env` files or secrets.
