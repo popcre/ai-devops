@@ -718,6 +718,10 @@ run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-
 # others exit 0 with "not in watch_hosts". Free Actions stay backup only.
 run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin/ai-local-watch" schedule
 
+# Optional: every machine sends its complete reviewer logs hourly to the private
+# fleet repository u2giants/ai-devops-reviewer-logs (bin/ai-reviewer-logs-sync).
+run_stage optional "Reviewer logs fleet sync scheduling" "$REPO_ROOT/bin/ai-reviewer-logs-sync" schedule
+
 # Optional: daily housekeeping report (plan_repo-housekeeping-visibility.md
 # step 7). Same shape as the stages above - one marked, idempotent `schedule`
 # command per platform. Windows machines that run setup-machine.ps1 get the

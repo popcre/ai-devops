@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# ai-reviewer-logs-sync — collect this machine's complete reviewer logs into
+# the private fleet-wide repository u2giants/ai-devops-reviewer-logs, so one AI
+# session can see every machine's reviewer evidence in one place.
+#
+# Usage:
+#   ai-reviewer-logs-sync [sync]   copy, scrub secret values, commit, push
+#   ai-reviewer-logs-sync schedule register an hourly run (Task Scheduler / crontab)
+#   ai-reviewer-logs-sync unschedule
+#
+# Layout in the repository (one folder per machine, append-only):
+#   <machine>/reviewer-issues/   full incident packages (ai-reviewer-issue)
+#   <machine>/state/             review scoreboard, invocation events, lifecycle runs
+#   <machine>/reviews/<checkout>/ review reports (.ai/reviews) from every checkout
+#   <machine>/LAST-SYNC.txt      when and what was collected; SKIPPED.txt lists
+#                                files left out (too large or binary)
+#
+# Content is copied unchanged except recognizable secret VALUES (tokens, keys,
+# private-key blocks, labeled passwords), which become [REDACTED-SECRET]. A push
+# is refused if any secret pattern survives. The repository must be private:
+# unauthenticated access has to fail before anything is pushed.
+#
+# Environment:
+#   AI_REVIEWER_LOGS_REMOTE         remote URL (default the private fleet repository)
+#   AI_REVIEWER_LOGS_HUB            local clone (default ~/.cache/ai-devops-reviewer-logs)
+#   AI_REVIEWER_LOGS_ROOTS          colon-separated folders holding checkouts to scan
+#                                   for .ai/reviews (default: the toolkit's parent
+#                                   folder plus /c/repos /d/repos ~/repos /worksp)
+#   AI_REVIEWER_LOGS_MAX_FILE_BYTES largest file copied (default 5000000)
+#   AI_REVIEWER_LOGS_MACHINE        machine folder name (default lowercased hostname)
+#   AI_REVIEWER_ISSUE_DIR, AI_REVIEWER_STATE_BASE  as in ai-reviewer-issue
+#   AI_REVIEWER_LOGS_TEST_MODE=1    tests: allow a local remote, skip the privacy probe
+set -euo pipefail
+
+_self="${BASH_SOURCE[0]}"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+TOOL_NAME=ai-reviewer-logs-sync
+HOME_DIR="$HOME/.ai-devops/reviewer-logs-sync"
+# shellcheck source=../tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+CANONICAL="github.com/u2giants/ai-devops-reviewer-logs"
+REMOTE="${AI_REVIEWER_LOGS_REMOTE:-https://$CANONICAL.git}"
+HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
+STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
+ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
+MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-5000000}"
+MACHINE="${AI_REVIEWER_LOGS_MACHINE:-$(hostname | lower)}"
+LOG="$HOME_DIR/sync.log"
+
+# Detects survivors; the scrub below replaces whole values for each family.
+SECRET_RE='ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
+R='[REDACTED-SECRET]'
+
+log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
+
+canonical_remote(){
+  printf '%s\n' "$1" | sed -E -e 's#^(https?://|ssh://)?([^@/]+@)?##' -e 's#^github\.com:#github.com/#' -e 's#\.git$##' -e 's#/$##'
+}
+
+scrub(){
+  sed -E -i \
+    -e "/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\\$R" \
+    -e "s/ops_[A-Za-z0-9]{20,}/$R/g" \
+    -e "s/gh[pousr]_[A-Za-z0-9]{20,}/$R/g" \
+    -e "s/github_pat_[A-Za-z0-9_]{20,}/$R/g" \
+    -e "s/AKIA[0-9A-Z]{16}/$R/g" \
+    -e "s/xox[baprs]-[A-Za-z0-9-]{10,}/$R/g" \
+    -e "s/sk-[A-Za-z0-9_-]{20,}/$R/g" \
+    -e "s/eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]*/$R/g" \
+    -e "s/((api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^\"'[:space:],}]{8,}/\\1$R/Ig" \
+    -e "s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]{12,}/\\1$R/g" \
+    "$1"
+}
+
+# copy_tree <source dir> <destination relative to the machine folder>
+copy_tree(){
+  local src="$1" dest="$HUB/$MACHINE/$2" file rel target size
+  [ -d "$src" ] || return 0
+  while IFS= read -r -d '' file; do
+    rel="${file#"$src"/}"
+    case "$rel" in
+      *.env|*.pem|*.key|*.p12|*.pfx|*id_rsa*|*id_ed25519*) printf '%s/%s\tsecret file type\n' "$2" "$rel" >> "$SKIPPED"; continue ;;
+    esac
+    target="$dest/$rel"
+    # Already collected and the source has not changed since.
+    if [ -f "$target" ] && [ "$target" -nt "$file" ]; then continue; fi
+    size="$(wc -c < "$file")"
+    if [ "$size" -gt "$MAX_BYTES" ]; then
+      printf '%s/%s\t%s bytes, over the size limit\n' "$2" "$rel" "$size" >> "$SKIPPED"; continue
+    fi
+    if [ "$size" -gt 0 ] && ! grep -Iq . "$file"; then
+      printf '%s/%s\tbinary\n' "$2" "$rel" >> "$SKIPPED"; continue
+    fi
+    mkdir -p "$(dirname "$target")"
+    cp -f "$file" "$target.tmp"
+    scrub "$target.tmp"
+    if [ -f "$target" ] && cmp -s "$target.tmp" "$target"; then rm -f "$target.tmp"; continue; fi
+    mv -f "$target.tmp" "$target"
+    COPIED=$((COPIED + 1))
+  done < <(find "$src" -type f ! -name '*.tmp' -print0 2>/dev/null)
+}
+
+ensure_hub(){
+  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
+    [ "$(canonical_remote "$REMOTE")" = "$CANONICAL" ] || die "remote is not the private reviewer-logs repository"
+    if GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -c credential.helper= -c core.askPass= \
+        ls-remote "https://$CANONICAL.git" >/dev/null 2>&1; then
+      die "reviewer-logs repository is publicly readable; refusing to sync"
+    fi
+  fi
+  if [ ! -d "$HUB/.git" ]; then
+    mkdir -p "$(dirname "$HUB")"
+    GIT_TERMINAL_PROMPT=0 git clone -q "$REMOTE" "$HUB" || die "could not clone $REMOTE"
+  fi
+  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
+    [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] \
+      || die "$HUB is not a clone of $REMOTE"
+  fi
+  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1 || \
+     GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>/dev/null; then
+    if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+      git -C "$HUB" checkout -q -B main origin/main
+    fi
+  fi
+}
+
+write_readme(){
+  local readme="$HUB/README.md"
+  [ -f "$readme" ] && return 0
+  cat > "$readme" <<'EOF'
+# Fleet reviewer logs (private)
+
+Every ai-devops machine pushes its complete reviewer evidence here hourly
+(`bin/ai-reviewer-logs-sync` in popcre/ai-devops). One folder per machine:
+
+- `reviewer-issues/` — full incident packages from `ai-reviewer-issue`
+- `state/review-scoreboard/` — every review's outcome record
+- `state/reviewer-events/` — start/exit record of every reviewer invocation
+- `state/review-lifecycle/runs/` — per-run lifecycle state
+- `reviews/<checkout>/` — review reports from each repository checkout
+- `LAST-SYNC.txt` — last collection time; `SKIPPED.txt` — files left out
+
+Only recognizable secret values are replaced with `[REDACTED-SECRET]`;
+everything else is the original text. Nothing is ever deleted here.
+EOF
+}
+
+push_with_retry(){
+  local attempt
+  for attempt in 1 2 3; do
+    if GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG"; then return 0; fi
+    GIT_TERMINAL_PROMPT=0 git -C "$HUB" pull -q --rebase origin main 2>>"$LOG" || true
+  done
+  die "push to $REMOTE failed after 3 attempts"
+}
+
+cmd_sync(){
+  mkdir -p "$HOME_DIR"
+  take_lock "$HOME_DIR/sync.lock" 60
+  rotate_log "$LOG"
+  ensure_hub
+  write_readme
+  mkdir -p "$HUB/$MACHINE"
+  SKIPPED="$HUB/$MACHINE/SKIPPED.txt.new"; : > "$SKIPPED"
+  COPIED=0
+  copy_tree "$ISSUES" reviewer-issues
+  copy_tree "$STATE/review-scoreboard" state/review-scoreboard
+  copy_tree "$STATE/reviewer-events" state/reviewer-events
+  copy_tree "$STATE/review-lifecycle/runs" state/review-lifecycle/runs
+  local roots root dir checkout
+  roots="${AI_REVIEWER_LOGS_ROOTS:-$(dirname "$TOOL_ROOT"):/c/repos:/d/repos:$HOME/repos:/worksp}"
+  declare -A seen=()
+  IFS=: read -r -a root_list <<< "$roots"
+  for root in "${root_list[@]}"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r -d '' dir; do
+      dir="$(cd "$dir" && pwd -P)"
+      [ -n "${seen[$dir]:-}" ] && continue
+      seen[$dir]=1
+      checkout="$(basename "$(dirname "$(dirname "$dir")")")"
+      copy_tree "$dir" "reviews/$checkout"
+    done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>/dev/null)
+  done
+  sort -u "$SKIPPED" > "$HUB/$MACHINE/SKIPPED.txt"; rm -f "$SKIPPED"
+
+  git -C "$HUB" add -A README.md "$MACHINE"
+  local hits
+  hits="$(git -C "$HUB" diff --cached --name-only -z | xargs -0 -r -I{} sh -c 'grep -Eq "$1" "$2/{}" && printf "%s\n" "{}"' _ "$SECRET_RE" "$HUB" || true)"
+  if [ -n "$hits" ]; then
+    git -C "$HUB" reset -q
+    log "BLOCKED: secret patterns survived scrubbing in:"; printf '  %s\n' $hits | tee -a "$LOG" >&2
+    exit 1
+  fi
+  if git -C "$HUB" diff --cached --quiet; then
+    log "$MACHINE: nothing new"; unlock "$HOME_DIR/sync.lock"; return 0
+  fi
+  printf 'machine: %s\nlast sync: %s\nfiles updated this run: %s\n' "$MACHINE" "$(stamp)" "$COPIED" > "$HUB/$MACHINE/LAST-SYNC.txt"
+  git -C "$HUB" add "$MACHINE/LAST-SYNC.txt"
+  git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)"
+  push_with_retry
+  log "$MACHINE: sync complete ($COPIED files updated)"
+  unlock "$HOME_DIR/sync.lock"
+}
+
+case "${1:-sync}" in
+  sync) cmd_sync ;;
+  schedule) register_timer 60 "$TOOL_ROOT/bin/ai-reviewer-logs-sync" sync ;;
+  unschedule) unregister_timer ;;
+  -h|--help|help) sed -n '2,32p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-reviewer-logs-sync --help" ;;
+esac

@@ -1364,6 +1364,22 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so local-watch was not scheduled. Install Git for Windows and rerun this script."
 }
 
+# Every machine sends its complete reviewer logs to the private fleet
+# repository hourly, so one session can see all machines' reviewer evidence.
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer-logs sync)."
+} elseif ($bwBash) {
+    $rlTool = (Join-Path $RepoPath 'bin\ai-reviewer-logs-sync') -replace '\\', '/'
+    $rlProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$rlTool' schedule")
+    if ($rlProbe.ExitCode -eq 0) {
+        Write-Note "Reviewer logs now sync hourly to the private fleet repository."
+    } else {
+        Write-Warning "Could not schedule the reviewer-logs sync: $($rlProbe.Output -join ' ')"
+    }
+} else {
+    Write-Note "Git Bash not found, so the reviewer-logs sync was not scheduled. Install Git for Windows and rerun this script."
+}
+
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     $ghGate = (Join-Path $PSScriptRoot 'ai-gh') -replace '\\', '/'
