@@ -112,5 +112,70 @@ class Controls(unittest.TestCase):
             reader.assert_not_called()
         finally:os.chdir(previous)
 
+    def test_context_failure_and_damaged_git_never_read_candidate(self):
+        spec=importlib.util.spec_from_file_location('routing_failure',ROOT/'tools/review_action_profile.py')
+        routing=importlib.util.module_from_spec(spec);spec.loader.exec_module(routing)
+        for failure in (ValueError('insecure executable'),OSError('damaged git'),subprocess.TimeoutExpired('git',5)):
+            reader=mock.Mock(side_effect=AssertionError('candidate read'))
+            with mock.patch.object(control,'oracle_state_context',side_effect=failure), mock.patch.object(routing.importlib.util,'module_from_spec',return_value=control), mock.patch.object(routing.importlib.util,'spec_from_file_location',return_value=SimpleNamespace(loader=SimpleNamespace(exec_module=lambda _:None))), mock.patch.object(routing._native,'private_read',reader), mock.patch.object(sys,'argv',['tool','preaction','/untrusted/capture.json']):
+                self.assertEqual(routing.main(),1)
+            reader.assert_not_called()
+        with mock.patch.object(control.subprocess,'run',return_value=SimpleNamespace(returncode=128,stdout=b'')):
+            with self.assertRaisesRegex(ValueError,'context unavailable'):control.oracle_state_context('/untrusted/capture.json')
+
+    def test_gate_explanation_seals_git_and_secrets(self):
+        calls=[]
+        def command(args,**kw):
+            calls.append((args,kw));return str(ROOT).encode() if '--show-toplevel' in args else b'{}'
+        with mock.patch.dict(os.environ,{'GIT_DIR':'/foreign','GIT_WORK_TREE':'/foreign','GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'x','GIT_CONFIG_VALUE_0':'y','PRIVATE_SENTINEL_SECRET':'never-forward'}),mock.patch.object(control.subprocess,'check_output',side_effect=command):
+            self.assertEqual(control.gate_explanation(ROOT,json.loads),{})
+        self.assertNotIn('PRIVATE_SENTINEL_SECRET',calls[0][1]['env'])
+        env=calls[-1][1]['env']
+        self.assertNotIn('PRIVATE_SENTINEL_SECRET',env)
+        self.assertFalse(any(k in env for k in ('GIT_DIR','GIT_WORK_TREE','GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0')))
+        self.assertEqual(env['GIT_CONFIG_GLOBAL'],'/dev/null')
+        self.assertEqual(calls[-1][1]['cwd'],ROOT)
+
+    def test_v1_prompt_refuses_foreign_profile(self):
+        spec=importlib.util.spec_from_file_location('v1_prompt',ROOT/'tools/oracle_native_alternate_profile.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with self.assertRaisesRegex(ValueError,'foreign action profile'):
+            module.prompt({'action_profile_binding':{'profile':'shared-db-770-isolated-timing-rehearsal-v1'}})
+
+    def test_producer_origin_does_not_follow_rewrite_or_inherited_config(self):
+        spec=importlib.util.spec_from_file_location('packet',ROOT/'bin/ai-review-code-only.py')
+        packet=importlib.util.module_from_spec(spec);spec.loader.exec_module(packet)
+        repo=self.root/'origin';repo.mkdir()
+        for args in [('init','-q'),('config','remote.origin.url','git@GitHub.COM:u2giants/theoracle.git'),('config','url.https://foreign.invalid/.insteadOf','git@GitHub.COM:')]:
+            subprocess.run(['/usr/bin/git','-C',str(repo),*args],check=True,capture_output=True)
+        registry=json.loads((ROOT/'config/review-action-profiles.json').read_text())['profiles'][packet.PUBLIC_PRODUCER_PROFILE]
+        real=packet.git;calls=[]
+        def selected(root,*args,**kw):
+            calls.append(args)
+            if args[0]=='config':return real(root,*args,**kw)
+            if args[0]=='show':return (ROOT/'tests/fixtures/oracle-native-public-producer.md').read_bytes()
+            if args[0]=='status':return b''
+            raise AssertionError(args)
+        with mock.patch.dict(os.environ,{'GIT_DIR':'/foreign','GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'remote.origin.url','GIT_CONFIG_VALUE_0':'https://foreign.invalid/no'}),mock.patch.object(packet,'git',side_effect=selected),mock.patch.object(packet,'tree_mode',return_value='100644'):
+            self.assertEqual(packet.public_document_context(repo,registry['paths'],packet.PUBLIC_PRODUCER_PROFILE),packet.PUBLIC_PRODUCER_PROFILE)
+        self.assertNotIn(('remote','get-url','origin'),calls)
+
+    def test_full_source_oracle_action_refuses_before_summary_or_publisher(self):
+        report=self.root/'report';report.write_text('PUBLIC NONAUTHORIZING FIXTURE')
+        digest=__import__('hashlib').sha256(report.read_bytes()).hexdigest()
+        key='a'*64; head='b'*40; source='c'*64
+        scripts=self.root/'bin';scripts.mkdir()
+        identity=scripts/'ai-review-lifecycle'
+        identity.write_text("#!/bin/sh\nprintf '%s\\n' '"+json.dumps({"repository_key":key,"source_digest":source})+"'\n")
+        identity.chmod(0o700)
+        state=self.root/'runs'/key/'deepseek'/'codex'/'fixture.json';state.parent.mkdir(parents=True)
+        state.write_text(json.dumps(dict(status='completed',verdict='APPROVE',stale=False,head=head,repository_key=key,source_digest=source,report_path=str(report),report_sha256=digest,provider='deepseek',implementer_engine='codex',review_mode='security-review')))
+        shell=(ROOT/'bin/ai-task-gates').read_text();function=shell[shell.index('reviewer_approval_summary(){'):shell.index('# Application source-release admission')]
+        for publish in ('0','1'):
+            program='set -eu\n'+function+'\nreviewer_approval_summary "$1" offline-private-capture-transform "$2" "$3" "" initial-forward "$4"\n'
+            env={**os.environ,'SCRIPT_DIR':str(scripts),'REAL_DIR':str(scripts),'AI_REVIEW_LIFECYCLE_DIR':str(self.root)}
+            result=subprocess.run(['/bin/bash','-c',program,'fixture',str(report),head,str(ROOT),publish],env=env,capture_output=True)
+            self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,b'');self.assertNotIn(b'unbound',result.stderr)
+
 
 if __name__=='__main__':unittest.main()

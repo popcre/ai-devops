@@ -108,25 +108,46 @@ def read_descriptor(path,profile,reader,decode):
     return value
 
 
+def sealed_git_env():
+    allowed={'HOME','PATH','LANG','LC_ALL','TMPDIR','AI_TASK_GATES_DIR','AI_DEVOPS_TEST_MODE'}
+    env={k:v for k,v in os.environ.items() if k in allowed}
+    env.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_CONFIG_SYSTEM='/dev/null')
+    return env
+
+
+def gate_explanation(repo, decode):
+    repo=Path(repo)
+    require(repo.is_absolute() and repo.resolve()==repo,'canonical repository root required')
+    env=sealed_git_env()
+    top=subprocess.check_output(['/usr/bin/git','-C',str(repo),'rev-parse','--show-toplevel'],env=env,timeout=5).decode().strip()
+    require(Path(top)==repo,'repository root differs')
+    allowed={'HOME','PATH','LANG','LC_ALL','TMPDIR','AI_TASK_GATES_DIR','AI_DEVOPS_TEST_MODE'}
+    child={k:v for k,v in env.items() if k in allowed or k in ('GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL','GIT_CONFIG_SYSTEM')}
+    return decode(subprocess.check_output([str(Path(__file__).resolve().parents[1]/'bin/ai-task-gates'),'explain','--json'],cwd=repo,env=child,timeout=10))
+
+
 def oracle_state_context(path):
     # Lexical native repository-key recognition requires no candidate file read.
     if isinstance(path,(str,Path)) and KEY in Path(path).parts:return True
-    env={k:v for k,v in os.environ.items() if not k.startswith('GIT_')}
-    env.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_CONFIG_SYSTEM='/dev/null')
+    env=sealed_git_env()
     info=os.stat('/usr/bin/git',follow_symlinks=False)
     require(stat.S_ISREG(info.st_mode) and info.st_uid==0 and not info.st_mode&0o022,'fixed public git executable required')
     proc=subprocess.run(['/usr/bin/git','-C',os.getcwd(),'config','--local','--no-includes','--get','remote.origin.url'],
         env=env,capture_output=True,timeout=5)
-    if proc.returncode!=0:return False
+    require(proc.returncode==0,'repository context unavailable')
     require(len(proc.stdout)<=4096,'public repository identity exceeds bound')
-    remote=proc.stdout.decode().strip().removesuffix('.git').rstrip('/')
+    return normalize_upstream(proc.stdout.decode())=='https://github.com/u2giants/theoracle'
+
+
+def normalize_upstream(value):
+    remote=value.strip().removesuffix('.git').rstrip('/')
     # Never expose captured URL values, credentials or private config contents.
     if remote.startswith('git@') and ':' in remote:
         host,path=remote[4:].split(':',1);normalized='https://'+host.lower()+'/'+path
     else:
         parsed=urlsplit(remote)
         normalized=('https' if parsed.scheme=='ssh' and parsed.username=='git' else parsed.scheme)+'://'+(parsed.hostname or '').lower()+parsed.path
-    return normalized=='https://github.com/u2giants/theoracle'
+    return normalized
 
 
 def publish_descriptor(value,profile):

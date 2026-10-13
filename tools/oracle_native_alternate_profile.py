@@ -169,7 +169,7 @@ def binding(state,m):
     require(exported==state['code_only'] and exported['paths']==p['paths'],'full public decoder/operator closure required')
     require(m['source_head']==state['head'] and m['source_digest']==state['source_digest'],'source moved')
     repo=Path(state['repository_root'])
-    explanation=decode(subprocess.check_output([str(ROOT/'bin/ai-task-gates'),'explain','--json'],cwd=repo))
+    explanation=control_metadata.gate_explanation(repo,decode)
     require(explanation['repository']=='u2giants/theoracle' and explanation['declared_class']=='private-tooling'
         and explanation['effective_class']=='private-tooling','truthful Oracle private-tooling task required')
     local=decode(old.git(repo,'show',state['head']+':.ai-devops/task-gates.json'))
@@ -253,6 +253,7 @@ def evidence_projection(b):
 def prompt(state):
     require(type(state) is dict and type(state.get('action_profile_binding')) is dict,'invalid lifecycle action binding')
     b=state['action_profile_binding']
+    require(b.get('profile')==PROFILE,'foreign action profile prompt refused')
     return ('Review ONLY Oracle offline native-alternate serialization. Metadata/custody/stat and claimed historical hashes were checked; '
         'capture bytes were NOT read or hash-verified. Only genuine independent native completion may register this current bounded purpose. '
         'Applicable owner/license/custodian requirements remain mandatory; withhold approval if they are not established. '

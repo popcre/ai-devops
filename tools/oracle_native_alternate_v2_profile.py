@@ -181,7 +181,7 @@ def binding(state,m):
     require(set(p['code_sha256'])=={'scripts/oracle2/native_alternate_chain_operator.py','services/oracle-brain/oracle_brain/operating_model/native_page_chain.py','services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py'},'fixed three-code closure required')
     require(p['public_contract_sha256']=='f4e0c71e1caf00b7c06a238af246c9d9947d3635b5f036bd5354e6f1a006a60e' and sha(old.git(repo,'show',state['head']+':scripts/oracle2/contracts/native_alternate_chain_v2.json'))==p['public_contract_sha256'],'fixed public contract differs')
     for path,digest in p['code_sha256'].items():require(sha(old.git(repo,'show',state['head']+':'+path))==digest,'frozen public code pin differs')
-    explanation=decode(subprocess.check_output([str(ROOT/'bin/ai-task-gates'),'explain','--json'],cwd=repo))
+    explanation=control_metadata.gate_explanation(repo,decode)
     require(explanation['repository']=='u2giants/theoracle' and explanation['declared_class']=='private-tooling'
         and explanation['effective_class']=='private-tooling','truthful Oracle private-tooling task required')
     local=decode(old.git(repo,'show',state['head']+':.ai-devops/task-gates.json'))

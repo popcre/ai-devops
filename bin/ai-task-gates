@@ -476,10 +476,13 @@ reviewer_approval_summary(){
       and ((.provider|ascii_downcase) != (.implementer_engine|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
   done
   [ -n "$row" ] || return 1
+  local oracle_script=""
+  if [ "$action" = offline-private-capture-transform ]; then
+    jq -e ' .evidence_scope=="selected-code" and .code_only!=null and .code_only_export!=null' "$row" >/dev/null || return 1
+  fi
   if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
     [ -n "$action_manifest_file" ] || return 1
     if [ "$action" = offline-private-capture-transform ]; then
-      local oracle_script
       case "$(jq -r .action_profile_binding.profile "$row")" in
         oracle-native-alternate-serialization-v1) oracle_script=oracle_native_alternate_profile.py ;;
         oracle-native-alternate-serialization-v2) oracle_script=oracle_native_alternate_v2_profile.py ;;

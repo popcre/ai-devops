@@ -376,9 +376,7 @@ def main():
             require(type(binding_value) is dict,'invalid action binding')
             selected=binding_value.get('profile')
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-            if oracle_context:
-                print("ai-review-action-profile: Oracle native metadata routing refused",file=sys.stderr);return 1
-            pass
+            print("ai-review-action-profile: Oracle native metadata routing refused",file=sys.stderr);return 1
     if selected in (oracle,"oracle-native-alternate-serialization-v2"):
         spec = importlib.util.spec_from_file_location("oracle_native_profile", ROOT / ("tools/oracle_native_alternate_v2_profile.py" if selected.endswith("-v2") else "tools/oracle_native_alternate_profile.py"))
         module = importlib.util.module_from_spec(spec)

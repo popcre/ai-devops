@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and verify a deliberately narrow, history-free private code review export."""
 
+import importlib.util
 import argparse
 import hashlib
 import json
@@ -109,7 +110,11 @@ def public_document_context(source, paths, profile):
     if not profile:return None
     if profile not in PUBLIC_PRODUCER_PROFILES:fail('unsupported public document profile')
     registry=json.loads((Path(__file__).resolve().parents[1]/'config/review-action-profiles.json').read_text())['profiles'][profile]
-    remote=git(source,'remote','get-url','origin').decode().strip().removesuffix('.git').rstrip('/')
+    spec=importlib.util.spec_from_file_location('oracle_public_identity',Path(__file__).resolve().parents[1]/'tools/oracle_native_alternate_control.py')
+    control=importlib.util.module_from_spec(spec);spec.loader.exec_module(control)
+    proc=subprocess.run(['/usr/bin/git','-C',str(source),'config','--local','--no-includes','--get','remote.origin.url'],env=control.sealed_git_env(),capture_output=True,timeout=5)
+    if proc.returncode or len(proc.stdout)>4096:fail('public repository identity unavailable')
+    remote=control.normalize_upstream(proc.stdout.decode())
     if remote!=registry['repository'] or sorted(paths)!=registry['paths']:fail('public document requires exact Oracle profile closure')
     if tree_mode(source,'HEAD',PUBLIC_PRODUCER_PATH) is None or digest(git(source,'show','HEAD:'+PUBLIC_PRODUCER_PATH))!=PUBLIC_PRODUCER_SHA256:fail('public producer document is not pinned tracked source')
     if git(source,'status','--porcelain','--',PUBLIC_PRODUCER_PATH):fail('public producer document worktree moved')
