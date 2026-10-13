@@ -54,6 +54,11 @@ set -uo pipefail
 # silently remove the serialization between sessions. A back-off on one account
 # may therefore also pause the other; that is the safe failure.
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+# Windows SSH logons cannot read Credential Manager; ai-gh-ssh-credentials.ps1
+# keeps a private copy of the login for them. Use it from any SSH shell.
+if [ -n "${SSH_CONNECTION:-}" ] && [ -z "${GH_CONFIG_DIR:-}" ] && [ -f "$HOME/.ai-devops/gh-ssh/hosts.yml" ]; then
+  export GH_CONFIG_DIR="$HOME/.ai-devops/gh-ssh"
+fi
 SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
 BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
 STALE="${AI_GH_LOCK_STALE_SECONDS:-90}"

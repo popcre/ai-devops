@@ -1377,6 +1377,17 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     } elseif ($ghProbe.ExitCode -ne 0) {
         Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
     }
+    # SSH logons cannot read Credential Manager; share the login through gh's
+    # own config store so remote sessions and Git work too.
+    $sshCreds = Join-Path $PSScriptRoot 'ai-gh-ssh-credentials.ps1'
+    if ((Test-Path -LiteralPath $sshCreds) -and -not $SkillsDryRun -and $env:AI_DEVOPS_INSTALL_TEST_MODE -ne '1') {
+        $sshProbe = Invoke-NativeProbe -Command 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sshCreds)
+        if ($sshProbe.ExitCode -eq 0 -or $sshProbe.ExitCode -eq 2) {
+            Write-Note "GitHub login for SSH sessions: $($sshProbe.Output -join ' ')"
+        } else {
+            Write-Warning "Sharing the GitHub login with SSH sessions FAILED (exit $($sshProbe.ExitCode)): $($sshProbe.Output -join ' ')"
+        }
+    }
 } else {
     Write-Note "GitHub CLI not found. Install when needed: winget install GitHub.cli"
 }
