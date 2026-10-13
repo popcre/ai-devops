@@ -127,13 +127,21 @@ save_seen(){
   mv -f "$HOME_DIR/seen.new" "$HOME_DIR/seen"
 }
 
+# Push, then prove delivery: every path passed must be in the published main.
 push_or_die(){
-  local attempt
+  local attempt p delivered
   for attempt in 1 2 3; do
-    if GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG"; then return 0; fi
-    GIT_TERMINAL_PROMPT=0 git -C "$HUB" pull -q --rebase origin main 2>>"$LOG" || true
+    GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG" || true
+    GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
+    delivered=1
+    for p in "$@"; do git -C "$HUB" cat-file -e "origin/main:$p" 2>/dev/null || delivered=0; done
+    [ "$delivered" = 1 ] && return 0
+    if ! git -C "$HUB" rebase -q origin/main 2>>"$LOG"; then
+      git -C "$HUB" rebase --abort 2>/dev/null || true
+      die "could not rebase onto the published archive; nothing was recorded as delivered"
+    fi
   done
-  die "push to $REMOTE failed after 3 attempts"
+  die "push to $REMOTE failed after 3 attempts; nothing was recorded as delivered"
 }
 
 cmd_sync(){
@@ -150,14 +158,22 @@ cmd_sync(){
   if [ -f "$HOME_DIR/seen" ]; then
     while IFS= read -r -d '' key && IFS= read -r -d '' val; do SEEN["$key"]="$val"; done < "$HOME_DIR/seen"
   fi
-  # What this machine remembers as sent is trusted only while every bundle it
-  # pushed is still in the published archive; otherwise collect everything again.
+  # Every bundle this machine delivered is also kept locally (encrypted). If the
+  # published archive lost one, put the very same bundle back; only if the local
+  # copy is gone too is everything collected again.
+  RESTORED=()
   if [ -f "$HOME_DIR/pushed-bundles" ]; then
     while IFS= read -r key; do
       [ -n "$key" ] || continue
-      if [ ! -f "$HUB/$key" ]; then
-        log "$MACHINE: the archive no longer has $key; collecting everything again"
-        SEEN=(); RECOVERING=1; break
+      [ -f "$HUB/$key" ] && continue
+      if [ -f "$HOME_DIR/sent/$(basename "$key")" ]; then
+        mkdir -p "$(dirname "$HUB/$key")"
+        cp -f "$HOME_DIR/sent/$(basename "$key")" "$HUB/$key"
+        git -C "$HUB" add -- "$key"; RESTORED+=("$key")
+        log "$MACHINE: restored $key to the archive from the local copy"
+      else
+        log "$MACHINE: the archive and this machine both lost $key; collecting everything again"
+        SEEN=(); RECOVERING=1
       fi
     done < "$HOME_DIR/pushed-bundles"
   fi
@@ -209,12 +225,10 @@ cmd_sync(){
 
   # Leak gate on exactly what will be published: only this run's bundle and
   # the clear-text status file, and the bundle must be a CMS envelope.
-  local rel bad=()
+  local rel bad=() expected=" $bundle ${RESTORED[*]:-} "
   while IFS= read -r -d '' rel; do
-    case "$rel" in
-      "$MACHINE/LAST-SYNC.txt") continue ;;
-      "$bundle") is_envelope "$HUB/$rel" && continue ;;
-    esac
+    if [ "$rel" = "$MACHINE/LAST-SYNC.txt" ]; then continue; fi
+    if [[ "$expected" == *" $rel "* ]] && is_envelope "$HUB/$rel"; then continue; fi
     bad+=("$rel")
   done < <(git -C "$HUB" diff --cached --name-only -z)
   if ((${#bad[@]})); then
@@ -225,21 +239,27 @@ cmd_sync(){
 
   if ! git -C "$HUB" diff --cached --quiet; then
     git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)$([ "$partial" = 0 ] || echo ' (partial)')"
-    push_or_die
+    push_or_die ${bundle:+"$bundle"} ${RESTORED[@]+"${RESTORED[@]}"} "$MACHINE/LAST-SYNC.txt"
+  fi
+  # Delivery is proven; record it. A sent bundle is kept locally for restores.
+  # After a full re-collection, bundles lost everywhere leave the ledger: their
+  # current files are in this run's bundle (deleted files and older versions
+  # that existed only in them cannot be recovered and are reported once).
+  if [ "$RECOVERING" = 1 ] && [ "$partial" = 0 ]; then
+    local entry
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      if [ -f "$HUB/$entry" ]; then printf '%s\n' "$entry"; else log "$MACHINE: permanently lost: $entry"; fi
+    done < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new"
+    mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
+  fi
+  if [ -n "$bundle" ]; then
+    mkdir -p "$HOME_DIR/sent"; cp -f "$HUB/$bundle" "$HOME_DIR/sent/$(basename "$bundle")"
+    printf '%s\n' "$bundle" >> "$HOME_DIR/pushed-bundles"
   fi
   if [ "$partial" = 0 ]; then
     save_seen
-    printf '%s
-' "$notes_sum" > "$HOME_DIR/notes.sha1"
-    # Only now, with the push done, is the sent-list updated (and, after a
-    # recovery, trimmed to the bundles the archive really has).
-    if [ "$RECOVERING" = 1 ]; then
-      while IFS= read -r key; do [ -n "$key" ] && [ -f "$HUB/$key" ] && printf '%s
-' "$key"; done         < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new" || true
-      mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
-    fi
-    [ -z "$bundle" ] || printf '%s
-' "$bundle" >> "$HOME_DIR/pushed-bundles"
+    printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha1"
     if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in $bundle)"; fi
   fi
   unlock "$HOME_DIR/sync.lock"
@@ -253,10 +273,13 @@ cmd_sync(){
 
 cmd_view(){
   local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile work b machine n=0 entry
+  # Same lock as sync: view's reset of the clone must never race a sync.
+  mkdir -p "$HOME_DIR"; chmod 700 "$HOME_DIR"
+  take_lock "$HOME_DIR/sync.lock" 60
   ensure_hub
   work="$(mktemp -d)"; chmod 700 "$work"
   # shellcheck disable=SC2064
-  trap "rm -rf '$work'" EXIT
+  trap "rm -rf '$work' '$HOME_DIR/sync.lock'" EXIT
   if [ -n "${AI_REVIEWER_LOGS_KEY_FILE:-}" ]; then
     keyfile="$AI_REVIEWER_LOGS_KEY_FILE"
   else

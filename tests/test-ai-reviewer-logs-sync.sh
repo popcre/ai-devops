@@ -68,13 +68,24 @@ view
 check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
-# A bundle lost from the published archive makes the next run collect everything again.
+# A bundle lost from the published archive is put back from the local copy.
 first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
 git -C "$VIEW" pull -q; git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q "$first"
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm lose && git -C "$VIEW" push -q origin HEAD:main
 run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
+check 'lost bundles are restored byte for byte' "grep -q 'restored' '$TMP/out13' && git -C '$REMOTE' cat-file -e 'main:$first'"
 view
-check 'lost bundles are re-collected' "grep -q 'collecting everything again' '$TMP/out13' && cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log'"
+check 'restored evidence includes files deleted locally' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
+
+# Lost everywhere: everything is collected again, once.
+second="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
+git -C "$VIEW" pull -q; git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q "$second"
+git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm lose2 && git -C "$VIEW" push -q origin HEAD:main
+rm -f "$TMP/home/.ai-devops/reviewer-logs-sync/sent/$(basename "$second")"
+run sync 2> "$TMP/out13b" || { cat "$TMP/out13b" >&2; exit 1; }
+run sync 2> "$TMP/out13c" || { cat "$TMP/out13c" >&2; exit 1; }
+view
+check 'bundles lost everywhere are re-collected once' "grep -q 'collecting everything again' '$TMP/out13b' && grep -q 'nothing new' '$TMP/out13c' && cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log'"
 
 # view rebuilds from scratch, never wipes a foreign folder, and refuses unsafe bundles.
 mkdir -p "$TMP/plain/test-box/ghost"; : > "$TMP/plain/test-box/ghost/stale.txt"
