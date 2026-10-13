@@ -90,6 +90,12 @@ view
 check 'a file larger than one part is listed as oversized, never forced into a part' "[ ! -e '$P/reviewer-issues/many/huge-for-chunk.log' ] && cat '$P'/_collection/*-skipped.txt | grep -q huge-for-chunk"
 rm -f "$ISSUES/many/huge-for-chunk.log"
 
+# Incident packages written inside other checkouts are collected too.
+mkdir -p "$REPOS2/app-one/.ai/reviewer-issues/other-pkg"; printf 'from another checkout\n' > "$REPOS2/app-one/.ai/reviewer-issues/other-pkg/details.txt"
+run sync 2> "$TMP/out21" || { cat "$TMP/out21" >&2; exit 1; }
+view
+check 'incident packages from every checkout are collected' "grep -rq 'from another checkout' '$P/reviewer-issues' && [ \$(grep -rl 'exit 1 after timeout' '$P/reviewer-issues' | wc -l) -eq 1 ]"
+
 # A bundle lost from the published archive is put back from the local copy.
 first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
 git -C "$VIEW" pull -q; git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q "$first"

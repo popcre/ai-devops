@@ -10,8 +10,9 @@
 #                                     (default ~/.cache/ai-devops-reviewer-logs-plain).
 #     The key comes from a private file named by AI_REVIEWER_LOGS_KEY_FILE. Read it
 #     with your normal (serialized) 1Password access, e.g. into a 0600 file:
-#       (umask 077; op read "op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile")
-#     and delete the file afterwards.
+#       (umask 077; op read "op://vibe_coding/3bqds3sk7eac2i5izq2alsc7my/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile")
+#     and delete the file afterwards. (The item ID is used because the entry
+#     title contains parentheses, which op:// references do not accept.)
 #   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
 #   ai-reviewer-logs-sync unschedule
 #
@@ -21,7 +22,7 @@
 # clear-text <machine>/LAST-SYNC.txt (time, file count, complete or not; no
 # names). Nothing is ever deleted. `view` extracts every bundle in time order,
 # giving one folder per machine:
-#   reviewer-issues/   incident packages (ai-reviewer-issue)
+#   reviewer-issues/   incident packages (ai-reviewer-issue); <checkout>/ for other copies
 #   state/             review scoreboard, invocation events, lifecycle runs
 #   reviews/<checkout>/ .ai/reviews reports from every checkout
 #   _collection/       per-bundle notes: files skipped as oversized, read errors
@@ -270,7 +271,10 @@ cmd_sync(){
   local roots root dir checkout
   roots="${AI_REVIEWER_LOGS_ROOTS:-$(dirname "$TOOL_ROOT"):/c/repos:/d/repos:$HOME/repos:/worksp}"
   declare -A seen_dirs=()
+  [ -d "$ISSUES" ] && seen_dirs["$(cd "$ISSUES" && pwd -P)"]=1
   IFS=: read -r -a root_list <<< "$roots"
+  # Review reports AND incident packages live inside whichever checkout ran the
+  # reviewer, so every checkout under the roots is collected.
   for root in "${root_list[@]}"; do
     [ -d "$root" ] || continue
     while IFS= read -r -d '' dir; do
@@ -280,8 +284,11 @@ cmd_sync(){
       # Readable name plus a hash of the full path: distinct checkouts never share a folder.
       checkout="$(dirname "$(dirname "$dir")")"
       checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha256sum | cut -c1-16)"
-      stage_tree "$dir" "reviews/$checkout"
-    done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>>"$ERRS")
+      case "$dir" in
+        */.ai/reviews) stage_tree "$dir" "reviews/$checkout" ;;
+        */.ai/reviewer-issues) stage_tree "$dir" "reviewer-issues/$checkout" ;;
+      esac
+    done < <(find "$root" -maxdepth 4 -type d \( -path '*/.ai/reviews' -o -path '*/.ai/reviewer-issues' \) -print0 2>>"$ERRS")
   done
 
   local partial=0 bundle="" bundles=()
