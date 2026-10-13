@@ -20,6 +20,12 @@
 # is refused if any secret pattern survives. The repository must be private:
 # unauthenticated access has to fail before anything is pushed.
 #
+# Boundary: masking is defense in depth, not the privacy boundary. A secret
+# written as unlabeled free prose cannot be recognized by any pattern; the
+# private, owner-only repository is the boundary, exactly as for the raw session
+# transcripts in u2giants/ai-devops-transcripts. Reviewer logs are the same kind
+# of local AI evidence and get the same treatment.
+#
 # Environment:
 #   AI_REVIEWER_LOGS_REMOTE         remote URL (default the private fleet repository)
 #   AI_REVIEWER_LOGS_HUB            local clone (default ~/.cache/ai-devops-reviewer-logs)
@@ -46,7 +52,7 @@ STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
 MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-5000000}"
 MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
-case "$MACHINE" in ''|.*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
+case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
 LOG="$HOME_DIR/sync.log"
 
 # Detects survivors; the scrub below replaces whole values for each family.
@@ -87,6 +93,7 @@ scrub(){
     -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*\")([^\"\\\\]|\\\\.)*\"/\\1$R\"/Ig" \
     -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*')([^'\\\\]|\\\\.)*'/\\1$R'/Ig" \
     -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*)$VALUE.*$/\\1$R/Ig" \
+    -e "s/(\\b(password|passwd|passphrase|secret|api key|token)[[:space:]]+(is|was|=|:)[[:space:]]+)$VALUE.*$/\\1$R/Ig" \
     "$1"
 }
 
@@ -274,7 +281,10 @@ cmd_sync(){
   # and do not remember anything as collected so the next run retries all of it.
   local partial=0
   [ -s "$ERRS" ] && partial=1
-  if git -C "$HUB" diff --cached --quiet; then
+  # A clean run after a partial one must clear the partial mark even with no new files.
+  local stale_partial=0
+  [ "$partial" = 0 ] && grep -q '^complete: no' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null && stale_partial=1
+  if git -C "$HUB" diff --cached --quiet && [ "$stale_partial" = 0 ]; then
     if [ "$partial" = 0 ]; then save_seen; log "$MACHINE: nothing new"; fi
   else
     printf 'machine: %s\nlast new evidence collected: %s\nfiles updated in that run: %s\ncomplete: %s\n' \

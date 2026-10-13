@@ -126,6 +126,15 @@ exec "%s" "$@"
 ' "$real_sha1" > "$TMP/badbin/sha1sum"; chmod +x "$TMP/badbin/sha1sum"
 rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out10" || rc=$?
 check 'hashing failures fail the run and stay marked partial' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out10' && ! grep -q 'sync complete' '$TMP/out10'"
+rm -rf "$TMP/badbin"
+run sync 2> "$TMP/out12" || { cat "$TMP/out12" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'a clean retry clears the partial mark' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
+check 'option-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=--dry-run run sync 2>/dev/null"
+printf 'the password is hunter3word\n' > "$ISSUES/20261013-pkg/prose.log"
+run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'sentence-form passwords masked' "! grep -q hunter3word '$M/reviewer-issues/20261013-pkg/prose.log'"
 
 # A symbolic link committed to the repository stops the sync before any write.
 git -C "$VIEW" pull -q
