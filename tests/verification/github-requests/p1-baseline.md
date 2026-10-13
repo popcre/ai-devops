@@ -11,14 +11,15 @@ preserved in the P1 integration; this does not establish P2 acceptance.
 
 ## Acceptance status
 
-**Incomplete.** P1 instrumentation merged in PR #663 and is installed on
-edge-dev and edge-dev3. The original text below records its pre-merge state.
-The live samples are not an accepted fleet baseline or evidence of request
-savings. No phase after P1 is claimed by this report.
-Acceptance still requires two busy reset windows and twenty comparable completed
-operations including PR waiting, BlockerWatch, dispatch and privacy checks. The
-offline-replay fallback is available only after two business days of insufficient
-volume; a quiet sample today cannot satisfy it.
+**Partial, baseline frozen 2026-10-13.** Privacy-safe attribution and a measured
+edge-dev3 baseline are established (section "Measured baseline, 2026-10-07 to
+2026-10-13"). Two busy reset windows and twenty comparable completed operations
+are proven for the instrumented types (PR waiting and BlockerWatch). Whole-account
+HTTP requests and GraphQL points remain unknown, not zero. Dispatch and privacy
+outcomes are still outside the wrapper (P3). Multi-host coverage, after-workload
+comparison, and qualified useful-work latency remain open. No savings are claimed.
+P1 instrumentation merged in PR #663 and is installed on edge-dev and edge-dev3.
+The historical text below records its pre-merge state.
 
 ### Integration candidate, 2026-09-28
 
@@ -315,3 +316,94 @@ do not generate artificial live jobs or increase probing to manufacture samples.
 Planning incident remains the evidence in plan section 3: GraphQL refusal at
 2026-09-20T16:43:06Z followed by a healthy **separate core** probe. That incident
 proves a bucket mismatch, not which caller consumed GraphQL capacity.
+
+## Measured baseline, 2026-10-07 to 2026-10-13 (edge-dev3)
+
+Read-only offline report over private local measurements on edge-dev3. Nine
+fixture rows were excluded from the report input and preserved with a quarantine
+manifest (placeholder workflow id `0123456789abcdef0123456789abcdef` written
+2026-10-08T12:52:49Z and one evidence row without a matching outcome receipt).
+Live telemetry was not modified. Filtered input SHA-256:
+`e98b8c1f6026663a73a008a4a4d4c7634e97977ac5622c5a92f0e1560541bdf2`.
+Report file SHA-256: `def6134c907d26653d7b6d93e65ed992494ab21df555c3af9d8dc4a91b3d7a9d`.
+Interval: 2026-10-07T00:00:05Z through 2026-10-13T15:12:05Z.
+
+### Privacy
+
+26,630 measurement rows checked. Repository, principal, and machine labels are
+redacted or hashed on every row. Zero violations. Access context is a local
+opaque `v1:` hash; reports print a context ordinal only.
+
+### Attribution and measured cost
+
+| Quantity | Value | Notes |
+| --- | ---: | --- |
+| Wrapper records (schema 1) | 22,192 | opaque CLI execution estimates |
+| Opaque CLI executions | 21,045 | not HTTP requests |
+| Observed GraphQL cost records | 1,921 | schema 2, same-response `rateLimit.cost` |
+| Observed GraphQL points | 1,921 | all `ai-pr-wait` / `graphql.pr_status` / `pr_wait` |
+| Cost records linked to a workflow receipt | 1,823 | 1,823 linked points |
+| Unattributed quota-window records | 0 | every window row carries an access context |
+| Whole-account HTTP requests | unknown | `http_requests` is null on every row |
+| Whole-account GraphQL points | unknown | report field stays null; observed subset above |
+| Unknown-caller wrapper records | 11,090 | |
+| Verified-principal wrapper records | 14,092 | opaque local hash, not a bound GitHub login |
+
+### Completed workflow receipts (comparable operations)
+
+1,192 non-deadline completed receipts, well above the twenty-operation floor:
+
+| Caller / workflow | Outcome | Count |
+| --- | --- | ---: |
+| `ai-blocker-watch` / `blocker_watch_tick` | completed | 949 |
+| `ai-pr-wait` / `pr_wait` | checks_failed | 126 |
+| `ai-pr-wait` / `pr_wait` | merged | 108 |
+| `ai-pr-wait` / `pr_wait` | ejected | 8 |
+| `ai-pr-wait` / `pr_wait` | closed | 1 |
+
+Deadline receipts (508) are excluded from the comparable set. Dispatch and
+privacy-check outcomes are absent: those callers remain unwrapped under P3.
+Idle BlockerWatch ticks are included as completed ticks; they are not claimed
+equivalent to active business workflows.
+
+### Busy reset windows
+
+101 access-context reset windows have observed GraphQL remaining below 4,900.
+The five deepest:
+
+| Reset (UTC) | Samples | Min remaining | Max remaining | Observed points | Bucket span | Unattributed in window |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-10-07T14:55:57Z | 30 | 2,505 | 4,957 | 30 | 2,452 | 2,422 |
+| 2026-10-11T20:18:39Z | 38 | 2,564 | 4,850 | 38 | 2,286 | 2,248 |
+| 2026-10-11T21:18:47Z | 35 | 2,745 | 4,999 | 35 | 2,254 | 2,219 |
+| 2026-10-07T00:54:49Z | 44 | 2,907 | 4,639 | 44 | 1,732 | 1,688 |
+| 2026-10-13T12:26:16Z | 8 | 2,923 | 4,447 | 8 | 1,524 | 1,516 |
+
+Across all 101 busy windows: 1,861 observed managed points versus a total
+observed bucket span of 85,831 points. The unattributed residual inside those
+windows is therefore at least 83,971 points. That residual is now bounded from
+below and is not zero; its composition (other hosts, unwrapped managed callers,
+external clients) remains unknown. No per-call savings percentage is computed
+from this imbalance.
+
+### Installation (edge-dev3)
+
+- Install manifest `source_sha` `1840f783f947104a680d52a263fe0a68e447d0cc` equals
+  the checkout HEAD.
+- `/usr/local/bin/ai-gh` resolves to `/home/ahazan/repos/ai-devops/bin/ai-gh`;
+  SHA-256 `f4569f7ab9da1663303059d2208c50b118ddeb7f2785eb438837ef452a01081e`.
+- A normal installed issue read returned the live issue state with exit 0.
+
+### What this baseline does and does not prove
+
+Proven: privacy-safe attribution shape, access-context binding on every cost
+window row, two or more comparable busy reset windows, twenty or more completed
+comparable operations for the instrumented types, and a frozen measured baseline
+with an input digest.
+
+Not proven (keep open on #660): whole-account HTTP/GraphQL totals; dispatch and
+privacy-check receipts; multi-host and external-client coverage; after-workload
+comparison; safety-event equivalence; qualified useful-work latency (schema-4
+qualified latency count is 0; 563 evidence rows lack cohort, source fingerprint
+and clock bound). Missing values stay unknown, never zero. No manufactured
+demand, no raw secrets and no savings claim.
