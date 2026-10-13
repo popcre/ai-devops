@@ -80,6 +80,18 @@ run sync 2> "$TMP/out4"
 git -C "$VIEW" pull -q
 check 'basic auth masked' "! grep -q dXNlcjpodW50ZXIy '$M/reviewer-issues/20261013-pkg/basic.log'"
 
+# Short and spaced labeled passwords, secret-looking file names, and evidence
+# restored with an older timestamp.
+printf 'password=abc\n"secret": "two words here"\n' > "$ISSUES/20261013-pkg/labels.log"
+printf 'x\n' > "$ISSUES/20261013-pkg/$fake_gh.log"
+printf 'restored older content\n' > "$STATE/review-lifecycle/runs/r1/run.json"
+touch -d '2001-01-01' "$STATE/review-lifecycle/runs/r1/run.json"
+run sync 2> "$TMP/out6" || { cat "$TMP/out6" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'short and spaced labeled values masked' "! grep -q 'abc' '$M/reviewer-issues/20261013-pkg/labels.log' && ! grep -q 'two words' '$M/reviewer-issues/20261013-pkg/labels.log'"
+check 'secret-looking file names are withheld' "! ls '$M/reviewer-issues/20261013-pkg' | grep -q '$fake_gh' && grep -q 'secret in file name' '$M/SKIPPED.txt'"
+check 'older-timestamp restores are collected' "grep -q 'restored older content' '$M/state/review-lifecycle/runs/r1/run.json'"
+
 # A symbolic link committed to the repository stops the sync before any write.
 git -C "$VIEW" config user.name t; git -C "$VIEW" config user.email t@example.invalid
 printf '%s' "$TMP/outside" > "$TMP/target"
