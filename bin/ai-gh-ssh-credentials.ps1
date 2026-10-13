@@ -59,6 +59,28 @@ function Invoke-Gate([string]$Script) {
     } finally { $ErrorActionPreference = $prior; Remove-Item Env:AI_GH_SSH_BODY -ErrorAction SilentlyContinue }
 }
 
+# True when the path or any existing parent is a junction or symbolic link, so
+# a write could be redirected somewhere else.
+function Test-Redirected([string]$Path) {
+    $p = [IO.Path]::GetFullPath($Path)
+    while ($p) {
+        if (Test-Path -LiteralPath $p) {
+            $item = Get-Item -LiteralPath $p -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $true }
+        }
+        $parent = Split-Path -Parent $p
+        if (-not $parent -or $parent -eq $p) { break }
+        $p = $parent
+    }
+    return $false
+}
+foreach ($target in @($SshConfigDir, $BackupRoot, $BashRc, $GitConfig)) {
+    if (Test-Redirected $target) { throw "Refusing to write through a junction or symbolic link: $target" }
+}
+$PowerShellProfiles = @($PowerShellProfiles | Where-Object {
+    if (Test-Redirected $_) { Write-Warning "Skipping redirected PowerShell profile: $_"; $false } else { $true }
+})
+
 function Set-PrivateAcl([string]$Path) {
     $inherit = if (Test-Path -LiteralPath $Path -PathType Container) { '(OI)(CI)' } else { '' }
     & icacls $Path /inheritance:r /grant:r "*${me}:${inherit}F" "*S-1-5-18:${inherit}F" "*S-1-5-32-544:${inherit}F" | Out-Null

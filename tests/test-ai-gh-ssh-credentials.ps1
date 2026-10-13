@@ -102,6 +102,15 @@ try {
     Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "another GitHub account is refused (exit $($r.Exit))"
     Assert-True (-not (Test-Path (Join-Path $r.Dir 'gh-ssh\hosts.yml'))) 'no other-account token written'
 
+    # A junction in place of the private folder is refused before any write.
+    $jdir = Join-Path $TempRoot 'junction'
+    New-Item -ItemType Directory -Force -Path $jdir, (Join-Path $jdir 'elsewhere'), (Join-Path $jdir 'home') | Out-Null
+    'GOOD' | Set-Content -LiteralPath (Join-Path $jdir 'token')
+    & cmd.exe /c mklink /J (Join-Path $jdir 'gh-ssh') (Join-Path $jdir 'elsewhere') | Out-Null
+    $r = Invoke-Script $jdir
+    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "junctioned SSH folder is refused (exit $($r.Exit))"
+    Assert-True (-not (Test-Path (Join-Path $jdir 'elsewhere\hosts.yml'))) 'nothing written through the junction'
+
     $r = Invoke-Case 'dead' 'BAD'
     Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"
     Assert-True ($r.Output -match 'gh auth login --web') 'dead login names the re-login step'
