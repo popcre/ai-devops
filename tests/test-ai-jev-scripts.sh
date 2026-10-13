@@ -15,7 +15,8 @@ for s in ai-jev-probe ai-jev-completion-shadow; do
 done
 
 # 2. A vendor failure is recorded as escalate, never as clean or agree.
-mkdir -p "$T/bin"; printf '#!/bin/sh\ncat >/dev/null; exit 7\n' > "$T/bin/curl"; chmod +x "$T/bin/curl"
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 7\n' > "$T/bin/curl"; chmod +x "$T/bin/curl"
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/op"; chmod +x "$T/bin/op"
 out="$(echo '{"last_assistant_message":"All done.","session_id":"t","prompt_id":"p"}' \
   | PATH="$T/bin:$PATH" TYPESAFE_API_KEY=dummy AI_JEV_SHADOW_LOG="$T/log" "$ROOT/bin/ai-jev-completion-shadow" 2>&1)"
 [[ "$out" == *"escalate=1"* ]] && ok || bad "outage not recorded as escalate: $out"
@@ -24,7 +25,11 @@ grep -q "All done" "$T/log" && bad "message text leaked into log" || ok
 
 # 3. Probe reports a network failure clearly.
 out="$(PATH="$T/bin:$PATH" TYPESAFE_API_KEY=dummy "$ROOT/bin/ai-jev-probe" 2>&1)"; rc=$?
-[ $rc -ne 0 ] && [[ "$out" == FAIL:* ]] && ok || bad "probe did not fail clearly: $out"
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q '^FAIL:'; then
+  ok
+else
+  bad "probe did not fail clearly rc=$rc out=$out"
+fi
 
 echo "passed=$pass failed=$failn"
-[ "$failn" -eq 0 ]
+if [ "$failn" -eq 0 ]; then exit 0; else exit 1; fi

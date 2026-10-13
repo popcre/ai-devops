@@ -71,5 +71,39 @@ else
   bad "pipeline model commands do not match the catalog"
 fi
 
+# Jev decision policy (advisory plan §9.2 / review-waste plan Phase 2)
+JEV_CFG="$ROOT/config/jev-decisions.json"
+jev_catalog_pin="$(jq -r '.models.jev // empty' "$CATALOG")"
+if [ -n "$jev_catalog_pin" ] && [ "$jev_catalog_pin" != null ]; then
+  ok "catalog pins a Jev model"
+else
+  bad "catalog models.jev is missing"
+fi
+if [ -f "$JEV_CFG" ] && jq -e '.schema_version == 1 and (.model_pin|type=="string") and (.endpoint|type=="string")' "$JEV_CFG" >/dev/null; then
+  ok "jev-decisions.json has a dated schema and model pin"
+else
+  bad "jev-decisions.json missing or malformed"
+fi
+jev_cfg_pin="$(jq -r '.model_pin // empty' "$JEV_CFG" 2>/dev/null)"
+if [ -n "$jev_cfg_pin" ] && [ "$jev_cfg_pin" = "$jev_catalog_pin" ]; then
+  ok "jev-decisions model pin matches tool-versions"
+else
+  bad "jev-decisions model pin $jev_cfg_pin != catalog $jev_catalog_pin"
+fi
+if jq -e '.decisions.value_level.type == "score"
+    and (.decisions.value_level.level_labels|length == 5)
+    and (.decisions.value_level.level_labels == ["negative","none","low","medium","highest"])
+    and (.decisions.chunk_filter.type == "choice")
+    and (.decisions.chunk_filter.allowed_labels|length >= 2)' "$JEV_CFG" >/dev/null 2>&1; then
+  ok "jev-decisions label enums match the locked five-level Score scale"
+else
+  bad "jev-decisions label enums do not match the locked scale"
+fi
+if grep -R --exclude-dir=node_modules -n -F '"jev-latest"' "$ROOT/bin/ai-jev-review-waste" "$ROOT/tools/lib/jev-client.sh" >/dev/null 2>&1; then
+  bad "calibration path still references jev-latest"
+else
+  ok "shared client and review-waste caller do not use jev-latest"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
