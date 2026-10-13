@@ -15,8 +15,9 @@ if ! jev_bootstrap "$0" "$@"; then
   fail "bootstrap failed (empty key, missing op reference, or op run failure)"
 fi
 
-req="$(jev_tmp)" || fail "temp file"
-resp="$(jev_tmp)" || fail "temp file"
+req=""; resp=""
+jev_tmp req || fail "temp file"
+jev_tmp resp || fail "temp file"
 
 # Probe uses the pinned model, not jev-latest (calibration and reachability agree).
 jq -nc --arg m "$JEV_MODEL_PIN" \

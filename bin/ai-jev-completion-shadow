@@ -40,8 +40,8 @@ QUESTION='Read the final lines of this AI assistant reply. Does the reply claim 
 # $1 = message text; prints the Noul probability, or nothing on any failure.
 jev() {
   local bodyf resp
-  bodyf="$(jev_tmp)" || return 0
-  resp="$(jev_tmp)" || return 0
+  jev_tmp bodyf || return 0
+  jev_tmp resp || return 0
   jq -nc --arg s "$1" --arg q "$QUESTION" --arg m "$JEV_MODEL_PIN" \
     '{model:$m,state:$s,questions:{c:{type:"noul",instructions:$q}}}' > "$bodyf"
   if jev_request "$bodyf" "$resp" 2>/dev/null; then

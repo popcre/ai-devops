@@ -29,6 +29,8 @@ usage() {
   exit 2
 }
 
+# Keep the original arguments: the op run re-exec must see the same command.
+ORIG_ARGS=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
     chunk-filter|value-level) CMD="$1"; shift ;;
@@ -39,7 +41,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$CMD" ] && [ -n "$ITEMS" ] && [ -f "$ITEMS" ] || usage
 
-if ! jev_bootstrap "$0" "$@" </dev/null; then
+if ! jev_bootstrap "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"} </dev/null; then
   echo '{"id":null,"decision":"abstain","reason":"bootstrap","abstain":true}'
   exit 1
 fi
@@ -65,8 +67,8 @@ run_chunk_filter() {
       emit_abstain "${id:-}" "bad-item"
       continue
     fi
-    req="$(jev_tmp)" || { emit_abstain "$id" "temp"; continue; }
-    resp="$(jev_tmp)" || { emit_abstain "$id" "temp"; continue; }
+    jev_tmp req || { emit_abstain "$id" "temp"; continue; }
+    jev_tmp resp || { emit_abstain "$id" "temp"; continue; }
     jq -nc --arg s "$state" --arg m "$JEV_MODEL_PIN" --rawfile cfg "$JEV_CONFIG" '
       ($cfg|fromjson).decisions.chunk_filter as $d
       | {
@@ -118,8 +120,8 @@ run_value_level() {
       emit_abstain "${id:-}" "bad-item"
       continue
     fi
-    req="$(jev_tmp)" || { emit_abstain "$id" "temp"; continue; }
-    resp="$(jev_tmp)" || { emit_abstain "$id" "temp"; continue; }
+    jev_tmp req || { emit_abstain "$id" "temp"; continue; }
+    jev_tmp resp || { emit_abstain "$id" "temp"; continue; }
     jq -nc --arg s "$state" --arg m "$JEV_MODEL_PIN" --rawfile cfg "$JEV_CONFIG" '
       ($cfg|fromjson).decisions.value_level as $d
       | {

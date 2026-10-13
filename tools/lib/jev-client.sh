@@ -7,7 +7,9 @@
 # normalized Noul/Choice/Score values.
 #
 # Shell API (fixed):
-#   jev_bootstrap "$0" "$@"     # before reading stdin; re-execs under op run
+#   jev_bootstrap "$0" "$@"     # before reading stdin and before parsing
+#                               # arguments; re-execs under op run and never
+#                               # returns in the unkeyed parent
 #   jev_request REQ_JSON RESP_JSON
 #   jev_read_noul RESP_JSON QUESTION_ID
 #   jev_read_choice RESP_JSON QUESTION_ID ALLOWED_LABELS_JSON
@@ -91,18 +93,23 @@ jev_cleanup() {
   return 0
 }
 
+# jev_tmp VAR — create a mode-0600 temp file, store its path in VAR, and
+# register it for jev_cleanup. Never call it in $(...): a subshell would lose
+# the registration and leak the file.
 jev_tmp() {
-  local t
+  local _jev_var="$1" t
+  [[ "$_jev_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
   t="$(mktemp)" || return 1
   chmod 600 "$t" 2>/dev/null || true
   JEV_TMPFILES+=("$t")
-  printf '%s' "$t"
+  printf -v "$_jev_var" '%s' "$t"
 }
 
 # jev_bootstrap "$0" "$@"
 # When the key is absent: spool stdin to a mode-0600 temporary file, resolve
 # the one managed op:// reference, re-exec the consumer through op run, and
-# return only in the keyed child. Empty resolution is nonzero and loud without
+# return only in the keyed child. The unkeyed parent never returns: it cleans
+# up and exits with the child's status. Empty resolution is nonzero and loud without
 # revealing the reference value.
 jev_bootstrap() {
   local self="$1"; shift || true
@@ -120,7 +127,7 @@ jev_bootstrap() {
   command -v op >/dev/null 2>&1 || { jev_fail "1Password CLI (op) is required"; return 1; }
 
   local input ref_line ref_file token_file
-  input="$(jev_tmp)" || return 1
+  jev_tmp input || return 1
   cat > "$input"
   ref_line=""
   local f
@@ -131,7 +138,7 @@ jev_bootstrap() {
   done
   [ -n "$ref_line" ] || { jev_fail "no TYPESAFE_API_KEY op:// reference found"; return 1; }
   [ "$(printf '%s\n' "$ref_line" | wc -l)" -eq 1 ] || { jev_fail "more than one TYPESAFE_API_KEY reference"; return 1; }
-  ref_file="$(jev_tmp)" || return 1
+  jev_tmp ref_file || return 1
   printf '%s\n' "$ref_line" > "$ref_file"
 
   token_file="$JEV_TOKEN_FILE"
@@ -144,8 +151,8 @@ jev_bootstrap() {
   set +e
   AI_JEV_REEXEC=1 op run --env-file "$ref_file" -- /usr/bin/env bash "$self" "$@" < "$input"
   rc=$?
-  set -e
-  return "$rc"
+  jev_cleanup
+  exit "$rc"
 }
 
 # jev_request REQUEST_JSON RESPONSE_JSON
