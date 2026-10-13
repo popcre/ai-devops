@@ -15,7 +15,8 @@ The gate checks only Markdown paths that the pull request adds, copies, or
 renames. Editing an old orphan does not fail the pull request. This keeps legacy
 debt from turning the check red on its first day while still preventing new debt.
 
-The checker ignores fenced code examples, inline code examples, bare URLs,
+The checker ignores fenced code examples, inline code examples (a link whose
+label is code-formatted still counts), bare URLs,
 anchors, images, and links outside the repository. It supports ordinary inline
 links, explicit reference-style links, URL-encoded paths, directory links that
 resolve to a README or index, and extensionless links that resolve to Markdown.

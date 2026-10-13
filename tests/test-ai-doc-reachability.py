@@ -128,6 +128,12 @@ class ReachabilityTests(unittest.TestCase):
         self.repo.commit()
         self.assert_passes()
 
+    def test_code_span_destination_does_not_count(self) -> None:
+        self.add_doc()
+        self.repo.write("README.md", "Example: [Finding](`docs/finding.md`).\n")
+        self.repo.commit()
+        self.assert_fails()
+
     def test_bare_url_and_anchor_do_not_count(self) -> None:
         self.add_doc()
         self.repo.write(
