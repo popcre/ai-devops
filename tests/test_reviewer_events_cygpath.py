@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""find_passing_report must skip a candidate when cygpath is missing or hangs.
+"""find_passing_report must fall through to the next candidate on cygpath failure.
 
 Regression for the DeepSeek final-check finding on e8584976: an unguarded
 subprocess.run(["cygpath", ...]) raised FileNotFoundError/TimeoutExpired and
 aborted the whole approval lookup instead of trying the next candidate.
+Codex Low follow-up: the fall-through test must observe the next candidate
+being returned, not merely that the call does not raise.
 """
 import json
 import os
@@ -73,34 +75,42 @@ class CygpathFallThrough(unittest.TestCase):
                     self.state, "any", "final-check", "a" * 40, "b" * 64, "c" * 64
                 )
 
-    def test_missing_cygpath_skips_candidate(self):
-        # Two Bash-style /-prefixed report paths. The first candidate's cygpath
-        # is missing; the second must still be found instead of the lookup dying.
+    def test_cygpath_failure_falls_through_to_next_candidate(self):
+        """A cygpath failure on one candidate must yield the next candidate.
+
+        Both records are otherwise valid APPROVEs. The first would win (later
+        finished_at) if cygpath converted its POSIX report path. The second
+        keeps a native Windows path and needs no conversion. Asserting the
+        second is returned — not None — fails if find_passing_report returns
+        early instead of continuing.
+        """
         first = self.report_dir / "deepseek-final-check-1.md"
         second = self.report_dir / "deepseek-final-check-2.md"
+        # Later finished_at: first would be selected if its path resolved.
         write_record(self.runs, "deepseek", "1", first, REPORT_BODY,
-                     finished_at="2026-10-12T01:00:00Z")
-        write_record(self.runs, "deepseek", "2", second, REPORT_BODY,
                      finished_at="2026-10-12T02:00:00Z")
-        # Force both records through the /path branch by rewriting paths to POSIX.
-        for node in (self.runs / "deepseek" / "zcode").glob("*.json"):
-            row = json.loads(node.read_text())
-            row["report_path"] = "/tmp/generic/" + Path(row["report_path"]).name
-            # Keep the digest bound to the real bytes we still need to open.
-            node.write_text(json.dumps(row))
-
-        real_run = subprocess.run
+        write_record(self.runs, "deepseek", "2", second, REPORT_BODY,
+                     finished_at="2026-10-12T01:00:00Z")
+        # Only the first candidate takes the /path cygpath branch.
+        node = self.runs / "deepseek" / "zcode" / "1.json"
+        row = json.loads(node.read_text())
+        row["report_path"] = "/tmp/generic/" + first.name
+        node.write_text(json.dumps(row))
 
         def fake_run(cmd, **kwargs):
             if cmd and cmd[0] == "cygpath":
+                # Scoped to the first candidate: only its path is POSIX.
+                self.assertIn("deepseek-final-check-1", cmd[-1])
                 raise FileNotFoundError("cygpath")
-            return real_run(cmd, **kwargs)
+            raise AssertionError(f"unexpected subprocess {cmd}")
 
-        # Without fall-through this raises FileNotFoundError and never returns.
-        # Either a clean None (both skipped) or the later Windows-path candidate
-        # is acceptable; the hard requirement is that the call returns at all.
         result = self.lookup(fake_run)
-        self.assertTrue(result is None or isinstance(result, dict))
+        self.assertIsNotNone(
+            result,
+            "lookup must fall through past a cygpath failure to the next candidate",
+        )
+        self.assertEqual(result["run_id"], "2")
+        self.assertEqual(result["report"], str(second))
 
     def test_cygpath_timeout_skips_candidate(self):
         first = self.report_dir / "deepseek-final-check-1.md"
