@@ -49,3 +49,8 @@ Automatic profile selection prevalidates when the lexical Oracle native reposito
 Descriptor metadata is stored only under real-UID-home `.local/state/ai-devops/oracle-native-alternate-descriptors/<exact profile>/<unique 32-lowercase-hex action ID>/<exact manifest basename>`. Every directory is owned 0700 and the regular single-link file is 0600. Its parsed profile/action ID must match the prevalidated directory identity. Actual-mode root overrides are refused. Explicit test-only roots keep the same closed schema/path/mode checks and cannot issue or consume authority.
 
 The shared module's bounded exclusive metadata publisher reuses the exact profile's metadata/stat/runtime validator, creates a fresh action directory, writes with O_CREAT|O_EXCL through anchored nofollow descriptors, and fsyncs the file and directories. Existing, failed, expired or partially created directories refuse; no overwrite/retry/renewal occurs. The publisher outputs metadata only, creates no permission certificate or receipt, and reads no retained capture/control/original content. Root must independently establish current observations/custody, source installation and genuine current-purpose/action native review outside this helper. No actual platform descriptor was created by source preparation.
+
+
+## Public producer fixture used by source checks
+
+The [immutable public producer fixture](../../tests/fixtures/oracle-native-public-producer.md) supplies the exact reviewed producer-document bytes for source export and refusal tests. Its byte commitment is retained; this fixture does not register custody, authorize private reads, or replace current action admission.
