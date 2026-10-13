@@ -69,9 +69,8 @@ node_modules/
 # Session scratch written at the checkout root; reviewers ignore it (#795).
 /.tmp-*
 .ai/reviews/
-.ai/*
-!.ai/reviewer-issues/
-!.ai/reviewer-issues/**
+.ai/
+
 # === Machine-local AI permissions ===
 .claude/settings.local.json
 
@@ -114,5 +113,3 @@ claude_chats/
 
 # === Local parallel test runner logs (regenerated every run) ===
 .test-logs/
-
-
