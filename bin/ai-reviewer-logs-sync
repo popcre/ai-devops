@@ -10,7 +10,7 @@
 #                                     (default ~/.cache/ai-devops-reviewer-logs-plain).
 #     The key comes from a private file named by AI_REVIEWER_LOGS_KEY_FILE. Read it
 #     with your normal (serialized) 1Password access, e.g. into a 0600 file:
-#       op read "op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile"
+#       (umask 077; op read "op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile")
 #     and delete the file afterwards.
 #   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
 #   ai-reviewer-logs-sync unschedule
@@ -74,17 +74,29 @@ ossl(){ MSYS2_ARG_CONV_EXCL='*' openssl "$@"; }
 # Owner-only folder: chmod everywhere, plus NTFS owner/SYSTEM-only on Windows
 # (same helper and pattern as the review wrappers).
 make_private(){
-  chmod 700 "$1" || return 1
-  [ -n "${SYSTEMROOT:-}" ] || return 0
+  local kind="${2:-directory}"
+  if [ "$kind" = directory ]; then chmod 700 "$1" || return 1; else chmod 600 "$1" || return 1; fi
+  if [ -z "${SYSTEMROOT:-}" ]; then
+    local mode; mode="$(stat -c %a -- "$1" 2>/dev/null)" || return 1
+    [ $(( 8#$mode & 8#077 )) -eq 0 ]; return
+  fi
   local ps helper="$TOOL_ROOT/bin/windows-private-file.ps1"
   ps="$(command -v pwsh.exe 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
   [ -n "$ps" ] && [ -f "$helper" ] || return 1
-  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$1")"     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory' >/dev/null
+  # Owner and SYSTEM only, then verified (Assert fails on any other identity).
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$1")" AI_DEVOPS_PRIVATE_KIND="$kind" \
+    "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null
 }
 # Paths removed on every exit. Kept as an array, never re-parsed as shell text,
 # so no folder name can break cleanup or run as a command.
 CLEANUP=()
-cleanup(){ ((${#CLEANUP[@]})) && rm -rf -- "${CLEANUP[@]}"; return 0; }
+LOCK_HELD=""
+cleanup(){
+  ((${#CLEANUP[@]})) && rm -rf -- "${CLEANUP[@]}"
+  # The lock is removed only while it still records this process as owner.
+  if [ -n "$LOCK_HELD" ] && [ "$(cat "$LOCK_HELD/pid" 2>/dev/null)" = "$$" ]; then rm -rf -- "$LOCK_HELD"; fi
+  return 0
+}
 
 # Reclaim by atomic rename: of several processes racing to reclaim the same
 # dead lock, exactly one rename succeeds; the others simply retry mkdir.
@@ -108,9 +120,10 @@ owner_lock(){
     die "another sync or view is running (lock $lock, process ${owner:-unknown})"
   done
   printf '%s\n' "$$" > "$lock/pid"
-  CLEANUP+=("$lock")
+  LOCK_HELD="$lock"
   trap cleanup EXIT
 }
+command -v openssl >/dev/null 2>&1 || die "openssl is required (install the openssl package)"
 is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
 
 # stage_tree <source dir> <path inside the bundle>: copy new or changed files
@@ -263,11 +276,20 @@ cmd_sync(){
     bundle="$MACHINE/bundles/$id.tar.cms"
     ossl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$WORK/bundle.tar")" \
       -out "$(native "$HUB/$bundle")" "$(native "$CERT")" || die "could not encrypt the evidence bundle"
-    printf 'machine: %s\nlast bundle: %s\nfiles in it: %s\ncomplete: %s\n' "$MACHINE" "$id" "$COPIED" \
-      "$([ "$partial" = 0 ] && echo yes || echo 'no - some files could not be read; they are retried next run')" > "$HUB/$MACHINE/LAST-SYNC.txt"
+    local oversized status
+    oversized="$(grep -c . "$NOTES" || true)"
+    if [ "$partial" = 1 ]; then status='no - some files could not be read; they are retried next run'
+    elif [ "$oversized" -gt 0 ]; then status="no - $oversized files over the size limit were left out (listed in _collection/$id-skipped.txt)"
+    else status=yes; fi
+    printf 'machine: %s\nlast bundle: %s\nfiles in it: %s\ncomplete: %s\n' "$MACHINE" "$id" "$COPIED" "$status" > "$HUB/$MACHINE/LAST-SYNC.txt"
     git -C "$HUB" add -- "$bundle" "$MACHINE/LAST-SYNC.txt"
-  elif grep -q '^complete: no' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null; then
-    sed -i 's/^complete: no.*/complete: yes (a later run collected everything)/' "$HUB/$MACHINE/LAST-SYNC.txt"
+  elif grep -q '^complete: no - some files could not be read' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null; then
+    local still_over; still_over="$(grep -c . "$NOTES" || true)"
+    if [ "$still_over" -gt 0 ]; then
+      sed -i "s/^complete: no.*/complete: no - $still_over files over the size limit were left out (listed in the latest skipped notes)/" "$HUB/$MACHINE/LAST-SYNC.txt"
+    else
+      sed -i 's/^complete: no.*/complete: yes (a later run collected everything)/' "$HUB/$MACHINE/LAST-SYNC.txt"
+    fi
     git -C "$HUB" add -- "$MACHINE/LAST-SYNC.txt"
   fi
 
@@ -310,7 +332,6 @@ cmd_sync(){
     printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha1"
     if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in $bundle)"; fi
   fi
-  rm -rf -- "$HOME_DIR/sync.lock"
   if [ "$partial" = 1 ]; then
     log "PARTIAL: some evidence could not be read (retried next run):"
     sed 's/^/  /' "$ERRS" | tee -a "$LOG" >&2
@@ -324,6 +345,8 @@ cmd_view(){
   # The key is supplied as a private file; this tool never calls 1Password, so
   # the caller's own serialized 1Password access applies (see --help).
   [ -n "$keyfile" ] && [ -f "$keyfile" ] || die "set AI_REVIEWER_LOGS_KEY_FILE to a private file holding the archive key (see --help)"
+  # The key file is locked down to its owner before use (and refused if that fails).
+  make_private "$keyfile" file || die "could not make the key file owner-only: $keyfile"
   # Same lock as sync: view's reset of the clone must never race a sync.
   mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
   owner_lock "$HOME_DIR/sync.lock"

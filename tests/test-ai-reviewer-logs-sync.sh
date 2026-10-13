@@ -129,7 +129,11 @@ git -C "$VIEW" pull -q
 check 'read failures fail the run and are published as incomplete' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out4' && grep -q '^complete: no' '$M/LAST-SYNC.txt'"
 run sync 2> "$TMP/out5" || { cat "$TMP/out5" >&2; exit 1; }
 git -C "$VIEW" pull -q
-check 'a clean retry clears the incomplete mark' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
+check 'a clean retry clears the read-failure mark but still reports oversized files' "absent grep -q 'could not be read' '$M/LAST-SYNC.txt' && grep -q '^complete: no - 1 files over the size limit' '$M/LAST-SYNC.txt'"
+rm -f "$ISSUES/pkg/large.txt"; printf 'v\n' >> "$STATE/reviewer-events/events.jsonl"
+run sync 2> "$TMP/out5b" || { cat "$TMP/out5b" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'complete: yes only when nothing was left out' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
 
 # An unpushed local commit (here carrying clear text) never reaches GitHub; the
 # next run starts from the published archive.
