@@ -1370,6 +1370,9 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer-logs sync)."
 } elseif ($bwBash) {
     $rlTool = (Join-Path $RepoPath 'bin\ai-reviewer-logs-sync') -replace '\\', '/'
+    # The path is single-quoted for bash; a path containing a quote is refused
+    # rather than spliced into shell text.
+    if ($rlTool.Contains("'")) { throw "Repository path contains a quote; cannot schedule the reviewer-logs sync safely: $rlTool" }
     $rlProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$rlTool' schedule")
     if ($rlProbe.ExitCode -eq 0) {
         Write-Note "Reviewer logs now sync hourly to the private fleet repository."
