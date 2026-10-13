@@ -83,5 +83,19 @@ OUT="$(AI_REVIEW_PREFLIGHT_BIN="$TMP/preflight-fail" \
 printf '%s\n' "$OUT" | grep -q 'PASS provider=codex' \
   && ok "gate_helpers_still_reported_when_preflight_fails" || bad "gate_helpers_still_reported_when_preflight_fails"
 
+# A machine whose install lost the scope file must fail loudly with a clear
+# message instead of silently dropping the rotation section.
+mkdir -p "$TMP/fakebin"
+cp "$SCRIPT" "$TMP/fakebin/ai-review"
+OUT="$(env AI_REVIEW_PREFLIGHT_BIN="$TMP/preflight" \
+       AI_CLAUDE_REVIEW_BIN="$TMP/claude-gate" \
+       AI_CODEX_REVIEW_BIN="$TMP/codex-gate" \
+       bash "$TMP/fakebin/ai-review" doctor 2>&1)"; RC=$?
+[ "$RC" -ne 0 ] && ok "doctor_fails_nonzero_when_scope_file_is_missing" || bad "doctor_fails_nonzero_when_scope_file_is_missing (rc=$RC)"
+printf '%s\n' "$OUT" | grep -q 'cannot find config/reviewer-membership-scope.json' \
+  && ok "doctor_names_the_missing_scope_file" || bad "doctor_names_the_missing_scope_file"
+printf '%s\n' "$OUT" | grep -q 'PASS provider=codex' \
+  && ok "gate_helpers_still_reported_when_scope_file_is_missing" || bad "gate_helpers_still_reported_when_scope_file_is_missing"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
