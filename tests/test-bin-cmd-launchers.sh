@@ -26,6 +26,11 @@ for launcher in "$REPO_ROOT"/bin/*.cmd; do
   [ -f "$script" ] || { echo "FAIL: $(basename "$launcher") has no matching script" >&2; fail=1; }
   mode="$(git -C "$REPO_ROOT" ls-files -s "bin/$(basename "$launcher")" | cut -d' ' -f1)"
   [ -z "$mode" ] || [ "$mode" = 100644 ] || { echo "FAIL: $(basename "$launcher") must not be executable (mode $mode)" >&2; fail=1; }
+  # ProgramFiles is empty in some service and restricted logons; the launcher
+  # must still find the well-known Git Bash path without resolving \Git\...
+  grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=C:\Program Files\Git\bin\bash.exe"' "$launcher" || {
+    echo "FAIL: $(basename "$launcher") has no hard-coded Git Bash fallback for empty ProgramFiles" >&2; fail=1;
+  }
 done
 
 if command -v cmd.exe >/dev/null 2>&1 && command -v pwsh >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/ai-task-gates.cmd" ]; then

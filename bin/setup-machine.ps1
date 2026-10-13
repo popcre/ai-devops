@@ -1017,9 +1017,12 @@ exec "`$APP" "`$CLI" "`$@"
   [System.IO.File]::WriteAllText($zcodeShim, ($shimBody -replace "`r`n", "`n"))
   $zcodeCmd = Join-Path $localBin "zcode.cmd"
   $gitBashForShim = @(
-    (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
-    (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe" }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe" }),
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe'
+  ) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
   if ($gitBashForShim) {
     Set-Content -LiteralPath $zcodeCmd -Encoding ascii -Value @"
 @echo off

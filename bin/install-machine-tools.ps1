@@ -55,10 +55,15 @@ if (-not $fixture -and [IO.Path]::GetFullPath($UserProfilePath).TrimEnd('\') -in
   throw 'Launcher installation requires the signed-in user profile.'
 }
 $target = if ($fixture) { Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER } else { Join-Path $UserProfilePath ".local\bin" }
+# ProgramFiles is empty in some service and restricted logons; Join-Path throws
+# on an empty root, and string interpolation would yield \Git\bin\bash.exe.
 $gitBash = @(
-  (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
-  (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
-) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" }),
+  $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe" }),
+  $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe" }),
+  'C:\Program Files\Git\bin\bash.exe',
+  'C:\Program Files (x86)\Git\bin\bash.exe'
+) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 if (-not $gitBash) { throw "Git Bash is required to install AI command launchers." }
 $catalogHash = (Get-FileHash -LiteralPath $canonicalCatalog -Algorithm SHA256).Hash.ToLowerInvariant()
 $homeBash = "/" + (($UserProfilePath -replace '\\','/' -replace '^([A-Za-z]):','$1'))
