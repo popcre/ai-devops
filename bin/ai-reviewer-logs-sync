@@ -81,6 +81,24 @@ make_private(){
   [ -n "$ps" ] && [ -f "$helper" ] || return 1
   AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$1")"     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory' >/dev/null
 }
+# Exclusive lock broken only when its recorded owner process is gone, never by
+# age, so a long sync or view is never overrun by the next hourly run.
+owner_lock(){
+  local lock="$1" owner
+  until mkdir "$lock" 2>/dev/null; do
+    owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      note "breaking the lock of finished process $owner"; rm -rf "$lock"; continue
+    fi
+    if [ -z "$owner" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+      rm -rf "$lock"; continue   # never published an owner: an aborted start
+    fi
+    die "another sync or view is running (lock $lock, process ${owner:-unknown})"
+  done
+  printf '%s\n' "$$" > "$lock/pid"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$lock'" EXIT
+}
 is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
 
 # stage_tree <source dir> <path inside the bundle>: copy new or changed files
@@ -162,7 +180,7 @@ push_or_die(){
 
 cmd_sync(){
   mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
-  take_lock "$HOME_DIR/sync.lock" 60
+  owner_lock "$HOME_DIR/sync.lock"
   rotate_log "$LOG"
   [ -f "$CERT" ] || die "archive certificate missing: $CERT"
   ensure_hub
@@ -297,7 +315,7 @@ cmd_view(){
   [ -n "$keyfile" ] && [ -f "$keyfile" ] || die "set AI_REVIEWER_LOGS_KEY_FILE to a private file holding the archive key (see --help)"
   # Same lock as sync: view's reset of the clone must never race a sync.
   mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
-  take_lock "$HOME_DIR/sync.lock" 60
+  owner_lock "$HOME_DIR/sync.lock"
   ensure_hub
   work="$(mktemp -d)"; make_private "$work" || die "could not make $work private"
   # shellcheck disable=SC2064
@@ -310,9 +328,9 @@ cmd_view(){
   done < "$work/added"
   # The key must not live inside the folder that is about to be rebuilt.
   local key_abs out_abs
-  key_abs="$(cd "$(dirname "$keyfile")" && pwd -P)/$(basename "$keyfile")"
+  key_abs="$(readlink -f -- "$keyfile")" || die "cannot resolve the key file"
   mkdir -p "$(dirname "$out")"
-  out_abs="$(cd "$(dirname "$out")" && pwd -P)/$(basename "$out")"
+  out_abs="$(readlink -f -- "$out")" || die "cannot resolve $out"
   case "$key_abs" in "$out_abs"|"$out_abs"/*) die "keep the key file outside $out" ;; esac
   # Always rebuild from scratch, and only ever wipe a folder this command made.
   if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then

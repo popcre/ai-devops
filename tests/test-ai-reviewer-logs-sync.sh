@@ -159,6 +159,14 @@ run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
 
 cp "$TMP/key.pem" "$TMP/plain/key.pem"
 check 'a key inside the view folder is refused and kept' "! AI_REVIEWER_LOGS_KEY_FILE='$TMP/plain/key.pem' run view '$TMP/plain' >/dev/null 2>&1 && [ -f '$TMP/plain/key.pem' ]"
+ln -s "$TMP/plain/key.pem" "$TMP/keylink.pem" 2>/dev/null && [ -L "$TMP/keylink.pem" ] &&   check 'a key symlink into the view folder is refused' "! AI_REVIEWER_LOGS_KEY_FILE='$TMP/keylink.pem' run view '$TMP/plain' >/dev/null 2>&1 && [ -f '$TMP/plain/key.pem' ]"
+mkdir -p "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"; sleep 600 & live=$!
+printf '%s
+' "$live" > "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock/pid"
+touch -d '2001-01-01' "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"
+check 'a live lock is never broken, however old' "! run sync 2>/dev/null && [ -d '$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock' ]"
+kill "$live" 2>/dev/null; wait "$live" 2>/dev/null || true
+check 'a dead owner lock is reclaimed' "run sync 2>/dev/null"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
