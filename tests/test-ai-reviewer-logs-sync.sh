@@ -206,6 +206,14 @@ q="$TMP/it's"; mkdir -p "$q/bin" "$q/tools/lib"
 cp "$ROOT/bin/ai-reviewer-logs-sync" "$q/bin/"; cp "$ROOT/tools/lib/local-watch.sh" "$q/tools/lib/"
 HOME="$TMP/home" bash "$q/bin/ai-reviewer-logs-sync" schedule > "$TMP/out16" 2>&1 || true
 check 'scheduling from a quoted path is refused' "grep -q 'contains a quote' '$TMP/out16'"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  # Scheduling from a profile with a space quotes every path in the timer command.
+  mkdir -p "$TMP/fakesched" "$TMP/home with space"
+  printf '#!/usr/bin/env bash\nprintf "%%s\n" "$@" > "%s/schtasks.args"\n' "$TMP" > "$TMP/fakesched/schtasks.exe"
+  chmod +x "$TMP/fakesched/schtasks.exe"
+  PATH="$TMP/fakesched:$PATH" HOME="$TMP/home with space" bash "$ROOT/bin/ai-reviewer-logs-sync" schedule > /dev/null 2>&1 || true
+  check 'scheduled command quotes a log path containing a space' "grep -qF \"/reviewer-logs-sync/cron.log' 2>&1\" '$TMP/schtasks.args' && grep -qF \"'$TMP/home with space\" '$TMP/schtasks.args'"
+fi
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
