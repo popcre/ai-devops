@@ -75,9 +75,9 @@ try {
     $oldHome = $env:HOME; $env:HOME = (Join-Path $r.Dir 'home').Replace('\', '/')
     $seen = & "$env:ProgramFiles\Git\bin\bash.exe" -lc 'printf %s "$GH_CONFIG_DIR"'
     $env:HOME = $oldHome
-    $psSeen = & powershell.exe -NoProfile -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; `$env:GH_CONFIG_DIR"
+    $psSeen = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; `$env:GH_CONFIG_DIR"
     Remove-Item Env:SSH_CONNECTION
-    $psNoSsh = & powershell.exe -NoProfile -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; [string]`$env:GH_CONFIG_DIR"
+    $psNoSsh = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; [string]`$env:GH_CONFIG_DIR"
     Assert-True ($psSeen -eq (Join-Path $r.Dir 'gh-ssh')) "PowerShell profile sets GH_CONFIG_DIR in SSH sessions (got '$psSeen')"
     Assert-True (-not $psNoSsh) 'PowerShell profile leaves interactive sessions alone'
     Assert-True ($seen -eq $sshFwd) "bashrc block sets GH_CONFIG_DIR in SSH sessions (got '$seen')"
