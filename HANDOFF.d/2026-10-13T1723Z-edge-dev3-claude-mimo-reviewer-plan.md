@@ -1,3 +1,9 @@
+---
+issue: 1696
+status: OPEN
+owner: claude/edge-dev3-mimo-reviewer-plan
+---
+
 # HANDOFF — MiMo reviewer wrappers: plan written, nothing built (2026-10-13 1:23 PM EDT)
 
 Plan: [`plan_mimo-reviewer-wrappers.md`](../plan_mimo-reviewer-wrappers.md) — read its STATUS table first; do not re-plan.
