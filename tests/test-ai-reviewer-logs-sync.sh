@@ -112,6 +112,12 @@ printf 'password=1234\napi_key=1abc\n' > "$ISSUES/20261013-pkg/digits.log"
 run sync 2> "$TMP/out9" || { cat "$TMP/out9" >&2; exit 1; }
 git -C "$VIEW" pull -q
 check 'digit-led short secrets masked' "! grep -q 1234 '$M/reviewer-issues/20261013-pkg/digits.log' && ! grep -q 1abc '$M/reviewer-issues/20261013-pkg/digits.log'"
+# Bracket-led and escaped-quote values are masked completely.
+printf 'password=[hunter2]\n"token": "ab\\"cdSECRETTAIL"\n' > "$ISSUES/20261013-pkg/edge.log"
+run sync 2> "$TMP/out11" || { cat "$TMP/out11" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'bracket-led and escaped-quote values masked' "! grep -q hunter2 '$M/reviewer-issues/20261013-pkg/edge.log' && ! grep -q SECRETTAIL '$M/reviewer-issues/20261013-pkg/edge.log'"
+
 printf 'locked\n' > "$ISSUES/20261013-pkg/locked.log"
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
 printf '#!/usr/bin/env bash
@@ -119,7 +125,7 @@ case " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac
 exec "%s" "$@"
 ' "$real_sha1" > "$TMP/badbin/sha1sum"; chmod +x "$TMP/badbin/sha1sum"
 rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out10" || rc=$?
-check 'hashing failures fail the run' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out10'"
+check 'hashing failures fail the run and stay marked partial' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out10' && ! grep -q 'sync complete' '$TMP/out10'"
 
 # A symbolic link committed to the repository stops the sync before any write.
 git -C "$VIEW" pull -q
