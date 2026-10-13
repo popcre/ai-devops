@@ -1,0 +1,32 @@
+{
+  "application": "vhmcdkdk23dgvjvcvhyhcjzd",
+  "application_label": "coolify.applicationUuid",
+  "host": "hetz",
+  "image": "ghcr.io/u2giants/theoracle-native@sha256:52536ce633c7571b9d38feee96c3d6022b2fc81692b71c8ee8639391c2cd6aec",
+  "known_hosts_sha256": "9657aee7f8edd5aeebc454953ab4562edfb3101838a4aa2807014166eeb3870a",
+  "port": 22,
+  "project": "oracle-native-vhmcdkdk23dgvjvcvhyhcjzd",
+  "revision": "4b6d680a7d0bdc49d5dee519e8635f8ea15c8a1f",
+  "schema": "oracle-hosting-metadata/v1",
+  "services": [
+    "gateway-files",
+    "executor-files",
+    "projector-files",
+    "ledger-files",
+    "ledger-init",
+    "candidate-files",
+    "confirmed-files",
+    "spool-files",
+    "blob-files",
+    "candidate-data-files",
+    "confirmed-data-files",
+    "ledger-data-files",
+    "ledger",
+    "candidate",
+    "confirmed",
+    "synthetic-project",
+    "executor",
+    "gateway"
+  ],
+  "user": "ai"
+}
