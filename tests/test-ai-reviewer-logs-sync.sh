@@ -222,6 +222,11 @@ chmod +x "$TMP/probe-git/git"
 GIT_ASKPASS=/bin/echo SSH_ASKPASS=/bin/echo GH_TOKEN=x PATH="$TMP/probe-git:$PATH" HOME="$TMP/home" \
   AI_REVIEWER_LOGS_HUB="$TMP/probe-hub" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out22" 2>&1 || true
 check 'the anonymous privacy probe carries no credentials and blocks a readable archive' "grep -q 'publicly readable' '$TMP/out22' && absent grep -qE '^(GIT_ASKPASS|SSH_ASKPASS|GH_TOKEN)=' '$TMP/probe-env' && grep -q '^GIT_CONFIG_GLOBAL=/dev/null' '$TMP/probe-env'"
+git -C "$REMOTE" log --format='%an <%ae>|%cn <%ce>' main | grep -v '^t <t@example.invalid>|t <t@example.invalid>$' | sort -u > "$TMP/idents"
+check 'archive commits always carry the owner identity' "[ \"\$(cat '$TMP/idents')\" = 'Albert Hazan <u2giants@users.noreply.github.com>|Albert Hazan <u2giants@users.noreply.github.com>' ]"
+mkdir -p "$TMP/fake-uname"; printf '#!/bin/sh\necho Darwin\n' > "$TMP/fake-uname/uname"; chmod +x "$TMP/fake-uname/uname"
+PATH="$TMP/fake-uname:$PATH" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out23" 2>&1 || true
+check 'unsupported systems are refused clearly' "grep -q 'Linux and Windows' '$TMP/out23'"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
