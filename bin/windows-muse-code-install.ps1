@@ -14,6 +14,9 @@ function Install-AiDevOpsMuseCode {
         [scriptblock]$Fetch = { param($Uri, $Destination) Invoke-WebRequest -Uri $Uri -OutFile $Destination -UseBasicParsing },
         [scriptblock]$RunInstaller = {
             param($Script)
+            # Windows PowerShell 5.1 turns native stderr into a terminating
+            # error under 'Stop'; judge the installer by its exit code only.
+            $ErrorActionPreference = 'Continue'
             $ps = (Get-Process -Id $PID).Path
             & $ps -NoProfile -ExecutionPolicy Bypass -File $Script *> $null
             if ($LASTEXITCODE -ne 0) { throw "installer exit code $LASTEXITCODE" }

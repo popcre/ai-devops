@@ -63,6 +63,21 @@ try {
     Assert ($failed -like "Meta's Muse Code installer failed*") "installer failure not reported: $failed"
     Assert (-not (Test-Path -LiteralPath $script:tempSeen)) 'temporary installer script was left behind'
 
+    # Missing pin -> fails closed without fetching anything.
+    $c = New-Case 'nopin'
+    Remove-Item -LiteralPath (Join-Path $c.Repo 'config\muse-code\sha256')
+    $script:fetched = @()
+    $failed = $null
+    try { Install-AiDevOpsMuseCode -RepoPath $c.Repo -InstallDir $c.Dir -Fetch $fetch -RunInstaller { throw 'no' } | Out-Null } catch { $failed = $_.Exception.Message }
+    Assert ($failed -like 'no Windows Muse Code pin*' -and $script:fetched.Count -eq 0) "missing pin did not fail closed: $failed"
+
+    # Default runner: native stderr from the installer must not fail the stage
+    # when it exits 0 (Windows PowerShell 5.1 under 'Stop').
+    $c = New-Case 'stderr'
+    $fetchNoisy = { param($Uri, $Destination) "[Console]::Error.WriteLine('noise'); New-Item -ItemType File -Force -Path '$($c.Bin)' | Out-Null; [IO.File]::WriteAllBytes('$($c.Bin)', [Text.Encoding]::ASCII.GetBytes('pinned muse binary')); exit 0" | Set-Content -LiteralPath $Destination }.GetNewClosure()
+    $msg = Install-AiDevOpsMuseCode -RepoPath $c.Repo -InstallDir $c.Dir -Fetch $fetchNoisy
+    Assert ($msg -like 'installed and verified*') "default runner with stderr noise: $msg"
+
     Write-Host 'PASS: windows Muse Code install stage'
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
