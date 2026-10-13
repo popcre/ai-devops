@@ -52,6 +52,35 @@ class TargetOrdinal(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout.strip(), r"^[1-9][0-9]*$")
 
+    def test_concurrent_distinct_keys_get_distinct_ordinals(self):
+        import concurrent.futures
+        keys = [f"owner/repo#{n}" for n in range(20)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            ordinals = list(pool.map(lambda k: target_ordinal.ordinal_for(self.state, k), keys))
+        self.assertEqual(len(set(ordinals)), len(keys), ordinals)
+        # Stable on re-read
+        self.assertEqual(target_ordinal.ordinal_for(self.state, keys[0]), ordinals[0])
+
+    def test_cross_process_lock_prevents_duplicate_ordinals(self):
+        # Two real processes must not share one ordinal for distinct keys.
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "import target_ordinal; from pathlib import Path;"
+            "print(target_ordinal.ordinal_for(Path(sys.argv[2]), sys.argv[3]))"
+        )
+        helper = str(ROOT / "tools/github-requests")
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, helper, str(self.state), f"owner/repo#{n}"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for n in range(8)
+        ]
+        out = [p.communicate(timeout=30)[0].strip() for p in procs]
+        for p in procs:
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(set(out)), 8, out)
+        self.assertTrue(all(o.isdigit() for o in out), out)
+
 
 class MeasureAppend(unittest.TestCase):
     def setUp(self):
@@ -89,16 +118,17 @@ class ReportCounters(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def read_row(self, source, ordinal):
+    def read_row(self, source, ordinal, workflow="pr_wait", caller="ai-pr-wait"):
         return {"schema": 6, "utc": "2026-10-12T00:00:00Z", "measurement": "read_observation",
-                "caller": "ai-pr-wait", "workflow": "pr_wait", "target_ordinal": ordinal,
+                "caller": caller, "workflow": workflow, "target_ordinal": ordinal,
                 "source": source, "cache_hit": source == "cache",
                 "saved_upstream_read": source == "cache"}
 
-    def write_row(self, action, relation, ordinal=1):
+    def write_row(self, action, relation, ordinal=1, workflow="blocker_watch_tick",
+                  caller="ai-blocker-watch"):
         return {"schema": 6, "utc": "2026-10-12T00:00:00Z", "measurement": "write_observation",
-                "caller": "ai-blocker-watch", "workflow": "blocker_watch_tick",
-                "target_ordinal": ordinal, "action": action, "content_relation": relation,
+                "caller": caller, "workflow": workflow, "target_ordinal": ordinal,
+                "action": action, "content_relation": relation,
                 "duplicate_unchanged_write": action == "written" and relation == "unchanged"}
 
     def test_replay_denominator_and_reduction(self):
@@ -143,6 +173,16 @@ class ReportCounters(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
 
+    def test_merge_group_evidence_observations_accepted(self):
+        # telemetry.sh allows merge_group_evidence; report.py must not crash.
+        self.write(self.read_row("cache", 1, workflow="merge_group_evidence",
+                                 caller="ai-merge-group-evidence"))
+        self.write(self.write_row("skipped", "unchanged", workflow="merge_group_evidence",
+                                  caller="ai-merge-group-evidence"))
+        summary = self.run_report()
+        self.assertEqual(summary["section13_item2_redundant_reads"]["read_observations"], 1)
+        self.assertEqual(summary["section13_item2_duplicate_writes"]["write_observations"], 1)
+
 
 class SingleFlightEmits(unittest.TestCase):
     def setUp(self):
@@ -150,7 +190,10 @@ class SingleFlightEmits(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.state = self.base / "gh-state"
-        (self.state / "measurements").mkdir(parents=True, mode=0o700)
+        # mkdir(parents=True) gives the parent umask permissions; the ordinal
+        # store refuses a group-writable state dir, so create both private.
+        self.state.mkdir(mode=0o700)
+        (self.state / "measurements").mkdir(mode=0o700)
         self.count = self.base / "calls"
         self.fake = self.base / "fake.py"
         self.fake.write_text(
