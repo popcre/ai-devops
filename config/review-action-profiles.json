@@ -168,6 +168,46 @@
       "schema": "dflow_prod",
       "source_host_sha256": "67b2a6290a92e6a9f833aecacaf59654d97c9db2513e3c5a60600e299aa06d15",
       "target_ref_sha256": "f3bb365eb5cb7bec231af99cfefd9701cdfc6cdf299049e4a985f77f241d549c"
+    },
+    "oracle-native-alternate-serialization-v2": {
+      "action": "offline-private-capture-transform",
+      "capture_count": 33,
+      "control_count": 15,
+      "entrypoint": "scripts/oracle2/native_alternate_chain_operator.py",
+      "input_format": "historical-custom-native-pages-chain-v2",
+      "limits": {
+        "address_space_bytes": 8589934592,
+        "cpu_seconds": 120,
+        "input_bytes": 268435456,
+        "network": "none",
+        "output_bytes": 268435456,
+        "per_file_bytes": 8388608,
+        "threads": 2,
+        "wall_seconds": 180,
+        "workers": 1
+      },
+      "owner": "Oracle coordinator on u2giants/theoracle#27/#58",
+      "path_set_sha256": "088f206c0901d62e1acaa4e2b0da60642c744fdd63a06ca75c6aaff10230702f",
+      "paths": [
+        ".ai-devops/task-gates.json",
+        "docs/operations/offline-original-locators.md",
+        "scripts/oracle2/contracts/native_alternate_chain_v2.json",
+        "scripts/oracle2/native_alternate_chain_operator.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_chain.py",
+        "services/oracle-brain/tests/test_native_alternate_chain_operator.py"
+      ],
+      "purpose": "native-alternate-serialization",
+      "repository": "https://github.com/u2giants/theoracle",
+      "retirement": "Keep v1 and spent history unchanged; consolidate only after v2 actual acceptance.",
+      "manifest_schema_version": 2,
+      "code_sha256": {
+        "scripts/oracle2/native_alternate_chain_operator.py": "1aaeac368c8ab4734fc7c9b464b7266a24f5c068fd95a42787484811d2a9d5d2",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_chain.py": "3fa0bdbcb1eb6a18d87627364acdbc9a0506012e9cb30d94ac5bfadf19242099",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py": "84cbcb3119bb6858915bd4538d5527e5ba6a716ab76a914c6db27f0e4202291d"
+      },
+      "public_contract_sha256": "f4e0c71e1caf00b7c06a238af246c9d9947d3635b5f036bd5354e6f1a006a60e",
+      "required_gate": "oracle-native-alternate-v2-descriptor-only-admission"
     }
   },
   "schema_version": 1

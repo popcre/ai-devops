@@ -175,7 +175,7 @@ def binding(state,m):
             'committed Oracle opt-in required')
     facts=validate_manifest(m,int(time.time()));installed=old.installed_enforcement()
     public={path:sha((ROOT/path).read_bytes()) for path in ('tools/oracle_native_alternate_profile.py',
-        'tools/oracle_native_alternate_guardian.py','tools/oracle_native_alternate_runtime.py','bin/ai-oracle-native-alternate')}
+        'tools/oracle_native_alternate_guardian.py','tools/oracle_native_alternate_runtime.py','bin/ai-oracle-native-alternate','tools/oracle_native_alternate_output.py')}
     if installed['kind']=='VERIFIED_INSTALLED_SOURCE':
         for path,digest in public.items():require(sha(old.git(ROOT,'show',installed['source_head']+':'+path))==digest,'installed Oracle guard differs')
     return {'profile':PROFILE,'profile_sha256':pdigest,'action':ACTION,'purpose':PURPOSE,
@@ -248,6 +248,7 @@ def evidence_projection(b):
             'capture_count','capture_bytes','path_set_sha256','source_head','source_digest','oracle_enforcement_sha256','runtime_identity','limits','input_format')}}
 
 def prompt(state):
+    require(type(state) is dict and type(state.get('action_profile_binding')) is dict,'invalid lifecycle action binding')
     b=state['action_profile_binding']
     return ('Review ONLY Oracle offline native-alternate serialization. Metadata/custody/stat and claimed historical hashes were checked; '
         'capture bytes were NOT read or hash-verified. Only genuine independent native completion may register this current bounded purpose. '
@@ -265,6 +266,7 @@ def main(argv=None):
     try:
         require(args.profile==PROFILE and args.stage=='initial-forward','fixed Oracle stage required')
         state=decode(legacy()._native.private_read(Path(args.state)))
+        require(type(state) is dict and (args.phase=='capture' or type(state.get('action_profile_binding')) is dict),'invalid lifecycle action binding')
         if args.phase=='prompt':print(prompt(state));return 0
         require(state['status']=={'capture':'preflight','evidence':'running','finish':'running','preaction':'completed'}[args.phase],'wrong native phase')
         m=metadata(args.manifest) if args.manifest else decode(sys.stdin.buffer.read(1024**2+1));b=binding(state,m)

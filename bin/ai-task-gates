@@ -479,8 +479,14 @@ reviewer_approval_summary(){
   if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
     [ -n "$action_manifest_file" ] || return 1
     if [ "$action" = offline-private-capture-transform ]; then
-      jq -e '.action_profile_binding.profile=="oracle-native-alternate-serialization-v1" and .action_profile_binding.action=="offline-private-capture-transform"' "$row" >/dev/null || return 1
-      python3 "$REAL_DIR/../tools/oracle_native_alternate_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+      local oracle_script
+      case "$(jq -r .action_profile_binding.profile "$row")" in
+        oracle-native-alternate-serialization-v1) oracle_script=oracle_native_alternate_profile.py ;;
+        oracle-native-alternate-serialization-v2) oracle_script=oracle_native_alternate_v2_profile.py ;;
+        *) return 1 ;;
+      esac
+      jq -e '.action_profile_binding.action=="offline-private-capture-transform"' "$row" >/dev/null || return 1
+      python3 "$REAL_DIR/../tools/$oracle_script" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
     else
       [ "$action" = database ] || return 1
       jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
@@ -496,7 +502,7 @@ reviewer_approval_summary(){
   if [ "$publish_admission" = 1 ]; then
     [ -n "$action_manifest_file" ] || return 1
     if [ "$action" = offline-private-capture-transform ]; then
-      python3 "$REAL_DIR/../tools/oracle_native_alternate_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
+      python3 "$REAL_DIR/../tools/$oracle_script" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
     else
       [ "$action" = database ] || return 1
       python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
@@ -1330,7 +1336,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
       && [ -n "$reviewer_approval" ] && [ -z "$acknowledge$small_entry" ] \
       || blocked 'ai-task-gates: STOP. Offline capture transform has only the closed Oracle/private-tooling native route.'
-    printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -qx oracle-native-alternate-descriptor-only-admission \
+    printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -Eqx 'oracle-native-alternate(-v2)?-descriptor-only-admission' \
       || blocked 'ai-task-gates: STOP. Oracle has not opted in to the exact offline native action.'
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
       || blocked 'ai-task-gates: STOP. Genuine independent dual-scoped native registration/action completion is absent.'

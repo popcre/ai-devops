@@ -358,14 +358,20 @@ def admit(state_path, state, binding, stage, publish):
 def main():
     # The existing foreign profile implementation and byte semantics stay intact.
     oracle = "oracle-native-alternate-serialization-v1"
+    if "--profile" in sys.argv and (sys.argv.index("--profile")+1>=len(sys.argv) or sys.argv[sys.argv.index("--profile")+1].startswith("--")):
+        print("ai-review-action-profile: missing action profile argument",file=sys.stderr);return 1
     selected = sys.argv[sys.argv.index("--profile") + 1] if "--profile" in sys.argv else None
     if selected is None and len(sys.argv) > 2:
         try:
-            selected = decode(_native.private_read(sys.argv[2])).get("action_profile_binding", {}).get("profile")
+            state_value=decode(_native.private_read(sys.argv[2]))
+            require(type(state_value) is dict,'invalid lifecycle state')
+            binding_value=state_value.get('action_profile_binding',{})
+            require(type(binding_value) is dict,'invalid action binding')
+            selected=binding_value.get('profile')
         except (OSError, ValueError, KeyError, TypeError):
             pass
-    if selected == oracle:
-        spec = importlib.util.spec_from_file_location("oracle_native_profile", ROOT / "tools/oracle_native_alternate_profile.py")
+    if selected in (oracle,"oracle-native-alternate-serialization-v2"):
+        spec = importlib.util.spec_from_file_location("oracle_native_profile", ROOT / ("tools/oracle_native_alternate_v2_profile.py" if selected.endswith("-v2") else "tools/oracle_native_alternate_profile.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.main(sys.argv[1:])

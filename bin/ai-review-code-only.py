@@ -40,7 +40,7 @@ def has_exact_action_scope(content, binding):
     # Sentence punctuation has no authority. The profile, complete descriptor
     # and unique unindented line remain exact; do not normalize other wording.
     valid = len(scopes) == 1 and scopes[0] in (expected, expected + ".")
-    if binding["profile"] == "oracle-native-alternate-serialization-v1":
+    if binding["profile"] in ("oracle-native-alternate-serialization-v1","oracle-native-alternate-serialization-v2"):
         purpose = "Purpose registration: " + binding["profile"] + " descriptor sha256:" + binding["permission_registration_descriptor_sha256"]
         lines = [line for line in content.splitlines() if line.lstrip().startswith("Purpose registration:")]
         valid = valid and len(lines) == 1 and lines[0] in (purpose, purpose + ".")
@@ -98,17 +98,24 @@ def denied_component(part):
 
 
 PUBLIC_PRODUCER_PROFILE='oracle-native-alternate-serialization-v1'
+PUBLIC_PRODUCER_PROFILES=(PUBLIC_PRODUCER_PROFILE,'oracle-native-alternate-serialization-v2')
 PUBLIC_PRODUCER_PATH='docs/operations/offline-original-locators.md'
 PUBLIC_PRODUCER_SHA256='e933892bb53ff2c32f000117dc8267cffd3b3eef8b146ba721a805ef97282532'
 
+PUBLIC_V2_CONTRACT_PATH='scripts/oracle2/contracts/native_alternate_chain_v2.json'
+PUBLIC_V2_CONTRACT_SHA256='f4e0c71e1caf00b7c06a238af246c9d9947d3635b5f036bd5354e6f1a006a60e'
+
 def public_document_context(source, paths, profile):
     if not profile:return None
-    if profile!=PUBLIC_PRODUCER_PROFILE:fail('unsupported public document profile')
+    if profile not in PUBLIC_PRODUCER_PROFILES:fail('unsupported public document profile')
     registry=json.loads((Path(__file__).resolve().parents[1]/'config/review-action-profiles.json').read_text())['profiles'][profile]
     remote=git(source,'remote','get-url','origin').decode().strip().removesuffix('.git').rstrip('/')
     if remote!=registry['repository'] or sorted(paths)!=registry['paths']:fail('public document requires exact Oracle profile closure')
     if tree_mode(source,'HEAD',PUBLIC_PRODUCER_PATH) is None or digest(git(source,'show','HEAD:'+PUBLIC_PRODUCER_PATH))!=PUBLIC_PRODUCER_SHA256:fail('public producer document is not pinned tracked source')
     if git(source,'status','--porcelain','--',PUBLIC_PRODUCER_PATH):fail('public producer document worktree moved')
+    if profile=='oracle-native-alternate-serialization-v2':
+        if tree_mode(source,'HEAD',PUBLIC_V2_CONTRACT_PATH) is None or digest(git(source,'show','HEAD:'+PUBLIC_V2_CONTRACT_PATH))!=PUBLIC_V2_CONTRACT_SHA256:fail('public v2 contract is not pinned tracked source')
+        if git(source,'status','--porcelain','--',PUBLIC_V2_CONTRACT_PATH):fail('public v2 contract worktree moved')
     return profile
 
 def safe_path(raw, document_profile=None):
@@ -132,7 +139,7 @@ def safe_path(raw, document_profile=None):
     # code suffix or the bin/ai-* launcher exception must not admit those rows.
     if "licensed" in Path(raw).stem.lower():
         fail("licensed evidence filename refused")
-    if raw==PUBLIC_PRODUCER_PATH and document_profile==PUBLIC_PRODUCER_PROFILE:return raw
+    if raw==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES:return raw
     suffix = Path(raw).suffix.lower()
     executable_bin = len(parts) == 2 and lower[0] == "bin" and lower[1].startswith("ai-") and suffix == ""
     if not executable_bin and suffix not in CODE_SUFFIXES and not (suffix in CONTRACT_SUFFIXES and any(p in CONTRACT_PARTS for p in lower[:-1])):
@@ -207,6 +214,10 @@ def current_bytes(source, path, document_profile=None):
     except ValueError:
         fail("approved path resolves into a refused location")
     value = item.read_bytes()
+    if path==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES and digest(value)!=PUBLIC_PRODUCER_SHA256:
+        fail('actual public producer bytes differ from pinned blob')
+    if path==PUBLIC_V2_CONTRACT_PATH and document_profile=='oracle-native-alternate-serialization-v2' and digest(value)!=PUBLIC_V2_CONTRACT_SHA256:
+        fail('actual public v2 contract bytes differ from pinned blob')
     validate_text(value)
     return value
 
@@ -232,7 +243,9 @@ def manifest_for(source, paths, head, base, document_profile=None):
         value = current_bytes(source, path, document_profile)
         if head_mode is None and base_mode is None and value is None:
             fail("approved path is absent from base, head, and worktree")
-        if path==PUBLIC_PRODUCER_PATH and document_profile==PUBLIC_PRODUCER_PROFILE and base_mode and git(source,'rev-parse',base+':'+path)!=git(source,'rev-parse',head+':'+path):
+        if path==PUBLIC_V2_CONTRACT_PATH and document_profile=='oracle-native-alternate-serialization-v2' and base_mode and git(source,'rev-parse',base+':'+path)!=git(source,'rev-parse',head+':'+path):
+            fail('public v2 contract baseline is not pinned')
+        if path==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES and base_mode and git(source,'rev-parse',base+':'+path)!=git(source,'rev-parse',head+':'+path):
             fail('public producer baseline is not the pinned public blob')
         if base_mode:
             validate_text(git(source, "show", f"{base}:{path}"))

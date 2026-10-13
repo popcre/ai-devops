@@ -447,6 +447,10 @@
         {
           "glob": "bin/ai-oracle-native-alternate",
           "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-oracle-native-alternate-v2",
+          "class": "reviewer-safety"
         }
       ],
       "gates": {}

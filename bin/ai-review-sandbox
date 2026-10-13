@@ -916,7 +916,7 @@ cmd_ensure_code_only() {
     [ -n "${options[$((option_index+1))]:-}" ] || die "missing code-only export option value"
     case "${options[$option_index]}" in
       --base) [ -z "$base" ] || die "duplicate code-only base"; base="${options[$((option_index+1))]}" ;;
-      --action-profile) [ -z "$document_profile" ] || die "duplicate public document profile"; document_profile="${options[$((option_index+1))]}"; [ "$document_profile" = oracle-native-alternate-serialization-v1 ] || die "unsupported public document profile" ;;
+      --action-profile) [ -z "$document_profile" ] || die "duplicate public document profile"; document_profile="${options[$((option_index+1))]}"; [[ "$document_profile" = oracle-native-alternate-serialization-v1 || "$document_profile" = oracle-native-alternate-serialization-v2 ]] || die "unsupported public document profile" ;;
       *) die "invalid code-only export option" ;;
     esac
     option_index=$((option_index+2))

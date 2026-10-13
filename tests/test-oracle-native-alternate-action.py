@@ -106,10 +106,14 @@ class OracleTests(unittest.TestCase):
         self.assertNotIn(str(self.capture),text);self.assertNotIn('INVENTED ONLY',text)
         self.assertIn('NOT read or hash-verified',text)
     def test_sandbox_fixed_mounts_no_hosthome_network_or_callback(self):
-        command=guardian.sandbox_command(self.manifest['runtime'],'/public/operator','/public/decoder',[12,13],'/fresh/output')
+        with mock.patch.object(guardian,'validate_sandbox_fds'):
+            command=guardian.sandbox_command(self.manifest['runtime'],3,4,list(range(10,58)),'/fresh/output')
         self.assertIn('--unshare-all',command);self.assertIn('--clearenv',command)
         self.assertNotIn('/home',command);self.assertNotIn('--share-net',command);self.assertNotIn('sh',command)
-        self.assertEqual(command.count('--ro-bind'),5)
+        self.assertEqual(command.count('--ro-bind'),1)
+        self.assertEqual(command.count('--ro-bind-fd'),48)
+        self.assertEqual(command.count('--ro-bind-data'),2)
+        self.assertNotIn('/proc/self/fd',str(command))
     def test_actual_linux_limits_and_namespace_or_exact_denial(self):
         code='import resource; resource.setrlimit(resource.RLIMIT_AS,(8589934592,)*2);resource.setrlimit(resource.RLIMIT_CPU,(120,)*2);print(resource.getrlimit(resource.RLIMIT_AS),resource.getrlimit(resource.RLIMIT_CPU))'
         result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True)
@@ -198,7 +202,8 @@ class OracleTests(unittest.TestCase):
         with mock.patch.object(os,'open',side_effect=checked):
             with self.assertRaisesRegex(ValueError,'fixed public OS'):profile.validate_manifest(m,self.now)
         self.assertEqual(opened,[])
-        self.assertEqual(guardian.sandbox_command(m['runtime'],'a','b',[],'c')[0],'/usr/bin/bwrap')
+        with mock.patch.object(guardian,'validate_sandbox_fds'):
+            self.assertEqual(guardian.sandbox_command(m['runtime'],3,4,list(range(10,58)),'c')[0],'/usr/bin/bwrap')
         m['runtime']['bwrap']='/usr/bin/bwrap';m['runtime']['bwrap_sha256']='0'*64
         with self.assertRaisesRegex(ValueError,'public executable changed'):profile.validate_manifest(m,self.now)
 
@@ -239,7 +244,7 @@ class OracleTests(unittest.TestCase):
     def test_oracle_evidence_loop_refuses_symlinked_parent(self):
         source=(ROOT/'bin/ai-review').read_text();function=source[source.index('action_review_evidence_args(){'):source.index('pool_provider=""')]
         # The Oracle loop is exercised separately after the unchanged legacy loop.
-        loop=function[function.index('  if [ "${action_profile:-}"'):function.rindex('}')]
+        loop=function[function.index('  if [[ "${action_profile:-}"'):function.rindex('}')]
         evidence=self.root/'evidence';outside=self.root/'outside';evidence.mkdir();outside.mkdir();(evidence/'tools').symlink_to(outside)
         (evidence/'bin').mkdir()
         for name in ('oracle_native_alternate_profile.py','oracle_native_alternate_guardian.py','oracle_native_alternate_runtime.py'):(outside/name).write_text('# invented')
