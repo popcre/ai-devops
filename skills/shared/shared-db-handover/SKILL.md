@@ -54,12 +54,15 @@ and exclusive stages, stop its writers, and verify each outcome:
 
 These ownership flags require the native helper to be available from merged
 shared-db source. Before reporting that they work, verify source change #4271 is
-merged, use a clean current merged canonical `shared-db` tool worktree, and run
-`node scripts/manage-migration-author-lanes.mjs --help` to confirm the exact
-supported flags. Run the flags from that tool worktree; pass the preserved source
-worktree with `--worktree`. Do not run an old helper from, or overwrite, the
-source worktree. If the merged helper or its documented flags are unavailable,
-report the ownership action as blocked; do not claim live capability.
+merged, and use a clean canonical `shared-db` tool worktree at the current merged
+source. Inspect that source's CLI option definitions to confirm the exact
+supported flags; this helper has no `--help` handler. Run supported flags from
+that tool worktree and pass the preserved source worktree with `--worktree`. Verify
+the tool's current source identity, supplied worktree/claim inputs, and native
+readiness or operation receipts before claiming capability. Do not run an old
+helper from, or overwrite, the source worktree. If the merged helper, its
+documented flags, or its required readiness evidence is unavailable, report the
+ownership action as blocked; do not claim live capability.
 
 This is also the normal completion/stop rule; wrap-up repeats it as a fallback.
 Before declaring closeout complete, freshly verify that no execution capacity
