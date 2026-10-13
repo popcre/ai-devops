@@ -170,7 +170,10 @@ class SingleFlightEmits(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.state = self.base / "gh-state"
-        (self.state / "measurements").mkdir(parents=True, mode=0o700)
+        # mkdir(parents=True) gives the parent umask permissions; the ordinal
+        # store refuses a group-writable state dir, so create both private.
+        self.state.mkdir(mode=0o700)
+        (self.state / "measurements").mkdir(mode=0o700)
         self.count = self.base / "calls"
         self.fake = self.base / "fake.py"
         self.fake.write_text(
