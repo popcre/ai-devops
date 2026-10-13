@@ -557,8 +557,9 @@ installed_toolkit_preflight() {
   # Windows installs a generated launcher (install-machine-tools.ps1) rather
   # than a symlink; follow its managed exec line to the real copy (#1698).
   local target
-  if [ -f "$installed" ] && head -n 3 "$installed" 2>/dev/null | grep -q '^# Managed by ai-devops install-machine-tools.ps1\.$'; then
-    target="$(sed -n 's/^exec "\([^"]*\)" "\$@"$/\1/p' "$installed" | tail -n 1)"
+  # The launcher is CRLF (install-machine-tools.ps1 is eol=crlf), so strip CR.
+  if [ -f "$installed" ] && head -n 3 "$installed" 2>/dev/null | tr -d '\r' | grep -q '^# Managed by ai-devops install-machine-tools\.ps1\.$'; then
+    target="$(tr -d '\r' < "$installed" | sed -n 's/^exec "\([^"]*\)" "\$@"$/\1/p' | tail -n 1)"
     [ -n "$target" ] && installed="$target"
   fi
   installed="$(readlink -f "$installed" 2>/dev/null)" || return 1

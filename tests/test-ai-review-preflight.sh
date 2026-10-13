@@ -338,10 +338,11 @@ check "Gemini standard check works outside any AI harness and does not quarantin
 check "Gemini live preflight performs a genuine live probe" "rm -f '$MOCK_GEMINI_LIVE_CONTACT'; $SCRIPT check gemini '$REPO' --live | grep -q 'allowance=live-verified' && test \"\$(wc -l < '$MOCK_GEMINI_LIVE_CONTACT')\" -eq 1"
 check "A non-installed preflight copy never records a shared provider quarantine" "env -u AI_REVIEW_QUARANTINE_DIR PATH=/usr/bin:/bin HOME='$TMP/nonint-home' $SCRIPT quarantine gemini provider-unhealthy --seconds 5 >/dev/null 2>&1; ! test -e '$TMP/nonint-home/.local/state/ai-devops/review-quarantine/gemini.json'"
 mkdir -p "$TMP/wrapper-bin" "$TMP/wrapper-home"
-printf '#!/usr/bin/env bash\n# Managed by ai-devops install-machine-tools.ps1.\n# source-sha=0\nexport HOME="%s"\nexec "%s" "$@"\n' "$TMP/wrapper-home" "$SCRIPT" > "$TMP/wrapper-bin/ai-review-preflight"
+# CRLF, exactly as install-machine-tools.ps1 writes it.
+printf '#!/usr/bin/env bash\r\n# Managed by ai-devops install-machine-tools.ps1.\r\n# source-sha=0\r\nexport HOME="%s"\r\nexec "%s" "$@"' "$TMP/wrapper-home" "$SCRIPT" > "$TMP/wrapper-bin/ai-review-preflight"
 chmod +x "$TMP/wrapper-bin/ai-review-preflight"
 check "A Windows-style managed launcher counts as the installed toolkit and records the shared quarantine (#1698)" "env -u AI_REVIEW_QUARANTINE_DIR PATH='$TMP/wrapper-bin':\"\$PATH\" HOME='$TMP/wrapper-home' $SCRIPT quarantine gemini provider-unhealthy --seconds 5 >/dev/null 2>&1; test -e '$TMP/wrapper-home/.local/state/ai-devops/review-quarantine/gemini.json'"
-printf '#!/usr/bin/env bash\n# Managed by ai-devops install-machine-tools.ps1.\nexec "/nonexistent/ai-review-preflight" "$@"\n' > "$TMP/wrapper-bin/ai-review-preflight"
+printf '#!/usr/bin/env bash\r\n# Managed by ai-devops install-machine-tools.ps1.\r\nexec "/nonexistent/ai-review-preflight" "$@"' > "$TMP/wrapper-bin/ai-review-preflight"
 check "A managed launcher pointing at another copy does not record the shared quarantine" "env -u AI_REVIEW_QUARANTINE_DIR PATH='$TMP/wrapper-bin':\"\$PATH\" HOME='$TMP/wrapper-home2' $SCRIPT quarantine gemini provider-unhealthy --seconds 5 >/dev/null 2>&1; ! test -e '$TMP/wrapper-home2/.local/state/ai-devops/review-quarantine/gemini.json'"
 check "Qwen status enforces built-in quarantine until live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Qwen check cannot report healthy while credits block live qualification" "! $SCRIPT check qwen '$REPO' 2>&1 | grep -q 'health=ok'"
