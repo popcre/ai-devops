@@ -149,6 +149,7 @@ class TestInspector(unittest.TestCase):
             hosts=Path(directory)/'hosts';hosts.write_bytes(b'fixture')
             contract=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
             parent=Path(directory)/'parent';parent.mkdir(mode=0o755)
+            parent.chmod(0o755)
             with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential','TMPDIR':str(parent)}),patch.object(m.subprocess,'run') as run:
                 with self.assertRaises(ValueError):m.read_remote(contract,hosts)
                 run.assert_not_called()
