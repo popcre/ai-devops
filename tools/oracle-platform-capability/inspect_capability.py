@@ -4,11 +4,12 @@ Discovery and qualification need different exact reviewed contracts/one-use
 claims. No live use is performed by preparation/tests.
 """
 import http.client,socket
+from urllib.parse import urlsplit
 import argparse,base64,hashlib,importlib.util,json,os,re,resource,stat,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
 LIMIT=65536
 HELPER='ghcr.io/coollabsio/coolify-helper'
-API='http://100.66.37.58:8000/api/v1/version'
+TARGET_SHA256='056362b2aa356350e0db6c7bdb90711dcd5d7283b9f55016d665381640ed7450'
 SOURCE_PLATFORM='f55efc859dfcbbf79274c4907b3df89f9767c11d'
 # Strip injected credentials before ANY project module executes.
 resource.setrlimit(resource.RLIMIT_CORE,(0,0))
@@ -17,11 +18,15 @@ _TOKEN=os.environ.pop('ORACLE_COOLIFY_READ_TOKEN',None)
 HELPER_SHA='35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754'
 def require(ok,message):
     if not ok:raise ValueError(message)
+def file_identity(info):
+    # Read-induced atime changes are allowed; all immutable custody facts remain exact.
+    return tuple(getattr(info,key) for key in ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'))
+
 def bounded_file(path,maximum):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     with os.fdopen(fd,'rb') as f:
         before=os.fstat(f.fileno());require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_size<=maximum,'bounded regular source required')
-        raw=f.read(maximum+1);require(len(raw)<=maximum and os.fstat(f.fileno())==before,'source moved')
+        raw=f.read(maximum+1);require(len(raw)<=maximum and file_identity(os.fstat(f.fileno()))==file_identity(before),'source moved')
         return raw
 def load_helpers():
     path=Path(__file__).resolve().parents[1]/'oracle-hosting-diagnosis/inspect_metadata.py'
@@ -59,7 +64,7 @@ def lifetime(c,remaining=0):
 IDENTITY='{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Config.Image}},"image_id":{{json .Image}},"state":{{json .State.Status}}}'
 INVENTORY='{"id":{{json .ID}},"image":{{json .Image}},"name":{{json .Names}},"state":{{json .State}}}'
 BASE={'schema','mode','application','api','platform_source','host','user','port','known_hosts_sha256','issued_at','expires_at','installed_gate','tailnet','claim_id','operator_sha256','remote_sha256','transport_helper_sha256'}
-FIXED={'schema':'oracle-platform-capability/v3','application':'vhmcdkdk23dgvjvcvhyhcjzd','api':API,'platform_source':SOURCE_PLATFORM,'host':'hetz','user':'ai','port':22}
+FIXED={'schema':'oracle-platform-capability/v4','application':'vhmcdkdk23dgvjvcvhyhcjzd','platform_source':SOURCE_PLATFORM,'user':'ai','port':22}
 
 class ReviewedContract(dict):pass
 
@@ -76,7 +81,7 @@ def load_contract(path,seal):
         source=bounded_file(path,65536)
         require(re.fullmatch('[a-f0-9]{64}',c[key]) and hashlib.sha256(source).hexdigest()==c[key],'reviewed source changed')
         if key=='remote_sha256':c.remote_source=source
-    lifetime(c);tailnet_contract(c)
+    target_contract(c);lifetime(c);tailnet_contract(c)
     return c
 
 def remote_command(c,source):
@@ -86,7 +91,7 @@ def remote_command(c,source):
     return '/usr/bin/python3 -c "import base64;C=__import__(\'json\').loads(base64.b64decode(\''+config+'\'));exec(base64.b64decode(\''+encoded+'\'))"'
 
 def read_remote(contract,known_hosts,password,source):
-    lifetime(contract,60)
+    target_contract(contract);tailnet_contract(contract);lifetime(contract,60)
     hosts=bounded_file(known_hosts,8192);require(hashlib.sha256(hosts).hexdigest()==contract['known_hosts_sha256'],'known hosts changed')
     require(type(password) is str and password and len(password.encode('utf-8'))<=LIMIT and not any(x in password for x in ('\x00','\n','\r')),'protected credential missing')
     parent=Custody(os.environ.get('TMPDIR',''))
@@ -109,7 +114,7 @@ def read_remote(contract,known_hosts,password,source):
           'sys.stdout.buffer.write(raw)\n')
         directory.create('askpass',helper_source.encode(),0o700)
         child={'PATH':'/usr/bin:/bin','LANG':'C','SSH_ASKPASS':anchor+'/askpass','SSH_ASKPASS_REQUIRE':'force','DISPLAY':'oracle-metadata:0'}
-        command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+anchor+'/known-hosts','-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes','ai@hetz',remote_command(contract,source)]
+        command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+anchor+'/known-hosts','-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes',contract['user']+'@'+contract['host'],remote_command(contract,source)]
         def bound_file():resource.setrlimit(resource.RLIMIT_FSIZE,(LIMIT,LIMIT))
         # Anonymous output descriptors never follow mutable named parents.
         with tempfile.TemporaryFile(dir=anchor) as output,tempfile.TemporaryFile(dir=anchor) as error:
@@ -129,9 +134,9 @@ def read_remote(contract,known_hosts,password,source):
             except OSError:pass # retain protected custody after hostile movement
         parent.close()
 
-TARGET='100.66.37.58'
 SOCKET='/run/tailscale/tailscaled.sock'
-PEER={'node_id':7478501245629156,'node_name':'hetz.coho-banded.ts.net.','addresses':['100.66.37.58/32','fd7a:115c:a1e0::5232:253a/128'],'node_key_sha256':'7f327508633eb57fdd8b054f2334e059e5d9c0354ea0932c5879865eaac0c039','tags':['tag:server'],'route_device':'tailscale0','route_table':'52','route_source':'100.66.9.69'}
+PEER_FIELDS=frozenset(('node_id', 'node_name', 'addresses', 'node_key_sha256', 'tags', 'route_device', 'route_table', 'route_source'))
+PEER_SHA256='c7f6ec888e90f1743d7a466e3af0a021af0b71da509369c20a4118523a117d45'
 OS_FILES={'tailscale':('/usr/bin/tailscale','/var/lib/dpkg/info/tailscale.md5sums'),'ip':('/usr/bin/ip','/var/lib/dpkg/info/iproute2.md5sums')}
 def root_ancestry(path,socket_leaf=False):
     parts=Path(path).parts;fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
@@ -153,8 +158,21 @@ def os_identity(kind,pins):
     metadata=bounded_file(origin,1024*1024);require(hashlib.sha256(metadata).hexdigest()==pins['package_manifest_sha256'],'root package origin moved')
     rows=[x.split() for x in metadata.decode('ascii').splitlines()]
     require([x[0] for x in rows if len(x)==2 and x[1]==path[1:]]==[hashlib.md5(raw).hexdigest()],'installed package binary association differs')
+def canonical_commitment(kind,value):
+    return hashlib.sha256(json.dumps({'schema':kind,'value':value},sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii')).hexdigest()
+
+def target_contract(c):
+    value={key:c[key] for key in ('api','host','user','port')}
+    require(canonical_commitment('oracle-platform-target/v4',value)==TARGET_SHA256,'fixed protected target commitment differs')
+    require(type(value['api']) is str and type(value['host']) is str and re.fullmatch('[a-z0-9.-]{1,253}',value['host']) and value['user']=='ai' and type(value['port']) is int and value['port']==22,'target metadata schema differs')
+    parsed=urlsplit(value['api'])
+    require(parsed.scheme=='http' and parsed.hostname and parsed.port==8000 and parsed.path=='/api/v1/version' and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment,'fixed version resource required')
+    return parsed
+
 def tailnet_contract(c):
-    value=c['tailnet'];require(type(value) is dict and set(value)==set(PEER)|{'os_cli'} and all(value[k]==v for k,v in PEER.items()),'independently reviewed fixed peer/route binding required')
+    target_contract(c)
+    value=c['tailnet'];require(type(value) is dict and set(value)==PEER_FIELDS|{'os_cli'},'closed peer/route schema required')
+    require(canonical_commitment('oracle-platform-peer-route/v4',{k:value[k] for k in PEER_FIELDS})==PEER_SHA256,'independently reviewed fixed peer/route binding required')
     require(type(value['os_cli']) is dict and set(value['os_cli'])=={'tailscale','ip'},'fixed OS CLI closure required')
     for pins in value['os_cli'].values():require(type(pins) is dict and set(pins)=={'binary_sha256','package_manifest_sha256'} and all(isinstance(h,str) and re.fullmatch('[a-f0-9]{64}',h) for h in pins.values()),'exact reviewed OS origin pins required')
     return value
@@ -177,10 +195,10 @@ def unique_metadata(pairs):
     return out
 
 def verify_tailnet(c):
-    expected=tailnet_contract(c);lifetime(c,15)
+    expected=tailnet_contract(c);target=target_contract(c).hostname;lifetime(c,15)
     for kind in OS_FILES:os_identity(kind,expected['os_cli'][kind])
     identity=root_ancestry(SOCKET,True)
-    who=local_metadata(['/usr/bin/tailscale','--socket='+SOCKET,'whois','--json',TARGET],65536)
+    who=local_metadata(['/usr/bin/tailscale','--socket='+SOCKET,'whois','--json',target],65536)
     require(type(who) is dict and type(who.get('Node')) is dict,'fixed peer missing');node=who['Node']
     key=node.get('Key');require(isinstance(key,str) and re.fullmatch(r'nodekey:[a-fA-F0-9]{64}',key,flags=re.ASCII),'fixed peer key missing')
     require(type(node.get('ID')) is int and node['ID']==expected['node_id'] and node.get('Name')==expected['node_name'],'fixed peer identity moved')
@@ -192,34 +210,43 @@ def verify_tailnet(c):
     if node.get('KeyExpiry') is not None:
         from datetime import datetime,timezone
         expiry=datetime.fromisoformat(node['KeyExpiry'].replace('Z','+00:00'));require(expiry.tzinfo is not None and expiry>datetime.now(timezone.utc),'expired or malformed peer lifetime')
-    route=local_metadata(['/usr/bin/ip','-j','route','get',TARGET],8192)
+    route=local_metadata(['/usr/bin/ip','-j','route','get',target],8192)
     require(type(route) is list and len(route)==1 and type(route[0]) is dict,'fixed route missing')
-    r=route[0];require(r.get('dst')==TARGET and r.get('dev')==expected['route_device'] and str(r.get('table'))==expected['route_table'] and r.get('prefsrc')==expected['route_source'] and r.get('flags')==[] and not any(k in r for k in ('gateway','via','nhid','multipath')),'fixed encrypted route moved')
+    r=route[0];require(r.get('dst')==target and r.get('dev')==expected['route_device'] and str(r.get('table'))==expected['route_table'] and r.get('prefsrc')==expected['route_source'] and r.get('flags')==[] and not any(k in r for k in ('gateway','via','nhid','multipath')),'fixed encrypted route moved')
     require(root_ancestry(SOCKET,True)==identity,'local daemon socket moved')
     for kind in OS_FILES:os_identity(kind,expected['os_cli'][kind])
     lifetime(c,10)
     return {'fixed_peer_key_bound':True,'encrypted_route_bound':True,'peer_expiry':'UNKNOWN' if node.get('KeyExpiry') is None or node.get('Expired') is None else 'checked-current'}
 
 class BoundConnection(http.client.HTTPConnection):
+    def __init__(self,host,*,contract,**kwargs):
+        self.contract=contract
+        super().__init__(host,**kwargs)
     def connect(self):
-        require(self.host==TARGET and self.port==8000,'fixed HTTP target required')
+        target=target_contract(self.contract).hostname;peer=tailnet_contract(self.contract)
+        require(self.host==target and self.port==8000,'fixed HTTP target required')
         sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         try:
-            sock.settimeout(10);sock.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,b'tailscale0\x00');sock.bind((PEER['route_source'],0));sock.connect((TARGET,8000));self.sock=sock
+            sock.settimeout(10);sock.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,(peer['route_device']+'\x00').encode('ascii'));sock.bind((peer['route_source'],0));sock.connect((target,8000));self.sock=sock
         except Exception:sock.close();raise # No other interface/source fallback.
 class BoundHTTP(urllib.request.HTTPHandler):
-    def http_open(self,request):return self.do_open(BoundConnection,request)
+    def __init__(self,contract):
+        self.contract=contract;super().__init__()
+    def http_open(self,request):
+        def connection(host,**kwargs):return BoundConnection(host,contract=self.contract,**kwargs)
+        return self.do_open(connection,request)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):raise ValueError('API redirect denied')
 
 def version(token,c):
+    target_contract(c);tailnet_contract(c)
     require(isinstance(token,str) and re.fullmatch(r'[!-~]{1,8192}',token,flags=re.ASCII),'protected ASCII API credential missing')
     verify_tailnet(c) # BEFORE constructing/sending any bearer request
-    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),BoundHTTP(),NoRedirect())
-    request=urllib.request.Request(API,headers={'Authorization':'Bearer '+token,'Accept':'text/plain'},method='GET')
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),BoundHTTP(c),NoRedirect())
+    request=urllib.request.Request(c['api'],headers={'Authorization':'Bearer '+token,'Accept':'text/plain'},method='GET')
     with opener.open(request,timeout=10) as response:
-        require(response.status==200 and response.geturl()==API,'version endpoint refused')
+        require(response.status==200 and response.geturl()==c['api'],'version endpoint refused')
         raw=response.read(65)
     peer=verify_tailnet(c) # Refuse changed peer/route before accepting metadata
     value=raw.decode('ascii').strip();require(len(raw)<=64 and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',value),'version metadata invalid')
@@ -251,15 +278,42 @@ def validate(raw,c):
 GATE='/usr/local/bin/ai-task-gates'
 GATE_SOURCE='/home/ahazan/repos/ai-devops/bin/ai-task-gates'
 MANIFEST='/etc/ai-devops/install-manifest.tsv'
+def read_install_manifest():
+    # Installer deliberately publishes this fixed receipt as the normal owner.
+    # Only its ancestry is root-owned; never chmod/chown or reinterpret it.
+    path=Path(MANIFEST);require(path.is_absolute(),'fixed absolute install receipt required')
+    fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=child
+            info=os.fstat(fd);require(stat.S_ISDIR(info.st_mode) and info.st_uid==0 and not stat.S_IMODE(info.st_mode)&0o022,'root-owned install receipt ancestry required')
+        leaf=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+        try:
+            before=os.fstat(leaf)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid==os.getuid() and stat.S_IMODE(before.st_mode)==0o600 and before.st_nlink==1 and 0<before.st_size<=1024*1024,'caller-owned protected install receipt required')
+            raw=b''
+            while len(raw)<before.st_size:
+                chunk=os.read(leaf,min(65536,before.st_size-len(raw)))
+                require(bool(chunk),'install receipt truncated');raw+=chunk
+            require(os.read(leaf,1)==b'' and file_identity(os.fstat(leaf))==file_identity(before),'install receipt moved')
+            return raw
+        finally:os.close(leaf)
+    finally:os.close(fd)
+
 def installed_gate(c):
     pins=c['installed_gate'];require(type(pins) is dict and set(pins)=={'source_head','launcher_sha256','manifest_sha256'},'exact installed gate pins required')
     require(re.fullmatch('[a-f0-9]{40}',pins['source_head']) and all(re.fullmatch('[a-f0-9]{64}',pins[k]) for k in ('launcher_sha256','manifest_sha256')),'installed gate identity invalid')
     link=os.lstat(GATE);require(stat.S_ISLNK(link.st_mode) and link.st_uid==0 and os.readlink(GATE)==GATE_SOURCE,'root-owned installed launcher required')
-    info=os.lstat(MANIFEST);require(stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_nlink==1 and not info.st_mode&0o022,'root-owned install receipt required')
-    manifest=bounded_file(MANIFEST,1024*1024);require(hashlib.sha256(manifest).hexdigest()==pins['manifest_sha256'],'installed manifest moved')
+    manifest=read_install_manifest();require(hashlib.sha256(manifest).hexdigest()==pins['manifest_sha256'],'installed manifest moved')
     rows=[x.split('\t') for x in manifest.decode('ascii').splitlines()]
     require([x[2] for x in rows if x[:2]==['meta','source_sha']]==[pins['source_head']],'installed source identity moved')
     require([x for x in rows if x[:2]==['symlink',GATE]]==[['symlink',GATE,GATE_SOURCE,pins['launcher_sha256']]],'installed gate receipt differs')
+    links=[x for x in rows if x and x[0]=='symlink']
+    require(0<len(links)<=256 and all(len(x)==4 for x in links) and len({x[1] for x in links})==len(links),'managed link closure differs')
+    for _,launcher,source,digest in links:
+        require(Path(launcher).parent==Path(GATE).parent and Path(source).parent==Path(GATE_SOURCE).parent and Path(launcher).name==Path(source).name and re.fullmatch('[a-f0-9]{64}',digest),'foreign managed link row refused')
+        info=os.lstat(launcher);require(stat.S_ISLNK(info.st_mode) and info.st_uid==0 and os.readlink(launcher)==source,'managed launcher moved')
+        require(hashlib.sha256(bounded_file(source,1024*1024)).hexdigest()==digest,'managed source hash differs')
     require(hashlib.sha256(bounded_file(GATE_SOURCE,1024*1024)).hexdigest()==pins['launcher_sha256'],'installed gate source changed')
     head=subprocess.run(['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C','/home/ahazan/repos/ai-devops','rev-parse','HEAD'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
     require(head.returncode==0 and head.stdout.decode('ascii').strip()==pins['source_head'],'installed checkout not current')
@@ -268,7 +322,7 @@ def installed_gate(c):
     return pins
 
 def gate_and_claim(c,contract_sha,report,custody):
-    lifetime(c,120);directory=custody if isinstance(custody,Custody) else Custody(custody)
+    target_contract(c);tailnet_contract(c);lifetime(c,120);directory=custody if isinstance(custody,Custody) else Custody(custody)
     owned=not isinstance(custody,Custody)
     try:
         directory.recheck();report=Path(report)
@@ -297,6 +351,7 @@ def main():
     custody=None
     try:
         c=load_contract(args.contract,args.contract_sha256)
+        protected_tmp=Custody(os.environ.get('TMPDIR',''));protected_tmp.close()
         require(hashlib.sha256(bounded_file(args.known_hosts,8192)).hexdigest()==c['known_hosts_sha256'],'known host changed')
         source=c.remote_source
         require(isinstance(token,str) and re.fullmatch(r'[!-~]{1,8192}',token,flags=re.ASCII) and isinstance(password,str) and password and len(password.encode())<=LIMIT and not any(x in password for x in ('\x00','\n','\r')),'credential presence/shape refused before claim')

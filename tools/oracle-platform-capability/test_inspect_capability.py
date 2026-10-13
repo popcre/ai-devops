@@ -5,8 +5,17 @@ from unittest.mock import patch
 import pytest
 ROOT=Path(__file__).parent
 spec=importlib.util.spec_from_file_location('capability',ROOT/'inspect_capability.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+TEST_TARGET={'api':'http://127.0.0.1:8000/api/v1/version','host':'invented-host','user':'ai','port':22}
+TEST_PEER={'node_id':1,'node_name':'invented.invalid.','addresses':['127.0.0.1/32','::1/128'],'node_key_sha256':hashlib.sha256(('nodekey:'+'1'*64).encode()).hexdigest(),'tags':['tag:server'],'route_device':'tailscale0','route_table':'52','route_source':'127.0.0.1'}
+
+@pytest.fixture(autouse=True)
+def invented_closed_commitments(monkeypatch):
+    # Fixtures have no actual topology or claim authority; runtime pins remain fixed.
+    monkeypatch.setattr(m,'TARGET_SHA256',m.canonical_commitment('oracle-platform-target/v4',TEST_TARGET))
+    monkeypatch.setattr(m,'PEER_SHA256',m.canonical_commitment('oracle-platform-peer-route/v4',TEST_PEER))
+
 def contract(mode='discover'):
-    c={**m.FIXED,'mode':mode,'issued_at':int(time.time())-1,'expires_at':int(time.time())+600,'installed_gate':{'source_head':'a'*40,'launcher_sha256':'b'*64,'manifest_sha256':'c'*64},'claim_id':'public-invented-test','known_hosts_sha256':'a'*64,'tailnet':{**m.PEER,'os_cli':{k:{'binary_sha256':'a'*64,'package_manifest_sha256':'b'*64} for k in m.OS_FILES}}}
+    c={**m.FIXED,**TEST_TARGET,'mode':mode,'issued_at':int(time.time())-1,'expires_at':int(time.time())+600,'installed_gate':{'source_head':'a'*40,'launcher_sha256':'b'*64,'manifest_sha256':'c'*64},'claim_id':'public-invented-test','known_hosts_sha256':'a'*64,'tailnet':{**TEST_PEER,'os_cli':{k:{'binary_sha256':'a'*64,'package_manifest_sha256':'b'*64} for k in m.OS_FILES}}}
     for key,path in [('operator_sha256',ROOT/'inspect_capability.py'),('remote_sha256',ROOT/'remote.py'),('transport_helper_sha256',Path(m.helpers.__file__))]:c[key]=hashlib.sha256(path.read_bytes()).hexdigest()
     if mode=='qualify':c.update(helper_id='b'*64,helper_name='fixedhelper',helper_image=m.HELPER+':1.0.12',helper_image_id='sha256:'+'c'*64)
     return c
@@ -200,30 +209,38 @@ def test_anchored_ssh_askpass_public_bytes_and_no_credential_env(tmp_path):
 
 def test_installed_gate_manifest_source_identity(tmp_path):
     from types import SimpleNamespace
-    launcher=tmp_path/'gate';source=tmp_path/'source';manifest=tmp_path/'manifest';source.write_bytes(b'PUBLIC GATE');launcher.symlink_to(source)
+    launchers=tmp_path/'bin';sources=tmp_path/'source';launchers.mkdir();sources.mkdir()
+    launcher=launchers/'gate';source=sources/'gate';manifest=tmp_path/'manifest';source.write_bytes(b'PUBLIC GATE');launcher.symlink_to(source)
     h=hashlib.sha256(source.read_bytes()).hexdigest();head='a'*40
     manifest.write_text('meta\tsource_sha\t'+head+'\t-\nsymlink\t'+str(launcher)+'\t'+str(source)+'\t'+h+'\n')
-    manifest.chmod(0o644)
+    manifest.chmod(0o600)
     c=contract();c['installed_gate']={'source_head':head,'launcher_sha256':h,'manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest()}
     original=m.os.lstat
     def root_fixture(path):
         st=original(path)
-        if str(path) in (str(launcher),str(manifest)):return SimpleNamespace(st_mode=st.st_mode,st_uid=0,st_nlink=st.st_nlink)
+        if str(path)==str(launcher):return SimpleNamespace(st_mode=st.st_mode,st_uid=0,st_nlink=st.st_nlink)
         return st
+    fstat=m.os.fstat
+    def owned_ancestry(fd):
+        info=fstat(fd)
+        if __import__('stat').S_ISDIR(info.st_mode):
+            values=list(info);values[0]&=~0o022;values[4]=0;return os.stat_result(values)
+        return info
     seen=[]
     def fake(argv,**kw):
         seen.append((argv,kw));return SimpleNamespace(returncode=0,stdout=(head+'\n').encode() if argv[-1]=='HEAD' else b'')
-    with patch.object(m,'GATE',str(launcher)),patch.object(m,'GATE_SOURCE',str(source)),patch.object(m,'MANIFEST',str(manifest)),patch.object(m.os,'lstat',root_fixture),patch.object(m.subprocess,'run',fake):
+    with patch.object(m,'GATE',str(launcher)),patch.object(m,'GATE_SOURCE',str(source)),patch.object(m,'MANIFEST',str(manifest)),patch.object(m.os,'lstat',root_fixture),patch.object(m.os,'fstat',owned_ancestry),patch.object(m.subprocess,'run',fake):
         m.installed_gate(c);assert len(seen)==2 and all(x[1]['env']['HOME']=='/home/ahazan' for x in seen)
         source.write_bytes(b'MOVED PUBLIC SOURCE')
-        with pytest.raises(ValueError,match='source changed'):m.installed_gate(c)
+        with pytest.raises(ValueError,match='managed source hash differs'):m.installed_gate(c)
 
 @pytest.fixture
 def invented_peer(monkeypatch):
-    key='nodekey:'+'1'*64;expected={**m.PEER,'node_key_sha256':hashlib.sha256(key.encode()).hexdigest()}
-    monkeypatch.setattr(m,'PEER',expected)
+    key='nodekey:'+'1'*64;expected={**TEST_PEER,'node_key_sha256':hashlib.sha256(key.encode()).hexdigest()}
+    monkeypatch.setattr(m,'PEER_SHA256',m.canonical_commitment('oracle-platform-peer-route/v4',expected))
+    for field,value in expected.items():monkeypatch.setitem(TEST_PEER,field,value)
     who={'Node':{'ID':expected['node_id'],'Name':expected['node_name'],'Addresses':expected['addresses'],'Key':key,'Tags':expected['tags']}}
-    route=[{'dst':m.TARGET,'dev':'tailscale0','table':'52','prefsrc':expected['route_source'],'flags':[]}]
+    route=[{'dst':'127.0.0.1','dev':'tailscale0','table':'52','prefsrc':expected['route_source'],'flags':[]}]
     monkeypatch.setattr(m,'os_identity',lambda *a:None);monkeypatch.setattr(m,'root_ancestry',lambda *a:(1,2))
     def local(argv,maximum):return who if argv[0]=='/usr/bin/tailscale' else route
     monkeypatch.setattr(m,'local_metadata',local)
@@ -260,7 +277,7 @@ def test_peer_rechecked_after_http_before_metadata_accepted(invented_peer):
     who,_=invented_peer
     class Response:
         status=200
-        def geturl(self):return m.API
+        def geturl(self):return TEST_TARGET['api']
         def __enter__(self):return self
         def __exit__(self,*args):pass
         def read(self,n):who['Node']['Key']='nodekey:'+'2'*64;return b'4.4.6\n'
@@ -306,12 +323,13 @@ def test_bound_http_socket_has_no_interface_fallback():
         def connect(self,*a):pytest.fail('HTTP egress after denied interface')
         def close(self):calls.append(('closed',))
     with patch.object(m.socket,'socket',lambda *a:Socket()):
-        with pytest.raises(PermissionError):m.BoundConnection(m.TARGET,8000).connect()
+        with pytest.raises(PermissionError):m.BoundConnection('127.0.0.1:8000',contract=contract()).connect()
     assert calls[-1]==('closed',)
 
 
 def test_multiple_exact_tags_preserved_not_subset(invented_peer,monkeypatch):
-    who,_=invented_peer;expected={**m.PEER,'tags':['tag:a','tag:server']};monkeypatch.setattr(m,'PEER',expected);who['Node']['Tags']=['tag:a','tag:server']
+    who,_=invented_peer;expected={**TEST_PEER,'tags':['tag:a','tag:server']};monkeypatch.setattr(m,'PEER_SHA256',m.canonical_commitment('oracle-platform-peer-route/v4',expected))
+    for field,value in expected.items():monkeypatch.setitem(TEST_PEER,field,value);who['Node']['Tags']=['tag:a','tag:server']
     assert m.verify_tailnet(contract())['encrypted_route_bound'] is True
     who['Node']['Tags']=['tag:server']
     with pytest.raises(ValueError):m.verify_tailnet(contract())
@@ -320,8 +338,8 @@ def test_multiple_exact_tags_preserved_not_subset(invented_peer,monkeypatch):
 def test_review_templates_pin_current_code_and_stay_unadmitted():
     for name in ('discovery.contract.template.json','qualification.contract.template.json'):
         c=json.loads((ROOT/name).read_bytes())
-        assert c['schema']=='oracle-platform-capability/v3' and c['issued_at']==0 and c['expires_at']==0
-        assert c['tailnet']['tags']==['tag:server'] and c['tailnet']['node_key_sha256']=='7f327508633eb57fdd8b054f2334e059e5d9c0354ea0932c5879865eaac0c039'
+        assert c['schema']=='oracle-platform-capability/v4' and c['issued_at']==0 and c['expires_at']==0
+        assert c['api'] is None and c['host'] is None and all(v is None for v in c['tailnet'].values())
         assert c['operator_sha256']==hashlib.sha256((ROOT/'inspect_capability.py').read_bytes()).hexdigest()
         assert c['remote_sha256']==hashlib.sha256((ROOT/'remote.py').read_bytes()).hexdigest()
 
@@ -338,3 +356,138 @@ def test_report_fifo_no_gate_and_no_wait(tmp_path):
     tmp_path.chmod(0o700);fifo=tmp_path/'fifo';os.mkfifo(fifo,0o600)
     with patch.object(m,'installed_gate',side_effect=AssertionError('gate ran')):
         with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,fifo,tmp_path)
+
+
+@pytest.mark.parametrize('field',['api','host','user','port','route_source','route_device','route_table','node_id','node_name','addresses','tags','node_key_sha256'])
+def test_wrong_closed_preimage_before_gate_or_credential_or_claim(tmp_path,field):
+    c=contract()
+    if field in TEST_TARGET:c[field]='foreign' if field!='port' else 23
+    elif field=='node_id':c['tailnet'][field]+=1
+    elif field in ('addresses','tags'):c['tailnet'][field]=[]
+    else:c['tailnet'][field]='foreign'
+    tmp_path.chmod(0o700)
+    with patch.object(m,'installed_gate',side_effect=AssertionError('gate metadata read')),patch.object(m.subprocess,'run',side_effect=AssertionError('child')),patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('HTTP')):
+        with pytest.raises(ValueError):m.gate_and_claim(c,'a'*64,public_report(tmp_path),tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+def root_fixture_ancestry(monkeypatch):
+    original=m.os.fstat
+    def fixture(fd):
+        info=original(fd)
+        if __import__('stat').S_ISDIR(info.st_mode):
+            values=list(info);values[0]&=~0o022;values[4]=0;return os.stat_result(values)
+        return info
+    monkeypatch.setattr(m.os,'fstat',fixture)
+
+
+def test_receipt_current_user_uid_and_0600_are_supported(tmp_path,monkeypatch):
+    receipt=tmp_path/'manifest';receipt.write_bytes(b'PUBLIC RECEIPT METADATA');receipt.chmod(0o600)
+    assert receipt.stat().st_uid==os.getuid()
+    monkeypatch.setattr(m,'MANIFEST',str(receipt));root_fixture_ancestry(monkeypatch)
+    assert m.read_install_manifest()==b'PUBLIC RECEIPT METADATA'
+
+
+@pytest.mark.parametrize('damage',['mode','hardlink','symlink','fifo','wronguid','ancestoruid','ancestormode','ancestorsymlink'])
+def test_receipt_custody_denials_before_content_read(tmp_path,monkeypatch,damage):
+    import stat
+    parent=tmp_path/'parent';parent.mkdir();receipt=parent/'manifest';receipt.write_bytes(b'PUBLIC');receipt.chmod(0o600)
+    original=m.os.fstat
+    root_fixture_ancestry(monkeypatch);fixture=m.os.fstat
+    if damage=='mode':receipt.chmod(0o644)
+    elif damage=='hardlink':os.link(receipt,parent/'alias')
+    elif damage=='symlink':receipt.unlink();receipt.symlink_to(parent/'missing')
+    elif damage=='fifo':receipt.unlink();os.mkfifo(receipt,0o600)
+    elif damage=='ancestorsymlink':
+        link=tmp_path/'linked';link.symlink_to(parent,target_is_directory=True);receipt=link/'manifest'
+    elif damage in ('wronguid','ancestoruid','ancestormode'):
+        def unsafe(fd):
+            info=fixture(fd);values=list(info)
+            if damage=='wronguid' and stat.S_ISREG(info.st_mode):values[4]=os.getuid()+1
+            if damage=='ancestoruid' and stat.S_ISDIR(info.st_mode):values[4]=os.getuid()
+            if damage=='ancestormode' and stat.S_ISDIR(info.st_mode):values[0]|=0o022
+            return os.stat_result(values)
+        monkeypatch.setattr(m.os,'fstat',unsafe)
+    monkeypatch.setattr(m,'MANIFEST',str(receipt))
+    with patch.object(m.os,'read',side_effect=AssertionError('receipt content read')),patch.object(m.subprocess,'run',side_effect=AssertionError('gate child')):
+        with pytest.raises((ValueError,OSError)):m.read_install_manifest()
+
+
+@pytest.mark.parametrize('field',['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns',None])
+def test_fresh_public_file_read_all_immutable_stats_except_atime(tmp_path,monkeypatch,field):
+    from types import SimpleNamespace
+    path=tmp_path/'fresh-public';path.write_bytes(b'PUBLIC FRESH SOURCE');calls=0;original=m.os.fstat
+    def changed(fd):
+        nonlocal calls
+        calls+=1;info=original(fd)
+        fields=('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns','st_atime_ns')
+        value={k:getattr(info,k) for k in fields}
+        if calls>1:value['st_atime_ns']+=1
+        if calls>1 and field:value[field]+=1
+        return SimpleNamespace(**value)
+    monkeypatch.setattr(m.os,'fstat',changed)
+    if field:
+        with pytest.raises(ValueError,match='source moved'):m.bounded_file(path,1024)
+    else:assert m.bounded_file(path,1024)==b'PUBLIC FRESH SOURCE'
+
+
+def test_missing_protected_tmpdir_before_gate_or_credentials(tmp_path,monkeypatch):
+    import sys
+    c=contract();monkeypatch.setattr(m,'load_contract',lambda *a:c)
+    monkeypatch.setattr(m,'_PASSWORD','INVENTED');monkeypatch.setattr(m,'_TOKEN','INVENTED')
+    monkeypatch.delenv('TMPDIR',raising=False)
+    monkeypatch.setattr(sys,'argv',['reader','--contract','/invented','--contract-sha256','a'*64,'--reviewer-approval','/invented','--known-hosts','/invented','--custody',str(tmp_path)])
+    with patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'bounded_file',side_effect=AssertionError('credential/host read')),patch.object(m,'version',side_effect=AssertionError('HTTP')),patch.object(m,'read_remote',side_effect=AssertionError('SSH')):
+        assert m.main()==3
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize('damage',['publicmode','symlink','dot'])
+def test_insecure_tmpdir_before_gate_or_knownhost_read(tmp_path,monkeypatch,damage):
+    import sys
+    parent=tmp_path/'custody';parent.mkdir(mode=0o700)
+    if damage=='publicmode':parent.chmod(0o755);value=str(parent)
+    elif damage=='symlink':
+        link=tmp_path/'linked';link.symlink_to(parent,target_is_directory=True);value=str(link)
+    else:value=str(parent)+'/.'
+    monkeypatch.setenv('TMPDIR',value);monkeypatch.setattr(m,'load_contract',lambda *a:contract())
+    monkeypatch.setattr(m,'_PASSWORD','INVENTED');monkeypatch.setattr(m,'_TOKEN','INVENTED')
+    monkeypatch.setattr(sys,'argv',['reader','--contract','/invented','--contract-sha256','a'*64,'--reviewer-approval','/invented','--known-hosts','/invented','--custody',str(parent)])
+    with patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'bounded_file',side_effect=AssertionError('host read')):
+        assert m.main()==3
+    assert not list(parent.iterdir())
+
+
+def test_wrong_target_precedes_api_credential_shape_or_ssh_credential_read(tmp_path):
+    c=contract();c['api']='http://127.0.0.1:8000/api/v1/foreign'
+    with patch.object(m,'bounded_file',side_effect=AssertionError('host/secret read')),patch.object(m.subprocess,'run',side_effect=AssertionError('child')),patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('HTTP')):
+        with pytest.raises(ValueError,match='target commitment differs'):m.version(None,c)
+        with pytest.raises(ValueError,match='target commitment differs'):m.read_remote(c,tmp_path/'missing',None,b'')
+
+
+@pytest.mark.parametrize('damage',['source','destination','duplicate','foreignrow'])
+def test_every_managed_link_refuses_tamper_before_git_child(tmp_path,monkeypatch,damage):
+    from types import SimpleNamespace
+    launchers=tmp_path/'bin';sources=tmp_path/'source';launchers.mkdir();sources.mkdir()
+    gate=sources/'gate';peer=sources/'peer';gate.write_bytes(b'PUBLIC GATE');peer.write_bytes(b'PUBLIC FOREIGN-CAPABILITY SOURCE')
+    launcher=launchers/'gate';other=launchers/'peer';launcher.symlink_to(gate);other.symlink_to(peer)
+    gh=hashlib.sha256(gate.read_bytes()).hexdigest();ph=hashlib.sha256(peer.read_bytes()).hexdigest();head='a'*40
+    rows=[['meta','source_sha',head,'-'],['symlink',str(launcher),str(gate),gh],['symlink',str(other),str(peer),ph]]
+    if damage=='source':peer.write_bytes(b'MOVED PUBLIC SOURCE')
+    elif damage=='destination':other.unlink();other.symlink_to(gate)
+    elif damage=='duplicate':rows.append(rows[-1])
+    elif damage=='foreignrow':rows[-1][2]=str(tmp_path/'foreign-bytes')
+    manifest=tmp_path/'manifest';manifest.write_text(''.join('\t'.join(r)+'\n' for r in rows));manifest.chmod(0o600)
+    monkeypatch.setattr(m,'GATE',str(launcher));monkeypatch.setattr(m,'GATE_SOURCE',str(gate));monkeypatch.setattr(m,'MANIFEST',str(manifest))
+    original=m.os.lstat
+    def root_links(path):
+        info=original(path)
+        if Path(path).is_symlink():return SimpleNamespace(st_mode=info.st_mode,st_uid=0,st_nlink=info.st_nlink)
+        return info
+    monkeypatch.setattr(m.os,'lstat',root_links);root_fixture_ancestry(monkeypatch)
+    c={'installed_gate':{'source_head':head,'launcher_sha256':gh,'manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest()}}
+    opened=[];reader=m.bounded_file
+    def bounded(path,maximum):opened.append(str(path));return reader(path,maximum)
+    with patch.object(m,'bounded_file',side_effect=bounded),patch.object(m.subprocess,'run',side_effect=AssertionError('git child before complete closure')):
+        with pytest.raises(ValueError):m.installed_gate(c)
+    assert str(tmp_path/'foreign-bytes') not in opened

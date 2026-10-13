@@ -17,7 +17,7 @@ a hash/dictionary/boolean is never production authority. No reviewer is run here
 
 Two separate contracts/claims are required:
 
-1. **discover**: fixed GET `http://100.66.37.58:8000/api/v1/version` (public Coolify
+1. **discover**: fixed GET `[protected contract identity]` (public Coolify
    v4.4.6 source commit f55efc859dfcbbf79274c4907b3df89f9767c11d exposes it through
    api.ability:read). No application API body/environment/settings is requested.
    Exact existing name `/coolify` receives only five identity fields; one Docker
@@ -79,7 +79,7 @@ remote command and final receipt checks expiry. No caller clock can extend scope
 
 The genuine gate is fixed `/usr/local/bin/ai-task-gates`, a root-owned symlink to
 `/home/ahazan/repos/ai-devops/bin/ai-task-gates`. Contract pins actual installed
-source HEAD, launcher SHA and root-owned `/etc/ai-devops/install-manifest.tsv`
+source HEAD, launcher SHA and caller-owned0600 `/etc/ai-devops/install-manifest.tsv`
 SHA. Exact manifest rows and clean tracked source are checked before and after
 the lifecycle child. Its HOME is fixed `/home/ahazan`; PATH is fixed root-managed
 `/usr/local/bin:/usr/bin:/bin`, never caller PATH/HOME. Source/manifest metadata
@@ -120,7 +120,7 @@ build association for the installed binary, whose actual SHA/package origin is
 separately bound. The root-observed exact peer metadata is prospective input;
 it grants no operating rights and cannot replace fresh runtime checks.
 
-HTTP sockets additionally bind only `tailscale0` and source100.66.9.69. Binding
+HTTP sockets additionally bind only the committed interface and protected local source address. Binding
 failure refuses before HTTP bytes; there is no other interface/source fallback,
 proxy, redirect, insecure TLS or token-over-SSH transfer. Root retains actual OS
 callability and production admission proof; this source performed no socket bind,
@@ -147,3 +147,43 @@ All bounded reads use O_NONBLOCK and reject FIFO/device input before read. Remot
 mode is explicitly discover or qualify, with other modes denied before Docker.
 Both Git identity commands use the same hook/fsmonitor overrides. Local daemon
 outputs use anonymous files through an anchored private TMPDIR descriptor.
+
+
+## Separately reviewed v4 public-boundary and installer receipt repair
+
+Public code contains only domain-separated canonical SHA256 commitments to the
+fixed protected target and fixed peer/route identity. Target and tailnet values
+live ONLY in a separately reviewed protected local contract. Public templates
+contain null placeholders and zero lifetime; they cannot qualify or grant an
+operation. A changed source/schema needs new genuine exact-head action review;
+frozen historical v3 attempts and claims must never be renewed or replayed.
+
+The target commitment binds exact API, SSH alias, user and port. The peer/route
+commitment binds exact node ID/name/key fingerprint, addresses, tags, interface,
+routing table and local source address. Both commitments are checked before any
+credential shape check, lifecycle/gate child, claim or transport. Methods, version
+resource path, service roles, command grammar and output bounds remain fixed.
+Only verified contract values reach the bound SSH/HTTP/tailnet operations; no
+arbitrary target, proxy, forwarded route or interface fallback is introduced.
+Commitments are identity pins, not confidentiality encryption, current ownership
+proof or authority. Runtime OS/package/socket/peer/route checks, current native
+review gate and fresh one-use claim remain independently mandatory.
+
+The supported installer publishes its fixed receipt for the NORMAL current
+owner. Receipt reading walks root-owned, nonwritable ancestry with nofollow
+held directory descriptors, then requires a caller-UID-owned0600 regular
+single-link bounded leaf, exact pre/post stat and pinned bytes. Root ownership
+of that user-owned leaf is deliberately NOT required. No chmod/chown or repair
+is attempted. Every recorded managed link and public source hash is verified
+against the same exact manifest in addition to the current clean source HEAD
+and genuine gate. All97 current managed links are covered; a later installation
+needs its own independently reviewed current manifest/source pins.
+
+An existing coordinator-owned0700 TMPDIR with no symlink/dot/dotdot ancestry
+is now required before credential checks, gates or one-use claim creation.
+Root's eventual protected credential injection must include that exact TMPDIR.
+Local fixtures contain only invented loopback identities and cannot issue
+production authority. No platform traffic or installation is performed by
+source preparation or these fixtures.
+
+Read-induced atime changes are excluded from bounded-file stability checks; dev/ino/UID/GID/mode/nlink/size/mtime_ns/ctime_ns must all remain exact, with nofollow and content hash bounds preserved.

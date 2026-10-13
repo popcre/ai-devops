@@ -1,5 +1,5 @@
 {
-  "api": "http://100.66.37.58:8000/api/v1/version",
+  "api": null,
   "application": "vhmcdkdk23dgvjvcvhyhcjzd",
   "claim_id": "unadmitted-qualification",
   "expires_at": 0,
@@ -7,7 +7,7 @@
   "helper_image": "ghcr.io/coollabsio/coolify-helper:UNKNOWN",
   "helper_image_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "helper_name": "unadmitted-helper",
-  "host": "hetz",
+  "host": null,
   "installed_gate": {
     "launcher_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -16,35 +16,21 @@
   "issued_at": 0,
   "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
   "mode": "qualify",
-  "operator_sha256": "c8f0a1bed44ede01f65a9a45a29c96346e06a553bf15835e281aaea1c352bae4",
+  "operator_sha256": "0fa3ec53269ffbc71875e2943d14441f9f4c0d18d05581b32602e120911713a7",
   "platform_source": "f55efc859dfcbbf79274c4907b3df89f9767c11d",
   "port": 22,
   "remote_sha256": "39714e7850da26684bf987b74431bbd368020322c6f2b39c876decc2eab3f061",
-  "schema": "oracle-platform-capability/v3",
+  "schema": "oracle-platform-capability/v4",
   "tailnet": {
-    "addresses": [
-      "100.66.37.58/32",
-      "fd7a:115c:a1e0::5232:253a/128"
-    ],
-    "node_id": 7478501245629156,
-    "node_key_sha256": "7f327508633eb57fdd8b054f2334e059e5d9c0354ea0932c5879865eaac0c039",
-    "node_name": "hetz.coho-banded.ts.net.",
-    "os_cli": {
-      "ip": {
-        "binary_sha256": "2829deca72cff655d6d1290646abb9cc829da2e2db615eec8bc0ccd283acf3a7",
-        "package_manifest_sha256": "4dfd008832c825fca850b524c87aa70c45c566ec86c357522c415a14f53cda00"
-      },
-      "tailscale": {
-        "binary_sha256": "64aed443d6454865bdcabb40030b052c4b89cf9a4436c499d41afc502c0ec28d",
-        "package_manifest_sha256": "3d7e55c5833fbc95ca38492b8d06eb585204b8d2ed1827dc7e83bac301435643"
-      }
-    },
-    "route_device": "tailscale0",
-    "route_source": "100.66.9.69",
-    "route_table": "52",
-    "tags": [
-      "tag:server"
-    ]
+    "addresses": null,
+    "node_id": null,
+    "node_key_sha256": null,
+    "node_name": null,
+    "os_cli": null,
+    "route_device": null,
+    "route_source": null,
+    "route_table": null,
+    "tags": null
   },
   "transport_helper_sha256": "35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754",
   "user": "ai"
