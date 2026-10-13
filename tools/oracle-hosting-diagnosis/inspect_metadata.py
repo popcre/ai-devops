@@ -24,7 +24,7 @@ FIELDS = {'id', 'name', 'image_id', 'image', 'service', 'project', 'application'
 TEMPLATE = ('{"id":{{json .Id}},"name":{{json .Name}},"image_id":{{json .Image}},'
  '"image":{{json .Config.Image}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
  '"project":{{json (index .Config.Labels "com.docker.compose.project")}},"application":{{json (index .Config.Labels "coolify.applicationUuid")}},'
- '"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}},'
+ '"revision":{{with (index .Config.Labels "org.opencontainers.image.revision")}}{{json .}}{{else}}""{{end}},'
  '"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"absent"{{end}},'
  '"exit_code":{{json .State.ExitCode}},"started_at":{{json .State.StartedAt}},'
  '"finished_at":{{json .State.FinishedAt}},"restarts":{{json .RestartCount}}}')
@@ -39,7 +39,7 @@ def load_contract(path, digest):
     raw = Path(path).read_bytes()
     require(len(raw) <= LIMIT and hashlib.sha256(raw).hexdigest() == digest, 'contract digest differs')
     contract = json.loads(raw)
-    require(set(contract) == {'schema', 'application', 'host', 'user', 'port', 'known_hosts_sha256', 'services', 'image', 'revision', 'application_label', 'project'}, 'contract fields differ')
+    require(set(contract) == {'schema', 'application', 'host', 'user', 'port', 'known_hosts_sha256', 'services', 'image', 'revision', 'application_label', 'project', 'vendor_images'}, 'contract fields differ')
     require(contract['application_label'] == 'coolify.applicationUuid', 'application label differs')
     require(contract['schema'] == 'oracle-hosting-metadata/v1' and contract['application'] == APP, 'application differs')
     require(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}', contract['host']) and re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}', contract['user']), 'SSH identity differs')
@@ -50,6 +50,10 @@ def load_contract(path, digest):
     services = contract['services']
     require(type(services) is list and len(services) == 18 and len(set(services)) == 18 and all(re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}', s) for s in services), '18-role closure differs')
     require(re.fullmatch(r'ghcr.io/u2giants/theoracle-native@sha256:[a-f0-9]{64}', contract['image']) and re.fullmatch(r'[a-f0-9]{40}', contract['revision']), 'source pin differs')
+    require(contract['vendor_images'] == {
+        'ledger':'postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297',
+        'candidate':'falkordb/falkordb:v4.20.7@sha256:13996aa523f0dd283f6bd6df6620b094dcea525452417c4d6ef9bef15dc9998d',
+        'confirmed':'falkordb/falkordb:v4.20.7@sha256:13996aa523f0dd283f6bd6df6620b094dcea525452417c4d6ef9bef15dc9998d'}, 'vendor pins differ')
     return contract
 
 
@@ -82,8 +86,8 @@ def validate_rows(raw, contract):
     # Missing/exited roles are findings, never silently healthy completion.
     return {'schema':'oracle-hosting-metadata-result/v1','application':APP,'contract_sha256':hashlib.sha256(json.dumps(contract,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
             'expected_image':contract['image'],'expected_revision':contract['revision'],'missing_roles':sorted(set(contract['services'])-set(roles)),
-            'image_mismatch_roles':sorted(row['service'] for row in rows if row['service'] not in {'ledger','candidate','confirmed'} and row['image'] != contract['image']),
-            'revision_mismatch_roles':sorted(row['service'] for row in rows if row['revision'] != contract['revision']),
+            'image_mismatch_roles':sorted(row['service'] for row in rows if row['image'] != contract['vendor_images'].get(row['service'],contract['image'])),
+            'revision_mismatch_roles':sorted(row['service'] for row in rows if row['service'] not in contract['vendor_images'] and row['revision'] != contract['revision']),
             'containers':sorted(rows,key=lambda row:row['service']),'metadata_sha256':hashlib.sha256(raw).hexdigest(),'cause':'UNKNOWN'}
 
 
@@ -91,16 +95,21 @@ def read_remote(contract, known_hosts):
     hosts=Path(known_hosts).read_bytes()
     require(len(hosts)<=8192 and hashlib.sha256(hosts).hexdigest()==contract['known_hosts_sha256'],'known-hosts changed')
     password=os.environ.pop('ORACLE_HETZ_READ_PASSWORD',None)
-    require(type(password) is str and password and '\n' not in password and '\r' not in password,'protected credential missing')
+    require(type(password) is str and password and len(password.encode('utf-8')) <= LIMIT and '\x00' not in password and '\n' not in password and '\r' not in password,'protected credential missing')
     with tempfile.TemporaryDirectory(prefix='oracle-metadata-',dir=os.environ.get('TMPDIR')) as directory:
         os.chmod(directory,0o700)
         secret=Path(directory)/'password'
-        fd=os.open(secret,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+        fd=os.open(secret,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'w') as stream:stream.write(password)
         del password
         helper=Path(directory)/'askpass'
-        helper.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nimport sys\nsys.stdout.write(Path('+repr(str(secret))+').read_text())\n')
-        os.chmod(helper,0o700)
+        helper_source=('#!'+sys.executable+'\nimport os,stat,sys\n'
+          'fd=os.open('+repr(str(secret))+',os.O_RDONLY|os.O_NOFOLLOW)\n'
+          'st=os.fstat(fd)\n'
+          'if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.getuid() or st.st_mode&0o777!=0o600 or st.st_size>65536:sys.exit(3)\n'
+          'with os.fdopen(fd,\"rb\") as stream:sys.stdout.buffer.write(stream.read(65537))\n')
+        fd=os.open(helper,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o700)
+        with os.fdopen(fd,'w') as stream:stream.write(helper_source)
         child={'PATH':'/usr/bin:/bin','LANG':'C','SSH_ASKPASS':str(helper),'SSH_ASKPASS_REQUIRE':'force','DISPLAY':'oracle-metadata:0'}
         command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(Path(known_hosts).resolve()),'-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes','ai@hetz',remote_command(contract)]
         def bound_file():resource.setrlimit(resource.RLIMIT_FSIZE,(LIMIT,LIMIT))

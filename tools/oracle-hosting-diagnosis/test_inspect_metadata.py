@@ -67,6 +67,52 @@ class TestInspector(unittest.TestCase):
                 self.assertNotIn('ORACLE_HETZ_READ_PASSWORD',os.environ)
             self.assertTrue(all(not helper.exists() for helper in helpers))
 
+    def test_vendor_absent_revision_expected_and_wrong_image_finding(self):
+        rows=[]
+        for index,service in enumerate(C['services']):
+            r=row();r.update(id=format(index+1,'064x'),service=service,name='/'+C['project']+'-'+service+'-1')
+            if service in C['vendor_images']:
+                r.update(image=C['vendor_images'][service],revision='')
+            rows.append(r)
+        out=m.validate_rows(json.dumps(rows).encode(),C)
+        self.assertEqual(out['image_mismatch_roles'],[])
+        self.assertEqual(out['revision_mismatch_roles'],[])
+        self.assertEqual(out['missing_roles'],[])
+        ledger=next(r for r in rows if r['service']=='ledger')
+        ledger['image']=ledger['image'].split('@')[0]+'@sha256:'+'d'*64
+        out=m.validate_rows(json.dumps(rows).encode(),C)
+        self.assertEqual(out['image_mismatch_roles'],['ledger'])
+        self.assertIn('{{else}}""{{end}}',m.TEMPLATE)
+
+    def test_credential_nul_and_oversize_rejected_before_child(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'known-hosts';p.write_text('fixture')
+            c=dict(C,known_hosts_sha256=hashlib.sha256(p.read_bytes()).hexdigest())
+            for password in ['bad\x00value','x'*65537]:
+                with self.subTest(length=len(password)),patch.object(m.os,'environ',{'ORACLE_HETZ_READ_PASSWORD':password}),patch.object(m.subprocess,'run') as run:
+                    with self.assertRaises(ValueError):m.read_remote(c,p)
+                    run.assert_not_called()
+                    self.assertNotIn('ORACLE_HETZ_READ_PASSWORD',os.environ)
+
+    def test_askpass_nofollow_secret_read(self):
+        real_run=m.subprocess.run
+        with tempfile.TemporaryDirectory() as d:
+            hosts=Path(d)/'known-hosts';hosts.write_text('fixture')
+            c=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
+            def fake_run(args,**kwargs):
+                helper=Path(kwargs['env']['SSH_ASKPASS']);secret=helper.parent/'password'
+                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.DEVNULL,env=kwargs['env'])
+                self.assertEqual(result.stdout,b'fixture-credential')
+                # An accidental link cannot make the helper read another file.
+                other=helper.parent/'foreign';other.write_text('foreign-fixture')
+                secret.unlink();secret.symlink_to(other)
+                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.DEVNULL,env=kwargs['env'])
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(result.stdout,b'')
+                kwargs['stdout'].write(json.dumps([row()]).encode())
+                return type('R',(),{'returncode':0})()
+            with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential'}),patch.object(m.subprocess,'run',fake_run):m.read_remote(c,hosts)
+
     def test_host_key_drift_precedes_credential_read(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'known-hosts';p.write_text('wrong')

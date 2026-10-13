@@ -40,11 +40,14 @@ that refusal; do not substitute #770 or invent a new operational profile.
 Runtime mode requires --contract, --contract-sha256 and --known-hosts. Offline
 stdin validation and --remote-command do not use credentials or contact a host.
 Result records missing roles, image/source-label mismatch and actual health;
-these are findings, not invented root cause. Non-native ledger/graph images are
-reported separately without treating their expected vendor image as app drift.
-Revision labels may be absent: the result explicitly reports that mismatch.
+these are findings, not invented root cause. Ledger/graph vendor images are pinned per role in the contract and drift is
+reported explicitly. Absent vendor revision labels are expected; absent native
+revision labels remain explicit mismatches. Empty OCI labels serialize as empty
+strings. Credential NUL/newline/oversize inputs refuse before child launch;
+secret/helper creation and secret reads use nofollow descriptors.
 
-Verification: seven synthetic tests pass, covering wrong contract/host key,
+Verification: ten synthetic tests pass, covering wrong contract/host key,
 foreign namespace/roles, injected sensitive fields, duplicate/oversized output,
 preserved unhealthy/missing roles, secret-free child environment and protected
-custody/cleanup. No real credentials or hosting traffic were used in preparation.
+custody/cleanup, vendor-image drift, absent vendor revisions, credential bounds
+and askpass rejection of a substituted secret symlink. No real credentials or hosting traffic were used in preparation.
