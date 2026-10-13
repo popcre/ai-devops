@@ -53,3 +53,11 @@ foreign namespace/roles, injected sensitive fields, duplicate/oversized output,
 preserved unhealthy/missing roles, secret-free child environment and protected
 custody/cleanup, vendor-image drift, absent vendor revisions, credential bounds
 and askpass rejection of a substituted secret symlink. No real credentials or hosting traffic were used in preparation.
+
+Trust anchor preparation: the original immutable known-hosts snapshot has8644bytes
+and SHA2569657aee7f8edd5aeebc454953ab4562edfb3101838a4aa2807014166eeb3870a.
+The first live-mode attempt refused its unchanged8192byte input bound locally before
+SSH/credential use. The corrected input contains ONLY the existing matched hetz
+ed25519 record extracted with ssh-keygen -F; the contract pins its exact digest.
+No new key is trusted, original snapshot is preserved, bounds are unchanged, and
+the failed claim is never reused. Root independently verifies this derivation.
