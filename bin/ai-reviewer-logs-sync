@@ -167,6 +167,9 @@ cmd_sync(){
   [ -f "$CERT" ] || die "archive certificate missing: $CERT"
   ensure_hub
   WORK="$HOME_DIR/work.$$"; rm -rf "$WORK"; mkdir -p "$WORK/stage"
+  # Clear-text staging never outlives the run, whatever way it ends.
+  # shellcheck disable=SC2064
+  trap "rm -rf '$WORK' '$HOME_DIR/sync.lock'" EXIT
   ERRS="$WORK/errors"; NOTES="$WORK/notes"; : > "$ERRS"; : > "$NOTES"
   COPIED=0; RECOVERING=0
   declare -gA SEEN=() NEW_SEEN=()
@@ -312,7 +315,8 @@ cmd_view(){
     while IFS= read -r entry; do
       case "$entry" in /*|..|../*|*/..|*/../*) die "$b contains an unsafe path; not unpacking it" ;; esac
     done < <(tar -tf "$work/b.tar")
-    if tar -tvf "$work/b.tar" | grep -qv '^[-d]'; then die "$b contains links or special files; not unpacking it"; fi
+    tar -tvf "$work/b.tar" > "$work/list" || die "could not list $b"
+    if grep -v '^[-d]' "$work/list" > /dev/null; then die "$b contains links or special files; not unpacking it"; fi
     mkdir -p "$out/$machine"
     tar -C "$out/$machine" --no-same-owner --no-same-permissions -xf "$work/b.tar" || die "could not unpack $b"
     cp -f "$HUB/$machine/LAST-SYNC.txt" "$out/$machine/" 2>/dev/null || true

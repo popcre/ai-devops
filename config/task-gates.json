@@ -399,6 +399,14 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/ai-reviewer-logs-sync.cmd",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-ai-reviewer-logs-sync.sh",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },
