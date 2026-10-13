@@ -58,3 +58,16 @@ if ($extra.Count -gt 0) {
   throw "hosts.yml is still readable by: $(($extra | ForEach-Object { $_.IdentityReference.Value }) -join ', ')"
 }
 Write-Host "GitHub CLI credentials file is readable only by its owner, SYSTEM and Administrators."
+
+# Git must read the same login: Git Credential Manager's default Windows store is
+# also unreadable over SSH. Route github.com through gh (backing up .gitconfig).
+$helper = (& git config --global --get-all credential.https://github.com.helper 2>$null) -join "`n"
+if ($helper -notmatch 'auth git-credential') {
+  $gitConfig = if ($env:GIT_CONFIG_GLOBAL) { $env:GIT_CONFIG_GLOBAL } else { Join-Path $HOME ".gitconfig" }
+  if (Test-Path -LiteralPath $gitConfig) {
+    Copy-Item -LiteralPath $gitConfig -Destination ("$gitConfig.bak-" + (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ"))
+  }
+  & $GhPath auth setup-git --hostname $GitHubHost
+  if ($LASTEXITCODE -ne 0) { throw "Could not make git use the GitHub CLI login." }
+  Write-Host "Git now uses the GitHub CLI login for $GitHubHost."
+}
