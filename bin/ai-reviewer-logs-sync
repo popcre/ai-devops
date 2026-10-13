@@ -1,41 +1,37 @@
 #!/usr/bin/env bash
-# ai-reviewer-logs-sync — collect this machine's complete reviewer logs into
-# the private fleet-wide repository u2giants/ai-devops-reviewer-logs, so one AI
-# session can see every machine's reviewer evidence in one place.
+# ai-reviewer-logs-sync — put every machine's complete reviewer logs in one
+# place: the private repository u2giants/ai-devops-reviewer-logs. Files are
+# stored unmasked but encrypted, so nothing diagnostic is removed and nothing
+# readable (including any credential a log happened to capture) reaches GitHub.
 #
 # Usage:
-#   ai-reviewer-logs-sync [sync]   copy, scrub secret values, commit, push
-#   ai-reviewer-logs-sync schedule register an hourly run (Task Scheduler / crontab)
+#   ai-reviewer-logs-sync [sync]      encrypt new or changed evidence, commit, push
+#   ai-reviewer-logs-sync view [DIR]  decrypt the whole fleet archive into DIR
+#                                     (default ~/.cache/ai-devops-reviewer-logs-plain)
+#   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
 #   ai-reviewer-logs-sync unschedule
 #
-# Layout in the repository (one folder per machine, append-only):
-#   <machine>/reviewer-issues/   full incident packages (ai-reviewer-issue)
-#   <machine>/state/             review scoreboard, invocation events, lifecycle runs
-#   <machine>/reviews/<checkout>/ review reports (.ai/reviews) from every checkout
-#   <machine>/LAST-SYNC.txt      when and what was collected; SKIPPED.txt lists
-#                                files left out (too large or binary)
+# Archive layout (one folder per machine; nothing is ever deleted):
+#   <machine>/reviewer-issues/...       incident packages (ai-reviewer-issue)
+#   <machine>/state/...                 scoreboard, invocation events, lifecycle runs
+#   <machine>/reviews/<checkout>/...    .ai/reviews reports from every checkout
+#   every collected file is stored as <name>.cms (CMS, AES-256, RSA-4096 recipient)
+#   <machine>/LAST-SYNC.txt             last new evidence; whether that run was complete
+#   <machine>/SKIPPED.txt               files left out (over the size limit) with reasons
+#   File names that look like credentials are stored as withheld-<hash>.cms; the
+#   real names are in the encrypted <machine>/withheld-names.cms.
 #
-# Content is copied unchanged except recognizable secret VALUES (tokens, keys,
-# private-key blocks, labeled passwords), which become [REDACTED-SECRET]. A push
-# is refused if any secret pattern survives. The repository must be private:
-# unauthenticated access has to fail before anything is pushed.
-#
-# Boundary: masking is defense in depth, not the privacy boundary. A secret
-# written as unlabeled free prose cannot be recognized by any pattern; the
-# private, owner-only repository is the boundary, exactly as for the raw session
-# transcripts in u2giants/ai-devops-transcripts. Reviewer logs are the same kind
-# of local AI evidence and get the same treatment.
+# Writers need only the public certificate config/reviewer-logs-archive.crt.
+# Readers need the private key in 1Password (vibe_coding):
+#   "Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)"
+# The push is refused unless the repository is private (unauthenticated access
+# must fail) and every outgoing collected file is a CMS envelope.
 #
 # Environment:
-#   AI_REVIEWER_LOGS_REMOTE         remote URL (default the private fleet repository)
-#   AI_REVIEWER_LOGS_HUB            local clone (default ~/.cache/ai-devops-reviewer-logs)
-#   AI_REVIEWER_LOGS_ROOTS          colon-separated folders holding checkouts to scan
-#                                   for .ai/reviews (default: the toolkit's parent
-#                                   folder plus /c/repos /d/repos ~/repos /worksp)
-#   AI_REVIEWER_LOGS_MAX_FILE_BYTES largest file copied (default 5000000)
-#   AI_REVIEWER_LOGS_MACHINE        machine folder name (default lowercased hostname)
-#   AI_REVIEWER_ISSUE_DIR, AI_REVIEWER_STATE_BASE  as in ai-reviewer-issue
-#   AI_REVIEWER_LOGS_TEST_MODE=1    tests: allow a local remote, skip the privacy probe
+#   AI_REVIEWER_LOGS_REMOTE / _HUB / _ROOTS / _MAX_FILE_BYTES / _MACHINE / _CERT
+#   AI_REVIEWER_ISSUE_DIR, AI_REVIEWER_STATE_BASE   as in ai-reviewer-issue
+#   AI_REVIEWER_LOGS_KEY_FILE   view: use this key file instead of 1Password (tests)
+#   AI_REVIEWER_LOGS_TEST_MODE=1  tests: local remote allowed, no privacy probe
 set -euo pipefail
 
 _self="${BASH_SOURCE[0]}"
@@ -50,96 +46,54 @@ REMOTE="${AI_REVIEWER_LOGS_REMOTE:-https://$CANONICAL.git}"
 HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
 STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
-MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-5000000}"
+MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-20000000}"
+CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
+KEY_REF='op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM'
 MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
 case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
 LOG="$HOME_DIR/sync.log"
-
-# Detects survivors; the scrub below replaces whole values for each family.
-SECRET_RE='Basic[[:space:]]+[A-Za-z0-9+/]{8,}|npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
-R='[REDACTED-SECRET]'
-# Credential labels, including composite names such as AWS_SECRET_ACCESS_KEY.
-# Anything after the keyword must start with a separator, so usage counters such
-# as input_tokens or max_tokens are not credential labels and stay readable.
-LABEL="[A-Za-z0-9_.-]*(api[_ -]?key|access[_ -]?key|private[_ -]?key|token|secret|password|passwd|pwd|authorization|credential)([_.-][A-Za-z0-9_.-]*)?"
-# Any labeled value that is not already masked.
-VALUE="[^\"'[:space:]]"
-LABELED_RE="$LABEL[\"']?[[:space:]]*[:=][[:space:]]*[\"']?$VALUE"
+# Credential-looking file names are withheld from the clear-text tree.
+NAME_RE='gh[pousr]_[A-Za-z0-9]{20}|github_pat_|sk-[A-Za-z0-9]{20}|AKIA[0-9A-Z]{16}|xox[baprs]-|eyJ[A-Za-z0-9_-]{18,}\.|npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-|ops_[A-Za-z0-9]{20}|password|passwd|secret|token|api[_-]?key|credential'
 
 log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
-
 canonical_remote(){
   printf '%s\n' "$1" | sed -E -e 's#^(https?://|ssh://)?([^@/]+@)?##' -e 's#^github\.com:#github.com/#' -e 's#\.git$##' -e 's#/$##'
 }
-
-scrub(){
-  sed -E -i \
-    -e "/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\\$R" \
-    -e "s/npm_[A-Za-z0-9]{36,}/$R/g" \
-    -e "s/AIza[0-9A-Za-z_-]{35}/$R/g" \
-    -e "s/glpat-[A-Za-z0-9_-]{20,}/$R/g" \
-    -e "s/[rs]k_live_[A-Za-z0-9]{20,}/$R/g" \
-    -e "s#hooks\.slack\.com/services/[A-Za-z0-9/]+#hooks.slack.com/services/$R#g" \
-    -e "s#([a-z][a-z0-9+.-]*://[^/[:space:]:@]+:)[^/[:space:]@]{3,}@#\\1$R@#g" \
-    -e "s/ops_[A-Za-z0-9]{20,}/$R/g" \
-    -e "s/gh[pousr]_[A-Za-z0-9]{20,}/$R/g" \
-    -e "s/github_pat_[A-Za-z0-9_]{20,}/$R/g" \
-    -e "s/AKIA[0-9A-Z]{16}/$R/g" \
-    -e "s/xox[baprs]-[A-Za-z0-9-]{10,}/$R/g" \
-    -e "s/sk-[A-Za-z0-9_-]{20,}/$R/g" \
-    -e "s/eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]*/$R/g" \
-    -e "s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]{12,}/\\1$R/g" \
-    -e "s/(Basic[[:space:]]+)[A-Za-z0-9+\/]{8,}={0,2}/\\1$R/g" \
-    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*\")([^\"\\\\]|\\\\.)*\"/\\1$R\"/Ig" \
-    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*')([^'\\\\]|\\\\.)*'/\\1$R'/Ig" \
-    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*)$VALUE.*$/\\1$R/Ig" \
-    -e "s/(\\b(password|passwd|passphrase|secret|api key|token)[[:space:]]+(is|was|=|:)[[:space:]]+)$VALUE.*$/\\1$R/Ig" \
-    "$1"
-}
-
-# True when masking the file again would change nothing.
-scrub_is_stable(){
-  local probe="$HOME_DIR/probe.$$"
-  cp -f "$1" "$probe"; scrub "$probe"
-  if cmp -s "$1" "$probe"; then rm -f "$probe"; return 0; fi
-  rm -f "$probe"; return 1
-}
+# Native Windows openssl needs Windows paths; elsewhere this is a no-op.
+native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+ossl(){ MSYS2_ARG_CONV_EXCL='*' openssl "$@"; }
+encrypt(){ ossl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$1")" -out "$(native "$2")" "$(native "$CERT")"; }
+decrypt(){ ossl cms -decrypt -binary -inform DER -inkey "$(native "$3")" -in "$(native "$1")" -out "$(native "$2")"; }
 
 # copy_tree <source dir> <destination relative to the machine folder>
 copy_tree(){
-  local src="$1" dest="$HUB/$MACHINE/$2" file rel target size line digest
+  local src="$1" dest="$HUB/$MACHINE/$2" line digest file rel stored target size sums="$HOME_DIR/sums.$$"
   [ -d "$src" ] || return 0
-  # One hashing pass per tree: a file is re-collected whenever its content changes.
-  # Unreadable or vanished files are recorded in $ERRS and fail the run at the end.
-  local sums="$HOME_DIR/sums.$$"
+  # One hashing pass per tree; a file is re-collected whenever its content changes.
+  # Unreadable or vanished files land in $ERRS and mark the run partial.
   find "$src" -type f ! -name '*.tmp' -print0 2>>"$ERRS" | xargs -0 -r sha1sum -z -- > "$sums" 2>>"$ERRS" \
     || printf 'hashing failed under %s\n' "$2" >> "$ERRS"
   while IFS= read -r -d '' line; do
     # "<40-hex digest><space><' ' or '*' mode marker><path>"
     digest="${line:0:40}"; file="${line:42}"
     rel="${file#"$src"/}"
-    shopt -s nocasematch
-    case "$rel" in
-      *.env|*.env.*|.env|*.pem|*.key|*.p12|*.pfx|*id_rsa*|*id_ed25519*) printf '%s/%s\tsecret file type\n' "$2" "$rel" >> "$SKIPPED"; continue ;;
-    esac
-    if printf '%s' "$rel" | grep -Eqi "$SECRET_RE|$LABELED_RE"; then
-      printf '%s/[name withheld: looks like a secret]\tsecret in file name\n' "$2" >> "$SKIPPED"; continue
+    stored="$rel"
+    if printf '%s' "$rel" | grep -Eqi "$NAME_RE"; then
+      stored="$(dirname "$rel")/withheld-$(printf '%s' "$rel" | sha1sum | cut -c1-12)"
+      stored="${stored#./}"
+      printf '%s/%s\t%s/%s\n' "$2" "$stored" "$2" "$rel" >> "$WITHHELD"
     fi
-    target="$dest/$rel"
+    target="$dest/$stored.cms"
     NEW_SEEN["$file"]="$digest"
-    # Collected before and the content is unchanged.
     if [ -f "$target" ] && [ "${SEEN[$file]:-}" = "$digest" ]; then continue; fi
     size="$(wc -c < "$file")"
     if [ "$size" -gt "$MAX_BYTES" ]; then
-      printf '%s/%s\t%s bytes, over the size limit\n' "$2" "$rel" "$size" >> "$SKIPPED"; continue
-    fi
-    if [ "$size" -gt 0 ] && ! grep -Iq . "$file"; then
-      printf '%s/%s\tbinary\n' "$2" "$rel" >> "$SKIPPED"; continue
+      printf '%s/%s\t%s bytes, over the size limit\n' "$2" "$stored" "$size" >> "$SKIPPED"; continue
     fi
     mkdir -p "$(dirname "$target")"
-    cp -f "$file" "$target.tmp"
-    scrub "$target.tmp"
-    if [ -f "$target" ] && cmp -s "$target.tmp" "$target"; then rm -f "$target.tmp"; continue; fi
+    if ! encrypt "$file" "$target.tmp" 2>>"$ERRS"; then
+      rm -f "$target.tmp"; printf 'could not encrypt %s/%s\n' "$2" "$stored" >> "$ERRS"; continue
+    fi
     mv -f "$target.tmp" "$target"
     COPIED=$((COPIED + 1))
   done < "$sums"
@@ -156,18 +110,24 @@ ensure_hub(){
   fi
   if [ ! -d "$HUB/.git" ]; then
     mkdir -p "$(dirname "$HUB")"
-    GIT_TERMINAL_PROMPT=0 git clone -q -c core.symlinks=false "$REMOTE" "$HUB" || die "could not clone $REMOTE"
+    GIT_TERMINAL_PROMPT=0 git clone -q -c core.symlinks=false "$REMOTE" "$HUB" 2>>"$LOG" || die "could not clone $REMOTE"
+  fi
+  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
+    [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] || die "$HUB is not a clone of $REMOTE"
   fi
   # Repository content must never redirect writes outside the clone.
   git -C "$HUB" config --replace-all core.symlinks false
-  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
-    [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] \
-      || die "$HUB is not a clone of $REMOTE"
+  # Recover from an interrupted or refused run: keep finished commits, drop
+  # uncommitted edits (everything in the clone is regenerated from the sources,
+  # and nothing was remembered as collected when a run did not finish).
+  if git -C "$HUB" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    git -C "$HUB" reset -q --hard HEAD
+    git -C "$HUB" clean -qfd
   fi
   GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
   if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
     if git -C "$HUB" rev-parse -q --verify HEAD >/dev/null 2>&1; then
-      git -C "$HUB" rebase -q origin/main 2>>"$LOG" || { git -C "$HUB" rebase --abort 2>/dev/null; die "could not bring $HUB up to date"; }
+      git -C "$HUB" rebase -q origin/main 2>>"$LOG" || { git -C "$HUB" rebase --abort 2>/dev/null || true; die "could not bring $HUB up to date"; }
     else
       git -C "$HUB" checkout -q -B main origin/main
     fi
@@ -178,44 +138,34 @@ ensure_hub(){
 }
 
 write_readme(){
-  local readme="$HUB/README.md"
-  [ -f "$readme" ] && return 0
-  cat > "$readme" <<'EOF'
-# Fleet reviewer logs (private)
+  cat > "$HUB/README.md" <<'EOF'
+# Fleet reviewer logs (private, encrypted)
 
 Every ai-devops machine pushes its complete reviewer evidence here hourly
-(`bin/ai-reviewer-logs-sync` in popcre/ai-devops). One folder per machine:
+(`bin/ai-reviewer-logs-sync` in popcre/ai-devops). Nothing is masked or
+removed; every collected file is encrypted (`*.cms`).
 
-- `reviewer-issues/` — full incident packages from `ai-reviewer-issue`
+Read everything at once: `ai-reviewer-logs-sync view` on any ai-devops machine
+(it reads the private key from 1Password, vibe_coding, "Reviewer logs archive
+private key - ai-devops-reviewer-logs (fleet, decrypt only)", and decrypts into
+~/.cache/ai-devops-reviewer-logs-plain).
+
+One folder per machine:
+- `reviewer-issues/` — incident packages from `ai-reviewer-issue`
 - `state/review-scoreboard/` — every review's outcome record
 - `state/reviewer-events/` — start/exit record of every reviewer invocation
 - `state/review-lifecycle/runs/` — per-run lifecycle state
 - `reviews/<checkout>/` — review reports from each repository checkout
-- `LAST-SYNC.txt` — last collection time; `SKIPPED.txt` — files left out
-
-Only recognizable secret values are replaced with `[REDACTED-SECRET]`;
-everything else is the original text. Nothing is ever deleted here.
+- `LAST-SYNC.txt` — last new evidence and whether that run was complete
+- `SKIPPED.txt` — files over the size limit
+- `withheld-names.cms` — real names of files stored as `withheld-<hash>`
 EOF
 }
 
-# Evidence that could not be read never passes silently: list it and exit 2.
-report_errors(){
-  if [ -s "$ERRS" ]; then
-    log "PARTIAL: some evidence could not be read:"
-    sed 's/^/  /' "$ERRS" | tee -a "$LOG" >&2
-    rm -f "$ERRS"
-    exit 2
-  fi
-  rm -f "$ERRS"
-}
-
-save_seen(){
-  local k
-  for k in "${!NEW_SEEN[@]}"; do printf '%s\0%s\0' "$k" "${NEW_SEEN[$k]}"; done > "$HOME_DIR/seen.new"
-  mv -f "$HOME_DIR/seen.new" "$HOME_DIR/seen"
-}
-
-push_with_retry(){
+push_if_ahead(){
+  git -C "$HUB" rev-parse -q --verify HEAD >/dev/null 2>&1 || return 0
+  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1 && \
+     [ "$(git -C "$HUB" rev-list --count origin/main..HEAD)" = 0 ]; then return 0; fi
   local attempt
   for attempt in 1 2 3; do
     if GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG"; then return 0; fi
@@ -224,84 +174,146 @@ push_with_retry(){
   die "push to $REMOTE failed after 3 attempts"
 }
 
+save_seen(){
+  local k
+  for k in "${!NEW_SEEN[@]}"; do printf '%s\0%s\0' "$k" "${NEW_SEEN[$k]}"; done > "$HOME_DIR/seen.new"
+  mv -f "$HOME_DIR/seen.new" "$HOME_DIR/seen"
+}
+
 cmd_sync(){
   mkdir -p "$HOME_DIR"
   take_lock "$HOME_DIR/sync.lock" 60
   rotate_log "$LOG"
+  [ -f "$CERT" ] || die "archive certificate missing: $CERT"
   ensure_hub
   write_readme
   mkdir -p "$HUB/$MACHINE"
-  SKIPPED="$HUB/$MACHINE/SKIPPED.txt.new"; : > "$SKIPPED"
+  SKIPPED="$HOME_DIR/skipped.$$"; WITHHELD="$HOME_DIR/withheld.$$"; ERRS="$HOME_DIR/errors.$$"
+  : > "$SKIPPED"; : > "$WITHHELD"; : > "$ERRS"
   COPIED=0
-  ERRS="$HOME_DIR/errors.$$"; : > "$ERRS"
-  # Size and modification time of every source already collected (local only).
   declare -gA SEEN=() NEW_SEEN=()
   local key val
   if [ -f "$HOME_DIR/seen" ]; then
     while IFS= read -r -d '' key && IFS= read -r -d '' val; do SEEN["$key"]="$val"; done < "$HOME_DIR/seen"
   fi
+
   copy_tree "$ISSUES" reviewer-issues
   copy_tree "$STATE/review-scoreboard" state/review-scoreboard
   copy_tree "$STATE/reviewer-events" state/reviewer-events
   copy_tree "$STATE/review-lifecycle/runs" state/review-lifecycle/runs
   local roots root dir checkout
   roots="${AI_REVIEWER_LOGS_ROOTS:-$(dirname "$TOOL_ROOT"):/c/repos:/d/repos:$HOME/repos:/worksp}"
-  declare -A seen=()
+  declare -A seen_dirs=()
   IFS=: read -r -a root_list <<< "$roots"
   for root in "${root_list[@]}"; do
     [ -d "$root" ] || continue
     while IFS= read -r -d '' dir; do
       dir="$(cd "$dir" && pwd -P)"
-      [ -n "${seen[$dir]:-}" ] && continue
-      seen[$dir]=1
+      [ -n "${seen_dirs[$dir]:-}" ] && continue
+      seen_dirs[$dir]=1
       # Readable name plus a hash of the full path: distinct checkouts never share a folder.
       checkout="$(dirname "$(dirname "$dir")")"
       checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha1sum | cut -c1-8)"
       copy_tree "$dir" "reviews/$checkout"
     done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>>"$ERRS")
   done
-  sort -u "$SKIPPED" > "$HUB/$MACHINE/SKIPPED.txt"; rm -f "$SKIPPED"
 
-  git -C "$HUB" add -A README.md "$MACHINE"
-  # Leak gate: no recognizable token, no secret-looking name, and masking the
-  # outgoing text again must change nothing (every labeled value already masked).
-  local hits=() rel
-  while IFS= read -r -d '' rel; do
-    [ -f "$HUB/$rel" ] || continue
-    if printf '%s' "$rel" | grep -Eqi "$SECRET_RE|$LABELED_RE"; then hits+=("[file name withheld]"); continue; fi
-    if grep -Eq "$SECRET_RE" "$HUB/$rel" || ! scrub_is_stable "$HUB/$rel"; then hits+=("$rel"); fi
-  done < <(git -C "$HUB" diff --cached --name-only -z)
-  if ((${#hits[@]})); then
-    git -C "$HUB" reset -q
-    log "BLOCKED: secret patterns survived scrubbing in:"; printf '  %s\n' "${hits[@]}" | tee -a "$LOG" >&2
-    exit 1
+  sort -u "$SKIPPED" > "$HUB/$MACHINE/SKIPPED.txt"
+  if [ -s "$WITHHELD" ]; then
+    local names="$HOME_DIR/names.$$"
+    # Every run lists every current file, so this is the complete name map.
+    sort -u "$WITHHELD" > "$names"
+    if [ -f "$HUB/$MACHINE/withheld-names.list.sha1" ] && \
+       [ "$(sha1sum < "$names" | cut -c1-40)" = "$(cat "$HUB/$MACHINE/withheld-names.list.sha1")" ]; then :; else
+      encrypt "$names" "$HUB/$MACHINE/withheld-names.cms" && sha1sum < "$names" | cut -c1-40 > "$HUB/$MACHINE/withheld-names.list.sha1"
+    fi
+    rm -f "$names"
   fi
+  rm -f "$SKIPPED" "$WITHHELD"
 
-  # Unreadable evidence: push what was collected, keep the run marked partial,
-  # and do not remember anything as collected so the next run retries all of it.
-  local partial=0
+  local partial=0 stale_partial=0
   [ -s "$ERRS" ] && partial=1
-  # A clean run after a partial one must clear the partial mark even with no new files.
-  local stale_partial=0
   [ "$partial" = 0 ] && grep -q '^complete: no' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null && stale_partial=1
-  if git -C "$HUB" diff --cached --quiet && [ "$stale_partial" = 0 ]; then
-    if [ "$partial" = 0 ]; then save_seen; log "$MACHINE: nothing new"; fi
-  else
+  git -C "$HUB" add -A README.md "$MACHINE"
+  if ! git -C "$HUB" diff --cached --quiet || [ "$partial" = 1 ] || [ "$stale_partial" = 1 ]; then
     printf 'machine: %s\nlast new evidence collected: %s\nfiles updated in that run: %s\ncomplete: %s\n' \
       "$MACHINE" "$(stamp)" "$COPIED" "$([ "$partial" = 0 ] && echo yes || echo 'no - some files could not be read')" > "$HUB/$MACHINE/LAST-SYNC.txt"
     git -C "$HUB" add "$MACHINE/LAST-SYNC.txt"
+  fi
+
+  # Leak gate over everything that would reach GitHub (staged files and any
+  # unpushed commits): each collected file must parse as a CMS enveloped-data
+  # structure; only the generated clear-text index files may be plain.
+  local bad=() rel outgoing=()
+  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    outgoing=(diff --cached --name-only --diff-filter=ACMR -z origin/main)
+  else
+    outgoing=(ls-files -z)
+  fi
+  while IFS= read -r -d '' rel; do
+    [ -f "$HUB/$rel" ] || continue
+    case "$rel" in
+      README.md|*/LAST-SYNC.txt|*/SKIPPED.txt|*/withheld-names.list.sha1) continue ;;
+      *.cms) ossl cms -cmsout -print -noout -inform DER -in "$(native "$HUB/$rel")" 2>/dev/null | grep -q 'pkcs7-envelopedData' && continue ;;
+    esac
+    bad+=("$rel")
+  done < <(git -C "$HUB" "${outgoing[@]}")
+  if ((${#bad[@]})); then
+    git -C "$HUB" reset -q
+    if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then git -C "$HUB" reset -q --hard origin/main; fi
+    log "BLOCKED: refusing to push files that are not encrypted:"; printf '  %s\n' "${bad[@]}" | tee -a "$LOG" >&2
+    exit 1
+  fi
+
+  if ! git -C "$HUB" diff --cached --quiet; then
     git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)$([ "$partial" = 0 ] || echo ' (partial)')"
-    push_with_retry
-    if [ "$partial" = 0 ]; then save_seen; log "$MACHINE: sync complete ($COPIED files updated)"; fi
+  fi
+  push_if_ahead
+  if [ "$partial" = 0 ]; then
+    save_seen
+    if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files updated)"; fi
   fi
   unlock "$HOME_DIR/sync.lock"
-  report_errors
+  if [ -s "$ERRS" ]; then
+    log "PARTIAL: some evidence could not be read (it is retried next run):"
+    sed 's/^/  /' "$ERRS" | tee -a "$LOG" >&2
+    rm -f "$ERRS"
+    exit 2
+  fi
+  rm -f "$ERRS"
+}
+
+cmd_view(){
+  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile work f rel n=0 failed=0
+  ensure_hub
+  work="$(mktemp -d)"; chmod 700 "$work"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" EXIT
+  if [ -n "${AI_REVIEWER_LOGS_KEY_FILE:-}" ]; then
+    keyfile="$AI_REVIEWER_LOGS_KEY_FILE"
+  else
+    command -v op >/dev/null 2>&1 || die "1Password CLI (op) is required to read the archive key"
+    keyfile="$work/key.pem"
+    (umask 077; op read "$KEY_REF" < /dev/null > "$keyfile") || die "could not read the archive key from 1Password"
+  fi
+  mkdir -p "$out"; chmod 700 "$out"
+  while IFS= read -r -d '' f; do
+    rel="${f#"$HUB"/}"; rel="${rel%.cms}"
+    mkdir -p "$out/$(dirname "$rel")"
+    if decrypt "$f" "$out/$rel" "$keyfile" 2>/dev/null; then n=$((n + 1)); else failed=$((failed + 1)); fi
+  done < <(find "$HUB" -path "$HUB/.git" -prune -o -type f -name '*.cms' -print0)
+  cp -f "$HUB/README.md" "$out/" 2>/dev/null || true
+  find "$HUB" -path "$HUB/.git" -prune -o -type f \( -name LAST-SYNC.txt -o -name SKIPPED.txt \) -print0 |
+    while IFS= read -r -d '' f; do rel="${f#"$HUB"/}"; mkdir -p "$out/$(dirname "$rel")"; cp -f "$f" "$out/$rel"; done
+  printf 'decrypted %s files into %s\n' "$n" "$out"
+  [ "$failed" = 0 ] || die "$failed files could not be decrypted"
 }
 
 case "${1:-sync}" in
   sync) cmd_sync ;;
+  view) shift; cmd_view "$@" ;;
   schedule) register_timer 60 "$TOOL_ROOT/bin/ai-reviewer-logs-sync" sync ;;
   unschedule) unregister_timer ;;
-  -h|--help|help) sed -n '2,32p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,35p' "$_self" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command; see ai-reviewer-logs-sync --help" ;;
 esac

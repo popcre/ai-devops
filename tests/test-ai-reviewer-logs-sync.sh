@@ -6,135 +6,108 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 pass=0
 check(){ if eval "$2"; then pass=$((pass + 1)); printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1" >&2; exit 1; fi; }
+native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+
+# Throwaway archive key pair for the test.
+(umask 077; MSYS2_ARG_CONV_EXCL='*' openssl req -x509 -newkey rsa:2048 -nodes -keyout "$(native "$TMP/key.pem")" \
+  -out "$(native "$TMP/cert.pem")" -days 2 -subj "/CN=test archive" >/dev/null 2>&1)
 
 REMOTE="$TMP/logs.git"
 git init -q --bare "$REMOTE"
 git -C "$REMOTE" symbolic-ref HEAD refs/heads/main
 
-STATE="$TMP/state"; ISSUES="$TMP/issues"; REPOS="$TMP/repos"
+STATE="$TMP/state"; ISSUES="$TMP/issues"; REPOS="$TMP/repos"; REPOS2="$TMP/other/repos"
 mkdir -p "$STATE/review-scoreboard" "$STATE/reviewer-events" "$STATE/review-lifecycle/runs/r1" \
-  "$ISSUES/20261013-pkg" "$REPOS/app-one/.ai/reviews" "$STATE/qwen/sessions"
+  "$ISSUES/pkg" "$REPOS/app-one/.ai/reviews" "$REPOS2/app-one/.ai/reviews" "$STATE/qwen/sessions"
 printf '{"verdict":"REJECT"}\n' > "$STATE/review-scoreboard/reviews.jsonl"
 printf '{"event":"start"}\n' > "$STATE/reviewer-events/events.jsonl"
-printf 'state\n' > "$STATE/review-lifecycle/runs/r1/run.json"
+printf 'AAAA\n' > "$STATE/review-lifecycle/runs/r1/run.json"
 printf 'big\n' > "$STATE/qwen/sessions/huge.json"
 fake_gh="gh""p_""abcdefghijklmnopqrstuvwxyz0123"
-fake_sk="sk-""ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
-cat > "$ISSUES/20261013-pkg/provider.log" <<EOF
-reviewer said: exit 1 after timeout
-token=$fake_gh
-Authorization: Bearer abcdefghijklmnop.qrstuvwx
-key $fake_sk end
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAA
------END OPENSSH PRIVATE KEY-----
-after key
-EOF
-printf 'A=1\n' > "$ISSUES/20261013-pkg/local.env"
-printf '\000\001\002binary' > "$ISSUES/20261013-pkg/blob.bin"
-head -c 3000 /dev/zero | tr '\0' 'x' > "$ISSUES/20261013-pkg/large.txt"
+printf 'reviewer said: exit 1 after timeout\ntoken=%s\nthe password is hunter3word\n' "$fake_gh" > "$ISSUES/pkg/provider.log"
+printf '\000\001\002binary' > "$ISSUES/pkg/blob.bin"
+head -c 3000 /dev/zero | tr '\0' 'x' > "$ISSUES/pkg/large.txt"
+printf 'x\n' > "$ISSUES/pkg/"'name-$(touch PWNED).log'
+printf 'x\n' > "$ISSUES/pkg/$fake_gh.log"
 printf '# review\nVERDICT: APPROVE\n' > "$REPOS/app-one/.ai/reviews/codex-final-check.md"
-REPOS2="$TMP/other/repos"; mkdir -p "$REPOS2/app-one/.ai/reviews"
 printf 'second checkout\n' > "$REPOS2/app-one/.ai/reviews/codex-final-check.md"
-printf 'x\n' > "$ISSUES/20261013-pkg/"'name-$(touch PWNED).log'
-fake_npm="npm_""abcdefghijklmnopqrstuvwxyz0123456789"
-printf 'db postgres://admin:hunter2pass@db.example:5432/app\nnpm %s\n' "$fake_npm" > "$ISSUES/20261013-pkg/urls.log"
 
 run(){
   HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
-    AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" \
+    AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 \
+    AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" AI_REVIEWER_LOGS_CERT="$TMP/cert.pem" \
+    AI_REVIEWER_LOGS_KEY_FILE="$TMP/key.pem" \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
     bash "$ROOT/bin/ai-reviewer-logs-sync" "$@"
 }
+view(){ rm -rf "$TMP/plain"; run view "$TMP/plain" >/dev/null 2>&1; }
 
 run sync 2> "$TMP/out1" || { cat "$TMP/out1" >&2; exit 1; }
 VIEW="$TMP/view"; git clone -q "$REMOTE" "$VIEW"
-M="$VIEW/test-box"
+M="$VIEW/test-box"; P="$TMP/plain/test-box"
 check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && [ -f '$VIEW/README.md' ]"
-check 'incident package copied' "grep -q 'exit 1 after timeout' '$M/reviewer-issues/20261013-pkg/provider.log'"
-check 'scoreboard, events and lifecycle copied' "[ -f '$M/state/review-scoreboard/reviews.jsonl' ] && [ -f '$M/state/reviewer-events/events.jsonl' ] && [ -f '$M/state/review-lifecycle/runs/r1/run.json' ]"
-check 'review reports copied per checkout' "[ \$(grep -rl APPROVE '$M/reviews' | wc -l) -eq 1 ] && [ \$(grep -rl 'second checkout' '$M/reviews' | wc -l) -eq 1 ]"
-check 'same-named checkouts kept apart' "[ \$(ls '$M/reviews' | wc -l) -eq 2 ]"
-check 'odd filenames are data, never commands' "[ ! -e PWNED ] && [ ! -e '$TMP/home/PWNED' ] && ls '$M/reviewer-issues/20261013-pkg' | grep -q 'touch PWNED'"
-check 'URL passwords and npm tokens redacted' "! grep -q hunter2pass '$M/reviewer-issues/20261013-pkg/urls.log' && grep -q 'postgres://admin:' '$M/reviewer-issues/20261013-pkg/urls.log' && ! grep -q '$fake_npm' '$M/reviewer-issues/20261013-pkg/urls.log'"
-check 'token values redacted' "! grep -q '$fake_gh' '$M/reviewer-issues/20261013-pkg/provider.log' && ! grep -q '$fake_sk' '$M/reviewer-issues/20261013-pkg/provider.log'"
-check 'bearer and private key redacted, text around kept' "! grep -q 'abcdefghijklmnop' '$M/reviewer-issues/20261013-pkg/provider.log' && ! grep -q b3BlbnNz '$M/reviewer-issues/20261013-pkg/provider.log' && grep -q 'after key' '$M/reviewer-issues/20261013-pkg/provider.log'"
-check 'secret file types, binaries and large files skipped and listed' "[ ! -e '$M/reviewer-issues/20261013-pkg/local.env' ] && [ ! -e '$M/reviewer-issues/20261013-pkg/blob.bin' ] && [ ! -e '$M/reviewer-issues/20261013-pkg/large.txt' ] && [ \$(grep -c . '$M/SKIPPED.txt') -eq 3 ]"
-check 'provider session stores are not collected' "[ ! -e '$M/state/qwen' ]"
-check 'source files are untouched' "grep -q '$fake_gh' '$ISSUES/20261013-pkg/provider.log'"
+check 'every collected file is encrypted' "[ -z \"\$(git -C '$VIEW' ls-files | grep -v -e '\.cms\$' -e '^README.md\$' -e 'LAST-SYNC.txt\$' -e 'SKIPPED.txt\$' -e 'withheld-names.list.sha1\$')\" ]"
+check 'no clear text from the logs reaches the repository' "! git -C '$VIEW' grep -q -e 'after timeout' -e hunter3word -e APPROVE"
+view
+check 'view decrypts complete, unmasked evidence' "cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log' && cmp -s '$ISSUES/pkg/blob.bin' '$P/reviewer-issues/pkg/blob.bin'"
+check 'scoreboard, events and lifecycle collected' "[ -f '$P/state/review-scoreboard/reviews.jsonl' ] && [ -f '$P/state/reviewer-events/events.jsonl' ] && [ -f '$P/state/review-lifecycle/runs/r1/run.json' ]"
+check 'review reports from same-named checkouts kept apart' "[ \$(ls '$P/reviews' | wc -l) -eq 2 ] && [ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ] && [ \$(grep -rl 'second checkout' '$P/reviews' | wc -l) -eq 1 ]"
+check 'credential-looking names withheld and mapped' "! git -C '$VIEW' ls-files | grep -q '$fake_gh' && grep -q '$fake_gh' '$P/withheld-names'"
+check 'odd file names are data, never commands' "[ ! -e PWNED ] && [ ! -e '$TMP/home/PWNED' ] && ls '$P/reviewer-issues/pkg' | grep -q 'touch PWNED'"
+check 'oversized files skipped and listed' "[ ! -e '$P/reviewer-issues/pkg/large.txt' ] && grep -q 'large.txt' '$M/SKIPPED.txt'"
+check 'provider session stores are not collected' "[ ! -e '$P/state/qwen' ]"
 
 run sync 2> "$TMP/out2"
 check 'unchanged rerun pushes nothing new' "grep -q 'nothing new' '$TMP/out2' && [ \$(git -C '$REMOTE' rev-list --count main) -eq 1 ]"
 
-printf '{"verdict":"APPROVE"}\n' >> "$STATE/review-scoreboard/reviews.jsonl"
+printf 'BBBB\n' > "$STATE/review-lifecycle/runs/r1/run.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/run.json"
 rm -f "$REPOS/app-one/.ai/reviews/codex-final-check.md"
-run sync 2> "$TMP/out3"
-git -C "$VIEW" pull -q
-check 'new evidence is appended' "grep -q APPROVE '$M/state/review-scoreboard/reviews.jsonl'"
-check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$M/reviews' | wc -l) -eq 1 ]"
+run sync 2> "$TMP/out3" || { cat "$TMP/out3" >&2; exit 1; }
+view
+check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
+check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
-# Basic authentication values are masked.
-printf 'Authorization: Basic dXNlcjpodW50ZXIycGFzcw==\n' > "$ISSUES/20261013-pkg/basic.log"
-run sync 2> "$TMP/out4"
-git -C "$VIEW" pull -q
-check 'basic auth masked' "! grep -q dXNlcjpodW50ZXIy '$M/reviewer-issues/20261013-pkg/basic.log'"
-
-# Short and spaced labeled passwords, secret-looking file names, and evidence
-# restored with an older timestamp.
-printf 'password=abc\n"secret": "two words here"\n' > "$ISSUES/20261013-pkg/labels.log"
-printf 'x\n' > "$ISSUES/20261013-pkg/$fake_gh.log"
-printf 'restored older content\n' > "$STATE/review-lifecycle/runs/r1/run.json"
-touch -d '2001-01-01' "$STATE/review-lifecycle/runs/r1/run.json"
-run sync 2> "$TMP/out6" || { cat "$TMP/out6" >&2; exit 1; }
-git -C "$VIEW" pull -q
-check 'short and spaced labeled values masked' "! grep -q 'abc' '$M/reviewer-issues/20261013-pkg/labels.log' && ! grep -q 'two words' '$M/reviewer-issues/20261013-pkg/labels.log'"
-check 'secret-looking file names are withheld' "! ls '$M/reviewer-issues/20261013-pkg' | grep -q '$fake_gh' && grep -q 'secret in file name' '$M/SKIPPED.txt'"
-check 'older-timestamp restores are collected' "grep -q 'restored older content' '$M/state/review-lifecycle/runs/r1/run.json'"
-
-# Composite labels, unquoted spaced values, odd secret file names, rewrites
-# that keep size and time, and unsafe machine names.
-printf 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI\ndb_password: my secret phrase\n"input_tokens": 51234\n' > "$ISSUES/20261013-pkg/composite.log"
-printf 'A=1\n' > "$ISSUES/20261013-pkg/prod.ENV.local"
-printf 'x\n' > "$ISSUES/20261013-pkg/$(printf '%s' "$fake_gh" | tr 'a-z' 'A-Z').log"
-printf 'AAAA\n' > "$STATE/review-lifecycle/runs/r1/same.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/same.json"
-run sync 2> "$TMP/out7" || { cat "$TMP/out7" >&2; exit 1; }
-printf 'BBBB\n' > "$STATE/review-lifecycle/runs/r1/same.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/same.json"
-run sync 2> "$TMP/out8" || { cat "$TMP/out8" >&2; exit 1; }
-git -C "$VIEW" pull -q
-check 'composite labels and spaced values masked, counts kept' "! grep -q wJalr '$M/reviewer-issues/20261013-pkg/composite.log' && ! grep -q 'secret phrase' '$M/reviewer-issues/20261013-pkg/composite.log' && grep -q 51234 '$M/reviewer-issues/20261013-pkg/composite.log'"
-check 'env variants and uppercase secret names withheld' "[ ! -e '$M/reviewer-issues/20261013-pkg/prod.ENV.local' ] && ! ls '$M/reviewer-issues/20261013-pkg' | grep -qi '$fake_gh'"
-check 'same-size same-time rewrites are collected' "grep -q BBBB '$M/state/review-lifecycle/runs/r1/same.json'"
-check 'path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"
-
-# Digit-led short secrets are masked; unreadable evidence fails the run loudly.
-printf 'password=1234\napi_key=1abc\n' > "$ISSUES/20261013-pkg/digits.log"
-run sync 2> "$TMP/out9" || { cat "$TMP/out9" >&2; exit 1; }
-git -C "$VIEW" pull -q
-check 'digit-led short secrets masked' "! grep -q 1234 '$M/reviewer-issues/20261013-pkg/digits.log' && ! grep -q 1abc '$M/reviewer-issues/20261013-pkg/digits.log'"
-# Bracket-led and escaped-quote values are masked completely.
-printf 'password=[hunter2]\n"token": "ab\\"cdSECRETTAIL"\n' > "$ISSUES/20261013-pkg/edge.log"
-run sync 2> "$TMP/out11" || { cat "$TMP/out11" >&2; exit 1; }
-git -C "$VIEW" pull -q
-check 'bracket-led and escaped-quote values masked' "! grep -q hunter2 '$M/reviewer-issues/20261013-pkg/edge.log' && ! grep -q SECRETTAIL '$M/reviewer-issues/20261013-pkg/edge.log'"
-
-printf 'locked\n' > "$ISSUES/20261013-pkg/locked.log"
+# Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
-printf '#!/usr/bin/env bash
-case " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac
-exec "%s" "$@"
-' "$real_sha1" > "$TMP/badbin/sha1sum"; chmod +x "$TMP/badbin/sha1sum"
-rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out10" || rc=$?
-check 'hashing failures fail the run and stay marked partial' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out10' && ! grep -q 'sync complete' '$TMP/out10'"
-rm -rf "$TMP/badbin"
-run sync 2> "$TMP/out12" || { cat "$TMP/out12" >&2; exit 1; }
+printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"
+chmod +x "$TMP/badbin/sha1sum"
+rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out4" || rc=$?
 git -C "$VIEW" pull -q
-check 'a clean retry clears the partial mark' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
-check 'option-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=--dry-run run sync 2>/dev/null"
-printf 'the password is hunter3word\n' > "$ISSUES/20261013-pkg/prose.log"
-run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
+check 'read failures fail the run and are published as incomplete' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out4' && grep -q '^complete: no' '$M/LAST-SYNC.txt'"
+run sync 2> "$TMP/out5" || { cat "$TMP/out5" >&2; exit 1; }
 git -C "$VIEW" pull -q
-check 'sentence-form passwords masked' "! grep -q hunter3word '$M/reviewer-issues/20261013-pkg/prose.log'"
+check 'a clean retry clears the incomplete mark' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
+
+# An interrupted delivery (committed, not pushed) is pushed by the next run.
+git -C "$TMP/hub" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m stranded
+run sync 2> "$TMP/out6" || { cat "$TMP/out6" >&2; exit 1; }
+check 'stranded commits are delivered' "git -C '$REMOTE' log --format=%s main | grep -q stranded"
+
+# Leak gate: if encryption silently produced clear text, nothing is pushed.
+mkdir -p "$TMP/badssl"
+cat > "$TMP/badssl/openssl" <<'FAKE'
+#!/usr/bin/env bash
+in=; out=
+while [ $# -gt 0 ]; do case "$1" in -in) in="$2"; shift ;; -out) out="$2"; shift ;; esac; shift; done
+cp "$in" "$out"
+FAKE
+chmod +x "$TMP/badssl/openssl"
+printf '0 starts like DER
+' > "$ISSUES/pkg/new.log"
+before="$(git -C "$REMOTE" rev-parse main)"
+check 'clear-text output is refused, even when it starts with 0' "! PATH='$TMP/badssl':\"\$PATH\" run sync 2> '$TMP/out7' && grep -q 'not encrypted' '$TMP/out7' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
+run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
+
+# A stranded commit carrying clear text is never pushed.
+printf 'stranded clear text
+' > "$TMP/hub/test-box/reviewer-issues/pkg/sneak.cms"
+git -C "$TMP/hub" add -A && git -C "$TMP/hub" -c user.name=t -c user.email=t@example.invalid commit -qm sneak
+before="$(git -C "$REMOTE" rev-parse main)"
+check 'unpushed clear-text commits are refused' "! run sync 2> '$TMP/out9' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
+check 'the shipped certificate is tracked' "git -C '$ROOT' ls-files --error-unmatch config/reviewer-logs-archive.crt >/dev/null 2>&1"
+
+check 'option-like and path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=--dry-run run sync 2>/dev/null && ! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"
 
 # A symbolic link committed to the repository stops the sync before any write.
 git -C "$VIEW" pull -q
@@ -144,7 +117,8 @@ blob="$(git -C "$VIEW" hash-object -w "$TMP/target")"
 git -C "$VIEW" update-index --add --cacheinfo 120000,"$blob",evil-link
 git -C "$VIEW" commit -qm link && git -C "$VIEW" push -q origin HEAD:main
 printf 'more\n' >> "$STATE/reviewer-events/events.jsonl"
-check 'repository symlinks refused' "! run sync 2> '$TMP/out5' && grep -q 'symbolic links' '$TMP/out5' && [ ! -e '$TMP/outside' ]"
+rc8=0; run sync 2> "$TMP/out8" || rc8=$?
+check 'repository symlinks refused' "[ $rc8 -ne 0 ] && grep -q 'symbolic links' '$TMP/out8' && [ ! -e '$TMP/outside' ]"
 check 'program is executable in git' "[ \"\$(git -C '$ROOT' ls-files -s bin/ai-reviewer-logs-sync | cut -c1-6)\" = 100755 ]"
 
 printf 'PASS test-ai-reviewer-logs-sync (%s checks)\n' "$pass"
