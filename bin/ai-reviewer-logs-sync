@@ -171,8 +171,10 @@ stage_tree(){
 ensure_hub(){
   if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
     [ "$(canonical_remote "$REMOTE")" = "$CANONICAL" ] || die "remote is not the private reviewer-logs repository"
-    if GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -c credential.helper= -c core.askPass= \
-        ls-remote "https://$CANONICAL.git" >/dev/null 2>&1; then
+    # Truly anonymous: no askpass programs, no user or system git config.
+    if env -u GIT_ASKPASS -u SSH_ASKPASS -u GH_TOKEN -u GITHUB_TOKEN \
+        GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+        git -c credential.helper= -c core.askPass= ls-remote "https://$CANONICAL.git" >/dev/null 2>&1; then
       die "reviewer-logs repository is publicly readable; refusing to sync"
     fi
     # A failed anonymous read could just be a network error: GitHub itself must

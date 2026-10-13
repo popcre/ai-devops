@@ -407,6 +407,18 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "tools/lib/local-watch.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-gh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/windows-private-file.ps1",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },
