@@ -1,3 +1,9 @@
+---
+issue: none                          # added by #1562 review repair: the plan PR (#1610) named no issue
+status: OPEN
+owner: mimo/jev-review-waste-plan
+---
+
 # HANDOFF — Jev review-waste mining plan (2026-10-12T1444Z, edge-dev/MiMo)
 
 This is a **write-once** session handoff. Do not edit it later; create a new file for follow-on work.

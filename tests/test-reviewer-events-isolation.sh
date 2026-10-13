@@ -11,6 +11,12 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 live="$(cd "$ROOT/tools" && "$PY" -c 'import reviewer_events; print(reviewer_events.live_location())')"
 resolve(){ (cd "$ROOT/tools" && env "$@" "$PY" -c 'import reviewer_events; print(reviewer_events.location())'); }
+# The real profile home, in Python's own spelling (C:\Users\... on Windows), so
+# the default-live probe needs no POSIX suffix strip.
+live_home="$(cd "$ROOT/tools" && "$PY" -c 'import reviewer_events; print(reviewer_events._profile_home())')"
+# Windows Python prints C:\...\Temp paths for Git Bash /tmp inputs; compare
+# both spellings through cygpath where it exists.
+same_path(){ [ "$1" = "$2" ] && return 0; command -v cygpath >/dev/null 2>&1 || return 1; [ "$(cygpath -u "$1")" = "$(cygpath -u "$2")" ]; }
 
 check "harness exports the test isolation marker" '[ "${AI_REVIEW_TEST_ISOLATION:-}" = 1 ]'
 check "harness gives the suite a private events directory" '[ -n "${AI_REVIEW_EVENT_DIR:-}" ] && [ -d "$AI_REVIEW_EVENT_DIR" ]'
@@ -33,17 +39,43 @@ check "nested test cannot append into inherited caller ledger" '[ "$(cat "$TMP/p
 out="$(resolve AI_REVIEW_TEST_ISOLATION=1 AI_REVIEW_EVENT_DIR="$live" 2>&1)"; rc=$?
 check "marker refuses an explicit live events directory" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "refused the live reviewer events log"'
 
-out="$(resolve -u AI_REVIEW_EVENT_DIR -u AI_REVIEWER_STATE_BASE AI_REVIEW_TEST_ISOLATION=1 HOME="${live%/.local/state/ai-devops/reviewer-events}" 2>&1)"; rc=$?
+out="$(resolve -u AI_REVIEW_EVENT_DIR -u AI_REVIEWER_STATE_BASE AI_REVIEW_TEST_ISOLATION=1 HOME="$live_home" 2>&1)"; rc=$?
 check "marker refuses the default live location" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "refused the live reviewer events log"'
 
 out="$(resolve -u AI_REVIEW_TEST_ISOLATION AI_REVIEW_EVENT_DIR="$live" 2>&1)"; rc=$?
 check "real runs without the marker still use the live ledger" '[ "$rc" -eq 0 ] && [ "$out" = "$live" ]'
 
 out="$(resolve -u AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION=1 AI_REVIEWER_STATE_BASE="$TMP/base" 2>&1)"; rc=$?
-check "marker allows a private state base" '[ "$rc" -eq 0 ] && [ "$out" = "$TMP/base/reviewer-events" ]'
+check "marker allows a private state base" '[ "$rc" -eq 0 ] && same_path "$out" "$TMP/base/reviewer-events"'
 
 out="$(resolve -u AI_REVIEW_EVENT_DIR -u AI_REVIEWER_STATE_BASE AI_REVIEW_TEST_ISOLATION=1 HOME="$TMP/home" 2>&1)"; rc=$?
-check "marker allows a substituted test HOME" '[ "$rc" -eq 0 ] && [ "$out" = "$TMP/home/.local/state/ai-devops/reviewer-events" ]'
+check "marker allows a substituted test HOME" '[ "$rc" -eq 0 ] && same_path "$out" "$TMP/home/.local/state/ai-devops/reviewer-events"'
+
+# Windows passed-head lookup: a missing cygpath skips that one report instead
+# of raising out of the whole lookup (which ai-review-preflight turns into exit 3).
+mkdir -p "$TMP/ph/runs/$(printf 'c%.0s' {1..64})/deepseek/claude"
+cygpath_probe="$(cd "$ROOT/tools" && STATE="$TMP/ph" "$PY" - <<'PYEOF' 2>&1
+import json, os, subprocess
+from pathlib import Path
+from unittest import mock
+import reviewer_events as r
+key = "c" * 64; head = "a" * 40; dig = "b" * 64; rid = "20261012T000000-1-1"
+Path(os.environ["STATE"], "runs", key, "deepseek", "claude", rid + ".json").write_text(json.dumps({
+    "schema_version": 1, "provider": "deepseek", "review_mode": "final-check", "head": head,
+    "source_digest": dig, "repository_key": key, "status": "completed", "verdict": "APPROVE",
+    "stale": False, "failure_class": None, "run_id": rid,
+    "report_path": "/c/nowhere/deepseek-final-check-" + rid + ".md", "report_sha256": "0" * 64}))
+class NtOs:
+    name = "nt"
+    def __getattr__(self, attr):
+        return getattr(os, attr)
+def no_cygpath(*a, **k):
+    raise FileNotFoundError("cygpath")
+with mock.patch.object(r, "os", NtOs()), mock.patch.object(r.subprocess, "run", no_cygpath):
+    print("result=%r" % (r.find_passing_report(os.environ["STATE"], "deepseek", "final-check", head, dig, key),))
+PYEOF
+)"
+check "passed-head skips a report when cygpath is missing" '[ "$cygpath_probe" = "result=None" ]'
 
 # Wrappers scrub their environment before recording; the marker must survive.
 check "event guard forwards the marker on every recording path" \

@@ -316,9 +316,11 @@ restore_install_crontab() {
       index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
       index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
       index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
+      index($0,"# ai-devops housekeeping (managed by ai-housekeeping schedule") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
       index($0,"\047" reap "\047 run") == 0 &&
-      index($0,"\047" lw "\047") == 0 { print }
+      index($0,"\047" lw "\047") == 0 &&
+      index($0,"ai-housekeeping\047 --log") == 0 { print }
     '
   }
   if $SUDO test -f "$BACKUP_DIR/crontab"; then
@@ -337,7 +339,8 @@ restore_install_crontab() {
     [ -z "$(crontab -l 2>/dev/null | strip_managed_cron)" ] || return 1
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
       "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
-      "$REPO_ROOT/bin/ai-local-watch" unschedule
+      "$REPO_ROOT/bin/ai-local-watch" unschedule &&
+      "$REPO_ROOT/bin/ai-housekeeping" unschedule
   else
     return 1
   fi
@@ -714,6 +717,13 @@ run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-
 # watch_hosts (docs/watchdog-duty-pool.md). Only a pool member schedules;
 # others exit 0 with "not in watch_hosts". Free Actions stay backup only.
 run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin/ai-local-watch" schedule
+
+# Optional: daily housekeeping report (plan_repo-housekeeping-visibility.md
+# step 7). Same shape as the stages above - one marked, idempotent `schedule`
+# command per platform. Windows machines that run setup-machine.ps1 get the
+# AiDevOps-Housekeeping Scheduled Task there; this stage covers Ubuntu/macOS
+# user crontab and any Windows box that only runs install.sh.
+run_stage optional "Housekeeping schedule" "$REPO_ROOT/bin/ai-housekeeping" schedule
 
 publish_install_manifest() {
   local source_sha staged owner group

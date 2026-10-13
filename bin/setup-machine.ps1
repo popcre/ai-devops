@@ -291,12 +291,21 @@ if (Get-Command railway -ErrorAction SilentlyContinue) { Ok "railway $(railway -
 # GitHub CLI creates its config folder with inheritance disabled on some Windows
 # installations. Codex's restricted task account can then see the workspace but
 # `gh` fails before it can run because config.yml is unreadable. Repair only that
-# folder and grant only read/execute; credentials remain in Windows Credential
-# Manager and no token is copied or exposed.
+# folder and grant only read/execute. The token file itself (hosts.yml) is then
+# restricted to its owner by repair-github-cli-ssh-auth.ps1 below.
 $repairGhAccess = Join-Path $RepoPath "bin\repair-codex-github-cli-access.ps1"
 if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhAccess)) {
   Step "GitHub CLI access for restricted Codex tasks"
   & $repairGhAccess
+}
+
+# SSH logons cannot read Windows Credential Manager, so a keyring GitHub login
+# breaks every remote ai-gh, git fetch and memory sync. Move it to GitHub CLI's
+# file storage, readable by both logon types and locked to the owner.
+$repairGhSsh = Join-Path $RepoPath "bin\repair-github-cli-ssh-auth.ps1"
+if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhSsh)) {
+  Step "GitHub CLI login readable from SSH sessions"
+  & $repairGhSsh
 }
 
 # cloudflared - used by the SSH config's ProxyCommand so `ssh vps` works on any network.
@@ -1179,6 +1188,50 @@ WScript.Quit exitCode
   }
 } else {
   Warn "Git bash not found (install Git) - memory sync not scheduled."
+}
+
+# --------------------------------------------------------------------------
+# 5d. Housekeeping report timer - daily local snapshot of cleanup candidates
+# --------------------------------------------------------------------------
+# Decision (b) in plan_repo-housekeeping-visibility.md: a SEPARATE daily task
+# named AiDevOps-Housekeeping, independent of ai-memory-sync. The report writes
+# its own log ($HOME/.cache/ai-housekeeping.log) because the VBS shim discards
+# stdout. Cheap and offline-tolerant: when GitHub is unreachable the tool logs
+# UNKNOWN and exits 0. Never wakes a sleeping machine.
+Step "Housekeeping schedule (daily report)"
+if (Test-Path $gitBash) {
+  $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\\','/')
+  $hkScript = "$posix/bin/ai-housekeeping"
+  $taskDir = Join-Path $HOME ".config\ai-devops"
+  $hkLauncher = Join-Path $taskDir "ai-housekeeping-hidden.vbs"
+  New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
+  $escapedBash = $gitBash.Replace('"', '""')
+  $escapedHk = $hkScript.Replace('"', '""')
+  $hkLauncherBody = @"
+Set shell = CreateObject("WScript.Shell")
+exitCode = shell.Run("""$escapedBash"" -lc ""cd '$posix' && '$escapedHk' --log --quiet""", 0, True)
+WScript.Quit exitCode
+"@
+  Set-Content -LiteralPath $hkLauncher -Value $hkLauncherBody -Encoding ascii
+  try {
+    $hkAction = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" `
+      -Argument "//B //NoLogo `"$hkLauncher`""
+    # Daily, mid-morning, no wake: StartWhenAvailable runs it after the machine
+    # is already awake if the trigger was missed. Never set WakeToRun.
+    $hkTrigger = New-ScheduledTaskTrigger -Daily -At 7:17am
+    $hkSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
+      -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
+    $hkPrincipal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+      -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName "AiDevOps-Housekeeping" -Action $hkAction -Trigger $hkTrigger `
+      -Settings $hkSettings -Principal $hkPrincipal -Description "Daily AI housekeeping report (report-only; logs to ~/.cache/ai-housekeeping.log)" `
+      -Force -ErrorAction Stop | Out-Null
+    Ok "Scheduled task 'AiDevOps-Housekeeping' daily at 7:17am (hidden; 15 min limit; no wake)"
+  } catch {
+    throw "Could not create the housekeeping scheduled task: $($_.Exception.Message)"
+  }
+} else {
+  Warn "Git bash not found (install Git) - housekeeping not scheduled."
 }
 
 # --------------------------------------------------------------------------

@@ -46,7 +46,30 @@ case "${1:-}" in
   deepseek)
     [ -z "${AI_DEEPSEEK_REVIEW_BIN:-}" ] || [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || { printf 'ai-review: private reviewer substitution is a test hook only.\n' >&2; exit 2; }
     wrapper="${AI_DEEPSEEK_REVIEW_BIN:-$REAL_DIR/ai-deepseek-agent}" ;;
-  doctor) "$ROOT/ai-claude-review" doctor; "$ROOT/ai-codex-review" doctor; exit 0 ;;
+  doctor)
+    # Doctor runs before any gate and must answer "who can review here".
+    # The rotation section comes from the same preflight every session
+    # trusts; providers listed in config/reviewer-membership-scope.json
+    # (gate helpers such as codex) are excluded there so a session never
+    # reads a gate helper as a drawable reviewer.
+    doctor_rc=0
+    _scope=""
+    for _c in "$REAL_DIR/../config/reviewer-membership-scope.json" "$ROOT/../config/reviewer-membership-scope.json"; do
+      [ ! -f "$_c" ] || { _scope="$_c"; break; }
+    done
+    printf 'Rotation reviewers (allocator pool; usable=true means drawable now; gate helpers are excluded):\n'
+    if [ -z "$_scope" ]; then
+      printf 'ai-review: doctor: cannot find config/reviewer-membership-scope.json; rotation section unavailable.\n' >&2
+      doctor_rc=1
+    else
+      "${AI_REVIEW_PREFLIGHT_BIN:-$ROOT/ai-review-preflight}" status \
+        | jq -c --slurpfile scope "$_scope" 'select(.registry_state == "registered") | select((.provider as $p | $scope[0].outside_allocator | has($p)) | not)' \
+        || doctor_rc=$?
+    fi
+    printf 'Approval-gate helpers (approval gates only, never a rotation reviewer):\n'
+    "${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" doctor || doctor_rc=$?
+    "${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" doctor || doctor_rc=$?
+    exit "$doctor_rc" ;;
   -h|--help|help|'') usage; exit 0 ;;
   *)
     # Every other name is a pool candidate. Eligibility comes from the

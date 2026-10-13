@@ -4,15 +4,36 @@ One command shows what might need cleaning up in this repository. It never
 deletes anything.
 
 ```bash
-ai-housekeeping            # one-screen summary
-ai-housekeeping --details  # every artifact, one labelled block per class
-ai-housekeeping --log      # also append the report to the housekeeping log
-ai-housekeeping --quiet    # print nothing when there is nothing to review
+ai-housekeeping             # one-screen summary
+ai-housekeeping --details   # every artifact, one labelled block per class
+ai-housekeeping --log       # also append a dated block to the housekeeping log
+ai-housekeeping --quiet     # print nothing when there is nothing to review
+ai-housekeeping schedule    # register the daily timer
+ai-housekeeping unschedule  # remove that timer
 ```
 
 Albert can run this at any time without asking an AI session to do the
 inventory. A session that is wrapping up should run it and include the summary
 in the closing report.
+
+## Log and daily schedule
+
+`--log` appends a dated block to `$HOME/.cache/ai-housekeeping.log` (override
+with `AI_HOUSEKEEPING_LOG`). The latest 30 dated daily blocks are kept; older
+blocks are dropped by a recoverable rewrite through a temp file. A scheduled
+`--quiet` run with no findings writes one line to the log and nothing else.
+
+**Windows** — `bin/setup-machine.ps1` registers a daily Scheduled Task named
+`AiDevOps-Housekeeping` (hidden VBS launcher, 15-minute cap, no wake). The
+report is cheap and offline-tolerant: when GitHub is unreachable it logs
+`UNKNOWN` and exits 0. It never blocks, never retries in a loop, and never
+wakes a sleeping machine.
+
+**Ubuntu / Linux (decision O2)** — a user-level crontab convention already
+exists in this repo (`ai-blocker-watch`, `ai-reap-shared-db-worktrees`,
+`ai-local-watch`), so `ai-housekeeping schedule` installs the same style of
+marked, idempotent daily crontab entry. `install.sh` runs that stage. No
+systemd user unit is added.
 
 ## What it looks at
 
@@ -80,7 +101,7 @@ will within this plan. Report-only is the whole design.
 
 ## Related
 
-- Plan and locked decisions:
+- Plan and locked decisions (including O2: Windows task + Ubuntu crontab):
   [`../plan_repo-housekeeping-visibility.md`](../plan_repo-housekeeping-visibility.md)
 - Worktree removal procedure: `skills/shared/cleanup-worktree/SKILL.md`
 - Handoff contract and successor rule: `skills/shared/handoff-writer/SKILL.md`

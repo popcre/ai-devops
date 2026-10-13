@@ -673,6 +673,8 @@ UTC_MS="$(bash -c "$(sed -n '/^utc_ms(){/,/^}/p' "$CMD"); utc_ms")"; REF_MS="$(p
 check "utc_ms matches the real clock to the millisecond scale" "test \$(( REF_MS - UTC_MS )) -ge 0 && test \$(( REF_MS - UTC_MS )) -lt 200"
 UTC_MS="$(env -u EPOCHREALTIME bash -c "unset EPOCHREALTIME; date(){ echo 1700000012045000000; }; $(sed -n '/^utc_ms(){/,/^}/p' "$CMD"); utc_ms")"
 check "utc_ms fallback keeps the fraction's leading zeros" "test '$UTC_MS' = 1700000012045"
+UTC_MS="$(env -u EPOCHREALTIME bash -c "unset EPOCHREALTIME; date(){ case \"\$*\" in *%N*) echo 17000000;; *) echo 1700000012;; esac; }; $(sed -n '/^utc_ms(){/,/^}/p' "$CMD"); utc_ms")"
+check "utc_ms falls back to whole seconds instead of printing nothing" "test '$UTC_MS' = 1700000012000"
 TEL_MS="$(bash -c "unset EPOCHREALTIME; date(){ [ \"\$1\" = +%s%N ] && echo 1700000012045000000 || echo 1700000012; }; source '$ROOT/tools/github-requests/telemetry.sh'; gh_measure_clock; echo \$GH_MEASURE_CLOCK")"
 check "telemetry clock fallback keeps the fraction's leading zeros" "test '$TEL_MS' = 1700000012045"
 

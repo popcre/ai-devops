@@ -13,7 +13,7 @@
 | Step | Status | Last updated | Evidence / next gate |
 |---|---|---|---|
 | 0. Reconfirm policy, data boundary, and current upstream | open | 2026-09-20 | Start at §9.1; no integration code exists yet |
-| 1. Consolidate the bounded Jev client and configuration | open | 2026-09-20 | §9.2; existing transport is duplicated in `bin/ai-jev-probe` and `bin/ai-jev-completion-shadow` |
+| 1. Consolidate the bounded Jev client and configuration | done (review-waste lane) | 2026-10-12 | §9.2; landed as `tools/lib/jev-client.sh` + `config/jev-decisions.json`; probe/shadow refactored onto it |
 | 2. Build and measure public-issue duplicate/supersession shadow triage | open | 2026-09-20 | §9.3–§9.4; this is the only first pilot |
 | 3. Decide keep, tune once, or retire the issue pilot | open | 2026-09-20 | §9.5; requires a checked-in evaluation artifact |
 | 4. Evaluate the reviewer-report contradiction sentinel | open | 2026-09-20 | §9.6; cannot start before step 3 passes or Albert explicitly redirects |
