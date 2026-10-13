@@ -13,6 +13,10 @@ while IFS= read -r path; do
       echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
     memory/*.md|memory/*/*.md)
       [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
+  esac
+  # Always forbid secret-bearing file types, including under reviewer-issues.
+  # The generated-artifact exemption above must not skip this rule.
+  case "$path" in
     *.env|*.pem|*.key)
       echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
   esac
