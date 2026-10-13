@@ -33,7 +33,7 @@ class OracleTests(unittest.TestCase):
             permission_custody=dict(current_contract_metadata_sha256='a'*64,historical_capture_sha256='b'*64,current_owner='Albert Hazan',
                 requires_external_registrar=False,external_registration_sha256=None,observed_at=self.now,expires_at=self.now+600),
             captures=[item(self.capture)],controls=[],census=copy.deepcopy(profile.CENSUS),output_parent={'path':str(self.root),'stat':profile.descriptor_stat(str(self.root),True)},
-            output_leaf='new-alternate',runtime={'root':str(self.root/'public-runtime'),'closure_sha256':'c'*64,'bytes':1,'bwrap':'/usr/bin/bwrap','bwrap_sha256':'d'*64},limits=copy.deepcopy(profile.LIMITS))
+            output_leaf='new-alternate',runtime={'root':str(self.root/'public-runtime'),'closure_sha256':'c'*64,'bytes':1,'bwrap':'/usr/bin/bwrap','bwrap_sha256':profile.public_bwrap_identity()['sha256']},limits=copy.deepcopy(profile.LIMITS))
         self.manifest['captures']=[]
         for index in range(33):
             path=self.root/('capture'+str(index));path.write_bytes(b'INVENTED ONLY '+str(index).encode());path.chmod(0o600)
@@ -172,19 +172,120 @@ class OracleTests(unittest.TestCase):
             self.assertEqual(bound['capture_count'],33)
             self.assertFalse(bound['root_action_authority'])
             self.assertFalse(bound['capture_byte_hashes_verified'])
+            evidence=profile.evidence_projection(bound)
+            self.assertEqual(evidence['runtime_identity']['sandbox_binary']['public_path'],'/usr/bin/bwrap')
+            self.assertEqual(evidence['limits'],profile.LIMITS)
+            self.assertNotIn(str(self.capture),json.dumps(evidence))
 
         # This is source export only; no provider completion, registration or admission exists.
         self.assertFalse(list(self.root.glob('*.spent')))
         (repo/scope.PUBLIC_PRODUCER_PATH).write_text('private substitution must refuse')
         with self.assertRaises(ValueError):scope.validate_snapshot(stage)
 
+
+    def test_arbitrary_sandbox_binary_denies_before_private_content_open(self):
+        m=copy.deepcopy(self.manifest);m['runtime']['bwrap']=str(self.capture)
+        opened=[];real=os.open;private={i['path'] for i in m['controls']+m['captures']}
+        def checked(path,flags,*a,**kw):
+            if str(path) in private and not flags&os.O_PATH:opened.append(str(path))
+            return real(path,flags,*a,**kw)
+        with mock.patch.object(os,'open',side_effect=checked):
+            with self.assertRaisesRegex(ValueError,'fixed public OS'):profile.validate_manifest(m,self.now)
+        self.assertEqual(opened,[])
+        self.assertEqual(guardian.sandbox_command(m['runtime'],'a','b',[],'c')[0],'/usr/bin/bwrap')
+        m['runtime']['bwrap']='/usr/bin/bwrap';m['runtime']['bwrap_sha256']='0'*64
+        with self.assertRaisesRegex(ValueError,'hash differs'):profile.validate_manifest(m,self.now)
+
+    def test_existing_lock_must_be_owned_private_regular_and_unaliased(self):
+        from types import SimpleNamespace
+        lock=self.root/'lock';lock.write_bytes(b'');lock.chmod(0o600);fd=os.open(lock,os.O_RDWR)
+        try:
+            profile.validate_lock_fd(fd)
+            lock.chmod(0o666)
+            with self.assertRaises(ValueError):profile.validate_lock_fd(fd)
+            lock.chmod(0o600);info=os.fstat(fd)
+            for key,value in (('st_uid',os.getuid()+1),('st_nlink',2)):
+                fields={k:getattr(info,k) for k in ('st_mode','st_uid','st_nlink')};fields[key]=value
+                with mock.patch.object(os,'fstat',return_value=SimpleNamespace(**fields)):
+                    with self.assertRaises(ValueError):profile.validate_lock_fd(fd)
+        finally:os.close(fd)
+
+    def test_task_override_requires_full_exact_summary_and_class(self):
+        state=dict(provider='deepseek',implementer_engine='codex',run_id='invented',review_mode='security-review',head='a'*40,report_sha256='b'*64)
+        row=dict(kind='reviewer-approval',action=profile.ACTION,observed_class='private-tooling',reason=profile.approval_summary(state))
+        self.assertTrue(profile.has_exact_task_override({'overrides':[row]},state))
+        for reason in ('b'*64,'prefix '+row['reason'],row['reason']+' suffix'):
+            self.assertFalse(profile.has_exact_task_override({'overrides':[{**row,'reason':reason}]},state))
+        self.assertFalse(profile.has_exact_task_override({'overrides':[{**row,'observed_class':'production'}]},state))
+
+    def test_full_postclaim_stat_includes_uid_mode_and_link_count(self):
+        from types import SimpleNamespace
+        item=self.manifest['captures'][0];fd=os.open(item['path'],os.O_RDONLY|os.O_NOFOLLOW)
+        try:
+            guardian.validate_input_fd(fd,item);info=os.fstat(fd)
+            keys=('st_dev','st_ino','st_uid','st_mode','st_size','st_mtime_ns','st_ctime_ns','st_nlink')
+            for key,value in (('st_uid',info.st_uid+1),('st_mode',info.st_mode|0o020),('st_nlink',2)):
+                fields={k:getattr(info,k) for k in keys};fields[key]=value
+                with mock.patch.object(os,'fstat',return_value=SimpleNamespace(**fields)):
+                    with self.assertRaises(ValueError):guardian.validate_input_fd(fd,item)
+        finally:os.close(fd)
+
+    def test_oracle_evidence_loop_refuses_symlinked_parent(self):
+        source=(ROOT/'bin/ai-review').read_text();function=source[source.index('action_review_evidence_args(){'):source.index('pool_provider=""')]
+        # The Oracle loop is exercised separately after the unchanged legacy loop.
+        loop=function[function.index('  if [ "${action_profile:-}"'):function.rindex('}')]
+        evidence=self.root/'evidence';outside=self.root/'outside';evidence.mkdir();outside.mkdir();(evidence/'tools').symlink_to(outside)
+        (evidence/'bin').mkdir()
+        for name in ('oracle_native_alternate_profile.py','oracle_native_alternate_guardian.py','oracle_native_alternate_runtime.py'):(outside/name).write_text('# invented')
+        (evidence/'bin/ai-oracle-native-alternate').write_text('# invented')
+        script='check(){\n'+loop+'\n}; action_profile='+profile.PROFILE+'; evidence_root='+str(evidence)+'; action_evidence_args=();check'
+        result=subprocess.run(['bash','-c',script],capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+
+
+    def test_native_gate_actual_branch_rechecks_persistence_and_summary(self):
+        source=(ROOT/'bin/ai-task-gates').read_text()
+        begin=source.index('  if [ "$action" = offline-private-capture-transform ]; then',source.index('effective_gate="$(merged_gate'))
+        end=source.index('  if printf',begin);branch=source[begin:end]
+        state=self.root/'fake-task.json'
+        # Exercise actual shell branch control flow with NONAUTHORIZING stubs;
+        # no native provider/lifecycle/admission code runs and no grant is issued.
+        for damage in ('missing-persistence','changed-summary','changed-post-state'):
+            state.write_text('{"overrides":[]}')
+            preamble="""blocked(){ exit 77; }
+state_path(){ printf '%s' "$FIXTURE_STATE"; }
+state_record_override(){
+ [ "$DAMAGE" != missing-persistence ] || return 0
+ jq --arg k "$1" --arg a "$2" --arg r "$3" --arg c "$4" '.overrides=[{kind:$k,action:$a,reason:$r,observed_class:$c}]' "$FIXTURE_STATE" > "$FIXTURE_STATE.next"
+ mv "$FIXTURE_STATE.next" "$FIXTURE_STATE"
+}
+reviewer_approval_summary(){
+ if [ "${7:-}" = 1 ]; then
+  [ "$DAMAGE" != changed-post-state ] || printf '{"overrides":[]}' > "$FIXTURE_STATE"
+  if [ "$DAMAGE" = changed-summary ]; then printf changed; return; fi
+ fi
+ printf NONAUTHORIZING_FIXTURE_SUMMARY
+}
+exercise(){
+ action=offline-private-capture-transform;IDENTITY=u2giants/theoracle;declared=private-tooling;effective=private-tooling
+ action_manifest_stdin=1;action_stage=initial-forward;reviewer_approval=invented;acknowledge=;small_entry=
+ effective_gate=$'required\toracle-native-alternate-descriptor-only-admission';action_manifest_file=invented
+ TOPLEVEL="$FIXTURE_REPO"
+"""
+            script=preamble+branch+'\n}\nexercise\n'
+            result=subprocess.run(['bash','-c',script],env={**os.environ,'FIXTURE_STATE':str(state),'FIXTURE_REPO':str(ROOT),'DAMAGE':damage},capture_output=True)
+            self.assertEqual(result.returncode,77,result.stderr)
+            self.assertFalse(list(self.root.glob('*.spent')))
+
     def test_actual_public_runtime_preparation_is_non_authorizing(self):
         probe = '''import sys,pathlib;sys.path.insert(0,"tools")
 import oracle_native_alternate_runtime as runtime
+import os;os.umask(0)
 root=pathlib.Path(sys.argv[1]);receipt=runtime.prepare(root)
 runtime.verify_recipe(root)
 assert receipt["kind"]=="NONAUTHORIZING_PUBLIC_OS_STDLIB_PREPARATION"
 assert receipt["bytes"]<=256*1024**2
+assert all(p.stat().st_mode&0o777==0o700 for p in root.rglob('*') if p.is_dir())
 assert not any("sitecustomize" in p or "site-packages" in p or "config-" in p for p in receipt["origins"])
 '''
         result=subprocess.run(['/usr/bin/python3','-c',probe,str(self.root/'public-runtime')],cwd=ROOT,

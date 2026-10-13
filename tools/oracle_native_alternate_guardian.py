@@ -57,13 +57,18 @@ def public_runtime(root,expected,maximum):
 
 
 def sandbox_command(runtime,operator,decoder,captures,output):
-    cmd=[runtime['bwrap'],'--die-with-parent','--new-session','--unshare-all','--clearenv',
+    cmd=['/usr/bin/bwrap','--die-with-parent','--new-session','--unshare-all','--clearenv',
          '--ro-bind',runtime['root'],'/','--proc','/proc','--dev','/dev',
          '--ro-bind',operator,'/code/operator.py','--ro-bind',decoder,'/code/native_alternate.py',
          '--bind',output,'/output','--chdir','/','--setenv','OMP_NUM_THREADS','2','--setenv','OPENBLAS_NUM_THREADS','2']
     for i,fd in enumerate(captures):cmd+=['--ro-bind','/proc/self/fd/'+str(fd),'/input/c'+str(i)]
     return cmd+['/usr/bin/python3','-I','-S','/code/operator.py']
 
+
+def validate_input_fd(fd,item):
+    info=os.fstat(fd)
+    actual=dict(dev=info.st_dev,ino=info.st_ino,uid=info.st_uid,mode=stat.S_IMODE(info.st_mode),size=info.st_size,mtime_ns=info.st_mtime_ns,ctime_ns=info.st_ctime_ns)
+    profile.require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and actual==item['stat'],'full input custody changed after claim')
 
 def limits():
     resource.setrlimit(resource.RLIMIT_AS,(profile.LIMITS['address_space_bytes'],)*2)
@@ -85,8 +90,8 @@ def run(state_path,m):
     profile.validate_manifest(m,int(time.time()))
     runtime=m['runtime'];total=public_runtime(runtime['root'],runtime['closure_sha256'],runtime['bytes'])
     profile.require(total==runtime['bytes'],'runtime size differs')
-    with open(runtime['bwrap'],'rb') as stream:
-        profile.require(hashlib.file_digest(stream,'sha256').hexdigest()==runtime['bwrap_sha256'],'sandbox binary changed')
+    profile.require(runtime['bwrap']=='/usr/bin/bwrap','only fixed public OS sandbox executable is supported')
+    profile.public_bwrap_identity(runtime['bwrap_sha256'])
     repo=Path(state['repository_root']);p,_=profile.profile()
     operator=repo/p['entrypoint'];decoder=repo/'services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py'
     source_bytes=[]
@@ -106,9 +111,7 @@ def run(state_path,m):
         # First content-capable capture open happens AFTER the durable claim.
         for item in inputs:
             fd=os.open(item['path'],os.O_RDONLY|os.O_NOFOLLOW);fds.append(fd)
-            info=os.fstat(fd)
-            profile.require((info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)==
-                tuple(item['stat'][k] for k in ('dev','ino','size','mtime_ns','ctime_ns')),'input changed after claim')
+            validate_input_fd(fd,item)
         control={'profile':profile.PROFILE,'purpose':profile.PURPOSE,'limits':profile.LIMITS,'census':profile.CENSUS,
             'inputs':[{k:v for k,v in item.items() if k!='path'} for item in inputs],
             'capture_count':len(m['captures']),'expires_at':min(m['expires_at'],state['oracle_alternate_action_admission']['expires_at']),'runtime_bytes':total}

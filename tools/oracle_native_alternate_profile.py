@@ -83,6 +83,34 @@ def descriptor_stat(path,directory=False):
     finally:os.close(fd)
 
 
+def public_bwrap_identity(expected=None):
+    """Read only the fixed root-owned public OS binary, never manifest paths."""
+    fd=os.open('/',os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in ('usr','bin'):
+            new=os.open(part,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=new
+            info=os.fstat(fd);require(info.st_uid==0 and not info.st_mode&0o022,'public sandbox parent is writable')
+        binary=os.open('bwrap',os.O_RDONLY|os.O_NOFOLLOW,dir_fd=fd)
+        try:
+            before=os.fstat(binary)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid==0 and not before.st_mode&0o022 and before.st_nlink==1,'root-owned immutable sandbox binary required')
+            with os.fdopen(os.dup(binary),'rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+            after=os.fstat(binary);require(all(getattr(before,k)==getattr(after,k) for k in ('st_dev','st_ino','st_uid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')),'public sandbox binary changed')
+            require(expected is None or digest==expected,'public sandbox binary hash differs')
+            return {'public_path':'/usr/bin/bwrap','sha256':digest,'uid':before.st_uid,'mode':stat.S_IMODE(before.st_mode),'provenance':'root-owned-public-OS-binary'}
+        finally:os.close(binary)
+    finally:os.close(fd)
+
+def validate_lock_fd(fd):
+    info=os.fstat(fd)
+    require(stat.S_ISREG(info.st_mode) and info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1,'native receipt lock is unsafe')
+
+def approval_summary(state):
+    return 'APPROVE by '+state['provider']+' (implementer '+state['implementer_engine']+', run '+state['run_id']+', '+state['review_mode']+') for '+ACTION+' at '+state['head']+' report sha256:'+state['report_sha256']
+
+def has_exact_task_override(task,state):
+    return any(isinstance(r,dict) and r.get('kind')=='reviewer-approval' and r.get('action')==ACTION and r.get('observed_class')=='private-tooling' and r.get('reason')==approval_summary(state) for r in task.get('overrides',[]))
+
 def profile():
     raw=(ROOT/'config/review-action-profiles.json').read_bytes();value=decode(raw)['profiles'][PROFILE]
     require(value['repository']=='https://github.com/u2giants/theoracle' and value['action']==ACTION
@@ -129,10 +157,13 @@ def validate_manifest(m,now):
     output=Path(parent['path'])/m['output_leaf'];require(not output.exists() and not output.is_symlink(),'output already exists')
     runtime=m['runtime'];require(set(runtime)=={'root','closure_sha256','bytes','bwrap','bwrap_sha256'},'fixed runtime descriptor required')
     require(type(runtime['bytes']) is int and runtime['bytes']>0 and total+runtime['bytes']<=LIMITS['input_bytes'],'runtime plus inputs exceed bound')
+    require(runtime['bwrap']=='/usr/bin/bwrap','only fixed public OS sandbox executable is supported')
+    sandbox_identity=public_bwrap_identity(runtime['bwrap_sha256'])
     require(re.fullmatch('[a-f0-9]{64}',runtime['closure_sha256']) and re.fullmatch('[a-f0-9]{64}',runtime['bwrap_sha256']),'runtime identity required')
     return {'claimed_input_set_sha256':sha(canonical([{k:v for k,v in c.items() if k!='path'} for c in m['controls']+m['captures']])),
             'capture_stat_sha256':sha(canonical([c['stat'] for c in m['controls']+m['captures']])),
-            'capture_count':len(m['captures']),'capture_bytes':total,'capture_byte_hashes_verified':False}
+            'capture_count':len(m['captures']),'capture_bytes':total,'capture_byte_hashes_verified':False,
+            'runtime_identity':{'closure_sha256':runtime['closure_sha256'],'bytes':runtime['bytes'],'sandbox_binary':sandbox_identity},'limits':LIMITS,'input_format':'historical-custom-native-pages-v1'}
 
 
 def binding(state,m):
@@ -196,6 +227,7 @@ def atomic_receipt(state_path,state,b,m,publish):
     require(os.environ.get('AI_DEVOPS_TEST_MODE')!='1','test mode cannot issue actual authority')
     lock=os.open(str(state_path)+'.oracle.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     try:
+        validate_lock_fd(lock)
         fcntl.flock(lock,fcntl.LOCK_EX);old=legacy();current=decode(old._native.private_read(Path(state_path)))
         require(current==state,'lifecycle moved during registration')
         finished=int(datetime.fromisoformat(state['finished_at'].replace('Z','+00:00')).timestamp())
@@ -207,9 +239,7 @@ def atomic_receipt(state_path,state,b,m,publish):
         identity=sha(('u2giants/theoracle'+'\0'+state['repository_root']).encode())
         task_dir=Path(os.environ.get('AI_TASK_GATES_DIR',str(Path.home()/'.local/state/ai-devops/task-gates')))
         task=decode(old._native.private_read(task_dir/(identity+'.json')))
-        require(any(r.get('kind')=='reviewer-approval' and r.get('action')==ACTION
-            and r.get('observed_class')=='private-tooling' and state['report_sha256'] in r.get('reason','') for r in task.get('overrides',[])),
-            'native gate approval was not persisted')
+        require(has_exact_task_override(task,state),'native gate approval was not persisted exactly')
         current[key]=expected
         fd,temp=tempfile.mkstemp(dir=Path(state_path).parent,prefix='.oracle-admission-')
         with os.fdopen(fd,'wb') as out:out.write(canonical(current)+b'\n');out.flush();os.fsync(out.fileno())
@@ -217,6 +247,12 @@ def atomic_receipt(state_path,state,b,m,publish):
         return reg
     finally:os.close(lock)
 
+
+def evidence_projection(b):
+    return {'schema_version':1,'evidence_kind':'oracle-stat-only-private-action-commitment',
+        'action_authorized':False,'capture_byte_hashes_verified':False,'private_values_disclosed':False,
+        **{k:b[k] for k in ('profile','action','purpose','manifest_descriptor_sha256','permission_registration_descriptor_sha256',
+            'capture_count','capture_bytes','path_set_sha256','source_head','source_digest','oracle_enforcement_sha256','runtime_identity','limits','input_format')}}
 
 def prompt(state):
     b=state['action_profile_binding']
@@ -241,10 +277,7 @@ def main(argv=None):
         m=metadata(args.manifest) if args.manifest else decode(sys.stdin.buffer.read(1024**2+1));b=binding(state,m)
         if args.phase!='capture':require(b==state['action_profile_binding'],'action metadata or source moved')
         if args.phase=='preaction':atomic_receipt(args.state,state,b,m,args.admit)
-        if args.phase=='evidence':b={'schema_version':1,'evidence_kind':'oracle-stat-only-private-action-commitment',
-            'action_authorized':False,'capture_byte_hashes_verified':False,'private_values_disclosed':False,
-            **{k:b[k] for k in ('profile','action','purpose','manifest_descriptor_sha256','permission_registration_descriptor_sha256',
-                'capture_count','capture_bytes','path_set_sha256','source_head','source_digest','oracle_enforcement_sha256')}}
+        if args.phase=='evidence':b=evidence_projection(b)
         print(json.dumps(b,sort_keys=True));return 0
     except (OSError,ValueError,KeyError,TypeError,RecursionError,subprocess.SubprocessError):
         print('oracle-native-alternate: bounded native metadata admission refused',file=sys.stderr);return 1

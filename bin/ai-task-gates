@@ -1335,9 +1335,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
       || blocked 'ai-task-gates: STOP. Genuine independent dual-scoped native registration/action completion is absent.'
     state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
-      || blocked 'ai-task-gates: STOP. Native action approval persistence failed.'
-    reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1 >/dev/null \
+      && jq -e --arg r "$approval_summary" --arg a "$action" --arg c "$effective" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r and .observed_class==$c)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+      || blocked 'ai-task-gates: STOP. Native action approval persistence/readback failed.'
+    local oracle_admission_summary
+    oracle_admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
       || blocked 'ai-task-gates: STOP. Current-purpose registration/one-use admission publication failed.'
+    [ "$oracle_admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Oracle approval changed during native admission.'
+    jq -e --arg r "$approval_summary" --arg a "$action" --arg c "$effective" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r and .observed_class==$c)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+      || blocked 'ai-task-gates: STOP. Oracle action override changed during native admission.'
     printf 'ai-task-gates: "%s" admitted only for one conditional unqualified offline serialization: %s\n' "$action" "$approval_summary"
     return 0
   fi

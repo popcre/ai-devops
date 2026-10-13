@@ -24,7 +24,7 @@ def public_origin(path):
 
 def prepare(root):
     root=Path(root);root.mkdir(mode=0o700)
-    for name in ('input','output','code','proc','dev'): (root/name).mkdir()
+    for name in ('input','output','code','proc','dev'): (root/name).mkdir(mode=0o700)
     for index in range(48):(root/'input'/('c'+str(index))).touch()
     for name in ('operator.py','native_alternate.py'):(root/'code'/name).touch()
     origins={};pending=[];total=0
@@ -32,7 +32,11 @@ def prepare(root):
         nonlocal total
         original=public_origin(origin);destination=Path(destination)
         if str(destination).lstrip('/') in origins:return
-        target=root/str(destination).lstrip('/');target.parent.mkdir(parents=True,exist_ok=True)
+        target=root/str(destination).lstrip('/');target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        # pathlib intermediate parents do not inherit mode; seal every staging directory.
+        for ancestor in [target.parent,*target.parent.parents]:
+            if ancestor==root:break
+            ancestor.chmod(0o700)
         total+=original.stat().st_size
         if total>256*1024**2:raise ValueError('public runtime exceeds aggregate bound')
         shutil.copyfile(original,target);target.chmod(0o755 if os.access(original,os.X_OK) else 0o644)

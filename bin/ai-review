@@ -25,7 +25,7 @@ action_review_evidence_args(){
   if [ "${action_profile:-}" = oracle-native-alternate-serialization-v1 ]; then
     for relative in tools/oracle_native_alternate_profile.py tools/oracle_native_alternate_guardian.py tools/oracle_native_alternate_runtime.py bin/ai-oracle-native-alternate; do
       file="$evidence_root/$relative"
-      [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] || return 1
+      [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1
       action_evidence_args+=(--file "$file")
     done
   fi
