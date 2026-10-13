@@ -67,7 +67,7 @@ pass 'ordinary snapshot and packet paths refuse private source'
 
 # Legacy fixture folders can hold code-extension row exports. Refuse before
 # creating a snapshot, regardless of a .ts/.mjs suffix or launcher spelling.
-for hostile in apps/workers/src/__fixtures__/licensed-rows.ts apps/workers/src/__fixtures__/licensed-rows.mjs apps/workers/src/testdata/rows.ts apps/workers/src/snapshots/rows.py apps/workers/src/mocks/rows.sh apps/workers/src/samples/rows.ts src/licensed-rows.ts bin/ai-licensed-rows; do
+for hostile in apps/workers/src/__fixtures__/licensed-rows.ts apps/workers/src/__fixtures__/licensed-rows.mjs apps/workers/src/__fixture__/rows.ts apps/workers/src/testdata/rows.ts apps/workers/src/test-data/rows.ts apps/workers/src/test_data/rows.ts apps/workers/src/snapshot/rows.py apps/workers/src/snapshots/rows.py apps/workers/src/mock/rows.sh apps/workers/src/mocks/rows.sh apps/workers/src/__mocks__/rows.sh apps/workers/src/sample/rows.ts apps/workers/src/samples/rows.ts src/licensed-rows.ts src/licensedrows.ts src/LicensedRows.ts src/mylicensed.ts 'src/licensed rows.ts' 'src/licensed+rows.ts' bin/ai-licensed-rows bin/ai-LicensedRows; do
   mkdir -p "$R/$(dirname "$hostile")"
   printf 'PRIVATE_LEGACY_FIXTURE_SENTINEL\n' > "$R/$hostile"
   printf '["%s"]\n' "$hostile" > "$TMP/legacy-approved.json"

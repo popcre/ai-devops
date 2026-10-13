@@ -20,7 +20,7 @@ DENIED_PARTS = {
     "evidence", "export", "exports", "fixture", "fixtures", "licensed",
     "logs", "private", "raw", "report", "reports", "secret", "secrets",
     "transcript", "transcripts", "vendor", "vendors", "__fixtures__",
-    "testdata", "snapshots", "mocks", "samples",
+    "testdata", "snapshot", "snapshots", "mock", "mocks", "sample", "samples",
 }
 CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js", ".jsx", ".mjs", ".cjs", ".py", ".ps1", ".rs", ".sh", ".ts", ".tsx"}
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
@@ -85,6 +85,13 @@ def source_digest(source):
     return result
 
 
+def denied_component(part):
+    # Legacy test-data and underscored fixture/mock folders have the same
+    # evidence meaning as their ordinary spelling, regardless of suffix.
+    lower = part.lower()
+    return lower in DENIED_PARTS or re.sub(r"[-_\s]", "", lower) in DENIED_PARTS
+
+
 def safe_path(raw):
     if not isinstance(raw, str) or not raw or raw.startswith("/") or "\\" in raw or "\0" in raw:
         fail("invalid approved path")
@@ -100,11 +107,11 @@ def safe_path(raw):
     if raw == GATE_DECLARATION:
         return raw
     lower = [part.lower() for part in parts]
-    if any(part in DENIED_PARTS or part.startswith(".") for part in lower):
+    if any(denied_component(part) or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
     # Legacy fixtures also encode their licensed scope in the filename. A
     # code suffix or the bin/ai-* launcher exception must not admit those rows.
-    if "licensed" in re.split(r"[-_.]", Path(raw).stem.lower()):
+    if "licensed" in Path(raw).stem.lower():
         fail("licensed evidence filename refused")
     suffix = Path(raw).suffix.lower()
     executable_bin = len(parts) == 2 and lower[0] == "bin" and lower[1].startswith("ai-") and suffix == ""
@@ -173,10 +180,11 @@ def current_bytes(source, path):
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
     relative = resolved.relative_to(resolved_root)
-    lowered = [part.lower() for part in relative.parts]
-    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() == path:
-        pass
-    elif any(part in DENIED_PARTS or part.startswith(".") for part in lowered):
+    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() != path:
+        fail("approved path resolves into a refused location")
+    try:
+        safe_path(relative.as_posix())
+    except ValueError:
         fail("approved path resolves into a refused location")
     value = item.read_bytes()
     validate_text(value)
