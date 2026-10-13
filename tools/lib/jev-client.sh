@@ -107,7 +107,7 @@ jev_tmp() {
   printf -v "$_jev_var" '%s' "$t"
 }
 
-# jev_bootstrap "$0" "$@"
+# jev_bootstrap "$0" ORIGINAL_ARGS...
 # When the key is absent: spool stdin to a mode-0600 temporary file, resolve
 # the one managed op:// reference, re-exec the consumer through op run, and
 # return only in the keyed child. Once the child has started, the unkeyed

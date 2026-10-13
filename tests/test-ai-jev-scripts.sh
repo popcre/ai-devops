@@ -31,5 +31,12 @@ else
   bad "probe did not fail clearly rc=$rc out=$out"
 fi
 
+# 4. Completion shadow leaves no Jev temp files (jev_tmp outside $(...)).
+mkdir -p "$T/shtmp"
+printf '%s\n' '{"last_assistant_message":"All done.","session_id":"t","prompt_id":"p"}' \
+  '{"last_assistant_message":"Fixed it.","session_id":"t","prompt_id":"q"}' \
+  | PATH="$T/bin:$PATH" TMPDIR="$T/shtmp" TYPESAFE_API_KEY=dummy AI_JEV_SHADOW_LOG="$T/log2" "$ROOT/bin/ai-jev-completion-shadow" >/dev/null 2>&1
+[ -z "$(find "$T/shtmp" -mindepth 1 2>/dev/null)" ] && ok || bad "completion shadow leaked temp files: $(find "$T/shtmp" -mindepth 1)"
+
 echo "passed=$pass failed=$failn"
 if [ "$failn" -eq 0 ]; then exit 0; else exit 1; fi
