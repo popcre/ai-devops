@@ -23,8 +23,41 @@ import re
 import stat
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 
 MAX_MAP = 10000
+
+
+@contextmanager
+def map_lock(directory: Path):
+    """Serialize read-modify-write of the ordinal map across processes."""
+    lock = directory / "target-ordinals.lock"
+    acquired = False
+    for _ in range(50):
+        try:
+            lock.mkdir(mode=0o700)
+            acquired = True
+            break
+        except OSError:
+            try:
+                if lock.is_dir() and (time.time() - lock.stat().st_mtime) > 60:
+                    lock.rmdir()
+                    lock.mkdir(mode=0o700)
+                    acquired = True
+                    break
+            except OSError:
+                pass
+            time.sleep(0.01)
+    if not acquired:
+        raise OSError("ordinal map lock unavailable")
+    try:
+        yield
+    finally:
+        try:
+            lock.rmdir()
+        except OSError:
+            pass
 
 
 def unique_object(pairs):
@@ -127,23 +160,24 @@ def ordinal_for(directory: Path, key: str) -> int:
         directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     if os.name != "nt" and not unix_private(directory, "directory"):
         raise OSError("state directory is not private")
-    salt = ensure_salt(directory)
-    digest = hashlib.sha256(salt + b"\x00" + key.encode("utf-8")).hexdigest()[:16]
-    row = load_map(directory / "target-ordinals.json")
-    if digest in row["map"]:
-        return row["map"][digest]
-    if len(row["map"]) >= MAX_MAP:
-        # Bound private metadata: drop the lowest ordinals first so recent
-        # same-target traffic keeps its identity within one measurement window.
-        for stale in sorted(row["map"], key=row["map"].get)[: MAX_MAP // 10]:
-            del row["map"][stale]
-    ordinal = row["next"]
-    if ordinal > 1_000_000_000:
-        raise ValueError("ordinal space exhausted")
-    row["map"][digest] = ordinal
-    row["next"] = ordinal + 1
-    save_map(directory / "target-ordinals.json", row)
-    return ordinal
+    with map_lock(directory):
+        salt = ensure_salt(directory)
+        digest = hashlib.sha256(salt + b"\x00" + key.encode("utf-8")).hexdigest()[:16]
+        row = load_map(directory / "target-ordinals.json")
+        if digest in row["map"]:
+            return row["map"][digest]
+        if len(row["map"]) >= MAX_MAP:
+            # Bound private metadata: drop the lowest ordinals first so recent
+            # same-target traffic keeps its identity within one measurement window.
+            for stale in sorted(row["map"], key=row["map"].get)[: MAX_MAP // 10]:
+                del row["map"][stale]
+        ordinal = row["next"]
+        if ordinal > 1_000_000_000:
+            raise ValueError("ordinal space exhausted")
+        row["map"][digest] = ordinal
+        row["next"] = ordinal + 1
+        save_map(directory / "target-ordinals.json", row)
+        return ordinal
 
 
 def main() -> int:
