@@ -1,7 +1,7 @@
 ---
 issue: 1562
-status: OPEN
-owner: mimo/1562-deepseek-windows-cygpath-v2
+status: DONE
+owner: mimo/1562-deepseek-windows-cygpath-test-gap
 ---
 
 # DeepSeek final-check follow-ups after the Windows ACL and cygpath fixes
@@ -53,13 +53,12 @@ same stretch.
   checks in ~32s (was >600s timeout), cygpath unit tests 4/4.
 
 **Not started / deferred (this handoff's reason to exist):**
-- Codex Low (non-blocking) on the same review: the cygpath fall-through
-  regression test is weak. It rewrites both synthetic candidates to POSIX
-  paths and accepts `None`, so an early `return None` would still pass.
-  Evidence line from that report: "The regression test claims to verify
-  fall-through, but rewrites both candidates and accepts `None`, so it would
-  not detect an early return." Production code correctly continues; only the
-  test is weak.
+- ~~Codex Low (non-blocking) on the same review: the cygpath fall-through
+  regression test is weak.~~ **Done 2026-10-13:** PR
+  [#1660](https://github.com/popcre/ai-devops/pull/1660) landed as
+  `ab28a61b`. The test now forces cygpath failure on the first (would-win)
+  candidate and asserts the second candidate is returned, not `None`.
+  Negative proof: an early `return None` makes the test fail.
 
 ## 4. Everything we tried that did NOT work
 
@@ -95,18 +94,17 @@ same stretch.
 
 ## 6. Exact next steps
 
-1. Tighten
+All complete 2026-10-13 (PR [#1660](https://github.com/popcre/ai-devops/pull/1660), merge `ab28a61b`):
+
+1. ~~Tighten
    [tests/test_reviewer_events_cygpath.py](https://github.com/popcre/ai-devops/blob/main/tests/test_reviewer_events_cygpath.py)
-   so fall-through is observable: give two candidates where the first would
-   be a winner if cygpath succeeded, force cygpath failure on the first only,
-   and assert the **second** candidate is returned (not `None`).
-   You'll know it worked when the test fails if `find_passing_report` returns
-   early instead of continuing.
-2. Run `python tests/test_reviewer_events_cygpath.py` and the pool dispatch
-   suite on a Windows host.
-3. Open a small PR against `popcre/ai-devops`, get a non-implementer
-   exact-head review if the change touches reviewer safety paths, merge via
-   the queue.
+   so fall-through is observable~~ Done: first candidate would-win with
+   forced cygpath failure; assert second candidate returned.
+2. ~~Run `python tests/test_reviewer_events_cygpath.py` and the pool dispatch
+   suite on a Windows host~~ Done: 4/4 cygpath OK on edge-dev; pool-dispatch
+   41 pass / 1 pre-existing flake (`reuse_same_head_digest`, unrelated).
+3. ~~Open a small PR, non-implementer exact-head review, merge via the queue~~
+   Done: DeepSeek final-check APPROVE on `6836160c`, merged `ab28a61b`.
 
 ## 7. Constraints and gotchas in force
 
