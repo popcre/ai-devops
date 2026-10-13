@@ -43,7 +43,7 @@ printf 'db postgres://admin:hunter2pass@db.example:5432/app\nnpm %s\n' "$fake_np
 run(){
   HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
-    AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 AI_REVIEWER_LOGS_MACHINE=test-box \
+    AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
     bash "$ROOT/bin/ai-reviewer-logs-sync" "$@"
 }
@@ -91,6 +91,21 @@ git -C "$VIEW" pull -q
 check 'short and spaced labeled values masked' "! grep -q 'abc' '$M/reviewer-issues/20261013-pkg/labels.log' && ! grep -q 'two words' '$M/reviewer-issues/20261013-pkg/labels.log'"
 check 'secret-looking file names are withheld' "! ls '$M/reviewer-issues/20261013-pkg' | grep -q '$fake_gh' && grep -q 'secret in file name' '$M/SKIPPED.txt'"
 check 'older-timestamp restores are collected' "grep -q 'restored older content' '$M/state/review-lifecycle/runs/r1/run.json'"
+
+# Composite labels, unquoted spaced values, odd secret file names, rewrites
+# that keep size and time, and unsafe machine names.
+printf 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI\ndb_password: my secret phrase\n"input_tokens": 51234\n' > "$ISSUES/20261013-pkg/composite.log"
+printf 'A=1\n' > "$ISSUES/20261013-pkg/prod.ENV.local"
+printf 'x\n' > "$ISSUES/20261013-pkg/$(printf '%s' "$fake_gh" | tr 'a-z' 'A-Z').log"
+printf 'AAAA\n' > "$STATE/review-lifecycle/runs/r1/same.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/same.json"
+run sync 2> "$TMP/out7" || { cat "$TMP/out7" >&2; exit 1; }
+printf 'BBBB\n' > "$STATE/review-lifecycle/runs/r1/same.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/same.json"
+run sync 2> "$TMP/out8" || { cat "$TMP/out8" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'composite labels and spaced values masked, counts kept' "! grep -q wJalr '$M/reviewer-issues/20261013-pkg/composite.log' && ! grep -q 'secret phrase' '$M/reviewer-issues/20261013-pkg/composite.log' && grep -q 51234 '$M/reviewer-issues/20261013-pkg/composite.log'"
+check 'env variants and uppercase secret names withheld' "[ ! -e '$M/reviewer-issues/20261013-pkg/prod.ENV.local' ] && ! ls '$M/reviewer-issues/20261013-pkg' | grep -qi '$fake_gh'"
+check 'same-size same-time rewrites are collected' "grep -q BBBB '$M/state/review-lifecycle/runs/r1/same.json'"
+check 'path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"
 
 # A symbolic link committed to the repository stops the sync before any write.
 git -C "$VIEW" config user.name t; git -C "$VIEW" config user.email t@example.invalid

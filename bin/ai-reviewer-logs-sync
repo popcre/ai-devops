@@ -45,14 +45,19 @@ HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
 STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
 MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-5000000}"
-MACHINE="${AI_REVIEWER_LOGS_MACHINE:-$(hostname | lower)}"
+MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
+case "$MACHINE" in ''|.*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
 LOG="$HOME_DIR/sync.log"
 
 # Detects survivors; the scrub below replaces whole values for each family.
 SECRET_RE='Basic[[:space:]]+[A-Za-z0-9+/]{8,}|npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
 R='[REDACTED-SECRET]'
-# A labeled credential whose value is anything but an already-masked value.
-LABELED_RE="(api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[^\"'[:space:],}[]"
+# Credential labels, including composite names such as AWS_SECRET_ACCESS_KEY.
+LABEL="[A-Za-z0-9_.-]*(api[_ -]?key|access[_ -]?key|private[_ -]?key|token|secret|password|passwd|pwd|authorization|credential)[A-Za-z0-9_.-]*"
+# A labeled value that is neither already masked nor a plain count (token counts
+# stay readable; a digit-led value of 16+ characters is still treated as secret).
+VALUE="([^\"'[:space:],}[0-9]|[0-9][^[:space:],}\"']{15,})"
+LABELED_RE="$LABEL[\"']?[[:space:]]*[:=][[:space:]]*[\"']?$VALUE"
 
 log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
 
@@ -78,28 +83,33 @@ scrub(){
     -e "s/eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]*/$R/g" \
     -e "s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]{12,}/\\1$R/g" \
     -e "s/(Basic[[:space:]]+)[A-Za-z0-9+\/]{8,}={0,2}/\\1$R/g" \
-    -e "s/((api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*\")[^\"]+\"/\\1$R\"/Ig" \
-    -e "s/((api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*')[^']+'/\\1$R'/Ig" \
-    -e "s/((api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*)[^\"'[:space:],}[][^\"'[:space:],}]*/\\1$R/Ig" \
+    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*\")([^\"0-9[][^\"]*|[0-9][^\"]{15,})\"/\\1$R\"/Ig" \
+    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*')([^'0-9[][^']*|[0-9][^']{15,})'/\\1$R'/Ig" \
+    -e "s/($LABEL[\"']?[[:space:]]*[:=][[:space:]]*)$VALUE.*$/\\1$R/Ig" \
     "$1"
 }
 
 # copy_tree <source dir> <destination relative to the machine folder>
 copy_tree(){
-  local src="$1" dest="$HUB/$MACHINE/$2" file rel target size stampv
+  local src="$1" dest="$HUB/$MACHINE/$2" file rel target size line digest
   [ -d "$src" ] || return 0
-  while IFS= read -r -d '' size && IFS= read -r -d '' stampv && IFS= read -r -d '' file; do
+  # One hashing pass per tree: a file is re-collected whenever its content changes.
+  while IFS= read -r -d '' line; do
+    # "<40-hex digest><space><' ' or '*' mode marker><path>"
+    digest="${line:0:40}"; file="${line:42}"
     rel="${file#"$src"/}"
+    shopt -s nocasematch
     case "$rel" in
-      *.env|*.pem|*.key|*.p12|*.pfx|*id_rsa*|*id_ed25519*) printf '%s/%s\tsecret file type\n' "$2" "$rel" >> "$SKIPPED"; continue ;;
+      *.env|*.env.*|.env|*.pem|*.key|*.p12|*.pfx|*id_rsa*|*id_ed25519*) printf '%s/%s\tsecret file type\n' "$2" "$rel" >> "$SKIPPED"; continue ;;
     esac
-    if printf '%s' "$rel" | grep -Eq "$SECRET_RE|$LABELED_RE"; then
+    if printf '%s' "$rel" | grep -Eqi "$SECRET_RE|$LABELED_RE"; then
       printf '%s/[name withheld: looks like a secret]\tsecret in file name\n' "$2" >> "$SKIPPED"; continue
     fi
     target="$dest/$rel"
-    NEW_SEEN["$file"]="$size $stampv"
-    # Collected before and unchanged since (same size and modification time).
-    if [ -f "$target" ] && [ "${SEEN[$file]:-}" = "$size $stampv" ]; then continue; fi
+    NEW_SEEN["$file"]="$digest"
+    # Collected before and the content is unchanged.
+    if [ -f "$target" ] && [ "${SEEN[$file]:-}" = "$digest" ]; then continue; fi
+    size="$(wc -c < "$file")"
     if [ "$size" -gt "$MAX_BYTES" ]; then
       printf '%s/%s\t%s bytes, over the size limit\n' "$2" "$rel" "$size" >> "$SKIPPED"; continue
     fi
@@ -112,7 +122,7 @@ copy_tree(){
     if [ -f "$target" ] && cmp -s "$target.tmp" "$target"; then rm -f "$target.tmp"; continue; fi
     mv -f "$target.tmp" "$target"
     COPIED=$((COPIED + 1))
-  done < <(find "$src" -type f ! -name '*.tmp' -printf '%s\0%T@\0%p\0' 2>/dev/null)
+  done < <(find "$src" -type f ! -name '*.tmp' -print0 2>/dev/null | xargs -0 -r sha1sum -z --)
 }
 
 ensure_hub(){
@@ -224,6 +234,7 @@ cmd_sync(){
   local hits=() rel
   while IFS= read -r -d '' rel; do
     [ -f "$HUB/$rel" ] || continue
+    if printf '%s' "$rel" | grep -Eqi "$SECRET_RE|$LABELED_RE"; then hits+=("[file name withheld]"); continue; fi
     if grep -Eq "$SECRET_RE" "$HUB/$rel" || grep -Eqi "$LABELED_RE" "$HUB/$rel"; then hits+=("$rel"); fi
   done < <(git -C "$HUB" diff --cached --name-only -z)
   if ((${#hits[@]})); then
