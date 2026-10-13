@@ -61,8 +61,12 @@ HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
 STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
 MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-20000000}"
-# Raw evidence per bundle part before compression (logs compress many times over).
-CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-200000000}"
+# Raw evidence per bundle part. Kept at or below 80 MB and never below the
+# largest file allowed, so a part stays under 95 MB encrypted even when nothing
+# compresses (gzip and CMS add well under 1%).
+CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-80000000}"
+[ "$CHUNK_BYTES" -le 80000000 ] || die "AI_REVIEWER_LOGS_CHUNK_BYTES may not exceed 80000000"
+[ "$MAX_BYTES" -le "$CHUNK_BYTES" ] || MAX_BYTES="$CHUNK_BYTES"
 CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
 MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
 case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac

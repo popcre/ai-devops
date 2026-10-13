@@ -39,7 +39,7 @@ run(){
   HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
     AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 \
-    AI_REVIEWER_LOGS_CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-200000000}" \
+    AI_REVIEWER_LOGS_CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-80000000}" \
     AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" AI_REVIEWER_LOGS_CERT="$TMP/cert.pem" \
     AI_REVIEWER_LOGS_KEY_FILE="${AI_REVIEWER_LOGS_KEY_FILE-$TMP/key.pem}" \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
@@ -75,11 +75,20 @@ check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/s
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
 # Large runs are split into several compressed parts; view joins them back.
-mkdir -p "$ISSUES/many"; for n in 1 2 3 4 5 6; do head -c 1500 /dev/zero | tr '\0' "$n" > "$ISSUES/many/f$n.log"; done
+# Incompressible content: each part must still respect the raw-size bound.
+mkdir -p "$ISSUES/many"; for n in 1 2 3 4 5 6; do head -c 1500 /dev/urandom > "$ISSUES/many/f$n.log"; done
 AI_REVIEWER_LOGS_CHUNK_BYTES=3000 run sync 2> "$TMP/out17" || { cat "$TMP/out17" >&2; exit 1; }
 git -C "$REMOTE" ls-tree -r --name-only main > "$TMP/tree17"
 view
 check 'large runs are split into parts and reassembled' "[ \$(grep -c 'part00[2-9]' '$TMP/tree17') -ge 1 ] && [ \$(ls '$P/reviewer-issues/many' | wc -l) -eq 6 ] && cmp -s '$ISSUES/many/f6.log' '$P/reviewer-issues/many/f6.log'"
+biggest=0; for f in "$TMP/hub/test-box/bundles/"*part*.cms; do n="$(wc -c < "$f")"; [ "$n" -gt "$biggest" ] && biggest="$n"; done
+check 'incompressible parts stay within the raw bound plus small overhead' "[ $biggest -le 6000 ]"
+check 'a part size over 80 MB is refused' "! AI_REVIEWER_LOGS_CHUNK_BYTES=90000000 run sync 2>/dev/null"
+head -c 4000 /dev/urandom > "$ISSUES/many/huge-for-chunk.log"
+AI_REVIEWER_LOGS_CHUNK_BYTES=3000 run sync 2> "$TMP/out18" || { cat "$TMP/out18" >&2; exit 1; }
+view
+check 'a file larger than one part is listed as oversized, never forced into a part' "[ ! -e '$P/reviewer-issues/many/huge-for-chunk.log' ] && cat '$P'/_collection/*-skipped.txt | grep -q huge-for-chunk"
+rm -f "$ISSUES/many/huge-for-chunk.log"
 
 # A bundle lost from the published archive is put back from the local copy.
 first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
