@@ -284,6 +284,57 @@ gh_measure_graphql_cost(){
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
+# Count a completed local read of a correlated target. Cache hits are saved
+# upstream reads; the report denominates them by same-target replays.
+gh_measure_read_observation(){
+  local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" source="${4:-}" utc record cache_hit=false saved=false
+  case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$source" in cache) cache_hit=true; saved=true ;; upstream) ;; *) return 2 ;; esac
+  [ -z "$ordinal" ] || [[ "$ordinal" =~ ^[0-9]{1,10}$ ]] || return 2
+  local ordinal_json=null
+  [ -z "$ordinal" ] || ordinal_json="$ordinal"
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":6,"utc":"%s","measurement":"read_observation","caller":"%s","workflow":"%s","target_ordinal":%s,"source":"%s","cache_hit":%s,"saved_upstream_read":%s}' \
+    "$utc" "$caller" "$workflow" "$ordinal_json" "$source" "$cache_hit" "$saved")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Count a managed write attempt and whether its content was already present.
+# duplicate_unchanged_write must stay zero for section 13 item 2.
+gh_measure_write_observation(){
+  local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" action="${4:-}" relation="${5:-}" utc record dup=false
+  case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$action" in written|skipped) ;; *) return 2 ;; esac
+  case "$relation" in new|unchanged|unknown) ;; *) return 2 ;; esac
+  if [ "$action" = written ] && [ "$relation" = unchanged ]; then dup=true; fi
+  [ -z "$ordinal" ] || [[ "$ordinal" =~ ^[0-9]{1,10}$ ]] || return 2
+  local ordinal_json=null
+  [ -z "$ordinal" ] || ordinal_json="$ordinal"
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":6,"utc":"%s","measurement":"write_observation","caller":"%s","workflow":"%s","target_ordinal":%s,"action":"%s","content_relation":"%s","duplicate_unchanged_write":%s}' \
+    "$utc" "$caller" "$workflow" "$ordinal_json" "$action" "$relation" "$dup")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Resolve a local target ordinal through the reviewed-shaped correlation
+# adapter. Missing adapter or private state yields empty (uncorrelated), never
+# an invented ordinal.
+gh_measure_target_ordinal(){
+  GH_MEASURE_TARGET_ORDINAL=''
+  local key="${1:-}" helper python result state
+  [ -n "$key" ] || return 0
+  helper="${BASH_SOURCE[0]%/*}/target_ordinal.py"
+  python="${PYTHON_RUNNER:-}"
+  [ -n "$python" ] || python="$(command -v python3 || command -v python || true)"
+  [ -n "$python" ] && [ -f "$helper" ] || return 0
+  state="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+  result="$("$python" "$helper" --state-dir "$state" --key "$key" 2>/dev/null)" || return 0
+  [[ "$result" =~ ^[0-9]{1,10}$ ]] || return 0
+  GH_MEASURE_TARGET_ORDINAL="$result"
+}
+
 # Both command records and server snapshots share the same filesystem boundary.
 gh_measure_append(){
   local dir="$1" record="$2" file count
