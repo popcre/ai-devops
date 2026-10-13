@@ -637,6 +637,7 @@ $(tail -n "$tests_tail" "$tests_out")
         native-error-envelope|provider-status-failed) door_failure=provider-native-error ;;
         invalid-response-json) door_failure=provider-invalid-response ;;
         native-tool-denied) door_failure=permission-denied ;;
+        permission-cancelled) door_failure=permission-cancelled ;;
         model-mismatch) door_failure=model-mismatch ;;
         no-assistant-text|empty-response-text|report-extraction-failed) door_failure=empty-report ;;
       esac

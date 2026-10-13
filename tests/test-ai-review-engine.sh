@@ -913,6 +913,54 @@ run_pc_door max_turns_reached turns
 check "grok_door_does_not_resume_turn_limit_cancel" \
   "test '$PC_RC' -ne 0 && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-turns')\" = 'first:10 '"
 
+# #1650: newer Grok CLIs log {"type":"turn_ended","outcome":"cancelled",
+# "cancellation_category":"permission_cancelled"} in the session log and may
+# exit nonzero with NO JSON. The door must resume once-bounded, and when the
+# refusal persists classify it permission-cancelled (never provider-failed),
+# naming the refused step and retaining diagnostics.
+STUB_PN="$TMP/stub-grok-pn"
+cat > "$STUB_PN" <<'STUBEOF'
+#!/usr/bin/env bash
+resumed=0; mt=""
+while [ $# -gt 0 ]; do
+  case "$1" in -r) resumed=1; shift 2 ;; --max-turns) mt="$2"; shift 2 ;; *) shift ;; esac
+done
+d="$GROK_HOME/sessions/C--work/sid-pn1"; mkdir -p "$d"
+if [ "$resumed" = 1 ]; then echo "resumed:$mt" >> "$PN_CALLS"; else echo "first:$mt" >> "$PN_CALLS"; fi
+if [ "$resumed" = 1 ] && [ "$PN_PERSIST" != 1 ]; then
+  printf '%s\n' '{"ts":"2026-10-13T02:20:00Z","type":"turn_ended","outcome":"completed"}' >> "$d/events.jsonl"
+  printf '%s\n' '{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-pn1","requestId":"req-2","modelUsage":{"grok-4.6-build":{}}}'
+  exit 0
+fi
+printf '%s\n' '{"ts":"2026-10-13T02:10:57Z","type":"tool_call","input":{"command":"rm -rf .git/review-scratch"}}' >> "$d/events.jsonl"
+printf '%s\n' '{"ts":"2026-10-13T02:10:58.427Z","type":"turn_ended","outcome":"cancelled","cancellation_category":"permission_cancelled"}' >> "$d/events.jsonl"
+exit 1
+STUBEOF
+chmod +x "$STUB_PN"
+run_pn_door() { # run_pn_door PERSIST TAG -> sets PN_RC
+  rm -rf "$TMP/pn-home-$2" "$TMP/pn-diag-$2"; : > "$TMP/pn-calls-$2"
+  set +e
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$TMP/pn-home-$2" \
+    PN_PERSIST="$1" PN_CALLS="$TMP/pn-calls-$2" DOOR_MAX_TURNS=10 AI_GROK_PERMISSION_RESUMES=1 \
+    AI_GROK_BIN="$STUB_PN" AI_GROK_ALLOW_NO_CREDS=1 DOOR_DIAGNOSTICS_DIR="$TMP/pn-diag-$2" \
+    DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+    DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/pn-report-$2.md" \
+    DOOR_HEAD="$HEAD_SHA" \
+    bash "$GROK_DOOR" review >/dev/null 2>"$TMP/pn-door-$2.err"
+  PN_RC=$?
+  set -e
+}
+run_pn_door 0 ok
+check "grok_door_resumes_turn_ended_permission_cancelled_without_json" \
+  "test '$PN_RC' -eq 0 && grep -q APPROVE '$TMP/pn-report-ok.md' && test \"\$(tr '\n' ' ' < '$TMP/pn-calls-ok')\" = 'first:10 resumed:9 ' && grep -q 'rm -rf .git/review-scratch' '$TMP/pn-door-ok.err'"
+run_pn_door 1 persist
+check "grok_door_persistent_permission_cancel_is_classified_not_provider_failed" \
+  "test '$PN_RC' -eq 1 && test \"\$(tr '\n' ' ' < '$TMP/pn-calls-persist')\" = 'first:10 resumed:9 ' && tail -n 1 '$TMP/pn-diag-persist/report.md' | jq -e '.reason == \"permission-cancelled\"' >/dev/null && ! grep -q 'provider call failed' '$TMP/pn-door-persist.err' && grep -q 'refused a shell command: rm -rf .git/review-scratch' '$TMP/pn-door-persist.err' && grep -q 'refused_step=rm -rf' '$TMP/pn-diag-persist/native.stderr'"
+check "lifecycle_maps_permission_cancelled_door_reason" \
+  "grep -q 'permission-cancelled) door_failure=permission-cancelled' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh'"
+check "preflight_explains_permission_cancelled" \
+  "'$REPO_ROOT/bin/ai-review-preflight' explain permission-cancelled 2>/dev/null | grep -q 'unattended permission check'"
+
 # Owner rule "remove the paid fallback": an exported paid key must never reach
 # a grok child on review, implement, or the PermissionCancelled resume.
 STUB_KEY="$TMP/stub-grok-key"
