@@ -1,0 +1,37 @@
+{
+  "application": "vhmcdkdk23dgvjvcvhyhcjzd",
+  "application_label": "coolify.applicationUuid",
+  "host": "hetz",
+  "image": "ghcr.io/u2giants/theoracle-native@sha256:52536ce633c7571b9d38feee96c3d6022b2fc81692b71c8ee8639391c2cd6aec",
+  "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
+  "port": 22,
+  "project": "oracle-native-vhmcdkdk23dgvjvcvhyhcjzd",
+  "revision": "4b6d680a7d0bdc49d5dee519e8635f8ea15c8a1f",
+  "schema": "oracle-hosting-metadata/v1",
+  "services": [
+    "gateway-files",
+    "executor-files",
+    "projector-files",
+    "ledger-files",
+    "ledger-init",
+    "candidate-files",
+    "confirmed-files",
+    "spool-files",
+    "blob-files",
+    "candidate-data-files",
+    "confirmed-data-files",
+    "ledger-data-files",
+    "ledger",
+    "candidate",
+    "confirmed",
+    "synthetic-project",
+    "executor",
+    "gateway"
+  ],
+  "user": "ai",
+  "vendor_images": {
+    "candidate": "falkordb/falkordb:v4.20.7@sha256:13996aa523f0dd283f6bd6df6620b094dcea525452417c4d6ef9bef15dc9998d",
+    "confirmed": "falkordb/falkordb:v4.20.7@sha256:13996aa523f0dd283f6bd6df6620b094dcea525452417c4d6ef9bef15dc9998d",
+    "ledger": "postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297"
+  }
+}

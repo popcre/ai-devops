@@ -7,7 +7,7 @@
 # join fields used by ai-reviewer-issue.
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
 PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$SCRIPT_DIR/ai-review-preflight}"
@@ -242,6 +242,42 @@ reconcile_siblings(){ # REPOSITORY-KEY PROVIDER
   done
 }
 
+# #1691: records written before #1562 carry no owner, so reconcile_state never
+# touches them and they stay "running" forever. A sweep closes only ownerless
+# running/preflight records untouched for --older-than seconds (default 24 h,
+# far above every door timeout), the same way reconcile_state does: no
+# scoreboard row, because nobody knows how the review ended. Owned records go
+# through reconcile_state unchanged. --dry-run only lists.
+sweep(){
+  local older=86400 dry=false f state now cutoff pid row lock token n=0
+  while [ "$#" -gt 0 ]; do case "$1" in
+    --older-than) older="${2:-}"; shift 2;; --dry-run) dry=true; shift;;
+    *) die "unknown sweep option: $1";; esac; done
+  case "$older" in ''|*[!0-9]*) die "--older-than must be a non-negative integer.";; esac
+  now="$(date -u +%s)"; cutoff=$((now - older))
+  while IFS= read -r -d '' f; do
+    [ ! -L "$f" ] || continue
+    state="$(state_checked "$f" 2>/dev/null)" || continue
+    case "$(jq -r .status "$state" 2>/dev/null)" in running|preflight) ;; *) continue;; esac
+    pid="$(jq -r '.owner_pid // empty' "$state")"
+    if [ -n "$pid" ]; then
+      [ "$dry" = true ] || ( reconcile_state "$state" sweep ) >/dev/null 2>&1 || true
+      continue
+    fi
+    jq -e --argjson cutoff "$cutoff" '(.updated_at // .started_at // "")|try (fromdateiso8601 <= $cutoff) catch false' "$state" >/dev/null || continue
+    n=$((n + 1)); printf '%s\n' "$state"
+    [ "$dry" = false ] || continue
+    row="$(jq --arg now "$(date -u +%FT%TZ)" \
+      '.interruption={detected_at:$now,detected_by:"sweep",owner_pid:null,owner_exited:null,reason:"ownerless-stale",status_before:.status,last_updated_at:.updated_at}|.status="interrupted"|.verdict="BLOCKED"|.failure_class="interrupted"|.updated_at=$now|.finished_at=$now' "$state")"
+    atomic_json "$state" "$row"
+    lock="$(jq -r '.lock_path // empty' "$state")"; token="$(jq -r '.lock_token // empty' "$state")"
+    if [ -n "$lock" ] && [ -d "$lock" ] && [ "$(cat "$lock/token" 2>/dev/null || true)" = "$token" ]; then
+      rm -f "$lock/token" "$lock/state"; rmdir "$lock" 2>/dev/null || true
+    fi
+  done < <(find "$STATE_DIR/runs" -mindepth 4 -maxdepth 4 -type f -name '*.json' -print0 2>/dev/null)
+  printf 'ai-review-lifecycle: sweep %s %d ownerless record(s) older than %ss\n' "$([ "$dry" = true ] && printf found || printf interrupted)" "$n" "$older" >&2
+}
+
 begin(){
   local provider="" repo="" run="" session="" caller="" base="" mode=standard reviewer_approval="" identity key lock token state now preflight_rc=0 preflight_out row
   local action_profile="" action_manifest="" action_binding=""
@@ -402,12 +438,13 @@ join(){
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class,packet_dir,packet_sha256}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle join <state-file>'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle join <state-file>' 'ai-review-lifecycle sweep [--older-than SECONDS] [--dry-run]'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;
   begin) shift; begin "$@";; finish) shift; terminal finish "$@";; fail) shift; terminal fail "$@";;
   observe) shift; diagnostic_observe "$@";;
+  sweep) shift; sweep "$@";;
   join) shift; [ "$#" -eq 1 ] || die "join requires one state file."; join "$1";;
   --version) printf 'ai-review-lifecycle %s\n' "$VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;;
 esac

@@ -613,7 +613,15 @@ check 'Windows schedule reliability allows start on batteries' \
 check 'Windows schedule reliability does not stop on batteries' \
   "grep -qF 'StopIfGoingOnBatteries=\\\$false' '$FAKE/schedule_windows_reliability.sh'"
 check 'Windows schedule reliability queues a fire instead of dropping it' \
-  "grep -qF 'MultipleInstances=1' '$FAKE/schedule_windows_reliability.sh'"
+  "grep -qF \"MultipleInstances='Queue'\" '$FAKE/schedule_windows_reliability.sh'"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Name the policy, not a number: prove the real Task Scheduler settings
+    # object maps 'Queue' to the Queue policy (#1698).
+    check 'Task Scheduler maps the Queue policy name to Queue' \
+      "[ \"\$(powershell.exe -NoProfile -Command '\$s=New-ScheduledTaskSettingsSet; \$s.MultipleInstances=\"Queue\"; [string]\$s.MultipleInstances' | tr -d '\\r')\" = Queue ]"
+    ;;
+esac
 check 'cmd_schedule applies the reliability settings after schtasks create' \
   "grep -q 'schedule_windows_reliability' '$SCRIPT'"
 
