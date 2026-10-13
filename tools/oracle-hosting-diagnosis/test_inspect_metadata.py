@@ -154,4 +154,21 @@ class TestInspector(unittest.TestCase):
                 with self.assertRaises(ValueError):m.read_remote(contract,hosts)
                 run.assert_not_called()
 
+    def test_transport_error_reveals_only_fixed_category(self):
+        self.assertEqual(m.transport_failure(255,b'Permission denied fixture-credential'),'ssh_authentication_refused')
+        self.assertEqual(m.transport_failure(255,b'Host key verification failed private-fixture'),'ssh_host_key_refused')
+        self.assertEqual(m.transport_failure(3,b'private-fixture'),'remote_metadata_reader_refused')
+        self.assertEqual(m.transport_failure(255,b'private-fixture'),'ssh_transport_failed')
+
+    def test_failed_ssh_discards_sensitive_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hosts=Path(directory)/'hosts';hosts.write_bytes(b'fixture')
+            contract=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
+            def fake_run(args,**kwargs):
+                kwargs['stderr'].write(b'Permission denied fixture-credential')
+                return type('R',(),{'returncode':255})()
+            with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential','TMPDIR':directory}),patch.object(m.subprocess,'run',fake_run):
+                with self.assertRaisesRegex(ValueError,'^ssh_authentication_refused$'):
+                    m.read_remote(contract,hosts)
+
 if __name__=='__main__':unittest.main()

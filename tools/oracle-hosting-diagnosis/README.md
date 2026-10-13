@@ -26,7 +26,7 @@ password inside a 0700 directory, and creates a 0700 fixed interpreter askpass
 helper. SSH child environment contains no credential. Temporary custody is
 removed on ordinary success/error; abrupt process death may retain protected
 files and root must recover them. SSH stdout is restricted to a 64KiB file;
-stderr is discarded. Connect timeout 10s; total subprocess timeout 55s; Docker
+stderr is bounded and reduced to fixed transport-failure enums; no raw stderr is returned or retained. Connect timeout 10s; total subprocess timeout 55s; Docker
 selection timeout 8s and each of at most18 inspections 2s/4KiB. No raw runtime
 inspection response is generated. Known-hosts is existing public key metadata.
 
@@ -48,7 +48,7 @@ revision labels remain explicit mismatches. Empty OCI labels serialize as empty
 strings. Credential NUL/newline/oversize inputs refuse before child launch;
 secret/helper creation and secret reads use nofollow descriptors.
 
-Verification: thirteen synthetic tests pass, covering wrong contract/host key,
+Verification: fifteen synthetic tests pass, covering wrong contract/host key,
 foreign namespace/roles, injected sensitive fields, duplicate/oversized output,
 preserved unhealthy/missing roles, secret-free child environment and protected
 custody/cleanup, vendor-image drift, absent vendor revisions, credential bounds
@@ -61,3 +61,8 @@ SSH/credential use. The corrected input contains ONLY the existing matched hetz
 ed25519 record extracted with ssh-keygen -F; the contract pins its exact digest.
 No new key is trusted, original snapshot is preserved, bounds are unchanged, and
 the failed claim is never reused. Root independently verifies this derivation.
+
+The second approved attempt failed safely; its claim is retained. The corrected
+reader adds fixed failure-stage categories, preserving all bounds and host-key
+checks. Raw remote stderr is transient protected custody only, never emitted or
+persisted. This does not read runtime logs or private mounted data.

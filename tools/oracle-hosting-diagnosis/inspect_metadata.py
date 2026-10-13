@@ -20,6 +20,16 @@ import stat
 
 LIMIT = 65536
 APP = 'vhmcdkdk23dgvjvcvhyhcjzd'
+SAFE_FAILURES = {'input file bound exceeded', 'known-hosts changed',
+                 'protected credential missing', 'protected temp parent required',
+                 'ssh_authentication_refused', 'ssh_host_key_refused',
+                 'ssh_name_resolution_failed', 'ssh_connection_refused',
+                 'ssh_transport_failed', 'remote_metadata_reader_refused',
+                 'metadata fields differ', 'metadata bound exceeded',
+                 'container count differs', 'container namespace differs',
+                 'container identity differs', 'state differs', 'state types differ',
+                 'timestamp differs', 'revision differs', 'image differs',
+                 'duplicate role differs'}
 FIELDS = {'id', 'name', 'image_id', 'image', 'service', 'project', 'application', 'revision', 'status', 'health', 'exit_code', 'started_at', 'finished_at', 'restarts'}
 # Go template reads only the named fields. Never marshal .Config or .State.
 TEMPLATE = ('{"id":{{json .Id}},"name":{{json .Name}},"image_id":{{json .Image}},'
@@ -34,6 +44,20 @@ TEMPLATE = ('{"id":{{json .Id}},"name":{{json .Name}},"image_id":{{json .Image}}
 def require(value, reason):
     if not value:
         raise ValueError(reason)
+
+
+def transport_failure(code, error):
+    # Classify only fixed transport phrases. Never return, persist or hash the
+    # raw stderr; a remote peer could place sensitive text there.
+    if code != 255:
+        return 'remote_metadata_reader_refused'
+    for phrase, reason in ((b'Permission denied', 'ssh_authentication_refused'),
+                           (b'Host key verification failed', 'ssh_host_key_refused'),
+                           (b'Could not resolve hostname', 'ssh_name_resolution_failed'),
+                           (b'Connection refused', 'ssh_connection_refused')):
+        if phrase in error:
+            return reason
+    return 'ssh_transport_failed'
 
 
 def bounded_file(path, limit):
@@ -132,9 +156,11 @@ def read_remote(contract, known_hosts):
         child={'PATH':'/usr/bin:/bin','LANG':'C','SSH_ASKPASS':str(helper),'SSH_ASKPASS_REQUIRE':'force','DISPLAY':'oracle-metadata:0'}
         command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(pinned_hosts),'-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes','ai@hetz',remote_command(contract)]
         def bound_file():resource.setrlimit(resource.RLIMIT_FSIZE,(LIMIT,LIMIT))
-        with tempfile.TemporaryFile() as output:
-            result=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,timeout=55,env=child,start_new_session=True,preexec_fn=bound_file)
-            require(result.returncode==0,'bounded remote metadata read failed')
+        with tempfile.TemporaryFile(dir=directory) as output, tempfile.TemporaryFile(dir=directory) as error:
+            result=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=output,stderr=error,timeout=55,env=child,start_new_session=True,preexec_fn=bound_file)
+            if result.returncode:
+                error.seek(0)
+                raise ValueError(transport_failure(result.returncode,error.read(4097)))
             output.seek(0)
             return output.read(LIMIT+1)
 
@@ -153,8 +179,9 @@ def main():
             return 0
         raw=read_remote(contract,args.known_hosts) if args.known_hosts else sys.stdin.buffer.read(LIMIT+1)
         print(json.dumps(validate_rows(raw,contract),sort_keys=True))
-    except Exception:
-        print('metadata diagnosis refused; no runtime mutation performed',file=sys.stderr)
+    except Exception as error:
+        reason = str(error) if isinstance(error, ValueError) and str(error) in SAFE_FAILURES else 'metadata_reader_refused'
+        print(json.dumps({'completed':False,'read_only':True,'reason':reason}),file=sys.stderr)
         return 3
     return 0
 
