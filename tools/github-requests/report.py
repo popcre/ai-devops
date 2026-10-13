@@ -205,7 +205,7 @@ def summarize(directory):
                     if measurement == "read_observation":
                         if (type(row.get("schema")) is not int or set(row) != READ_OBSERVATION_KEYS
                                 or row.get("caller") not in CALLERS
-                                or row.get("workflow") != "pr_wait"
+                                or row.get("workflow") not in OBSERVATION_WORKFLOWS
                                 or not valid_target_ordinal(row.get("target_ordinal"))
                                 or row.get("source") not in ("cache", "upstream")
                                 or type(row.get("cache_hit")) is not bool
@@ -218,7 +218,7 @@ def summarize(directory):
                     if measurement == "write_observation":
                         if (type(row.get("schema")) is not int or set(row) != WRITE_OBSERVATION_KEYS
                                 or row.get("caller") not in CALLERS
-                                or row.get("workflow") not in ("pr_wait", "blocker_watch_tick", "blocker_watch_alarm", "blocker_watch_links")
+                                or row.get("workflow") not in OBSERVATION_WORKFLOWS
                                 or not valid_target_ordinal(row.get("target_ordinal"))
                                 or row.get("action") not in ("written", "skipped")
                                 or row.get("content_relation") not in ("new", "unchanged", "unknown")
@@ -511,6 +511,10 @@ READ_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "
                          "cache_hit", "saved_upstream_read"}
 WRITE_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "target_ordinal", "action",
                           "content_relation", "duplicate_unchanged_write"}
+# Keep in lockstep with telemetry.sh gh_measure_read_observation /
+# gh_measure_write_observation; a wider emitter must never crash the report.
+OBSERVATION_WORKFLOWS = {"pr_wait", "blocker_watch_tick", "blocker_watch_alarm",
+                         "blocker_watch_links", "merge_group_evidence"}
 LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline"}
 LOCAL_CLOCK_BASES = {"linux_boottime_centiseconds", "unknown"}
 LOCAL_REASONS = {"source_unknown", "clock_unknown", "clock_negative", "delivery_unknown"}
