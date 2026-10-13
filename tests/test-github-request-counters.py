@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,13 +198,17 @@ class SingleFlightEmits(unittest.TestCase):
         self.count = self.base / "calls"
         self.fake = self.base / "fake.py"
         self.fake.write_text(
-            """import json, os
+            """import json, os, time
 with open(os.environ['COUNT'], 'a') as f: f.write('x\\n')
+time.sleep(float(os.environ.get('DELAY', '0')))
+mode = os.environ.get('MODE', 'open')
 pr = {'state': 'OPEN', 'headRefOid': 'h1', 'isInMergeQueue': False, 'mergeCommit': None,
       'commits': {'nodes': [{'commit': {'statusCheckRollup': {
-      'state': 'PENDING', 'contexts': {'totalCount': 0,
+      'state': 'FAILURE' if mode == 'failed' else 'PENDING',
+      'contexts': {'totalCount': 1 if mode == 'failed' else 0,
                    'pageInfo': {'hasPreviousPage': False},
-                   'nodes': []}}}}]}}
+                   'nodes': ([{'name': 'test', 'conclusion': 'FAILURE'}]
+                             if mode == 'failed' else [])}}}}]}}
 print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
 """
         )
@@ -211,14 +216,17 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
                         AI_GH_STATE_DIR=str(self.state),
                         AI_GH_CALLER="ai-pr-wait")
 
-    def call(self, suffix):
+    def call(self, suffix, force=False, delay="0", mode="open", wait_seconds="4"):
+        argv = [sys.executable, str(SINGLE), "--state-dir", str(self.base / "snap"),
+                "--key", "same-target", "--expected-head", "h1", "--ttl", "10",
+                "--wait-seconds", wait_seconds, "--age-file", str(self.base / (suffix + ".age")),
+                "--source-file", str(self.base / (suffix + ".source"))]
+        if force:
+            argv.append("--force-refresh")
+        argv.extend(["--", sys.executable, str(self.fake)])
+        env = dict(self.env, DELAY=delay, MODE=mode)
         return subprocess.Popen(
-            [sys.executable, str(SINGLE), "--state-dir", str(self.base / "snap"),
-             "--key", "same-target", "--expected-head", "h1", "--ttl", "10",
-             "--wait-seconds", "4", "--age-file", str(self.base / (suffix + ".age")),
-             "--source-file", str(self.base / (suffix + ".source")),
-             "--", sys.executable, str(self.fake)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
     def _rows(self):
         rows = []
@@ -226,6 +234,9 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
             for line in path.read_text().splitlines():
                 rows.append(json.loads(line))
         return rows
+
+    def calls(self):
+        return len(self.count.read_text().splitlines()) if self.count.exists() else 0
 
     def test_cache_hit_emits_saved_read_and_upstream_emits_read(self):
         first = self.call("a")
@@ -270,6 +281,32 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
         skipped = next(w for w in writes if w["action"] == "skipped")
         self.assertEqual(skipped["content_relation"], "unchanged")
         self.assertFalse(skipped["duplicate_unchanged_write"])
+
+    def test_identical_skip_refreshes_mtime_for_in_flight_coalescing(self):
+        # A failing snapshot is not TTL-cacheable, so waiters only share via
+        # the same-flight mtime window. Skipping the identical content rewrite
+        # must still bump mtime, or a waiter that joined during the refresh
+        # re-hits upstream instead of sharing the completed read.
+        first = self.call("a", mode="failed")
+        out, err = first.communicate(timeout=8)
+        self.assertEqual(first.returncode, 0, err)
+        cache = next((self.base / "snap").glob("*.json"))
+        before = cache.stat().st_mtime_ns
+        owner = self.call("owner", force=True, delay="0.6", mode="failed", wait_seconds="8")
+        time.sleep(0.2)
+        joiner = self.call("joiner", mode="failed", wait_seconds="8")
+        out, err = owner.communicate(timeout=10)
+        self.assertEqual(owner.returncode, 0, err)
+        out, err = joiner.communicate(timeout=10)
+        self.assertEqual(joiner.returncode, 0, err)
+        self.assertEqual((self.base / "owner.source").read_text(), "upstream")
+        self.assertEqual((self.base / "joiner.source").read_text(), "cache")
+        self.assertEqual(self.calls(), 2)
+        after = cache.stat().st_mtime_ns
+        self.assertGreater(after, before, "identical skip must refresh cache mtime")
+        writes = [r for r in self._rows() if r.get("measurement") == "write_observation"]
+        self.assertEqual(sorted(w["action"] for w in writes), ["skipped", "written"])
+        self.assertFalse(any(w["duplicate_unchanged_write"] for w in writes))
 
 
 if __name__ == "__main__":
