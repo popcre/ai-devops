@@ -39,7 +39,12 @@ def has_exact_action_scope(content, binding):
     scopes = [line for line in content.splitlines() if line.lstrip().startswith("Action scope:")]
     # Sentence punctuation has no authority. The profile, complete descriptor
     # and unique unindented line remain exact; do not normalize other wording.
-    return len(scopes) == 1 and scopes[0] in (expected, expected + ".")
+    valid = len(scopes) == 1 and scopes[0] in (expected, expected + ".")
+    if binding["profile"] == "oracle-native-alternate-serialization-v1":
+        purpose = "Purpose registration: " + binding["profile"] + " descriptor sha256:" + binding["permission_registration_descriptor_sha256"]
+        lines = [line for line in content.splitlines() if line.lstrip().startswith("Purpose registration:")]
+        valid = valid and len(lines) == 1 and lines[0] in (purpose, purpose + ".")
+    return valid
 
 
 # Absolute repository-location variables in the inherited environment (set by

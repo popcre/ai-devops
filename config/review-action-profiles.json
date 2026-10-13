@@ -1,5 +1,32 @@
 {
   "profiles": {
+    "oracle-native-alternate-serialization-v1": {
+      "action": "offline-private-capture-transform",
+      "entrypoint": "scripts/oracle2/native_alternate_operator.py",
+      "limits": {
+        "address_space_bytes": 8589934592,
+        "cpu_seconds": 120,
+        "input_bytes": 268435456,
+        "network": "none",
+        "output_bytes": 268435456,
+        "threads": 2,
+        "wall_seconds": 180,
+        "workers": 1
+      },
+      "owner": "Oracle coordinator on u2giants/theoracle#27/#58",
+      "path_set_sha256": "f00cc855a87b8c8fdcf694d1cd74a7eebc302c43e54c9763fddaf32cc3e9fb88",
+      "paths": [
+        ".ai-devops/task-gates.json",
+        "scripts/oracle2/contracts/native_alternate_serialization.json",
+        "scripts/oracle2/native_alternate_operator.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_alternate.py",
+        "services/oracle-brain/tests/test_native_alternate.py",
+        "services/oracle-brain/tests/test_native_alternate_operator.py"
+      ],
+      "purpose": "native-alternate-serialization",
+      "repository": "https://github.com/u2giants/theoracle",
+      "retirement": "Retain until unqualified serialization is reconciled; no source adoption rights."
+    },
     "shared-db-770-isolated-timing-rehearsal-v1": {
       "acceptance_callback": false,
       "action": "database",

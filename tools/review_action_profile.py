@@ -356,6 +356,19 @@ def admit(state_path, state, binding, stage, publish):
 
 
 def main():
+    # The existing foreign profile implementation and byte semantics stay intact.
+    oracle = "oracle-native-alternate-serialization-v1"
+    selected = sys.argv[sys.argv.index("--profile") + 1] if "--profile" in sys.argv else None
+    if selected is None and len(sys.argv) > 2:
+        try:
+            selected = decode(_native.private_read(sys.argv[2])).get("action_profile_binding", {}).get("profile")
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    if selected == oracle:
+        spec = importlib.util.spec_from_file_location("oracle_native_profile", ROOT / "tools/oracle_native_alternate_profile.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.main(sys.argv[1:])
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("capture", "evidence", "finish", "preaction"))
     parser.add_argument("state")

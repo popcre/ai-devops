@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Real local stat/namespace fixtures; never provider, permission or private reads."""
+import copy
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+ROOT=Path(__file__).resolve().parents[1]
+spec=importlib.util.spec_from_file_location('profile',ROOT/'tools/oracle_native_alternate_profile.py')
+profile=importlib.util.module_from_spec(spec);spec.loader.exec_module(profile)
+spec=importlib.util.spec_from_file_location('scope',ROOT/'bin/ai-review-code-only.py')
+scope=importlib.util.module_from_spec(spec);spec.loader.exec_module(scope)
+spec=importlib.util.spec_from_file_location('guardian',ROOT/'tools/oracle_native_alternate_guardian.py')
+guardian=importlib.util.module_from_spec(spec);spec.loader.exec_module(guardian)
+
+
+class OracleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.root.chmod(0o700)
+        self.now=int(time.time());self.capture=self.root/'capture';self.capture.write_bytes(b'INVENTED ONLY');self.capture.chmod(0o600)
+        self.register=self.root/'register';self.register.write_bytes(b'INVENTED REGISTER');self.register.chmod(0o600)
+        def item(path):return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'original_hash':'a'*64,'stat':profile.descriptor_stat(str(path))}
+        self.manifest=dict(schema_version=1,profile=profile.PROFILE,purpose=profile.PURPOSE,action_id='a'*32,
+            source_head='a'*40,source_digest='a'*64,observed_at=self.now,expires_at=self.now+600,
+            permission_custody=dict(current_contract_metadata_sha256='a'*64,historical_capture_sha256='b'*64,current_owner='Albert Hazan',
+                requires_external_registrar=False,external_registration_sha256=None,observed_at=self.now,expires_at=self.now+600),
+            captures=[item(self.capture)],original_register=item(self.register),census=copy.deepcopy(profile.CENSUS),output_parent={'path':str(self.root),'stat':profile.descriptor_stat(str(self.root),True)},
+            output_leaf='new-alternate',runtime={'root':str(self.root/'public-runtime'),'closure_sha256':'c'*64,'bytes':1,'bwrap':'/usr/bin/bwrap','bwrap_sha256':'d'*64},limits=copy.deepcopy(profile.LIMITS))
+        self.manifest['captures'][0]['original_hash']='0'*64
+        for index in range(1,8):
+            path=self.root/('capture'+str(index));path.write_bytes(b'INVENTED ONLY '+str(index).encode());path.chmod(0o600)
+            value=item(path);value['original_hash']=str(index)*64;self.manifest['captures'].append(value)
+        self.manifest['output_parent']['stat']=profile.descriptor_stat(str(self.root),True)
+    def tearDown(self):self.temp.cleanup()
+    def test_preapproval_stat_never_reads_or_hashes_capture(self):
+        with mock.patch('builtins.open',side_effect=AssertionError('content read before admission')),mock.patch.object(Path,'read_bytes',side_effect=AssertionError('content read')):
+            result=profile.validate_manifest(self.manifest,self.now)
+        self.assertFalse(result['capture_byte_hashes_verified'])
+    def test_declared_hash_is_unverified_not_permission(self):
+        self.manifest['captures'][0]['sha256']='0'*64
+        self.assertFalse(profile.validate_manifest(self.manifest,self.now)['capture_byte_hashes_verified'])
+    def test_unknown_contract_and_external_registrar_cannot_be_fabricated(self):
+        self.manifest['permission_custody']['requires_external_registrar']=True
+        with self.assertRaisesRegex(ValueError,'supported verifier'):profile.validate_manifest(self.manifest,self.now)
+    def test_missing_or_expired_custody_fails(self):
+        for key in ('current_contract_metadata_sha256','current_owner'):
+            m=copy.deepcopy(self.manifest);del m['permission_custody'][key]
+            with self.assertRaises(ValueError):profile.validate_manifest(m,self.now)
+        self.manifest['permission_custody']['expires_at']=self.now
+        with self.assertRaises(ValueError):profile.validate_manifest(self.manifest,self.now)
+    def test_expired_future_and_too_short_action_deny(self):
+        for delta in (-1,1):
+            m=copy.deepcopy(self.manifest);m['observed_at']=self.now+delta*(601 if delta<0 else 1)
+            with self.assertRaises(ValueError):profile.validate_manifest(m,self.now)
+        self.manifest['expires_at']=self.now+179
+        with self.assertRaises(ValueError):profile.validate_manifest(self.manifest,self.now)
+    def test_source_extraction_renewal_and_changed_bounds_deny(self):
+        for mutation in ({'purpose':'source-extraction'},{'limits':{**profile.LIMITS,'network':'host'}},{'active':True}):
+            with self.assertRaises(ValueError):profile.validate_manifest({**self.manifest,**mutation},self.now)
+    def test_symlink_wrong_mode_and_inode_drift_deny(self):
+        self.capture.chmod(0o644)
+        with self.assertRaises(ValueError):profile.validate_manifest(self.manifest,self.now)
+        self.capture.chmod(0o600);self.capture.unlink();self.capture.symlink_to(self.register)
+        with self.assertRaises(ValueError):profile.validate_manifest(self.manifest,self.now)
+    def test_duplicate_input_output_collision_and_oversize_deny(self):
+        for change in ('duplicate','output','size'):
+            m=copy.deepcopy(self.manifest)
+            if change=='duplicate':m['captures']*=2
+            elif change=='output':(self.root/m['output_leaf']).mkdir()
+            else:m['runtime']['bytes']=profile.LIMITS['input_bytes']
+            with self.assertRaises(ValueError):profile.validate_manifest(m,self.now)
+    def test_dual_scope_unique_unindented_lines_required(self):
+        binding={'profile':profile.PROFILE,'manifest_descriptor_sha256':'a'*64,'permission_registration_descriptor_sha256':'b'*64}
+        action='Action scope: '+profile.PROFILE+' descriptor sha256:'+'a'*64
+        purpose='Purpose registration: '+profile.PROFILE+' descriptor sha256:'+'b'*64
+        self.assertTrue(scope.has_exact_action_scope(action+'\n'+purpose,binding))
+        for text in (action,purpose,' '+action+'\n'+purpose,action+'\n'+purpose+'\n'+purpose,action+'\n'+purpose.replace('b'*64,'c'*64)):
+            self.assertFalse(scope.has_exact_action_scope(text,binding))
+    def test_advisory_boolean_or_test_fixture_cannot_register_or_consume(self):
+        binding={'installed_enforcement':{'kind':'NONAUTHORIZING_TEST_FIXTURE'}}
+        state={'status':'completed','verdict':'APPROVE','stale':False,'failure_class':None,'active':True}
+        with self.assertRaisesRegex(ValueError,'test fixture'):profile.completed(self.root/'state',state,binding)
+        with self.assertRaises(ValueError):guardian.consume(self.root/'state',state,self.manifest,binding)
+        self.assertFalse(list(self.root.glob('*.spent')))
+    def test_plain_manifest_is_not_provider_attachment(self):
+        b={'profile':profile.PROFILE,'permission_registration_descriptor_sha256':'a'*64,'manifest_descriptor_sha256':'b'*64}
+        text=profile.prompt({'action_profile_binding':b})
+        self.assertNotIn(str(self.capture),text);self.assertNotIn('INVENTED ONLY',text)
+        self.assertIn('NOT read or hash-verified',text)
+    def test_sandbox_fixed_mounts_no_hosthome_network_or_callback(self):
+        command=guardian.sandbox_command(self.manifest['runtime'],'/public/operator','/public/decoder',[12,13],'/fresh/output')
+        self.assertIn('--unshare-all',command);self.assertIn('--clearenv',command)
+        self.assertNotIn('/home',command);self.assertNotIn('--share-net',command);self.assertNotIn('sh',command)
+        self.assertEqual(command.count('--ro-bind'),5)
+    def test_actual_linux_limits_and_namespace_or_exact_denial(self):
+        code='import resource; resource.setrlimit(resource.RLIMIT_AS,(8589934592,)*2);resource.setrlimit(resource.RLIMIT_CPU,(120,)*2);print(resource.getrlimit(resource.RLIMIT_AS),resource.getrlimit(resource.RLIMIT_CPU))'
+        result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0);self.assertIn('(8589934592, 8589934592)',result.stdout);self.assertIn('(120, 120)',result.stdout)
+        # This is a PUBLIC fixture only, not an installed/admitted action.
+        result=subprocess.run(['/usr/bin/bwrap','--unshare-all','--ro-bind','/usr','/usr','--ro-bind','/lib','/lib','--ro-bind','/lib64','/lib64',
+            '--proc','/proc','--dev','/dev','/usr/bin/python3','-c','import socket;print(socket.if_nameindex())'],capture_output=True,text=True)
+        if result.returncode==0:self.assertEqual(result.stdout.strip(),"[(1, 'lo')]")
+        else:
+            self.assertIn('Operation not permitted',result.stderr)
+            print('PUBLIC SANDBOX PROBE: Linux namespace creation refused; actual private execution stays blocked.',file=sys.stderr)
+    def test_real_named_gate_preserves_generic_production_and_foreign_denials(self):
+        repo=self.root/'repo';repo.mkdir()
+        env=dict(os.environ,AI_TASK_GATES_DIR=str(self.root/'gates'),AI_REVIEW_LIFECYCLE_DIR=str(self.root/'reviews'))
+        def command(*args):return subprocess.run(args,cwd=repo,env=env,capture_output=True)
+        self.assertEqual(command('git','init','-q').returncode,0)
+        command('git','config','user.name','Fixture');command('git','config','user.email','fixture@invalid.local')
+        command('git','remote','add','origin','https://github.com/u2giants/theoracle')
+        (repo/'.ai-devops').mkdir()
+        (repo/'.ai-devops/task-gates.json').write_text(json.dumps({'schema_version':1,'gates':{'private-tooling':{'required':['synthetic-fixtures-only','oracle-native-alternate-descriptor-only-admission'],'forbidden_actions':[]}}}))
+        command('git','add','.ai-devops/task-gates.json');command('git','commit','-qm','invented control only')
+        gates=str(ROOT/'bin/ai-task-gates');self.assertEqual(command(gates,'start','--class','private-tooling').returncode,0)
+        self.assertEqual(command(gates,'check','--before','production').returncode,3)
+        # Missing native report/manifest always denies, even with exact opt-in.
+        self.assertNotEqual(command(gates,'check','--before',profile.ACTION).returncode,0)
+        command('git','remote','set-url','origin','https://github.com/popcre/designflow-backend')
+        self.assertNotEqual(command(gates,'check','--before',profile.ACTION).returncode,0)
+
+    def test_direct_guardian_cannot_self_issue(self):
+        state=self.root/'state';state.write_text('{}');state.chmod(0o600)
+        result=subprocess.run([sys.executable,str(ROOT/'tools/oracle_native_alternate_guardian.py'),'--state',str(state)],
+            input=profile.canonical(self.manifest),capture_output=True)
+        self.assertNotEqual(result.returncode,0);self.assertNotIn(b'INVENTED',result.stderr)
+        self.assertFalse(list(self.root.glob('*.spent')))
+
+    def test_actual_public_runtime_preparation_is_non_authorizing(self):
+        probe = '''import sys,pathlib;sys.path.insert(0,"tools")
+import oracle_native_alternate_runtime as runtime
+root=pathlib.Path(sys.argv[1]);receipt=runtime.prepare(root)
+runtime.verify_recipe(root)
+assert receipt["kind"]=="NONAUTHORIZING_PUBLIC_OS_STDLIB_PREPARATION"
+assert receipt["bytes"]<=256*1024**2
+assert not any("sitecustomize" in p or "site-packages" in p or "config-" in p for p in receipt["origins"])
+'''
+        result=subprocess.run(['/usr/bin/python3','-c',probe,str(self.root/'public-runtime')],cwd=ROOT,
+            capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertFalse(list(self.root.glob('*.spent')))
+
+
+if __name__=='__main__':unittest.main()

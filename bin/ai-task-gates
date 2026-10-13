@@ -477,9 +477,15 @@ reviewer_approval_summary(){
   done
   [ -n "$row" ] || return 1
   if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
-    [ "$action" = database ] && [ -n "$action_manifest_file" ] || return 1
-    jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
-    python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    [ -n "$action_manifest_file" ] || return 1
+    if [ "$action" = offline-private-capture-transform ]; then
+      jq -e '.action_profile_binding.profile=="oracle-native-alternate-serialization-v1" and .action_profile_binding.action=="offline-private-capture-transform"' "$row" >/dev/null || return 1
+      python3 "$REAL_DIR/../tools/oracle_native_alternate_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    else
+      [ "$action" = database ] || return 1
+      jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
+      python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    fi
   fi
   [ -z "$action_manifest_file" ] || jq -e '.action_profile_binding!=null and .evidence_scope=="selected-code"' "$row" >/dev/null || return 1
   mode="$(jq -r '.review_mode // ""' "$row")"
@@ -488,8 +494,13 @@ reviewer_approval_summary(){
     *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
   esac
   if [ "$publish_admission" = 1 ]; then
-    [ "$action" = database ] && [ -n "$action_manifest_file" ] || return 1
-    python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    [ -n "$action_manifest_file" ] || return 1
+    if [ "$action" = offline-private-capture-transform ]; then
+      python3 "$REAL_DIR/../tools/oracle_native_alternate_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    else
+      [ "$action" = database ] || return 1
+      python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    fi
   fi
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
@@ -1110,7 +1121,7 @@ cmd_check(){
   fi
   case "$action_stage" in initial-forward) ;; original-restoration) [ "$action_manifest_stdin" -eq 1 ] || die 'restoration stage requires bounded action stdin.' ;; *) die 'unknown bounded action stage.' ;; esac
   if [ "$action_manifest_stdin" -eq 1 ]; then
-    [ "$action" = database ] && [ -n "$reviewer_approval" ] && [ -z "$base$small_entry" ] || die 'bounded action stdin requires database, reviewer approval, and unchanged recorded task base.'
+    { [ "$action" = database ] || [ "$action" = offline-private-capture-transform ]; } && [ -n "$reviewer_approval" ] && [ -z "$base$small_entry" ] || die 'bounded action stdin requires a closed native action, reviewer approval, and unchanged recorded task base.'
     action_manifest_file="$(umask 077; mktemp)" || die 'cannot reserve private action stdin.'
     trap "$(printf 'rm -f -- %q' "$action_manifest_file")" EXIT
     head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
@@ -1314,6 +1325,22 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   effective_gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  if [ "$action" = offline-private-capture-transform ]; then
+    [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
+      && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
+      && [ -n "$reviewer_approval" ] && [ -z "$acknowledge$small_entry" ] \
+      || blocked 'ai-task-gates: STOP. Offline capture transform has only the closed Oracle/private-tooling native route.'
+    printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -qx oracle-native-alternate-descriptor-only-admission \
+      || blocked 'ai-task-gates: STOP. Oracle has not opted in to the exact offline native action.'
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
+      || blocked 'ai-task-gates: STOP. Genuine independent dual-scoped native registration/action completion is absent.'
+    state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
+      || blocked 'ai-task-gates: STOP. Native action approval persistence failed.'
+    reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1 >/dev/null \
+      || blocked 'ai-task-gates: STOP. Current-purpose registration/one-use admission publication failed.'
+    printf 'ai-task-gates: "%s" admitted only for one conditional unqualified offline serialization: %s\n' "$action" "$approval_summary"
+    return 0
+  fi
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     # A protected forbidden action stays sealed unless the central policy names
     # a reviewer release for exactly this action and EFFECTIVE class, and the
