@@ -161,7 +161,8 @@ cmd_schedule() {
     return 2
   }
   local tmp rc=0 existing read_rc=0
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
+  trap 'rm -f "$tmp"' EXIT
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
   if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
     # Distinguish "no crontab yet" from "unreadable crontab": if the spool
@@ -207,7 +208,8 @@ cmd_unschedule() {
     return 2
   }
   local tmp rc=0 existing read_rc=0
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
+  trap 'rm -f "$tmp"' EXIT
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
   if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
     local spool
