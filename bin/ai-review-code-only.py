@@ -26,6 +26,7 @@ CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
 CONTRACT_PARTS = {"contract", "contracts", "migration", "migrations", "schema", "schemas", "types"}
 GATE_DECLARATION = ".ai-devops/task-gates.json"
+SHARED_DB_BYPASS_WORKFLOW = ".github/workflows/forbid-shared-db-bypass.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -106,6 +107,10 @@ def safe_path(raw):
     # rows; it is the one hidden path a sealed review may see, exactly (#1239).
     if raw == GATE_DECLARATION:
         return raw
+    # This one publishing-gate workflow is exact-source policy needed to review
+    # the scoped exemption; no other hidden workflow or YAML path is admitted.
+    if raw == SHARED_DB_BYPASS_WORKFLOW:
+        return raw
     lower = [part.lower() for part in parts]
     if any(denied_component(part) or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
@@ -180,7 +185,7 @@ def current_bytes(source, path):
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
     relative = resolved.relative_to(resolved_root)
-    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() != path:
+    if relative.as_posix() in (GATE_DECLARATION, SHARED_DB_BYPASS_WORKFLOW) and relative.as_posix() != path:
         fail("approved path resolves into a refused location")
     try:
         safe_path(relative.as_posix())
