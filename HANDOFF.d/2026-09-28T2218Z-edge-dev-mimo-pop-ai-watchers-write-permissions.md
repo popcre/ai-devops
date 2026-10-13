@@ -1,5 +1,5 @@
 ---
-issue: none                          # no GitHub issue; wrap-up scope freeze blocked opening one
+issue: 1679
 status: OPEN
 owner: mimo/pop-ai-watchers-write-permissions
 ---

@@ -1,5 +1,5 @@
 ---
-issue: null # Wrap-up scope freeze forbade opening a new issue; successor must create the parent issue before implementation.
+issue: 961
 status: BLOCKED
 owner: codex/warpbuild-byoc-handoff
 ---

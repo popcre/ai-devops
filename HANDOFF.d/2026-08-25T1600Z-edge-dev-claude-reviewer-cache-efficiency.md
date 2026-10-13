@@ -1,5 +1,5 @@
 ---
-issue: none    # no GitHub issue opened for this workstream
+issue: 1677
 status: OPEN
 owner: claude/reviewer-setup-audit-23cef2 (edge-dev Claude session, 2026-08-25)
 ---
