@@ -313,7 +313,8 @@ cmd_view(){
       -out "$(native "$work/b.tar")" || die "could not decrypt $b"
     # Only plain files and folders with relative, non-escaping names are unpacked.
     while IFS= read -r entry; do
-      case "$entry" in /*|..|../*|*/..|*/../*) die "$b contains an unsafe path; not unpacking it" ;; esac
+      # Backslashes and drive colons are refused too: on Windows they are separators.
+      case "$entry" in /*|*\\*|*:*|..|../*|*/..|*/../*) die "$b contains an unsafe path; not unpacking it" ;; esac
     done < <(tar -tf "$work/b.tar")
     tar -tvf "$work/b.tar" > "$work/list" || die "could not list $b"
     if grep -v '^[-d]' "$work/list" > /dev/null; then die "$b contains links or special files; not unpacking it"; fi

@@ -6,6 +6,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 pass=0
 check(){ if eval "$2"; then pass=$((pass + 1)); printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1" >&2; exit 1; fi; }
+# absent CMD...: true only when CMD ran fine and found nothing (exit 1); a
+# checker error (exit 2+) or a match fails the check.
+absent(){ local rc=0; "$@" >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 1 ]; }
 native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 # Throwaway archive key pair for the test.
@@ -48,12 +51,13 @@ VIEW="$TMP/view"; git clone -q "$REMOTE" "$VIEW"
 M="$VIEW/test-box"; P="$TMP/plain/test-box"
 check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && ls '$M/bundles' | grep -q 'tar.cms'"
 check 'only encrypted bundles and the status file are published' "[ -z \"\$(git -C '$VIEW' ls-files | grep -v -e '^test-box/bundles/[0-9TZ]*-[0-9a-f]*\.tar\.cms\$' -e '^test-box/LAST-SYNC.txt\$')\" ]"
-check 'no clear text from the logs reaches the repository' "! git -C '$VIEW' grep -q -e 'after timeout' -e hunter3word -e APPROVE"
+check 'no clear text from the logs reaches the repository' "absent git -C '$VIEW' grep -q -e 'after timeout' -e hunter3word -e APPROVE"
 view
 check 'view decrypts complete, unmasked evidence' "cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log' && cmp -s '$ISSUES/pkg/blob.bin' '$P/reviewer-issues/pkg/blob.bin'"
 check 'scoreboard, events and lifecycle collected' "[ -f '$P/state/review-scoreboard/reviews.jsonl' ] && [ -f '$P/state/reviewer-events/events.jsonl' ] && [ -f '$P/state/review-lifecycle/runs/r1/run.json' ]"
 check 'review reports from same-named checkouts kept apart' "[ \$(ls '$P/reviews' | wc -l) -eq 2 ] && [ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ] && [ \$(grep -rl 'second checkout' '$P/reviews' | wc -l) -eq 1 ]"
-check 'file names are never published in clear text' "! git -C '$VIEW' ls-files | grep -q -e '$fake_gh' -e provider -e codex-final && ! git -C '$VIEW' grep -q -e '$fake_gh' -e provider.log && [ -f '$P/reviewer-issues/pkg/$fake_gh.log' ]"
+git -C "$VIEW" ls-files > "$TMP/published-names"
+check 'file names are never published in clear text' "absent grep -q -e '$fake_gh' -e provider -e codex-final '$TMP/published-names' && absent git -C '$VIEW' grep -q -e '$fake_gh' -e provider.log && [ -f '$P/reviewer-issues/pkg/$fake_gh.log' ]"
 check 'odd file names are data, never commands' "[ ! -e PWNED ] && [ ! -e '$TMP/home/PWNED' ] && ls '$P/reviewer-issues/pkg' | grep -q 'touch PWNED'"
 check 'oversized files skipped and listed inside the bundle' "[ ! -e '$P/reviewer-issues/pkg/large.txt' ] && cat '$P'/_collection/*-skipped.txt | grep -q 'large.txt'"
 check 'provider session stores are not collected' "[ ! -e '$P/state/qwen' ]"
@@ -101,6 +105,19 @@ MSYS2_ARG_CONV_EXCL='*' openssl cms -encrypt -binary -aes-256-cbc -outform DER -
 git -C "$VIEW" add -A && git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm evil && git -C "$VIEW" push -q origin HEAD:main
 check 'bundles with escaping paths are not unpacked' "! run view '$TMP/plain' >/dev/null 2>'$TMP/out14' && grep -q 'unsafe path' '$TMP/out14'"
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q test-box/bundles/99991231T000000000000000Z-evil.tar.cms
+pybin="$(command -v python3 || command -v python)"
+"$pybin" - "$(native "$TMP/evil2.tar")" <<'PY'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w") as t:
+    data = b"x"
+    info = tarfile.TarInfo(r"..\outside.txt"); info.size = len(data)
+    t.addfile(info, io.BytesIO(data))
+PY
+MSYS2_ARG_CONV_EXCL='*' openssl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$TMP/evil2.tar")" \
+  -out "$(native "$VIEW/test-box/bundles/99991231T000000000000001Z-evil.tar.cms")" "$(native "$TMP/cert.pem")"
+git -C "$VIEW" add -A && git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm evil2 && git -C "$VIEW" push -q origin HEAD:main
+check 'bundles with Windows-style escaping paths are not unpacked' "! run view '$TMP/plain' >/dev/null 2>'$TMP/out15' && grep -q 'unsafe path' '$TMP/out15' && [ ! -e '$TMP/outside.txt' ]"
+git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q test-box/bundles/99991231T000000000000001Z-evil.tar.cms
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm unevil && git -C "$VIEW" push -q origin HEAD:main
 
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
@@ -122,7 +139,8 @@ git -C "$TMP/hub" add -A && git -C "$TMP/hub" -c user.name=t -c user.email=t@exa
 printf 'w
 ' >> "$STATE/reviewer-events/events.jsonl"
 run sync 2> "$TMP/out6" || { cat "$TMP/out6" >&2; exit 1; }
-check 'unpushed local commits never reach GitHub' "! git -C '$REMOTE' log --format=%s main | grep -q stranded && ! git -C '$REMOTE' ls-tree -r --name-only main | grep -q sneak"
+git -C "$REMOTE" log --format=%s main > "$TMP/remote-log"; git -C "$REMOTE" ls-tree -r --name-only main > "$TMP/remote-tree"
+check 'unpushed local commits never reach GitHub' "absent grep -q stranded '$TMP/remote-log' && absent grep -q sneak '$TMP/remote-tree'"
 
 # Leak gate: if encryption silently produced clear text, nothing is pushed.
 mkdir -p "$TMP/badssl"
@@ -142,7 +160,8 @@ run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
-  check 'state folder is owner-only on Windows' "[ -n \"\$acl\" ] && ! printf '%s' \"\$acl\" | grep -i -e 'Users:' -e 'Everyone:' -e 'Authenticated' >/dev/null"
+  printf '%s\n' "$acl" > "$TMP/acl.txt"
+  check 'state folder is owner-only on Windows' "[ -s '$TMP/acl.txt' ] && absent grep -qiE 'users:|everyone:|authenticated' '$TMP/acl.txt'"
 fi
 check 'the shipped certificate is tracked' "git -C '$ROOT' ls-files --error-unmatch config/reviewer-logs-archive.crt >/dev/null 2>&1"
 
