@@ -139,8 +139,8 @@ class CygpathBound(unittest.TestCase):
     def test_cygpath_invocation_is_bounded(self):
         source = (ROOT / "tools" / "reviewer_events.py").read_text(encoding="utf-8")
         self.assertIn('["cygpath", "-w", report]', source)
-        self.assertIn("subprocess.TimeoutExpired", source)
-        self.assertIn("FileNotFoundError", source)
+        self.assertIn("subprocess.SubprocessError", source)
+        self.assertIn("OSError", source)
         # The timeout must stay bounded well below the old 30s hang window.
         self.assertIn("timeout=5", source)
 
