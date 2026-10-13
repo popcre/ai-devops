@@ -64,7 +64,8 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
 
     def call(self, key="scope-a", head="h1", mode="open", delay="0", suffix="a",
              force=False, wait_seconds="4"):
-        env = dict(os.environ, COUNT=str(self.count), HEAD=head, MODE=mode, DELAY=delay)
+        env = dict(os.environ, COUNT=str(self.count), HEAD=head, MODE=mode, DELAY=delay,
+                   AI_GH_STATE_DIR=str(self.base / "gh-state"))
         argv = [sys.executable, str(HELPER), "--state-dir", str(self.base / "state"),
                 "--key", key, "--expected-head", head, "--ttl", "10",
                 "--wait-seconds", wait_seconds, "--age-file", str(self.base / (suffix + ".age")),

@@ -69,9 +69,11 @@ def emit_read_observation(key, source, caller=None):
     })
 
 
-def emit_write_observation(key, content_changed, caller=None):
+def emit_write_observation(key, action, content_changed, caller=None):
+    """Record a managed cache write or the skip that avoids an unchanged rewrite."""
     ordinal = _target_ordinal(key)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    relation = "new" if content_changed else "unchanged"
     _emit_record({
         "schema": 6,
         "utc": now,
@@ -79,9 +81,9 @@ def emit_write_observation(key, content_changed, caller=None):
         "caller": caller or os.environ.get("AI_GH_CALLER") or "ai-pr-wait",
         "workflow": "pr_wait",
         "target_ordinal": ordinal,
-        "action": "written",
-        "content_relation": "new" if content_changed else "unchanged",
-        "duplicate_unchanged_write": (not content_changed),
+        "action": action,
+        "content_relation": relation,
+        "duplicate_unchanged_write": action == "written" and not content_changed,
     })
 
 
@@ -403,19 +405,25 @@ def run(command, cache, age_file, source_file, expected_head=None,
     if args_key:
         emit_read_observation(args_key, "upstream")
     if cache is not None and len(result.stdout) <= 1048576 and complete(result.stdout):
-        try:
-            previous = None
-            if cache.is_file() and not cache.is_symlink():
-                try:
-                    previous = cache.read_bytes()
-                except OSError:
-                    previous = None
-            atomic_write(cache, result.stdout)
+        previous = None
+        if cache.is_file() and not cache.is_symlink():
+            try:
+                previous = cache.read_bytes()
+            except OSError:
+                previous = None
+        if previous == result.stdout:
+            # Zero duplicate unchanged writes: an identical snapshot is already
+            # present, so skip the rewrite and count the avoided duplicate.
             if args_key:
-                emit_write_observation(args_key, previous != result.stdout)
-        except OSError:
-            # A cache write must not erase an otherwise valid fresh outcome.
-            pass
+                emit_write_observation(args_key, "skipped", False)
+        else:
+            try:
+                atomic_write(cache, result.stdout)
+                if args_key:
+                    emit_write_observation(args_key, "written", True)
+            except OSError:
+                # A cache write must not erase an otherwise valid fresh outcome.
+                pass
     return 0
 
 

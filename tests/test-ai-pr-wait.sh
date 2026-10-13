@@ -619,6 +619,7 @@ fi
 
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
+  "python3 '$ROOT/tests/test-github-request-counters.py' -q"
 
 # Exercise the real waiter and complete reader: advisory cancellation must not
 # end a queued PR, while required or unproved cancellations remain terminal.

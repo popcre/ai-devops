@@ -177,6 +177,13 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
              "--", sys.executable, str(self.fake)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
 
+    def _rows(self):
+        rows = []
+        for path in (self.state / "measurements").glob("*.jsonl"):
+            for line in path.read_text().splitlines():
+                rows.append(json.loads(line))
+        return rows
+
     def test_cache_hit_emits_saved_read_and_upstream_emits_read(self):
         first = self.call("a")
         out, err = first.communicate(timeout=8)
@@ -186,10 +193,7 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
         out, err = second.communicate(timeout=8)
         self.assertEqual(second.returncode, 0, err)
         self.assertEqual((self.base / "b.source").read_text(), "cache")
-        rows = []
-        for path in (self.state / "measurements").glob("*.jsonl"):
-            for line in path.read_text().splitlines():
-                rows.append(json.loads(line))
+        rows = self._rows()
         reads = [r for r in rows if r.get("measurement") == "read_observation"]
         writes = [r for r in rows if r.get("measurement") == "write_observation"]
         self.assertEqual(len(reads), 2, rows)
@@ -200,8 +204,29 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
         self.assertTrue(cache["saved_upstream_read"])
         self.assertEqual(len(writes), 1)
         self.assertTrue(writes[0]["content_relation"] == "new")
+        self.assertTrue(writes[0]["action"] == "written")
         self.assertFalse(writes[0]["duplicate_unchanged_write"])
         self.assertIsInstance(reads[0]["target_ordinal"], int)
+
+    def test_identical_rewrite_is_skipped_not_written_unchanged(self):
+        # Force a second upstream refresh of the identical snapshot.
+        first = self.call("a")
+        first.communicate(timeout=8)
+        argv = [sys.executable, str(SINGLE), "--state-dir", str(self.base / "snap"),
+                "--key", "same-target", "--expected-head", "h1", "--ttl", "10",
+                "--wait-seconds", "4", "--age-file", str(self.base / "c.age"),
+                "--source-file", str(self.base / "c.source"),
+                "--force-refresh", "--", sys.executable, str(self.fake)]
+        second = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+        out, err = second.communicate(timeout=8)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertEqual((self.base / "c.source").read_text(), "upstream")
+        writes = [r for r in self._rows() if r.get("measurement") == "write_observation"]
+        self.assertEqual(len(writes), 2, writes)
+        self.assertEqual(sorted(w["action"] for w in writes), ["skipped", "written"])
+        skipped = next(w for w in writes if w["action"] == "skipped")
+        self.assertEqual(skipped["content_relation"], "unchanged")
+        self.assertFalse(skipped["duplicate_unchanged_write"])
 
 
 if __name__ == "__main__":
