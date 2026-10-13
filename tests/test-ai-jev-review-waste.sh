@@ -132,12 +132,16 @@ mkdir -p "$T/tmpcheck2"
 TMPDIR="$T/tmpcheck2" STUB_MODE=ok "$ROOT/bin/ai-jev-review-waste" value-level --items "$items" >/dev/null 2>&1
 [ -z "$(find "$T/tmpcheck2" -type f ! -name last-request.json 2>/dev/null)" ] && ok || bad "keyed run leaked temp files"
 
+# Native paths for Python on Windows Git Bash (it cannot read /c/... paths).
+npath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+PYROOT="$(npath "$ROOT")"
+
 # 11. Python helpers: one secret path (op run), no field reveal, no private archive path.
 grep -nE 'op", "item"|--reveal' "$ROOT"/tools/jev_*.py && bad "python helper reads a secret field directly" || ok
 grep -nE 'C:\\\\Users|Dropbox' "$ROOT/tools/jev_review_waste_sample.py" | grep -v '^\s*#' | grep -q 'Path(' && bad "private archive path hardcoded" || ok
-pyout="$(cd "$T" && env -u AI_JEV_ARCHIVE_DIR python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_sample as s; s.archive_root()" 2>&1)"; rc=$?
+pyout="$(cd "$T" && env -u AI_JEV_ARCHIVE_DIR python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_sample as s; s.archive_root()" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && [[ "$pyout" == *AI_JEV_ARCHIVE_DIR* ]] && ok || bad "archive root not required: $pyout"
-pyout="$(cd "$T" && env -u TYPESAFE_API_KEY AI_JEV_REEXEC=1 python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
+pyout="$(cd "$T" && env -u TYPESAFE_API_KEY AI_JEV_REEXEC=1 python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && [[ "$pyout" == *EMPTY* ]] && ok || bad "python empty key after op run not loud: $pyout"
 
 # 12. op run launch failure (before the child starts) keeps the consumer's
@@ -157,11 +161,16 @@ out="$(env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS
 [ $rc -eq 1 ] && [ "$(printf '%s\n' "$out" | grep -c '"reason":"bootstrap"')" -eq 1 ] && [[ "$out" == *EMPTY* ]] && ok || bad "failed child output not exactly once: rc=$rc $out"
 # Python helper: op run failure is loud; the archive path expands ~.
 printf '#!/bin/sh\nexit 3\n' > "$T/opfail/op"
-pyout="$(cd "$T" && env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
-[ $rc -eq 3 ] && [[ "$pyout" == *'op run failed'* ]] && ok || bad "python op run failure not loud: rc=$rc $pyout"
+pyout="$(cd "$T" && env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$(npath "$T/cfgdir")" python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
+if command -v cygpath >/dev/null 2>&1; then
+  # Native Windows Python cannot run the sh stub as `op`; it must still fail loudly.
+  [ $rc -ne 0 ] && [[ "$pyout" == *'op run failed'* || "$pyout" == *'(op) is required'* ]] && ok || bad "python op failure not loud on Windows: rc=$rc $pyout"
+else
+  [ $rc -eq 3 ] && [[ "$pyout" == *'op run failed'* ]] && ok || bad "python op run failure not loud: rc=$rc $pyout"
+fi
 mkdir -p "$T/home/arch"
-pyout="$(cd "$T" && HOME="$T/home" AI_JEV_ARCHIVE_DIR='~/arch' python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_sample as s; print(s.archive_root())" 2>&1)"
-[ "$pyout" = "$T/home/arch" ] && ok || bad "archive root did not expand ~: $pyout"
+pyout="$(cd "$T" && HOME="$(npath "$T/home")" USERPROFILE="$(npath "$T/home")" AI_JEV_ARCHIVE_DIR='~/arch' python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_sample as s; print(s.archive_root().as_posix())" 2>&1 | tr -d '\r')"
+[ "$pyout" = "$(npath "$T/home/arch")" ] && ok || bad "archive root did not expand ~: $pyout"
 
 echo "passed=$pass failed=$failn"
 if [ "$failn" -eq 0 ]; then exit 0; else exit 1; fi
