@@ -548,6 +548,17 @@ write_atomic() { # FILE JSON
   mv -f "$tmp" "$f"
 }
 
+# installed_toolkit_preflight: 0 when this script is the copy the machine's
+# `ai-review-preflight` command resolves to (the shared quarantine owner).
+installed_toolkit_preflight() {
+  local installed self
+  installed="$(command -v ai-review-preflight 2>/dev/null)" || return 1
+  [ -n "$installed" ] || return 1
+  installed="$(readlink -f "$installed" 2>/dev/null)" || return 1
+  self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null)" || return 1
+  [ "$installed" = "$self" ]
+}
+
 quarantine() { # PROVIDER CLASS [SECONDS]
   local provider="$1" class="$2" seconds="${3:-}" now expires f
   # Out of credit matches the wrapper classifier's one-hour hold (CREDIT_SECONDS).
@@ -562,6 +573,15 @@ quarantine() { # PROVIDER CLASS [SECONDS]
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
+  # Machine-wide provider holds belong to the installed toolkit only. A copy run
+  # from a fixture, proof worktree or review sandbox (for example one with a
+  # deliberately broken wrapper) must not quarantine the real provider through
+  # the shared default store (2026-10-12: a proof-1562 fixture reported
+  # "agy lacks --sandbox" and held the live Gemini reviewer for 1800s).
+  if [ -z "${AI_REVIEW_QUARANTINE_DIR:-}" ] && ! installed_toolkit_preflight; then
+    note "ai-review-preflight: not the installed toolkit; ${provider} quarantine ($class) not recorded in the shared store."
+    return 0
+  fi
   admission_store quarantine "$provider" --reason "$class" --seconds "$seconds" >/dev/null
   note "ai-review-preflight: quarantined $provider for ${seconds}s ($class)."
 }
@@ -1641,7 +1661,12 @@ case "$cmd" in
     done
     pause_args=(pause "$provider" --reason "$class" --seconds "$seconds")
     [ -z "$observed" ] || pause_args+=(--observed "$observed")
-    admission_store "${pause_args[@]}" ;;
+    # Same ownership rule as quarantine(): only the installed toolkit writes the shared store.
+    if [ -n "${AI_REVIEW_QUARANTINE_DIR:-}" ] || installed_toolkit_preflight; then
+      admission_store "${pause_args[@]}"
+    else
+      note "ai-review-preflight: not the installed toolkit; $provider pause not recorded in the shared store."
+    fi ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
     [ "${1:-}" != --seconds ] || { seconds="${2:-}"; shift 2; }
