@@ -24,6 +24,10 @@
 # Writers need only the public certificate config/reviewer-logs-archive.crt.
 # Readers need the private key in 1Password (vibe_coding):
 #   "Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)"
+# Bundles are encrypted, not signed: anyone able to push to the private archive
+# (only the u2giants account) could add a forged bundle. `view` therefore
+# unpacks only plain files and folders with relative names, so a forged bundle
+# can add misleading evidence but can never write outside the view folder.
 # Every run starts from the published archive (unpushed local commits are
 # discarded; their evidence is collected again because nothing is remembered as
 # collected until a push succeeds). A push happens only when the repository is
@@ -140,7 +144,7 @@ cmd_sync(){
   ensure_hub
   WORK="$HOME_DIR/work.$$"; rm -rf "$WORK"; mkdir -p "$WORK/stage"
   ERRS="$WORK/errors"; NOTES="$WORK/notes"; : > "$ERRS"; : > "$NOTES"
-  COPIED=0
+  COPIED=0; RECOVERING=0
   declare -gA SEEN=() NEW_SEEN=()
   local key val
   if [ -f "$HOME_DIR/seen" ]; then
@@ -153,7 +157,7 @@ cmd_sync(){
       [ -n "$key" ] || continue
       if [ ! -f "$HUB/$key" ]; then
         log "$MACHINE: the archive no longer has $key; collecting everything again"
-        SEEN=(); : > "$HOME_DIR/pushed-bundles"; break
+        SEEN=(); RECOVERING=1; break
       fi
     done < "$HOME_DIR/pushed-bundles"
   fi
@@ -186,7 +190,7 @@ cmd_sync(){
   notes_sum="$(sha1sum < "$NOTES" | cut -c1-40)"
   [ "$notes_sum" = "$(cat "$HOME_DIR/notes.sha1" 2>/dev/null)" ] || notes_changed=1
   if [ "$COPIED" -gt 0 ] || [ "$notes_changed" = 1 ] || [ "$partial" = 1 ]; then
-    local id; id="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+    local id; id="$(date -u +%Y%m%dT%H%M%S%NZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
     mkdir -p "$WORK/stage/_collection"
     cp -f "$NOTES" "$WORK/stage/_collection/$id-skipped.txt"
     cp -f "$ERRS" "$WORK/stage/_collection/$id-read-errors.txt"
@@ -227,6 +231,13 @@ cmd_sync(){
     save_seen
     printf '%s
 ' "$notes_sum" > "$HOME_DIR/notes.sha1"
+    # Only now, with the push done, is the sent-list updated (and, after a
+    # recovery, trimmed to the bundles the archive really has).
+    if [ "$RECOVERING" = 1 ]; then
+      while IFS= read -r key; do [ -n "$key" ] && [ -f "$HUB/$key" ] && printf '%s
+' "$key"; done         < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new" || true
+      mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
+    fi
     [ -z "$bundle" ] || printf '%s
 ' "$bundle" >> "$HOME_DIR/pushed-bundles"
     if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in $bundle)"; fi
@@ -241,7 +252,7 @@ cmd_sync(){
 }
 
 cmd_view(){
-  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile work b machine n=0
+  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile work b machine n=0 entry
   ensure_hub
   work="$(mktemp -d)"; chmod 700 "$work"
   # shellcheck disable=SC2064
@@ -253,16 +264,26 @@ cmd_view(){
     keyfile="$work/key.pem"
     op read "$KEY_REF" < /dev/null > "$keyfile" || die "could not read the archive key from 1Password"
   fi
-  mkdir -p "$out"; chmod 700 "$out"
+  # Always rebuild from scratch, and only ever wipe a folder this command made.
+  if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
+    die "$out exists and was not made by 'ai-reviewer-logs-sync view'; choose another folder"
+  fi
+  rm -rf "$out"; mkdir -p "$out"; chmod 700 "$out"; : > "$out/.ai-reviewer-logs-view"
   while IFS= read -r b; do
     machine="${b%%/*}"
     ossl cms -decrypt -binary -inform DER -inkey "$(native "$keyfile")" -in "$(native "$HUB/$b")" \
       -out "$(native "$work/b.tar")" || die "could not decrypt $b"
+    # Only plain files and folders with relative, non-escaping names are unpacked.
+    while IFS= read -r entry; do
+      case "$entry" in /*|..|../*|*/..|*/../*) die "$b contains an unsafe path; not unpacking it" ;; esac
+    done < <(tar -tf "$work/b.tar")
+    if tar -tvf "$work/b.tar" | grep -qv '^[-d]'; then die "$b contains links or special files; not unpacking it"; fi
     mkdir -p "$out/$machine"
-    tar -C "$out/$machine" -xf "$work/b.tar" || die "could not unpack $b"
+    tar -C "$out/$machine" --no-same-owner --no-same-permissions -xf "$work/b.tar" || die "could not unpack $b"
     cp -f "$HUB/$machine/LAST-SYNC.txt" "$out/$machine/" 2>/dev/null || true
     n=$((n + 1))
-  done < <(cd "$HUB" && find . -path ./.git -prune -o -type f -path '*/bundles/*.tar.cms' -print | sed 's#^\./##' | sort -t/ -k3)
+  done < <(cd "$HUB" && find . -path ./.git -prune -o -type f -path '*/bundles/*.tar.cms' -print | sed 's#^\./##' |
+    awk -F/ '{ print $3 "\t" $0 }' | sort | cut -f2-)
   printf 'decrypted %s bundles into %s (one folder per machine)\n' "$n" "$out"
 }
 

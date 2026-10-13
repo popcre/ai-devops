@@ -76,6 +76,22 @@ run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
 view
 check 'lost bundles are re-collected' "grep -q 'collecting everything again' '$TMP/out13' && cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log'"
 
+# view rebuilds from scratch, never wipes a foreign folder, and refuses unsafe bundles.
+mkdir -p "$TMP/plain/test-box/ghost"; : > "$TMP/plain/test-box/ghost/stale.txt"
+view
+check 'view output is rebuilt from scratch' "[ ! -e '$TMP/plain/test-box/ghost' ]"
+mkdir -p "$TMP/foreign"; : > "$TMP/foreign/keep.txt"
+check 'view refuses to wipe a folder it did not make' "! run view '$TMP/foreign' >/dev/null 2>&1 && [ -f '$TMP/foreign/keep.txt' ]"
+mkdir -p "$TMP/evil/x"; : > "$TMP/evil/x/f"
+(cd "$TMP/evil/x" && tar -cPf "$TMP/evil.tar" ../x/f 2>/dev/null)
+git -C "$VIEW" pull -q; mkdir -p "$VIEW/test-box/bundles"
+MSYS2_ARG_CONV_EXCL='*' openssl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$TMP/evil.tar")" \
+  -out "$(native "$VIEW/test-box/bundles/99991231T000000000000000Z-evil.tar.cms")" "$(native "$TMP/cert.pem")"
+git -C "$VIEW" add -A && git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm evil && git -C "$VIEW" push -q origin HEAD:main
+check 'bundles with escaping paths are not unpacked' "! run view '$TMP/plain' >/dev/null 2>'$TMP/out14' && grep -q 'unsafe path' '$TMP/out14'"
+git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q test-box/bundles/99991231T000000000000000Z-evil.tar.cms
+git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm unevil && git -C "$VIEW" push -q origin HEAD:main
+
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
 printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"
