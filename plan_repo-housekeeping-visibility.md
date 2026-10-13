@@ -4,10 +4,10 @@ Written 2026-08-14T2015Z on machine `al8960ofc` by a Claude Opus 5 session.
 Repo: `C:\repos\ai-devops` (`u2giants/ai-devops`), branch `main`, at `99311f8`.
 
 Companion handoff (links back here):
-[`HANDOFF.d/2026-08-14T2015Z-al8960ofc-claude-housekeeping-visibility.md`](HANDOFF.d/2026-08-14T2015Z-al8960ofc-claude-housekeeping-visibility.md)
+Session handoff `2026-08-14T2015Z-al8960ofc-claude-housekeeping-visibility.md` (retired 2026-10-13; this plan STATUS is the record).
 
 Codex safety-correction handoff:
-[`HANDOFF.d/2026-08-16T0303Z-al8960ofc-codex-housekeeping-plan-corrections.md`](HANDOFF.d/2026-08-16T0303Z-al8960ofc-codex-housekeeping-plan-corrections.md)
+Companion Codex handoff `2026-08-16T0303Z-al8960ofc-codex-housekeeping-plan-corrections.md` (retired 2026-10-13).
 
 ---
 

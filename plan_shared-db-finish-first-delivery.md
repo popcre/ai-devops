@@ -6,7 +6,7 @@
 > Execute [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md)
 > instead; it preserves safe parallel authoring and covers every newer finding.
 
-Paired handoff: [`HANDOFF.d/2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md`](HANDOFF.d/2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md)
+Paired handoff `2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md` (retired 2026-10-13; superseded for implementation by `plan_shared-db-complete-throughput-repair.md`).
 
 Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](shared-db_orchestrator_failure_analysis.md)
 

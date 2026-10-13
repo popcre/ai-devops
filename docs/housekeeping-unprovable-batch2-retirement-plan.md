@@ -1,6 +1,8 @@
 # Retirement plan — UNPROVABLE HANDOFF.d batch 2
 
 Tracking: popcre/ai-devops#1661 (comment will carry before/after counts).
+Owner: MiMo housekeeping leftover triage (batch 2). Retire this doc when #1661
+closes and the before/after counts are posted; do not keep it as a second ledger.
 Branch: `mimo/housekeeping-unprovable-batch2`. Owner ruling this session: open a
 real issue for each still-relevant workstream; retire the rest under the
 successor rule, **only with an AI reviewer APPROVE covering these exact files**.
@@ -73,7 +75,7 @@ Successor rule (must all be true; checked here for every file):
 
 ### B3. `2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md`
 - **(1)** The plan it carried was committed (`plan_shared-db-finish-first-delivery.md` is on `main`).
-- **(2)** The plan header itself says the premise is **superseded 2026-08-25**
+- **(2)** The plan header itself says the premise is **SUPERSEDED FOR IMPLEMENTATION 2026-09-11** (`plan_shared-db-finish-first-delivery.md:3`)
   and directs execution of `plan_shared-db-complete-throughput-repair.md`
   instead. That successor programme is a closed #401 decision record with every
   in-scope row complete. Kimi reliability stays in
@@ -119,8 +121,9 @@ Successor rule (must all be true; checked here for every file):
   `plan_shared-db-coordination-deletion.md` STATUS steps 0–9 and 11 are ✅ done
   (row 10 residual is a 14d check on the plan, not this file).
 - **(2)** Parent #1061 is closed. Remaining coordination residuals are already
-  in still-open handoffs `2026-09-30T1226Z-...-coord-del-residuals.md` and
-  `2026-10-04T...`-style residual closeout (issue: 1061) and in the plan.
+  in still-open handoffs `HANDOFF.d/2026-09-30T1226Z-edge-dev-mimo-coord-del-residuals.md`
+  and `HANDOFF.d/2026-09-30T1431Z-edge-dev-mimo-coord-del-residuals-closeout.md`
+  (both `issue: 1061`) and in the plan.
   Parked-issue tidy is done (plan row 11).
 - **(3)** LOCKED decision (C by deletion) is in the plan §8 and
   `docs/shared-db-delivery-failure-background-2026-09-29.md`. Contract block was
@@ -152,30 +155,40 @@ Successor rule (must all be true; checked here for every file):
   `main`. Docs PR **#1665 is MERGED** (2026-10-13).
 - **(2)** Remaining named work is local workspace cleanup (branch
   `mimo/memory-index-decision`, worktree `C:\repos\ai-devops-wt-memory-index`).
-  That is machine housekeeping, not a repo obligation; `cleanup-worktree` /
-  `bin/ai-housekeeping` own it. Do-not-rewrite-handoff / health-gate constraints
-  stay in the memory tools and AGENTS.md.
+  **Carried forward to #1661** as checklist items (comment 2026-10-13) so
+  condition 2 is met: delete the branch after #1665 is confirmed MERGED, then
+  remove the worktree via `cleanup-worktree`. Health-gate constraints stay in
+  the memory tools and AGENTS.md.
 - **(3)** The merge-by-target decision is recorded in `docs/design-decisions.md`
   (via #1665). Nothing unique remains. (`issue: none` was deliberate: "do not
   open a second tracker".)
 
 ---
 
-## C. Execution order (this PR)
+## C. What is in this change (exact-head review target)
 
-1. **This commit (already on the branch):** retargets + this plan + reachability
-   links. **No file is deleted yet.** The reviewer is approving the *plan* to
-   delete B1–B10.
-2. **After APPROVE, one follow-up commit in the same PR:**
-   - re-verify on `origin/main` the landing commits cited above
-     (`ca47a1fb`, `074902ed`, `2db96bc`, `49c5627`, `b217e535`, `52b9f76f`,
-     `918866b8`, and the PR #1665 merge) before removing anything;
-   - delete exactly B1–B10;
-   - fix every inbound reference listed in section F in that same commit
-     (handoff-writer skill: "when you delete a handoff, grep for references and
-     fix/remove them in the same commit");
-   - rerun `bin/ai-housekeeping --details` and paste before/after into #1661.
-3. Then PR → merge queue → verify on `origin/main`.
+This PR contains, on one head:
+1. retargets of the 8 live UNPROVABLE handoffs to bare issue numbers;
+2. this plan;
+3. reachability links (README / housekeeping / plan index);
+4. **deletion of exactly B1–B10**;
+5. inbound-reference fixes listed in section F (same commit as the deletions).
+
+So the reviewing APPROVE is an **exact-head approval of the change that performs
+the deletions**, not a plan-only approval of a future commit.
+
+Still required after APPROVE, before merge:
+- re-verify on full `origin/main` the landing SHAs cited in section B
+  (`ca47a1fb`, `074902ed`, `2db96bc`, `49c5627`, `b217e535`, `52b9f76f`,
+  `918866b8`, PR #1665 merge) — the review sandbox is a shallow clone;
+- `bin/ai-housekeeping --details` before/after counts posted on #1661.
+
+What this change never does:
+- Does not rewrite root `HANDOFF.md`.
+- Does not delete any file not listed in section B.
+- Does not close any GitHub issue.
+- Does not reopen closed parents (#1464, #1061, #608, #1585, #1436).
+- Does not edit timestamped verification evidence under `tests/verification/`.
 
 What this change never does:
 - Does not rewrite root `HANDOFF.md`.
@@ -186,8 +199,8 @@ What this change never does:
 ## F. Inbound references to fix in the deletion commit
 
 `skills/shared/handoff-writer/SKILL.md` requires grepping and fixing inbound
-references when a handoff is deleted. Live references at the plan head
-(`574ed798`) that must be updated in the same commit as the B1–B10 deletions:
+references when a handoff is deleted. Live references at the reviewed head
+(`caad3756`) that must be updated in the same commit as the B1–B10 deletions:
 
 | Target | Inbound reference | Fix |
 |---|---|---|
@@ -197,7 +210,7 @@ references when a handoff is deleted. Live references at the plan head
 | B4 `2026-09-18T1606Z-...review-packet-race-plan.md` | `plan_review-packet-race-and-evidence-speed.md:15` | note landed via #611/#639 / issue #608 |
 | B5 `2026-09-18T1756Z-...gemini-prepare-timeout.md` | (none outside this plan) | none |
 | B6 `2026-09-28T1513Z-...ssh-916-alien-acl-fix.md` | (none outside this plan) | none; leftover is #1681 |
-| B7 `2026-09-29T1635Z-...c-by-deletion.md` | `plan_shared-db-coordination-deletion.md:3`, `:17`; `tests/verification/shared-db-coordination-deletion/adopt-edge-dev3-20260930T051907Z.md:53` | replace with "decision record is this plan §8; session handoff retired 2026-10-13" |
+| B7 `2026-09-29T1635Z-...c-by-deletion.md` | `plan_shared-db-coordination-deletion.md:3`, `:17` | replace with "decision record is `plan_shared-db-coordination-deletion.md` §8; session handoff retired 2026-10-13". **Do not edit** `tests/verification/shared-db-coordination-deletion/adopt-edge-dev3-20260930T051907Z.md:53` — it is timestamped verification evidence; leave the historical name in place |
 | B8 `2026-10-01T2205Z-...watchdog-local-timed-tasks.md` | `plan_watchdog-local-timed-tasks.md:3`; `docs/watchdog-duty-pool.md:13` | note P0–P5 done / duty-pool runbook is the contract |
 | B9 `2026-10-12T1444Z-...jev-review-waste-mining.md` | `plan_jev-review-waste-mining.md:4` | note implementation on `main` (#1620 etc.) |
 | B10 `2026-10-13T1240Z-...memory-index-docs-closeout.md` | (none outside this plan) | none |

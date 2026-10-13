@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN — Jev review-waste mining from AI transcripts
 
 **Handoff (read first together with this file):**
-[`HANDOFF.d/2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md`](HANDOFF.d/2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md)
+Session handoff `2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md` (retired 2026-10-13; implementation on `main` via #1620/#1647/#1656/#1668).
 
 **Related plans (do not duplicate their work):**
 [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md),
