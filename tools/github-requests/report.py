@@ -167,7 +167,7 @@ def summarize(directory):
                             or row.get("boundary") != "receipt_init_to_terminal_output"
                             or row.get("clock_basis") not in LOCAL_CLOCK_BASES
                             or row.get("source_verified") != "unknown"
-                            or row.get("acceptance") != "unknown"
+                            or row.get("acceptance") not in LOCAL_ACCEPTANCES
                             or row.get("unknown_reason") not in LOCAL_REASONS):
                         raise ValueError("invalid local workflow observation")
                     for field, upper in (("start_monotonic_ms", 9999999999999), ("end_monotonic_ms", 9999999999999),
@@ -186,6 +186,11 @@ def summarize(directory):
                                 or upper != end - start + 20):
                             raise ValueError("invalid local observation interval")
                         local_lower.append(lower); local_upper.append(upper)
+                        if row["acceptance"] == "qualified":
+                            qualified_latency.append(end - start)
+                            qualified_groups[("useful_work", row["boundary"], row["outcome"])].append(end - start)
+                    elif row["acceptance"] == "qualified":
+                        raise ValueError("qualified local observation without measured interval")
                     elif any(value is not None for value in numeric):
                         raise ValueError("invalid unknown local observation")
                     local_observations[row["workflow_id"]] = row
@@ -404,6 +409,7 @@ LOCAL_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id
 LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline"}
 LOCAL_CLOCK_BASES = {"linux_boottime_centiseconds", "unknown"}
 LOCAL_REASONS = {"source_unknown", "clock_unknown", "clock_negative", "delivery_unknown"}
+LOCAL_ACCEPTANCES = {"unknown", "qualified"}
 SOURCE_STATES = {"verified", "changed", "unknown"}
 EVENT_KINDS = {"pr_merged", "pr_closed", "check_completed", "unknown"}
 DELIVERY_BOUNDARIES = {"terminal_report", "unknown"}

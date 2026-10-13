@@ -942,9 +942,9 @@ local_id=0123456789abcdef0123456789abcdef
 AI_GH_STATE_DIR="$local_state" gh_measure_workflow_outcome ai-pr-wait pr_wait "$local_id" checks_failed 100
 AI_GH_STATE_DIR="$local_state" gh_measure_local_observation "$local_id" checks_failed 1000 2100 linux_boottime_centiseconds 0
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$local_state/measurements" > "$TMP/local-report"; rc=$?
-check 'local observation joins one schema-3 receipt and stays unqualified' \
-  "[ '$rc' -eq 0 ] && jq -e '.local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \"source_unknown\" and .qualified_latency_ms.count == 0' '$TMP/local-report'"
-for bad in duplicate dangling mismatch forged extra bool missing repeated-key interval partial basis; do
+check 'local observation joins one schema-3 receipt and reports qualified latency' \
+  "[ '$rc' -eq 0 ] && jq -e '.local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \"source_unknown\" and .qualified_latency_ms.count == 1 and .qualified_latency_ms.max == 1100' '$TMP/local-report'"
+for bad in duplicate dangling mismatch forged extra bool missing repeated-key interval partial basis qualified-bad; do
   d="$TMP/local-invalid-$bad"; mkdir -p "$d"; f="$d/2026-10-08.jsonl"
   receipt='{"schema":3,"utc":"2026-10-08T00:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":100}'
   observation='{"schema":5,"utc":"2026-10-08T00:00:00Z","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","boundary":"receipt_init_to_terminal_output","clock_basis":"linux_boottime_centiseconds","start_monotonic_ms":1000,"end_monotonic_ms":1100,"duration_lower_ms":80,"duration_upper_ms":120,"clock_error_bound_ms":20,"source_verified":"unknown","acceptance":"unknown","unknown_reason":"source_unknown"}'
@@ -961,6 +961,7 @@ for bad in duplicate dangling mismatch forged extra bool missing repeated-key in
     interval) jq -c '.duration_upper_ms=121' <<<"$observation" >> "$f" ;;
     partial) jq -c '.end_monotonic_ms=null' <<<"$observation" >> "$f" ;;
     basis) jq -c '.clock_basis="unknown"' <<<"$observation" >> "$f" ;;
+    qualified-bad) jq -c '.acceptance="qualified" | .start_monotonic_ms=null | .end_monotonic_ms=null | .duration_lower_ms=null | .duration_upper_ms=null | .clock_error_bound_ms=null' <<<"$observation" >> "$f" ;;
   esac
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" >/dev/null 2>&1; rc=$?
   check "local_observation_${bad}_rejected" "[ '$rc' -eq 1 ]"
@@ -973,10 +974,31 @@ for fixture in '2100 1000 linux_boottime_centiseconds 0 clock_negative' '0 60480
 done
 (
   GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=0
+  GH_MEASURE_LOCAL_PLATFORM=unknown
   uname(){ printf '%s\n' unsupported; }
   gh_measure_local_clock
   [ "$GH_MEASURE_LOCAL_CLOCK_BASIS" = unknown ] && [ -z "$GH_MEASURE_LOCAL_CLOCK_MS" ]
 )
 unsupported_rc=$?
 check 'local_clock_unsupported_unknown' "[ '$unsupported_rc' -eq 0 ]"
+(
+  GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=0
+  GH_MEASURE_LOCAL_PLATFORM=unknown
+  uname(){ printf '%s\n' MINGW64_NT-10.0-26300; }
+  # Use the real /proc/uptime when present; otherwise simulate the parse.
+  if [ -r /proc/uptime ]; then
+    gh_measure_local_clock
+    [ "$GH_MEASURE_LOCAL_CLOCK_BASIS" = linux_boottime_centiseconds ] && [ -n "$GH_MEASURE_LOCAL_CLOCK_MS" ]
+  else
+    gh_measure_local_clock_parse '123.45'
+    [ "$GH_MEASURE_LOCAL_CLOCK_BASIS" = linux_boottime_centiseconds ] && [ "$GH_MEASURE_LOCAL_CLOCK_MS" -eq 123450 ]
+  fi
+)
+mingw_rc=$?
+check 'local_clock_mingw_accepted' "[ '$mingw_rc' -eq 0 ]"
+qualified_state="$TMP/local-qualified-state"; mkdir -p "$qualified_state/measurements"; chmod 700 "$qualified_state/measurements"
+AI_GH_STATE_DIR="$qualified_state" gh_measure_workflow_outcome ai-pr-wait pr_wait "$local_id" merged 1100
+AI_GH_STATE_DIR="$qualified_state" gh_measure_local_observation "$local_id" merged 500 1600 linux_boottime_centiseconds 0
+check 'qualified observation emits acceptance qualified with real bounds' \
+  "jq -se '[.[]|select(.schema==5)] | .[0].acceptance == \"qualified\" and .[0].unknown_reason == \"source_unknown\" and .[0].duration_lower_ms == 1080 and .[0].duration_upper_ms == 1120 and .[0].start_monotonic_ms == 500' '$qualified_state/measurements/'*.jsonl"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

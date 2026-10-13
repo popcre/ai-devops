@@ -72,16 +72,22 @@ gh_measure_local_clock(){
   GH_MEASURE_LOCAL_CLOCK_BASIS=unknown
   if [ "$GH_MEASURE_LOCAL_PLATFORM_INITIALIZED" -eq 0 ]; then
     GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=1
-    [ "$(uname -s 2>/dev/null || true)" = Linux ] && GH_MEASURE_LOCAL_PLATFORM=linux
+    # MSYS/Git Bash/Cygwin expose the same /proc/uptime centisecond BOOTTIME
+    # interface as Linux (GetTickCount64-based, monotonic).  Accept every
+    # POSIX-procfs platform so Windows waiters get real duration rows instead
+    # of clock_unknown on every observation.
+    case "$(uname -s 2>/dev/null || true)" in
+      Linux|MINGW*|MSYS*|CYGWIN*) GH_MEASURE_LOCAL_PLATFORM=posix_procfs ;;
+    esac
   fi
-  [ "$GH_MEASURE_LOCAL_PLATFORM" = linux ] || return 0
+  [ "$GH_MEASURE_LOCAL_PLATFORM" = posix_procfs ] || return 0
   local uptime
   IFS=' ' read -r uptime _ < /proc/uptime 2>/dev/null || return 0
   gh_measure_local_clock_parse "$uptime"
 }
 
 gh_measure_local_observation(){
-  local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown lower=null upper=null error=null start_json=null end_json=null
+  local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown acceptance=unknown lower=null upper=null error=null start_json=null end_json=null
   case "$outcome" in merged|closed|checks_failed|ejected|deadline) ;; *) return 2 ;; esac
   [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
   if [ "$output_failed" = 1 ]; then
@@ -95,7 +101,12 @@ gh_measure_local_observation(){
       local elapsed=$((end - start))
       if [ "$elapsed" -le 604800000 ]; then
         lower=$((elapsed - 20)); [ "$lower" -lt 0 ] && lower=0
-        upper=$((elapsed + 20)); error=20; reason=source_unknown
+        upper=$((elapsed + 20)); error=20
+        # A supported monotonic clock that produced a non-negative bounded
+        # interval qualifies the duration.  Source verification stays a
+        # separate axis and is genuinely unknown here.
+        reason=source_unknown
+        acceptance=qualified
       else
         reason=clock_negative
         start_json=null; end_json=null
@@ -103,8 +114,8 @@ gh_measure_local_observation(){
     fi
   fi
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
-  record=$(printf '{"schema":5,"utc":"%s","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","outcome":"%s","boundary":"receipt_init_to_terminal_output","clock_basis":"%s","start_monotonic_ms":%s,"end_monotonic_ms":%s,"duration_lower_ms":%s,"duration_upper_ms":%s,"clock_error_bound_ms":%s,"source_verified":"unknown","acceptance":"unknown","unknown_reason":"%s"}' \
-    "$utc" "$id" "$outcome" "$basis" "$start_json" "$end_json" "$lower" "$upper" "$error" "$reason")
+  record=$(printf '{"schema":5,"utc":"%s","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","outcome":"%s","boundary":"receipt_init_to_terminal_output","clock_basis":"%s","start_monotonic_ms":%s,"end_monotonic_ms":%s,"duration_lower_ms":%s,"duration_upper_ms":%s,"clock_error_bound_ms":%s,"source_verified":"unknown","acceptance":"%s","unknown_reason":"%s"}' \
+    "$utc" "$id" "$outcome" "$basis" "$start_json" "$end_json" "$lower" "$upper" "$error" "$acceptance" "$reason")
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
