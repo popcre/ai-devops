@@ -20,6 +20,7 @@ Session handoff `2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md` (ret
 | 4. Review-arc stitch + value Score | done | 2026-10-12 | [value score shadow run](tests/verification/jev/review-waste-value-shadow-20261012T180611Z.md); `tools/jev_review_waste_arc.py`; pipeline tests 17/0 |
 | 5. Aggregation + waste report | done | 2026-10-12 | [review waste report](tests/verification/jev/review-waste-report-20261012T180833Z.md) (bounded 12-file sample; slices n≥5 suppressed) |
 | 5b. Large sweep (250 files) | done | 2026-10-13 | [large review-waste sweep report](tests/verification/jev/review-waste-report-20261013T112939Z.md) |
+| 5c. Full sweep and owner analysis | done | 2026-10-13 | [full sweep report](tests/verification/jev/review-waste-report-20261013T162000Z.md); [per-reviewer detail](tests/verification/jev/review-waste-reviewer-detail-20261013.md); [Flash verification](tests/verification/jev/review-waste-flash-verify-20261013.md); [analysis](docs/review-waste-analysis-2026-10-13.md); [recommendation](docs/review-waste-recommendation-2026-10-13.md) |
 | 6. Decision brief for the owner | done | 2026-10-12 | Decision brief section of the waste report (options only; no policy change) |
 
 **Where a fresh session starts:** every step above is done — re-read this STATUS table for the evidence links before touching this lane, and do not re-derive or re-plan. The evidence cells name the artifacts a reader can open; a new change to this lane needs its own issue, not a reopened row.
