@@ -84,12 +84,16 @@ copy_tree(){
       printf '%s/%s\t%s/%s\n' "$2" "$stored" "$2" "$rel" >> "$WITHHELD"
     fi
     target="$dest/$stored.cms"
-    NEW_SEEN["$file"]="$digest"
-    if [ -f "$target" ] && [ "${SEEN[$file]:-}" = "$digest" ]; then continue; fi
+    # Size first, every run: an oversized file stays listed for as long as it
+    # exists, including when an older, smaller copy is already archived.
     size="$(wc -c < "$file")"
     if [ "$size" -gt "$MAX_BYTES" ]; then
-      printf '%s/%s\t%s bytes, over the size limit\n' "$2" "$stored" "$size" >> "$SKIPPED"; continue
+      printf '%s/%s\t%s bytes, over the size limit%s\n' "$2" "$stored" "$size" \
+        "$([ -f "$target" ] && echo '; the archived copy is from before it grew')" >> "$SKIPPED"
+      continue
     fi
+    NEW_SEEN["$file"]="$digest"
+    if [ -f "$target" ] && [ "${SEEN[$file]:-}" = "$digest" ]; then continue; fi
     mkdir -p "$(dirname "$target")"
     if ! encrypt "$file" "$target.tmp" 2>>"$ERRS"; then
       rm -f "$target.tmp"; printf 'could not encrypt %s/%s\n' "$2" "$stored" >> "$ERRS"; continue
@@ -221,8 +225,11 @@ cmd_sync(){
   sort -u "$SKIPPED" > "$HUB/$MACHINE/SKIPPED.txt"
   if [ -s "$WITHHELD" ]; then
     local names="$HOME_DIR/names.$$"
-    # Every run lists every current file, so this is the complete name map.
-    sort -u "$WITHHELD" > "$names"
+    # Cumulative: archived files are kept after local deletion, so are their names.
+    # The clear-text list stays on this machine only, in the private state folder.
+    touch "$HOME_DIR/withheld-names"; chmod 600 "$HOME_DIR/withheld-names"
+    sort -u "$HOME_DIR/withheld-names" "$WITHHELD" > "$names"
+    cp -f "$names" "$HOME_DIR/withheld-names"
     if [ -f "$HUB/$MACHINE/withheld-names.list.sha1" ] && \
        [ "$(sha1sum < "$names" | cut -c1-40)" = "$(cat "$HUB/$MACHINE/withheld-names.list.sha1")" ]; then :; else
       encrypt "$names" "$HUB/$MACHINE/withheld-names.cms" && sha1sum < "$names" | cut -c1-40 > "$HUB/$MACHINE/withheld-names.list.sha1"

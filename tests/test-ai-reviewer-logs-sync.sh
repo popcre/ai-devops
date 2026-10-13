@@ -68,6 +68,20 @@ view
 check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
+# Oversized files stay listed on every run; withheld names survive local deletion.
+run sync 2> "$TMP/out10" || { cat "$TMP/out10" >&2; exit 1; }
+git -C "$VIEW" pull -q
+check 'oversized files listed on every run' "grep -q 'large.txt' '$M/SKIPPED.txt'"
+printf 'y
+' > "$ISSUES/pkg/second-$fake_gh.log"
+run sync 2> "$TMP/out11" || { cat "$TMP/out11" >&2; exit 1; }
+rm -f "$ISSUES/pkg/second-$fake_gh.log"
+printf 'z
+' >> "$STATE/reviewer-events/events.jsonl"
+run sync 2> "$TMP/out12" || { cat "$TMP/out12" >&2; exit 1; }
+view
+check 'withheld names survive local deletion' "grep -q 'second-$fake_gh' '$P/withheld-names' && grep -q '/$fake_gh.log' '$P/withheld-names'"
+
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
 printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"
