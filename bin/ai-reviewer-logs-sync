@@ -352,7 +352,10 @@ cmd_sync(){
 
   if ! git -C "$HUB" diff --cached --quiet; then
     git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)$([ "$partial" = 0 ] || echo ' (partial)')"
-    push_or_die ${bundles[@]+"${bundles[@]}"} ${RESTORED[@]+"${RESTORED[@]}"} "$MACHINE/LAST-SYNC.txt"
+    # Every file this commit carries must be proven published.
+    local delivered_paths=()
+    while IFS= read -r -d '' rel; do delivered_paths+=("$rel"); done < <(git -C "$HUB" diff-tree --root --no-commit-id --name-only -r -z HEAD)
+    push_or_die "${delivered_paths[@]}"
   fi
   # Delivery is proven; record it. A sent bundle is kept locally for restores.
   # After a full re-collection, bundles lost everywhere leave the ledger: their
