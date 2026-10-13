@@ -70,6 +70,12 @@ export AI_TEST_SCOREBOARD_META="$TMP/scoreboard-meta.json"
 
 echo '== ai-review-lifecycle'
 IDENTITY="$($SCRIPT identity "$R")"
+# Regression (#1716): the paid report is written into the reviewed repository,
+# which is part of the source digest when .ai/ is not ignored. The post-review
+# identity comparison must run before that write.
+LIFECYCLE_CORE="$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
+check "post_review_identity_checked_before_report_write" \
+  "a=\$(grep -n 'after_identity=\"\$(rlc_identity' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); b=\$(grep -n '^  rlc_write_report \"\$report\"' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); [ -n \"\$a\" ] && [ -n \"\$b\" ] && [ \"\$a\" -lt \"\$b\" ]"
 check "identity_normalizes_github_upstream" \
   "[ \"\$(jq -r .normalized_upstream <<<'$IDENTITY')\" = 'https://github.com/Owner/Repo' ]"
 check "identity_never_retains_remote_credential" "! grep -q secret <<<'$IDENTITY'"
