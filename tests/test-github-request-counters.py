@@ -61,6 +61,26 @@ class TargetOrdinal(unittest.TestCase):
         # Stable on re-read
         self.assertEqual(target_ordinal.ordinal_for(self.state, keys[0]), ordinals[0])
 
+    def test_cross_process_lock_prevents_duplicate_ordinals(self):
+        # Two real processes must not share one ordinal for distinct keys.
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "import target_ordinal; from pathlib import Path;"
+            "print(target_ordinal.ordinal_for(Path(sys.argv[2]), sys.argv[3]))"
+        )
+        helper = str(ROOT / "tools/github-requests")
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, helper, str(self.state), f"owner/repo#{n}"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for n in range(8)
+        ]
+        out = [p.communicate(timeout=30)[0].strip() for p in procs]
+        for p in procs:
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(set(out)), 8, out)
+        self.assertTrue(all(o.isdigit() for o in out), out)
+
 
 class MeasureAppend(unittest.TestCase):
     def setUp(self):
