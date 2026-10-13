@@ -1,3 +1,9 @@
+---
+issue: 1490
+status: OPEN
+owner: codex/hts-review-rag
+---
+
 # HTS independent review to trusted RAG — continuation
 
 Owner: Codex chat 01a1136c-953b-77e3-9216-9c88a41365f5, edge-dev3. Application card: [designflow-backend#94](https://github.com/popcre/designflow-backend/issues/94). Tool repair card: [ai-devops#1490](https://github.com/popcre/ai-devops/issues/1490). Both remain OPEN. No new issue, database claim, structural route or automatic continuation was created. Human observations below are October 8, 2026, EDT. UTC in this filename is only a machine identifier.

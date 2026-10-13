@@ -141,6 +141,12 @@ forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
 
+Reviewer-safety paths are listed in `config/task-gates.json`. They include the
+reviewer wrappers and the reviewer-binary version pins (`config/muse-code/**`,
+`config/opencode/version`, `config/provider-cli-versions.json`), because those
+pins choose which reviewer program runs. A release that only re-pins a reviewer
+binary therefore uses this same reviewed install route (#1650).
+
 For an update containing reviewer-safety paths, leave the installed checkout
 unchanged while preparing two linked worktrees: a disposable installation
 candidate at its current HEAD and a separate reviewer candidate at the exact

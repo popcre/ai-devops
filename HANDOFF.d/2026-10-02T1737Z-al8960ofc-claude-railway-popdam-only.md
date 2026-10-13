@@ -1,3 +1,9 @@
+---
+issue: 1663
+status: BLOCKED
+owner: claude/railway-popdam-only
+---
+
 # HANDOFF — Railway MCP limited to popdam on every machine (2026-10-02T1737Z, al8960ofc/claude)
 
 Session `fcded5df-960d-4e53-b1fb-466f6045193a`, written 1:37 PM EDT on 2026-10-02.
