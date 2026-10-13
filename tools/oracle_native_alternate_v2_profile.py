@@ -42,6 +42,8 @@ FIELDS={'schema_version','profile','purpose','action_id','source_head','source_d
         'permission_custody','captures','controls','output_parent','output_leaf','runtime','limits','census'}
 STAT_FIELDS={'dev','ino','uid','mode','size','mtime_ns','ctime_ns'}
 
+spec=importlib.util.spec_from_file_location('oracle_control',ROOT/'tools/oracle_native_alternate_control.py')
+control_metadata=importlib.util.module_from_spec(spec);spec.loader.exec_module(control_metadata)
 
 def require(condition,reason):
     if not condition:raise ValueError(reason)
@@ -62,7 +64,7 @@ def legacy():
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 def metadata(path):
     require(Path(path).name=='oracle-native-action-v2.manifest.json','dedicated metadata control required')
-    return decode(legacy()._native.private_read(Path(path)))
+    return control_metadata.read_descriptor(path,PROFILE,legacy()._native.private_read,decode)
 
 
 def descriptor_stat(path,directory=False):
@@ -187,7 +189,7 @@ def binding(state,m):
             'committed Oracle opt-in required')
     facts=validate_manifest(m,int(time.time()));installed=old.installed_enforcement()
     public={path:sha((ROOT/path).read_bytes()) for path in ('tools/oracle_native_alternate_v2_profile.py',
-        'tools/oracle_native_alternate_v2_guardian.py','tools/oracle_native_alternate_v2_runtime.py','bin/ai-oracle-native-alternate-v2','tools/oracle_native_alternate_output.py')}
+        'tools/oracle_native_alternate_v2_guardian.py','tools/oracle_native_alternate_v2_runtime.py','bin/ai-oracle-native-alternate-v2','tools/oracle_native_alternate_output.py','tools/oracle_native_alternate_control.py')}
     if installed['kind']=='VERIFIED_INSTALLED_SOURCE':
         for path,digest in public.items():require(sha(old.git(ROOT,'show',installed['source_head']+':'+path))==digest,'installed Oracle guard differs')
     return {'profile':PROFILE,'profile_sha256':pdigest,'action':ACTION,'purpose':PURPOSE,
@@ -209,6 +211,7 @@ def completed(state_path,state,b):
     require(b['installed_enforcement']['kind']=='VERIFIED_INSTALLED_SOURCE','test fixture cannot issue authority')
     finished=datetime.fromisoformat(state['finished_at'].replace('Z','+00:00'))
     require(finished.tzinfo is not None and 0<=time.time()-finished.timestamp()<=300,'native approval start window expired')
+    control_metadata.lifecycle(state_path)
     old=legacy();proc=subprocess.run([sys.executable,str(ROOT/'bin/ai-review-code-only.py'),'lifecycle-proof',
         str(state_path),state['session_id'],state['report_path'],'--completed'],capture_output=True)
     require(proc.returncode==0 and decode(proc.stdout)==state['code_only_completion'],'genuine independent native completion required')
@@ -230,7 +233,7 @@ def atomic_receipt(state_path,state,b,m,publish):
     lock=os.open(str(state_path)+'.oracle.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     try:
         validate_lock_fd(lock)
-        fcntl.flock(lock,fcntl.LOCK_EX);old=legacy();current=decode(old._native.private_read(Path(state_path)))
+        fcntl.flock(lock,fcntl.LOCK_EX);old=legacy();current=decode(control_metadata.read_lifecycle(state_path,old._native.private_read))
         require(current==state,'lifecycle moved during registration')
         finished=int(datetime.fromisoformat(state['finished_at'].replace('Z','+00:00')).timestamp())
         expected={'schema_version':2,'registration':reg,'binding':b,'action_id':m['action_id'],
@@ -278,7 +281,7 @@ def main(argv=None):
     parser.add_argument('--stage',default='initial-forward');parser.add_argument('--admit',action='store_true');args=parser.parse_args(argv)
     try:
         require(args.profile==PROFILE and args.stage=='initial-forward','fixed Oracle stage required')
-        state=decode(legacy()._native.private_read(Path(args.state)))
+        state=decode(control_metadata.read_lifecycle(args.state,legacy()._native.private_read))
         require(type(state) is dict and (args.phase=='capture' or type(state.get('action_profile_binding')) is dict),'invalid lifecycle action binding')
         if args.phase=='prompt':print(prompt(state));return 0
         require(state['status']=={'capture':'preflight','evidence':'running','finish':'running','preaction':'completed'}[args.phase],'wrong native phase')

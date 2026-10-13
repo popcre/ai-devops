@@ -25,7 +25,7 @@ action_review_evidence_args(){
   if [[ "${action_profile:-}" = oracle-native-alternate-serialization-v1 || "${action_profile:-}" = oracle-native-alternate-serialization-v2 ]]; then
     local oracle_sources=(tools/oracle_native_alternate_profile.py tools/oracle_native_alternate_guardian.py tools/oracle_native_alternate_runtime.py bin/ai-oracle-native-alternate)
     [ "$action_profile" != oracle-native-alternate-serialization-v2 ] || oracle_sources=(tools/oracle_native_alternate_v2_profile.py tools/oracle_native_alternate_v2_guardian.py tools/oracle_native_alternate_v2_runtime.py bin/ai-oracle-native-alternate-v2)
-    oracle_sources+=(tools/oracle_native_alternate_output.py)
+    oracle_sources+=(tools/oracle_native_alternate_output.py tools/oracle_native_alternate_control.py)
     for relative in "${oracle_sources[@]}"; do
       file="$evidence_root/$relative"
       [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1

@@ -94,7 +94,7 @@ def limits():
 
 
 def run(state_path,m):
-    old=profile.legacy();state=profile.decode(old._native.private_read(Path(state_path)))
+    old=profile.legacy();state=profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))
     b=profile.binding(state,m);profile.require(b==state.get('action_profile_binding'),'fixed prospective action binding required')
     # There is deliberately no ordinary/advisory/boolean authority path.
     spec=importlib.util.spec_from_file_location('oracle_public_runtime',Path(__file__).with_name('oracle_native_alternate_runtime.py'))
@@ -149,7 +149,7 @@ def run(state_path,m):
             try:
                 while selector.get_map():
                     profile.require(time.monotonic()-started<180 and time.time()<state['oracle_alternate_action_admission']['expires_at'],'action deadline expired')
-                    profile.require(profile.decode(old._native.private_read(Path(state_path)))==state,'purpose registration revoked during execution')
+                    profile.require(profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))==state,'purpose registration revoked during execution')
                     for key,_ in selector.select(.1):
                         chunk=os.read(key.fileobj.fileno(),2049-len(result))
                         if not chunk:selector.unregister(key.fileobj)
@@ -169,7 +169,7 @@ def run(state_path,m):
         returned_fd=output_checks.open_directory(output)
         try:profile.require((os.fstat(returned_fd).st_dev,os.fstat(returned_fd).st_ino)==(output_initial.st_dev,output_initial.st_ino),'output path replaced before release')
         finally:os.close(returned_fd)
-        profile.require(profile.decode(old._native.private_read(Path(state_path)))==state and time.time()<m['expires_at'],'registration changed before release')
+        profile.require(profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))==state and time.time()<m['expires_at'],'registration changed before release')
         return receipt
     finally:
         for fd in fds+source_fds+[output_fd]:os.close(fd)

@@ -289,6 +289,33 @@ exercise(){
             self.assertFalse(list(self.root.glob('*.spent')))
 
 
+    def test_exclusive_metadata_publisher_is_not_authority_and_preserves_collisions(self):
+        descriptors=self.root/'known-descriptor-metadata';descriptors.mkdir(mode=0o700)
+        self.manifest['output_parent']['stat']=profile.descriptor_stat(str(self.root),True)
+        controls=profile.control_metadata
+        with mock.patch.dict(os.environ,{'AI_DEVOPS_TEST_MODE':'1','AI_ORACLE_NATIVE_TEST_DESCRIPTOR_ROOT':str(descriptors)}):
+            invalid={**self.manifest,'source_text':'INVENTED RAW CAPTURE'}
+            with self.assertRaises(ValueError):controls.publish_descriptor(invalid,profile.PROFILE)
+            self.assertFalse(list(descriptors.iterdir()))
+            for header in ({'profile':'unknown'},{'action_id':'wrong'},{'schema_version':True}):
+                with self.assertRaises(ValueError):controls.publish_descriptor({**self.manifest,**header},profile.PROFILE)
+            path=controls.publish_descriptor(self.manifest,profile.PROFILE)
+            raw=path.read_bytes();self.assertEqual(path.stat().st_mode&0o777,0o600)
+            self.assertEqual(path.parent.stat().st_mode&0o777,0o700)
+            self.assertEqual(profile.metadata(path),self.manifest)
+            self.assertFalse(list(self.root.glob('*.spent')))
+            with self.assertRaises(FileExistsError):controls.publish_descriptor(self.manifest,profile.PROFILE)
+            self.assertEqual(path.read_bytes(),raw)
+            crashed='b'*32;(descriptors/profile.PROFILE/crashed).mkdir(mode=0o700)
+            with self.assertRaises(FileExistsError):controls.publish_descriptor({**self.manifest,'action_id':crashed},profile.PROFILE)
+            self.assertFalse(list((descriptors/profile.PROFILE/crashed).iterdir()))
+            action='c'*32;directory=descriptors/profile.PROFILE;directory.chmod(0o755)
+            with self.assertRaises(ValueError):controls.publish_descriptor({**self.manifest,'action_id':action},profile.PROFILE)
+            directory.chmod(0o700);moved=directory.with_name('moved');directory.rename(moved);directory.symlink_to(moved,target_is_directory=True)
+            with self.assertRaises(OSError):controls.publish_descriptor({**self.manifest,'action_id':action},profile.PROFILE)
+            self.assertEqual(path.parent.name,self.manifest['action_id'])
+
+
     def clone_public_runtime(self):
         import shutil
         root=self.root/'staged-public';shutil.copytree(self.public_root,root)
