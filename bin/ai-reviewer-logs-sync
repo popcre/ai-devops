@@ -46,7 +46,8 @@
 set -euo pipefail
 umask 077
 
-_self="${BASH_SOURCE[0]}"
+# Resolve an installed symlink (/usr/local/bin) back to the checkout.
+_self="$(readlink -f -- "${BASH_SOURCE[0]}")"
 TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 TOOL_NAME=ai-reviewer-logs-sync
 HOME_DIR="$HOME/.ai-devops/reviewer-logs-sync"
@@ -94,7 +95,7 @@ LOCK_HELD=""
 cleanup(){
   ((${#CLEANUP[@]})) && rm -rf -- "${CLEANUP[@]}"
   # The lock is removed only while it still records this process as owner.
-  if [ -n "$LOCK_HELD" ] && [ "$(cat "$LOCK_HELD/pid" 2>/dev/null)" = "$$" ]; then rm -rf -- "$LOCK_HELD"; fi
+  if [ -n "$LOCK_HELD" ] && [ "$(cat "$LOCK_HELD/owner" 2>/dev/null)" = "$(proc_id "$$")" ]; then rm -rf -- "$LOCK_HELD"; fi
   return 0
 }
 
@@ -107,23 +108,26 @@ reclaim_lock(){
 
 # Exclusive lock broken only when its recorded owner process is gone, never by
 # age, so a long sync or view is never overrun by the next hourly run.
+# A process identity that survives PID reuse: "<pid> <start time>".
+proc_id(){ local st; st="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1; printf '%s %s' "$1" "$(printf '%s' "$st" | awk '{print $22}')"; }
 owner_lock(){
-  local lock="$1" owner
+  local lock="$1" owner pid
   until mkdir "$lock" 2>/dev/null; do
-    owner="$(cat "$lock/pid" 2>/dev/null || true)"
-    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
-      reclaim_lock "$lock" "finished process $owner"; continue
+    owner="$(cat "$lock/owner" 2>/dev/null || true)"
+    pid="${owner%% *}"
+    if [ -n "$owner" ] && [ "$(proc_id "$pid" 2>/dev/null)" != "$owner" ]; then
+      reclaim_lock "$lock" "finished process $pid"; continue
     fi
     if [ -z "$owner" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
       reclaim_lock "$lock" "an aborted start"; continue
     fi
-    die "another sync or view is running (lock $lock, process ${owner:-unknown})"
+    die "another sync or view is running (lock $lock, process ${pid:-unknown})"
   done
-  printf '%s\n' "$$" > "$lock/pid"
+  proc_id "$$" > "$lock/owner" || { rm -rf -- "$lock"; die "cannot identify this process"; }
   LOCK_HELD="$lock"
   trap cleanup EXIT
 }
-command -v openssl >/dev/null 2>&1 || die "openssl is required (install the openssl package)"
+need_openssl(){ command -v openssl >/dev/null 2>&1 || die "openssl is required (install the openssl package)"; }
 is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
 
 # stage_tree <source dir> <path inside the bundle>: copy new or changed files
@@ -204,6 +208,7 @@ push_or_die(){
 }
 
 cmd_sync(){
+  need_openssl
   mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
   owner_lock "$HOME_DIR/sync.lock"
   rotate_log "$LOG"
@@ -347,6 +352,7 @@ cmd_view(){
   [ -n "$keyfile" ] && [ -f "$keyfile" ] || die "set AI_REVIEWER_LOGS_KEY_FILE to a private file holding the archive key (see --help)"
   # The key file is locked down to its owner before use (and refused if that fails).
   make_private "$keyfile" file || die "could not make the key file owner-only: $keyfile"
+  need_openssl
   # Same lock as sync: view's reset of the clone must never race a sync.
   mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
   owner_lock "$HOME_DIR/sync.lock"

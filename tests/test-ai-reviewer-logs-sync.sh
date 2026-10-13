@@ -165,12 +165,15 @@ cp "$TMP/key.pem" "$TMP/plain/key.pem"
 check 'a key inside the view folder is refused and kept' "! AI_REVIEWER_LOGS_KEY_FILE='$TMP/plain/key.pem' run view '$TMP/plain' >/dev/null 2>&1 && [ -f '$TMP/plain/key.pem' ]"
 ln -s "$TMP/plain/key.pem" "$TMP/keylink.pem" 2>/dev/null && [ -L "$TMP/keylink.pem" ] &&   check 'a key symlink into the view folder is refused' "! AI_REVIEWER_LOGS_KEY_FILE='$TMP/keylink.pem' run view '$TMP/plain' >/dev/null 2>&1 && [ -f '$TMP/plain/key.pem' ]"
 mkdir -p "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"; sleep 600 & live=$!
-printf '%s
-' "$live" > "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock/pid"
+printf '%s %s' "$live" "$(awk '{print $22}' "/proc/$live/stat")" > "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock/owner"
 touch -d '2001-01-01' "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"
 check 'a live lock is never broken, however old' "! run sync 2>/dev/null && [ -d '$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock' ]"
 kill "$live" 2>/dev/null; wait "$live" 2>/dev/null || true
 check 'a dead owner lock is reclaimed' "run sync 2>/dev/null"
+mkdir -p "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"
+printf '%s 1' "$$" > "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock/owner"
+check 'a reused process id does not keep the lock' "run sync 2>/dev/null"
+check 'openssl is required only by sync and view, never by help or unschedule' "[ \$(grep -c '^  need_openssl\$' '$ROOT/bin/ai-reviewer-logs-sync') -eq 2 ] && absent grep -q '^need_openssl\$' '$ROOT/bin/ai-reviewer-logs-sync'"
 q="$TMP/it's"; mkdir -p "$q/bin" "$q/tools/lib"
 cp "$ROOT/bin/ai-reviewer-logs-sync" "$q/bin/"; cp "$ROOT/tools/lib/local-watch.sh" "$q/tools/lib/"
 HOME="$TMP/home" bash "$q/bin/ai-reviewer-logs-sync" schedule > "$TMP/out16" 2>&1 || true
