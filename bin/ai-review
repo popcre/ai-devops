@@ -328,6 +328,7 @@ if [ "$code_only" -eq 1 ]; then
   tag="code-only-$(date +%s)-$$-$RANDOM"
   export_args=(ensure-code-only "$source_root" "$tag" --paths-file "$paths_file")
   [ -z "$review_base" ] || export_args+=(--base "$review_base")
+  [ "$action_profile" != oracle-native-alternate-serialization-v1 ] || export_args+=(--action-profile "$action_profile")
   snapshot="$("$SANDBOX" "${export_args[@]}")" || { printf 'ai-review: code-only export refused; no reviewer was started.\n' >&2; exit 3; }
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only source verification refused; no reviewer was started.\n' >&2; exit 3; }
   synthetic_head="$(git -C "$snapshot" rev-parse HEAD 2>/dev/null)" || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only export has no HEAD.\n' >&2; exit 3; }

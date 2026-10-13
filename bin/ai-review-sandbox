@@ -906,13 +906,21 @@ cmd_clone_code_only() {
 }
 
 cmd_ensure_code_only() {
-  local root tag stage paths python build base=""
+  local root tag stage paths python build base="" document_profile=""
   root="$(canon "${1:?usage: ensure-code-only <repo> <tag> --paths-file <JSON>}")"
   tag="${2:?usage: ensure-code-only <repo> <tag> --paths-file <JSON>}"
   [ "${3:-}" = --paths-file ] && [ -f "${4:-}" ] \
     || die "usage: ensure-code-only <repo> <tag> --paths-file <JSON> [--base REF]"
-  if [ "$#" -eq 6 ] && [ "$5" = --base ]; then base="$6"
-  elif [ "$#" -ne 4 ]; then die "usage: ensure-code-only <repo> <tag> --paths-file <JSON> [--base REF]"; fi
+  local options=("${@:5}") option_index=0
+  while [ "$option_index" -lt "${#options[@]}" ]; do
+    [ -n "${options[$((option_index+1))]:-}" ] || die "missing code-only export option value"
+    case "${options[$option_index]}" in
+      --base) [ -z "$base" ] || die "duplicate code-only base"; base="${options[$((option_index+1))]}" ;;
+      --action-profile) [ -z "$document_profile" ] || die "duplicate public document profile"; document_profile="${options[$((option_index+1))]}"; [ "$document_profile" = oracle-native-alternate-serialization-v1 ] || die "unsupported public document profile" ;;
+      *) die "invalid code-only export option" ;;
+    esac
+    option_index=$((option_index+2))
+  done
   paths="$(canon "$(dirname "$4")")/$(basename "$4")"
   # The sealed route's repository opt-in is enforced here too, not only at the
   # bin/ai-review front door: the export itself is the capability, so a direct
@@ -942,6 +950,7 @@ cmd_ensure_code_only() {
   [ ! -e "$build" ] || die "partial code-only export already exists."
   local create_args=(create "$root" "$build" "$paths")
   [ -z "$base" ] || create_args+=(--base "$base")
+  [ -z "$document_profile" ] || create_args+=(--action-profile "$document_profile")
   if ! "$python" "$SCRIPT_DIR/ai-review-code-only.py" "${create_args[@]}"; then
     [ ! -e "$build" ] || rm -rf -- "$build"
     rm -f -- "$build.source.json"

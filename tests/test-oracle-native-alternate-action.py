@@ -139,6 +139,45 @@ class OracleTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0);self.assertNotIn(b'INVENTED',result.stderr)
         self.assertFalse(list(self.root.glob('*.spent')))
 
+    def test_complete_seven_path_public_export_and_profile_preflight(self):
+        from types import SimpleNamespace
+        repo=self.root/'public-repo';repo.mkdir()
+        def git(*args):return subprocess.check_output(['git','-C',str(repo),*args],stderr=subprocess.DEVNULL)
+        git('init','-q');git('config','user.name','Invented Fixture');git('config','user.email','fixture@invalid.local')
+        git('remote','add','origin','https://github.com/u2giants/theoracle')
+        registry,_=profile.profile();paths=registry['paths']
+        for name in paths:
+            target=repo/name;target.parent.mkdir(parents=True,exist_ok=True)
+            value=(ROOT/'tests/fixtures/oracle-native-public-producer.md').read_bytes() if name==scope.PUBLIC_PRODUCER_PATH else b'{}' if name.endswith('.json') else b'# Invented public source fixture only\n'
+            if name=='.ai-devops/task-gates.json':value=json.dumps({'schema_version':1,'gates':{'private-tooling':{'required':['synthetic-fixtures-only','oracle-native-alternate-descriptor-only-admission'],'forbidden_actions':[]}}}).encode()
+            target.write_bytes(value)
+        git('add','--all');git('commit','-qm','public source fixture')
+        pathsfile=self.root/'paths.json';pathsfile.write_text(json.dumps(paths));stage=self.root/'export'
+        # Generic markdown and a foreign profile continue to refuse.
+        with self.assertRaises(ValueError):scope.safe_path(scope.PUBLIC_PRODUCER_PATH)
+        with self.assertRaises(ValueError):scope.public_document_context(repo,paths,'shared-db-770-isolated-timing-rehearsal-v1')
+        scope.create(SimpleNamespace(source=str(repo),stage=str(stage),paths_file=str(pathsfile),base='HEAD',action_profile=profile.PROFILE))
+        exported=scope.validate_snapshot(stage,git('rev-parse','HEAD').decode().strip())
+        self.assertEqual(exported['paths'],paths)
+        self.assertEqual((stage/scope.PUBLIC_PRODUCER_PATH).read_bytes(),(repo/scope.PUBLIC_PRODUCER_PATH).read_bytes())
+        self.assertEqual(exported['document_profile'],profile.PROFILE)
+        with mock.patch.dict(os.environ,{'AI_DEVOPS_TEST_MODE':'1','AI_TASK_GATES_DIR':str(self.root/'task-state')}):
+            started=subprocess.run([str(ROOT/'bin/ai-task-gates'),'start','--class','private-tooling'],cwd=repo,capture_output=True)
+            self.assertEqual(started.returncode,0,started.stderr)
+            state=dict(normalized_upstream='https://github.com/u2giants/theoracle',provider='deepseek',implementer_engine='codex',review_mode='final-check',
+                code_only_export=str(stage),code_only=exported,head=exported['original_head'],source_digest=exported['source_digest'],repository_root=str(repo))
+            manifest=copy.deepcopy(self.manifest);manifest.update(source_head=state['head'],source_digest=state['source_digest'])
+            manifest['output_parent']['stat']=profile.descriptor_stat(str(self.root),True)
+            bound=profile.binding(state,manifest)
+            self.assertEqual(bound['capture_count'],33)
+            self.assertFalse(bound['root_action_authority'])
+            self.assertFalse(bound['capture_byte_hashes_verified'])
+
+        # This is source export only; no provider completion, registration or admission exists.
+        self.assertFalse(list(self.root.glob('*.spent')))
+        (repo/scope.PUBLIC_PRODUCER_PATH).write_text('private substitution must refuse')
+        with self.assertRaises(ValueError):scope.validate_snapshot(stage)
+
     def test_actual_public_runtime_preparation_is_non_authorizing(self):
         probe = '''import sys,pathlib;sys.path.insert(0,"tools")
 import oracle_native_alternate_runtime as runtime
