@@ -46,16 +46,16 @@ view(){ rm -rf "$TMP/plain"; run view "$TMP/plain" >/dev/null 2>&1; }
 run sync 2> "$TMP/out1" || { cat "$TMP/out1" >&2; exit 1; }
 VIEW="$TMP/view"; git clone -q "$REMOTE" "$VIEW"
 M="$VIEW/test-box"; P="$TMP/plain/test-box"
-check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && [ -f '$VIEW/README.md' ]"
-check 'every collected file is encrypted' "[ -z \"\$(git -C '$VIEW' ls-files | grep -v -e '\.cms\$' -e '^README.md\$' -e 'LAST-SYNC.txt\$' -e 'SKIPPED.txt\$' -e 'withheld-names.list.sha1\$')\" ]"
+check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && ls '$M/bundles' | grep -q 'tar.cms'"
+check 'only encrypted bundles and the status file are published' "[ -z \"\$(git -C '$VIEW' ls-files | grep -v -e '^test-box/bundles/[0-9TZ]*-[0-9a-f]*\.tar\.cms\$' -e '^test-box/LAST-SYNC.txt\$')\" ]"
 check 'no clear text from the logs reaches the repository' "! git -C '$VIEW' grep -q -e 'after timeout' -e hunter3word -e APPROVE"
 view
 check 'view decrypts complete, unmasked evidence' "cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log' && cmp -s '$ISSUES/pkg/blob.bin' '$P/reviewer-issues/pkg/blob.bin'"
 check 'scoreboard, events and lifecycle collected' "[ -f '$P/state/review-scoreboard/reviews.jsonl' ] && [ -f '$P/state/reviewer-events/events.jsonl' ] && [ -f '$P/state/review-lifecycle/runs/r1/run.json' ]"
 check 'review reports from same-named checkouts kept apart' "[ \$(ls '$P/reviews' | wc -l) -eq 2 ] && [ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ] && [ \$(grep -rl 'second checkout' '$P/reviews' | wc -l) -eq 1 ]"
-check 'credential-looking names withheld and mapped' "! git -C '$VIEW' ls-files | grep -q '$fake_gh' && grep -q '$fake_gh' '$P/withheld-names'"
+check 'file names are never published in clear text' "! git -C '$VIEW' ls-files | grep -q -e '$fake_gh' -e provider -e codex-final && ! git -C '$VIEW' grep -q -e '$fake_gh' -e provider.log && [ -f '$P/reviewer-issues/pkg/$fake_gh.log' ]"
 check 'odd file names are data, never commands' "[ ! -e PWNED ] && [ ! -e '$TMP/home/PWNED' ] && ls '$P/reviewer-issues/pkg' | grep -q 'touch PWNED'"
-check 'oversized files skipped and listed' "[ ! -e '$P/reviewer-issues/pkg/large.txt' ] && grep -q 'large.txt' '$M/SKIPPED.txt'"
+check 'oversized files skipped and listed inside the bundle' "[ ! -e '$P/reviewer-issues/pkg/large.txt' ] && cat '$P'/_collection/*-skipped.txt | grep -q 'large.txt'"
 check 'provider session stores are not collected' "[ ! -e '$P/state/qwen' ]"
 
 run sync 2> "$TMP/out2"
@@ -68,20 +68,6 @@ view
 check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
-# Oversized files stay listed on every run; withheld names survive local deletion.
-run sync 2> "$TMP/out10" || { cat "$TMP/out10" >&2; exit 1; }
-git -C "$VIEW" pull -q
-check 'oversized files listed on every run' "grep -q 'large.txt' '$M/SKIPPED.txt'"
-printf 'y
-' > "$ISSUES/pkg/second-$fake_gh.log"
-run sync 2> "$TMP/out11" || { cat "$TMP/out11" >&2; exit 1; }
-rm -f "$ISSUES/pkg/second-$fake_gh.log"
-printf 'z
-' >> "$STATE/reviewer-events/events.jsonl"
-run sync 2> "$TMP/out12" || { cat "$TMP/out12" >&2; exit 1; }
-view
-check 'withheld names survive local deletion' "grep -q 'second-$fake_gh' '$P/withheld-names' && grep -q '/$fake_gh.log' '$P/withheld-names'"
-
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
 printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"
@@ -93,10 +79,15 @@ run sync 2> "$TMP/out5" || { cat "$TMP/out5" >&2; exit 1; }
 git -C "$VIEW" pull -q
 check 'a clean retry clears the incomplete mark' "grep -q '^complete: yes' '$M/LAST-SYNC.txt'"
 
-# An interrupted delivery (committed, not pushed) is pushed by the next run.
-git -C "$TMP/hub" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m stranded
+# An unpushed local commit (here carrying clear text) never reaches GitHub; the
+# next run starts from the published archive.
+printf 'stranded clear text
+' > "$TMP/hub/test-box/sneak.txt"
+git -C "$TMP/hub" add -A && git -C "$TMP/hub" -c user.name=t -c user.email=t@example.invalid commit -qm stranded
+printf 'w
+' >> "$STATE/reviewer-events/events.jsonl"
 run sync 2> "$TMP/out6" || { cat "$TMP/out6" >&2; exit 1; }
-check 'stranded commits are delivered' "git -C '$REMOTE' log --format=%s main | grep -q stranded"
+check 'unpushed local commits never reach GitHub' "! git -C '$REMOTE' log --format=%s main | grep -q stranded && ! git -C '$REMOTE' ls-tree -r --name-only main | grep -q sneak"
 
 # Leak gate: if encryption silently produced clear text, nothing is pushed.
 mkdir -p "$TMP/badssl"
@@ -113,12 +104,6 @@ before="$(git -C "$REMOTE" rev-parse main)"
 check 'clear-text output is refused, even when it starts with 0' "! PATH='$TMP/badssl':\"\$PATH\" run sync 2> '$TMP/out7' && grep -q 'not encrypted' '$TMP/out7' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
 run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
 
-# A stranded commit carrying clear text is never pushed.
-printf 'stranded clear text
-' > "$TMP/hub/test-box/reviewer-issues/pkg/sneak.cms"
-git -C "$TMP/hub" add -A && git -C "$TMP/hub" -c user.name=t -c user.email=t@example.invalid commit -qm sneak
-before="$(git -C "$REMOTE" rev-parse main)"
-check 'unpushed clear-text commits are refused' "! run sync 2> '$TMP/out9' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
 check 'the shipped certificate is tracked' "git -C '$ROOT' ls-files --error-unmatch config/reviewer-logs-archive.crt >/dev/null 2>&1"
 
 check 'option-like and path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=--dry-run run sync 2>/dev/null && ! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"

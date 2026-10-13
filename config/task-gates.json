@@ -391,6 +391,14 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/ai-reviewer-logs-sync",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/reviewer-logs-archive.crt",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },
