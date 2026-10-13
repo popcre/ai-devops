@@ -32,7 +32,7 @@ record merely to reduce the file count.
 | [`plan_reviewer-scoped-ci-selection.md`](../plan_reviewer-scoped-ci-selection.md) | [#1563](https://github.com/popcre/ai-devops/issues/1563) | Complete — live proof PR #1571 (7 of 143 suites) |
 | [`plan_github-request-reduction.md`](../plan_github-request-reduction.md) | [#658](https://github.com/popcre/ai-devops/issues/658) | P5 (BlockerWatch → existing App) before any multi-App split |
 | [`plan_mimo-windows-support.md`](../plan_mimo-windows-support.md) | (see plan STATUS) | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` |
-| [`plan_mimo-reviewer-wrappers.md`](../plan_mimo-reviewer-wrappers.md) | [#1696](https://github.com/popcre/ai-devops/issues/1696) | Step 0 first: install and qualify `mimo run` on both platforms; one door, two engine paths (StepFun pattern) |
+| [plan_mimo-reviewer-wrappers.md](../plan_mimo-reviewer-wrappers.md) | [#1696](https://github.com/popcre/ai-devops/issues/1696) | Step 0 first: install and qualify `mimo run` on both platforms; one door, two engine paths (StepFun pattern) |
 | [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md) | [#782](https://github.com/popcre/ai-devops/issues/782) | Steps 5–6 open: re-adopt globals on edge-dev, land PR, add router row |
 | [`plan_review-packet-race-and-evidence-speed.md`](../plan_review-packet-race-and-evidence-speed.md) | (see plan STATUS) | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict |
 | [`plan_reviewer-pipeline-core.md`](../plan_reviewer-pipeline-core.md) | (see plan STATUS) | Phases A–C then D–E; new 2026-09-29, index retro-fix |
