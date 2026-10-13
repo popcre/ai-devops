@@ -291,12 +291,21 @@ if (Get-Command railway -ErrorAction SilentlyContinue) { Ok "railway $(railway -
 # GitHub CLI creates its config folder with inheritance disabled on some Windows
 # installations. Codex's restricted task account can then see the workspace but
 # `gh` fails before it can run because config.yml is unreadable. Repair only that
-# folder and grant only read/execute; credentials remain in Windows Credential
-# Manager and no token is copied or exposed.
+# folder and grant only read/execute. The token file itself (hosts.yml) is then
+# restricted to its owner by repair-github-cli-ssh-auth.ps1 below.
 $repairGhAccess = Join-Path $RepoPath "bin\repair-codex-github-cli-access.ps1"
 if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhAccess)) {
   Step "GitHub CLI access for restricted Codex tasks"
   & $repairGhAccess
+}
+
+# SSH logons cannot read Windows Credential Manager, so a keyring GitHub login
+# breaks every remote ai-gh, git fetch and memory sync. Move it to GitHub CLI's
+# file storage, readable by both logon types and locked to the owner.
+$repairGhSsh = Join-Path $RepoPath "bin\repair-github-cli-ssh-auth.ps1"
+if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhSsh)) {
+  Step "GitHub CLI login readable from SSH sessions"
+  & $repairGhSsh
 }
 
 # cloudflared - used by the SSH config's ProxyCommand so `ssh vps` works on any network.
