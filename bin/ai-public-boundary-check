@@ -15,9 +15,12 @@ while IFS= read -r path; do
       [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
   esac
   # Always forbid secret-bearing file types, including under reviewer-issues.
-  # The generated-artifact exemption above must not skip this rule.
-  case "$path" in
-    *.env|*.pem|*.key)
+  # Match basenames like .gitignore: .env, *.env, .env.*, *.pem, *.key —
+  # never the documented examples.
+  base="${path##*/}"
+  case "$base" in
+    .env.example|*.env.example) ;;
+    .env|*.env|.env.*|*.pem|*.key)
       echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
   esac
 done < <(git -C "$root" ls-files)
