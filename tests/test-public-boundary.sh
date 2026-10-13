@@ -37,7 +37,12 @@ DIAG="$(bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" 2>&1 || true)"
 printf '%s' "$DIAG" | grep -q 'word.md:1:' || { echo 'FAIL: boundary failure does not name the offending file and line'; exit 1; }
 printf '%s' "$DIAG" | grep -q 'public-boundary-allowlist.txt' || { echo 'FAIL: boundary failure does not say how to clear a false positive'; exit 1; }
 git -C "$TMP/repo" reset -q HEAD word.md tools/public-boundary-allowlist.txt; rm -rf "$TMP/repo/word.md" "$TMP/repo/tools"
+# Redacted reviewer-issue notes are published on main by owner decision
+# (PR #1626). Other generated AI artifacts stay forbidden.
 mkdir -p "$TMP/repo/.ai/reviewer-issues"; printf '{}\n' > "$TMP/repo/.ai/reviewer-issues/issue.json"; git -C "$TMP/repo" add -f .ai/reviewer-issues/issue.json
+bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null || { echo 'FAIL: reviewer-issue notes rejected'; exit 1; }
+git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/repo/.ai/reviewer-issues"
+mkdir -p "$TMP/repo/.ai/reviews"; printf 'x\n' > "$TMP/repo/.ai/reviews/secret.md"; git -C "$TMP/repo" add -f .ai/reviews/secret.md
 if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: seeded AI artifact fixture passed'; exit 1; fi
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
-echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; the allowlist clears words without laundering identifiers'
+echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; reviewer-issue notes are allowed; the allowlist clears words without laundering identifiers'
