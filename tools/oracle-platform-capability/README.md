@@ -187,3 +187,45 @@ production authority. No platform traffic or installation is performed by
 source preparation or these fixtures.
 
 Read-induced atime changes are excluded from bounded-file stability checks; dev/ino/UID/GID/mode/nlink/size/mtime_ns/ctime_ns must all remain exact, with nofollow and content hash bounds preserved.
+
+
+## Held report and safe discovery projection (ROOT #27/#58)
+
+The report parent and nofollow leaf descriptors stay open through the genuine
+native gate and one-use claim. The gate receives a parent-FD-anchored pathname.
+Every report ancestor must be root/caller-owned and nonwritable by others (only the root-owned sticky `/tmp` boundary is allowed); nofollow ancestry identities remain exact. Original pathname/parent inode and immutable leaf identity/UID/GID/mode/nlink/
+size/mtime_ns/ctime_ns are rechecked before/after gate, runtime checks and claim.
+Reading may change atime only. A changed parent, named leaf, held inode or byte
+identity refuses; after a spent claim, failure retains spent evidence.
+
+Gate return0 alone is NOT a permission issuer or proof of APPROVE. ROOT must
+independently establish genuine current independent APPROVE and exact action/
+contract scope BEFORE injecting any credentials. Old rejected/frozen action
+reports, source versions and spent/expired claims must not be reused or renewed.
+
+`describe_action.py` is the uniquely ROOT-owned #27/#58 nonauthorizing helper
+needed to keep actual protected contracts OUTSIDE public Git while reviewers
+can inspect a bounded exact commitment. It consolidates the existing inspector
+contract/current installation/fixed local peer validators; it adds no generic
+JSON, document or evidence exception. Actual contracts in ordinary, linked or
+bare Git ancestry are refused before content reads. Protected contract bytes
+use a held private parent FD, nofollow owner0600 single-link leaf,8192byte cap,
+exact source/contract hashes and pre/post custody checks. TMPDIR must already be
+owned0700. Public templates retain null topology and zero lifetime.
+
+Its output contains ONLY the versioned projection schema, discovery mode,
+claim/time identifiers, contract/operator/remote/transport-helper hashes,
+fixed opaque target and peer/route commitments, current installation hashes,
+managed-link count, fixed GET version/five identity-field/16 inventory scope,
+and explicit nonauthorizing/no-claim/no-credential/no-remote-traffic facts.
+No actual target/peer addresses, node names, credentials or private paths enter
+stdout or error messages. It does not invoke the production gate, claim writer,
+HTTP, SSH, remote Docker or providers. The existing fixed local WHOIS/route
+metadata preflight is read-only and remains necessary. Qualification projection
+is refused because it needs its own complete separately reviewed exec scope.
+
+A projection is preparation and an immutable input commitment, never authority.
+ROOT owns its actual private contract, genuine source/action review and any
+subsequent one-use invocation. If the native reviewer harness cannot consume
+this validated nonprivate projection through an existing supported route, STOP;
+do not commit actual contracts or add a generic evidence/privacy waiver.

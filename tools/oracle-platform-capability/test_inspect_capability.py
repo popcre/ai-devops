@@ -491,3 +491,154 @@ def test_every_managed_link_refuses_tamper_before_git_child(tmp_path,monkeypatch
     with patch.object(m,'bounded_file',side_effect=bounded),patch.object(m.subprocess,'run',side_effect=AssertionError('git child before complete closure')):
         with pytest.raises(ValueError):m.installed_gate(c)
     assert str(tmp_path/'foreign-bytes') not in opened
+
+@pytest.mark.parametrize('damage',['parentrename','parentsymlink','leafreplace','leafsymlink','leafwrite','leafmode'])
+def test_report_changed_during_gate_creates_zero_claims(tmp_path,monkeypatch,damage):
+    tmp_path.chmod(0o700);reportdir=tmp_path/'reports';reportdir.mkdir(mode=0o700)
+    output=tmp_path/'output';output.mkdir(mode=0o700);report=reportdir/'report';report.write_bytes(b'PUBLIC ORIGINAL REPORT');report.chmod(0o600)
+    original=report.stat();called=[]
+    def gate(argv,**kw):
+        called.append(argv)
+        assert '/proc/' in argv[-1] and Path(argv[-1]).read_bytes()==b'PUBLIC ORIGINAL REPORT'
+        if damage in ('parentrename','parentsymlink'):
+            moved=tmp_path/'moved';reportdir.rename(moved)
+            if damage=='parentrename':reportdir.mkdir(mode=0o700)
+            else:reportdir.symlink_to(moved,target_is_directory=True)
+        elif damage=='leafreplace':
+            report.rename(report.with_name('old'));report.write_bytes(b'FOREIGN REPORT');report.chmod(0o600)
+        elif damage=='leafsymlink':report.unlink();report.symlink_to(tmp_path/'foreign')
+        elif damage=='leafwrite':report.write_bytes(b'MUTATED REPORT')
+        else:report.chmod(0o644)
+        return type('R',(),{'returncode':0})()
+    monkeypatch.setattr(m,'installed_gate',lambda c:None);monkeypatch.setattr(m,'verify_tailnet',lambda c:None)
+    with patch.object(m.subprocess,'run',side_effect=gate):
+        with pytest.raises((ValueError,OSError)):m.gate_and_claim(contract(),'a'*64,report,output)
+    assert len(called)==1 and not list(output.iterdir())
+
+
+def test_report_mutation_after_gate_and_before_claim_creates_zero_claims(tmp_path,monkeypatch):
+    tmp_path.chmod(0o700);reportdir=tmp_path/'reports';reportdir.mkdir(mode=0o700);report=reportdir/'report';report.write_bytes(b'PUBLIC REPORT');report.chmod(0o600)
+    output=tmp_path/'output';output.mkdir(mode=0o700)
+    monkeypatch.setattr(m,'installed_gate',lambda c:None)
+    def changed(c):report.write_bytes(b'AFTER GATE MUTATION')
+    monkeypatch.setattr(m,'verify_tailnet',changed)
+    with patch.object(m.subprocess,'run',return_value=type('R',(),{'returncode':0})()):
+        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,report,output)
+    assert not list(output.iterdir())
+
+
+def test_held_report_symlink_and_fifo_denied_before_gate(tmp_path,monkeypatch):
+    tmp_path.chmod(0o700);target=tmp_path/'target';target.write_bytes(b'PUBLIC REPORT');target.chmod(0o600)
+    symlink=tmp_path/'link';symlink.symlink_to(target);fifo=tmp_path/'fifo';os.mkfifo(fifo,0o600)
+    with patch.object(m.subprocess,'run',side_effect=AssertionError('gate ran')):
+        for path in (symlink,fifo):
+            with pytest.raises((ValueError,OSError)):m.HeldReport(path)
+
+
+def projection_module():
+    spec=importlib.util.spec_from_file_location('public_projection',ROOT/'describe_action.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);module.inspector=m
+    return module
+
+
+def projection_fixture(tmp_path,monkeypatch,mode='discover'):
+    tmp_path.chmod(0o700);private=tmp_path/'private';private.mkdir(mode=0o700)
+    c=contract(mode);manifest=b'meta\tsource_sha\t'+b'a'*40+b'\t-\n'+b'symlink\tNONPRIVATE METADATA\n'*97
+    c['installed_gate']['manifest_sha256']=hashlib.sha256(manifest).hexdigest()
+    path=private/'actual.contract.json';raw=json.dumps(c).encode();path.write_bytes(raw);path.chmod(0o600)
+    monkeypatch.setenv('TMPDIR',str(tmp_path));monkeypatch.setattr(m,'installed_gate',lambda value:value['installed_gate'])
+    monkeypatch.setattr(m,'read_install_manifest',lambda:manifest);monkeypatch.setattr(m,'verify_tailnet',lambda c:None)
+    return path,hashlib.sha256(raw).hexdigest(),c
+
+
+def test_projection_exact_closed_privacy_and_no_authority(tmp_path,monkeypatch):
+    module=projection_module();path,seal,c=projection_fixture(tmp_path,monkeypatch)
+    with patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'version',side_effect=AssertionError('HTTP')),patch.object(m,'read_remote',side_effect=AssertionError('SSH')):
+        value=module.describe(path,seal)
+    text=json.dumps(value,sort_keys=True)
+    assert value['schema']==module.PROJECTION_SCHEMA and value['contract_sha256']==seal and value['managed_link_count']==97
+    assert value['non_authorizing'] is True and value['claims_created']==0 and value['credentials_used'] is False and value['remote_traffic']==0
+    for forbidden in (str(path),str(path.parent),c['api'],c['host'],c['tailnet']['node_name'],*c['tailnet']['addresses'],c['tailnet']['route_source']):assert forbidden not in text
+    assert set(value)=={'schema','contract_schema','mode','claim_id','issued_at','expires_at','contract_sha256','operator_sha256','remote_sha256','transport_helper_sha256','fixed_target_commitment_sha256','fixed_peer_route_commitment_sha256','installed_gate','managed_link_count','scope','non_authorizing','claims_created','credentials_used','remote_traffic'}
+    assert len(list(path.parent.iterdir()))==1
+
+
+@pytest.mark.parametrize('damage',['digest','expiry','target','qualification','mode','link','fifo'])
+def test_projection_bad_contract_zero_egress(tmp_path,monkeypatch,damage):
+    module=projection_module();path,seal,c=projection_fixture(tmp_path,monkeypatch)
+    if damage=='digest':seal='f'*64
+    elif damage in ('expiry','target','mode','qualification'):
+        if damage=='expiry':c['expires_at']=int(time.time())-1
+        elif damage=='target':c['api']='http://127.0.0.1:8000/api/v1/foreign'
+        elif damage=='mode':c['mode']='foreign'
+        else:c=contract('qualify')
+        raw=json.dumps(c).encode();path.write_bytes(raw);path.chmod(0o600);seal=hashlib.sha256(raw).hexdigest()
+    elif damage=='link':
+        target=path.with_name('target');path.rename(target);path.symlink_to(target)
+    else:path.unlink();os.mkfifo(path,0o600)
+    with patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'version',side_effect=AssertionError('HTTP')),patch.object(m,'read_remote',side_effect=AssertionError('SSH')),patch.object(m,'verify_tailnet',side_effect=AssertionError('local peer before valid contract')):
+        with pytest.raises((ValueError,OSError)):module.describe(path,seal)
+
+
+@pytest.mark.parametrize('kind',['ordinary','linked','bare'])
+def test_projection_git_contract_refused_without_content_read(tmp_path,monkeypatch,kind):
+    module=projection_module();repo=tmp_path/'repo';repo.mkdir(mode=0o700)
+    if kind=='ordinary':(repo/'.git').mkdir()
+    elif kind=='linked':(repo/'.git').write_bytes(b'gitdir: PUBLIC FIXTURE')
+    else:
+        (repo/'HEAD').write_bytes(b'ref: refs/heads/main');(repo/'objects').mkdir();(repo/'refs').mkdir()
+    path=repo/'contract';path.write_bytes(b'PRIVATE CONTROL FIXTURE');path.chmod(0o600)
+    with patch.object(m,'load_contract',side_effect=AssertionError('contract bytes read')),patch.object(m,'installed_gate',side_effect=AssertionError('gate read')),patch.object(m,'verify_tailnet',side_effect=AssertionError('peer')):
+        with pytest.raises(ValueError):module.describe(path,'a'*64)
+
+
+
+def test_projection_cli_errors_never_echo_private_values(capsys):
+    module=projection_module()
+    assert module.main(['--unknown','PRIVATE-PATH-SENTINEL'])==3
+    captured=capsys.readouterr();assert captured.out=='' and 'PRIVATE-PATH-SENTINEL' not in captured.err
+
+
+def test_projection_parent_swap_before_runtime_metadata_denies(tmp_path,monkeypatch):
+    module=projection_module();path,seal,c=projection_fixture(tmp_path,monkeypatch)
+    def moved(value):
+        old=path.parent;renamed=old.with_name('renamed');old.rename(renamed);old.mkdir(mode=0o700)
+        return value['installed_gate']
+    monkeypatch.setattr(m,'installed_gate',moved)
+    with patch.object(m,'verify_tailnet',side_effect=AssertionError('peer after changed contract parent')):
+        with pytest.raises((ValueError,OSError)):module.describe(path,seal)
+
+@pytest.mark.parametrize('field',['st_uid','st_gid','st_mode','st_nlink','st_ino','st_size','st_mtime_ns','st_ctime_ns'])
+def test_report_immutable_stat_change_after_gate_refuses_before_claim(tmp_path,monkeypatch,field):
+    from types import SimpleNamespace
+    tmp_path.chmod(0o700);reportdir=tmp_path/'reports';reportdir.mkdir(mode=0o700);report=reportdir/'report';report.write_bytes(b'PUBLIC REPORT');report.chmod(0o600)
+    output=tmp_path/'output';output.mkdir(mode=0o700);damaged=False;original=m.os.fstat;inode=report.stat().st_ino
+    def fstat(fd):
+        info=original(fd)
+        if damaged and info.st_ino==inode:
+            fields=('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+            values={key:getattr(info,key) for key in fields};values[field]+=1
+            return SimpleNamespace(**values)
+        return info
+    def gate(*a,**kw):
+        nonlocal damaged
+        damaged=True;return type('R',(),{'returncode':0})()
+    monkeypatch.setattr(m.os,'fstat',fstat);monkeypatch.setattr(m,'installed_gate',lambda c:None);monkeypatch.setattr(m,'verify_tailnet',lambda c:None)
+    with patch.object(m.subprocess,'run',side_effect=gate):
+        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,report,output)
+    assert not list(output.iterdir())
+
+@pytest.mark.parametrize('damage',['writable','foreignuid'])
+def test_report_untrusted_intermediate_ancestry_denies_before_gate(tmp_path,monkeypatch,damage):
+    tmp_path.chmod(0o700);intermediate=tmp_path/'intermediate';intermediate.mkdir(mode=0o700);leaf=intermediate/'reports';leaf.mkdir(mode=0o700);report=leaf/'report';report.write_bytes(b'PUBLIC REPORT');report.chmod(0o600)
+    if damage=='writable':intermediate.chmod(0o777)
+    else:
+        original=m.os.fstat;inode=intermediate.stat().st_ino
+        def untrusted(fd):
+            info=original(fd)
+            if info.st_ino==inode:
+                values=list(info);values[4]=os.getuid()+1;return os.stat_result(values)
+            return info
+        monkeypatch.setattr(m.os,'fstat',untrusted)
+    with patch.object(m.subprocess,'run',side_effect=AssertionError('gate ran')),patch.object(m.os,'read',side_effect=AssertionError('report content read')):
+        with pytest.raises(ValueError):m.HeldReport(report)

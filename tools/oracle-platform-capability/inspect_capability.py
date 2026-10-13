@@ -321,23 +321,64 @@ def installed_gate(c):
     require(status.returncode==0 and not status.stdout,'installed tracked source moved')
     return pins
 
+def report_ancestry(path):
+    fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);walked=Path('/');identities=[]
+    try:
+        for part in Path(path).parts[1:]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=child;walked=walked/part
+            info=os.fstat(fd)
+            sticky_tmp=walked==Path('/tmp') and info.st_uid==0 and bool(info.st_mode&stat.S_ISVTX)
+            require(info.st_uid in (0,os.getuid()) and (sticky_tmp or not stat.S_IMODE(info.st_mode)&0o022),'reviewer report ancestry is untrusted')
+            identities.append((info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode))
+        return tuple(identities)
+    finally:os.close(fd)
+
+class HeldReport:
+    """Hold the genuine gate's report custody through claim; never issue approval."""
+    def __init__(self,path):
+        raw=str(path)
+        require(raw.startswith('/') and all(x not in ('','.','..') for x in raw.split('/')[1:]),'absolute canonical reviewer report required')
+        self.path=Path(raw);self.ancestry=report_ancestry(self.path.parent);self.parent=Custody(self.path.parent);self.fd=None
+        try:
+            self.fd=os.open(self.path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=self.parent.fd)
+            self.info=os.fstat(self.fd)
+            require(stat.S_ISREG(self.info.st_mode) and self.info.st_uid==os.getuid() and self.info.st_nlink==1 and not stat.S_IMODE(self.info.st_mode)&0o022 and 0<self.info.st_size<=1024*1024,'reviewer report custody differs')
+            self.parent_info=file_identity(os.fstat(self.parent.fd))
+            self.check();raw=b''
+            while len(raw)<self.info.st_size:
+                part=os.read(self.fd,min(65536,self.info.st_size-len(raw)))
+                require(bool(part),'reviewer report truncated');raw+=part
+            require(os.read(self.fd,1)==b'','reviewer report grew');self.check()
+            self.sha256=hashlib.sha256(raw).hexdigest()
+            self.anchor='/proc/'+str(os.getpid())+'/fd/'+str(self.parent.fd)+'/'+self.path.name
+        except Exception:
+            self.close();raise
+    def check(self):
+        require(report_ancestry(self.path.parent)==self.ancestry,'reviewer report ancestry moved')
+        self.parent.recheck()
+        require(file_identity(os.fstat(self.parent.fd))==self.parent_info,'reviewer report parent moved')
+        require(file_identity(os.fstat(self.fd))==file_identity(self.info),'reviewer report held leaf moved')
+        named=os.stat(self.path.name,dir_fd=self.parent.fd,follow_symlinks=False)
+        require(file_identity(named)==file_identity(self.info),'reviewer report named leaf moved')
+    def close(self):
+        if self.fd is not None:os.close(self.fd);self.fd=None
+        self.parent.close()
+
 def gate_and_claim(c,contract_sha,report,custody):
     target_contract(c);tailnet_contract(c);lifetime(c,120);directory=custody if isinstance(custody,Custody) else Custody(custody)
     owned=not isinstance(custody,Custody)
     try:
-        directory.recheck();report=Path(report)
-        require(report.is_absolute() and not any(x in ('..','.') for x in report.parts),'absolute regular reviewer report required')
-        report_parent=Custody(report.parent)
-        try:report_parent.recheck()
-        finally:report_parent.close()
-        report_info=os.lstat(report);require(report_info.st_uid==os.getuid() and stat.S_ISREG(report_info.st_mode) and report_info.st_nlink==1 and not stat.S_IMODE(report_info.st_mode)&0o022,'reviewer report custody differs')
-        bounded_file(report,1024*1024);installed_gate(c)
-        gate=subprocess.run([GATE,'check','--before','production','--reviewer-approval',str(report)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
-        require(gate.returncode==0,'production lifecycle refused')
-        installed_gate(c);directory.recheck();lifetime(c,90);verify_tailnet(c)
-        name=c['claim_id']+'.claim.json'
-        directory.create(name,json.dumps({'contract_sha256':contract_sha,'mode':c['mode'],'issued_at':c['issued_at'],'expires_at':c['expires_at'],'claimed_at':int(time.time()),'spent':True}).encode())
-        return Path(directory.path)/name
+        directory.recheck();held=HeldReport(report)
+        try:
+            held.check();installed_gate(c);held.check()
+            gate=subprocess.run([GATE,'check','--before','production','--reviewer-approval',held.anchor],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
+            held.check();require(gate.returncode==0,'production lifecycle refused')
+            installed_gate(c);held.check();directory.recheck();lifetime(c,90);verify_tailnet(c);held.check()
+            name=c['claim_id']+'.claim.json'
+            directory.create(name,json.dumps({'contract_sha256':contract_sha,'review_report_sha256':held.sha256,'mode':c['mode'],'issued_at':c['issued_at'],'expires_at':c['expires_at'],'claimed_at':int(time.time()),'spent':True}).encode())
+            held.check()
+            return Path(directory.path)/name
+        finally:held.close()
     finally:
         if owned:directory.close()
 
