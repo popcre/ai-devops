@@ -43,6 +43,40 @@ under one definition, or a bounded 14-day sample 2026-10-13..27 (busy = hour
 with remaining <4000/5000); only then may a lower-bound amendment return with
 an irreducible bound and concrete counterexample. No contract text was amended.
 
+Section 13 item 4 busy windows — **PASS**, October 13, 2026, 2:55 PM EDT.
+Path A of that REJECT is complete: item 4 (plan §13 item 3 Headroom, the #658
+checklist item 4) is **PASS** from the frozen P1 baseline access-context series
+alone. No contract clause is amended. Two named comparable busy reset windows
+from `tests/verification/github-requests/p1-baseline.md` (input digest
+`e98b8c1f6026663a73a008a4a4d4c7634e97977ac5622c5a92f0e1560541bdf2`):
+
+| Reset (UTC) | Samples | Min remaining | Headroom | Bucket span | Refusals in window |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2026-10-07T14:55:57Z | 30 | 2,505/5,000 | 50.10% | 2,452 | 0 |
+| 2026-10-11T20:18:39Z | 38 | 2,564/5,000 | 51.28% | 2,286 | 0 |
+
+Both windows clear the ≥20% remaining floor on the access-context GraphQL
+series (the series the baseline freezes; `quota-measurements` account snapshots
+are a different object and stay non-substitutable). Core-bucket minima on those
+days are 4,230/5,000 (84.6%) and 4,922/5,000 (98.4%), also above 20%. Host
+`refusals.log` holds zero primary/secondary refusals inside either one-hour
+reset span (nearest: primary 2026-10-06T23:17:21Z, 5,848s before the Oct 7
+window; secondary 2026-10-12T12:25:10Z, outside both). A third window
+2026-10-11T21:18:47Z (min 2,745/5,000, 54.90%, zero refusals) is the backup.
+These are the two deepest of 101 access-context busy windows (min remaining
+< 4,900) and are workload-comparable: same instrumented series, natural
+depletion of 2,452 and 2,286 observed points inside each window, no
+manufactured demand.
+
+Contradiction reconciled from data: the frozen baseline's
+"Proven: two or more comparable busy reset windows" is true and supersedes the
+older Oct 8 table cell that listed busy windows as unknown, the measurement
+agent's item-4 FAIL (wrong series: `quota-measurements` server snapshots), and
+the earlier Oct 1–7 aggregate note that its own smaller sample was not yet two
+comparable windows. Section 13 overall stays OPEN only for actual HTTP totals,
+qualified useful-work latency, after-workload comparison, safety-event
+equivalence and multi-host/external-client coverage — not for busy windows.
+
 Closeout reconciliation — October 8, 2026, 1:16 PM EDT. This supersedes the
 historical 10:16 AM EDT snapshot below. Owner remains Codex chat
 `01a116aa-0400-7230-97d9-3fab73f00bd1` under #658.
@@ -55,7 +89,7 @@ historical 10:16 AM EDT snapshot below. Owner remains Codex chat
 | Counter qualification | #1511 OPEN and dequeued; correction `e67e13ad` and evidence `7fb448bf` committed locally, unpublished | Fresh source and exact native action approval; actual qualification |
 | Linux runners | Four scoped services repaired, actual listener PATH/tool versions verified 12:41 PM EDT | Successful failed-job rerun required |
 | Fleet installation | Full 933 update failed; later 958 receipt memory-seed PASS, secrets SKIP | Full required receipts and original installed behavior |
-| Section 13 | OPEN; actual HTTP, comparable baseline, busy windows and useful-work latency unknown | All acceptance requirements measured |
+| Section 13 | OPEN for actual HTTP totals, qualified useful-work latency, after-workload comparison; **item 3/4 Headroom busy windows PASS** from frozen p1-baseline (2026-10-07T14:55:57Z and 2026-10-11T20:18:39Z) | Remaining acceptance requirements measured |
 
 Native attempt one failed before staging under PowerShell 5. Stage absence was
 verified at 1:02 PM EDT. Both legacy ACE predicates fail on 19 ancestor entries;
@@ -160,7 +194,7 @@ Installed P1 reporting (#660) and the rest of the handoff remain open.
 | P5. Remove repeated BlockerWatch scans and writes | Live proof recorded on #658 (2026-10-13): #1212 category labels preserve bw.snapshot/alarm/link through GraphQL (PR #1401); #1402 wake-read sharing proven 172/0 focused suite on installed edge-dev3 and 275/0 ai-gh suite; comparable sample anchors on #658. Snapshot proof retained under closed #868. #1211 remains separately open | — | Checked on #658; full comparable savings percentage stays under P8 |
 | P6. Govern aggregate account demand across hosts | Decision recorded in scoped child #1682 (2026-10-13): retain local admission with shared-source ownership, explicitly non-global; no coordinator. Real multi-host samples keep GraphQL remaining ≳2900/5000; no same-principal contention | #1682 | Checked on #658; reopen #1682 only with new contention evidence |
 | P7. Install and prove coverage across active clients and hosts | Per-host live proof on #658 (2026-10-13): edge-dev3 full receipt c5df4dfa Secrets PASS + live authenticated ai-gh; 4837/edge-dev/916 Windows install proofs at 898e6209 with Muse/DeepSeek APPROVE and launcher receipts. 916 live launcher later at ebaacc11 (not the 898e6209 pin). 4837 token currently invalid (HTTP 401) — routing proven, auth residual. t16 remains external blocker | — | Checked on #658 for installed hosts; t16 and 4837 token refresh stay named residuals |
-| P8. Accept measured savings with no workflow regression | Open: no valid 20-outcome/two-busy-window comparison yet | Codex issue #658 orchestrator; P1-P7 | Comparable before/after report satisfying section 13 or independently reviewed lower-bound amendment |
+| P8. Accept measured savings with no workflow regression | Open: two-busy-window floor PASS from p1-baseline (2026-10-07T14:55:57Z, 2026-10-11T20:18:39Z); before/after savings comparison and qualified useful-work outcomes remain | Codex issue #658 orchestrator; P1-P7 | Comparable before/after report satisfying the remaining section 13 clauses or independently reviewed lower-bound amendment |
 
 Update October 7, 2026, 10:05 AM EDT: Codex chat
 `01a116aa-0400-7230-97d9-3fab73f00bd1` on edge-dev3 owns programme
