@@ -35,10 +35,10 @@ try {
 Write-Output '---N3 wrong owner (admin-owned request)---'
 # Create request as admin via elevated SSH would be admin-owned; simulate by icacls after create if possible.
 # From non-elevated we can still prove REQUEST_REJECTED when owner is not the operator SID
-# by writing a request and re-owning is not possible without elevation — skip live re-own here.
+# by writing a request and re-owning is not possible without elevation - skip live re-own here.
 Write-Output 'N3 note: live wrong-owner already evidenced in audit (REQUEST_REJECTED sid=S-1-5-32-544)'
 
-# N4: concurrency — two invokes
+# N4: concurrency - two invokes
 Write-Output '---N4 concurrency---'
 $jobs = @()
 for ($i = 0; $i -lt 2; $i++) {
