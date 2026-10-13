@@ -68,7 +68,7 @@ def sandbox_command(runtime,operator,decoder,captures,output):
 def limits():
     resource.setrlimit(resource.RLIMIT_AS,(profile.LIMITS['address_space_bytes'],)*2)
     resource.setrlimit(resource.RLIMIT_CPU,(profile.LIMITS['cpu_seconds'],)*2)
-    resource.setrlimit(resource.RLIMIT_FSIZE,(profile.LIMITS['output_bytes'],)*2)
+    resource.setrlimit(resource.RLIMIT_FSIZE,(profile.LIMITS['per_file_bytes'],)*2)
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
 
 
@@ -88,14 +88,14 @@ def run(state_path,m):
     with open(runtime['bwrap'],'rb') as stream:
         profile.require(hashlib.file_digest(stream,'sha256').hexdigest()==runtime['bwrap_sha256'],'sandbox binary changed')
     repo=Path(state['repository_root']);p,_=profile.profile()
-    operator=repo/p['entrypoint'];decoder=repo/'services/oracle-brain/oracle_brain/operating_model/native_alternate.py'
+    operator=repo/p['entrypoint'];decoder=repo/'services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py'
     source_bytes=[]
     for path in (operator,decoder):
         data=path.read_bytes()
         profile.require(data==old.git(repo,'show',state['head']+':'+str(path.relative_to(repo))), 'fixed source changed')
         source_bytes.append(data)
     output=Path(m['output_parent']['path'])/m['output_leaf'];output.mkdir(mode=0o700)
-    inputs=m['captures']+[m['original_register']];fds=[];source_fds=[]
+    inputs=m['controls']+m['captures'];fds=[];source_fds=[]
     try:
         import fcntl
         for data in source_bytes:

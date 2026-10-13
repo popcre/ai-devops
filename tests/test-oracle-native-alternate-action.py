@@ -27,17 +27,21 @@ class OracleTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.root.chmod(0o700)
         self.now=int(time.time());self.capture=self.root/'capture';self.capture.write_bytes(b'INVENTED ONLY');self.capture.chmod(0o600)
         self.register=self.root/'register';self.register.write_bytes(b'INVENTED REGISTER');self.register.chmod(0o600)
-        def item(path):return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'original_hash':'a'*64,'stat':profile.descriptor_stat(str(path))}
+        def item(path):return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'role':path.name,'stat':profile.descriptor_stat(str(path))}
         self.manifest=dict(schema_version=1,profile=profile.PROFILE,purpose=profile.PURPOSE,action_id='a'*32,
             source_head='a'*40,source_digest='a'*64,observed_at=self.now,expires_at=self.now+600,
             permission_custody=dict(current_contract_metadata_sha256='a'*64,historical_capture_sha256='b'*64,current_owner='Albert Hazan',
                 requires_external_registrar=False,external_registration_sha256=None,observed_at=self.now,expires_at=self.now+600),
-            captures=[item(self.capture)],original_register=item(self.register),census=copy.deepcopy(profile.CENSUS),output_parent={'path':str(self.root),'stat':profile.descriptor_stat(str(self.root),True)},
+            captures=[item(self.capture)],controls=[],census=copy.deepcopy(profile.CENSUS),output_parent={'path':str(self.root),'stat':profile.descriptor_stat(str(self.root),True)},
             output_leaf='new-alternate',runtime={'root':str(self.root/'public-runtime'),'closure_sha256':'c'*64,'bytes':1,'bwrap':'/usr/bin/bwrap','bwrap_sha256':'d'*64},limits=copy.deepcopy(profile.LIMITS))
-        self.manifest['captures'][0]['original_hash']='0'*64
-        for index in range(1,8):
+        self.manifest['captures']=[]
+        for index in range(33):
             path=self.root/('capture'+str(index));path.write_bytes(b'INVENTED ONLY '+str(index).encode());path.chmod(0o600)
-            value=item(path);value['original_hash']=str(index)*64;self.manifest['captures'].append(value)
+            value=item(path);value['role']='group-'+str(index%8)+'-page-'+str(index+1)+'.json';self.manifest['captures'].append(value)
+        self.capture=Path(self.manifest['captures'][0]['path'])
+        for role in profile.CONTROL_ROLES:
+            path=self.root/role;path.write_bytes(b'INVENTED CONTROL');path.chmod(0o600)
+            value=item(path);value['sha256']=profile.CONTROL_HASHES.get(role,value['sha256']);self.manifest['controls'].append(value)
         self.manifest['output_parent']['stat']=profile.descriptor_stat(str(self.root),True)
     def tearDown(self):self.temp.cleanup()
     def test_preapproval_stat_never_reads_or_hashes_capture(self):

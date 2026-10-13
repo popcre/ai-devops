@@ -25,7 +25,7 @@ def public_origin(path):
 def prepare(root):
     root=Path(root);root.mkdir(mode=0o700)
     for name in ('input','output','code','proc','dev'): (root/name).mkdir()
-    for index in range(9):(root/'input'/('c'+str(index))).touch()
+    for index in range(48):(root/'input'/('c'+str(index))).touch()
     for name in ('operator.py','native_alternate.py'):(root/'code'/name).touch()
     origins={};pending=[];total=0
     def copy(origin,destination):
@@ -81,7 +81,7 @@ def verify_recipe(root):
         raise ValueError('owned bounded public runtime recipe required')
     receipt=json.loads(path.read_bytes())
     if receipt.get('kind')!='NONAUTHORIZING_PUBLIC_OS_STDLIB_PREPARATION' or receipt.get('root')!=str(root):raise ValueError('fixed public runtime recipe required')
-    expected=set(receipt['origins'])|{'code/operator.py','code/native_alternate.py'}|{'input/c'+str(i) for i in range(9)}
+    expected=set(receipt['origins'])|{'code/operator.py','code/native_alternate.py'}|{'input/c'+str(i) for i in range(48)}
     observed={str(p.relative_to(root)) for p in Path(root).rglob('*') if p.is_file() or p.is_symlink()}
     if observed!=expected:raise ValueError('runtime contains unapproved files')
     for rel,item in receipt['origins'].items():

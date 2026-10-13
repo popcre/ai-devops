@@ -30,10 +30,16 @@ CENSUS={'original_uploads':26,'native_groups':8,'native_pages':33,
     'operator_sha256':'8fc05bea47c07034d90f294665b73f0293cf1b51fb1644c9f8cd93afbdcf9175',
     'configuration_sha256':'4c6bf1a32ffe26894e99c76440f20eda19faa58318851d0f5444058dbb82d681',
     'custody_sha256':'79bd96fa3a837a702ad283dc2f1f613dce4de6f2f1a8801f0e11e05ede53b0ca'}
-LIMITS={'input_bytes':256*1024**2,'output_bytes':256*1024**2,'workers':1,'threads':2,
+CONTROL_HASHES={'completion':CENSUS['completion_sha256'],'configuration':CENSUS['configuration_sha256'],
+    'producer':CENSUS['operator_sha256'],'custody':CENSUS['custody_sha256'],
+    'original_manifest':'59b92c2b28d629732f5e5fb5895325d636173c7fc2ff7e84158f6f98f8fc6a7e',
+    'group_inventory':'b236778237d7c0c64c8cb73995b8d7430493e492a3c28a357e0efc24bdd26bfe',
+    'page_skeleton':'f650543d3d6d6fcf0b24da3ff5d9bc839d657aac9350c719ad847056eb0509d7'}
+CONTROL_ROLES=list(CONTROL_HASHES)+['group-'+str(i)+'-manifest.json' for i in range(8)]
+LIMITS={'input_bytes':256*1024**2,'output_bytes':256*1024**2,'per_file_bytes':8*1024**2,'workers':1,'threads':2,
         'address_space_bytes':8*1024**3,'cpu_seconds':120,'wall_seconds':180,'network':'none'}
 FIELDS={'schema_version','profile','purpose','action_id','source_head','source_digest','observed_at','expires_at',
-        'permission_custody','captures','original_register','output_parent','output_leaf','runtime','limits','census'}
+        'permission_custody','captures','controls','output_parent','output_leaf','runtime','limits','census'}
 STAT_FIELDS={'dev','ino','uid','mode','size','mtime_ns','ctime_ns'}
 
 
@@ -80,7 +86,7 @@ def descriptor_stat(path,directory=False):
 def profile():
     raw=(ROOT/'config/review-action-profiles.json').read_bytes();value=decode(raw)['profiles'][PROFILE]
     require(value['repository']=='https://github.com/u2giants/theoracle' and value['action']==ACTION
-            and value['purpose']==PURPOSE and value['limits']==LIMITS,'installed closed profile differs')
+            and value['purpose']==PURPOSE and value['limits']==LIMITS and value['input_format']=='historical-custom-native-pages-v1' and value['capture_count']==33 and value['control_count']==15,'installed closed profile differs')
     require(sha(canonical(value['paths']))==value['path_set_sha256'],'complete public closure differs')
     return value,sha(raw)
 
@@ -103,16 +109,20 @@ def validate_manifest(m,now):
     # license/custodian registration must be resolved through its own contract.
     require(custody['requires_external_registrar'] is False and custody['external_registration_sha256'] is None,
             'applicable external custodian registration needs its supported verifier')
-    require(type(m['captures']) is list and len(m['captures'])==CENSUS['native_groups']
-        and len({c['original_hash'] for c in m['captures']})==CENSUS['native_groups'],'fixed capture census required')
+    require(type(m['controls']) is list and len(m['controls'])==15 and [c['role'] for c in m['controls']]==CONTROL_ROLES,'fixed historical control closure required')
+    require(type(m['captures']) is list and len(m['captures'])==33,'fixed captured page census required')
+    names=[c['role'] for c in m['captures']]
+    require(len(set(names))==33 and all(re.fullmatch(r'group-[0-7]-page-[1-9][0-9]*\.json',n) for n in names),'fixed custom page identities required')
     seen=set();total=0
-    for i,item in enumerate(m['captures']+[m['original_register']]):
-        require(type(item) is dict and set(item)=={'path','sha256','original_hash','stat'},'capture descriptor schema differs')
+    for item in m['controls']+m['captures']:
+        require(type(item) is dict and set(item)=={'path','sha256','role','stat'},'capture descriptor schema differs')
         require(set(item['stat'])==STAT_FIELDS and all(type(v) is int for v in item['stat'].values()),'capture stat commitment differs')
-        require(all(isinstance(item[k],str) and re.fullmatch('[a-f0-9]{64}',item[k]) for k in ('sha256','original_hash')),'claimed historical hashes required')
+        require(isinstance(item['sha256'],str) and re.fullmatch('[a-f0-9]{64}',item['sha256']),'claimed historical hash required')
+        if item['role'] in CONTROL_HASHES:require(item['sha256']==CONTROL_HASHES[item['role']],'historical control commitment differs')
         actual=descriptor_stat(item['path']);require(actual==item['stat'],'capture custody moved')
         inode=(actual['dev'],actual['ino']);require(inode not in seen,'duplicate input inode');seen.add(inode)
         require(descriptor_stat(str(Path(item['path']).parent),True)['mode']==0o700,'private input parent required')
+        require(0<actual['size']<=8*1024**2,'per-file input exceeds bound')
         total+=actual['size'];require(total<=LIMITS['input_bytes'],'aggregate input exceeds bound')
     parent=m['output_parent'];require(set(parent)=={'path','stat'} and descriptor_stat(parent['path'],True)==parent['stat'],'output parent moved')
     require(isinstance(m['output_leaf'],str) and re.fullmatch('[a-z0-9-]{1,80}',m['output_leaf']),'fresh output leaf required')
@@ -120,8 +130,8 @@ def validate_manifest(m,now):
     runtime=m['runtime'];require(set(runtime)=={'root','closure_sha256','bytes','bwrap','bwrap_sha256'},'fixed runtime descriptor required')
     require(type(runtime['bytes']) is int and runtime['bytes']>0 and total+runtime['bytes']<=LIMITS['input_bytes'],'runtime plus inputs exceed bound')
     require(re.fullmatch('[a-f0-9]{64}',runtime['closure_sha256']) and re.fullmatch('[a-f0-9]{64}',runtime['bwrap_sha256']),'runtime identity required')
-    return {'claimed_input_set_sha256':sha(canonical([{k:v for k,v in c.items() if k!='path'} for c in m['captures']+[m['original_register']]])),
-            'capture_stat_sha256':sha(canonical([c['stat'] for c in m['captures']+[m['original_register']]])),
+    return {'claimed_input_set_sha256':sha(canonical([{k:v for k,v in c.items() if k!='path'} for c in m['controls']+m['captures']])),
+            'capture_stat_sha256':sha(canonical([c['stat'] for c in m['controls']+m['captures']])),
             'capture_count':len(m['captures']),'capture_bytes':total,'capture_byte_hashes_verified':False}
 
 

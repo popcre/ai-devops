@@ -18,9 +18,8 @@ descriptor binding and independent provider completion can satisfy this path.
 There is no new cryptographic signer and no hash is called a signature.
 
 Root prepares fresh metadata/stat observations and historical claimed hashes
-without opening captures. The descriptor must cover the exact eight native
-groups,26 uploads,33 pages, immutable historical completion/operator/configuration/
-custody commitments, original hash register, current applicable owner/license/
+without opening captures. The descriptor must cover the exact historical33 page files and15 controls,26 upload aliases,eight original groups, immutable historical completion/operator/configuration/
+custody commitments, exact alias/group/page inventories, current applicable owner/license/
 custodian contract metadata, current ownership, exact scope and expiry.
 Captures remain stat-only before review. A claimed historical SHA is explicitly
 **unverified during this new action**. Metadata is not a qualified SourceRef or a
@@ -77,7 +76,7 @@ home or arbitrary callback are mounted. Namespace failures stop; no privileged
 fallback or weakened limit exists.
 
 The isolated worker reads each capture/control input once, verifies actual
-hash/size and strict DoclingDocument1.10.0 compatibility, preserves native
+hash/size and the strict historical custom page snapshot schema, preserves native
 structure/provenance/Unicode addresses, and checks the full page/group census
 before writing. Original binaries/qualified readings are not mounted or parsed.
 Its only private-processing launch path is the installed native guardian; the
@@ -104,3 +103,11 @@ Oracle tests cover exact one-pass byte hashing/Unicode, metadata retention,
 schema/hash/budget/expiry/census refusal and ordinary host invocation denial.
 Root integrates the new operator tests into its mandatory W10 inventory and the
 new toolkit helper/docs into repository routing after source review.
+
+## Historical custom capture closure (supersedes unpublished full-document assumption)
+
+The pinned public producer emits custom native page snapshots, never full DoclingDocument exports. The separate native_page_alternate module consumes this exact format; the existing full-document decoder remains independent and is not used by this action. Historical commits b47a05c5/42f0438 remain recovery evidence, not applicable capture admission.
+
+A descriptor fixes 48 read-only inputs in this order: completion, configuration, producer, independent custody proof, original alias manifest, group inventory, page skeleton, eight group manifests (indices0–7), then33 page files in group/page order. Before any capture-page bytes, actual fixed control hashes are verified after durable action consumption, followed by completion→group→page hash/size/count chains and26 alias/8 original/33 page inventory checks. Historical original binaries, readings, models and receipt renewal are excluded. Per-file8MiB and aggregate runtime/input256MiB bounds apply.
+
+Only captured native_text_region/table_cell source_text is concatenated verbatim in captured list order per native page; new offsets count UTF-8 bytes. Native IDs, bbox, charspan, structural links and cell row/column addresses remain distinct retained metadata. Native characters, literal byte ranges and pictures remain explicit unrepresented gaps, with their unsupported source text/alignment quotes excluded from alternate output. No supported captured text across the entire closure refuses without output. Capture-format or control-schema mismatch refuses; unknown historical fields are never guessed. The independently registered purpose/action digest binds this revised fixed public closure and actual format. Current metadata lookup has located candidate historical files but validates no bytes or historical hash. Actual admission/installation/review remains root-owned.
