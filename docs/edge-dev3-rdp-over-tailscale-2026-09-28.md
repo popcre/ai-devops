@@ -76,7 +76,7 @@ few seconds with `Unable to listen ... 4837`) was retired at 10:12 AM EDT:
 # Second incident — RDP refused every password (2026-09-30)
 
 Status: **RDP resolved** about 1:05 PM EDT, September 30, 2026. Albert confirmed a
-working `mstsc` session. **ScreenConnect black screen is still open** (see the end).
+working `mstsc` session. **ScreenConnect on Wayland is closed as impossible** (owner ruling 2026-10-13; see the end).
 The office network move at the same time was a coincidence. Tailscale, UFW
 and DNS were fine throughout.
 
@@ -171,16 +171,18 @@ journalctl --user -u 'app-org.kde.krdpserver*' --since '-10min' --no-pager | gre
 - A "Control input devices" popup can still appear after connecting. RDP works anyway.
   It is harmless and not yet removed.
 
-## Still open — ScreenConnect black screen
+## ScreenConnect black screen — closed (owner ruling 2026-10-13)
 
-ScreenConnect (`connectwisecontrol-159806842ff2961f`, a system service) captures
-`DISPLAY=:0`. On Plasma Wayland that display is Xwayland, which contains only X11 apps,
-so the capture is black and input does not reach the desktop. Albert reports it
-worked on the morning of 2026-09-30 in this same Wayland setup. The journal shows
-Wayland sessions on every boot since 2026-09-28. **How it worked is not yet explained.**
-Do not assume Wayland and X11 are mutually exclusive with KRDP until that is
-investigated. The next step is to compare the ScreenConnect client version and
-logs from before and after the 10:54 AM EDT reboot.
+**Owner ruling (2026-10-13, Albert, verbatim):** "ConnectWise ScreenConnect will
+never work with Wayland. close that out."
+
+Final state: ScreenConnect cannot drive a Plasma Wayland session. Do not wait on
+ConnectWise case #03766621, do not install X11 or LightDM for it, and do not
+treat the black screen as a defect to repair. KRDP (RDP) is the supported remote
+path on edge-dev3. This supersedes the 2026-10-01 "leave screenconnect black"
+trade-off note: there is no trade-off left to decide.
+
+Historical findings (2026-09-30) kept for archaeology:
 
 Findings so far (2026-09-30):
 - The console (edgehome.screenconnect.com, Access → edge-dev3) shows **Logged On User: root**,
