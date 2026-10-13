@@ -8,7 +8,8 @@ while IFS= read -r path; do
   case "$path" in
     .ai/reviewer-issues/*)
       # Redacted reviewer-issue notes are published on main by owner decision
-      # (PR #1626). Other generated AI artifacts stay private.
+      # (PR #1626). Only the generated-artifact ban is lifted; secret-bearing
+      # file types and content scans below still apply.
       : ;;
     .ai/*)
       echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
@@ -16,6 +17,9 @@ while IFS= read -r path; do
       echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
     memory/*.md|memory/*/*.md)
       [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
+  esac
+  # Always forbid secret-bearing file types, including under reviewer-issues.
+  case "$path" in
     *.env|*.pem|*.key)
       echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
   esac
