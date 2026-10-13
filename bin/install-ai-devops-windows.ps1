@@ -66,6 +66,7 @@ function Write-Note {
 }
 
 . (Join-Path $PSScriptRoot 'repo-identity.ps1')
+. (Join-Path $PSScriptRoot 'windows-muse-code-install.ps1')
 
 function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 
@@ -1238,6 +1239,20 @@ if (Test-Path -LiteralPath $museWrapper) {
         }
     } else {
         Write-Note 'Git Bash is needed to prepare the Muse key store.'
+    }
+}
+
+# Optional stage: Muse Code. When the pinned muse-bin-<version>.exe is absent,
+# run Meta's official Windows installer, then verify version and SHA-256.
+# A failure is reported and the install continues; ai-muse refuses to run an
+# unpinned or mismatched binary either way.
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note 'Test mode: not installing Muse Code.'
+} else {
+    try {
+        Write-Note (Install-AiDevOpsMuseCode -RepoPath $RepoPath)
+    } catch {
+        Write-Note "Muse Code stage failed (optional): $($_.Exception.Message)"
     }
 }
 
