@@ -1365,6 +1365,13 @@ cmd_tick(){
     if [ -f "$HOME_DIR/tick.misd" ] && [ "$DRY" != 1 ]; then
       rm -f "$HOME_DIR/tick.misd"
       note "tick catch-up after a concurrent fire hit the live lock"
+      # Release this run's lock, including any Linux wake cache, or catch-up
+      # cannot take the lock (rmdir fails on a non-empty directory) and later
+      # ticks stay blocked on the leaked lock.
+      if [ -n "${BW_WAKE_CACHE:-}" ]; then
+        wake_cache_remove "$BW_WAKE_CACHE" || true
+        BW_WAKE_CACHE=''
+      fi
       rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true
       trap - EXIT
       run_tick_body || rc=$?

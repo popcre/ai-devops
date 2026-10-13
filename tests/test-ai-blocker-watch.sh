@@ -598,6 +598,10 @@ BW tick >"$TMP/tick-concurrent.out" 2>&1
 check 'a concurrent fire during a tick triggers one catch-up body' \
   "grep -q 'tick catch-up after a concurrent fire hit the live lock' '$TMP/tick-concurrent.out'"
 check 'catch-up clears the marker' "[ ! -f '$TMP/home/tick.misd' ]"
+check 'catch-up does not leak the tick lock' "[ ! -d '$TMP/home/tick.lock' ]"
+BW tick >"$TMP/tick-after.out" 2>&1
+check 'a tick after catch-up can take the lock' \
+  "! grep -q 'another tick is running' '$TMP/tick-after.out'"
 
 # schedule_windows_reliability must re-point the Windows task away from the
 # schtasks defaults that drop fires (IgnoreNew, no StartWhenAvailable, battery).
