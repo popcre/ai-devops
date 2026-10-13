@@ -25,6 +25,24 @@ edge-dev3 baseline are frozen in
   external-client coverage, after-workload comparison, safety-event equivalence,
   qualified useful-work latency. #660 stays open with that checklist.
 
+Section 13 item 4 busy-window lower bound — October 13, 2026, 2:05 PM EDT.
+Independent review (DeepSeek V4.1 Flash, engine ≠ implementer MiMo) returned
+**REJECT** of the proposed amendment that would define a busy reset window as
+"the two busiest observed natural hours" (2026-10-10T01/T02 core minima
+4712/4807 of 5000). Item 4 stays **FAIL**. The reviewer showed the
+"cannot form busy windows" premise is contradicted by this plan's own frozen
+P1 baseline (`p1-baseline.md` busy-reset table: 101 access-context windows,
+deepest GraphQL remaining 2,505/5,000), that the proposed definition is
+tautological (any idle sample passes), and that selecting two idle hours to
+declare zero refusals is the forbidden "quietly weaken after a miss" pattern.
+Measured-series mismatch is real: `quota-measurements` server bucket snapshots
+(min remaining 4048–4712) are not the `measurements` access-context window
+series (min graphql_remaining 2785–3893) that the baseline uses. Required
+next step is either PASS item 4 from the already-measured comparable windows
+under one definition, or a bounded 14-day sample 2026-10-13..27 (busy = hour
+with remaining <4000/5000); only then may a lower-bound amendment return with
+an irreducible bound and concrete counterexample. No contract text was amended.
+
 Closeout reconciliation — October 8, 2026, 1:16 PM EDT. This supersedes the
 historical 10:16 AM EDT snapshot below. Owner remains Codex chat
 `01a116aa-0400-7230-97d9-3fab73f00bd1` under #658.
