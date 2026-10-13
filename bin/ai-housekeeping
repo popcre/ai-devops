@@ -331,16 +331,35 @@ classify_ref() {
   echo "UNKNOWN"
 }
 
+# One batched round-trip serves every issue any handoff names (#1646): a
+# per-handoff `issue view` cost ~44 serialized ai-gh requests per run against
+# plan_github-request-reduction. Lazy so a run with no numeric handoff spends
+# no request at all; a failed or partial fetch still classifies as UNKNOWN.
+declare -A ISSUE_STATES=()
+ISSUE_STATES_LOADED=0
+issue_states_load() {
+  [[ "$ISSUE_STATES_LOADED" -eq 1 ]] && return 0
+  ISSUE_STATES_LOADED=1
+  [[ "$GH_OK" -eq 1 ]] || return 0
+  local raw n st
+  raw="$(gh_call issue list --state all --limit 5000 --json number,state 2>/dev/null || true)"
+  [[ -n "$raw" ]] || return 0
+  while IFS=$'\t' read -r n st; do
+    [[ -n "$n" ]] || continue
+    ISSUE_STATES["$n"]="$st"
+  done < <(jq -r '.[] | select(.number != null) | (.number|tostring) + "\t" + (.state // "")' <<<"$raw" 2>/dev/null)
+}
+
 issue_state() {
-  # $1 = issue number. Prints OPEN / CLOSED / UNKNOWN.
-  local n="$1" st
+  # $1 = issue number. Prints OPEN / CLOSED / UNKNOWN from the batched list.
+  local n="$1"
   if [[ "$GH_OK" -ne 1 ]]; then
     echo "UNKNOWN"
     return 0
   fi
-  st="$(gh_call issue view "$n" --json state --jq .state 2>/dev/null || true)"
-  case "$st" in
-    OPEN|CLOSED) echo "$st" ;;
+  issue_states_load
+  case "${ISSUE_STATES[$n]:-}" in
+    OPEN|CLOSED) echo "${ISSUE_STATES[$n]}" ;;
     *) echo "UNKNOWN" ;;
   esac
 }
@@ -434,6 +453,17 @@ done
 HO_ROWS=()          # file|class|issue|owner
 HO_SUCCESSOR=0; HO_OPEN=0; HO_UNPROVABLE=0; HO_UNATTRIBUTED=0
 if [[ -d "$REPO_ROOT/HANDOFF.d" ]]; then
+  # Fetch the issue map once, in this shell (issue_state itself runs inside
+  # $(...) subshells, so loading there would re-fetch per handoff).
+  if [[ "$GH_OK" -eq 1 ]]; then
+    for f in "$REPO_ROOT/HANDOFF.d"/*.md; do
+      [[ -f "$f" ]] || continue
+      if head -n 30 "$f" | grep -qE '^issue:[[:space:]]*[0-9]+'; then
+        issue_states_load
+        break
+      fi
+    done
+  fi
   for f in "$REPO_ROOT/HANDOFF.d"/*.md; do
     [[ -f "$f" ]] || continue
     base="${f##*/}"

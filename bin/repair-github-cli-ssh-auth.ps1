@@ -12,8 +12,12 @@ param(
 # fails. GitHub CLI's supported alternative is file storage (`--insecure-storage`):
 # the token lives in hosts.yml, readable by both logon types. This script moves an
 # interactive keyring login to file storage (the token travels only through a
-# pipe) and restricts hosts.yml to the owner, SYSTEM and Administrators, removing
-# inherited grants such as the Codex sandbox's read access to this folder.
+# pipe) and restricts hosts.yml itself to the owner, SYSTEM and Administrators.
+# The ACL work targets hosts.yml only: folder-level grants (such as the Codex
+# sandbox's access, set by repair-codex-github-cli-access.ps1 so config.yml
+# stays readable) are deliberately left in place. After /inheritance:r
+# /grant:r the cleanup loop removes any remaining non-allowed ACE on hosts.yml,
+# DENY rules included.
 
 $ErrorActionPreference = "Stop"
 $hosts = Join-Path $GitHubConfigDir "hosts.yml"

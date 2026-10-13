@@ -38,5 +38,56 @@ printf '%s\n' '{"last_assistant_message":"All done.","session_id":"t","prompt_id
   | PATH="$T/bin:$PATH" TMPDIR="$T/shtmp" TYPESAFE_API_KEY=dummy AI_JEV_SHADOW_LOG="$T/log2" "$ROOT/bin/ai-jev-completion-shadow" >/dev/null 2>&1
 [ -z "$(find "$T/shtmp" -mindepth 1 2>/dev/null)" ] && ok || bad "completion shadow leaked temp files: $(find "$T/shtmp" -mindepth 1)"
 
+# 5-7. The op run re-exec path (#1646 H1/H2), exercised without real 1Password:
+#      a stub `op` re-execs the consumer keyed, and the unkeyed parent must
+#      exit with the child's status instead of continuing unkeyed.
+mkdir -p "$T/opbin" "$T/cfgdir"
+printf 'TYPESAFE_API_KEY=op://vault/item/field\n' > "$T/cfgdir/mcp.env"
+cat > "$T/opbin/op" <<EOS
+#!/bin/sh
+printf '%s\n' "\$*" >> "$T/op-calls"
+[ "\$1" = run ] || exit 1
+while [ \$# -gt 0 ] && [ "\$1" != -- ]; do shift; done
+shift
+TYPESAFE_API_KEY=dummy exec "\$@"
+EOS
+chmod +x "$T/opbin/op"
+PIN="$(jq -r .model_pin "$ROOT/config/jev-decisions.json")"
+cat > "$T/opbin/curl" <<EOS
+#!/bin/sh
+out=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "\$out" ]; then
+  printf '%s\n' '{"model":"$PIN","answers":{"probe":{"type":"noul","noul":0.97},"c":{"type":"noul","noul":0.97}},"usage":{"input_tokens":1,"output_tokens":1}}' > "\$out"
+fi
+echo 200
+EOS
+chmod +x "$T/opbin/curl"
+
+# 5. Probe through the re-exec path exits 0 and prints ok exactly once (a
+#    returning parent would continue unkeyed and append FAIL: / exit 1).
+rm -f "$T/op-calls"
+out="$(env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opbin:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" \
+  "$ROOT/bin/ai-jev-probe" </dev/null 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok || bad "probe via op run re-exec rc=$rc: $out"
+[ "$(printf '%s\n' "$out" | grep -cx 'ok')" -eq 1 ] && ok || bad "probe via op run did not print ok exactly once: $out"
+grep -q 'run --env-file' "$T/op-calls" 2>/dev/null && ok || bad "probe never re-executed through op run"
+
+# 6. Completion shadow through the re-exec path prints exactly ONE items=
+#    summary — the parent must not append a spurious second (items=0) line.
+rm -f "$T/op-calls"
+out="$(printf '%s\n' '{"last_assistant_message":"All done.","session_id":"t","prompt_id":"p"}' \
+  | env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opbin:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" \
+    AI_JEV_SHADOW_LOG="$T/log-reexec" "$ROOT/bin/ai-jev-completion-shadow" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok || bad "completion shadow via op run re-exec rc=$rc: $out"
+[ "$(printf '%s\n' "$out" | grep -c '^items=')" -eq 1 ] && ok || bad "expected exactly one items= summary: $out"
+printf '%s\n' "$out" | grep -q '^items=1 ' && ok || bad "summary is not the keyed child's (items=1): $out"
+grep -q 'run --env-file' "$T/op-calls" 2>/dev/null && ok || bad "completion shadow never re-executed through op run"
+
 echo "passed=$pass failed=$failn"
 if [ "$failn" -eq 0 ]; then exit 0; else exit 1; fi

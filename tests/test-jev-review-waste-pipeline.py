@@ -108,6 +108,96 @@ def test_chunker() -> None:
             bad("review_signal never set on marked fixture")
 
 
+def _synth_lines(count: int, width: int) -> str:
+    """JSONL text whose turn boundaries land on exact width multiples."""
+    lines = []
+    for i in range(count):
+        body = json.dumps({"type": "user", "message": f"turn {i} "})
+        if len(body) > width - 1:
+            raise AssertionError("line wider than width")
+        body = body + " " * (width - 1 - len(body))
+        lines.append(body)
+    return "\n".join(lines) + "\n"
+
+
+def _assert_lossless(rows, text_len: int) -> None:
+    if not rows:
+        bad("lossless check: no chunks")
+        return
+    ordered = sorted(rows, key=lambda r: r["byte_start"])
+    if ordered[0]["byte_start"] != 0:
+        bad(f"lossless check: first chunk starts at {ordered[0]['byte_start']}, not 0")
+        return
+    for prev, cur in zip(ordered, ordered[1:]):
+        if cur["byte_start"] > prev["byte_end"]:
+            bad(
+                "lossless check: gap between chunks "
+                f"[{prev['byte_end']}, {cur['byte_start']}) "
+                f"(prev={prev} cur={cur})"
+            )
+            return
+        if cur["byte_end"] <= cur["byte_start"]:
+            bad(f"lossless check: empty chunk {cur}")
+            return
+    if ordered[-1]["byte_end"] != text_len:
+        bad(f"lossless check: last chunk ends at {ordered[-1]['byte_end']}, text is {text_len} long")
+        return
+    ok("chunk coverage is lossless (no dropped bytes between chunks)")
+
+
+def test_chunker_lossless_coverage() -> None:
+    """#1646 M2: overlap < 0.2*window (the defaults) must not drop bytes when
+    the turn-boundary snap moves the chunk end behind the next start."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from jev_review_waste_chunker import chunk_text  # noqa: E402
+
+    # Regime 1: small window. Boundaries at multiples of 81; the first at or
+    # after 0.8*window=160 is 162, which sits below step=180 — the old advance
+    # dropped [162, 180).
+    text = _synth_lines(40, 81)
+    chunks = chunk_text(text, 200, 20)
+    if any(e <= s for s, e, _ in chunks):
+        bad("chunker emitted an empty chunk (window=200 overlap=20)")
+    else:
+        ok("small-window chunks are non-empty")
+    if len(chunks) < 2:
+        bad("small-window fixture produced fewer than 2 chunks")
+    else:
+        ok("small-window fixture produced multiple chunks")
+    _assert_lossless([{"byte_start": s, "byte_end": e} for s, e, _ in chunks], len(text))
+
+    # Regime 2: the shipped defaults, 6000/1000 (overlap = 1/6 < 0.2*window).
+    # Boundaries at multiples of 101; the first at or after 4800 is 4848,
+    # below step=5000 — the old advance dropped [4848, 5000) at every snap.
+    text2 = _synth_lines(130, 101)
+    chunks2 = chunk_text(text2, 6000, 1000)
+    if len(chunks2) < 2:
+        bad("default-regime fixture produced fewer than 2 chunks")
+    else:
+        ok(f"default regime produced {len(chunks2)} chunks")
+    _assert_lossless([{"byte_start": s, "byte_end": e} for s, e, _ in chunks2], len(text2))
+
+    # And through the CLI with argparse defaults (same numbers, main()).
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        src = td_path / "defaults.jsonl"
+        # write_bytes: write_text would CRLF-translate on Windows and change
+        # the byte offsets the lossless check compares against.
+        src.write_bytes(text2.encode("utf-8"))
+        items = td_path / "items.jsonl"
+        r = subprocess.run(
+            [sys.executable, str(CHUNKER), "--items", str(items),
+             "--text-dir", str(td_path / "chunks"), "--window", "6000",
+             "--overlap", "1000", str(src)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            bad(f"chunker CLI failed at defaults: {r.stderr}")
+        else:
+            cli_rows = [json.loads(x) for x in items.read_text(encoding="utf-8").splitlines() if x]
+            _assert_lossless(cli_rows, len(text2))
+
+
 def test_arc() -> None:
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
@@ -214,6 +304,7 @@ def test_chunk_fixture_labels() -> None:
 
 if __name__ == "__main__":
     test_chunker()
+    test_chunker_lossless_coverage()
     test_arc()
     test_chunk_fixture_labels()
     test_value_fixture_labels()
