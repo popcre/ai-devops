@@ -4,13 +4,19 @@
   "claim_id": "unadmitted-discovery",
   "expires_at": 0,
   "host": "hetz",
+  "installed_gate": {
+    "launcher_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_head": "0000000000000000000000000000000000000000"
+  },
+  "issued_at": 0,
   "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
   "mode": "discover",
-  "operator_sha256": "55a765f46748f937ee73accd0bbcf8a346c9dae1111a4c7964a21536d501e331",
+  "operator_sha256": "1be07726e53f685dc0864d2f98cbfcf05ed085253d2814dc8337d953fd79adde",
   "platform_source": "f55efc859dfcbbf79274c4907b3df89f9767c11d",
   "port": 22,
-  "remote_sha256": "7f21fa3440788f9429b1e4ffeb5ee24b1dc1dae2155952ae866907a5c8fb95f6",
-  "schema": "oracle-platform-capability/v1",
+  "remote_sha256": "982e9a903f1c97decc4e261b01b694cae6668a468c434127149a55e44d235d92",
+  "schema": "oracle-platform-capability/v2",
   "transport_helper_sha256": "35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754",
   "user": "ai"
 }

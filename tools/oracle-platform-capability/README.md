@@ -60,3 +60,56 @@ Local tests use fake transports plus a public local shell refusal, no API/SSH or
 provider. Receipts always retain launch_admitted/hosted_accepted=false and
 configured_helper=UNKNOWN. Remote mutation count is zero; local protected
 credential/claim/receipt custody is intentionally created.
+
+
+## Separately reviewed v2 hardening
+
+This source is prepared on a fresh upstream worktree; frozen0348 and its review
+remain historical. V1 contracts do not satisfy the new v2 exact fields. No new
+review, action, installation, credential use or platform read occurred here.
+
+The transport helper is bounded/hash-checked with stdlib before execution.
+Injected credentials are removed from the environment before any project import;
+they survive only in controller memory until use. The remote program is bounded,
+pinned and held once; SSH executes fixed `/usr/bin/python3`, without re-reading
+its code. Tokens must be nonempty ASCII visible bytes, at most8192, with no space,
+control, NUL, tabs or Unicode. Both actual local/remote clocks require issued_at
+not in the future, expiry after issuance and lifetime at most1800seconds; each
+remote command and final receipt checks expiry. No caller clock can extend scope.
+
+The genuine gate is fixed `/usr/local/bin/ai-task-gates`, a root-owned symlink to
+`/home/ahazan/repos/ai-devops/bin/ai-task-gates`. Contract pins actual installed
+source HEAD, launcher SHA and root-owned `/etc/ai-devops/install-manifest.tsv`
+SHA. Exact manifest rows and clean tracked source are checked before and after
+the lifecycle child. Its HOME is fixed `/home/ahazan`; PATH is fixed root-managed
+`/usr/local/bin:/usr/bin:/bin`, never caller PATH/HOME. Source/manifest metadata
+pins are not authority: the installed genuine exact-head lifecycle still gates
+production, and root retains actual review/action association.
+
+Custody and TMPDIR ancestry traverse each component with nofollow directory
+FDs; dot/dotdot/symlink ancestry refuses. Claims and receipts use the same open
+custody FD and refuse renamed parents before/after creation. Temporary host/key/
+askpass files use anchored private descriptors, regular single-link files and
+bounded bytes; askpass validates exact secret inode/size/mode/UID before and after
+read. It follows only the controller's deliberately anchored proc-FD reference,
+not caller path ancestry. Temporary SSH output is anonymous and bounded. Abrupt
+termination may still leave protected custody; retain rather than replay.
+
+**Version API trust prerequisite:** the existing fixed
+http://100.66.37.58:8000/api/v1/version capability is preserved. It has no TLS;
+confidentiality depends on the encrypted Tailscale overlay. Before this new
+purpose's actual action, the coordinator must independently admit and verify
+the exact current Tailscale peer identity/path to100.66.37.58 and bind that proof
+to the current exact review/action inputs. A100.64/10 address, route guess,
+HTTP success or this source does not prove that prerequisite. No public-network
+HTTP, redirect/proxy, token-over-SSH transfer, insecure TLS fallback or new
+credential is authorized. This reader does not perform or claim the separate
+peer qualification; root holds it and must refuse actual use without it.
+
+Actual configured helper remains UNKNOWN: pinned public source calls
+InstanceSettings::findOrFail(0), loading the full credential-bearing row; it
+cannot satisfy an exact three-column selector scope. This v2 reader does not
+execute that method or bootstrap PHP. Fresh CLI/source defaults cannot establish
+running queue/cache configuration. Separate platform-owned scalar selector,
+current source/runtime identity and readonly bootstrap qualification remain
+blocked; no helpers are created or existing functionality removed.
