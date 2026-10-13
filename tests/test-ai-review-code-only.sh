@@ -180,7 +180,7 @@ must_fail "$SANDBOX" ensure-code-only "$R" rejected-gates-case --paths-file "$TM
 pass 'only the exact gate declaration passes the hidden-path refusal'
 
 # The publishing guard workflow is the sole additional hidden source allowed
-# for the bounded #277 review; it must travel with selected test code only.
+# for the bounded #277 review; exercise it alongside selected test code.
 mkdir -p "$R/.github/workflows" "$R/tests" "$R/.github/workflows/nested" "$R/.github/workflows/__fixtures__"
 printf 'name: Forbid shared database bypass\non:\n  pull_request:\n' > "$R/.github/workflows/forbid-shared-db-bypass.yml"
 printf 'def test_guard_contract(): assert True\n' > "$R/tests/test_publish_guard_workflow.py"
@@ -212,6 +212,13 @@ for rejected_workflow in \
   must_fail "$SANDBOX" ensure-code-only "$R" rejected-workflow --paths-file "$TMP/rejected-workflow.json" --base "$BASE"
 done
 pass 'unknown, nested, case-variant, traversal, and licensed fixture workflow paths remain refused'
+
+# An otherwise approved contract spelling cannot alias the hidden workflow.
+mkdir -p "$R/contracts"
+ln -s ../.github/workflows "$R/contracts/workflow-alias"
+printf '["contracts/workflow-alias/forbid-shared-db-bypass.yml"]\n' > "$TMP/aliased-workflow.json"
+must_fail "$SANDBOX" ensure-code-only "$R" aliased-workflow --paths-file "$TMP/aliased-workflow.json" --base "$BASE"
+pass 'approved contract aliases cannot resolve into the exempted hidden workflow'
 
 LINK_BLOB="$(printf 'data/tracked.txt' | git -C "$R" hash-object -w --stdin)"
 git -C "$R" update-index --add --cacheinfo "120000,$LINK_BLOB,src/linked.py"

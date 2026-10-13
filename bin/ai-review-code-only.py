@@ -185,7 +185,7 @@ def current_bytes(source, path):
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
     relative = resolved.relative_to(resolved_root)
-    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() != path:
+    if relative.as_posix() in (GATE_DECLARATION, SHARED_DB_BYPASS_WORKFLOW) and relative.as_posix() != path:
         fail("approved path resolves into a refused location")
     try:
         safe_path(relative.as_posix())
