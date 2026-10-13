@@ -354,5 +354,52 @@ else
   bad "default is one-screen summary and details are opt-in"
 fi
 
+# ---------------------------------------------------------------------------
+# 13. --log writes a dated block and retains only the latest 30 daily blocks
+# ---------------------------------------------------------------------------
+case13="$TMP/retention"
+new_repo "$case13"
+stub13="$TMP/gh13"
+make_gh_stub "$stub13"
+export AI_HOUSEKEEPING_LOG="$TMP/hk-retention.log"
+# Seed 35 dated daily blocks, then one real --log run.
+: > "$AI_HOUSEKEEPING_LOG"
+for i in $(seq 1 35); do
+  {
+    printf '===== 2026-01-%02dT00:00:00Z ai-housekeeping =====\n' "$i"
+    printf 'seed block %s\n' "$i"
+  } >> "$AI_HOUSEKEEPING_LOG"
+done
+( cd "$case13" && AI_HOUSEKEEPING_GH="$stub13" bash "$TOOL" --log --quiet ) > "$TMP/c13.out" 2>&1
+blocks13="$(grep -c '^===== .* ai-housekeeping =====$' "$AI_HOUSEKEEPING_LOG" || true)"
+if grep -q 'seed block 35' "$AI_HOUSEKEEPING_LOG" && \
+   ! grep -q 'seed block 1$' "$AI_HOUSEKEEPING_LOG" && \
+   [[ "$blocks13" -le 30 ]]; then
+  ok "keeps the latest 30 dated daily blocks in the log"
+else
+  bad "keeps the latest 30 dated daily blocks in the log (blocks=$blocks13)"
+fi
+unset AI_HOUSEKEEPING_LOG
+
+# ---------------------------------------------------------------------------
+# 14. offline --log still records UNKNOWN and exits 0 (D3)
+# ---------------------------------------------------------------------------
+case14="$TMP/offline-log"
+new_repo "$case14"
+git -C "$case14" branch feature-offline-log
+export AI_HOUSEKEEPING_LOG="$TMP/hk-offline.log"
+: > "$AI_HOUSEKEEPING_LOG"
+set +e
+( cd "$case14" && AI_HOUSEKEEPING_GH= bash "$TOOL" --log ) > "$TMP/c14.out" 2>&1
+c14=$?
+set -e
+if [[ "$c14" -eq 0 ]] && grep -q 'UNKNOWN' "$AI_HOUSEKEEPING_LOG" && \
+   grep -q '^===== .* ai-housekeeping =====$' "$AI_HOUSEKEEPING_LOG"; then
+  ok "offline --log records UNKNOWN in a dated block and exits 0"
+else
+  bad "offline --log records UNKNOWN in a dated block and exits 0 (exit=$c14)"
+fi
+unset AI_HOUSEKEEPING_LOG
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

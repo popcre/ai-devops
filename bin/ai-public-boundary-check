@@ -4,9 +4,22 @@ set -uo pipefail
 root="${1:-.}"
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDARY FAIL: not a git repo' >&2; exit 1; }
 failed=0
-while IFS= read -r path; do
-  case "$path" in
-    .ai/reviewer-issues/*) ;; # published incident packages (#1626); the only allowed .ai/* subtree
+while IFS= read -r -d '' path; do
+  lowered="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  # .ai/reviewer-issues/ is an intentional publish (PR #1626). Content-level
+  # checks (credentials, topology, project IDs) below still apply to every
+  # tracked file; the path rule only rejects non-publish .ai/ artifacts and
+  # secret-bearing filenames (case-insensitive) under the publish path.
+  case "$lowered" in
+    .ai/reviewer-issues/*)
+      case "$lowered" in
+        *.env*|*.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.kdbx|\
+        */auth.json|*/credentials.json|*/id_rsa*|*/id_ed25519*|*/id_ecdsa*|*/id_dsa*|\
+        *token*|*secret*|*private*|*passwd*|*password*)
+          echo "BOUNDARY FAIL: secret-bearing file name tracked at $path" >&2; failed=1 ;;
+        *.json|*.txt|*.md|*.log|*.csv|*.err|*.out) ;;
+        *) echo "BOUNDARY FAIL: non-prose file tracked at $path" >&2; failed=1 ;;
+      esac ;;
     .ai/*)
       echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
     claude_chats/*|codex_chats/*|transcripts/claude_chats/*|transcripts/codex_chats/*)
@@ -23,10 +36,11 @@ while IFS= read -r path; do
     .env|*.env|.env.*|*.pem|*.key)
       echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
   esac
-done < <(git -C "$root" ls-files)
+done < <(git -C "$root" ls-files -z)
 
 pattern='(ops_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{24,})'
-if git -C "$root" grep -IlE "$pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-build-private-memory-hub.ps1' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' | grep -q .; then
+cred_hits="$(git -C "$root" grep -alE "$pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-build-private-memory-hub.ps1' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null || true)"
+if [ -n "$cred_hits" ]; then
   echo 'BOUNDARY FAIL: credential-shaped tracked content found' >&2; failed=1
 fi
 
@@ -34,7 +48,7 @@ fi
 # topology even though they are not credentials. The documented network range
 # itself is harmless and is the one deliberate exception.
 topology_ip_pattern='(100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})'
-topology_matches="$(git -C "$root" grep -nIE "$topology_ip_pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -vE '100\.64\.0\.0/(10|255\.192\.0\.0)' || true)"
+topology_matches="$(git -C "$root" grep -anE "$topology_ip_pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -vE '100\.64\.0\.0/(10|255\.192\.0\.0)' || true)"
 if [ -n "$topology_matches" ]; then
   echo 'BOUNDARY FAIL: protected private-network topology found' >&2; failed=1
 fi
@@ -43,7 +57,7 @@ fi
 # assignment. Domain-based product endpoints remain allowed — only the URL
 # authority (host) counts as an endpoint, never a version number in the path.
 public_ip_context='(HostName|public IP|Tailscale IP|PROXY_URL=)[^[:space:]]*([0-9]{1,3}\.){3}[0-9]{1,3}|https?://(([0-9]{1,3}\.){3}[0-9]{1,3})([^0-9.]|$)'
-public_ip_matches="$(git -C "$root" grep -nIE "$public_ip_context" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -vF '127.0.0.1' || true)"
+public_ip_matches="$(git -C "$root" grep -anE "$public_ip_context" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -vF '127.0.0.1' || true)"
 if [ -n "$public_ip_matches" ]; then
   echo 'BOUNDARY FAIL: protected endpoint address found' >&2; failed=1
 fi
@@ -70,7 +84,7 @@ while IFS= read -r hit; do
 ' "$line_text" | grep -oE '[a-z]{20}' | grep -vE '[a-z]{21}')
   [ "$unexplained" -eq 1 ] && project_matches="$project_matches$hit
 "
-done < <(git -C "$root" grep -nIE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' ':!tools/public-boundary-allowlist.txt' 2>/dev/null || true)
+done < <(git -C "$root" grep -anE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' ':!tools/public-boundary-allowlist.txt' 2>/dev/null || true)
 if [ -n "$project_matches" ]; then
   # Name the file and line. The old message named neither, which cost one
   # session twenty minutes of bisecting a documentation-only change.

@@ -1,28 +1,33 @@
 #!/usr/bin/env bash
 # ai-housekeeping — read-only inventory of housekeeping candidates in this repo.
 #
-#   ai-housekeeping            # print the report
-#   ai-housekeeping --details  # print every supported artifact
-#   ai-housekeeping --log      # also append the report to the housekeeping log
-#   ai-housekeeping --quiet    # print nothing when there are no review candidates
+#   ai-housekeeping             # print the report
+#   ai-housekeeping --details   # print every supported artifact
+#   ai-housekeeping --log       # also append a dated block to the housekeeping log
+#   ai-housekeeping --quiet     # print nothing when there are no review candidates
+#   ai-housekeeping schedule    # register the daily timer (Task Scheduler / user crontab)
+#   ai-housekeeping unschedule  # remove that timer
 #
-# READ-ONLY BY DESIGN: it never deletes, commits, checks out, or prunes
-# anything. Findings name the governed cleanup procedure; they do not print
-# copy-paste deletion commands.
-# There is deliberately no --apply. See plan_repo-housekeeping-visibility.md.
+# READ-ONLY INVENTORY: it never deletes, commits, checks out, or prunes
+# repository artifacts. Findings name the governed cleanup procedure; they do
+# not print copy-paste deletion commands. There is deliberately no --apply.
+# `schedule` / `unschedule` only manage this report's own daily timer.
+# See plan_repo-housekeeping-visibility.md.
 set -uo pipefail
 
-# --- flags -----------------------------------------------------------------
+# --- flags / subcommands ---------------------------------------------------
 DETAILS=0
 LOGGING=0
 QUIET=0
+CMD=""
 for arg in "$@"; do
   case "$arg" in
     --details) DETAILS=1 ;;
     --log) LOGGING=1 ;;
     --quiet) QUIET=1 ;;
+    schedule|unschedule) CMD="$arg" ;;
     -h|--help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -44,14 +49,192 @@ else
 fi
 LOG="${AI_HOUSEKEEPING_LOG:-$BASE_HOME/.cache/ai-housekeeping.log}"
 STATE_DIR="${AI_HOUSEKEEPING_STATE_DIR:-$BASE_HOME/.local/state/ai-devops}"
+HOST="$(hostname 2>/dev/null || printf unknown)"
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# Resolve symlinks so an installed link (/usr/local/bin/ai-housekeeping)
+# still points at the checkout that owns the script.
+while [[ -L "$SELF" ]]; do
+  _link="$(readlink "$SELF")"
+  case "$_link" in
+    /*) SELF="$_link" ;;
+    *) SELF="$(dirname "$SELF")/$_link" ;;
+  esac
+done
+SELF="$(cd "$(dirname "$SELF")" && pwd)/$(basename "$SELF")"
+# Derived from the real script path so schedule/unschedule work from any cwd
+# (including a scheduled shell that is not inside the worktree).
+REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 
 # --- helpers ---------------------------------------------------------------
 c_head() { printf '\033[1m%s\033[0m\n' "$1"; }
 c_warn() { printf '\033[33m⚠  %s\033[0m\n' "$1"; }
 
+# Same log()/tee pattern as bin/ai-memory-sync: timestamp + host, stdout and log.
+log() {
+  mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+  printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST" "$*" | tee -a "$LOG" || return 1
+}
+
 OUT=""
 emit() { OUT="${OUT}${1}"$'\n'; }
 emit_warn() { OUT="${OUT}$(printf '\033[33m⚠  %s\033[0m' "$1")"$'\n'; }
+
+# Keep the latest 30 dated daily blocks. Recoverable rewrite: build the
+# trimmed file beside the log, then replace. A failed rewrite leaves the
+# original log untouched.
+retain_log_blocks() {
+  local max="${AI_HOUSEKEEPING_LOG_KEEP:-30}" tmp headers
+  [[ -f "$LOG" ]] || return 0
+  headers="$(grep -c '^===== .* ai-housekeeping =====$' "$LOG" 2>/dev/null || true)"
+  [[ "${headers:-0}" =~ ^[0-9]+$ ]] || return 0
+  (( headers > max )) || return 0
+  tmp="${LOG}.tmp.$$"
+  if awk -v max="$max" '
+    /^===== .* ai-housekeeping =====$/ { blocks++; start[blocks]=NR }
+    { lines[NR]=$0 }
+    END {
+      first = blocks - max + 1
+      if (first < 1) first = 1
+      from = start[first]
+      for (i = from; i <= NR; i++) print lines[i]
+    }
+  ' "$LOG" >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$LOG" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+# --- schedule / unschedule (daily timer; never wakes a sleeping machine) ----
+# Decision (b) in plan_repo-housekeeping-visibility.md: one separate daily
+# timer named AiDevOps-Housekeeping, independent of ai-memory-sync.
+TASK_NAME='AiDevOps-Housekeeping'
+CRON_MARKER='# ai-devops housekeeping (managed by ai-housekeeping schedule; unschedule removes)'
+CRON_REM='ai-housekeeping'"'"' --log'
+DAILY_AT="${AI_HOUSEKEEPING_DAILY_AT:-07:17}"   # minute picked to avoid :00/:30 fleet sync
+
+cron_job_line() {
+  local minute hour
+  minute="${DAILY_AT#*:}"
+  hour="${DAILY_AT%%:*}"
+  # --log already writes the dated block to $LOG; do not also shell-redirect
+  # stdout there, or the report is stored twice outside the retention blocks.
+  # cd into the repo first: a scheduled shell has no worktree, and the tool
+  # exits before logging when run outside one.
+  printf '%s %s * * * cd "%s" && %s --log --quiet' \
+    "$minute" "$hour" "$REPO_ROOT" "'$SELF'"
+}
+
+cmd_schedule() {
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    # Mirror bin/setup-machine.ps1 section 5d exactly: hidden VBS launcher,
+    # 15-minute ExecutionTimeLimit, IgnoreNew, StartWhenAvailable, no wake.
+    # A bare schtasks /Create would replace that task with an unbounded one.
+    local posix launcher win_launcher
+    posix="$(cygpath -u "$SELF")"
+    launcher="$BASE_HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
+    win_launcher="$(cygpath -w "$launcher")"
+    mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
+    {
+      # VBS quoting matches setup-machine.ps1: """ is one literal quote, and
+      # the -lc argument is wrapped in "" pairs. Single quotes inside the bash
+      # command need no VBS escaping.
+      printf '%s\n' 'Set shell = CreateObject("WScript.Shell")'
+      printf 'exitCode = shell.Run("""%s"" -lc ""cd '"'"'%s'"'"' && '"'"'%s'"'"' --log --quiet""", 0, True)\n' \
+        "$(cygpath -w "$(command -v bash)")" "$REPO_ROOT" "$posix"
+      printf '%s\n' 'WScript.Quit exitCode'
+    } >"$launcher"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+      \$ErrorActionPreference = 'Stop'
+      \$hkAction = New-ScheduledTaskAction -Execute \"\$env:WINDIR\System32\wscript.exe\" -Argument \"//B //NoLogo \`\"$win_launcher\`\"\"
+      \$hkTrigger = New-ScheduledTaskTrigger -Daily -At $DAILY_AT
+      \$hkSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
+      \$hkPrincipal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+      Register-ScheduledTask -TaskName 'AiDevOps-Housekeeping' -Action \$hkAction -Trigger \$hkTrigger -Settings \$hkSettings -Principal \$hkPrincipal -Description 'Daily AI housekeeping report (report-only; logs to ~/.cache/ai-housekeeping.log)' -Force | Out-Null
+    " >/dev/null 2>&1 \
+      || { echo "ai-housekeeping: could not register $TASK_NAME" >&2; return 2; }
+    log "scheduled daily at $DAILY_AT as $TASK_NAME (hidden; 15 min limit; no wake)"
+    return 0
+  fi
+  command -v crontab >/dev/null 2>&1 || {
+    echo "ai-housekeeping: schedule needs schtasks (Windows) or crontab (Linux/macOS)" >&2
+    return 2
+  }
+  local tmp rc=0 existing read_rc=0
+  tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
+  trap 'rm -f "$tmp"' EXIT
+  existing="$(crontab -l 2>/dev/null)" || read_rc=$?
+  if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
+    # Distinguish "no crontab yet" from "unreadable crontab": if the spool
+    # has a file for this user we cannot read, refuse rather than erase it.
+    local spool
+    for spool in /var/spool/cron/crontabs /var/spool/cron /var/spool/cron/tabs; do
+      if [[ -f "$spool/$(id -un 2>/dev/null || whoami)" ]]; then
+        echo "ai-housekeeping: crontab exists but cannot be read; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+    done
+  fi
+  printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >>"$tmp" || :
+  printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
+  crontab "$tmp" || rc=$?
+  rm -f "$tmp"
+  [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the housekeeping entry" >&2; return 2; }
+  log "scheduled daily at $DAILY_AT in the user crontab"
+}
+
+cmd_unschedule() {
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1
+    local rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      log "removed $TASK_NAME"
+      return 0
+    fi
+    # Distinguish "task does not exist" from a real deletion failure.
+    if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" >/dev/null 2>&1; then
+      echo "ai-housekeeping: could not delete $TASK_NAME (still present)" >&2
+      return 2
+    fi
+    if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" 2>&1 | grep -qi 'cannot find\|cannot open\|ERROR:'; then
+      log "removed $TASK_NAME (was already absent)"
+      return 0
+    fi
+    echo "ai-housekeeping: could not delete $TASK_NAME (status unknown)" >&2
+    return 2
+  fi
+  command -v crontab >/dev/null 2>&1 || {
+    echo "ai-housekeeping: unschedule needs schtasks or crontab" >&2
+    return 2
+  }
+  local tmp rc=0 existing read_rc=0
+  tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
+  trap 'rm -f "$tmp"' EXIT
+  existing="$(crontab -l 2>/dev/null)" || read_rc=$?
+  if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
+    local spool
+    for spool in /var/spool/cron/crontabs /var/spool/cron /var/spool/cron/tabs; do
+      if [[ -f "$spool/$(id -un 2>/dev/null || whoami)" ]]; then
+        echo "ai-housekeeping: crontab exists but cannot be read; refusing to replace it" >&2
+        rm -f "$tmp"; return 2
+      fi
+    done
+  fi
+  printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >"$tmp" || :
+  crontab "$tmp" || rc=$?
+  rm -f "$tmp"
+  [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }
+  log "removed the housekeeping crontab entry"
+}
+
+# Timer subcommands never inventory and never touch repository artifacts.
+if [[ "$CMD" == "schedule" ]]; then
+  cmd_schedule
+  exit $?
+elif [[ "$CMD" == "unschedule" ]]; then
+  cmd_unschedule
+  exit $?
+fi
 
 
 # --- A. Preflight ----------------------------------------------------------
@@ -473,8 +656,17 @@ if [[ "$LOGGING" -eq 1 ]]; then
   mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
   {
     printf '===== %s ai-housekeeping =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    printf '%s' "$OUT"
-  } >>"$LOG" 2>/dev/null || true
+    if [[ "$QUIET" -eq 1 && "$REVIEW_CANDIDATES" -eq 0 && "$GH_OK" -eq 1 ]]; then
+      # O4: a scheduled no-findings run writes one line to the log, nothing else.
+      printf '%s [%s] no review candidates\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST"
+    else
+      printf '%s' "$OUT"
+    fi
+  } | tee -a "$LOG" >/dev/null || {
+    echo "ai-housekeeping: failed to write log $LOG" >&2
+    exit 1
+  }
+  retain_log_blocks
 fi
 
 exit 0
