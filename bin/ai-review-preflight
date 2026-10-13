@@ -1661,7 +1661,12 @@ case "$cmd" in
     done
     pause_args=(pause "$provider" --reason "$class" --seconds "$seconds")
     [ -z "$observed" ] || pause_args+=(--observed "$observed")
-    admission_store "${pause_args[@]}" ;;
+    # Same ownership rule as quarantine(): only the installed toolkit writes the shared store.
+    if [ -n "${AI_REVIEW_QUARANTINE_DIR:-}" ] || installed_toolkit_preflight; then
+      admission_store "${pause_args[@]}"
+    else
+      note "ai-review-preflight: not the installed toolkit; $provider pause not recorded in the shared store."
+    fi ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
     [ "${1:-}" != --seconds ] || { seconds="${2:-}"; shift 2; }
