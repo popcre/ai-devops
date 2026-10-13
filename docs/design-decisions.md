@@ -286,6 +286,31 @@ union must retain only the first occurrence of each entry, batch forgets must
 remain transactional, and disposable worktrees, scratchpads, and temporary
 folders must stay excluded from the published project set.
 
+## MEMORY.md index entries merge by target file, not by line text
+
+Looks like:
+Union every index line whose exact text is new.
+
+Actually:
+`bin/ai-sync-memory` keys each index entry by the memory file it points at
+(the `](target.md)` link target). One line per file. When the hub already
+lists a target, the hub's wording wins and a machine's differently worded
+line for the same target is dropped. A line for a target the hub does not
+list is a genuinely new memory and is still added. Tombstoned or missing
+targets are never re-added. After a sync the two indexes converge.
+
+Why:
+Line-text union re-added every stale wording after a hub consolidation.
+vps2 re-grew a 4KB popdam index to 11KB on its first sync after
+consolidation; al8960ofc and edge-dev pushed 19–25KB ai-devops indexes until
+the 12KB health gate blocked sync. `forget --prune-index` only dedupes the
+hub copy; the next machine sync put the lines back.
+
+Do not change because:
+Matching by line text recreates the re-growth. The hub's wording must stay
+authoritative for any target it lists. Health-gate limits (12KB / 200 lines)
+and the secret-pattern and privacy checks stay as they are.
+
 ## Routine memory sync runs at most once a day
 
 Looks like:
