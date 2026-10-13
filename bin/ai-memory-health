@@ -76,6 +76,17 @@ if [[ -z "$claude_home" ]]; then
 fi
 
 projects_dir="$claude_home/projects"
+# Resolve Windows untrusted mount points (see bin/ai-winpath) so SSH sessions
+# can audit the same memory interactive Claude uses through the junction.
+if [[ -n "${AI_MEMORY_CLAUDE_PROJECTS:-}" ]]; then
+  projects_dir="$AI_MEMORY_CLAUDE_PROJECTS"
+elif [[ "${OS:-}" == "Windows_NT" || -n "${USERPROFILE:-}" ]]; then
+  winpath="${AI_MEMORY_WINPATH:-$repo_root/bin/ai-winpath}"
+  if [[ -f "$winpath" ]]; then
+    resolved="$("$winpath" "$projects_dir" 2>/dev/null || true)"
+    [[ -n "$resolved" ]] && projects_dir="$resolved"
+  fi
+fi
 if (( ! hub_only )); then
   [[ -d "$projects_dir" ]] || { echo "ERROR no Claude projects directory at $projects_dir" >&2; exit 2; }
 fi

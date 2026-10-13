@@ -79,6 +79,7 @@ export DOOR_WORKDIR="$TMP/work" DOOR_PACKET_DIR="$TMP/packet" DOOR_PROMPT_FILE="
 export DOOR_HEAD=0123456789012345678901234567890123456789 DOOR_TIMEOUT=10
 export GEMINI_FIXTURE="$TMP/response.json"
 passed=0
+acl_proved=0
 run_case() {
   local name="$1" expected="$2" json="$3" native_exit="${4:-0}" rc=0
   test_case="$name"
@@ -101,11 +102,16 @@ run_case() {
     ! grep -q 'private provider diagnostic sentinel' "$DOOR_REPORT_OUT" "$TMP/$name.err"
     case "$(uname -s)" in
       MINGW*|MSYS*|CYGWIN*)
-        AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" \
-        AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$DOOR_DIAGNOSTICS_DIR")" \
-        env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
-          '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET; Get-ChildItem -LiteralPath $env:AI_DEVOPS_PRIVATE_TARGET | ForEach-Object { Assert-AiDevOpsPrivateAcl -Path $_.FullName }' \
-          > "$TMP/$name.acl-proof" 2>&1
+        # One full ACL proof locks the mechanism; repeating the PowerShell
+        # assert per failure case burned the Windows section budget (#1562).
+        if [ "$acl_proved" -eq 0 ]; then
+          AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" \
+          AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$DOOR_DIAGNOSTICS_DIR")" \
+          env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
+            '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET; Get-ChildItem -LiteralPath $env:AI_DEVOPS_PRIVATE_TARGET | ForEach-Object { Assert-AiDevOpsPrivateAcl -Path $_.FullName }' \
+            > "$TMP/$name.acl-proof" 2>&1
+          acl_proved=1
+        fi
         ;;
       *) python3 - "$DOOR_DIAGNOSTICS_DIR" <<'PY'
 import pathlib,stat,sys

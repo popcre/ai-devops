@@ -4,7 +4,7 @@ status: OPEN
 owner: claude/1562-door-diagnostics-leak
 ---
 
-# #1562 door-diagnostics leak: fix merged (PR #1599); live proof and one pre-existing test failure remain
+# #1562 door-diagnostics leak: fix merged (PR #1599) and live-proven; one pre-existing test failure remains
 
 Written 2026-10-12T1310Z (9:10 AM EDT) on machine `edge-dev3` by a Claude Code session.
 Repo `popcre/ai-devops`; fix landed on `main` as merge commit `fb5cbd10414846469a6d5fc0cd258335baff81b7` ([PR #1599](https://github.com/popcre/ai-devops/pull/1599)).
@@ -33,7 +33,7 @@ DeepSeek review run `20261012T090026-2925715-17164` on EDGE-ALIEN (`--tests "bas
   - [tools/review_door_diagnostics.py](https://github.com/popcre/ai-devops/blob/main/tools/review_door_diagnostics.py): a pre-existing destination is left untouched; this run's evidence goes to a `<dest>.collision-<pid>-<n>` sibling; it exits non-zero ("both retained") **before** writing the caller report.
   - Regressions: [tests/test-review-door-diagnostics.sh](https://github.com/popcre/ai-devops/blob/main/tests/test-review-door-diagnostics.sh), [tests/test-reviewer-events-isolation.sh](https://github.com/popcre/ai-devops/blob/main/tests/test-reviewer-events-isolation.sh) (custody probe; proven to fail without the fix), updated capacity-refusal expectations in [tests/test-ai-review-engine.sh](https://github.com/popcre/ai-devops/blob/main/tests/test-ai-review-engine.sh).
   - Independent review: Grok final-check **APPROVE** on exact head `369483229771af124122d294827dd430baa8598f` (comment on PR #1599). Codex is not installed on edge-dev3.
-- **Not done:** live proof on a Windows dev host (#1562 live-proof item stays unticked).
+- **Live proof DONE (2026-10-12, host 4837 / al8960ofc; EDGE-ALIEN not used):** installed toolkit at `ae490d6d` (contains fb5cbd10) via reviewed install. Installed `ai-review deepseek final-check --base c5df4dfa --assert-head ae490d6d --tests "bash tests/test-review-door-diagnostics.sh"` run `20261012T163531-1208-8881`, 4192 s, verdict **APPROVE**. Custody probe: 0 DOOR_*/RLC_* in the tests child and in reviewer children. Collision retention re-verified 2026-10-12: pre-existing dir untouched, new evidence in `*.collision-<pid>-<n>`, no caller report, exit "both retained". Evidence on #1562 (comment + ticked live-proof item).
 - **Pre-existing failure:** `deepseek_real_unittest_keeps_immutable_snapshot_digest` in tests/test-ai-review-engine.sh fails on edge-dev3 on unmodified `c5df4dfa` too. Not caused or touched by this work.
 - **EDGE-ALIEN cleanup (done 2026-10-12):** scheduled tasks `blocker-watch` and `worktree-reap` unregistered. `C:\repos\ai-devops` and six review copies (`ai-devops-sync-{2131,544d,8e1b,9b53,c984}-review`, `coordinator-first-review-20261008`) were **moved** (not deleted) to `C:\retired\ai-devops-20261012\` on that host. Kept: Actions runner service `actions.runner.popcre-ai-devops.EDGE-ALIEN` (running), `WindowsRunnerMaintenance` task (installed under Program Files, independent of the checkout), all of `~/.ssh` (916-alien key, `ai-devops.conf`, `config`, `ai-lan-probe`, known_hosts), 16 Claude transcripts, `C:\repos\popdam`.
 
@@ -52,8 +52,8 @@ DeepSeek review run `20261012T090026-2925715-17164` on EDGE-ALIEN (`--tests "bas
 
 ## 6. Exact next steps
 
-1. Live proof on **4837** (never EDGE-ALIEN): update its installed toolkit to current main through the reviewed install path, run a real DeepSeek `final-check` with `--tests "bash tests/test-review-door-diagnostics.sh"`; prove a verdict, no custody variables in the reviewer/tests children, and collision retention. Post evidence on [#1562](https://github.com/popcre/ai-devops/issues/1562) and tick its live-proof item.
-2. Separately, root-cause `deepseek_real_unittest_keeps_immutable_snapshot_digest` (pre-existing) under reviewer-safety class with independent review.
+1. ~~Live proof on **4837**~~ **DONE 2026-10-12** (see §3; evidence on [#1562](https://github.com/popcre/ai-devops/issues/1562)).
+2. Root-cause `deepseek_real_unittest_keeps_immutable_snapshot_digest` (pre-existing) under reviewer-safety class with independent review.
 
 ## 7. Constraints and gotchas in force
 

@@ -59,7 +59,7 @@ $evidence = [ordered]@{
   windows_sudo_enabled = if ($sudo -and $sudo.Enabled -eq 1) { $true } else { $false }
   caller_token_elevated = $true
   caller_integrity_level = $integrity
-  token_posture_note = 'Local-admin Network (SSH) logons yield full elevated tokens since the 2026-09-09 Windows servicing regression (issue #1547). UAC knobs stay at secure defaults; host proofs must measure token posture instead of assuming filtering.'
+  token_posture_note = 'Local-admin Network (SSH) logons yield full elevated tokens under stock Windows OpenSSH (issue #1547 closed 2026-10-12; no Microsoft regression). UAC knobs stay at secure defaults; host proofs must measure token posture instead of assuming filtering.'
 }
 
 $parent = Split-Path -Parent $EvidencePath

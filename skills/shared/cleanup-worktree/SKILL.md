@@ -242,3 +242,6 @@ the `main` branch” before mentioning “linked worktree.”
 - Use the repo's normal ship/closeout skill for recovered source changes.
 - Use `cleanup-worktree` again after shipping to remove only the now-safe
   temporary working copy.
+- For a report-only inventory before deciding what to clean, run
+  `ai-housekeeping` (see [`docs/housekeeping.md`](../../../docs/housekeeping.md)).
+  It never deletes anything and names this skill for each MERGED CANDIDATE.

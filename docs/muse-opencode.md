@@ -48,11 +48,17 @@ Everything shared is unchanged: the disposable review copy, evidence packet,
 locks, private reports, credential handoff, retained turns, and `reconcile`.
 
 - Pinned build: `config/muse-code/version`, installed by Meta's Windows installer at
-  `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`. `doctor` refuses any other
+  `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`. The optional Muse Code
+  stage of `bin/install-ai-devops-windows.ps1` (`bin/windows-muse-code-install.ps1`)
+  runs Meta's official `https://dev.meta.ai/install.ps1` when that file is absent,
+  then verifies version and SHA-256; a mismatch or a different installed version
+  fails the stage and nothing runs. As on Linux, the model catalog appears after
+  the first live turn, so `doctor`'s catalog checks fail on a fresh machine until
+  one `ai-muse new` turn has run. `doctor` refuses any other
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
-  (x86_64: `1.4.0-R4161.1`). `install.sh` runs Meta's official installer when the
+  (x86_64: `1.4.7-R6101.1`). `install.sh` runs Meta's official installer when the
   pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
   SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
   ships a newer build, re-pin both files together. The model catalog appears
@@ -86,7 +92,8 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   Retained usage comes from the durable store; unreadable evidence is explicitly
   unavailable. Catalog prices produce labeled estimates, never billed cost.
   Sessions never cross engines.
-- Tests: `tests/test-ai-muse-code.sh` (offline stub). Windows only so far.
+- Tests: `tests/test-ai-muse-code.sh` (offline stub);
+  `tests/test-windows-muse-code-install.ps1` (Windows install stage, mocked installer).
 
 ## Safety and evidence
 

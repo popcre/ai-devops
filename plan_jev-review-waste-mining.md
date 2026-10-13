@@ -13,13 +13,13 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 0. Session setup (worktree, gates) | ⬜ open | | |
-| 1. Inventory + read-all cost baseline | ⬜ open | | |
-| 2. Shared Jev client + decision config | ⬜ open | | |
-| 3. Chunk filter (Noul) + calibration | ⬜ open | | |
-| 4. Review-arc stitch + value Score | ⬜ open | | |
-| 5. Aggregation + waste report | ⬜ open | | |
-| 6. Decision brief for the owner | ⬜ open | | |
+| 0. Session setup (worktree, gates) | done | 2026-10-12 | worktree C:/repos/ai-devops-wt-jev-review-waste branch mimo/jev-review-waste-mining; task class code |
+| 1. Inventory + read-all cost baseline | done | 2026-10-12 | [inventory and cost baseline](tests/verification/jev/review-waste-inventory-20261012T162801Z.md) |
+| 2. Shared Jev client + decision config | done | 2026-10-12 | `tools/lib/jev-client.sh`, config/jev-decisions.json; pin tests 37/0; contracts 24/0; scripts suite 6/0 |
+| 3. Chunk filter + calibration | done | 2026-10-12 | [chunk filter shadow run](tests/verification/jev/review-waste-chunk-shadow-20261012T180611Z.md); fixtures `tests/fixtures/jev/review-waste-chunk-labels.json` |
+| 4. Review-arc stitch + value Score | done | 2026-10-12 | [value score shadow run](tests/verification/jev/review-waste-value-shadow-20261012T180611Z.md); `tools/jev_review_waste_arc.py`; pipeline tests 17/0 |
+| 5. Aggregation + waste report | done | 2026-10-12 | [review waste report](tests/verification/jev/review-waste-report-20261012T180833Z.md) (bounded 12-file sample; slices n≥5 suppressed) |
+| 6. Decision brief for the owner | done | 2026-10-12 | Decision brief section of the waste report (options only; no policy change) |
 
 **Where a fresh session starts:** Step 0. Re-read this STATUS table first — do not re-derive or re-plan. Every row stays `⬜ open` until its verification gate passes and the evidence cell names an artifact a reader can open.
 
@@ -107,7 +107,7 @@ Worktree base for this plan: `ae490d6d` (`origin/main` as of 2026-10-12).
 | `tools/reviewer_events.py` | Exists. Reviewer event log writer/reader. |
 | `~/.local/state/ai-devops/reviewer-events/events.jsonl` | Live reviewer dispatch/outcome log on installed machines. |
 | `bin/ai-jev-review-waste*` (any caller) | **Does not exist.** To be added under Step 2/3/4. |
-| Transcript archive | Local, outside the repo. See §12. Owner ruled 2026-10-12: **redacted, no longer private** for the purpose of sending to TypeSafe. Raw files still must never be committed here. |
+| Transcript archive | Local, outside the repo. See §12. `tools/jev_review_waste_sample.py` reads it from the `AI_JEV_ARCHIVE_DIR` environment variable (a directory; `~` is expanded); the path is never committed. Owner ruled 2026-10-12: **redacted, no longer private** for the purpose of sending to TypeSafe. Raw files still must never be committed here. |
 | Shared-db allocator / roster | Untouched. |
 
 Nothing in this plan is half-written in this repository. The STATUS table above is the only progress record.
