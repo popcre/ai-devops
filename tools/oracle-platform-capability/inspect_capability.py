@@ -3,7 +3,7 @@
 Discovery and qualification need different exact reviewed contracts/one-use
 claims. No live use is performed by preparation/tests.
 """
-import http.client,socket
+import http.client,socket,ipaddress
 from urllib.parse import urlsplit
 import argparse,base64,hashlib,importlib.util,json,os,re,resource,stat,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
@@ -64,12 +64,14 @@ def lifetime(c,remaining=0):
 IDENTITY='{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Config.Image}},"image_id":{{json .Image}},"state":{{json .State.Status}}}'
 INVENTORY='{"id":{{json .ID}},"image":{{json .Image}},"name":{{json .Names}},"state":{{json .State}}}'
 BASE={'schema','mode','application','api','platform_source','host','user','port','known_hosts_sha256','issued_at','expires_at','installed_gate','tailnet','claim_id','operator_sha256','remote_sha256','transport_helper_sha256'}
-FIXED={'schema':'oracle-platform-capability/v4','application':'vhmcdkdk23dgvjvcvhyhcjzd','platform_source':SOURCE_PLATFORM,'user':'ai','port':22}
+FIXED={'schema':'oracle-platform-capability/v5','application':'vhmcdkdk23dgvjvcvhyhcjzd','platform_source':SOURCE_PLATFORM,'user':'ai','port':22}
 
 class ReviewedContract(dict):pass
 
 def load_contract(path,seal):
-    raw=bounded_file(path,8192);require(re.fullmatch('[a-f0-9]{64}',seal) and hashlib.sha256(raw).hexdigest()==seal,'contract mismatch')
+    if isinstance(path,HeldInput):path.check();raw=path.raw
+    else:raw=bounded_file(path,8192)
+    require(re.fullmatch('[a-f0-9]{64}',seal) and hashlib.sha256(raw).hexdigest()==seal,'contract mismatch')
     c=ReviewedContract(json.loads(raw,object_pairs_hook=unique_metadata));extra={'helper_id','helper_name','helper_image','helper_image_id'} if c.get('mode')=='qualify' else set()
     require(set(c)==BASE|extra and all(c[k]==v for k,v in FIXED.items()),'closed contract mismatch')
     require(c['mode'] in {'discover','qualify'} and type(c['expires_at']) is int and type(c['claim_id']) is str and re.fullmatch('[a-z0-9-]{1,64}',c['claim_id']),'contract metadata invalid')
@@ -82,6 +84,7 @@ def load_contract(path,seal):
         require(re.fullmatch('[a-f0-9]{64}',c[key]) and hashlib.sha256(source).hexdigest()==c[key],'reviewed source changed')
         if key=='remote_sha256':c.remote_source=source
     target_contract(c);lifetime(c);tailnet_contract(c)
+    if isinstance(path,HeldInput):path.check()
     return c
 
 def remote_command(c,source):
@@ -92,7 +95,7 @@ def remote_command(c,source):
 
 def read_remote(contract,known_hosts,password,source):
     target_contract(contract);tailnet_contract(contract);lifetime(contract,60)
-    hosts=bounded_file(known_hosts,8192);require(hashlib.sha256(hosts).hexdigest()==contract['known_hosts_sha256'],'known hosts changed')
+    require(isinstance(known_hosts,HeldInput),'held known-host custody required');known_hosts.check();hosts=known_hosts.raw;require(hashlib.sha256(hosts).hexdigest()==contract['known_hosts_sha256'],'known hosts changed')
     require(type(password) is str and password and len(password.encode('utf-8'))<=LIMIT and not any(x in password for x in ('\x00','\n','\r')),'protected credential missing')
     parent=Custody(os.environ.get('TMPDIR',''))
     name='oracle-metadata-'+os.urandom(12).hex();directory=None
@@ -118,9 +121,9 @@ def read_remote(contract,known_hosts,password,source):
         def bound_file():resource.setrlimit(resource.RLIMIT_FSIZE,(LIMIT,LIMIT))
         # Anonymous output descriptors never follow mutable named parents.
         with tempfile.TemporaryFile(dir=anchor) as output,tempfile.TemporaryFile(dir=anchor) as error:
-            directory.recheck();parent.recheck();lifetime(contract,60)
+            known_hosts.check();directory.recheck();parent.recheck();lifetime(contract,60)
             result=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=output,stderr=error,timeout=55,env=child,start_new_session=True,preexec_fn=bound_file)
-            directory.recheck();parent.recheck();lifetime(contract)
+            known_hosts.check();directory.recheck();parent.recheck();lifetime(contract)
             if result.returncode:
                 error.seek(0);raise ValueError(transport_failure(result.returncode,error.read(4097)))
             output.seek(0);return output.read(LIMIT+1)
@@ -137,7 +140,7 @@ def read_remote(contract,known_hosts,password,source):
 SOCKET='/run/tailscale/tailscaled.sock'
 PEER_FIELDS=frozenset(('node_id', 'node_name', 'addresses', 'node_key_sha256', 'tags', 'route_device', 'route_table', 'route_source'))
 PEER_SHA256='c7f6ec888e90f1743d7a466e3af0a021af0b71da509369c20a4118523a117d45'
-OS_FILES={'tailscale':('/usr/bin/tailscale','/var/lib/dpkg/info/tailscale.md5sums'),'ip':('/usr/bin/ip','/var/lib/dpkg/info/iproute2.md5sums')}
+OS_FILES={'tailscale':('/usr/bin/tailscale','/var/lib/dpkg/info/tailscale.md5sums'),'ip':('/usr/bin/ip','/var/lib/dpkg/info/iproute2.md5sums'),'git':('/usr/bin/git','/var/lib/dpkg/info/git.md5sums')}
 def root_ancestry(path,socket_leaf=False):
     parts=Path(path).parts;fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     try:
@@ -153,7 +156,7 @@ def os_identity(kind,pins):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     with os.fdopen(fd,'rb') as code:
         before=os.fstat(code.fileno());require(before.st_size<=64*1024**2 and before.st_mode&0o111,'bounded executable required')
-        raw=code.read(64*1024**2+1);require(len(raw)==before.st_size and os.fstat(code.fileno())==before,'OS executable moved')
+        raw=code.read(64*1024**2+1);require(len(raw)==before.st_size and file_identity(os.fstat(code.fileno()))==file_identity(before),'OS executable moved')
     require(hashlib.sha256(raw).hexdigest()==pins['binary_sha256'],'reviewed OS executable differs')
     metadata=bounded_file(origin,1024*1024);require(hashlib.sha256(metadata).hexdigest()==pins['package_manifest_sha256'],'root package origin moved')
     rows=[x.split() for x in metadata.decode('ascii').splitlines()]
@@ -167,13 +170,14 @@ def target_contract(c):
     require(type(value['api']) is str and type(value['host']) is str and re.fullmatch('[a-z0-9.-]{1,253}',value['host']) and value['user']=='ai' and type(value['port']) is int and value['port']==22,'target metadata schema differs')
     parsed=urlsplit(value['api'])
     require(parsed.scheme=='http' and parsed.hostname and parsed.port==8000 and parsed.path=='/api/v1/version' and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment,'fixed version resource required')
+    require(type(parsed.hostname) is str and str(ipaddress.IPv4Address(parsed.hostname))==parsed.hostname and value['api']=='http://'+parsed.hostname+':8000/api/v1/version','canonical fixed IPv4 version resource required')
     return parsed
 
 def tailnet_contract(c):
     target_contract(c)
     value=c['tailnet'];require(type(value) is dict and set(value)==PEER_FIELDS|{'os_cli'},'closed peer/route schema required')
     require(canonical_commitment('oracle-platform-peer-route/v4',{k:value[k] for k in PEER_FIELDS})==PEER_SHA256,'independently reviewed fixed peer/route binding required')
-    require(type(value['os_cli']) is dict and set(value['os_cli'])=={'tailscale','ip'},'fixed OS CLI closure required')
+    require(type(value['os_cli']) is dict and set(value['os_cli'])==set(OS_FILES),'fixed OS CLI closure required')
     for pins in value['os_cli'].values():require(type(pins) is dict and set(pins)=={'binary_sha256','package_manifest_sha256'} and all(isinstance(h,str) and re.fullmatch('[a-f0-9]{64}',h) for h in pins.values()),'exact reviewed OS origin pins required')
     return value
 
@@ -315,9 +319,12 @@ def installed_gate(c):
         info=os.lstat(launcher);require(stat.S_ISLNK(info.st_mode) and info.st_uid==0 and os.readlink(launcher)==source,'managed launcher moved')
         require(hashlib.sha256(bounded_file(source,1024*1024)).hexdigest()==digest,'managed source hash differs')
     require(hashlib.sha256(bounded_file(GATE_SOURCE,1024*1024)).hexdigest()==pins['launcher_sha256'],'installed gate source changed')
+    os_identity('git',c['tailnet']['os_cli']['git'])
     head=subprocess.run(['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C','/home/ahazan/repos/ai-devops','rev-parse','HEAD'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
+    os_identity('git',c['tailnet']['os_cli']['git'])
     require(head.returncode==0 and head.stdout.decode('ascii').strip()==pins['source_head'],'installed checkout not current')
     status=subprocess.run(['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C','/home/ahazan/repos/ai-devops','status','--porcelain','--untracked-files=no'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
+    os_identity('git',c['tailnet']['os_cli']['git'])
     require(status.returncode==0 and not status.stdout,'installed tracked source moved')
     return pins
 
@@ -364,19 +371,63 @@ class HeldReport:
         if self.fd is not None:os.close(self.fd);self.fd=None
         self.parent.close()
 
-def gate_and_claim(c,contract_sha,report,custody):
+def outside_git(path):
+    raw=str(path)
+    require(raw.startswith('/') and all(p not in ('','.','..','.git') for p in raw.split('/')[1:]),'canonical outside-Git contract required')
+    fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in Path(raw).parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=child
+            try:os.stat('.git',dir_fd=fd,follow_symlinks=False)
+            except FileNotFoundError:pass
+            else:raise ValueError('Git ancestry refused')
+            # A bare repository has no .git child. Metadata only; never read it.
+            try:
+                head=os.stat('HEAD',dir_fd=fd,follow_symlinks=False)
+                objects=os.stat('objects',dir_fd=fd,follow_symlinks=False)
+                refs=os.stat('refs',dir_fd=fd,follow_symlinks=False)
+            except FileNotFoundError:pass
+            else:
+                require(not((stat.S_ISREG(head.st_mode) or stat.S_ISLNK(head.st_mode)) and stat.S_ISDIR(objects.st_mode) and stat.S_ISDIR(refs.st_mode)),'bare Git ancestry refused')
+    finally:os.close(fd)
+
+class HeldInput:
+    """Hold outside-Git private input, anchored leaf and immutable parent until close."""
+    def __init__(self,path,maximum,exact_size=None):
+        self.path=Path(path);outside_git(path);self.ancestry=report_ancestry(self.path.parent)
+        self.parent=Custody(self.path.parent);self.fd=None
+        try:
+            self.parent_info=file_identity(os.fstat(self.parent.fd))
+            self.fd=os.open(self.path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=self.parent.fd)
+            self.info=os.fstat(self.fd)
+            require(stat.S_ISREG(self.info.st_mode) and self.info.st_uid==os.getuid() and stat.S_IMODE(self.info.st_mode)==0o600 and self.info.st_nlink==1 and 0<self.info.st_size<=maximum and (exact_size is None or self.info.st_size==exact_size),'protected input leaf required')
+            self.check();self.raw=b''
+            while len(self.raw)<self.info.st_size:
+                part=os.read(self.fd,min(65536,self.info.st_size-len(self.raw)));require(bool(part),'protected input truncated');self.raw+=part
+            require(os.read(self.fd,1)==b'','protected input grew');self.check()
+            self.anchor='/proc/'+str(os.getpid())+'/fd/'+str(self.parent.fd)+'/'+self.path.name
+        except Exception:
+            self.close();raise
+    def check(self):
+        outside_git(self.path);require(report_ancestry(self.path.parent)==self.ancestry,'input ancestry moved');self.parent.recheck()
+        require(file_identity(os.fstat(self.parent.fd))==self.parent_info and file_identity(os.fstat(self.fd))==file_identity(self.info) and file_identity(os.stat(self.path.name,dir_fd=self.parent.fd,follow_symlinks=False))==file_identity(self.info),'protected input moved')
+    def close(self):
+        if self.fd is not None:os.close(self.fd);self.fd=None
+        self.parent.close()
+
+def gate_and_claim(c,contract_sha,report,custody,input_checks=()):
     target_contract(c);tailnet_contract(c);lifetime(c,120);directory=custody if isinstance(custody,Custody) else Custody(custody)
     owned=not isinstance(custody,Custody)
     try:
         directory.recheck();held=HeldReport(report)
         try:
-            held.check();installed_gate(c);held.check()
+            held.check();[check() for check in input_checks];installed_gate(c);held.check();[check() for check in input_checks]
             gate=subprocess.run([GATE,'check','--before','production','--reviewer-approval',held.anchor],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
-            held.check();require(gate.returncode==0,'production lifecycle refused')
-            installed_gate(c);held.check();directory.recheck();lifetime(c,90);verify_tailnet(c);held.check()
+            held.check();[check() for check in input_checks];require(gate.returncode==0,'production lifecycle refused')
+            installed_gate(c);held.check();[check() for check in input_checks];directory.recheck();lifetime(c,90);verify_tailnet(c);held.check();[check() for check in input_checks]
             name=c['claim_id']+'.claim.json'
             directory.create(name,json.dumps({'contract_sha256':contract_sha,'review_report_sha256':held.sha256,'mode':c['mode'],'issued_at':c['issued_at'],'expires_at':c['expires_at'],'claimed_at':int(time.time()),'spent':True}).encode())
-            held.check()
+            held.check();[check() for check in input_checks]
             return Path(directory.path)/name
         finally:held.close()
     finally:
@@ -389,20 +440,25 @@ def main():
     # through its serialized protected op_run; values never enter argv/receipts.
     global _PASSWORD,_TOKEN
     password,token=_PASSWORD,_TOKEN;_PASSWORD=_TOKEN=None
-    custody=None
+    custody=None;contract_input=None;host_input=None
     try:
-        c=load_contract(args.contract,args.contract_sha256)
         protected_tmp=Custody(os.environ.get('TMPDIR',''));protected_tmp.close()
-        require(hashlib.sha256(bounded_file(args.known_hosts,8192)).hexdigest()==c['known_hosts_sha256'],'known host changed')
+        contract_input=HeldInput(args.contract,8192)
+        c=load_contract(contract_input,args.contract_sha256);contract_input.check()
+        host_input=HeldInput(args.known_hosts,142,exact_size=142)
+        require(hashlib.sha256(host_input.raw).hexdigest()==c['known_hosts_sha256'],'known host changed');host_input.check();contract_input.check()
         source=c.remote_source
         require(isinstance(token,str) and re.fullmatch(r'[!-~]{1,8192}',token,flags=re.ASCII) and isinstance(password,str) and password and len(password.encode())<=LIMIT and not any(x in password for x in ('\x00','\n','\r')),'credential presence/shape refused before claim')
         lifetime(c,120)
         custody=Custody(args.custody)
-        gate_and_claim(c,args.contract_sha256,args.reviewer_approval,custody)
+        gate_and_claim(c,args.contract_sha256,args.reviewer_approval,custody,(contract_input.check,host_input.check))
+        contract_input.check();host_input.check()
         actual_version,peer_state=version(token,c);del token
+        contract_input.check();host_input.check()
         require(c['mode']=='discover' or actual_version=='4.4.6','unqualified installed platform version')
         lifetime(c,60)
-        raw=read_remote(c,args.known_hosts,password,source);del password
+        raw=read_remote(c,host_input,password,source);del password
+        contract_input.check();host_input.check()
         result=validate(raw,c);result.update(platform_version=actual_version,contract_sha256=args.contract_sha256,tailnet_runtime_checks=peer_state)
         lifetime(c);custody.create(c['claim_id']+'.receipt.json',json.dumps(result,sort_keys=True).encode())
         print('bounded platform metadata receipt retained; no launch admitted')
@@ -411,5 +467,7 @@ def main():
     finally:
         password=token=None
         if custody is not None:custody.close()
+        if host_input is not None:host_input.close()
+        if contract_input is not None:contract_input.close()
     return 0
 if __name__=='__main__':raise SystemExit(main())

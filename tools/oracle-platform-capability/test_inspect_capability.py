@@ -194,7 +194,7 @@ def test_remote_long_lifetime_no_commands():
 
 
 def test_anchored_ssh_askpass_public_bytes_and_no_credential_env(tmp_path):
-    tmp_path.chmod(0o700);hosts=tmp_path/'hosts';hosts.write_bytes(b'INVENTED HOST KEY\n');c=contract();c['known_hosts_sha256']=hashlib.sha256(hosts.read_bytes()).hexdigest();source=(ROOT/'remote.py').read_bytes();calls=[]
+    tmp_path.chmod(0o700);inputdir=tmp_path/'input';inputdir.mkdir(mode=0o700);hosts=inputdir/'hosts';hosts.write_bytes(b'INVENTED HOST KEY\n'.ljust(142,b' '));hosts.chmod(0o600);c=contract();c['known_hosts_sha256']=hashlib.sha256(hosts.read_bytes()).hexdigest();source=(ROOT/'remote.py').read_bytes();calls=[]
     original=subprocess.run
     def fake(argv,**kw):
         calls.append((argv,kw));assert argv[0]=='/usr/bin/ssh' and argv[-1].startswith('/usr/bin/python3 -c ')
@@ -203,8 +203,10 @@ def test_anchored_ssh_askpass_public_bytes_and_no_credential_env(tmp_path):
         assert result.returncode==0 and result.stdout==b'INVENTED PASSWORD'
         kw['stdout'].write(b'{}');return type('R',(),{'returncode':0})()
     with patch.dict(os.environ,{'TMPDIR':str(tmp_path)}),patch.object(m.subprocess,'run',fake):
-        assert m.read_remote(c,hosts,'INVENTED PASSWORD',source)==b'{}'
-    assert calls and sorted(x.name for x in tmp_path.iterdir())==['hosts']
+        held=m.HeldInput(hosts,142,exact_size=142)
+        try:assert m.read_remote(c,held,'INVENTED PASSWORD',source)==b'{}'
+        finally:held.close()
+    assert calls and sorted(x.name for x in tmp_path.iterdir())==['input']
 
 
 def test_installed_gate_manifest_source_identity(tmp_path):
@@ -226,11 +228,17 @@ def test_installed_gate_manifest_source_identity(tmp_path):
         if __import__('stat').S_ISDIR(info.st_mode):
             values=list(info);values[0]&=~0o022;values[4]=0;return os.stat_result(values)
         return info
-    seen=[]
+    seen=[];gitchecks=[]
+    def checked_git(kind,pins):gitchecks.append((kind,pins))
     def fake(argv,**kw):
         seen.append((argv,kw));return SimpleNamespace(returncode=0,stdout=(head+'\n').encode() if argv[-1]=='HEAD' else b'')
-    with patch.object(m,'GATE',str(launcher)),patch.object(m,'GATE_SOURCE',str(source)),patch.object(m,'MANIFEST',str(manifest)),patch.object(m.os,'lstat',root_fixture),patch.object(m.os,'fstat',owned_ancestry),patch.object(m.subprocess,'run',fake):
-        m.installed_gate(c);assert len(seen)==2 and all(x[1]['env']['HOME']=='/home/ahazan' for x in seen)
+    with patch.object(m,'GATE',str(launcher)),patch.object(m,'GATE_SOURCE',str(source)),patch.object(m,'MANIFEST',str(manifest)),patch.object(m.os,'lstat',root_fixture),patch.object(m.os,'fstat',owned_ancestry),patch.object(m.subprocess,'run',fake),patch.object(m,'os_identity',checked_git):
+        m.installed_gate(c);assert len(gitchecks)==3 and all(kind=='git' and pins==c['tailnet']['os_cli']['git'] for kind,pins in gitchecks)
+        assert len(seen)==2 and all(x[1]['env']['HOME']=='/home/ahazan' for x in seen)
+        seen.clear()
+        with patch.object(m,'os_identity',side_effect=ValueError('reviewed OS executable differs')):
+            with pytest.raises(ValueError,match='executable differs'):m.installed_gate(c)
+        assert seen==[]
         source.write_bytes(b'MOVED PUBLIC SOURCE')
         with pytest.raises(ValueError,match='managed source hash differs'):m.installed_gate(c)
 
@@ -336,9 +344,9 @@ def test_multiple_exact_tags_preserved_not_subset(invented_peer,monkeypatch):
 
 
 def test_review_templates_pin_current_code_and_stay_unadmitted():
-    for name in ('discovery.contract.template.json','qualification.contract.template.json'):
+    for name in ('discovery.v5.contract.template.json','qualification.v5.contract.template.json'):
         c=json.loads((ROOT/name).read_bytes())
-        assert c['schema']=='oracle-platform-capability/v4' and c['issued_at']==0 and c['expires_at']==0
+        assert c['schema']=='oracle-platform-capability/v5' and c['issued_at']==0 and c['expires_at']==0
         assert c['api'] is None and c['host'] is None and all(v is None for v in c['tailnet'].values())
         assert c['operator_sha256']==hashlib.sha256((ROOT/'inspect_capability.py').read_bytes()).hexdigest()
         assert c['remote_sha256']==hashlib.sha256((ROOT/'remote.py').read_bytes()).hexdigest()
@@ -642,3 +650,113 @@ def test_report_untrusted_intermediate_ancestry_denies_before_gate(tmp_path,monk
         monkeypatch.setattr(m.os,'fstat',untrusted)
     with patch.object(m.subprocess,'run',side_effect=AssertionError('gate ran')),patch.object(m.os,'read',side_effect=AssertionError('report content read')):
         with pytest.raises(ValueError):m.HeldReport(report)
+
+
+@pytest.mark.parametrize('damage',['parentrename','parentsymlink','leafreplace','leafsymlink','leafmode','hardlink','git','baregit','bareheadsymlink'])
+def test_v5_held_input_actual_metadata_refusals(tmp_path,damage):
+    tmp_path.chmod(0o700);parent=tmp_path/'private';parent.mkdir(mode=0o700)
+    leaf=parent/'contract';leaf.write_bytes(b'PUBLIC INVENTED CONTRACT');leaf.chmod(0o600)
+    if damage in ('git','baregit','bareheadsymlink'):
+        if damage=='git':(parent/'.git').write_text('PUBLIC GIT MARKER')
+        else:
+            (parent/'objects').mkdir();(parent/'refs').mkdir()
+            if damage=='baregit':(parent/'HEAD').write_text('PUBLIC HEAD')
+            else:(parent/'HEAD').symlink_to(parent/'missing')
+        with pytest.raises(ValueError):m.HeldInput(leaf,8192)
+        return
+    held=m.HeldInput(leaf,8192)
+    try:
+        assert held.raw==b'PUBLIC INVENTED CONTRACT'
+        if damage in ('parentrename','parentsymlink'):
+            moved=tmp_path/'moved';parent.rename(moved)
+            if damage=='parentrename':parent.mkdir(mode=0o700)
+            else:parent.symlink_to(moved,target_is_directory=True)
+        elif damage=='leafreplace':leaf.rename(parent/'original');leaf.write_bytes(b'FOREIGN');leaf.chmod(0o600)
+        elif damage=='leafsymlink':leaf.unlink();leaf.symlink_to(parent/'foreign')
+        elif damage=='leafmode':leaf.chmod(0o644)
+        else:os.link(leaf,parent/'alias')
+        with pytest.raises((ValueError,OSError)):held.check()
+        assert held.raw==b'PUBLIC INVENTED CONTRACT'
+    finally:held.close()
+
+@pytest.mark.parametrize('mode',[0o644,0o400,0o660])
+def test_v5_private_input_requires_exact_600_before_read(tmp_path,mode):
+    tmp_path.chmod(0o700);leaf=tmp_path/'private';leaf.write_bytes(b'PUBLIC');leaf.chmod(mode)
+    with patch.object(m.os,'read',side_effect=AssertionError('unprotected content read')):
+        with pytest.raises(ValueError):m.HeldInput(leaf,8192)
+
+@pytest.mark.parametrize('hostname',['--help','foreign.invalid','127.000.0.1','2130706433','0x7f000001','127.0.0.1%flag','[::1]'])
+def test_v5_api_requires_normal_ipv4_before_any_cli(hostname,monkeypatch):
+    c=contract();c['api']='http://'+hostname+':8000/api/v1/version'
+    monkeypatch.setattr(m,'TARGET_SHA256',m.canonical_commitment('oracle-platform-target/v4',{k:c[k] for k in TEST_TARGET}))
+    with patch.object(m.subprocess,'run',side_effect=AssertionError('CLI on malformed address')):
+        with pytest.raises(ValueError):m.target_contract(c)
+
+@pytest.mark.parametrize('role',['tailscale','ip','git'])
+def test_v5_os_closure_missing_pin_denies_before_children(role):
+    c=contract();del c['tailnet']['os_cli'][role]
+    with patch.object(m.subprocess,'run',side_effect=AssertionError('CLI without complete reviewed closure')):
+        with pytest.raises(ValueError):m.verify_tailnet(c)
+
+
+def test_v5_git_package_binary_mismatch_before_git_child(tmp_path,monkeypatch):
+    import hashlib
+    code=tmp_path/'git';code.write_bytes(b'PUBLIC INVENTED GIT');code.chmod(0o700)
+    origin=tmp_path/'git.md5sums';origin.write_text(hashlib.md5(code.read_bytes()).hexdigest()+'  '+str(code)[1:]+'\n')
+    monkeypatch.setitem(m.OS_FILES,'git',(str(code),str(origin)))
+    monkeypatch.setattr(m,'root_ancestry',lambda *a:None)
+    with patch.object(m.subprocess,'run',side_effect=AssertionError('unverified git executed')):
+        with pytest.raises(ValueError,match='executable differs'):m.os_identity('git',{'binary_sha256':'0'*64,'package_manifest_sha256':hashlib.sha256(origin.read_bytes()).hexdigest()})
+        with pytest.raises(ValueError,match='package origin moved'):m.os_identity('git',{'binary_sha256':hashlib.sha256(code.read_bytes()).hexdigest(),'package_manifest_sha256':'0'*64})
+
+
+def test_v5_execution_contract_and_host_swap_gate_zero_claim(tmp_path,monkeypatch):
+    import sys
+    tmp_path.chmod(0o700);inputs=tmp_path/'inputs';inputs.mkdir(mode=0o700)
+    output=tmp_path/'out';output.mkdir(mode=0o700);scratch=tmp_path/'scratch';scratch.mkdir(mode=0o700)
+    hosts=inputs/'known-hosts';hosts.write_bytes(b'PUBLIC INVENTED HOST KEY\n'.ljust(142,b' '));hosts.chmod(0o600)
+    c=contract();c['known_hosts_sha256']=hashlib.sha256(hosts.read_bytes()).hexdigest()
+    leaf=inputs/'contract';raw=json.dumps(c).encode();leaf.write_bytes(raw);leaf.chmod(0o600)
+    report=public_report(tmp_path);seen=[]
+    def gate(argv,**kw):
+        seen.append(argv);leaf.rename(inputs/'old');leaf.write_bytes(raw);leaf.chmod(0o600)
+        return type('R',(),{'returncode':0})()
+    monkeypatch.setenv('TMPDIR',str(scratch));monkeypatch.setattr(m,'_PASSWORD','PUBLIC INVENTED PASSWORD');monkeypatch.setattr(m,'_TOKEN','PUBLIC-INVENTED-TOKEN')
+    monkeypatch.setattr(m,'installed_gate',lambda c:None);monkeypatch.setattr(m,'verify_tailnet',lambda c:None)
+    monkeypatch.setattr(sys,'argv',['reader','--contract',str(leaf),'--contract-sha256',hashlib.sha256(raw).hexdigest(),'--reviewer-approval',str(report),'--known-hosts',str(hosts),'--custody',str(output)])
+    with patch.object(m.subprocess,'run',side_effect=gate),patch.object(m,'version',side_effect=AssertionError('HTTP')),patch.object(m,'read_remote',side_effect=AssertionError('SSH')):
+        assert m.main()==3
+    assert len(seen)==1 and not list(output.iterdir())
+
+
+def test_v5_preserves_old_unadmitted_templates_and_denies_v4(tmp_path):
+    for name in ('discovery.contract.template.json','qualification.contract.template.json'):
+        old=json.loads((ROOT/name).read_bytes());assert old['schema']=='oracle-platform-capability/v4' and old['expires_at']==0
+    c=contract();c['schema']='oracle-platform-capability/v4';raw=json.dumps(c).encode();leaf=tmp_path/'old';leaf.write_bytes(raw)
+    with pytest.raises(ValueError,match='closed contract mismatch'):m.load_contract(leaf,hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize('damage',['write','mode','rename','symlink','hardlink'])
+def test_v5_knownhost_change_during_transport_refuses_received_bytes(tmp_path,monkeypatch,damage):
+    tmp_path.chmod(0o700);inputs=tmp_path/'input';inputs.mkdir(mode=0o700);scratch=tmp_path/'scratch';scratch.mkdir(mode=0o700)
+    hosts=inputs/'known-hosts';hosts.write_bytes(b'PUBLIC INVENTED HOST KEY\n'.ljust(142,b' '));hosts.chmod(0o600)
+    c=contract();c['known_hosts_sha256']=hashlib.sha256(hosts.read_bytes()).hexdigest();held=m.HeldInput(hosts,142,exact_size=142)
+    def ssh(argv,**kw):
+        if damage=='write':hosts.write_bytes(b'FOREIGN'.ljust(142,b' '))
+        elif damage=='mode':hosts.chmod(0o644)
+        elif damage=='rename':inputs.rename(tmp_path/'moved');inputs.mkdir(mode=0o700)
+        elif damage=='symlink':hosts.unlink();hosts.symlink_to(inputs/'foreign')
+        else:os.link(hosts,inputs/'alias')
+        kw['stdout'].write(b'FOREIGN RECEIPT');return type('R',(),{'returncode':0})()
+    monkeypatch.setenv('TMPDIR',str(scratch))
+    try:
+        with patch.object(m.subprocess,'run',side_effect=ssh):
+            with pytest.raises((ValueError,OSError)):m.read_remote(c,held,'PUBLIC INVENTED PASSWORD',(ROOT/'remote.py').read_bytes())
+        assert held.raw.startswith(b'PUBLIC INVENTED HOST KEY')
+    finally:held.close()
+
+@pytest.mark.parametrize('size',[141,143])
+def test_v5_knownhost_exact142_before_byte_read(tmp_path,size):
+    tmp_path.chmod(0o700);hosts=tmp_path/'known-hosts';hosts.write_bytes(b'X'*size);hosts.chmod(0o600)
+    with patch.object(m.os,'read',side_effect=AssertionError('unexpected host bytes read')):
+        with pytest.raises(ValueError):m.HeldInput(hosts,142,exact_size=142)

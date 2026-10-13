@@ -229,3 +229,40 @@ ROOT owns its actual private contract, genuine source/action review and any
 subsequent one-use invocation. If the native reviewer harness cannot consume
 this validated nonprivate projection through an existing supported route, STOP;
 do not commit actual contracts or add a generic evidence/privacy waiver.
+
+
+## Distinct v5 execution custody and system-program closure
+
+ROOT #27/#58 owns this source-only repair of actual-operation review findings
+4, 5 and 6. The existing v4 templates and rejected source/action contracts remain
+historical, unchanged and unconsumed; they are never migrated, renewed or replayed.
+Only the additive `discovery.v5.contract.template.json` and
+`qualification.v5.contract.template.json` correspond to this operator. They remain
+unadmitted: null private topology, zero lifetime, no credential or claim authority.
+Target and peer/route public commitments retain their exact existing meanings.
+
+Projection and execution now share one held input implementation: canonical,
+outside ordinary/linked/bare Git ancestry; owned0700 parent; owned0600 regular
+single-link nofollow/nonblocking leaf; bounded descriptor reads; parent and leaf
+identity/ownership/permissions/link/size/mtime/ctime rechecks. Contract parsing
+uses the original held descriptor bytes, with no mutable-path fallback. The
+approved public known-host file additionally requires exactly142 bytes and its
+reviewed hash, stays held through source claim and SSH transport, and is rechecked
+before accepting output. Hostile movement refuses; a spent partial claim remains.
+The coordinator must place input custody separately from transport/output custody,
+because changing a held input parent's metadata causes a refusal.
+
+The v5 closed OS CLI map contains exactly tailscale, ip and git. Git is fixed to
+`/usr/bin/git` and `/var/lib/dpkg/info/git.md5sums`, checked through existing
+root-owned ancestry, binary SHA, package-manifest SHA and actual MD5 association
+before and after HEAD/status reads. Old v4 two-program records do not satisfy v5.
+The API hostname must be a canonical IPv4 literal, and its complete URL must be
+exactly the existing committed version resource. Flag-like hosts, DNS aliases,
+noncanonical IPv4, userinfo, alternate path/query/fragment and IPv6 refuse before
+OS CLI use. No resource, production write, helper creation or credential scope is
+added. Public corresponding source and tests alone remain nonauthorizing.
+
+Root separately verifies actual protected inputs and genuine exact-action APPROVE
+before credentials. Actual nonsecret operational preimages may enter the protected
+outside-Git reviewer prompt under root custody, never this public repository.
+Nothing here supplies a signer, attestation, authority renewal or hosting proof.
