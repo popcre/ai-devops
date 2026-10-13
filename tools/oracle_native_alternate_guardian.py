@@ -42,19 +42,9 @@ def consume(state_path,state,m,b):
 
 
 def public_runtime(root,expected,maximum):
-    rows=[];total=0
-    for folder,dirs,files in os.walk(root,followlinks=False):
-        dirs.sort()
-        for name in sorted(dirs+files):
-            path=Path(folder)/name;info=path.lstat()
-            profile.require(not path.is_symlink() and info.st_uid==os.getuid() and not info.st_mode&0o022,'immutable runtime custody required')
-            if path.is_file():
-                total+=info.st_size;profile.require(total<=maximum,'runtime byte bound exceeded')
-                with path.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-                rows.append({'path':str(path.relative_to(root)),'bytes':info.st_size,'sha256':digest})
-    profile.require(profile.sha(profile.canonical(rows))==expected,'complete runtime closure changed')
-    return total
-
+    recipe=profile.public_runtime_module().verify_recipe(root)
+    profile.require(recipe['closure_sha256']==expected and recipe['bytes']<=maximum,'complete runtime closure changed')
+    return recipe['bytes']
 
 def sandbox_command(runtime,operator,decoder,captures,output):
     cmd=['/usr/bin/bwrap','--die-with-parent','--new-session','--unshare-all','--clearenv',

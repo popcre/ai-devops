@@ -83,23 +83,11 @@ def descriptor_stat(path,directory=False):
     finally:os.close(fd)
 
 
-def public_bwrap_identity(expected=None):
-    """Read only the fixed root-owned public OS binary, never manifest paths."""
-    fd=os.open('/',os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try:
-        for part in ('usr','bin'):
-            new=os.open(part,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=new
-            info=os.fstat(fd);require(info.st_uid==0 and not info.st_mode&0o022,'public sandbox parent is writable')
-        binary=os.open('bwrap',os.O_RDONLY|os.O_NOFOLLOW,dir_fd=fd)
-        try:
-            before=os.fstat(binary)
-            require(stat.S_ISREG(before.st_mode) and before.st_uid==0 and not before.st_mode&0o022 and before.st_nlink==1,'root-owned immutable sandbox binary required')
-            with os.fdopen(os.dup(binary),'rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-            after=os.fstat(binary);require(all(getattr(before,k)==getattr(after,k) for k in ('st_dev','st_ino','st_uid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')),'public sandbox binary changed')
-            require(expected is None or digest==expected,'public sandbox binary hash differs')
-            return {'public_path':'/usr/bin/bwrap','sha256':digest,'uid':before.st_uid,'mode':stat.S_IMODE(before.st_mode),'provenance':'root-owned-public-OS-binary'}
-        finally:os.close(binary)
-    finally:os.close(fd)
+def public_runtime_module():
+    spec=importlib.util.spec_from_file_location('oracle_public_runtime',ROOT/'tools/oracle_native_alternate_runtime.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+def public_bwrap_identity(expected=None):return public_runtime_module().public_tool_identity('bwrap',expected)
 
 def validate_lock_fd(fd):
     info=os.fstat(fd)
@@ -159,11 +147,13 @@ def validate_manifest(m,now):
     require(type(runtime['bytes']) is int and runtime['bytes']>0 and total+runtime['bytes']<=LIMITS['input_bytes'],'runtime plus inputs exceed bound')
     require(runtime['bwrap']=='/usr/bin/bwrap','only fixed public OS sandbox executable is supported')
     sandbox_identity=public_bwrap_identity(runtime['bwrap_sha256'])
+    recipe=public_runtime_module().verify_recipe(runtime['root'])
+    require(recipe['closure_sha256']==runtime['closure_sha256'] and recipe['bytes']==runtime['bytes'],'actual public runtime differs from descriptor')
     require(re.fullmatch('[a-f0-9]{64}',runtime['closure_sha256']) and re.fullmatch('[a-f0-9]{64}',runtime['bwrap_sha256']),'runtime identity required')
     return {'claimed_input_set_sha256':sha(canonical([{k:v for k,v in c.items() if k!='path'} for c in m['controls']+m['captures']])),
             'capture_stat_sha256':sha(canonical([c['stat'] for c in m['controls']+m['captures']])),
             'capture_count':len(m['captures']),'capture_bytes':total,'capture_byte_hashes_verified':False,
-            'runtime_identity':{'closure_sha256':runtime['closure_sha256'],'bytes':runtime['bytes'],'sandbox_binary':sandbox_identity},'limits':LIMITS,'input_format':'historical-custom-native-pages-v1'}
+            'runtime_identity':{'closure_sha256':runtime['closure_sha256'],'bytes':runtime['bytes'],'sandbox_binary':sandbox_identity,'public_os_origin_set_sha256':recipe['public_os_origin_set_sha256'],'ldd_identity':recipe['ldd_identity']},'limits':LIMITS,'input_format':'historical-custom-native-pages-v1'}
 
 
 def binding(state,m):
@@ -244,6 +234,9 @@ def atomic_receipt(state_path,state,b,m,publish):
         fd,temp=tempfile.mkstemp(dir=Path(state_path).parent,prefix='.oracle-admission-')
         with os.fdopen(fd,'wb') as out:out.write(canonical(current)+b'\n');out.flush();os.fsync(out.fileno())
         os.replace(temp,state_path)
+        parent=os.open(Path(state_path).parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        try:os.fsync(parent)
+        finally:os.close(parent)
         return reg
     finally:os.close(lock)
 

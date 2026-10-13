@@ -1199,7 +1199,7 @@ cmd_check(){
   # helper on central defaults alone.
   if [ "$IDENTITY_RESOLVED" != true ]; then
     case "$action" in
-      deploy|database|infrastructure|production|shared-db-promotion|application-workflow)
+      deploy|database|infrastructure|production|shared-db-promotion|application-workflow|offline-private-capture-transform)
         fail_closed "repository identity is unresolved; refusing to start '$action'." ;;
     esac
   fi

@@ -70,8 +70,8 @@ seconds or registration movement/revocation.
 The public OS/stdlib runtime preparer creates a **NONAUTHORIZING** recipe from
 root-owned system package bytes only. It reads no capture, installs nothing and
 creates no permission. Preaction checks its complete allowed file inventory and
-actual public origins, never candidate capture bytes. Actual runtime bytes are
-verified only after action consumption. No model assets/site-packages/private
+actual public origins and every staged PUBLIC runtime byte before approval/
+consumption; retained capture/control/original bytes are not read by this check. No model assets/site-packages/private
 home or arbitrary callback are mounted. Namespace failures stop; no privileged
 fallback or weakened limit exists.
 
@@ -117,3 +117,27 @@ Only captured native_text_region/table_cell source_text is concatenated verbatim
 The manifest cannot select an executable. Only /usr/bin/bwrap is supported, with nofollow traversal, root-owned nonwritable parents, a root-owned regular unaliased binary and its actual public OS SHA. The sanitized independent review evidence includes that fixed public identity, runtime closure hash/bytes, exact input format and all resource bounds; it exposes no capture paths or text. Namespace confinement remains a real platform gate, not a claimed approval.
 
 Every additional Oracle review attachment has the same complete canonical-realpath check as existing attachments. Receipt locks require current ownership,0600 and one link. The persisted task override must match the entire provider/implementer/run/mode/head/report/action summary and private-tooling class; matching a report-hash substring grants nothing. Native gate admission must return the same preapproval summary and pass persistence readback before and after publication. After the durable one-use claim, every opened input descriptor must retain its full device/inode/uid/mode/size/mtime/ctime and one link. Runtime staging directories explicitly use0700 even under permissive umask. The OS owner/root remains a trusted custody boundary; a worker namespace alone is defense, not registration or replay protection.
+
+## Independent PUBLIC runtime verification before any private action
+
+Preapproval may read staged PUBLIC runtime files and live public OS origins. This
+is distinct from retained capture/original/control inputs, which stay unopened
+until genuine one-use action consumption. The complete Python/stdlib/library
+source set is independently derived from the live root-owned nonwritable OS,
+not selected by the recipe or a caller hash. Every staged file must match that
+live origin's actual length/hash, and every placeholder is fixed empty. An
+operator-recomputed closure cannot admit a trojan stdlib or substitute origins.
+
+Traversal uses anchored nofollow directory/file descriptors, complete stat
+checks and regular unaliased nodes only. Symlinks, FIFOs, sockets, devices,
+unknown files and extra directories refuse before claim/private opens. The fixed
+root-owned /usr/bin/ldd is hash-verified before each bounded clean-environment
+execution; arbitrary tools/substitutions refuse. Sanitized evidence binds the
+live OS origin-set hash, ldd identity and actual runtime closure. Unknown
+repository identity refuses this action explicitly; admission-file publication
+fsyncs its parent directory. Existing spent marker collisions still deny and
+preserve the old marker; there is no retry, renewal or replacement.
+
+The exact already-public producer document/pin remains immutable. Its public
+path is not reclassified as a secret, and generic/private Markdown remains
+refused. Mutable private artifacts are never scrubbed/promoted into review code.

@@ -23,6 +23,12 @@ guardian=importlib.util.module_from_spec(spec);spec.loader.exec_module(guardian)
 
 
 class OracleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.public_temp=tempfile.TemporaryDirectory();parent=Path(cls.public_temp.name);parent.chmod(0o700)
+        cls.public_root=parent/'runtime';cls.public_receipt=profile.public_runtime_module().prepare(cls.public_root)
+    @classmethod
+    def tearDownClass(cls):cls.public_temp.cleanup()
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.root.chmod(0o700)
         self.now=int(time.time());self.capture=self.root/'capture';self.capture.write_bytes(b'INVENTED ONLY');self.capture.chmod(0o600)
@@ -33,7 +39,7 @@ class OracleTests(unittest.TestCase):
             permission_custody=dict(current_contract_metadata_sha256='a'*64,historical_capture_sha256='b'*64,current_owner='Albert Hazan',
                 requires_external_registrar=False,external_registration_sha256=None,observed_at=self.now,expires_at=self.now+600),
             captures=[item(self.capture)],controls=[],census=copy.deepcopy(profile.CENSUS),output_parent={'path':str(self.root),'stat':profile.descriptor_stat(str(self.root),True)},
-            output_leaf='new-alternate',runtime={'root':str(self.root/'public-runtime'),'closure_sha256':'c'*64,'bytes':1,'bwrap':'/usr/bin/bwrap','bwrap_sha256':profile.public_bwrap_identity()['sha256']},limits=copy.deepcopy(profile.LIMITS))
+            output_leaf='new-alternate',runtime={'root':str(self.public_root),'closure_sha256':self.public_receipt['closure_sha256'],'bytes':self.public_receipt['bytes'],'bwrap':'/usr/bin/bwrap','bwrap_sha256':profile.public_bwrap_identity()['sha256']},limits=copy.deepcopy(profile.LIMITS))
         self.manifest['captures']=[]
         for index in range(33):
             path=self.root/('capture'+str(index));path.write_bytes(b'INVENTED ONLY '+str(index).encode());path.chmod(0o600)
@@ -194,7 +200,7 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(opened,[])
         self.assertEqual(guardian.sandbox_command(m['runtime'],'a','b',[],'c')[0],'/usr/bin/bwrap')
         m['runtime']['bwrap']='/usr/bin/bwrap';m['runtime']['bwrap_sha256']='0'*64
-        with self.assertRaisesRegex(ValueError,'hash differs'):profile.validate_manifest(m,self.now)
+        with self.assertRaisesRegex(ValueError,'public executable changed'):profile.validate_manifest(m,self.now)
 
     def test_existing_lock_must_be_owned_private_regular_and_unaliased(self):
         from types import SimpleNamespace
@@ -276,6 +282,71 @@ exercise(){
             result=subprocess.run(['bash','-c',script],env={**os.environ,'FIXTURE_STATE':str(state),'FIXTURE_REPO':str(ROOT),'DAMAGE':damage},capture_output=True)
             self.assertEqual(result.returncode,77,result.stderr)
             self.assertFalse(list(self.root.glob('*.spent')))
+
+
+    def clone_public_runtime(self):
+        import shutil
+        root=self.root/'staged-public';shutil.copytree(self.public_root,root)
+        receipt=copy.deepcopy(self.public_receipt);receipt['root']=str(root)
+        path=Path(str(root)+'.public-runtime.json');path.write_text(json.dumps(receipt));path.chmod(0o600)
+        return root,receipt,path
+
+    def test_trojan_staged_stdlib_self_claimed_closure_denies_before_claim(self):
+        runtime=profile.public_runtime_module();root,receipt,path=self.clone_public_runtime()
+        target=next(rel for rel in receipt['origins'] if rel.endswith('.py'))
+        (root/target).write_bytes(b'# invented trojan staged stdlib\n')
+        rows,total=runtime.staged_rows(root);receipt.update(closure_sha256=runtime.seal(runtime.canonical(rows)),bytes=total);path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError,'differ from live OS'):runtime.verify_recipe(root)
+        self.assertFalse(list(self.root.glob('*.spent')))
+
+    def test_staged_symlink_fifo_socket_and_device_denies_without_private_open(self):
+        import socket,stat
+        from types import SimpleNamespace
+        runtime=profile.public_runtime_module();root,receipt,path=self.clone_public_runtime()
+        rel=next(rel for rel in receipt['origins'] if rel.endswith('.py'));target=root/rel;original=target.read_bytes()
+        private_opens=[];real_open=os.open
+        def checked(name,flags,*args,**kwargs):
+            if str(name)==str(self.capture) and not flags&os.O_PATH:private_opens.append(str(name))
+            return real_open(name,flags,*args,**kwargs)
+        target.unlink();target.symlink_to(self.capture)
+        with mock.patch.object(os,'open',side_effect=checked):
+            with self.assertRaises(ValueError):runtime.verify_recipe(root)
+        self.assertEqual(private_opens,[]);target.unlink();os.mkfifo(target,0o600)
+        with self.assertRaises(ValueError):runtime.verify_recipe(root)
+        target.unlink();sock=socket.socket(socket.AF_UNIX)
+        try:
+            sock.bind(str(target));target.chmod(0o600)
+            with self.assertRaises(ValueError):runtime.verify_recipe(root)
+        finally:sock.close();target.unlink()
+        target.write_bytes(original);target.chmod(0o644)
+        real_stat=os.stat
+        def special(name,*args,**kwargs):
+            info=real_stat(name,*args,**kwargs)
+            if str(name)==target.name:
+                fields={key:getattr(info,key) for key in ('st_uid','st_mode','st_nlink')};fields['st_mode']=stat.S_IFCHR|0o644
+                return SimpleNamespace(**fields)
+            return info
+        with mock.patch.object(os,'stat',side_effect=special):
+            with self.assertRaises(ValueError):runtime.staged_rows(root)
+        self.assertFalse(list(self.root.glob('*.spent')))
+
+    def test_staged_inventory_and_origin_substitution_cannot_admit(self):
+        runtime=profile.public_runtime_module();root,receipt,path=self.clone_public_runtime()
+        (root/'unexpected-empty').mkdir(mode=0o700)
+        with self.assertRaisesRegex(ValueError,'unapproved runtime directory'):runtime.verify_recipe(root)
+        (root/'unexpected-empty').rmdir()
+        rel=next(rel for rel in receipt['origins'] if rel.endswith('.py'))
+        receipt['origins'][rel]['origin']='/usr/bin/python3';path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError,'independently derived'):runtime.verify_recipe(root)
+        self.assertFalse(list(self.root.glob('*.spent')))
+
+    def test_ldd_substitution_denies_before_execution_or_private_opens(self):
+        runtime=profile.public_runtime_module()
+        with self.assertRaises(ValueError):runtime.public_tool_identity('arbitrary-sender')
+        with self.assertRaises(ValueError):runtime.public_tool_identity('ldd','0'*64)
+        with mock.patch.object(runtime,'public_tool_identity',side_effect=ValueError('untrusted ldd identity')),mock.patch.object(runtime.subprocess,'run',side_effect=AssertionError('unverified ldd executed')):
+            with self.assertRaisesRegex(ValueError,'untrusted ldd'):runtime.expected_origins()
+        self.assertFalse(list(self.root.glob('*.spent')))
 
     def test_actual_public_runtime_preparation_is_non_authorizing(self):
         probe = '''import sys,pathlib;sys.path.insert(0,"tools")
