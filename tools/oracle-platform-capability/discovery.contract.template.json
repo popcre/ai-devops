@@ -1,0 +1,16 @@
+{
+  "api": "http://100.66.37.58:8000/api/v1/version",
+  "application": "vhmcdkdk23dgvjvcvhyhcjzd",
+  "claim_id": "unadmitted-discovery",
+  "expires_at": 0,
+  "host": "hetz",
+  "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
+  "mode": "discover",
+  "operator_sha256": "55a765f46748f937ee73accd0bbcf8a346c9dae1111a4c7964a21536d501e331",
+  "platform_source": "f55efc859dfcbbf79274c4907b3df89f9767c11d",
+  "port": 22,
+  "remote_sha256": "7f21fa3440788f9429b1e4ffeb5ee24b1dc1dae2155952ae866907a5c8fb95f6",
+  "schema": "oracle-platform-capability/v1",
+  "transport_helper_sha256": "35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754",
+  "user": "ai"
+}
