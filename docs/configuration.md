@@ -60,17 +60,26 @@ overrides for controlled tests or machine migration. They are not secrets.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `AI_MEMORY_REMOTE` | Canonical private Git remote | `https://github.com/u2giants/ai-devops-memory.git` |
+| `AI_MEMORY_REMOTE` | Canonical private Git remote | SSH (`git@github.com:u2giants/ai-devops-memory.git`) when an SSH key exists, else HTTPS |
 | `AI_MEMORY_HUB` | Isolated private clone | `~/.cache/ai-devops-memory-private` |
 | `AI_MEMORY_LOG` | Append-only status log | `~/.cache/ai-memory-sync.log` |
 | `AI_MEMORY_STAMP` | Last successful round trip, used by `sync-if-stale` | `~/.cache/ai-memory-sync.last-success` |
 | `AI_MEMORY_MAX_AGE_HOURS` | Maximum age before `sync-if-stale` runs a full round trip | `24` |
 | `AI_MEMORY_HEALTH_STATE` | Prior health report used to show the next audit trend | `~/.cache/ai-memory-health.trend` |
+| `AI_MEMORY_CLAUDE_PROJECTS` | Physical `projects` path (set automatically after resolving a Windows junction) | `$CLAUDE_HOME/projects` via `bin/ai-winpath` |
 
 Production runs reject any remote other than the canonical private repository
-and use GitHub's API to prove `private=true` before copying machine memory. Test
-flags are accepted only by the behavioral fixture and must never appear in
-machine configuration.
+and prove it is private before copying machine memory: unauthenticated HTTPS
+must not reach the hub, and the configured remote must. That works over SSH,
+where Git Credential Manager's wincredman store cannot persist and gh OAuth is
+session-isolated. Tests replace the visibility read through `ai-gh`. Test flags
+are accepted only by the behavioral fixture and must never appear in machine
+configuration.
+
+On Windows, `~/.claude/projects` may be a junction to another volume (disk
+housekeeping). Interactive Claude follows it; SSH sessions hit
+`ERROR_UNTRUSTED_MOUNT_POINT`. `bin/ai-winpath` resolves the physical target so
+sync, health, and Python tools see the same memory without a per-run override.
 
 ## Feature flags
 

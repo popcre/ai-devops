@@ -32,14 +32,36 @@ fi
 MACHINE_CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 
 TOOL_ROOT="${AI_MEMORY_TOOL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-REMOTE="${AI_MEMORY_REMOTE:-https://github.com/u2giants/ai-devops-memory.git}"
+# Prefer SSH for the private hub when a key exists. Windows Credential Manager
+# is not available in SSH logons, so HTTPS + Git Credential Manager hangs on a
+# credential prompt (wincredman cannot persist). The same key works in both
+# interactive and SSH sessions. Explicit AI_MEMORY_REMOTE always wins.
+if [[ -n "${AI_MEMORY_REMOTE:-}" ]]; then
+  REMOTE="$AI_MEMORY_REMOTE"
+elif [[ -f "$BASE_HOME/.ssh/id_ed25519" || -f "$BASE_HOME/.ssh/id_rsa" ]]; then
+  REMOTE="git@github.com:u2giants/ai-devops-memory.git"
+else
+  REMOTE="https://github.com/u2giants/ai-devops-memory.git"
+fi
 HUB="${AI_MEMORY_HUB:-$BASE_HOME/.cache/ai-devops-memory-private}"
 LOG="${AI_MEMORY_LOG:-$BASE_HOME/.cache/ai-memory-sync.log}"
 SYNC="$TOOL_ROOT/bin/ai-sync-memory"
 HEALTH="$TOOL_ROOT/bin/ai-memory-health"
+WINPATH="${AI_MEMORY_WINPATH:-$TOOL_ROOT/bin/ai-winpath}"
 HOST="$(hostname)"
 DRY=""
 [[ "$MODE" == "--dry-run" ]] && DRY="--dry-run"
+
+# This tool is automated. Never hang on a credential or askpass prompt.
+export GIT_TERMINAL_PROMPT=0
+export GCM_INTERACTIVE=never
+
+# Interactive Claude uses ~/.claude/projects (a junction is fine there). Over
+# SSH, Windows path APIs refuse the untrusted mount point. Use the physical
+# target so every consumer sees the same memory without a per-run override.
+MACHINE_PROJECTS="$("$WINPATH" "$MACHINE_CLAUDE_HOME/projects" 2>/dev/null || printf '%s\n' "$MACHINE_CLAUDE_HOME/projects")"
+[[ -n "$MACHINE_PROJECTS" ]] || MACHINE_PROJECTS="$MACHINE_CLAUDE_HOME/projects"
+export AI_MEMORY_CLAUDE_PROJECTS="$MACHINE_PROJECTS"
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST" "$*" | tee -a "$LOG"; }
@@ -83,13 +105,26 @@ command -v git >/dev/null 2>&1 || fail "git is unavailable"
 
 # Privacy must be proven, not inferred from a repository name. Tests may replace
 # GitHub with a local bare remote only when both explicit test flags are set.
+# Live runs prove it without the GitHub API: unauthenticated HTTPS must not
+# reach the hub, and the configured remote must. That works over SSH, where gh
+# OAuth is session-isolated or stale and GCM/wincredman cannot persist.
+# Tests keep the shared ai-gh transport path (with a fake visibility read).
 if [[ "${AI_MEMORY_TEST_MODE:-}" == "1" && "${AI_MEMORY_TEST_PRIVATE:-}" == "1" ]]; then
   :
-else
+elif [[ "${AI_MEMORY_TEST_MODE:-}" == "1" ]]; then
   [[ -x "$TOOL_ROOT/bin/ai-gh" ]] || fail "shared GitHub transport is required to verify private visibility"
   private="$(AI_GH_CALLER=ai-memory-sync "$TOOL_ROOT/bin/ai-gh" api repos/u2giants/ai-devops-memory --jq '.private' 2>/dev/null)" ||
     fail "could not verify private hub visibility"
   [[ "$private" == "true" ]] || fail "memory hub is not private"
+else
+  if GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+      git -c credential.helper= -c core.askPass= \
+      ls-remote https://github.com/u2giants/ai-devops-memory.git HEAD >/dev/null 2>&1; then
+    fail "memory hub is publicly readable; refusing to sync"
+  fi
+  GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+    git ls-remote "$REMOTE" HEAD >/dev/null 2>&1 ||
+    fail "could not verify private hub visibility"
 fi
 
 lock="$HUB.lock"
@@ -106,11 +141,19 @@ origin="$(git -C "$HUB" config --get remote.origin.url 2>/dev/null || true)"
 if [[ "${AI_MEMORY_TEST_MODE:-}" != "1" ]]; then
   [[ "$(canonical_remote "$origin")" == "$(canonical_remote "$REMOTE")" ]] ||
     fail "existing hub clone points at the wrong remote"
+  # Same repo, different transport: prefer the configured REMOTE. HTTPS + GCM
+  # cannot persist credentials in SSH logons (wincredman) and hangs; SSH works
+  # in both interactive and SSH sessions when a key exists.
+  if [[ -n "$origin" && "$origin" != "$REMOTE" ]]; then
+    git -C "$HUB" remote set-url origin "$REMOTE" || fail "could not update hub remote"
+    log "hub remote re-pointed at $REMOTE"
+  fi
 fi
 git -C "$HUB" config core.longpaths true || fail "could not enable long paths"
 
 log "fetch private hub"
-git -C "$HUB" fetch -q origin main || fail "fetch failed; no local or hub memory was changed"
+GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+  git -C "$HUB" fetch -q origin main || fail "fetch failed; no local or hub memory was changed"
 
 if [[ -n "$(git -C "$HUB" status --porcelain)" ]]; then
   git -C "$HUB" add -A -- memory || fail "could not stage interrupted recovery state"
@@ -159,7 +202,7 @@ AI_MEMORY_HUB_ROOT="$HUB" bash "$SYNC" pull $DRY || fail "incoming union failed"
 # project into an outgoing empty sync, and do not relax the wrong-home guard for
 # an unrecognized Claude home.
 machine_memory_found=0
-for machine_memory in "$MACHINE_CLAUDE_HOME"/projects/*/memory; do
+for machine_memory in "$MACHINE_PROJECTS"/*/memory; do
   [[ -d "$machine_memory" ]] || continue
   machine_memory_found=1
   break
@@ -213,7 +256,8 @@ git -C "$HUB" -c user.name="ai-memory-sync" \
   -c user.email="ai-memory-sync@users.noreply.github.com" \
   commit -q -m "memory sync from $HOST" || fail "could not commit private memory union"
 commit_sha="$(git -C "$HUB" rev-parse HEAD)"
-if ! git -C "$HUB" push origin HEAD:main; then
+if ! GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+    git -C "$HUB" push origin HEAD:main; then
   fail "push rejected; commit $commit_sha is preserved and no older state was copied"
 fi
 
