@@ -11,7 +11,8 @@ installed. Evidence file content was never printed (metadata/shape only).
 ## Source and approvals
 
 - Install/recovery source: worktree head
-  `b528742e66df6d56629d18bfb705ea5183349c88` (install-inputs doc on top of
+  `b528742e66df6d56629d18bfb705ea5183349c88` ([install-inputs doc](install-inputs.md), also kept as
+  [docs/edge-dev-win-step6-install-inputs.md](../../../docs/edge-dev-win-step6-install-inputs.md), on top of
   `origin/main` `698554f6`). Payload files are byte-identical to
   `origin/main` at install time (two later docs-only commits on main do not
   touch the payload).
@@ -118,3 +119,5 @@ deviation as EDGE-RUNN-ENVY, tracked in #1547). Elevated SSH was used only for
 install / `-RecoverPartial` / `-Verify` / `-Remove` / `-Install`. Invoke and
 every privilege negative ran from the non-elevated local operator token
 (`admin=False`).
+
+Raw command transcripts for this proof: [transcripts.md](transcripts.md).
