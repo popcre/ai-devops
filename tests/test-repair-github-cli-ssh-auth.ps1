@@ -16,6 +16,9 @@ function Write-FakeGh([string]$Path, [string]$Storage, [string]$LoggedIn = "Logg
 
 try {
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
+  $savedGitConfig = $env:GIT_CONFIG_GLOBAL
+  $env:GIT_CONFIG_GLOBAL = Join-Path $tempRoot "gitconfig"
+  Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value "" -Encoding ascii
   $hosts = Join-Path $tempRoot "hosts.yml"
   $fakeGh = Join-Path $tempRoot "gh.cmd"
   $users = ([Security.Principal.SecurityIdentifier]'S-1-5-32-545').Translate([Security.Principal.NTAccount]).Value
@@ -33,7 +36,16 @@ try {
   & $repair -GitHubConfigDir $tempRoot -GhPath $fakeGh
   $others = @((Get-Acl -LiteralPath $hosts).Access | Where-Object { $_.IdentityReference.Value -ieq $users })
   if ($others.Count -ne 0) { throw "Other users can still read hosts.yml." }
-  if ((Get-Content (Join-Path $tempRoot "calls.log") -Raw) -match 'login') { throw "Login ran although storage was already a file." }
+  $calls = Get-Content (Join-Path $tempRoot "calls.log") -Raw
+  if ($calls -match 'login') { throw "Login ran although storage was already a file." }
+  if ($calls -notmatch 'auth setup-git --hostname github.com') { throw "Git was not pointed at the GitHub CLI login." }
+  if (-not (Get-ChildItem -LiteralPath $tempRoot -Filter 'gitconfig.bak-*')) { throw "No .gitconfig backup before setup-git." }
+
+  # 2b. Git already uses gh: setup-git is not run again.
+  & git config --global credential.https://github.com.helper "!gh auth git-credential"
+  Remove-Item -LiteralPath (Join-Path $tempRoot "calls.log")
+  & $repair -GitHubConfigDir $tempRoot -GhPath $fakeGh
+  if ((Get-Content (Join-Path $tempRoot "calls.log") -Raw) -match 'setup-git') { throw "setup-git ran although git already uses gh." }
 
   # 3. Keyring token unreadable (SSH logon): warn, never migrate or fail.
   Remove-Item -LiteralPath (Join-Path $tempRoot "calls.log")
@@ -55,5 +67,6 @@ try {
 
   Write-Host "repair-github-cli-ssh-auth tests passed."
 } finally {
+  $env:GIT_CONFIG_GLOBAL = $savedGitConfig
   Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
