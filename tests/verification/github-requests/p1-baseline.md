@@ -381,7 +381,7 @@ The five deepest:
 
 Across all 101 busy windows: 1,861 observed managed points versus a total
 observed bucket span of 85,831 points. The unattributed residual inside those
-windows is therefore at least 83,971 points. That residual is now bounded from
+windows is therefore at least 83,970 points. That residual is now bounded from
 below and is not zero; its composition (other hosts, unwrapped managed callers,
 external clients) remains unknown. No per-call savings percentage is computed
 from this imbalance.

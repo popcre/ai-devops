@@ -14,7 +14,7 @@ edge-dev3 baseline are frozen in
   for the instrumented types.
 - 1,921 observed GraphQL points, all `ai-pr-wait`/`graphql.pr_status`; 1,823
   linked to a workflow receipt; 0 unattributed quota-window rows.
-- Unknown residual inside busy windows is bounded below at 83,971 points
+- Unknown residual inside busy windows is bounded below at 83,970 points
   (85,831 bucket span minus 1,861 observed). Whole-account HTTP requests and
   GraphQL points remain unknown, never zero.
 - Privacy check: 26,630 rows, 0 violations. Nine fixture rows quarantined with
