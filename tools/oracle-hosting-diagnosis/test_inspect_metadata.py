@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+from uuid import uuid4
 from unittest.mock import patch
 
 HERE=Path(__file__).parent
@@ -170,5 +172,27 @@ class TestInspector(unittest.TestCase):
             with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential','TMPDIR':directory}),patch.object(m.subprocess,'run',fake_run):
                 with self.assertRaisesRegex(ValueError,'^ssh_authentication_refused$'):
                     m.read_remote(contract,hosts)
+
+    def test_real_docker_missing_health_is_metadata_not_template_failure(self):
+        # A new, never-started local invented fixture contains no job/store data.
+        # Record its exact metadata before recoverable fixture cleanup.
+        name='oracle2-synthetic-metadata-'+uuid4().hex
+        image=C['vendor_images']['ledger']
+        created=subprocess.run(['docker','create','--name',name,'--label','oracle.metadata.synthetic=true',
+          '--network','none','--read-only','--cap-drop','ALL','--user','10001:10001',image,'/bin/true'],capture_output=True,text=True)
+        self.assertEqual(created.returncode,0,'owned local formatter fixture required')
+        cid=created.stdout.strip()
+        try:
+            rendered=subprocess.run(['docker','inspect','--format',m.TEMPLATE,cid],capture_output=True,text=True)
+            self.assertEqual(rendered.returncode,0,'Docker absent-health field must render safely')
+            row=json.loads(rendered.stdout)
+            self.assertEqual(row['health'],'absent')
+            self.assertEqual(row['status'],'created')
+            self.assertEqual(row['started_at'],'0001-01-01T00:00:00Z')
+        finally:
+            labels=subprocess.check_output(['docker','inspect','--format','{{json .Config.Labels}}',cid],text=True)
+            self.assertEqual(json.loads(labels)['oracle.metadata.synthetic'],'true')
+            self.assertEqual(subprocess.check_output(['docker','inspect','--format','{{.State.Status}}',cid],text=True).strip(),'created')
+            subprocess.run(['docker','rm','-v',cid],check=True,stdout=subprocess.DEVNULL)
 
 if __name__=='__main__':unittest.main()

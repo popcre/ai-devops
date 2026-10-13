@@ -36,7 +36,7 @@ TEMPLATE = ('{"id":{{json .Id}},"name":{{json .Name}},"image_id":{{json .Image}}
  '"image":{{json .Config.Image}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
  '"project":{{json (index .Config.Labels "com.docker.compose.project")}},"application":{{json (index .Config.Labels "coolify.applicationUuid")}},'
  '"revision":{{with (index .Config.Labels "org.opencontainers.image.revision")}}{{json .}}{{else}}""{{end}},'
- '"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"absent"{{end}},'
+ '"status":{{json .State.Status}},"health":{{with (index .State "Health")}}{{json .Status}}{{else}}"absent"{{end}},'
  '"exit_code":{{json .State.ExitCode}},"started_at":{{json .State.StartedAt}},'
  '"finished_at":{{json .State.FinishedAt}},"restarts":{{json .RestartCount}}}')
 

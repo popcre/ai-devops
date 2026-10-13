@@ -48,7 +48,7 @@ revision labels remain explicit mismatches. Empty OCI labels serialize as empty
 strings. Credential NUL/newline/oversize inputs refuse before child launch;
 secret/helper creation and secret reads use nofollow descriptors.
 
-Verification: fifteen synthetic tests pass, covering wrong contract/host key,
+Verification: sixteen synthetic tests pass, covering wrong contract/host key,
 foreign namespace/roles, injected sensitive fields, duplicate/oversized output,
 preserved unhealthy/missing roles, secret-free child environment and protected
 custody/cleanup, vendor-image drift, absent vendor revisions, credential bounds
@@ -66,3 +66,9 @@ The second approved attempt failed safely; its claim is retained. The corrected
 reader adds fixed failure-stage categories, preserving all bounds and host-key
 checks. Raw remote stderr is transient protected custody only, never emitted or
 persisted. This does not read runtime logs or private mounted data.
+
+Actual local Docker formatting reproduced a reader defect: exited/created roles
+without a Health key made direct .State.Health lookup fail. The fixed template
+uses map index and reports absent health explicitly; a real never-started local
+fixture regression proves the capability. No runtime health check is removed or
+changed. Earlier failed read claims remain preserved and cannot be reused.
