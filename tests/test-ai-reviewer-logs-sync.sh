@@ -34,11 +34,16 @@ printf 'A=1\n' > "$ISSUES/20261013-pkg/local.env"
 printf '\000\001\002binary' > "$ISSUES/20261013-pkg/blob.bin"
 head -c 3000 /dev/zero | tr '\0' 'x' > "$ISSUES/20261013-pkg/large.txt"
 printf '# review\nVERDICT: APPROVE\n' > "$REPOS/app-one/.ai/reviews/codex-final-check.md"
+REPOS2="$TMP/other/repos"; mkdir -p "$REPOS2/app-one/.ai/reviews"
+printf 'second checkout\n' > "$REPOS2/app-one/.ai/reviews/codex-final-check.md"
+printf 'x\n' > "$ISSUES/20261013-pkg/"'name-$(touch PWNED).log'
+fake_npm="npm_""abcdefghijklmnopqrstuvwxyz0123456789"
+printf 'db postgres://admin:hunter2pass@db.example:5432/app\nnpm %s\n' "$fake_npm" > "$ISSUES/20261013-pkg/urls.log"
 
 run(){
   HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
-    AI_REVIEWER_LOGS_ROOTS="$REPOS" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 AI_REVIEWER_LOGS_MACHINE=test-box \
+    AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 AI_REVIEWER_LOGS_MACHINE=test-box \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
     bash "$ROOT/bin/ai-reviewer-logs-sync" "$@"
 }
@@ -49,7 +54,10 @@ M="$VIEW/test-box"
 check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && [ -f '$VIEW/README.md' ]"
 check 'incident package copied' "grep -q 'exit 1 after timeout' '$M/reviewer-issues/20261013-pkg/provider.log'"
 check 'scoreboard, events and lifecycle copied' "[ -f '$M/state/review-scoreboard/reviews.jsonl' ] && [ -f '$M/state/reviewer-events/events.jsonl' ] && [ -f '$M/state/review-lifecycle/runs/r1/run.json' ]"
-check 'review reports copied per checkout' "grep -q APPROVE '$M/reviews/app-one/codex-final-check.md'"
+check 'review reports copied per checkout' "[ \$(grep -rl APPROVE '$M/reviews' | wc -l) -eq 1 ] && [ \$(grep -rl 'second checkout' '$M/reviews' | wc -l) -eq 1 ]"
+check 'same-named checkouts kept apart' "[ \$(ls '$M/reviews' | wc -l) -eq 2 ]"
+check 'odd filenames are data, never commands' "[ ! -e PWNED ] && [ ! -e '$TMP/home/PWNED' ] && ls '$M/reviewer-issues/20261013-pkg' | grep -q 'touch PWNED'"
+check 'URL passwords and npm tokens redacted' "! grep -q hunter2pass '$M/reviewer-issues/20261013-pkg/urls.log' && grep -q 'postgres://admin:' '$M/reviewer-issues/20261013-pkg/urls.log' && ! grep -q '$fake_npm' '$M/reviewer-issues/20261013-pkg/urls.log'"
 check 'token values redacted' "! grep -q '$fake_gh' '$M/reviewer-issues/20261013-pkg/provider.log' && ! grep -q '$fake_sk' '$M/reviewer-issues/20261013-pkg/provider.log'"
 check 'bearer and private key redacted, text around kept' "! grep -q 'abcdefghijklmnop' '$M/reviewer-issues/20261013-pkg/provider.log' && ! grep -q b3BlbnNz '$M/reviewer-issues/20261013-pkg/provider.log' && grep -q 'after key' '$M/reviewer-issues/20261013-pkg/provider.log'"
 check 'secret file types, binaries and large files skipped and listed' "[ ! -e '$M/reviewer-issues/20261013-pkg/local.env' ] && [ ! -e '$M/reviewer-issues/20261013-pkg/blob.bin' ] && [ ! -e '$M/reviewer-issues/20261013-pkg/large.txt' ] && [ \$(grep -c . '$M/SKIPPED.txt') -eq 3 ]"
@@ -64,6 +72,6 @@ rm -f "$REPOS/app-one/.ai/reviews/codex-final-check.md"
 run sync 2> "$TMP/out3"
 git -C "$VIEW" pull -q
 check 'new evidence is appended' "grep -q APPROVE '$M/state/review-scoreboard/reviews.jsonl'"
-check 'files deleted locally stay in the archive' "[ -f '$M/reviews/app-one/codex-final-check.md' ]"
+check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$M/reviews' | wc -l) -eq 1 ]"
 
 printf 'PASS test-ai-reviewer-logs-sync (%s checks)\n' "$pass"

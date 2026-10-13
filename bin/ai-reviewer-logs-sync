@@ -49,7 +49,7 @@ MACHINE="${AI_REVIEWER_LOGS_MACHINE:-$(hostname | lower)}"
 LOG="$HOME_DIR/sync.log"
 
 # Detects survivors; the scrub below replaces whole values for each family.
-SECRET_RE='ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
+SECRET_RE='npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
 R='[REDACTED-SECRET]'
 
 log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
@@ -61,6 +61,12 @@ canonical_remote(){
 scrub(){
   sed -E -i \
     -e "/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\\$R" \
+    -e "s/npm_[A-Za-z0-9]{36,}/$R/g" \
+    -e "s/AIza[0-9A-Za-z_-]{35}/$R/g" \
+    -e "s/glpat-[A-Za-z0-9_-]{20,}/$R/g" \
+    -e "s/[rs]k_live_[A-Za-z0-9]{20,}/$R/g" \
+    -e "s#hooks\.slack\.com/services/[A-Za-z0-9/]+#hooks.slack.com/services/$R#g" \
+    -e "s#([a-z][a-z0-9+.-]*://[^/[:space:]:@]+:)[^/[:space:]@]{3,}@#\\1$R@#g" \
     -e "s/ops_[A-Za-z0-9]{20,}/$R/g" \
     -e "s/gh[pousr]_[A-Za-z0-9]{20,}/$R/g" \
     -e "s/github_pat_[A-Za-z0-9_]{20,}/$R/g" \
@@ -178,18 +184,22 @@ cmd_sync(){
       dir="$(cd "$dir" && pwd -P)"
       [ -n "${seen[$dir]:-}" ] && continue
       seen[$dir]=1
-      checkout="$(basename "$(dirname "$(dirname "$dir")")")"
+      # Full checkout path as the folder name, so same-named checkouts never merge.
+      checkout="$(dirname "$(dirname "$dir")")"
+      checkout="$(printf '%s' "${checkout#/}" | tr '/:\\' '___')"
       copy_tree "$dir" "reviews/$checkout"
     done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>/dev/null)
   done
   sort -u "$SKIPPED" > "$HUB/$MACHINE/SKIPPED.txt"; rm -f "$SKIPPED"
 
   git -C "$HUB" add -A README.md "$MACHINE"
-  local hits
-  hits="$(git -C "$HUB" diff --cached --name-only -z | xargs -0 -r -I{} sh -c 'grep -Eq "$1" "$2/{}" && printf "%s\n" "{}"' _ "$SECRET_RE" "$HUB" || true)"
-  if [ -n "$hits" ]; then
+  local hits=() rel
+  while IFS= read -r -d '' rel; do
+    [ -f "$HUB/$rel" ] && grep -Eq "$SECRET_RE" "$HUB/$rel" && hits+=("$rel")
+  done < <(git -C "$HUB" diff --cached --name-only -z)
+  if ((${#hits[@]})); then
     git -C "$HUB" reset -q
-    log "BLOCKED: secret patterns survived scrubbing in:"; printf '  %s\n' $hits | tee -a "$LOG" >&2
+    log "BLOCKED: secret patterns survived scrubbing in:"; printf '  %s\n' "${hits[@]}" | tee -a "$LOG" >&2
     exit 1
   fi
   if git -C "$HUB" diff --cached --quiet; then
