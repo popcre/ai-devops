@@ -286,6 +286,9 @@ exclusions, rollout workflow, and legacy-document boundary.
 Active multi-session work is catalogued in the
 [implementation-plan index](docs/implementation-plan-index.md), including the
 evidence that establishes each completed gate.
+Housekeeping leftover triage (UNPROVABLE handoff retargets and the retirement
+plan for finished files) is in
+[docs/housekeeping-unprovable-batch2-retirement-plan.md](docs/housekeeping-unprovable-batch2-retirement-plan.md).
 For #660's isolated request measurement build and separate offline/live
 qualification, see the [outgoing-write counter prototype](tools/github-requests/instrumented-gh/README.md).
 

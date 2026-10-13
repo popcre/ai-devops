@@ -10,7 +10,7 @@ only.
 **Read first if you are an AI agent:** implementation plan
 [`plan_watchdog-local-timed-tasks.md`](../plan_watchdog-local-timed-tasks.md)
 (STATUS table), then this runbook, then the owner handoff
-[`HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md`](../HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md).
+Session handoff `2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md` (retired 2026-10-13).
 Do not invent another name (not “runner pool”, not “failover cluster”).
 
 ## 1. Why this exists

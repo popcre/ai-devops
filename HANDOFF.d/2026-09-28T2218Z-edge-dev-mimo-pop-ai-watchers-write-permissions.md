@@ -1,5 +1,5 @@
 ---
-issue: none                          # no GitHub issue; wrap-up scope freeze blocked opening one
+issue: 1679
 status: OPEN
 owner: mimo/pop-ai-watchers-write-permissions
 ---
@@ -16,9 +16,7 @@ owner: mimo/pop-ai-watchers-write-permissions
    - Why: the app registration now requests write on Statuses and Pull requests, but both installs are still on the old read-only grant. Write APIs stay 403 until each account accepts.
    - Recommendation: accept both now (two clicks). Success looks like `gh api orgs/popcre/installations` and the app JWT list showing `statuses: write` and `pull_requests: write` on those two installs.
 
-2. **Open a tracking issue for this workstream** (recommended, one minute).
-   - Why: the handoff contract wants an issue that proves the work finished; wrap-up scope freeze forbade opening it in this session.
-   - Recommendation: open `popcre/ai-devops` issue titled “Accept pop-ai-watchers statuses/PR write on both installations”, then paste its number into the `issue:` field at the top of this file.
+2. ~~Open a tracking issue for this workstream.~~ DONE 2026-10-13: issue #1679 opened and written into the `issue:` field at the top of this file.
 
 **Already settled — do NOT re-ask**
 

@@ -101,3 +101,9 @@ commit. When work closes, move it to the correct record table with completion
 or successor evidence. Deletion is optional and requires proof that no live
 issue or handoff relies on the path and that every unique decision remains in a
 successor or Git history.
+
+## Housekeeping leftover triage (batch 2)
+
+UNPROVABLE HANDOFF.d retargets and the file-by-file retirement plan:
+[`housekeeping-unprovable-batch2-retirement-plan.md`](housekeeping-unprovable-batch2-retirement-plan.md)
+(tracking issue [#1661](https://github.com/popcre/ai-devops/issues/1661)).

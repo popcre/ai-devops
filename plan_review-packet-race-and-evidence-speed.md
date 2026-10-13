@@ -12,7 +12,7 @@ The plan itself landed 2026-09-18 as PR #600, squash merge `51e680a3`, with
 its handoff and the AGENTS.md router row. No implementation step has started.
 
 **A fresh session starts at §1, then §9.** Registration handoff:
-[`HANDOFF.d/2026-09-18T1606Z-edge-dev-kimi-review-packet-race-plan.md`](HANDOFF.d/2026-09-18T1606Z-edge-dev-kimi-review-packet-race-plan.md).
+Session handoff `2026-09-18T1606Z-edge-dev-kimi-review-packet-race-plan.md` (retired 2026-10-13; landed via PR #611/#639 / issue #608).
 
 ## 1. The ultimate goal — what we are actually trying to achieve
 

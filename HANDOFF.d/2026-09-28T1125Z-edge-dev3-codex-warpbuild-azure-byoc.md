@@ -1,5 +1,5 @@
 ---
-issue: null # Wrap-up scope freeze forbade opening a new issue; successor must create the parent issue before implementation.
+issue: 961
 status: BLOCKED
 owner: codex/warpbuild-byoc-handoff
 ---
@@ -47,7 +47,7 @@ Albert's Blacksmith billing dashboard showed substantially higher month-to-date 
 
 ## 6. Exact next steps and gates
 
-1. Start a new session in this repository, read `AGENTS.md`, this handoff, and the Windows CI row of `docs/task-router.md`. Create one parent issue for the multi-step migration; the wrap-up scope freeze forbade this session from opening it. **Gate:** issue body assigns one outcome at a time and links this handoff.
+1. Start a new session in this repository, read `AGENTS.md`, this handoff, and the Windows CI row of `docs/task-router.md`. Use existing parent issue #961 (retargeted 2026-10-13); the wrap-up scope freeze forbade this session from opening one. **Gate:** issue body assigns one outcome at a time and links this handoff.
 2. Recheck `az account show`, subscription resources and provider states, WarpBuild account/billing, and GitHub organization connection. Have Albert complete the Microsoft sign-in and add a payment method himself if still pending; do not approve consent or submit a deployment during that handoff. **Gate:** signed-in consent and template preview are visible, payment method is present, and exact target subscription matches his choice.
 3. Generate a fresh WarpBuild Azure connection request if the previous signed template expired. Inspect the full admin-consent permissions and exact ARM template contents, roles, scope, resources, and deployment target read-only. Keep signed URLs and account identifiers out of logs, chat, and the public repo. **Gate:** a concrete proposed change set and recovery path exist, with no ambiguous or broad authority.
 4. Dispatch those exact inputs to an available independent read-only reviewer under the standing production/shared-cloud rule. Accept only explicit APPROVE; otherwise stop and resolve the review finding. Apply the browser confirmation policy at the actual security-grant action. **Gate:** approval identifies the same template, app, subscription, scopes, and actions that will be executed.
@@ -78,7 +78,7 @@ Albert's Blacksmith billing dashboard showed substantially higher month-to-date 
 - The vendor ARM template's permissions and new resource names are not yet reviewed. It may request broader access than the CI stack needs; reject or redesign if so.
 - Payment method and Microsoft password are still pending with Albert. No credential should pass through a chat, shell argument, or public artifact.
 - Azure regional VM quotas and whether the chosen VM/image can run all Windows 2025-era tests remain unproven. Do not cut over required CI before live canary evidence.
-- No issue was opened due to the user's wrap-up scope freeze. The successor must open exactly one parent issue before implementing the multi-step route.
+- Issue retargeted to existing #961 on 2026-10-13 (this session originally opened none due to wrap-up scope freeze). One parent issue owns the multi-step route.
 
 ## Self-audit
 
