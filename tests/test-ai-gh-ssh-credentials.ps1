@@ -111,6 +111,16 @@ try {
     Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "junctioned SSH folder is refused (exit $($r.Exit))"
     Assert-True (-not (Test-Path (Join-Path $jdir 'elsewhere\hosts.yml'))) 'nothing written through the junction'
 
+    # A hard-linked existing login file is refused, and the other name is untouched.
+    $hdir = Join-Path $TempRoot 'hardlink'
+    New-Item -ItemType Directory -Force -Path (Join-Path $hdir 'gh-ssh'), (Join-Path $hdir 'home') | Out-Null
+    'GOOD' | Set-Content -LiteralPath (Join-Path $hdir 'token')
+    'old' | Set-Content -LiteralPath (Join-Path $hdir 'gh-ssh\hosts.yml')
+    & cmd.exe /c mklink /H (Join-Path $hdir 'exposed.txt') (Join-Path $hdir 'gh-ssh\hosts.yml') | Out-Null
+    $r = Invoke-Script $hdir
+    Assert-True ($r.Exit -ne 0 -and $r.Exit -ne 2) "hard-linked login file is refused (exit $($r.Exit))"
+    Assert-True ((Get-Content (Join-Path $hdir 'exposed.txt') -Raw).Trim() -eq 'old') 'no token written through the hard link'
+
     $r = Invoke-Case 'dead' 'BAD'
     Assert-True ($r.Exit -eq 2) "dead login reports exit 2 (got $($r.Exit))"
     Assert-True ($r.Output -match 'gh auth login --web') 'dead login names the re-login step'

@@ -110,7 +110,15 @@ if ($login.Output -ne $ExpectedLogin) { throw "Refusing to share the GitHub logi
 # Private folder first, so the token never lands somewhere readable by others.
 New-Item -ItemType Directory -Force -Path $SshConfigDir | Out-Null
 Set-PrivateAcl $SshConfigDir
-Backup-File (Join-Path $SshConfigDir 'hosts.yml')
+$sshHosts = Join-Path $SshConfigDir 'hosts.yml'
+if (Test-Path -LiteralPath $sshHosts) {
+    # Never rewrite a token through a link: refuse links, then start from a fresh file.
+    if (Test-Redirected $sshHosts) { throw "Refusing to write through a junction or symbolic link: $sshHosts" }
+    $links = @(& fsutil hardlink list $sshHosts 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $links.Count -ne 1) { throw "Refusing to rewrite ${sshHosts}: it has other hard links." }
+    Backup-File $sshHosts
+    Remove-Item -LiteralPath $sshHosts -Force
+}
 $copy = Invoke-Gate '"$0" auth token --hostname github.com | GH_CONFIG_DIR="$1" "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
 if ($copy.ExitCode -ne 0) { throw 'The GitHub CLI could not save the SSH copy of the login.' }
 Set-PrivateAcl $SshConfigDir
