@@ -7,7 +7,11 @@
 # Usage:
 #   ai-reviewer-logs-sync [sync]      pack new or changed evidence into one encrypted bundle, push it
 #   ai-reviewer-logs-sync view [DIR]  decrypt the whole fleet archive into DIR
-#                                     (default ~/.cache/ai-devops-reviewer-logs-plain)
+#                                     (default ~/.cache/ai-devops-reviewer-logs-plain).
+#     The key comes from a private file named by AI_REVIEWER_LOGS_KEY_FILE. Read it
+#     with your normal (serialized) 1Password access, e.g. into a 0600 file:
+#       op read "op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile"
+#     and delete the file afterwards.
 #   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
 #   ai-reviewer-logs-sync unschedule
 #
@@ -37,7 +41,7 @@
 # Environment:
 #   AI_REVIEWER_LOGS_REMOTE / _HUB / _ROOTS / _MAX_FILE_BYTES / _MACHINE / _CERT
 #   AI_REVIEWER_ISSUE_DIR, AI_REVIEWER_STATE_BASE   as in ai-reviewer-issue
-#   AI_REVIEWER_LOGS_KEY_FILE   view: use this key file instead of 1Password (tests)
+#   AI_REVIEWER_LOGS_KEY_FILE   view: private file holding the archive private key
 #   AI_REVIEWER_LOGS_TEST_MODE=1  tests: local remote allowed, no privacy probe
 set -euo pipefail
 umask 077
@@ -56,7 +60,6 @@ STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
 MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-20000000}"
 CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
-KEY_REF='op://vibe_coding/Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)/REVIEWER_LOGS_PRIVATE_KEY_PEM'
 MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
 case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
 LOG="$HOME_DIR/sync.log"
@@ -68,6 +71,16 @@ canonical_remote(){
 # Native Windows openssl needs Windows paths; elsewhere this is a no-op.
 native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 ossl(){ MSYS2_ARG_CONV_EXCL='*' openssl "$@"; }
+# Owner-only folder: chmod everywhere, plus NTFS owner/SYSTEM-only on Windows
+# (same helper and pattern as the review wrappers).
+make_private(){
+  chmod 700 "$1" || return 1
+  [ -n "${SYSTEMROOT:-}" ] || return 0
+  local ps helper="$TOOL_ROOT/bin/windows-private-file.ps1"
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  [ -n "$ps" ] && [ -f "$helper" ] || return 1
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$1")"     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory' >/dev/null
+}
 is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
 
 # stage_tree <source dir> <path inside the bundle>: copy new or changed files
@@ -148,7 +161,7 @@ push_or_die(){
 }
 
 cmd_sync(){
-  mkdir -p "$HOME_DIR"; chmod 700 "$HOME_DIR"
+  mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
   take_lock "$HOME_DIR/sync.lock" 60
   rotate_log "$LOG"
   [ -f "$CERT" ] || die "archive certificate missing: $CERT"
@@ -275,39 +288,22 @@ cmd_sync(){
 }
 
 cmd_view(){
-  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile work b machine n=0 entry
+  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile="${AI_REVIEWER_LOGS_KEY_FILE:-}" work b machine n=0 entry
+  # The key is supplied as a private file; this tool never calls 1Password, so
+  # the caller's own serialized 1Password access applies (see --help).
+  [ -n "$keyfile" ] && [ -f "$keyfile" ] || die "set AI_REVIEWER_LOGS_KEY_FILE to a private file holding the archive key (see --help)"
   # Same lock as sync: view's reset of the clone must never race a sync.
-  mkdir -p "$HOME_DIR"; chmod 700 "$HOME_DIR"
+  mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
   take_lock "$HOME_DIR/sync.lock" 60
   ensure_hub
-  work="$(mktemp -d)"; chmod 700 "$work"
+  work="$(mktemp -d)"; make_private "$work" || die "could not make $work private"
   # shellcheck disable=SC2064
   trap "rm -rf '$work' '$HOME_DIR/sync.lock'" EXIT
-  if [ -n "${AI_REVIEWER_LOGS_KEY_FILE:-}" ]; then
-    keyfile="$AI_REVIEWER_LOGS_KEY_FILE"
-  else
-    command -v op >/dev/null 2>&1 || die "1Password CLI (op) is required to read the archive key"
-    keyfile="$work/key.pem"
-    # Serialize with the other 1Password readers (the reviewer key refreshes use
-    # this same lock folder).
-    local oplock="$HOME/.local/state/ai-devops/muse/credential.lock.d" deadline rc=0
-    mkdir -p "$(dirname "$oplock")"
-    deadline=$(( $(date +%s) + 120 ))
-    until mkdir "$oplock" 2>/dev/null; do
-      if [ -n "$(find "$oplock" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then rm -rf "$oplock"; continue; fi
-      [ "$(date +%s)" -lt "$deadline" ] || die "timed out waiting for the shared 1Password lock"
-      sleep 1
-    done
-    printf '%s %s ai-reviewer-logs-sync\n' "$$" "$(date +%s)" > "$oplock/owner"
-    op read "$KEY_REF" < /dev/null > "$keyfile" || rc=$?
-    rm -rf "$oplock"
-    [ "$rc" = 0 ] || die "could not read the archive key from 1Password"
-  fi
   # Always rebuild from scratch, and only ever wipe a folder this command made.
   if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
     die "$out exists and was not made by 'ai-reviewer-logs-sync view'; choose another folder"
   fi
-  rm -rf "$out"; mkdir -p "$out"; chmod 700 "$out"; : > "$out/.ai-reviewer-logs-view"
+  rm -rf "$out"; mkdir -p "$out"; make_private "$out" || die "could not make $out private"; : > "$out/.ai-reviewer-logs-view"
   while IFS= read -r b; do
     machine="${b%%/*}"
     ossl cms -decrypt -binary -inform DER -inkey "$(native "$keyfile")" -in "$(native "$HUB/$b")" \

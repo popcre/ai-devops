@@ -139,6 +139,10 @@ before="$(git -C "$REMOTE" rev-parse main)"
 check 'clear-text output is refused, even when it starts with 0' "! PATH='$TMP/badssl':\"\$PATH\" run sync 2> '$TMP/out7' && grep -q 'not encrypted' '$TMP/out7' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
 run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
 
+check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  check 'state folder is owner-only on Windows' "! icacls \"\$(cygpath -w '$TMP/home/.ai-devops/reviewer-logs-sync')\" | grep -qi -e 'Users:' -e 'Everyone:' -e 'Authenticated'"
+fi
 check 'the shipped certificate is tracked' "git -C '$ROOT' ls-files --error-unmatch config/reviewer-logs-archive.crt >/dev/null 2>&1"
 
 check 'option-like and path-like machine names refused' "! AI_REVIEWER_LOGS_MACHINE=--dry-run run sync 2>/dev/null && ! AI_REVIEWER_LOGS_MACHINE=.. run sync 2>/dev/null"
