@@ -90,6 +90,11 @@ if [ -x "$hk_tool" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule AiDevOps-Housekeeping"; else "$hk_tool" unschedule || echo "WARNING: could not unschedule AiDevOps-Housekeeping; remove it manually if present"; fi
 fi
 
+rl_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-reviewer-logs-sync"
+if [ -x "$rl_tool" ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule the hourly reviewer-logs sync"; else "$rl_tool" unschedule || echo "WARNING: could not unschedule the reviewer-logs sync; remove it manually if present"; fi
+fi
+
 if [ "$PURGE" -eq 1 ]; then
   echo "ARCHIVE config $resolved_etc -> $archive/etc-ai-devops.tar.gz"
   if [ "$DRY_RUN" -eq 0 ]; then

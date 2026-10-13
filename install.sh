@@ -312,11 +312,14 @@ restore_install_crontab() {
   strip_managed_cron() {
     awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
         -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" \
-        -v lw="$REPO_ROOT/bin/ai-local-watch" '
+        -v lw="$REPO_ROOT/bin/ai-local-watch" \
+        -v rl="$REPO_ROOT/bin/ai-reviewer-logs-sync" '
       index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
       index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
       index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
       index($0,"# ai-devops housekeeping (managed by ai-housekeeping schedule") == 0 &&
+      index($0,"# ai-devops ai-reviewer-logs-sync (managed by ai-reviewer-logs-sync schedule") == 0 &&
+      index($0,"\047" rl "\047") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
       index($0,"\047" reap "\047 run") == 0 &&
       index($0,"\047" lw "\047") == 0 &&
@@ -340,7 +343,8 @@ restore_install_crontab() {
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
       "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
       "$REPO_ROOT/bin/ai-local-watch" unschedule &&
-      "$REPO_ROOT/bin/ai-housekeeping" unschedule
+      "$REPO_ROOT/bin/ai-housekeeping" unschedule &&
+      "$REPO_ROOT/bin/ai-reviewer-logs-sync" unschedule
   else
     return 1
   fi

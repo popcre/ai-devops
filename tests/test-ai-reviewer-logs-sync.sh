@@ -68,6 +68,14 @@ view
 check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
 
+# A bundle lost from the published archive makes the next run collect everything again.
+first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
+git -C "$VIEW" pull -q; git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q "$first"
+git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm lose && git -C "$VIEW" push -q origin HEAD:main
+run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
+view
+check 'lost bundles are re-collected' "grep -q 'collecting everything again' '$TMP/out13' && cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log'"
+
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
 mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
 printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"

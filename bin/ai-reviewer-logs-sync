@@ -146,6 +146,17 @@ cmd_sync(){
   if [ -f "$HOME_DIR/seen" ]; then
     while IFS= read -r -d '' key && IFS= read -r -d '' val; do SEEN["$key"]="$val"; done < "$HOME_DIR/seen"
   fi
+  # What this machine remembers as sent is trusted only while every bundle it
+  # pushed is still in the published archive; otherwise collect everything again.
+  if [ -f "$HOME_DIR/pushed-bundles" ]; then
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      if [ ! -f "$HUB/$key" ]; then
+        log "$MACHINE: the archive no longer has $key; collecting everything again"
+        SEEN=(); : > "$HOME_DIR/pushed-bundles"; break
+      fi
+    done < "$HOME_DIR/pushed-bundles"
+  fi
 
   stage_tree "$ISSUES" reviewer-issues
   stage_tree "$STATE/review-scoreboard" state/review-scoreboard
@@ -216,6 +227,8 @@ cmd_sync(){
     save_seen
     printf '%s
 ' "$notes_sum" > "$HOME_DIR/notes.sha1"
+    [ -z "$bundle" ] || printf '%s
+' "$bundle" >> "$HOME_DIR/pushed-bundles"
     if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in $bundle)"; fi
   fi
   unlock "$HOME_DIR/sync.lock"
