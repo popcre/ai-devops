@@ -26,6 +26,7 @@ CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
 CONTRACT_PARTS = {"contract", "contracts", "migration", "migrations", "schema", "schemas", "types"}
 GATE_DECLARATION = ".ai-devops/task-gates.json"
+SHARED_DB_BYPASS_WORKFLOW = ".github/workflows/forbid-shared-db-bypass.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -105,6 +106,10 @@ def safe_path(raw):
     # A private repository's own gate declaration is policy, never licensed
     # rows; it is the one hidden path a sealed review may see, exactly (#1239).
     if raw == GATE_DECLARATION:
+        return raw
+    # This one publishing-gate workflow is exact-source policy needed to review
+    # the scoped exemption; no other hidden workflow or YAML path is admitted.
+    if raw == SHARED_DB_BYPASS_WORKFLOW:
         return raw
     lower = [part.lower() for part in parts]
     if any(denied_component(part) or part.startswith(".") for part in lower):

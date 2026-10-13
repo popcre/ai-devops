@@ -179,6 +179,40 @@ printf '[".AI-DEVOPS/task-gates.json"]\n' > "$TMP/rejected.json"
 must_fail "$SANDBOX" ensure-code-only "$R" rejected-gates-case --paths-file "$TMP/rejected.json" --base "$BASE"
 pass 'only the exact gate declaration passes the hidden-path refusal'
 
+# The publishing guard workflow is the sole additional hidden source allowed
+# for the bounded #277 review; it must travel with selected test code only.
+mkdir -p "$R/.github/workflows" "$R/tests" "$R/.github/workflows/nested" "$R/.github/workflows/__fixtures__"
+printf 'name: Forbid shared database bypass\non:\n  pull_request:\n' > "$R/.github/workflows/forbid-shared-db-bypass.yml"
+printf 'def test_guard_contract(): assert True\n' > "$R/tests/test_publish_guard_workflow.py"
+printf 'name: Unrelated workflow\non:\n  push:\n' > "$R/.github/workflows/other.yml"
+printf 'name: Nested workflow\non:\n  push:\n' > "$R/.github/workflows/nested/child.yml"
+printf 'PRIVATE_LICENSED_FIXTURE_SENTINEL\n' > "$R/.github/workflows/__fixtures__/licensed-workflow.yml"
+git -C "$R" add .github/workflows/forbid-shared-db-bypass.yml tests/test_publish_guard_workflow.py \
+  .github/workflows/other.yml .github/workflows/nested/child.yml .github/workflows/__fixtures__/licensed-workflow.yml
+git -C "$R" commit -qm 'workflow exception fixture'
+printf '[".github/workflows/forbid-shared-db-bypass.yml","tests/test_publish_guard_workflow.py"]\n' > "$TMP/workflow-approved.json"
+WORKFLOW_EXPORT="$("$SANDBOX" ensure-code-only "$R" exact-workflow --paths-file "$TMP/workflow-approved.json" --base "$BASE")" \
+  || fail 'the exact shared-db publishing guard workflow was refused'
+"$SANDBOX" verify-code-only "$WORKFLOW_EXPORT" --assert-head "$(git -C "$R" rev-parse HEAD)"
+cmp -s "$R/.github/workflows/forbid-shared-db-bypass.yml" "$WORKFLOW_EXPORT/.github/workflows/forbid-shared-db-bypass.yml" \
+  || fail 'the exact publishing guard workflow bytes changed in export'
+[ -f "$WORKFLOW_EXPORT/tests/test_publish_guard_workflow.py" ] || fail 'paired test code is missing from workflow export'
+if rg -a -q 'PRIVATE_LICENSED_FIXTURE_SENTINEL|Unrelated workflow|Nested workflow' "$WORKFLOW_EXPORT"; then
+  fail 'unselected workflow or licensed fixture appeared in export'
+fi
+pass 'exact publishing guard workflow and paired test code export successfully'
+
+for rejected_workflow in \
+  '.github/workflows/other.yml' \
+  '.github/workflows/nested/child.yml' \
+  '.GITHUB/workflows/forbid-shared-db-bypass.yml' \
+  '.github/workflows/../workflows/forbid-shared-db-bypass.yml' \
+  '.github/workflows/__fixtures__/licensed-workflow.yml'; do
+  printf '["%s"]\n' "$rejected_workflow" > "$TMP/rejected-workflow.json"
+  must_fail "$SANDBOX" ensure-code-only "$R" rejected-workflow --paths-file "$TMP/rejected-workflow.json" --base "$BASE"
+done
+pass 'unknown, nested, case-variant, traversal, and licensed fixture workflow paths remain refused'
+
 LINK_BLOB="$(printf 'data/tracked.txt' | git -C "$R" hash-object -w --stdin)"
 git -C "$R" update-index --add --cacheinfo "120000,$LINK_BLOB,src/linked.py"
 git -C "$R" commit -qm linked-code-path
