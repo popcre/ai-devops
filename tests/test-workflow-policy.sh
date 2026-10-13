@@ -264,6 +264,8 @@ check 'the doc-safety job is unconditional: no path filter, no classification co
   "! printf '%s' '$doc_safety_block' | grep -q '^[[:space:]]*if:'"
 check 'the doc-safety job runs the public-boundary and Markdown-link suites' \
   "printf '%s' '$doc_safety_block' | grep -q 'tests/test-public-boundary.sh' && printf '%s' '$doc_safety_block' | grep -q 'tests/test-markdown-links.sh'"
+check 'the doc-safety job checks added Markdown reachability against the PR or queue base (#1698)' \
+  "printf '%s' '$doc_safety_block' | grep -q 'bin/ai-doc-reachability' && printf '%s' '$doc_safety_block' | grep -q 'github.event.merge_group.base_sha' && printf '%s' '$doc_safety_block' | grep -q 'fetch-depth: 0'"
 check 'the doc-safety job stays on the Blacksmith Linux pool' \
   "printf '%s' '$doc_safety_block' | grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404'"
 check 'closure evaluates the doc-safety result fail-closed' \
