@@ -345,6 +345,10 @@ issue_states_load() {
   raw="$(gh_call issue list --state all --limit 5000 --json number,state 2>/dev/null || true)"
   [[ -n "$raw" ]] || return 0
   while IFS=$'\t' read -r n st; do
+    # A native Windows jq (the winget build) emits CRLF on stdout; without
+    # stripping the CR the OPEN|CLOSED match below silently fails (#1646).
+    n="${n%$'\r'}"
+    st="${st%$'\r'}"
     [[ -n "$n" ]] || continue
     ISSUE_STATES["$n"]="$st"
   done < <(jq -r '.[] | select(.number != null) | (.number|tostring) + "\t" + (.state // "")' <<<"$raw" 2>/dev/null)
