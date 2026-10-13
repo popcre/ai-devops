@@ -7,9 +7,11 @@
 # normalized Noul/Choice/Score values.
 #
 # Shell API (fixed):
-#   jev_bootstrap "$0" "$@"     # before reading stdin and before parsing
-#                               # arguments; re-execs under op run and never
-#                               # returns in the unkeyed parent
+#   jev_bootstrap "$0" ORIGINAL_ARGS...
+#                               # before reading stdin; pass every original
+#                               # argument (save them before option parsing).
+#                               # Re-execs under op run; after the child starts
+#                               # the unkeyed parent exits with its status
 #   jev_request REQ_JSON RESP_JSON
 #   jev_read_noul RESP_JSON QUESTION_ID
 #   jev_read_choice RESP_JSON QUESTION_ID ALLOWED_LABELS_JSON
@@ -108,11 +110,19 @@ jev_tmp() {
 # jev_bootstrap "$0" "$@"
 # When the key is absent: spool stdin to a mode-0600 temporary file, resolve
 # the one managed op:// reference, re-exec the consumer through op run, and
-# return only in the keyed child. The unkeyed parent never returns: it cleans
-# up and exits with the child's status. Empty resolution is nonzero and loud without
-# revealing the reference value.
+# return only in the keyed child. Once the child has started, the unkeyed
+# parent never returns: it cleans up and exits with the child's status, so the
+# consumer's work runs exactly once. If op run fails before starting the child
+# (auth expiry, locked vault), bootstrap returns nonzero so the consumer's own
+# failure output (abstain / FAIL:) still runs. Empty resolution is nonzero and
+# loud without revealing the reference value.
 jev_bootstrap() {
   local self="$1"; shift || true
+  # Child side: tell the parent the keyed child started.
+  if [ -n "${AI_JEV_REEXEC:-}" ] && [ -n "${AI_JEV_CHILD_MARK:-}" ]; then
+    : > "$AI_JEV_CHILD_MARK" 2>/dev/null || true
+    unset AI_JEV_CHILD_MARK
+  fi
   jev_load_config || return 1
   trap 'jev_cleanup' EXIT INT TERM
 
@@ -147,10 +157,15 @@ jev_bootstrap() {
     export OP_SERVICE_ACCOUNT_TOKEN
   fi
 
-  local rc
-  set +e
-  AI_JEV_REEXEC=1 op run --env-file "$ref_file" -- /usr/bin/env bash "$self" "$@" < "$input"
-  rc=$?
+  local rc mark
+  jev_tmp mark || return 1
+  rm -f "$mark"
+  AI_JEV_REEXEC=1 AI_JEV_CHILD_MARK="$mark" \
+    op run --env-file "$ref_file" -- /usr/bin/env bash "$self" "$@" < "$input" && rc=0 || rc=$?
+  if [ ! -e "$mark" ]; then
+    jev_fail_loud "op run failed before starting the keyed child (exit $rc)"
+    return 1
+  fi
   jev_cleanup
   exit "$rc"
 }

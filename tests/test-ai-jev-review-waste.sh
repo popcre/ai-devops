@@ -140,5 +140,28 @@ pyout="$(cd "$T" && env -u AI_JEV_ARCHIVE_DIR python3 -I -c "import sys; sys.pat
 pyout="$(cd "$T" && env -u TYPESAFE_API_KEY AI_JEV_REEXEC=1 python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && [[ "$pyout" == *EMPTY* ]] && ok || bad "python empty key after op run not loud: $pyout"
 
+# 12. op run launch failure (before the child starts) keeps the consumer's
+#     failure contract: abstain record / FAIL: line and exit 1.
+mkdir -p "$T/opfail"
+printf '#!/bin/sh\necho "op: session expired" >&2\nexit 3\n' > "$T/opfail/op"; chmod +x "$T/opfail/op"
+out="$(env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" \
+  "$ROOT/bin/ai-jev-review-waste" chunk-filter --items "$items" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && [[ "$out" == *'"reason":"bootstrap"'* ]] && ok || bad "op launch failure lost the abstain contract: rc=$rc $out"
+out="$(env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" \
+  "$ROOT/bin/ai-jev-probe" </dev/null 2>&1)"; rc=$?
+[ $rc -eq 1 ] && [[ "$out" == *'FAIL: bootstrap failed'* ]] && ok || bad "op launch failure lost probe FAIL: rc=$rc $out"
+# A started child that fails (empty key) prints its own record once; parent adds nothing.
+printf '#!/bin/sh\nwhile [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done; shift\nTYPESAFE_API_KEY= exec "$@"\n' > "$T/opfail/op"
+out="$(env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" \
+  "$ROOT/bin/ai-jev-review-waste" chunk-filter --items "$items" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && [ "$(printf '%s\n' "$out" | grep -c '"reason":"bootstrap"')" -eq 1 ] && [[ "$out" == *EMPTY* ]] && ok || bad "failed child output not exactly once: rc=$rc $out"
+# Python helper: op run failure is loud; the archive path expands ~.
+printf '#!/bin/sh\nexit 3\n' > "$T/opfail/op"
+pyout="$(cd "$T" && env -u TYPESAFE_API_KEY -u AI_JEV_REEXEC PATH="$T/opfail:$PATH" AI_DEVOPS_CONFIG_DIR="$T/cfgdir" python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
+[ $rc -eq 3 ] && [[ "$pyout" == *'op run failed'* ]] && ok || bad "python op run failure not loud: rc=$rc $pyout"
+mkdir -p "$T/home/arch"
+pyout="$(cd "$T" && HOME="$T/home" AI_JEV_ARCHIVE_DIR='~/arch' python3 -I -c "import sys; sys.path.insert(0, '$ROOT/tools'); import jev_review_waste_sample as s; print(s.archive_root())" 2>&1)"
+[ "$pyout" = "$T/home/arch" ] && ok || bad "archive root did not expand ~: $pyout"
+
 echo "passed=$pass failed=$failn"
 if [ "$failn" -eq 0 ]; then exit 0; else exit 1; fi

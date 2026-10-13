@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,8 @@ def resolve_key() -> str:
     if os.environ.get("AI_JEV_REEXEC"):
         raise SystemExit("TYPESAFE_API_KEY resolved EMPTY after op run")
     ref = _managed_reference()
+    if shutil.which("op") is None:
+        raise SystemExit("1Password CLI (op) is required to resolve TYPESAFE_API_KEY")
     env = os.environ.copy()
     env["AI_JEV_REEXEC"] = "1"
     token_file = Path(os.environ.get("AI_DEVOPS_CONFIG_DIR") or Path.home() / ".config/ai-devops") / "op-service-account"
@@ -65,6 +68,8 @@ def resolve_key() -> str:
             os.unlink(ref_file)
         except OSError:
             pass
+    if rc != 0:
+        print(f"jev: keyed run under op run failed (exit {rc})", file=sys.stderr)
     raise SystemExit(rc)
 
 

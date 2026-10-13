@@ -29,9 +29,11 @@ ARCHIVE_ENV = "AI_JEV_ARCHIVE_DIR"
 
 def archive_root() -> Path:
     value = os.environ.get(ARCHIVE_ENV, "").strip()
-    if not value or not Path(value).is_dir():
-        raise SystemExit(f"{ARCHIVE_ENV} must name the private transcript archive directory")
-    return Path(value)
+    path = Path(value).expanduser() if value else None
+    if path is None or not path.is_dir():
+        raise SystemExit(f"{ARCHIVE_ENV} must name the private transcript archive directory "
+                         "(see plan_jev-review-waste-mining.md)")
+    return path
 EVENTS = Path.home() / ".local/state/ai-devops/reviewer-events/events.jsonl"
 WORK = Path(os.environ.get("TEMP", ".")) / "jev-review-waste-work"
 HEAD_RE = re.compile(r"\b[0-9a-f]{40}\b")

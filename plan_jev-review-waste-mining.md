@@ -107,7 +107,7 @@ Worktree base for this plan: `ae490d6d` (`origin/main` as of 2026-10-12).
 | `tools/reviewer_events.py` | Exists. Reviewer event log writer/reader. |
 | `~/.local/state/ai-devops/reviewer-events/events.jsonl` | Live reviewer dispatch/outcome log on installed machines. |
 | `bin/ai-jev-review-waste*` (any caller) | **Does not exist.** To be added under Step 2/3/4. |
-| Transcript archive | Local, outside the repo. See §12. Owner ruled 2026-10-12: **redacted, no longer private** for the purpose of sending to TypeSafe. Raw files still must never be committed here. |
+| Transcript archive | Local, outside the repo. See §12. `tools/jev_review_waste_sample.py` reads it from the `AI_JEV_ARCHIVE_DIR` environment variable (a directory; `~` is expanded); the path is never committed. Owner ruled 2026-10-12: **redacted, no longer private** for the purpose of sending to TypeSafe. Raw files still must never be committed here. |
 | Shared-db allocator / roster | Untouched. |
 
 Nothing in this plan is half-written in this repository. The STATUS table above is the only progress record.
