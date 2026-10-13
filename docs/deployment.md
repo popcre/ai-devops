@@ -123,6 +123,13 @@ cd /worksp/ai-devops
    crontab) only on hosts listed in `config/local-watch.json` `watch_hosts`
    (edge-dev, edge-dev3, hetz). That single entry claims the duty lease and
    runs the four watchdog ticks. GitHub Actions stay as a free weekly backup.
+   The installer (and `bin/install-ai-devops-windows.ps1`) also schedules
+   `ai-reviewer-logs-sync` hourly on every machine: it uploads that machine's
+   complete reviewer logs (incident packages, scoreboard, invocation events,
+   lifecycle runs, `.ai/reviews` reports) as encrypted bundles to the private
+   repository `u2giants/ai-devops-reviewer-logs`. Read the whole fleet with
+   `ai-reviewer-logs-sync view` (key in 1Password; see its `--help`).
+   `uninstall.sh` and a failed install's rollback remove the timer.
 10. Records exact source, config, owned symlinks, config files, managed
     skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 11. Runs `ai-devops doctor`.

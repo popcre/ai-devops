@@ -175,6 +175,12 @@ ensure_hub(){
         ls-remote "https://$CANONICAL.git" >/dev/null 2>&1; then
       die "reviewer-logs repository is publicly readable; refusing to sync"
     fi
+    # A failed anonymous read could just be a network error: GitHub itself must
+    # also say the repository is private (fail closed if it cannot be asked).
+    local private
+    private="$(AI_GH_CALLER=ai-reviewer-logs-sync "$TOOL_ROOT/bin/ai-gh" api "repos/${CANONICAL#github.com/}" --jq .private 2>>"$LOG")" \
+      || die "could not confirm with GitHub that the reviewer-logs repository is private"
+    [ "$private" = true ] || die "GitHub does not report the reviewer-logs repository as private; refusing to sync"
   fi
   if [ ! -d "$HUB/.git" ]; then
     mkdir -p "$(dirname "$HUB")"

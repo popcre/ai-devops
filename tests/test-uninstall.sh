@@ -7,6 +7,11 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config"; mkdir -p "$HOME/.claude"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/systemctl-stub"; chmod +x "$TMP/systemctl-stub"
 export AI_SESSION_TMP_SYSTEMCTL="$TMP/systemctl-stub"
+# uninstall.sh also unschedules installer-owned timers (housekeeping, reviewer
+# logs). Stub Task Scheduler and crontab so the real machine's timers survive.
+mkdir -p "$TMP/sched-stubs"
+for stub in schtasks.exe schtasks crontab; do printf '#!/bin/sh\nexit 0\n' > "$TMP/sched-stubs/$stub"; chmod +x "$TMP/sched-stubs/$stub"; done
+export PATH="$TMP/sched-stubs:$PATH"
 REPO="$TMP/repo"; ETC="$TMP/etc-ai-devops"; BIN="$TMP/bin"; ARCH="$TMP/archive"
 mkdir -p "$REPO/bin" "$ETC" "$BIN"
 cp "$ROOT/bin/ai-devops" "$REPO/bin/ai-devops"; chmod +x "$REPO/bin/ai-devops"
