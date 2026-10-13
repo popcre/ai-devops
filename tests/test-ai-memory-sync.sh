@@ -465,6 +465,35 @@ cmp -s "$TMP/target-machine.before" "$TINDEX" ||
 cmp -s "$TMP/target-hub.before" "$HINDEX" ||
   fail "second sync changed the hub index after convergence"
 
+# #1646 L2: the unauthenticated public-read probe must not be fooled by a
+# url.*.insteadOf rewrite. Fixture global gitconfig rewrites the probe URL to
+# a local bare repo (old code: probe "succeeds" anonymously -> false
+# "publicly readable") and rewrites the SSH-form remote to a missing path so
+# the second check fails fast without touching the network.
+L2_HOME="$TMP/l2-home"
+L2_PUB="$TMP/l2-pub"
+L2_NOWHERE="$TMP/l2-nowhere"
+mkdir -p "$L2_HOME" "$L2_PUB/u2giants" "$L2_NOWHERE"
+git init -q --bare "$L2_PUB/u2giants/ai-devops-memory.git"
+cat > "$L2_HOME/.gitconfig" <<EOF
+[url "file://$L2_PUB/"]
+	insteadOf = https://github.com/
+[url "file://$L2_NOWHERE/"]
+	insteadOf = git@github.com:
+EOF
+set +e
+timeout 90 env HOME="$L2_HOME" USERPROFILE="$L2_HOME" CLAUDE_HOME="$L2_HOME/.claude" \
+  AI_MEMORY_REMOTE="git@github.com:u2giants/ai-devops-memory.git" \
+  AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_HUB="$TMP/l2-hub" AI_MEMORY_LOG="$TMP/l2.log" \
+  bash "$ROOT/bin/ai-memory-sync" sync > "$TMP/l2.out" 2>&1
+l2_status=$?
+set -e
+[[ "$l2_status" -ne 0 ]] || fail "insteadOf fixture unexpectedly synced (status 0)"
+grep -Fq 'publicly readable' "$TMP/l2.out" &&
+  fail "public-read probe false-positived under insteadOf rewrite"
+grep -Fq 'could not verify private hub visibility' "$TMP/l2.out" ||
+  fail "insteadOf fixture lost its diagnosis: $(tail -3 "$TMP/l2.out")"
+
 bash -n "$ROOT/bin/ai-memory-sync"
 bash -n "$ROOT/bin/ai-sync-memory"
 echo "PASS: private memory sync converges losslessly and preserves every failure state"

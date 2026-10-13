@@ -117,7 +117,14 @@ elif [[ "${AI_MEMORY_TEST_MODE:-}" == "1" ]]; then
     fail "could not verify private hub visibility"
   [[ "$private" == "true" ]] || fail "memory hub is not private"
 else
-  if GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+  # The probe must see the repository exactly as an anonymous outsider would.
+  # A url.<base>.insteadOf rewrite (e.g. https://github.com/ -> git@github.com:)
+  # would route this "is it public?" check through an authenticated transport
+  # and false-positive "publicly readable" on every run (#1646). An empty
+  # `-c url...insteadOf=` does NOT override a multivar rewrite; dropping the
+  # global/system config for this one call does.
+  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
       git -c credential.helper= -c core.askPass= \
       ls-remote https://github.com/u2giants/ai-devops-memory.git HEAD >/dev/null 2>&1; then
     fail "memory hub is publicly readable; refusing to sync"

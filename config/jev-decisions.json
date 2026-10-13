@@ -16,7 +16,7 @@
   "secret": {
     "env": "TYPESAFE_API_KEY",
     "op_reference_file_candidates": [
-      "config/mcp.env",
+      "~/.config/ai-devops/mcp.env",
       "config/mcp.env.example"
     ],
     "op_reference_prefix": "TYPESAFE_API_KEY=op://"

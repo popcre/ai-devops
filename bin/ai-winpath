@@ -41,8 +41,11 @@ fi
 # is a definitive no — do not pay for a PowerShell launch on every normal path.
 if [[ -z "$target" && "$query" != *"not a reparse point"* ]] && \
    command -v powershell >/dev/null 2>&1; then
+  # PowerShell single-quoted literals escape ' by doubling it; interpolate the
+  # escaped copy so a path containing a quote cannot break out of -LiteralPath.
+  ps_p="${win_p//\'/\'\'}"
   target="$(powershell -NoProfile -Command \
-    "try { (Get-Item -LiteralPath '$win_p').Target } catch { }" 2>/dev/null | head -1 | tr -d '\r')"
+    "try { (Get-Item -LiteralPath '$ps_p').Target } catch { }" 2>/dev/null | head -1 | tr -d '\r')"
 fi
 
 if [[ -n "$target" ]]; then

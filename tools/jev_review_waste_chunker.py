@@ -45,7 +45,6 @@ def chunk_text(text: str, window: int, overlap: int) -> list[tuple[int, int, str
         raise ValueError("window must be positive")
     if overlap < 0 or overlap >= window:
         raise ValueError("overlap must be in [0, window)")
-    step = window - overlap
     n = len(text)
     if n == 0:
         return []
@@ -66,9 +65,12 @@ def chunk_text(text: str, window: int, overlap: int) -> list[tuple[int, int, str
         out.append((start, end, text[start:end]))
         if end >= n:
             break
-        start += step
-        if start >= n:
-            break
+        # Lossless advance (#1646 M2): start the next chunk `overlap` before
+        # this chunk's actual end, not at start + step. When overlap < 0.2*window
+        # (the defaults), a turn-boundary snap can move `end` below start + step;
+        # advancing by step would drop the bytes in between. max() guarantees
+        # forward progress even when overlap is large relative to the snap.
+        start = max(end - overlap, start + 1)
     return out
 
 

@@ -22,6 +22,18 @@ missing="$TMP/does-not-exist"
 got="$(bash "$ROOT/bin/ai-winpath" "$missing")"
 check "missing path unchanged" test "$got" = "$missing"
 
+# A path containing a single quote must survive the PowerShell -LiteralPath
+# hand-off (#1646 L3): the script escapes embedded ' before interpolation.
+if grep -q "LiteralPath '\$ps_p'" "$ROOT/bin/ai-winpath" &&
+   grep -q 'ps_p="\${win_p//' "$ROOT/bin/ai-winpath"; then
+  echo "ok embedded quotes escaped before PowerShell"
+else
+  fail "ai-winpath does not escape embedded quotes for -LiteralPath"
+fi
+quoted="$TMP/it's a path"
+got="$(bash "$ROOT/bin/ai-winpath" "$quoted")"
+check "quoted path unchanged" test "$got" = "$quoted"
+
 # Junction coverage only where the OS can create one (Windows).
 if command -v cmd >/dev/null 2>&1; then
   target="$TMP/real-target"
