@@ -5,6 +5,10 @@ description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not mai
 
 # Qwen Code
 
+> **FROZEN 2026-10-13** (popcre/ai-devops#1714): best-effort, not maintained.
+> The wrapper stays installed and callable by name. The registry marks `qwen`
+> absent, so `ai-review qwen` refuses formal dispatch.
+
 ## Always use the wrapper
 
 ```bash

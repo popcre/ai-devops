@@ -24,7 +24,7 @@
     },
     "grok": {
       "registry_state": "absent",
-      "reason": "Temporarily out of reviewer rotation (quarantined) by owner instruction on 2026-10-13 (\"take grok out of the reviewer pool for now\"): Grok's xAI account is out of credit. Mirrors popcre/shared-db adding grok-4.6 to QUARANTINED_REVIEWERS (temporary, not retired). The ai-grok-review wrapper stays installed for named sessions. To reverse: remove grok-4.6 from shared-db QUARANTINED_REVIEWERS and set this entry back to registered, after the account has credit and one live well-formed review passes."
+      "reason": "Out of the maintained rotation pool. Quarantined 2026-10-13 (\"take grok out of the reviewer pool for now\": xAI account out of credit) and frozen the same day by owner instruction popcre/ai-devops#1714 (pool = Muse, DeepSeek, GLM, StepFun). The ai-grok-review wrapper stays installed for named sessions. Credit recovery alone does not restore rotation membership: re-entry requires owner instruction plus a reviewed registry change after one live well-formed review."
     },
     "kimi": {
       "registry_state": "absent",

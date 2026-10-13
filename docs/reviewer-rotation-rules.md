@@ -249,9 +249,10 @@ does not remove the separate suspended-membership restriction.
     2026-10-13 (#1714). Outside `popcre/shared-db`, a review is required only
     when the task class's gate already demands one (installation,
     reviewer-safety, deployment, infrastructure, production, shared-db
-    promotion, small-owner-entry). Ordinary docs, tooling, and non-shared-db
-    code land with no review; a review stays available on request by name.
-    Safety gates are never skipped.
+    promotion). Ordinary docs, tooling, and non-shared-db code land with no
+    review; a review stays available on request by name. Safety gates are never
+    skipped. A `small-owner-entry` is a review-*skipping* database override and
+    is not a review-requiring gate.
 
 ---
 

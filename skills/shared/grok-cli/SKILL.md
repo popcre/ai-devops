@@ -5,6 +5,10 @@ description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not mai
 
 # Grok CLI
 
+> **FROZEN 2026-10-13** (popcre/ai-devops#1714): best-effort, not maintained.
+> The wrappers stay installed and callable by name. The registry marks `grok`
+> absent, so `ai-review grok` refuses formal dispatch.
+
 This repository sets a minimum Grok Build version, recorded in
 `config/provider-cli-versions.json` (currently 1.0.13 with `version_match:
 minimum`). Both wrappers accept that build or any newer build of the same major

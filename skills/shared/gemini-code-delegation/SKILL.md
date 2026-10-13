@@ -5,6 +5,11 @@ description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not mai
 
 # Gemini code review
 
+> **FROZEN 2026-10-13** (popcre/ai-devops#1714): best-effort, not maintained.
+> The wrapper stays installed and callable by name. The registry marks `gemini`
+> absent, so `ai-review gemini` refuses formal dispatch. Do not treat the
+> rotation notes below as current membership.
+
 Gemini 3.8 Flash is a governed reviewer again as of 2026-09-06, and may also be
 used for an ad-hoc advisory review. It was held out after two live
 attempts produced no parseable verdict and a bare `PASS` with an empty report;
