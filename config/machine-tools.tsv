@@ -37,3 +37,4 @@ ai-mimo	bin/ai-mimo	bash+cmd	none	mimo	install-machine-tools.ps1
 ai-install-post-merge-hook	bin/ai-install-post-merge-hook	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-credit-watch	bin/ai-review-credit-watch	bash+cmd	yes	none	install-machine-tools.ps1
 ai-housekeeping	bin/ai-housekeeping	bash+cmd	yes	none	install-machine-tools.ps1
+ai-reviewer-logs-sync	bin/ai-reviewer-logs-sync	bash+cmd	yes	none	install-machine-tools.ps1

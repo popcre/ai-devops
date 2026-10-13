@@ -74,4 +74,20 @@ git -C "$VIEW" pull -q
 check 'new evidence is appended' "grep -q APPROVE '$M/state/review-scoreboard/reviews.jsonl'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$M/reviews' | wc -l) -eq 1 ]"
 
+# Basic authentication values are masked.
+printf 'Authorization: Basic dXNlcjpodW50ZXIycGFzcw==\n' > "$ISSUES/20261013-pkg/basic.log"
+run sync 2> "$TMP/out4"
+git -C "$VIEW" pull -q
+check 'basic auth masked' "! grep -q dXNlcjpodW50ZXIy '$M/reviewer-issues/20261013-pkg/basic.log'"
+
+# A symbolic link committed to the repository stops the sync before any write.
+git -C "$VIEW" config user.name t; git -C "$VIEW" config user.email t@example.invalid
+printf '%s' "$TMP/outside" > "$TMP/target"
+blob="$(git -C "$VIEW" hash-object -w "$TMP/target")"
+git -C "$VIEW" update-index --add --cacheinfo 120000,"$blob",evil-link
+git -C "$VIEW" commit -qm link && git -C "$VIEW" push -q origin HEAD:main
+printf 'more\n' >> "$STATE/reviewer-events/events.jsonl"
+check 'repository symlinks refused' "! run sync 2> '$TMP/out5' && grep -q 'symbolic links' '$TMP/out5' && [ ! -e '$TMP/outside' ]"
+check 'program is executable in git' "[ \"\$(git -C '$ROOT' ls-files -s bin/ai-reviewer-logs-sync | cut -c1-6)\" = 100755 ]"
+
 printf 'PASS test-ai-reviewer-logs-sync (%s checks)\n' "$pass"

@@ -49,7 +49,7 @@ MACHINE="${AI_REVIEWER_LOGS_MACHINE:-$(hostname | lower)}"
 LOG="$HOME_DIR/sync.log"
 
 # Detects survivors; the scrub below replaces whole values for each family.
-SECRET_RE='npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
+SECRET_RE='Basic[[:space:]]+[A-Za-z0-9+/]{8,}|npm_[A-Za-z0-9]{36}|AIza[0-9A-Za-z_-]{35}|glpat-[A-Za-z0-9_-]{20}|[rs]k_live_[A-Za-z0-9]{20}|hooks\.slack\.com/services/T[A-Za-z0-9]+/|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^[/[:space:]@][^/[:space:]@]{2,}@|ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
 R='[REDACTED-SECRET]'
 
 log(){ mkdir -p "$HOME_DIR"; printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
@@ -76,6 +76,7 @@ scrub(){
     -e "s/eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]*/$R/g" \
     -e "s/((api[_ -]?key|token|secret|password|passwd|authorization|credential)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^\"'[:space:],}]{8,}/\\1$R/Ig" \
     -e "s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]{12,}/\\1$R/g" \
+    -e "s/(Basic[[:space:]]+)[A-Za-z0-9+\/]{8,}={0,2}/\\1$R/g" \
     "$1"
 }
 
@@ -117,17 +118,24 @@ ensure_hub(){
   fi
   if [ ! -d "$HUB/.git" ]; then
     mkdir -p "$(dirname "$HUB")"
-    GIT_TERMINAL_PROMPT=0 git clone -q "$REMOTE" "$HUB" || die "could not clone $REMOTE"
+    GIT_TERMINAL_PROMPT=0 git clone -q -c core.symlinks=false "$REMOTE" "$HUB" || die "could not clone $REMOTE"
   fi
+  # Repository content must never redirect writes outside the clone.
+  git -C "$HUB" config --replace-all core.symlinks false
   if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
     [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] \
       || die "$HUB is not a clone of $REMOTE"
   fi
-  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1 || \
-     GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>/dev/null; then
-    if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+  GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
+  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    if git -C "$HUB" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+      git -C "$HUB" rebase -q origin/main 2>>"$LOG" || { git -C "$HUB" rebase --abort 2>/dev/null; die "could not bring $HUB up to date"; }
+    else
       git -C "$HUB" checkout -q -B main origin/main
     fi
+  fi
+  if [ -n "$(git -C "$HUB" ls-files -s | awk '$1 == "120000"')" ]; then
+    die "the reviewer-logs repository contains symbolic links; refusing to write into it"
   fi
 }
 
@@ -185,8 +193,9 @@ cmd_sync(){
       [ -n "${seen[$dir]:-}" ] && continue
       seen[$dir]=1
       # Full checkout path as the folder name, so same-named checkouts never merge.
+      # Readable name plus a hash of the full path: distinct checkouts never share a folder.
       checkout="$(dirname "$(dirname "$dir")")"
-      checkout="$(printf '%s' "${checkout#/}" | tr '/:\\' '___')"
+      checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha1sum | cut -c1-8)"
       copy_tree "$dir" "reviews/$checkout"
     done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>/dev/null)
   done
