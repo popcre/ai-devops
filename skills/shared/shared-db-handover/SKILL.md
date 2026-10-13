@@ -52,6 +52,15 @@ and exclusive stages, stop its writers, and verify each outcome:
   source/object/version protection or fake expiry. Release only finished stages
   this session owns; never claim readiness without the actual receipt.
 
+These ownership flags require the native helper to be available from merged
+shared-db source. Before reporting that they work, verify source change #4271 is
+merged, use a clean current merged canonical `shared-db` tool worktree, and run
+`node scripts/manage-migration-author-lanes.mjs --help` to confirm the exact
+supported flags. Run the flags from that tool worktree; pass the preserved source
+worktree with `--worktree`. Do not run an old helper from, or overwrite, the
+source worktree. If the merged helper or its documented flags are unavailable,
+report the ownership action as blocked; do not claim live capability.
+
 This is also the normal completion/stop rule; wrap-up repeats it as a fallback.
 Before declaring closeout complete, freshly verify that no execution capacity
 remains with the stopped session and every retained object claim has a verified
@@ -74,8 +83,8 @@ block already exists, extend it; never infer the route from the repository,
 gh issue comment <existing-issue> --repo popcre/shared-db --body-file <a file you wrote>
 ```
 
-Sign each GitHub post with `Posted by Codex chat <id> on <machine>` as required by
-the shared-db repository instructions.
+Sign each GitHub post with the actual client engine: `Posted by <Codex or Claude>
+chat <id> on <machine>`. Never attribute a post to an engine that did not make it.
 
 Only structural work uses `route: claim-first`. Source-data decisions,
 application data, documentation, repository maintenance, and security settings
@@ -201,7 +210,7 @@ responsible for its claim, safety decisions, and verified closeout.
 A structural handoff that omits half (b) is **incomplete**, no matter how long
 it is. **A handoff that leaves outstanding work with no note on the existing
 issue is equally incomplete**, and carries exactly the same weight —
-see "Seed the outstanding work" below. *(Corrected 2026-08-09: this named the `REQUEST
+see "Keep unfinished work on its existing issue" below. *(Corrected 2026-08-09: this named the `REQUEST
 QUEUE` in `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
 
 **(a) Coordination state**
@@ -277,10 +286,12 @@ Three passes, and then a fourth that is just honesty:
    cleanup keyed on git ancestry therefore reports live work and cleans nothing —
    which is exactly why 29 worktrees and 130 branches accumulated. **Ask GitHub
    whether the PULL REQUEST merged.** Use the current `shared-db` worktree-recovery
-   procedure and its ownership, clean-custody, and recoverability proofs. The old
-   marker guard was removed; a marker is neither a lock nor authorization to reap.
-   Preserve dirty or unproven bytes and resolve the exact ownership refusal before
-   any cleanup.
+   procedure and its ownership, clean-custody, and recoverability proofs.
+   `popcre/shared-db/scripts/reap-merged-worktrees.mjs` identifies merged-PR candidates (dry-run
+   by default); apply cleanup only after the current `cleanup-worktree` checks
+   prove ownership, clean custody and recoverability. It has no marker predicate
+   and does not authorize removal by itself. Preserve dirty or unproven bytes and
+   resolve the exact ownership refusal before any cleanup.
 
    Remote branches now delete themselves — `delete-branch-on-merge` was turned on
    for `popcre/shared-db` on 2026-08-13.
@@ -413,7 +424,7 @@ issue. Open no marker or leftover-proof issue.
    unfinished there is no PR at all.
 
    This split exists because the old blanket "never merge on the way out" is what
-   stranded the **2026-08-05** handover in open PR #451. The next orchestrator read
+   stranded the **2026-08-05** handover in open PR #451. The next session read
    `main`, saw a five-day-old handover, and concluded the session had been lost.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
@@ -466,7 +477,7 @@ issue. Open no marker or leftover-proof issue.
 7. **Confirm the sweep above was actually run** — every
    "finished" branch confirmed merged and its worktree retired, and everything
    you deliberately left behind flagged as a decision. This is a checklist item,
-   not a nicety: an unswept repo is how the next orchestrator inherits phantom
+   not a nicety: an unswept repo is how the next session inherits phantom
    worktrees and branches nobody dares delete.
 8. **Confirm outstanding work is on its existing application issue.** Verify
    actions against the issue, including any older agenda or backlog note. **Do not
