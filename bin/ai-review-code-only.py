@@ -19,7 +19,8 @@ DENIED_PARTS = {
     "captures", "credential", "credentials", "data", "dataset", "datasets",
     "evidence", "export", "exports", "fixture", "fixtures", "licensed",
     "logs", "private", "raw", "report", "reports", "secret", "secrets",
-    "transcript", "transcripts", "vendor", "vendors",
+    "transcript", "transcripts", "vendor", "vendors", "__fixtures__",
+    "testdata", "snapshots", "mocks", "samples",
 }
 CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js", ".jsx", ".mjs", ".cjs", ".py", ".ps1", ".rs", ".sh", ".ts", ".tsx"}
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
@@ -101,6 +102,10 @@ def safe_path(raw):
     lower = [part.lower() for part in parts]
     if any(part in DENIED_PARTS or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
+    # Legacy fixtures also encode their licensed scope in the filename. A
+    # code suffix or the bin/ai-* launcher exception must not admit those rows.
+    if "licensed" in re.split(r"[-_.]", Path(raw).stem.lower()):
+        fail("licensed evidence filename refused")
     suffix = Path(raw).suffix.lower()
     executable_bin = len(parts) == 2 and lower[0] == "bin" and lower[1].startswith("ai-") and suffix == ""
     if not executable_bin and suffix not in CODE_SUFFIXES and not (suffix in CONTRACT_SUFFIXES and any(p in CONTRACT_PARTS for p in lower[:-1])):

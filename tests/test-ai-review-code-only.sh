@@ -65,6 +65,22 @@ must_fail "$PACKET" resolve "$R" --assert-head "$ORIGINAL_HEAD"
 must_fail "$PACKET" build "$R" ordinary
 pass 'ordinary snapshot and packet paths refuse private source'
 
+# Legacy fixture folders can hold code-extension row exports. Refuse before
+# creating a snapshot, regardless of a .ts/.mjs suffix or launcher spelling.
+for hostile in apps/workers/src/__fixtures__/licensed-rows.ts apps/workers/src/__fixtures__/licensed-rows.mjs apps/workers/src/testdata/rows.ts apps/workers/src/snapshots/rows.py apps/workers/src/mocks/rows.sh apps/workers/src/samples/rows.ts src/licensed-rows.ts bin/ai-licensed-rows; do
+  mkdir -p "$R/$(dirname "$hostile")"
+  printf 'PRIVATE_LEGACY_FIXTURE_SENTINEL\n' > "$R/$hostile"
+  printf '["%s"]\n' "$hostile" > "$TMP/legacy-approved.json"
+  must_fail "$SANDBOX" ensure-code-only "$R" legacy-refused --paths-file "$TMP/legacy-approved.json" --base "$BASE"
+  grep -Eq 'evidence or hidden path refused|licensed evidence filename refused' "$TMP/refusal.out" \
+    || fail "legacy fixture did not fail its evidence boundary: $hostile"
+  if compgen -G "$TMP/sandboxes/legacy-refused*" >/dev/null; then
+    fail 'denied legacy snapshot or partial export was published'
+  fi
+  rm "$R/$hostile"
+done
+pass 'legacy fixture folders and licensed filenames refuse code and launcher extensions'
+
 EXPORT="$("$SANDBOX" ensure-code-only "$R" codeonly --paths-file "$TMP/approved.json" --base "$BASE")"
 "$SANDBOX" verify-code-only "$EXPORT" --assert-head "$ORIGINAL_HEAD"
 # Owner lease (PR #1537): a live run must hold a lease beside the export so a
