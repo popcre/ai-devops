@@ -1,3 +1,9 @@
+---
+issue: 1116
+status: OPEN
+owner: mimo/1116-d1-flake
+---
+
 # HANDOFF — #1116 D1 land + flake fix (2026-09-30)
 
 Status: OPEN — finish D1, then final report.

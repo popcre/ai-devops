@@ -12,6 +12,26 @@ $tpm = Get-Tpm
 if (-not $tpm.TpmPresent -or -not $tpm.TpmReady) { throw 'TPM must be present and ready.' }
 if (-not (Confirm-SecureBootUEFI)) { throw 'Secure Boot must be enabled.' }
 
+# Remote-admin filtering must stay at its secure defaults (issue #1547).
+# Never set LocalAccountTokenFilterPolicy, enable Windows sudo, or weaken UAC.
+# Those knobs are forbidden and cannot restore pre-2026-09-09 SSH filtering.
+$uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+if ($uac.EnableLUA -ne 1) { throw "UAC must remain enabled (EnableLUA=1); found '$($uac.EnableLUA)'." }
+if ($null -ne $uac.PSObject.Properties['LocalAccountTokenFilterPolicy'] -and $uac.LocalAccountTokenFilterPolicy -ne 0) {
+  throw "LocalAccountTokenFilterPolicy must be absent or 0; found '$($uac.LocalAccountTokenFilterPolicy)'."
+}
+$sudo = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo' -ErrorAction SilentlyContinue
+if ($sudo -and $sudo.Enabled -eq 1) { throw 'Windows sudo must not be enabled.' }
+
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  throw 'Qualification must run from an elevated administrator token.'
+}
+$integrity = whoami /groups | Select-String -Pattern 'Mandatory Label\\(High|Medium|Low|System) Mandatory Level' | ForEach-Object {
+  $_.Matches[0].Groups[1].Value
+} | Select-Object -First 1
+
 $machinePwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
 $gitBash = 'C:\Program Files\Git\bin\bash.exe'
 foreach ($path in @($machinePwsh, $gitBash)) {
@@ -34,6 +54,12 @@ $evidence = [ordered]@{
   runner_service_automatic = $true
   machine_pwsh = $machinePwsh
   git_bash = $gitBash
+  enable_lua = [int]$uac.EnableLUA
+  local_account_token_filter_policy = if ($null -ne $uac.PSObject.Properties['LocalAccountTokenFilterPolicy']) { [int]$uac.LocalAccountTokenFilterPolicy } else { 'absent' }
+  windows_sudo_enabled = if ($sudo -and $sudo.Enabled -eq 1) { $true } else { $false }
+  caller_token_elevated = $true
+  caller_integrity_level = $integrity
+  token_posture_note = 'Local-admin Network (SSH) logons yield full elevated tokens under stock Windows OpenSSH (issue #1547 closed 2026-10-12; no Microsoft regression). UAC knobs stay at secure defaults; host proofs must measure token posture instead of assuming filtering.'
 }
 
 $parent = Split-Path -Parent $EvidencePath
@@ -42,4 +68,3 @@ $temporary = "$EvidencePath.tmp"
 $evidence | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
 Move-Item -LiteralPath $temporary -Destination $EvidencePath -Force
 Write-Output "PASS: Windows runner security evidence written to $EvidencePath"
-

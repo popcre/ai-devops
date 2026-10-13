@@ -110,20 +110,20 @@ credentials you would not hand to a pull request author.
 
 ## What is installed
 
-**Two runners**, both labelled `edge-dev`, living outside every repository
-checkout:
+**One runner** since 2026-10-12, labelled `edge-dev`, living outside every
+repository checkout:
 
-| Runner | Directory | Scheduled task |
+| Runner | Directory | How it runs |
 |---|---|---|
-| `edge-dev-win` | `C:\actions-runner` | `GitHubActionsRunner-aidevops` |
-| `edge-dev-win-2` | `C:\actions-runner-2` | `GitHubActionsRunner-aidevops-2` |
+| `edge-dev-win` | `C:\actions-runner` | Windows service `actions.runner.popcre-ai-devops.edge-dev-win` |
 
-Two registrations remain available for explicit host-bound diagnostics; they
-are not used by required pull-request or scheduled verification. Do not run
-both on the same physical machine at once or add a third without a reason — each
-competes for the same cores and installed runtime, and oversubscription starves
-a runner's heartbeat (see the 2026-08-28 entry in
-[`critical-incidents.md`](critical-incidents.md)).
+The former second registration `edge-dev-win-2` (`C:\actions-runner-2`,
+scheduled task `GitHubActionsRunner-aidevops-2`) is no longer registered on
+GitHub; do not revive it. The runner is not used by required pull-request or
+scheduled verification. Do not add a second registration on the same physical
+machine without a reason — each competes for the same cores and installed
+runtime, and oversubscription starves a runner's heartbeat (see the 2026-08-28
+entry in [`critical-incidents.md`](critical-incidents.md)).
 
 The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
 `X64` labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]`
@@ -137,14 +137,26 @@ machines. An explicit full manual run may select
 The registrations remain available only for deliberate manual workflows that
 ask for `edge-dev`.
 
-Neither is a Windows service — installing one requires an elevated shell. At
-most one registration and scheduled task may be active on this physical host.
-A deliberate manual diagnostic selects one; the other must remain stopped or
-disabled for the whole run because both share the installed runtime and cores.
+> **Update 2026-10-12:** `edge-dev-win` now runs as the Windows service
+> `actions.runner.popcre-ai-devops.edge-dev-win` (NETWORK SERVICE, delayed auto
+> start) with labels `edge-dev,ai-devops-windows`. Its `C:\actions-runner`
+> folder had been deleted (not in the 2026-10-11 shadow copy either), so it was
+> re-registered with `--replace --runasservice`. `edge-dev-win-2` is no longer
+> registered on GitHub.
+
+Before that update neither registration was a Windows service. Reinstalling or
+changing the service requires an elevated shell. At most one registration may be
+active on this physical host; the old `GitHubActionsRunner-aidevops` scheduled
+task must stay disabled so it cannot start a second copy beside the service.
 
 **Consequence:** only that manual diagnostic depends on the machine. Hosted
 repository verification continues independently if the local host is off,
 busy, or unavailable.
+
+> **Historical (pre-2026-10-12 two-registration layout).** The scheduled-task
+> creation and peer-selection procedures below describe the retired
+> `edge-dev-win-2` arrangement. Do not run them while the service above is the
+> only registration; they would start a second listener on the same host.
 
 **Creating an on-demand scheduled task needs an elevated shell.** Do not attach
 an at-logon or recurring trigger. From an **Administrator** PowerShell:

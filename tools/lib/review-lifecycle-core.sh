@@ -324,7 +324,7 @@ rlc_lifecycle_begin() { # rlc_lifecycle_begin PROVIDER REPO RUN_ID CALLER [BASE]
   [ -z "$base" ] || args+=(--base "$base")
   [ -z "$session" ] || args+=(--session-id "$session")
   [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] || args+=(--reviewer-approval "$AI_REVIEW_REVIEWER_APPROVAL")
-  AI_REVIEW_RUNNER_CORE="$RLC_STAMP" "$RLC_LIFECYCLE" begin "${args[@]}" \
+  AI_REVIEW_LIFECYCLE_OWNER_PID="$$" AI_REVIEW_RUNNER_CORE="$RLC_STAMP" "$RLC_LIFECYCLE" begin "${args[@]}" \
     || rlc_die 'provider preflight failed; no review was assigned.'
 }
 
@@ -340,6 +340,21 @@ rlc_lifecycle_finish() { # rlc_lifecycle_finish STATE VERDICT REPORT ELAPSED [PA
 
 rlc_lifecycle_fail() { # rlc_lifecycle_fail STATE ELAPSED FAILURE [REPORT] [PACKET_DIR] [PACKET_SHA]
   local state="$1" elapsed="$2" failure="$3" report="${4:-}" packet_dir="${5:-}" packet_sha="${6:-}"
+  local retained="$state.failure-diagnostics" diagnostic_provider
+  # Failure evidence has the same lifetime as its lifecycle, including invalid
+  # verdicts, report-floor failures and stale source. Never reference a temp
+  # report that the caller immediately removes after this transition.
+  case "$report" in "$state.diagnostics"/report.md) ;;
+    *)
+      diagnostic_provider="$(jq -r '.provider // "unknown"' "$state" 2>/dev/null || printf unknown)"
+      python3 "$RLC_ROOT/tools/review_door_diagnostics.py" "$diagnostic_provider" \
+        "${report:-$state.no-output}" "$state.no-stderr" 1 "$failure" \
+        "$retained.report.tmp" "$retained" \
+        || rlc_die 'private failure evidence could not be retained; lifecycle remains for recovery.'
+      rm -f "$retained.report.tmp"
+      report="$retained/report.md"
+      ;;
+  esac
   local -a args=(--state "$state" --elapsed "$elapsed" --failure "$failure")
   [ -z "$report" ] || args+=(--report "$report")
   [ -z "$packet_dir" ] || args+=(--packet-dir "$packet_dir")
@@ -385,6 +400,7 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
       DOOR_PACKET_DIR="$packet_dir" \
       DOOR_PROMPT_FILE="$prompt_file" \
       DOOR_REPORT_OUT="$report_out" \
+      DOOR_DIAGNOSTICS_DIR="${RLC_DOOR_DIAGNOSTICS_DIR:-}" \
       DOOR_HEAD="$head" \
       DOOR_MAX_TURNS="$max_turns" \
       DOOR_ALLOW_WRITE="$allow_write" \
@@ -566,9 +582,28 @@ $operation_request"
   fi
 
   if [ -n "$tests_cmd" ]; then
-    if ( cd "$review_dir" && bash -c "$tests_cmd" ) >/dev/null 2>&1; then
-      tests_result="$tests_cmd (exit 0 — passed in the review snapshot before dispatch)"
+    # Keep the executed output: the reviewer must see what ran, not only that
+    # it exited 0 (a reviewer that cannot run tests itself has no other source).
+    local tests_out tests_tail="${AI_REVIEW_TEST_OUTPUT_TAIL:-60}"
+    case "$tests_tail" in ""|*[!0-9]*) tests_tail=60 ;; esac
+    tests_out="$(mktemp)"
+    # The suite runs as an offline child: never hand it live door/lifecycle
+    # custody (diagnostics, report, runner token) to write into (#1562).
+    local tests_name; local -a tests_scrub=()
+    for tests_name in $(compgen -e); do
+      case "$tests_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+        tests_scrub+=(-u "$tests_name");; esac
+    done
+    if ( cd "$review_dir" && env "${tests_scrub[@]}" bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
+      tests_result="$tests_cmd (exit 0 — passed in the review snapshot before dispatch)
+
+Executed test output (last ${tests_tail} lines, captured by the runner in the review snapshot before dispatch; this supersedes any packet line saying no tests were run):
+\`\`\`
+$(tail -n "$tests_tail" "$tests_out")
+\`\`\`"
+      rm -f "$tests_out"
     else
+      rm -f "$tests_out"
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-command-failed
       rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
       rlc_die 'tests command failed; no review was dispatched.'
@@ -587,17 +622,36 @@ $operation_request"
   snapshot_before="$("$RLC_SANDBOX" digest "$review_dir" 2>/dev/null || true)"
   rlc_note "step door-call"
   local door_rc=0
+  local RLC_DOOR_DIAGNOSTICS_DIR="$state.diagnostics"  # this review only, never a later call
   rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 "$mode" "$operation" || door_rc=$?
   if [ "$door_rc" -ne 0 ]; then
+    local door_failure=provider-failed diagnostic_reason=""
+    # Door diagnostics are private and already durably published outside the
+    # sealed packet. Keep the lifecycle reference after session temp cleanup.
+    if [ -f "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ] && [ ! -L "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ]; then
+      body_file="$RLC_DOOR_DIAGNOSTICS_DIR/report.md"
+      diagnostic_reason="$(tail -n 1 "$body_file" | jq -r '.reason // empty' 2>/dev/null || true)"
+      case "$diagnostic_reason" in
+        local-dependency-unavailable) door_failure=local_dependency_unavailable ;;
+        native-execution-failed) door_failure=native-execution-failed ;;
+        native-error-envelope|provider-status-failed) door_failure=provider-native-error ;;
+        invalid-response-json) door_failure=provider-invalid-response ;;
+        native-tool-denied) door_failure=permission-denied ;;
+        permission-cancelled) door_failure=permission-cancelled ;;
+        model-mismatch) door_failure=model-mismatch ;;
+        no-assistant-text|empty-response-text|report-extraction-failed) door_failure=empty-report ;;
+      esac
+    fi
     # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does
     # for wrappers; the door has already printed both contract lines.
     if [ "$door_rc" -eq 92 ]; then
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" out-of-credit "$body_file" "$packet_dir" "$packet_sha"
     else
-      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" provider-failed "$body_file" "$packet_dir" "$packet_sha"
+      rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" "$door_failure" "$body_file" "$packet_dir" "$packet_sha"
     fi
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
-    rm -f "$brief" "$body_file" "$identity_file"
+    rm -f "$brief" "$identity_file"
+    case "$body_file" in "$RLC_DOOR_DIAGNOSTICS_DIR"/*) ;; *) rm -f "$body_file";; esac
     [ "$door_rc" -ne 92 ] || { rlc_note "door $provider is out of credit."; exit 92; }
     rlc_die "door $provider exited nonzero; diagnostic retained in the lifecycle record."
   fi
@@ -739,6 +793,9 @@ rlc_run_implement() {
   fi
 
   rlc_capture door rlc_door_path "$provider"
+  # Implement has no diagnostics custody of its own; never forward one inherited
+  # from a caller or an earlier review in this shell (#1562).
+  local RLC_DOOR_DIAGNOSTICS_DIR=""
   set +e
   rlc_call_door implement "$door" "$worktree" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 1
   rc=$?

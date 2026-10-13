@@ -253,8 +253,12 @@ The command automatically captures:
 - when supplied, the complete error log and detailed session notes.
 
 Reports are stored under `.ai/reviewer-issues/` in the installed ai-devops
-checkout. That directory is excluded from Git because evidence can refer to
-private repositories and provider sessions.
+checkout. Owner decision 2026-10-12 (PR #1626): redacted incident packages are
+published on main as evidence. The public-boundary gate allows that one
+subtree and still forbids every other generated AI artifact, plus any
+secret-bearing file type (`*.env`, `*.pem`, `*.key`, and the other
+`.gitignore` secret names) even under `.ai/reviewer-issues/`. Packages may
+refer to private repositories and provider sessions only after redaction.
 
 ## Later diagnosis
 

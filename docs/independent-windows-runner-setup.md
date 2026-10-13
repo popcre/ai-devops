@@ -566,6 +566,38 @@ the shell that host actually runs.
 
 Both hosts were verified reachable this way on 2026-09-02.
 
+### What token an SSH session gets
+
+Fresh SSH sessions on every probed Windows pool host yield a FULL elevated
+administrator token (High Mandatory Level, BUILTIN\Administrators enabled).
+Stock Windows OpenSSH has always behaved this way for local administrators;
+lab-VM checks matched before and after the September 2026 updates (issue #1547
+closed 2026-10-12 — no Microsoft regression). The older expectation of a
+filtered token does not reproduce.
+
+Verify the posture of a fresh session rather than assuming it:
+
+```bash
+ssh <host-alias> "whoami /groups"
+```
+
+Interpret the result: `High Mandatory Level` together with Administrators as an
+`Enabled group` means the session is elevated — treat it as host-admin.
+`Medium Mandatory Level` with `Group used for deny only` means the token is
+filtered (not what stock Windows OpenSSH does for local admins).
+
+Implications: scripts needing Administrator SUCCEED over SSH — do not
+mistake this for a misconfigured boundary. Any negative privilege test must run
+from a proven non-elevated operator context (Medium Mandatory Level,
+Administrators deny-only), per the host adaptation in
+[`plan_windows-runner-maintenance-elevation.md`](../plan_windows-runner-maintenance-elevation.md)
+§10.
+
+Decision recorded in issue #1547: no host-side hardening. Do not set
+`LocalAccountTokenFilterPolicy`, do not enable Windows sudo, do not change UAC —
+those knobs stay at their secure defaults and setting them is forbidden.
+Future host proofs record their token posture as a fact of that proof.
+
 ## Status and troubleshooting
 
 Repository runner status:

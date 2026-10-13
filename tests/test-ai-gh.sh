@@ -82,6 +82,13 @@ echo "end $(date +%s%N)" >> "$FAKE_LOG"
 EOF
 chmod +x "$FAKE"
 export AI_GH_REAL_GH="$FAKE" FAKE_LOG="$TMP/log" AI_GH_STATE_DIR="$TMP/state" AI_GH_MIN_SPACING_SECONDS=0 FAKE_COUNT="$TMP/count" AI_GH_QUOTA_PROBE_SECONDS=off
+# Spacing is a guarantee about reservations taken under the lock. Child launch
+# times drift on loaded runners, so spacing checks read the reservation log.
+RES_LOG="$TMP/reservations"
+# reservations_spaced MIN_MS COUNT: every reservation (identity lookups included)
+# is at least MIN_MS after the previous one, and COUNT non-identity reservations
+# exist (the fake logs no start line for identity lookups).
+reservations_spaced(){ awk -v min="$1" -v want="$2" '/^reserve/{t[++n]=$2; if($4!="identity") c++} END{if(c!=want) exit 1; for(i=2;i<=n;i++) if(t[i]-t[i-1] < min) exit 1}' "$RES_LOG"; }
 
 check 'passes arguments and output through' "[ \"\$('$GH' pr view 5)\" = 'out:pr view 5' ]"
 check 'gh run watch is refused without calling GitHub' "! '$GH' run watch 12 && ! grep -q 'run watch' '$FAKE_LOG'"
@@ -92,17 +99,19 @@ check 'ordinary failure keeps gh status and records no back-off' "[ $rc -eq 1 ] 
 
 # Spacing across calls.
 : > "$FAKE_LOG"
-AI_GH_MIN_SPACING_SECONDS=2 "$GH" a >/dev/null; AI_GH_MIN_SPACING_SECONDS=2 "$GH" b >/dev/null
-s1=$(awk '/^start/{print $2}' "$FAKE_LOG" | sed -n 1p); s2=$(awk '/^start/{print $2}' "$FAKE_LOG" | sed -n 2p)
-check 'calls are spaced by the minimum interval' "[ $(( (s2 - s1) / 1000000 )) -ge 1000 ]"
+: > "$RES_LOG"
+AI_GH_RESERVATION_LOG="$RES_LOG" AI_GH_MIN_SPACING_SECONDS=2 "$GH" a >/dev/null; AI_GH_RESERVATION_LOG="$RES_LOG" AI_GH_MIN_SPACING_SECONDS=2 "$GH" b >/dev/null
+check 'calls are spaced by the minimum interval' "[ \$(grep -c '^start' '$FAKE_LOG') -eq 2 ] && reservations_spaced 2000 2"
 
 # Serialization across concurrent processes: call STARTS are spaced, and a slow
 # call does not hold the lock while it runs.
 : > "$FAKE_LOG"
-for i in 1 2 3; do AI_GH_MIN_SPACING_SECONDS=1 FAKE_SLEEP=3 "$GH" p$i >/dev/null & done; wait
-# Reservation order is serialized; process scheduling after lock release can
-# change the order of actual child starts. Check the observed burst envelope.
-check 'concurrent processes space their GitHub call starts' "[ \$(grep -c '^start' '$FAKE_LOG') -eq 3 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{if(n!=3 || (t[3]-t[1])/1000000 < 1500) exit 1; for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 400) exit 1}'"
+: > "$RES_LOG"
+for i in 1 2 3; do AI_GH_RESERVATION_LOG="$RES_LOG" AI_GH_MIN_SPACING_SECONDS=1 FAKE_SLEEP=3 "$GH" p$i >/dev/null & done; wait
+# Each call start is reserved under the lock, in order, at least the minimum
+# spacing apart; every reservation is followed by exactly one real call.
+check 'concurrent processes space their GitHub call starts' "[ \$(grep -c '^start' '$FAKE_LOG') -eq 3 ] && reservations_spaced 1000 3"
+check 'millisecond clock never uses date %3N (uutils drops leading zeros)' "! grep -q '%3N' '$GH'"
 check 'lock is released after calls' "[ ! -d '$TMP/state/lock.d' ]"
 : > "$FAKE_LOG"
 # Prove ordering, not speed: the slow call is held open until the quick call
@@ -134,14 +143,16 @@ rm -f "$TMP/state/backoff_until"
 # Hourly (primary) budget.
 # Follow-up probes must share the same start-spacing lock as real requests.
 : > "$FAKE_LOG"
-for i in 1 2; do FAKE_MODE=spaced-failure AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1 & done
+: > "$RES_LOG"
+for i in 1 2; do AI_GH_RESERVATION_LOG="$RES_LOG" FAKE_MODE=spaced-failure AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1 & done
 wait
 # Ordinary failures need no diagnostic quota request. Both commands still
 # reserve separate starts even when their processes launch in either order.
-check 'concurrent ordinary failures retain spacing without diagnostic probes' "! grep -q 'api --include rate_limit' '$FAKE_LOG' && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{if(n!=2 || (t[2]-t[1])/1000000 < 1000) exit 1}'"
+check 'concurrent ordinary failures retain spacing without diagnostic probes' "! grep -q 'api --include rate_limit' '$FAKE_LOG' && [ \$(grep -c '^start' '$FAKE_LOG') -eq 2 ] && reservations_spaced 2000 2"
 : > "$FAKE_LOG"
-FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
-check 'primary refusal snapshot also respects minimum start spacing' "[ $rc -eq 75 ] && [ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 1 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
+: > "$RES_LOG"
+AI_GH_RESERVATION_LOG="$RES_LOG" FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
+check 'primary refusal snapshot also respects minimum start spacing' "[ $rc -eq 75 ] && [ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 1 ] && n=\$(grep -c '^start' '$FAKE_LOG') && reservations_spaced 2000 \$n"
 rm -f "$TMP/state/backoff_until" "$TMP/state"/quota-pause.*
 rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?

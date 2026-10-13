@@ -1,3 +1,9 @@
+---
+issue: 617
+status: OPEN
+owner: claude/blockerwatch-parked-work-plan
+---
+
 # Handoff: BlockerWatch parked-work plan (not started)
 
 Written 2026-09-18 on edge-dev by a Claude Opus 5 session.

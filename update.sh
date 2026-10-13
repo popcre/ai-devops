@@ -5,6 +5,18 @@ set -uo pipefail
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
+normalized_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -am -- "$1" | tr '[:upper:]' '[:lower:]'
+  else
+    realpath -- "$1"
+  fi
+}
+same_path() {
+  local left right
+  left="$(normalized_path "$1")" && right="$(normalized_path "$2")" || return 1
+  [ -n "$left" ] && [ -n "$right" ] && [ "$left" = "$right" ]
+}
 
 expected_head=""
 installed_checkout=""
@@ -41,12 +53,12 @@ if [ -n "$installed_checkout" ]; then
   [ "$SOURCE_ROOT" != "$REPO_ROOT" ] || { warn 'candidate and installed checkout must differ'; exit 1; }
   source_top="$(git -C "$SOURCE_ROOT" rev-parse --show-toplevel 2>/dev/null)" || exit 1
   installed_top="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" || exit 1
-  [ "$source_top" = "$SOURCE_ROOT" ] && [ "$installed_top" = "$REPO_ROOT" ] || {
+  same_path "$source_top" "$SOURCE_ROOT" && same_path "$installed_top" "$REPO_ROOT" || {
     warn 'candidate or installed path is not a Git worktree root'; exit 1;
   }
   source_common="$(git -C "$SOURCE_ROOT" rev-parse --path-format=absolute --git-common-dir)" || exit 1
   installed_common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" || exit 1
-  [ "$(realpath "$source_common")" = "$(realpath "$installed_common")" ] || {
+  same_path "$source_common" "$installed_common" || {
     warn 'candidate does not share the installed checkout Git common directory'; exit 1;
   }
   [ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ] || {
@@ -64,7 +76,15 @@ umask 077
 mkdir -p "$install_lock_dir" || exit 1
 install_lock_file="$install_lock_dir/$install_lock_name"
 exec 9>"$install_lock_file" || exit 1
-flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+if command -v flock >/dev/null 2>&1; then
+  flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+else
+  install_lock_fallback="${install_lock_file}.d"
+  mkdir "$install_lock_fallback" 2>/dev/null || { warn 'another installation is active for this checkout'; exit 1; }
+  trap 'rmdir -- "$install_lock_fallback" 2>/dev/null' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+fi
 umask "$install_original_umask"
 if [ -n "$(git status --porcelain)" ]; then
   warn 'checkout has local changes; preserve and reconcile them before updating'
@@ -122,6 +142,7 @@ cleanup() {
   if [ "$candidate_added" -eq 1 ]; then git worktree remove --force "$candidate" >/dev/null 2>&1 || true; fi
   [ -z "$proof_file" ] || rm -f -- "$proof_file"
   rmdir "$candidate_parent" "$hooks_dir" 2>/dev/null || true
+  [ -z "${install_lock_fallback:-}" ] || rmdir -- "$install_lock_fallback" 2>/dev/null || true
 }
 trap cleanup EXIT
 git -c core.hooksPath="$hooks_dir" worktree add --detach "$candidate" "$target_head" >/dev/null || exit 1

@@ -139,13 +139,17 @@ file and note in it that migration is still pending.
   > informed than anyone as to whether something is finished or not."
 
   Twenty concurrent workstreams legitimately means twenty files. A count cap bills
-  whoever shows up next for a mess somebody else left. **Count STALE files instead
-  — files whose issue is already closed — and the target for those is ZERO.**
-  Report those in the closing report, named, with their owner from the contract
-  block. Any earlier "more than 5 is a warning" wording in this or any other skill
-  is **superseded**.
+  whoever shows up next for a mess somebody else left. **Do not count files. Count
+  SUCCESSOR REVIEW candidates — those whose `issue:` is already closed — and report
+  those by name with their `owner:`. A closed issue is a review trigger, not proof
+  that the handoff is finished; apply the successor rule before deletion. There is
+  no limit on the total.** (Owner ruling 2026-08-13.) Any earlier "more than 5 is a
+  warning" wording in this or any other skill is **superseded**.
 
 ### The contract block (REQUIRED where the repo enforces it; good practice everywhere)
+
+`popcre/ai-devops` (the ai-devops repository) enforces it: every `HANDOFF.d/`
+file there MUST open with the contract block below.
 
 **Open every `HANDOFF.d/` file with the issue that would prove it finished:**
 
@@ -165,12 +169,17 @@ question is one `gh issue view`.
 
 **A finished file is DELETED, never marked done.** There is no `status: DONE`. A
 file that stays behind announcing it is complete is the same archaeology problem as
-one that says nothing.
+one that says nothing. A file without the contract block cannot be retired by
+anyone but its author, and will be reported as `UNATTRIBUTED` by `ai-housekeeping`.
 
-**If your work has no issue, open one.** A workstream worth a handoff is worth an
+**If your work has no issue, do not invent a parallel tracker.** Open one on the
+repo with `gh issue create`, or, if the work genuinely has no issue, write
+`issue: none` plus a one-line reason. `issue: none` is legal but will be reported
+as `UNPROVABLE` by `ai-housekeeping`. A workstream worth a handoff is worth an
 issue; without one, nothing can ever tell that the handoff is finished.
 
-**Enforced in `popcre/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
+**Enforced in `popcre/ai-devops` and `popcre/shared-db`** — in `shared-db` by the
+`Handoff Contract Guard` (added 2026-08-13,
 issue #658). It fails a pull request only for a handoff file **that pull request
 touches**, never for anybody else's, and it asks you to retire your file in the same
 pull request that closes its issue.

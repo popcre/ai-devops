@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# deepseek.sh — DeepSeek (OpenCode harness) door for the shared review runner.
+# deepseek.sh — DeepSeek (OpenCode harness) door for the shared review runner
+# (its CI scope is the narrowed reviewer selection, #1563).
 #
 # Provider bits ONLY: OpenCode binary/profile selection, credentials presence,
 # model pin, provider tool set (the agent profile), and parse to our report
@@ -33,6 +34,7 @@ case "$MODE" in review|implement) ;; *) printf 'deepseek door: usage: deepseek.s
 # Repository root, for the pinned OpenCode install and the profile source.
 DS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DS_ROOT/tools/reviewer_event_guard.sh"
+source "$DS_ROOT/tools/lib/deepseek-opencode.sh"
 PROFILE_SRC="$DS_ROOT/config/opencode-deepseek"
 OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || true)"
 
@@ -42,8 +44,17 @@ OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || 
 # --auto is the OpenCode non-interactive form; no web, no subagents.
 DS_PROVIDER="deepseek-api"
 DS_MODEL="${AI_DEEPSEEK_MODEL:-deepseek-flash}"
-DS_TIMEOUT="${DOOR_TIMEOUT:-${AI_DEEPSEEK_TIMEOUT:-3600}}"
+# Windows hosts run full suites several times slower (single runs of 880-895s
+# on alien/916, #1562), so the default bound is larger there; it stays bounded.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) DS_DEFAULT_TIMEOUT=7200 ;;
+  *) DS_DEFAULT_TIMEOUT=3600 ;;
+esac
+DS_TIMEOUT="${DOOR_TIMEOUT:-${AI_DEEPSEEK_TIMEOUT:-$DS_DEFAULT_TIMEOUT}}"
 DS_ENGINE="${AI_DEEPSEEK_ENGINE:-opencode}"
+DS_SCRATCH=""
+cleanup_scratch() { [ -z "$DS_SCRATCH" ] || rm -rf -- "$DS_SCRATCH"; }
+trap cleanup_scratch EXIT
 if [ "$MODE" = implement ]; then
   DS_AGENT="deepseek-implement"
 else
@@ -62,21 +73,7 @@ native_path() {
 }
 
 resolve_opencode() {
-  if [ -n "${AI_DEEPSEEK_OPENCODE:-}" ] && [ -x "${AI_DEEPSEEK_OPENCODE}" ]; then
-    printf '%s' "$AI_DEEPSEEK_OPENCODE"; return 0
-  fi
-  local home_dir="$HOME" pinned c
-  if [ "$IS_WINDOWS" = 1 ] && [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
-    home_dir="$(cygpath -u "$USERPROFILE")"
-  fi
-  if [ -n "$OC_VERSION" ]; then
-    pinned="$home_dir/.local/lib/ai-devops/opencode/$OC_VERSION/node_modules/opencode-ai/bin/opencode.exe"
-    [ -x "$pinned" ] && { printf '%s' "$pinned"; return 0; }
-  fi
-  c="$(command -v opencode 2>/dev/null || true)"
-  [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
-  printf 'deepseek door: local_dependency_unavailable: OpenCode binary not found. This is not a DeepSeek provider fault. Set AI_DEEPSEEK_OPENCODE or run bin/setup-opencode-glm.sh.\n' >&2
-  return 127
+  deepseek_resolve_opencode "$DS_ROOT"
 }
 
 # Credentials presence only — never print a key. A missing store is a local
@@ -143,16 +140,22 @@ extract_report() { # extract_report LOG_JSONL DEST HEAD MODE
       "$tools" "$errs" "${session:-none}"
     printf '| reviewed commit | `%s` |\n\n' "$head"
     printf -- '---\n\n'
-    if grep -qF '## Verdict' <<< "$text"; then
+    if grep -Eq '^## Verdict[[:space:]]*$' <<< "$text"; then
       printf '### Findings and reasoning\n\n'
-      printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
-      printf '\n---\n\n'
-      printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+      printf '%s\n' "$text" | deepseek_terminal_report || return 1
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'
     fi
   } > "$dest"
+}
+
+retain_failure() { # native stdout, native stderr, actual exit, fixed reason
+  # Never copy provider/model text into the public-facing report. Exact native
+  # bytes belong only in owner-only private diagnostics, before temp cleanup.
+  local log="$1" err="$2" rc="$3" reason="$4"
+  printf '%s\n' "$DS_KEY" | AI_REVIEW_DIAGNOSTICS_SECRET_STDIN=1 \
+    python3 "$DS_ROOT/tools/review_door_diagnostics.py" deepseek "$log" "$err" "$rc" "$reason" "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}"
 }
 
 attachment_api_review() {
@@ -199,7 +202,7 @@ attachment_api_review() {
   {
     printf '# DeepSeek first managed installation — attachment API\n\n'
     printf '| field | value |\n|---|---|\n| harness | `attachment-api` |\n| reviewed commit | `%s` |\n\n' "$DOOR_HEAD"
-    cat "$raw"
+    deepseek_terminal_report < "$raw" || return 1
   } > "$DOOR_REPORT_OUT"
   rm -f "$raw"
 }
@@ -211,12 +214,34 @@ main() {
     *) printf 'deepseek door: unsupported explicit engine %s.\n' "$DS_ENGINE" >&2; return 2 ;;
   esac
   local oc xdg prompt_full out log rc
-  oc="$(resolve_opencode)" || exit $?
-  require_credentials || exit $?
+  out="$(mktemp)"; log="$out.jsonl"; : > "$log"; : > "$out.err"
+  rc=0
+  oc="$(resolve_opencode 2>"$out.err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$log" "$out.err" "$rc" local-dependency-unavailable || exit 1
+    printf 'deepseek door: local OpenCode dependency unavailable; private diagnostics retained.\n' >&2
+    exit "$rc"
+  fi
+  require_credentials 2>"$out.err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    retain_failure "$log" "$out.err" "$rc" local-dependency-unavailable || exit 1
+    printf 'deepseek door: local credentials unavailable; private diagnostics retained.\n' >&2
+    exit "$rc"
+  fi
   [ -d "$DOOR_WORKDIR" ] || { printf 'deepseek door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
   [ -f "$DOOR_PROMPT_FILE" ] || { printf 'deepseek door: prompt file missing: %s\n' "$DOOR_PROMPT_FILE" >&2; exit 2; }
   [ -n "$OC_VERSION" ] || [ -x "${AI_DEEPSEEK_OPENCODE:-}" ] || true
 
+  local oc_dir="$DOOR_WORKDIR"
+  if [ "$MODE" = review ]; then
+    DS_SCRATCH="$(mktemp -d)"
+    oc_dir="$DS_SCRATCH/work"
+    cp -a "$DOOR_WORKDIR" "$oc_dir" || {
+      retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
+      printf 'deepseek door: could not prepare its disposable review workspace.\n' >&2
+      exit 127
+    }
+  fi
   # Packet preamble: the sealed evidence is the subject; the workdir is the
   # disposable copy. The runner owns seal/store; this only points the model.
   prompt_full="$(mktemp)"
@@ -224,24 +249,33 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    [ "$MODE" != review ] || printf 'Run commands and tests in your current directory, a private writable copy. The original review snapshot and its evidence packet must remain unchanged.\n\n'
+    [ "$MODE" != review ] || printf 'Executed test output in this brief, when present, was produced by the review runner on the exact head and is authoritative. Do not re-run full test suites to reproduce it; run only the narrow tests or commands a specific finding requires.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
+    if [ "$MODE" = review ]; then
+      printf '\nTrusted execution workspace: %s\n' "$(native_path "$oc_dir")"
+      printf 'This workspace pointer takes precedence for every tool working directory. Run all commands, tests, and source edits only in this selected private workspace. Original MANIFEST snapshot paths are immutable provenance only, never execution or edit targets. Read the original evidence packet only; keep its snapshot and packet unchanged.\n'
+    fi
   } > "$prompt_full"
 
   xdg="$(mktemp -d)"
-  if ! install_profile "$xdg"; then
+  if ! install_profile "$xdg" 2>"$out.err"; then
+    retain_failure "$log" "$out.err" 127 local-dependency-unavailable || exit 1
     rm -rf "$xdg"
     rm -f "$prompt_full"
     exit 127
   fi
-  out="$(mktemp)"
-  log="$out.jsonl"
   local -a native_review=()
   if [ "$MODE" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
-    native_review=(--native-deepseek-review "$DOOR_WORKDIR" "$oc")
+    native_review=(--native-deepseek-review "$oc_dir" "$oc")
   fi
   set +e
   (
+    # --dir is an engine option, not the operating-system working directory.
+    # Native plugins and inherited subprocesses must start in the same owned
+    # scratch as the command broker, before any engine code can execute.
+    cd "$oc_dir" || exit 127
     export DOOR_MODE="$MODE"
     export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
            XDG_DATA_HOME="$(native_path "$xdg/data")" \
@@ -249,34 +283,51 @@ main() {
            XDG_CACHE_HOME="$(native_path "$xdg/cache")"
     if [ -n "$DS_KEY" ]; then export DEEPSEEK_API_KEY="$DS_KEY"; else unset DEEPSEEK_API_KEY || true; fi
     printf '%s' "$(cat "$prompt_full")" \
-      | reviewer_credit_run deepseek "$log" "$out.err" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
+      | reviewer_credit_run deepseek "$log" "$out.err" --timeout-seconds "$DS_TIMEOUT" "${native_review[@]}" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
           --format json --model "$DS_PROVIDER/$DS_MODEL" \
-          --dir "$(native_path "$DOOR_WORKDIR")" \
+          --dir "$(native_path "$oc_dir")" \
           > "$log" 2> "$out.err"
   )
   rc=$?
   set -e
-  DS_KEY=""
   rm -rf "$xdg"
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current deepseek "$log" || true
+    if ! retain_failure "$log" "$out.err" "$rc" out-of-credit; then
+      printf 'deepseek door: private diagnostic retention refused; capacity refusal remains nonauthorizing.\n' >&2
+    fi
     rm -f "$prompt_full"
     reviewer_credit_exit
     exit 92
   fi
   if [ "$rc" -ne 0 ] || [ ! -s "$log" ]; then
+    retain_failure "$log" "$out.err" "$rc" native-execution-failed || exit 1
     printf 'deepseek door: provider call failed (exit %s)\n' "$rc" >&2
-    [ -s "$out.err" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$out.err" | tail -20 >&2 || true
+    printf 'deepseek door: sanitized native diagnostics retained privately.\n' >&2
     rm -f "$prompt_full"
     exit 1
   fi
 
+  if ! jq -se 'length > 0 and all(.[]; type == "object")' "$log" >/dev/null 2>&1; then
+    retain_failure "$log" "$out.err" "$rc" invalid-response-json || exit 1
+    printf 'deepseek door: invalid native event stream; private diagnostics retained.\n' >&2
+    rm -f "$prompt_full"
+    exit 1
+  fi
+  if jq -se 'any(.[]; .type == "error")' "$log" >/dev/null 2>&1; then
+    retain_failure "$log" "$out.err" "$rc" native-error-envelope || exit 1
+    printf 'deepseek door: native engine reported an error; private diagnostics retained.\n' >&2
+    rm -f "$prompt_full"
+    exit 1
+  fi
   if ! extract_report "$log" "$DOOR_REPORT_OUT" "$DOOR_HEAD" "$MODE"; then
+    retain_failure "$log" "$out.err" "$rc" no-assistant-text || exit 1
     rm -f "$prompt_full"
     exit 1
   fi
   rm -f "$prompt_full"
+  DS_KEY=""
   exit 0
 }
 

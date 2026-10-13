@@ -7,6 +7,9 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_TEST_ISOLATION=1
+export AI_REVIEWER_STATE_BASE="$TMP/reviewer-state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard/reviews.jsonl"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -186,6 +189,7 @@ check "appended_command_options_are_refused" "cd '$R' && ! AI_DEVOPS_MODELS_ENV=
 printf 'historic\n' > "$R/.ai/reviews/historic.md"; git -C "$R" add -f .ai/reviews/historic.md; git -C "$R" commit -qm historic
 check "tracked_historic_reports_do_not_block_a_unique_destination" "cd '$R' && '$SCRIPT' diff-review >/dev/null"
 check "unknown_mode_is_rejected" "cd '$R' && ! '$SCRIPT' nonsense >/dev/null 2>&1"
+check "review_outcomes_are_recorded_in_the_private_fixture_ledger" "jq -se 'any(.[]; .provider==\"codex\")' '$AI_REVIEW_EVENT_DIR/events.jsonl' && test -s '$AI_REVIEW_SCOREBOARD_FILE' && test -d '$AI_REVIEW_LIFECYCLE_DIR/runs'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

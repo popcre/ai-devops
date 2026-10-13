@@ -13,6 +13,7 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
+| [`Windows render admission plan`](plans/windows-render-production-admission-20261011.md) | [#1455](https://github.com/popcre/ai-devops/issues/1455), Root coordinator | Step 0 STOP: supported ephemeral structurally read-only reviewer qualification not proved; no allowance/code/live action implemented; PopDAM #162 retains application acceptance |
 | [`plan_blockerwatch-reliability-repair.md`](../plan_blockerwatch-reliability-repair.md) | [#632](https://github.com/popcre/ai-devops/issues/632) | Step 0; comprehensive audit/repair plan written, no implementation started |
 | [`plan_blockerwatch-parked-work.md`](../plan_blockerwatch-parked-work.md) | [#617](https://github.com/popcre/ai-devops/issues/617) | Steps 1-9 and 11 done (merge `eb92356e`); step 10 partly proved on 916-alien - the fresh session must still be proved on a machine with a working headless agent, owned by #617 |
 | [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 3, §9.4; the [Windows and Ubuntu Git-ref qualification](../tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) and [task-only schema/baseline](../tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md) passed |
@@ -28,6 +29,7 @@ record merely to reduce the file count.
 | [`plan_agent_evidence_and_jujutsu_pilot.md`](../plan_agent_evidence_and_jujutsu_pilot.md) | [#903](https://github.com/popcre/ai-devops/issues/903) | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
 | [`plan_ai-muse-native-engine-parity.md`](../plan_ai-muse-native-engine-parity.md) | [#542](https://github.com/popcre/ai-devops/issues/542) | Phase A coordination done; remaining phases open |
 | [`plan_cut-unneeded-github-traffic.md`](../plan_cut-unneeded-github-traffic.md) | (see plan STATUS) | Measure and reduce remaining unneeded traffic; preserve workflow and separate quota buckets |
+| [`plan_reviewer-scoped-ci-selection.md`](../plan_reviewer-scoped-ci-selection.md) | [#1563](https://github.com/popcre/ai-devops/issues/1563) | Complete — live proof PR #1571 (7 of 143 suites) |
 | [`plan_github-request-reduction.md`](../plan_github-request-reduction.md) | [#658](https://github.com/popcre/ai-devops/issues/658) | P5 (BlockerWatch → existing App) before any multi-App split |
 | [`plan_mimo-windows-support.md`](../plan_mimo-windows-support.md) | (see plan STATUS) | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` |
 | [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md) | [#782](https://github.com/popcre/ai-devops/issues/782) | Steps 5–6 open: re-adopt globals on edge-dev, land PR, add router row |

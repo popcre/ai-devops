@@ -49,7 +49,8 @@ PREFLIGHT="$TMP/preflight"
 cat > "$PREFLIGHT" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AI_TEST_PREFLIGHT_LOG"
-[ "${AI_TEST_PREFLIGHT_FAIL:-0}" != 1 ]
+if [ "${1:-}" = status ]; then printf '%s\n' "${AI_TEST_PREFLIGHT_STATUS:-{\"status\":\"installed-healthy\"\}}"; exit 0; fi
+[ "${AI_TEST_PREFLIGHT_FAIL:-0}" != 1 ] || { printf '%s\n' "${AI_TEST_PREFLIGHT_TEXT:-preflight failed}"; exit "${AI_TEST_PREFLIGHT_RC:-1}"; }
 EOF
 SCOREBOARD="$TMP/scoreboard"
 cat > "$SCOREBOARD" <<'EOF'
@@ -173,6 +174,46 @@ AI_TEST_PREFLIGHT_FAIL=1 "$SCRIPT" begin --provider kimi --repo "$R" --run-id un
 FAILED_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -path '*/kimi/codex/unhealthy.json' -print -quit)"
 check "preflight_failure_is_terminally_recorded" "[ \"\$(jq -r .status '$FAILED_STATE')\" = preflight_failed ]"
 check "preflight_failure_releases_lock" "[ ! -d \"\$(jq -r .lock_path '$FAILED_STATE')\" ]"
+
+# #1562: a held provider's refusal carries its truthful class into the record.
+AI_TEST_PREFLIGHT_FAIL=1 AI_TEST_PREFLIGHT_RC=3 AI_TEST_PREFLIGHT_TEXT='qwen is quarantined until epoch 9 (out-of-credit).' \
+  AI_TEST_PREFLIGHT_STATUS='{"provider":"qwen","status":"quarantined","failure_class":"out-of-credit"}' \
+  "$SCRIPT" begin --provider qwen --repo "$R" --run-id held --caller codex >/dev/null 2>"$TMP/held.err" || true
+HELD_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -path '*/qwen/codex/held.json' -print -quit)"
+check "held_provider_refusal_records_out_of_credit_class" "jq -e '.status==\"preflight_failed\" and .failure_class==\"out-of-credit\" and .preflight.failure_class==\"out-of-credit\"' '$HELD_STATE'"
+check "held_provider_refusal_names_class_on_stderr" "grep -q 'out-of-credit' '$TMP/held.err'"
+check "unclassified_preflight_failure_keeps_null_class" "jq -e '.failure_class==null' '$FAILED_STATE'"
+
+# #1562: a review whose owner process is gone must not stay "running" forever.
+sleep 300 & LIVE_OWNER=$!
+STATE_LIVE="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$LIVE_OWNER "$SCRIPT" begin --provider muse --repo "$R" --run-id owner-live --caller codex)"
+sh -c 'exit 0' & DEAD_OWNER=$!; wait "$DEAD_OWNER"
+STATE_DEAD="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$LIVE_OWNER "$SCRIPT" begin --provider muse --repo "$R" --run-id owner-dead --caller codex)"
+row="$(jq --argjson pid "$DEAD_OWNER" '.owner_pid=$pid|.owner_start=null' "$STATE_DEAD")"; printf '%s\n' "$row" > "$STATE_DEAD"
+check "begin_records_the_review_owner" "jq -e --argjson pid $LIVE_OWNER '.owner_pid==\$pid' '$STATE_LIVE'"
+"$SCRIPT" join "$STATE_DEAD" > "$TMP/join-dead.json"
+check "join_reconciles_dead_owner_to_interrupted" "jq -e '.status==\"interrupted\" and .verdict==\"BLOCKED\" and .failure_class==\"interrupted\"' '$TMP/join-dead.json' && jq -e '.interruption.detected_by==\"join\" and .finished_at!=null' '$STATE_DEAD'"
+check "reconciled_interruption_releases_lock" "[ ! -d \"\$(jq -r .lock_path '$STATE_DEAD')\" ]"
+"$SCRIPT" join "$STATE_LIVE" >/dev/null
+check "join_leaves_live_owner_running" "jq -e '.status==\"running\"' '$STATE_LIVE'"
+STATE_DEAD2="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$LIVE_OWNER "$SCRIPT" begin --provider muse --repo "$R" --run-id owner-dead-2 --caller codex)"
+row="$(jq --argjson pid "$DEAD_OWNER" '.owner_pid=$pid' "$STATE_DEAD2")"; printf '%s\n' "$row" > "$STATE_DEAD2"
+STATE_NEXT="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$LIVE_OWNER "$SCRIPT" begin --provider muse --repo "$R" --run-id owner-next --caller codex)"
+check "next_run_reconciles_dead_owner_to_interrupted" "jq -e '.status==\"interrupted\" and .interruption.detected_by==\"begin\"' '$STATE_DEAD2'"
+check "next_run_leaves_live_owner_running" "jq -e '.status==\"running\"' '$STATE_LIVE'"
+row="$(jq --argjson pid "$LIVE_OWNER" '.owner_pid=$pid|.owner_start="1"' "$STATE_NEXT")"; printf '%s\n' "$row" > "$STATE_NEXT"
+"$SCRIPT" join "$STATE_NEXT" >/dev/null
+if [ -r "/proc/$LIVE_OWNER/stat" ]; then
+  check "reused_pid_with_different_start_is_interrupted" "jq -e '.status==\"interrupted\"' '$STATE_NEXT'"
+fi
+STATE_LEGACY="$("$SCRIPT" begin --provider muse --repo "$R" --run-id owner-legacy --caller codex)"
+"$SCRIPT" join "$STATE_LEGACY" >/dev/null
+check "record_without_owner_is_never_guessed_interrupted" "jq -e '.status==\"running\"' '$STATE_LEGACY'"
+kill "$LIVE_OWNER" 2>/dev/null; wait "$LIVE_OWNER" 2>/dev/null
+# Every production begin call site must name its owner, or its killed runs can
+# never be reconciled.
+UNOWNED_BEGINS="$(grep -nE '(LIFECYCLE|lifecycle)"? +(begin|"\$\{lifecycle_args)' "$REPO_ROOT"/bin/ai-review "$REPO_ROOT"/bin/ai-review-pool "$REPO_ROOT"/bin/ai-codex-review "$REPO_ROOT"/bin/ai-claude-review "$REPO_ROOT"/tools/lib/review-lifecycle-core.sh | grep -vE ':[0-9]+: *#' | grep -v 'AI_REVIEW_LIFECYCLE_OWNER_PID=' || true)"
+check "every_lifecycle_begin_call_site_names_its_owner" "test -z \"\$UNOWNED_BEGINS\""
 
 STATE_ACCOUNT="$($SCRIPT begin --provider glm --repo "$R" --run-id accounting --caller codex)"
 AI_TEST_SCOREBOARD_FAIL=1 "$SCRIPT" fail --state "$STATE_ACCOUNT" --elapsed 4 --failure provider-timeout >/dev/null 2>&1 || true

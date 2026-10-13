@@ -12,7 +12,12 @@ export AI_REVIEW_EVENT_DIR="$TMP/events"
 unset AI_STEPFUN_KEY STEPFUN_API_KEY STEP_API_KEY
 export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20 AI_STEPFUN_RPM=100000
 mkdir -p "$TMP/bin" "$HOME"
+chmod 700 "$HOME"
 printf 'stub-key\n' > "$AI_STEPFUN_KEY_STORE"; chmod 600 "$AI_STEPFUN_KEY_STORE"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$AI_STEPFUN_KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$HOME")" \
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_PARENT -Directory; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null || exit 1
+fi
 git -C "$TMP" init -q repo; git -C "$TMP/repo" config user.email t@example.com; git -C "$TMP/repo" config user.name T
 printf 'x\n' > "$TMP/repo/f"; git -C "$TMP/repo" add f; git -C "$TMP/repo" commit -qm init
 HEAD_SHA="$(git -C "$TMP/repo" rev-parse HEAD)"
@@ -284,6 +289,7 @@ if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind /usr /usr --symlink usr/bin /
   # A home outside /tmp, so only the sandbox's empty-home mount can hide it.
   mkdir -p "$ROOT/.ai"; RH="$(mktemp -d "$ROOT/.ai/stepfun-test-home.XXXXXX")"
   mkdir -p "$RH/.ssh" "$RH/probe-bin" "$RH/.config/ai-devops/secrets"; printf 'secret\n' > "$RH/.ssh/id_test"
+  chmod 700 "$RH/.config/ai-devops/secrets"
   cp "$AI_STEPFUN_KEY_STORE" "$RH/.config/ai-devops/secrets/stepfun-api-key"; chmod 600 "$RH/.config/ai-devops/secrets/stepfun-api-key"
   cat > "$RH/probe-bin/step" <<'STUB'
 #!/usr/bin/env bash
@@ -440,6 +446,9 @@ export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
 check "StepFun keeps its qualified compaction settings" "jq -e '.compaction == {auto:true,prune:false,tail_turns:8,reserved:32768}' '$ROOT/config/opencode-stepfun/opencode.json' >/dev/null"
 check "macOS and unknown systems are refused" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
 check "Windows is allowed with OpenCode (folder + test shell)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); printf '%s' \"\$out\" | grep -q 'OK engine=opencode'"
+check "read-only Windows doctor refuses missing runner setup without creating it" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON='$TMP/missing-readonly-runners.json' '$SCRIPT' doctor --read-only 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'FAIL Windows runner allowlist missing (read-only readiness)' && test ! -e '$TMP/missing-readonly-runners.json'"
+check "read-only doctor refuses paid live calls" "out=\$('$SCRIPT' doctor --read-only --live 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'read-only doctor cannot run live calls or write runners'"
+check "read-only doctor refuses runner rewrites" "out=\$('$SCRIPT' doctor --read-only --write-runners 2>&1); [ \$? != 0 ] && printf '%s' \"\$out\" | grep -q 'read-only doctor cannot run live calls or write runners'"
 # Regression (#1266 residual): jq.exe on Windows ends every -r line with CRLF.
 # One shim, built unconditionally, serves the Windows-host allowlist checks
 # below and the Linux review check in the OpenCode block.

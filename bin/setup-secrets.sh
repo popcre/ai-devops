@@ -316,19 +316,46 @@ _aidev_flock() {
   command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
-_aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
-_aidev_exports="\$(_aidev_flock op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+_aidev_resolve() {
+  _aidev_flock op run --no-masking --env-file="\$1" -- python3 -c '
 import os, shlex, sys
 for name in sys.argv[1:]:
     value = os.environ.get(name, "")
     if not value:
         raise SystemExit("empty 1Password value: " + name)
     print("export %s=%s" % (name, shlex.quote(value)))
-' \$_aidev_names 2>/dev/null)" && eval "\$_aidev_exports" || {
-  echo "ai-devops: serialized MCP secret refresh failed" >&2
-  exit 1
+' \$2 2>/dev/null
 }
-unset _aidev_names _aidev_exports
+_aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
+if ! _aidev_exports="\$(_aidev_resolve "$MCP_ENV" "\$_aidev_names")"; then
+  # One bad reference (a rotated or renamed item) must not take down every
+  # MCP. Drop each reference 1Password cannot resolve, name it on stderr, and
+  # start with the rest. Only an all-references failure stops the launch.
+  _aidev_tmp="\$(mktemp)" && chmod 600 "\$_aidev_tmp" || exit 1
+  _aidev_names=""
+  while IFS= read -r _aidev_line || [ -n "\$_aidev_line" ]; do
+    case "\$_aidev_line" in
+      [A-Za-z_]*=op://*)
+        _aidev_name="\${_aidev_line%%=*}"
+        if _aidev_flock op read --no-newline "\${_aidev_line#*=}" 2>/dev/null | grep -q .; then
+          printf '%s\n' "\$_aidev_line" >> "\$_aidev_tmp"
+          _aidev_names="\$_aidev_names \$_aidev_name"
+        else
+          echo "ai-devops: skipping \$_aidev_name: 1Password cannot resolve its reference" >&2
+        fi ;;
+      *) printf '%s\n' "\$_aidev_line" >> "\$_aidev_tmp" ;;
+    esac
+  done < "$MCP_ENV"
+  _aidev_rc=1
+  [ -n "\$_aidev_names" ] && _aidev_exports="\$(_aidev_resolve "\$_aidev_tmp" "\$_aidev_names")" && _aidev_rc=0
+  rm -f "\$_aidev_tmp"
+  [ "\$_aidev_rc" -eq 0 ] || {
+    echo "ai-devops: serialized MCP secret refresh failed" >&2
+    exit 1
+  }
+fi
+eval "\$_aidev_exports"
+unset _aidev_names _aidev_exports _aidev_tmp _aidev_line _aidev_name _aidev_rc
 # Start the server under the session guard, never bare: npm/npx does not
 # forward stdin EOF, so a client death (or OOM kill) left helpers orphaned.
 exec "$NODE_BIN" "$GUARD_JS" "\$@"

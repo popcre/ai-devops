@@ -313,6 +313,26 @@ reviewer_credit_prepare(){
 }
 reviewer_credit_run(){
   local provider="$1" output="$2" stderr="$3"; shift 3
+  local -a wall_deadline=()
+  if [ "${1:-}" = --timeout-seconds ]; then
+    [ "$#" -ge 3 ] || return 2
+    # Explicit caller contract, never inferred from a provider's argv. Keep
+    # GNU duration suffixes/fractions and its zero (disabled) timeout meaning.
+    local seconds
+    seconds="$("${REVIEWER_CREDIT_PYTHON:-$(command -v python3 || command -v python)}" - "$2" <<'PY'
+import math, re, sys
+m = re.fullmatch(r'(\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)([smhd]?)', sys.argv[1])
+if not m:
+    raise SystemExit(2)
+n = float(m[1]) * {'': 1, 's': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
+if not math.isfinite(n):
+    raise SystemExit(2)
+print(n)
+PY
+    )" || return 2
+    [ "$seconds" = 0.0 ] || wall_deadline=(--timeout-seconds "$seconds")
+    shift 2
+  fi
   local -a native_review=()
   if [ "${1:-}" = --native-deepseek-review ]; then
     [ "$provider" = deepseek ] && [ "${AI_REVIEW_RUNNER_CORE:-}" = review-lifecycle-core/1 ] && [ "${DOOR_MODE:-}" = review ] && [ "$(uname -s 2>/dev/null)" = Linux ] || return 2
@@ -360,8 +380,17 @@ reviewer_credit_run(){
   fi
   # Only the managed native DeepSeek door requests sibling tool capsules.
   # Other providers and implementation retain their original launch routes.
+  # The native reviewer, and every command or test it runs inside its copy,
+  # must never see the live run's door or lifecycle custody paths: a suite
+  # using ${DOOR_DIAGNOSTICS_DIR:-...} would otherwise write stubs into the
+  # real private evidence directory (#1562, DeepSeek WinError 183).
+  local scrubbed_name; local -a custody_scrub=()
+  for scrubbed_name in $(compgen -e); do
+    case "$scrubbed_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+      custody_scrub+=(-u "$scrubbed_name");; esac
+  done
   term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
-  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" "${native_review[@]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
+  env "${custody_scrub[@]}" MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" "${native_review[@]}" "${wall_deadline[@]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
   trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
   trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
   trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP

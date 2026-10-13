@@ -43,7 +43,10 @@ gh_measure_clock(){
   if [[ "$stamp" =~ ^[0-9]{16}$ ]]; then
     GH_MEASURE_CLOCK="${stamp:0:13}"
   else
-    GH_MEASURE_CLOCK=$(date +%s%3N)
+    # Never date's three-digit fraction: uutils coreutils 0.10 drops its leading zeros.
+    stamp=$(date +%s%N)
+    if [[ "$stamp" =~ ^[0-9]{19}$ ]]; then GH_MEASURE_CLOCK=$(( 10#$stamp / 1000000 ))
+    else GH_MEASURE_CLOCK=$(( $(date +%s) * 1000 )); fi
   fi
 }
 
@@ -273,11 +276,18 @@ gh_measure_graphql_cost(){
 # Both command records and server snapshots share the same filesystem boundary.
 gh_measure_append(){
   local dir="$1" record="$2" file count
-  # Completion must not hold up other callers. Use an
-  # independent non-waiting lock; contention is a visible missing sample.
+  # Completion must not hold up other callers. Use an independent lock with
+  # a short bounded retry (<= ~0.5s): writers hold it for milliseconds, so two
+  # callers finishing together both record; longer contention is a visible
+  # missing sample.
   [ ! -L "$dir" ] || return 1
   ( umask 077; mkdir -p "$dir" ) || return 1
-  if ! mkdir "$dir/write.lock" 2>/dev/null; then
+  local tries=0 locked=0
+  while [ "$tries" -lt 50 ]; do
+    if mkdir "$dir/write.lock" 2>/dev/null; then locked=1; break; fi
+    tries=$(( tries + 1 )); sleep 0.01
+  done
+  if [ "$locked" -eq 0 ]; then
     # A writer holds the lock for milliseconds; one older than a minute was
     # left by a crash. Clear it once so measurement does not stop for good.
     [ -n "$(find "$dir/write.lock" -maxdepth 0 -type d -mmin +1 2>/dev/null)" ] || return 1

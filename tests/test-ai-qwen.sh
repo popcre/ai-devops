@@ -92,7 +92,12 @@ if (mode === 'publication-failure') {
   const current = events.filter(event => event.provider === 'qwen' && event.event === 'started').at(-1);
   fs.writeFileSync(path.join(root, 'reviewer-events', 'evidence', current.run_id, 'required.json'), '{}\n');
 }
-fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
+const wire = fs.readFileSync(0, 'utf8');
+if (!process.argv.includes('--input-format') || process.argv[process.argv.indexOf('--input-format') + 1] !== 'stream-json') process.exit(72);
+const input = JSON.parse(wire);
+if (input.type !== 'user' || input.message.role !== 'user' || typeof input.message.content !== 'string') process.exit(73);
+fs.writeFileSync(path.join(root, 'prompt-wire'), wire);
+fs.writeFileSync(path.join(root, 'prompt-copy'), input.message.content);
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
 if (mode === 'complete-then-hang') {
@@ -608,6 +613,7 @@ else
 fi
 check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
+check 'review preserves stdin through the vendor sandbox relaunch' "grep -q -- '--input-format stream-json' '$TMP/argv.txt' && ! grep -q -- '--prompt' '$TMP/argv.txt'"
 check 'review runs under Qwen sandbox with full tools (#974)' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools' '$TMP/argv.txt' && ! grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
 check 'review record announces sandbox containment' "run show review-1 | jq -e '.containment==\"sandbox\"'"
 check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
@@ -618,6 +624,11 @@ check 'review record stores exact session' "run show review-1 | jq -e '.qwen_ses
 check 'review record binds exact evidence identity' "run show review-1 | jq -e '(.base|length)==40 and (.head|length)==40 and (.packet_sha256|length)==64 and (.working_tree_sha256|length)==64 and .evidence_generation==1'"
 check 'governed auth settings are regular and pin both provider and active model identity' "test -f '$AI_QWEN_HOME/settings.json' && test ! -L '$AI_QWEN_HOME/settings.json' && jq -e '.model.baseUrl as \$url | .security.auth.selectedType==\"openai\" and .model.name==\"qwen3.8-max\" and (\$url|length)>0 and (.modelProviders.openai|any(.id==\"qwen3.8-max\" and .baseUrl==\$url and .envKey==\"BAILIAN_CODING_PLAN_API_KEY\"))' '$AI_QWEN_HOME/settings.json'"
 check 'review prompt requires the sealed packet first' "grep -q '.ai-review-qwen-codex-review-1/MANIFEST.md' '$TMP/prompt-copy'"
+node -e 'require("node:fs").writeFileSync(process.argv[1], "BEGIN-LARGE-INPUT\n" + "quoted \"text\" \\\\ unicode Ω\n".repeat(12000) + "END-LARGE-INPUT\n")' "$TMP/large-prompt"
+LARGE_OUT="$(run new large-stream-input --prompt-file "$TMP/large-prompt" 2>&1)"; LARGE_RC=$?
+check 'a prompt larger than the Linux single-argument limit completes in the sandbox mode' "test '$LARGE_RC' -eq 0 && test \"\$(wc -c < '$TMP/large-prompt')\" -gt 131072"
+check 'large stream input retains every original byte including Unicode and trailing newlines' "node -e 'const fs=require(\"node:fs\"); const original=fs.readFileSync(process.argv[1],\"utf8\"); const wire=JSON.parse(fs.readFileSync(process.argv[2],\"utf8\")); if(!wire.message.content.includes(original)) process.exit(1)' '$TMP/large-prompt' '$TMP/prompt-wire'"
+check 'completed turns remove private stream input files' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -name '.qwen-input.*' -print -quit)\""
 REVIEW_DIR="$(run show review-1 | jq -r .review_dir)"
 check 'ordinary clone review uses a private copy' "[ \"\$(cd '$REVIEW_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check 'private review copy owns its git controls' "test -d '$REVIEW_DIR/.git'"
@@ -1172,6 +1183,8 @@ printf 'Review.\n' > "$QD/prompt"
 cat > "$QD/qwen" <<EOF
 #!/usr/bin/env bash
 env > "$QD/qwen-env"
+printf '%s\n' "\$*" > "$QD/qwen-args"
+cat > "$QD/qwen-stdin"
 printf '%s\n' '{"type":"result","is_error":false,"result":"ok\n## Verdict\nAPPROVE","num_turns":1}'
 EOF
 chmod +x "$QD/qwen"
@@ -1184,5 +1197,7 @@ check 'qwen_door_ignores_ambient_openai_key' "test '$QD_RC' -eq 127 && test ! -e
 printf 'sk-sp-store-1427\n' > "$QD/store"; chmod 600 "$QD/store"
 qwen_door AI_QWEN_KEY_STORE="$QD/store"; QD_RC=$?
 check 'qwen door forwards only the protected store key' "test '$QD_RC' -eq 0 && grep -q '^OPENAI_API_KEY=sk-sp-store-1427$' '$QD/qwen-env' && ! grep -q 'fake-.*-1427' '$QD/qwen-env'"
+check 'qwen door keeps the complete multi-line result and its verdict' "grep -q '^ok$' '$QD/report' && grep -q '^## Verdict$' '$QD/report' && test \"\$(tail -1 '$QD/report')\" = APPROVE"
+check 'qwen door sends the complete brief as one stream-json user event on stdin' "grep -q -- '--input-format stream-json' '$QD/qwen-args' && jq -e 'select(.type==\"user\") | .message.content | contains(\"Review.\") and contains(\"MANIFEST.md\")' '$QD/qwen-stdin' >/dev/null && ! grep -q 'Review\\.' '$QD/qwen-args'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

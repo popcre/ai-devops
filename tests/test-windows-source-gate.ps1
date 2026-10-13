@@ -46,7 +46,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $authPath=Join-Path $authDir "$Target.json"
   $launcherHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath $Fixture.Launcher)) { (Get-FileHash -LiteralPath $Fixture.Launcher -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
   $cmdHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath "$($Fixture.Launcher).cmd")) { (Get-FileHash -LiteralPath "$($Fixture.Launcher).cmd" -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
-  $installedSourceHash = (& $bash -c 'set -o pipefail; git -C "$1" cat-file blob "$2:bin/ai-task-gates" | sha256sum | cut -d" " -f1' 'ai-devops' $Fixture.Repo $Base).Trim()
+  $installedSourceHash = (& $bash -c 'set -o pipefail; git -C "$1" cat-file blob "$2:bin/ai-task-gates" | sha256sum | cut -c1-64' 'ai-devops' $Fixture.Repo $Base).Trim()
   $receiptSha = ''
   if (-not $RecoverLaunchers -and (Test-Path -LiteralPath $Fixture.Launcher)) {
     foreach ($line in @(Get-Content -LiteralPath $Fixture.Launcher)) {
@@ -385,6 +385,23 @@ try {
   Invoke-Gate $firstBody -ExpectedHead $firstBodyHead -ExpectFailure -FailureContains 'does not bind exactly the requested installation operation'
   Write-TestAuthorization $first $firstHead $firstHead $false $true | Out-Null
   Invoke-Gate $first -ExpectedHead $firstHead
+
+  # A reviewed first install that advances to a newer gate (#1562, Envy): the
+  # launcher refresh re-runs this gate after the checkout moved, so the gate
+  # must hash bin/ai-task-gates at the approved starting commit, not on disk.
+  $firstAdvance=New-Fixture first-install-advance
+  $firstAdvanceBase=(git -C $firstAdvance.Repo rev-parse HEAD).Trim()
+  'newer reviewed gate' | Set-Content (Join-Path $firstAdvance.Repo 'bin/ai-task-gates')
+  git -C $firstAdvance.Repo add bin/ai-task-gates
+  git -C $firstAdvance.Repo commit -m newer-gate | Out-Null
+  git -C $firstAdvance.Repo push origin main | Out-Null
+  $firstAdvanceTarget=(git -C $firstAdvance.Repo rev-parse HEAD).Trim()
+  git -C $firstAdvance.Repo reset --hard $firstAdvanceBase | Out-Null
+  Remove-Item -LiteralPath $firstAdvance.Launcher, "$($firstAdvance.Launcher).cmd"
+  Write-TestAuthorization $firstAdvance $firstAdvanceTarget $firstAdvanceBase $false $true | Out-Null
+  Invoke-Gate $firstAdvance -ExpectedHead $firstAdvanceTarget
+  Assert ((git -C $firstAdvance.Repo rev-parse HEAD).Trim() -eq $firstAdvanceTarget) 'first install did not advance to the reviewed target'
+  Invoke-Gate $firstAdvance -ExpectedHead $firstAdvanceTarget -LauncherGate
 
   $preadvancedMissing=New-Fixture preadvanced-missing
   'reviewer change' | Set-Content (Join-Path $preadvancedMissing.Repo 'bin/ai-task-gates')

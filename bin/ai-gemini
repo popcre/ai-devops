@@ -58,6 +58,7 @@ QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 # independence recording keys off this value. Fail closed when unknown.
 # Help/usage/version never start a review and need no caller identity.
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/gemini-review-contract.sh"
 CALLER=''
 case "${1:-}" in
   --version|-h|--help|help) : ;;
@@ -608,24 +609,14 @@ call(){
     cd "$d" && a="$(agy)"
     if [ -n "$c" ]; then set -- --conversation "$c"; else set -- --new-project; fi
     if [ "$streamed" -eq 1 ]; then
-      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
+      reviewer_credit_run gemini "$output" "$o.stderr" --timeout-seconds "$TIMEOUT" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
     else
-      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
+      reviewer_credit_run gemini "$output" "$o.stderr" --timeout-seconds "$TIMEOUT" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
     fi
   ) > "$output" 2>"$o.stderr" & ACTIVE_CHILD=$!
   rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''
   if [ "$streamed" -eq 1 ]; then
-    if ! jq -se '
-      . as $events |
-      [$events[] | select(.event=="init")] as $starts |
-      [$events[] | select(.event=="result")] as $ends |
-      if ($starts|length)==1 and ($ends|length)==1
-         and ($starts[0].conversation_id|type)=="string"
-         and $ends[0].result.conversation_id==$starts[0].conversation_id
-      then $ends[0].result + (if ($starts[0].init.model|type)=="string" then {init_model:$starts[0].init.model} else {} end)
-      else error("Gemini stream has no single matching conversation result")
-      end
-    ' "$output" > "$o"; then
+    if ! gemini_normalize_stream "$output" > "$o"; then
       preserve_failure "$ACTIVE_META" "$o" provider-stream
       gemini_credit_stop "$o"
       die 'Gemini stream result or conversation was invalid; evidence preserved'
@@ -643,8 +634,8 @@ call(){
   # inventory so any change between turns, outside a Gemini turn, still refuses.
   [ "$bd" = "$ad" ] || write "$ACTIVE_META" "$(jq -c --arg tree "$ad" '.review_tree_sha256=$tree' "$ACTIVE_META")" || die 'could not retain post-provider review inventory'
 }
-brief(){ if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. This is a disposable review copy.
+brief(){ gemini_review_contract "$2"; if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
+This is a disposable review copy.
 OUTPUT FORMAT — follow exactly. Write your findings first, with file paths. No line anywhere in your reply may begin with APPROVE, REJECT, REVISE, PASS, FAIL, LGTM, or OK, and do not write a "## Verdict" heading. The very last line of your reply must be exactly one of:
 VERDICT: APPROVE $GOVERNED_HEAD
 VERDICT: REVISE $GOVERNED_HEAD
@@ -654,7 +645,7 @@ Write nothing after that line.
 $1
 EOF
 else cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are NOT available in this headless runtime: never call run_command or any terminal tool (a denied command ends your turn with no output); inspect files with the file-reading tools instead. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. Start your response with exactly two lines:
+Start your response with exactly two lines:
 ## Verdict
 APPROVE
 Replace APPROVE with REJECT or BLOCKED when appropriate. Put no text between the heading and that one allowed verdict word. Then provide concise findings with file paths. This is a disposable review copy.
@@ -772,8 +763,12 @@ ask(){
 }
 list(){ find "$STATE_DIR/sessions" -name '*.json' -type f -print0 2>/dev/null | xargs -0 -r -n1 jq -r '[.name,.caller,.status,.model,(.conversation_id//"unavailable")]|@tsv'; }
 delete(){ local n="${1:-}" r id m d t status; name_ok "$n" || die 'invalid session name'; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; acquire "$(lock_path "session-$id-$CALLER-$n")" session; status="$(jq -r .status "$m")"; [ "$status" = COMPLETE ] || die 'refusing to delete preserved recovery evidence'; d="$(jq -r .review_dir "$m")"; t="$(jq -r .sandbox_tag "$m")"; reviewer_event_verify_sandbox "$d" || die 'review evidence cleanup refused; session metadata preserved'; "$PACKET" remove "$d" "$t" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$r" "$t"; rm -f "$m"; ACTIVE_TERMINAL=1; release_locks; }
-doctor_identity(){ local a a_sha status=IDENTITY; need git; need jq; a="$(agy)"; "$a" --help 2>&1 | grep -q -- --sandbox || die 'agy lacks --sandbox'; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$status" "$("$a" --version)" "$a_sha" "$MODEL"; }
-doctor(){ local a a_sha models; need git; need jq; a="$(agy)"; "$a" --help 2>&1 | grep -q -- --sandbox || die 'agy lacks --sandbox'; models="$(timeout "${AI_GEMINI_MODELS_TIMEOUT:-15}s" "$a" models)" || die 'configured model inventory unavailable or timed out'; printf '%s\n' "$models" | grep -q "^$MODEL" || die 'configured model unavailable'; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; if [ "$QUARANTINED" -eq 1 ]; then printf 'QUARANTINED agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory live-qualification=required\n' "$("$a" --version)" "$a_sha" "$MODEL"; return 3; fi; printf 'PASS agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$("$a" --version)" "$a_sha" "$MODEL"; }
+# #1562: read the whole help text before matching. Piping it into `grep -q`
+# under pipefail let agy die of SIGPIPE after an early match, which reported
+# a healthy runtime as lacking --sandbox and quarantined it.
+require_agy_sandbox(){ local help; help="$("$1" --help 2>&1)" || die 'agy --help failed'; [[ "$help" == *--sandbox* ]] || die 'agy lacks --sandbox'; }
+doctor_identity(){ local a a_sha status=IDENTITY; need git; need jq; a="$(agy)"; require_agy_sandbox "$a"; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$status" "$("$a" --version)" "$a_sha" "$MODEL"; }
+doctor(){ local a a_sha models; need git; need jq; a="$(agy)"; require_agy_sandbox "$a"; models="$(timeout "${AI_GEMINI_MODELS_TIMEOUT:-15}s" "$a" models)" || die 'configured model inventory unavailable or timed out'; printf '%s\n' "$models" | grep -q "^$MODEL" || die 'configured model unavailable'; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; if [ "$QUARANTINED" -eq 1 ]; then printf 'QUARANTINED agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory live-qualification=required\n' "$("$a" --version)" "$a_sha" "$MODEL"; return 3; fi; printf 'PASS agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$("$a" --version)" "$a_sha" "$MODEL"; }
 qualify_live(){
   local name sentinel before after fixture="${AI_GEMINI_QUALIFY_FIXTURE:-}" fixtures
   require_local_runtime; fixtures="$(physical_dir "$STATE_DIR/qualification-fixtures")" || die 'live qualification fixture is unavailable'

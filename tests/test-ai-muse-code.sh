@@ -27,7 +27,7 @@ printf '#!/usr/bin/env bash\nprintf fake-key\n' > "$TMP/bin/op"
 cat > "$MBIN/muse-bin-$VERSION.exe" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
-  --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code %s (%s)\n' "${MUSE_STUB_PRODUCT:-1.4.2}" "${MUSE_STUB_VERSION:-__PIN_VERSION__}";;
+  --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code %s (%s)\n' "${MUSE_STUB_PRODUCT:-1.4.7}" "${MUSE_STUB_VERSION:-__PIN_VERSION__}";;
   exec)
     if [ "${MUSE_STUB_BOUNDARY_CHECK:-}" = 1 ]; then
       case "$*" in *fake-key*|*fake-foreign*) exit 78;; esac

@@ -9,6 +9,11 @@ PACKET="$ROOT/bin/ai-review-packet"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle-state"
+export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard-state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/scoreboard-state/reviews.jsonl"
+export AI_REVIEW_EVENT_DIR="$TMP/event-state"
+export AI_REVIEW_TEST_ISOLATION=1
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 PASS=0
@@ -60,8 +65,43 @@ must_fail "$PACKET" resolve "$R" --assert-head "$ORIGINAL_HEAD"
 must_fail "$PACKET" build "$R" ordinary
 pass 'ordinary snapshot and packet paths refuse private source'
 
+# Legacy fixture folders can hold code-extension row exports. Refuse before
+# creating a snapshot, regardless of a .ts/.mjs suffix or launcher spelling.
+for hostile in apps/workers/src/__fixtures__/licensed-rows.ts apps/workers/src/__fixtures__/licensed-rows.mjs apps/workers/src/__fixture__/rows.ts apps/workers/src/testdata/rows.ts apps/workers/src/test-data/rows.ts apps/workers/src/test_data/rows.ts apps/workers/src/snapshot/rows.py apps/workers/src/snapshots/rows.py apps/workers/src/mock/rows.sh apps/workers/src/mocks/rows.sh apps/workers/src/__mocks__/rows.sh apps/workers/src/sample/rows.ts apps/workers/src/samples/rows.ts src/licensed-rows.ts src/licensedrows.ts src/LicensedRows.ts src/mylicensed.ts 'src/licensed rows.ts' 'src/licensed+rows.ts' bin/ai-licensed-rows bin/ai-LicensedRows; do
+  mkdir -p "$R/$(dirname "$hostile")"
+  printf 'PRIVATE_LEGACY_FIXTURE_SENTINEL\n' > "$R/$hostile"
+  printf '["%s"]\n' "$hostile" > "$TMP/legacy-approved.json"
+  must_fail "$SANDBOX" ensure-code-only "$R" legacy-refused --paths-file "$TMP/legacy-approved.json" --base "$BASE"
+  grep -Eq 'evidence or hidden path refused|licensed evidence filename refused' "$TMP/refusal.out" \
+    || fail "legacy fixture did not fail its evidence boundary: $hostile"
+  if compgen -G "$TMP/sandboxes/legacy-refused*" >/dev/null; then
+    fail 'denied legacy snapshot or partial export was published'
+  fi
+  rm "$R/$hostile"
+done
+pass 'legacy fixture folders and licensed filenames refuse code and launcher extensions'
+
 EXPORT="$("$SANDBOX" ensure-code-only "$R" codeonly --paths-file "$TMP/approved.json" --base "$BASE")"
 "$SANDBOX" verify-code-only "$EXPORT" --assert-head "$ORIGINAL_HEAD"
+# Owner lease (PR #1537): a live run must hold a lease beside the export so a
+# concurrent sweep or housekeeping age rule cannot delete a live snapshot.
+"$SANDBOX" has-live-owner "$EXPORT" || fail 'code-only export did not record a live owner lease'
+[ -d "$EXPORT.leases" ] || fail 'code-only export has no leases directory'
+check_codeonly_lease_pid="$(ls "$EXPORT.leases" 2>/dev/null | head -1)"
+[ -n "$check_codeonly_lease_pid" ] || fail 'code-only export lease directory is empty'
+printf '%s\n' "$check_codeonly_lease_pid" | grep -Eq '^[0-9]+$' || fail 'code-only lease file is not named by pid'
+pass 'code-only export records an owner lease'
+# A concurrent orphan sweep with every age past due must keep this live export
+# (Windows 916, 2026-10-08 class of bug), and drop only a dead-owner twin.
+sleep 0 & DEAD_CODE_OWNER=$!; wait "$DEAD_CODE_OWNER" 2>/dev/null || true
+printf '["src/app.py"]\n' > "$TMP/codeonly-dead.json"
+DEAD_EXPORT="$(AI_REVIEW_SANDBOX_OWNER_PID="$DEAD_CODE_OWNER" "$SANDBOX" ensure-code-only "$R" codeonly-dead --paths-file "$TMP/codeonly-dead.json" --base "$BASE")"
+touch -d '3 hours ago' "$EXPORT/.ai-review-sandbox" "$DEAD_EXPORT/.ai-review-sandbox"
+"$SANDBOX" sweep-orphans --max-age-seconds 0 >/dev/null 2>&1
+[ -d "$EXPORT" ] || fail 'sweep deleted a live code-only export'
+"$SANDBOX" has-live-owner "$EXPORT" || fail 'live code-only lease lost after concurrent sweep'
+[ ! -d "$DEAD_EXPORT" ] || fail 'sweep kept a dead-owner code-only export'
+pass 'concurrent sweep keeps a live code-only export and drops a dead one'
 [ "$(git -C "$EXPORT" rev-list --count HEAD)" = 2 ] || fail 'synthetic export does not have two commits'
 [ "$(git -C "$EXPORT" rev-parse HEAD^)" != "$BASE" ] || fail 'source history leaked into synthetic history'
 [ ! -e "$EXPORT.source.json/." ] || fail 'host-only sidecar is under the export'

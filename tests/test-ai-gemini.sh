@@ -152,13 +152,38 @@ EOF
 chmod +x "$TMP/bin/agy-envspy"; rm -f "$TMP/agy-spy-env"
 GEMINI_API_KEY=fake-gem-1427 GOOGLE_API_KEY=fake-google-1427 AI_GEMINI_KEY=fake-aigem-1427 AI_GEMINI_BIN="$TMP/bin/agy-envspy" "$SCRIPT" doctor --identity >/dev/null 2>&1 || true
 check 'gemini_ignores_generic_api_keys' "test -s '$TMP/agy-spy-env' && ! grep -q 'fake-.*-1427' '$TMP/agy-spy-env'"
+# #1562: the sandbox-capability probe must not race SIGPIPE. A help text that
+# names --sandbox early and then keeps writing must pass every time, while a
+# help text without --sandbox (or a failing --help) must still refuse.
+for kind in early missing failing; do
+cat > "$TMP/bin/agy-help-$kind" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = --help ]; then
+  case $kind in
+    early) printf '  --sandbox  run sandboxed\n' ;;
+    failing) printf '  --sandbox  run sandboxed\n'; exit 2 ;;
+  esac
+  head -c 524288 /dev/zero | tr '\0' 'x'; printf '\n'
+  exit 0
+fi
+exec "$TMP/bin/agy" "\$@"
+EOF
+chmod +x "$TMP/bin/agy-help-$kind"
+done
+HELP_RACE_FAILS=0
+for _ in 1 2 3 4 5; do AI_GEMINI_BIN="$TMP/bin/agy-help-early" "$SCRIPT" doctor --identity >/dev/null 2>&1 || HELP_RACE_FAILS=$((HELP_RACE_FAILS+1)); done
+check 'sandbox probe tolerates a help writer that outlives the match (no SIGPIPE false refusal)' "test '$HELP_RACE_FAILS' -eq 0"
+set +e; MISSING_OUT="$(AI_GEMINI_BIN="$TMP/bin/agy-help-missing" "$SCRIPT" doctor --identity 2>&1)"; MISSING_RC=$?; set -e
+check 'sandbox probe still refuses an agy whose help lacks --sandbox' "test '$MISSING_RC' -ne 0 && printf '%s' \"\$MISSING_OUT\" | grep -q 'agy lacks --sandbox'"
+set +e; FAILING_OUT="$(AI_GEMINI_BIN="$TMP/bin/agy-help-failing" "$SCRIPT" doctor --identity 2>&1)"; FAILING_RC=$?; set -e
+check 'sandbox probe refuses when agy --help itself fails' "test '$FAILING_RC' -ne 0 && printf '%s' \"\$FAILING_OUT\" | grep -q 'agy --help failed'"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools/lib"
 cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
 cp "$ROOT/tools/reviewer_credit_stream.py" "$TMP/tools/"
 cp "$ROOT/bin/ai-process-supervisor" "$TMP/bin/"
-cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
+cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$ROOT/tools/lib/gemini-review-contract.sh" "$TMP/tools/lib/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -250,7 +275,7 @@ check 'disposable review copy has no git remote' "test -z \"\$(git -C \"\$(jq -r
 check 'copy-edit review completes and records the post-turn copy inventory' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = COMPLETE"
 R2="$TMP/repo2"; make_repo "$R2"; printf prior > "$R2/.ignored"
 check 'reviewer may edit an ignored file inside its disposable copy' "new_run '$R2' ignored mutate-ignored | grep -q '^PASS' && test \"\$(cat '$R2/.ignored')\" = prior"
-check 'review prompt no longer says read-only and grants disposable-copy file edits' "! grep -q 'without editing files, running commands' '$SCRIPT' && grep -q 'you may read and edit files there' '$SCRIPT' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
+check 'review prompt no longer says read-only and grants disposable-copy file edits' "! grep -q 'without editing files, running commands' '$ROOT/tools/lib/gemini-review-contract.sh' && grep -q 'you may read and edit files there' '$ROOT/tools/lib/gemini-review-contract.sh' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
 R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$SENT"; export MOCK_SENTINEL="$SENT"
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R3B="$TMP/repo3b"; make_repo "$R3B"; export MOCK_PROTECTED="$R3B"
@@ -563,7 +588,7 @@ else
   printf '  note drive-letter spelling check needs cygpath (Windows only)
 '
 fi
-check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
+check 'actual native prompts preserve file tools and forbid unavailable terminal commands' "test \"\$(grep -c 'never call run_command' '$MOCK_AGY_CALLS')\" -ge 2 && grep -q 'file-reading tools instead' '$MOCK_AGY_CALLS' && grep -q 'never claim command execution' '$MOCK_AGY_CALLS' && ! grep -q 'you may run commands' '$MOCK_AGY_CALLS'"
 set +e; (gov_run govdenied denied) >"$TMP/govdenied.out" 2>"$TMP/govdenied.err"; GOVDENIED_RC=$?; set -e
 check 'governed denied-tool turn fails naming the denied tool' "test '$GOVDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
 check 'governed denied-tool turn is a review-step failure (exit 81 + marker)' "test '$GOVDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/govdenied.err'"

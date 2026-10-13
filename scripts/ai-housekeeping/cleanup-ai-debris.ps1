@@ -1,11 +1,64 @@
 # Daily housekeeping: disposable AI review sandboxes, old archives, temp debris.
-# Safe targets only. Never touches live repos, secrets, or recent work (<24h).
+# Safe targets only. Never touches live repos, secrets, recent work (<24h), or a
+# review snapshot whose owner run is still alive (lease beside the snapshot).
+param(
+  [string]$SandboxRoot = 'C:\Users\ahazan\.local\state\ai-devops\review-sandboxes',
+  [string]$WorktreeRoot = 'C:\Users\ahazan\.codex\worktrees',
+  [string]$ArchiveRoot = 'C:\Users\ahazan\.codex\archived_sessions',
+  [string]$CodexRoot = 'C:\Users\ahazan\.codex',
+  [switch]$SkipNonSandbox
+)
 $ErrorActionPreference = 'Continue'
 $log = 'D:\ai-data\logs\housekeeping.log'
+if ($env:AI_HOUSEKEEPING_LOG) { $log = $env:AI_HOUSEKEEPING_LOG }
 function Log($m) {
   $line = "[{0}] {1}" -f (Get-Date -Format o), $m
   Add-Content -LiteralPath $log -Value $line -ErrorAction SilentlyContinue
   Write-Output $line
+}
+function Test-SandboxLiveOwner([string]$sandboxPath) {
+  # Mirror bin/ai-review-sandbox has-live-owner exactly: lease files name MSYS
+  # pids and carry /proc start times, so only that helper can judge liveness
+  # correctly. A live lease means the creating run still owns this snapshot.
+  $leases = "$sandboxPath.leases"
+  if (-not (Test-Path -LiteralPath $leases)) { return $false }
+  $tool = $null
+  foreach ($candidate in @(
+    (Join-Path $PSScriptRoot '..\..\bin\ai-review-sandbox'),
+    'C:\repos\ai-devops\bin\ai-review-sandbox',
+    'D:\repos\ai-devops\bin\ai-review-sandbox'
+  )) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+      $tool = (Resolve-Path -LiteralPath $candidate).Path
+      break
+    }
+  }
+  $bash = $null
+  $bashCandidates = @()
+  foreach ($root in @($env:ProgramFiles, $env:ProgramW6432, ${env:ProgramFiles(x86)}, 'C:\Program Files', 'C:\Program Files (x86)')) {
+    if ($root) { $bashCandidates += (Join-Path $root 'Git\bin\bash.exe') }
+  }
+  $bashCandidates += @(
+    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe",
+    'C:\Program Files\Git\bin\bash.exe'
+  )
+  foreach ($candidate in $bashCandidates) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) { $bash = $candidate; break }
+  }
+  if ($tool -and $bash) {
+    $toolUnix = $tool -replace '\\', '/'
+    $snapUnix = $sandboxPath -replace '\\', '/'
+    & $bash $toolUnix has-live-owner $snapUnix 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  }
+  # Fallback when Git Bash or the sandbox tool is missing: any live lease pid.
+  foreach ($f in Get-ChildItem -LiteralPath $leases -Force -File -ErrorAction SilentlyContinue) {
+    $pidNum = 0
+    if (-not [int]::TryParse($f.BaseName, [ref]$pidNum)) { continue }
+    if ($pidNum -le 1) { continue }
+    if (Get-Process -Id $pidNum -ErrorAction SilentlyContinue) { return $true }
+  }
+  return $false
 }
 function Wipe-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) { return $false }
@@ -20,10 +73,7 @@ function Wipe-Dir($path) {
 }
 
 # Resolve via junction so this works whether data is on C: or D:
-$sandboxRoot = 'C:\Users\ahazan\.local\state\ai-devops\review-sandboxes'
-$worktreeRoot = 'C:\Users\ahazan\.codex\worktrees'
-$archiveRoot = 'C:\Users\ahazan\.codex\archived_sessions'
-$codexRoot = 'C:\Users\ahazan\.codex'
+# Paths come from parameters (defaults are the machine layout).
 $preserveWorktrees = @(
   'ai-devops-pr666-resume','issue-2371-owner-decision-evidence','issue-2662-six-views-01a0bc14',
   'issue-2876-catalog-row-order-refresh-01a0bc4c','issue-3273-resume-01a0bc4c','issue-634-shared-db-rename'
@@ -32,26 +82,41 @@ $preserveWorktrees = @(
 Log "housekeeping start"
 
 # 1) Review sandboxes older than 24 hours (explicitly disposable snapshots)
-if (Test-Path -LiteralPath $sandboxRoot) {
+if (Test-Path -LiteralPath $SandboxRoot) {
   $cutoff = (Get-Date).AddHours(-24)
-  $old = @(Get-ChildItem -LiteralPath $sandboxRoot -Force -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.LastWriteTime -lt $cutoff })
+  $old = @(Get-ChildItem -LiteralPath $SandboxRoot -Force -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -lt $cutoff -and $_.Name -notlike '*.leases' })
   $n = 0
+  $skippedLive = 0
+  $rootFull = (Get-Item -LiteralPath $SandboxRoot).FullName
   foreach ($d in $old) {
-    if ($d.Parent.FullName -ne (Get-Item -LiteralPath $sandboxRoot).FullName) { continue }
-    if (Wipe-Dir $d.FullName) { $n++ }
+    if ($d.Parent.FullName -ne $rootFull) { continue }
+    if (Test-SandboxLiveOwner $d.FullName) {
+      Log "SKIP live-owner sandbox $($d.Name)"
+      $skippedLive++
+      continue
+    }
+    if (Wipe-Dir $d.FullName) {
+      $n++
+      $leasesDir = "$($d.FullName).leases"
+      if (Test-Path -LiteralPath $leasesDir) { Wipe-Dir $leasesDir | Out-Null }
+    }
   }
-  Log "review-sandboxes removed=$n of $($old.Count) older than 24h"
+  Log "review-sandboxes removed=$n of $($old.Count) older than 24h (skipped live-owner=$skippedLive)"
+}
+if ($SkipNonSandbox) {
+  Log "housekeeping done (sandbox-only)"
+  return
 }
 
 # 2) Worktree groups older than 7 days that are not on the preserve list
-if (Test-Path -LiteralPath $worktreeRoot) {
+if (Test-Path -LiteralPath $WorktreeRoot) {
   $cutoff = (Get-Date).AddDays(-7)
-  $old = @(Get-ChildItem -LiteralPath $worktreeRoot -Force -Directory -ErrorAction SilentlyContinue |
+  $old = @(Get-ChildItem -LiteralPath $WorktreeRoot -Force -Directory -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt $cutoff -and $preserveWorktrees -notcontains $_.Name })
   $n = 0
   foreach ($d in $old) {
-    if ($d.Parent.FullName -ne (Get-Item -LiteralPath $worktreeRoot).FullName) { continue }
+    if ($d.Parent.FullName -ne (Get-Item -LiteralPath $WorktreeRoot).FullName) { continue }
     # Skip if dirty (has modified files)
     $inner = Get-ChildItem $d.FullName -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($inner -and (Test-Path (Join-Path $inner.FullName '.git'))) {
@@ -64,9 +129,9 @@ if (Test-Path -LiteralPath $worktreeRoot) {
 }
 
 # 3) Archived sessions older than 14 days
-if (Test-Path -LiteralPath $archiveRoot) {
+if (Test-Path -LiteralPath $ArchiveRoot) {
   $cutoff = (Get-Date).AddDays(-14)
-  $old = @(Get-ChildItem -LiteralPath $archiveRoot -Force -ErrorAction SilentlyContinue |
+  $old = @(Get-ChildItem -LiteralPath $ArchiveRoot -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt $cutoff })
   $n = 0
   foreach ($d in $old) {
@@ -79,7 +144,7 @@ if (Test-Path -LiteralPath $archiveRoot) {
 }
 
 # 4) Codex root temp/backup debris older than 7 days (never live auth/config)
-$debris = @(Get-ChildItem -LiteralPath $codexRoot -Force -File -ErrorAction SilentlyContinue | Where-Object {
+$debris = @(Get-ChildItem -LiteralPath $CodexRoot -Force -File -ErrorAction SilentlyContinue | Where-Object {
   ($_.Name -match '\.bak$|\.bak-|\.tmp-|^tmp-|^..codex-global-state\.json\.') -and
   $_.LastWriteTime -lt (Get-Date).AddDays(-7) -and
   $_.Name -notmatch 'auth|secret|config\.toml$'

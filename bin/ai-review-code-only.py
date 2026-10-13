@@ -19,7 +19,8 @@ DENIED_PARTS = {
     "captures", "credential", "credentials", "data", "dataset", "datasets",
     "evidence", "export", "exports", "fixture", "fixtures", "licensed",
     "logs", "private", "raw", "report", "reports", "secret", "secrets",
-    "transcript", "transcripts", "vendor", "vendors",
+    "transcript", "transcripts", "vendor", "vendors", "__fixtures__",
+    "testdata", "snapshot", "snapshots", "mock", "mocks", "sample", "samples",
 }
 CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js", ".jsx", ".mjs", ".cjs", ".py", ".ps1", ".rs", ".sh", ".ts", ".tsx"}
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
@@ -31,6 +32,14 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 def fail(message):
     raise ValueError(message)
+
+
+def has_exact_action_scope(content, binding):
+    expected = "Action scope: " + binding["profile"] + " descriptor sha256:" + binding["manifest_descriptor_sha256"]
+    scopes = [line for line in content.splitlines() if line.lstrip().startswith("Action scope:")]
+    # Sentence punctuation has no authority. The profile, complete descriptor
+    # and unique unindented line remain exact; do not normalize other wording.
+    return len(scopes) == 1 and scopes[0] in (expected, expected + ".")
 
 
 # Absolute repository-location variables in the inherited environment (set by
@@ -76,6 +85,13 @@ def source_digest(source):
     return result
 
 
+def denied_component(part):
+    # Legacy test-data and underscored fixture/mock folders have the same
+    # evidence meaning as their ordinary spelling, regardless of suffix.
+    lower = part.lower()
+    return lower in DENIED_PARTS or re.sub(r"[-_\s]", "", lower) in DENIED_PARTS
+
+
 def safe_path(raw):
     if not isinstance(raw, str) or not raw or raw.startswith("/") or "\\" in raw or "\0" in raw:
         fail("invalid approved path")
@@ -91,8 +107,12 @@ def safe_path(raw):
     if raw == GATE_DECLARATION:
         return raw
     lower = [part.lower() for part in parts]
-    if any(part in DENIED_PARTS or part.startswith(".") for part in lower):
+    if any(denied_component(part) or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
+    # Legacy fixtures also encode their licensed scope in the filename. A
+    # code suffix or the bin/ai-* launcher exception must not admit those rows.
+    if "licensed" in Path(raw).stem.lower():
+        fail("licensed evidence filename refused")
     suffix = Path(raw).suffix.lower()
     executable_bin = len(parts) == 2 and lower[0] == "bin" and lower[1].startswith("ai-") and suffix == ""
     if not executable_bin and suffix not in CODE_SUFFIXES and not (suffix in CONTRACT_SUFFIXES and any(p in CONTRACT_PARTS for p in lower[:-1])):
@@ -160,10 +180,11 @@ def current_bytes(source, path):
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
     relative = resolved.relative_to(resolved_root)
-    lowered = [part.lower() for part in relative.parts]
-    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() == path:
-        pass
-    elif any(part in DENIED_PARTS or part.startswith(".") for part in lowered):
+    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() != path:
+        fail("approved path resolves into a refused location")
+    try:
+        safe_path(relative.as_posix())
+    except ValueError:
         fail("approved path resolves into a refused location")
     value = item.read_bytes()
     validate_text(value)
@@ -547,8 +568,7 @@ def lifecycle_proof(args):
         fail("native packet verification refused")
     if state.get("action_profile_binding"):
         binding = state["action_profile_binding"]
-        expected_line = "Action scope: " + binding["profile"] + " descriptor sha256:" + binding["manifest_descriptor_sha256"] + "."
-        if verdicts[0] == "APPROVE" and content.splitlines().count(expected_line) != 1:
+        if verdicts[0] == "APPROVE" and not has_exact_action_scope(content, binding):
             fail("native approval does not explicitly cover the exact bounded action")
         action = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "tools/review_action_profile.py"), "finish", args.state, "--manifest", state["action_manifest"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE) if not args.completed else None
         if not args.completed and action.returncode:

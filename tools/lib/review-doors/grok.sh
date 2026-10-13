@@ -12,6 +12,7 @@
 set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/grok-runtime.sh"
 # Owner rule "remove the paid fallback": no grok child inherits a paid key.
 source "$DOOR_CREDIT_ROOT/tools/lib/grok-paid-keys.sh"
 grok_strip_paid_keys
@@ -62,19 +63,7 @@ GROK_PERMS=(--permission-mode default --allow Read --allow Grep
             --no-subagents --disable-web-search --no-memory)
 
 resolve_grok() {
-  if [ -n "${AI_GROK_BIN:-}" ] && [ -x "${AI_GROK_BIN}" ]; then
-    printf '%s' "$AI_GROK_BIN"; return 0
-  fi
-  local c
-  for c in "$(command -v grok 2>/dev/null || true)" \
-           "${HOME:-}/.local/bin/grok" \
-           "${HOME:-}/.grok/bin/grok" \
-           /home/ai/.local/bin/grok \
-           /usr/local/bin/grok; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
-  done
-  printf 'grok door: local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN.\n' >&2
-  return 127
+  grok_resolve_door_runtime
 }
 
 # Credentials presence only — never print a key. A missing store is a local
@@ -146,42 +135,102 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
 SHELL_RULE="Shell rule (Grok CLI limit): a shell command containing a variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, git -c, \$(...) or backtick substitution, or angle brackets (even inside quotes, e.g. git log --format='<%ae>') is refused, and a refused command CANCELS your turn. Use one plain command per call. When something needs variables or such forms, write a small script under .git/review-scratch/ with your file tool and run: bash .git/review-scratch/run.sh"
 GROK_PERMISSION_RESUMES="${AI_GROK_PERMISSION_RESUMES:-3}"
 
-permission_cancelled() { # permission_cancelled RESULT_JSON -> 0 only on ONE native PermissionCancelled witness
-  # Bound to this result's sessionId AND requestId (the native prompt_id), as in
-  # bin/ai-grok-review: exactly one matching turn_completed line, symlinks
-  # refused, whitespace-tolerant JSON. A leftover or other-category cancel
-  # (max_turns_reached) never qualifies.
-  local result="$1" py
-  [ "$(jq -r '.stopReason // ""' "$result" 2>/dev/null)" = cancelled ] || return 1
+permission_cancelled() { # permission_cancelled RESULT_JSON [SINCE_MARKER] -> 0 and "SID<TAB>STEP" on ONE witness
+  # Two native witness forms, both bound to one session:
+  #  1. updates.jsonl turn_completed bound to this result's sessionId AND
+  #     requestId (native prompt_id), exactly one match, as in bin/ai-grok-review.
+  #  2. the newer session-log event {"type":"turn_ended","outcome":"cancelled",
+  #     "cancellation_category":"permission_cancelled"} as the session's LATEST
+  #     turn_ended (seen on 916, #1650; the CLI may then exit nonzero with no
+  #     JSON). Without a result sessionId, only a single session touched after
+  #     SINCE_MARKER qualifies. Symlinks refused; a leftover or other-category
+  #     cancel (max_turns_reached) never qualifies.
+  local result="$1" since="${2:-}" py
   for py in python3 python; do command -v "$py" >/dev/null 2>&1 && break; py=""; done
   [ -n "$py" ] || return 1
-  "$py" - "$result" "${GROK_HOME:-${HOME:-}/.grok}/sessions" <<'PY'
-import json, pathlib, re, sys
+  "$py" - "$result" "${GROK_HOME:-${HOME:-}/.grok}/sessions" "$since" <<'PY'
+import json, os, pathlib, re, sys
 try: result = json.loads(pathlib.Path(sys.argv[1]).read_text())
-except Exception: sys.exit(1)
+except Exception: result = {}
+if not isinstance(result, dict): result = {}
 sid, req = result.get('sessionId'), result.get('requestId')
 ok = lambda v: isinstance(v, str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}', v)
-root = pathlib.Path(sys.argv[2])
-if not (ok(sid) and ok(req)) or not root.is_dir() or root.is_symlink(): sys.exit(1)
-cats = []
-for parent in root.iterdir():
-    stream = parent / sid / 'updates.jsonl'
-    if parent.is_symlink() or (parent / sid).is_symlink() or stream.is_symlink() or not stream.is_file(): continue
+root, since = pathlib.Path(sys.argv[2]), sys.argv[3]
+if not root.is_dir() or root.is_symlink(): sys.exit(1)
+def session_dirs(s):
+    for parent in root.iterdir():
+        d = parent / s
+        if parent.is_symlink() or d.is_symlink() or not d.is_dir(): continue
+        yield d
+def logs(d):
+    for f in sorted(d.rglob('*.jsonl')):
+        if f.is_symlink() or not f.is_file(): continue
+        yield f
+def step_of(rows):
+    for row in reversed(rows):  # the last shell command the model asked for
+        stack = [row]
+        while stack:
+            v = stack.pop()
+            if isinstance(v, dict):
+                for k in ('command', 'cmd'):
+                    if isinstance(v.get(k), str) and v[k].strip(): return v[k].strip().splitlines()[0][:200]
+                stack.extend(v.values())
+            elif isinstance(v, list): stack.extend(v)
+    return ''
+def new_form(d):
+    rows, last, turn = [], None, []
+    for f in logs(d):
+        for line in f.read_text(errors='replace').splitlines():
+            try: ev = json.loads(line)
+            except ValueError: continue
+            if not isinstance(ev, dict): continue
+            if ev.get('type') == 'turn_ended': last, turn, rows = ev, rows, []
+            else: rows.append(ev)
+    if not (isinstance(last, dict) and last.get('outcome') == 'cancelled'
+            and last.get('cancellation_category') == 'permission_cancelled'): return None
+    return step_of(turn)
+def old_form(d):
+    stream = d / 'updates.jsonl'
+    if stream.is_symlink() or not stream.is_file() or not ok(req): return []
+    cats, rows = [], []
     for line in stream.read_text(errors='replace').splitlines():
-        if not re.search(r'"sessionUpdate"\s*:\s*"turn_completed"', line): continue
         try: ev = json.loads(line)
         except ValueError: continue
+        rows.append(ev)
+        if not re.search(r'"sessionUpdate"\s*:\s*"turn_completed"', line): continue
         par = ev.get('params', {}) if isinstance(ev, dict) else {}
         up = par.get('update', {}) if isinstance(par, dict) else {}
         if not isinstance(up, dict) or par.get('sessionId') != sid or up.get('prompt_id') != req or up.get('stop_reason') != 'cancelled': continue
         meta = par.get('_meta', {})
         cats.append(meta.get('cancellationCategory') if isinstance(meta, dict) else None)
-sys.exit(0 if cats == ['PermissionCancelled'] else 1)
+    return cats
+if ok(sid):
+    if result.get('stopReason') not in (None, 'cancelled'): sys.exit(1)
+    cats, step = [], None
+    for d in session_dirs(sid):
+        cats += old_form(d)
+        s = new_form(d)
+        if s is not None: step = s
+    if result.get('stopReason') == 'cancelled' and cats == ['PermissionCancelled']: print(sid + '\t'); sys.exit(0)
+    if step is not None: print(sid + '\t' + step); sys.exit(0)
+    sys.exit(1)
+if not since or not os.path.isfile(since): sys.exit(1)
+t0, hits = os.path.getmtime(since), []
+for parent in root.iterdir():
+    if parent.is_symlink() or not parent.is_dir(): continue
+    for d in parent.iterdir():
+        if d.is_symlink() or not d.is_dir() or not ok(d.name): continue
+        if not any(f.stat().st_mtime >= t0 for f in logs(d)): continue
+        hits.append(d)
+if len(hits) != 1: sys.exit(1)
+step = new_form(hits[0])
+if step is None: sys.exit(1)
+print(hits[0].name + '\t' + step)
 PY
 }
 
 main() {
-  local grok cwd out prompt_full rc
+  local grok cwd out prompt_full rc since witness="" step=""
   grok="$(resolve_grok)" || exit $?
   require_credentials || exit $?
   [ -d "$DOOR_WORKDIR" ] || { printf 'grok door: workdir missing: %s\n' "$DOOR_WORKDIR" >&2; exit 2; }
@@ -201,6 +250,7 @@ main() {
 
   cwd="$(native_cwd "$DOOR_WORKDIR")"
   out="$(mktemp)"
+  since="$(mktemp)"   # session logs touched after this belong to this call
   set +e
   if [ "$MODE" = implement ]; then
     reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
@@ -216,18 +266,24 @@ main() {
   rc=$?
   set -e
 
-  local n=0 sid rpf used left="$GROK_MAX_TURNS"
+  local n=0 sid rpf used left="$GROK_MAX_TURNS" tab=$'\t'
   case "$GROK_PERMISSION_RESUMES" in ''|*[!0-9]*) GROK_PERMISSION_RESUMES=0 ;; esac
   [ "$GROK_PERMISSION_RESUMES" -le 5 ] || GROK_PERMISSION_RESUMES=5
-  while [ "$rc" -eq 0 ] && [ "$n" -lt "$GROK_PERMISSION_RESUMES" ] && permission_cancelled "$out"; do
+  # A permission-cancelled turn may exit 0 with stopReason "cancelled" or, on
+  # newer CLIs, nonzero with no JSON (#1650). Out of credit (92) never resumes.
+  while [ "$rc" -ne 92 ] && witness="$(permission_cancelled "$out" "$since")"; do
+    sid="${witness%%"$tab"*}"; step="${witness#*"$tab"}"
+    [ "$n" -lt "$GROK_PERMISSION_RESUMES" ] || break
     # num_turns is per invocation; a missing count is charged as one turn.
-    used="$(jq -r '.num_turns // 1' "$out")"; case "$used" in ''|*[!0-9]*) used=1 ;; esac
+    used="$(jq -r '.num_turns // 1' "$out" 2>/dev/null || echo 1)"; case "$used" in ''|*[!0-9]*) used=1 ;; esac
     left=$(( left - used )); [ "$left" -ge 1 ] || break
-    n=$((n + 1)); sid="$(jq -r '.sessionId' "$out")"
-    printf 'grok door: Grok refused a shell command form (PermissionCancelled); resuming session %s (%s of %s, %s turns left).\n' "$sid" "$n" "$GROK_PERMISSION_RESUMES" "$left" >&2
+    n=$((n + 1))
+    printf 'grok door: Grok refused a shell command (permission_cancelled%s); resuming session %s (%s of %s, %s turns left).\n' "${step:+: $step}" "$sid" "$n" "$GROK_PERMISSION_RESUMES" "$left" >&2
     mv -f "$out" "$out.cancelled$n"   # keep the confirmed cancelled result
+    [ ! -s "$out.err" ] || mv -f "$out.err" "$out.cancelled$n.err"
     rpf="$(mktemp)"
-    printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
+    printf '%s\n' "The Grok CLI refused your last shell command${step:+ ($step)} and cancelled it; nothing ran. $SHELL_RULE. Do not retry that command or form. If your $MODE work is already complete, skip any cleanup and output your final report with the required '## Verdict' section now; otherwise continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
+    : > "$since"
     set +e
     reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
@@ -236,13 +292,25 @@ main() {
     rc=$?
     set -e
     rm -f "$rpf"
+    witness=""
   done
 
   if [ "$rc" -eq 92 ]; then
     reviewer_capacity_current grok "$out" || true
     reviewer_credit_exit
-    rm -f "$prompt_full"
+    rm -f "$prompt_full" "$since"
     exit 92
+  fi
+  rm -f "$since"
+  if [ -n "$witness" ]; then
+    # Still cancelled after the bounded recovery: an unattended permission
+    # refusal, not a provider outage. Retain the native evidence privately.
+    printf 'grok door: Grok cancelled the turn because the unattended permission check refused a shell command%s; no verdict after %s resume(s).\n' "${step:+: $step}" "$n" >&2
+    printf 'permission_cancelled session=%s refused_step=%s resumes=%s\n' "$sid" "${step:-unknown}" "$n" >> "$out.err"
+    python3 "$DOOR_CREDIT_ROOT/tools/review_door_diagnostics.py" grok \
+      "$out" "$out.err" "$rc" permission-cancelled "$DOOR_REPORT_OUT" "${DOOR_DIAGNOSTICS_DIR:-}" || true
+    rm -f "$prompt_full"
+    exit 1
   fi
   if [ "$rc" -ne 0 ] || ! jq -e 'has("stopReason")' "$out" >/dev/null 2>&1; then
     printf 'grok door: provider call failed (exit %s)\n' "$rc" >&2

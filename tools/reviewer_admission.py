@@ -551,7 +551,7 @@ def pause_failure(data, provider, reason, now, seconds=3600, observed=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'capacity-status', 'capacity-observe', 'reset-qualification-claim', 'global', 'clear', 'clear-global', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'capacity-status', 'capacity-observe', 'reset-qualification-claim', 'global', 'clear', 'clear-global', 'clear-credit', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -641,6 +641,22 @@ def main():
                         return
                 data['global'] = None
                 publish(args.directory, args.provider, data); result = {'cleared': 'global'}
+            elif args.action == 'clear-credit':
+                # A successful live probe proved credit returned. Drop only the
+                # credit/allowance global and capacity hold it tested, as one
+                # compare-and-swap; scoped backoffs and any newer record stay.
+                expected = json.loads(args.expect_record) if args.expect_record else None
+                hold = data.get('capacity_hold')
+                credit_classes = ('out-of-credit', 'allowance-exhausted')
+                if (data.get('global') != expected
+                        or (expected is not None and expected.get('failure_class') not in credit_classes)
+                        or ((hold.get('record_id') if hold else '') != args.run_id)
+                        or (hold and hold.get('failure_class') not in credit_classes)
+                        or (expected is None and not hold)):
+                    result = {'cleared': False, 'reason': 'record-changed'}
+                else:
+                    data['global'] = None; data['capacity_hold'] = None
+                    publish(args.directory, args.provider, data); result = {'cleared': 'credit'}
             elif args.action == 'pause-status':
                 result = data.get('global')
                 if result is not None and not valid_global(result, args.provider):

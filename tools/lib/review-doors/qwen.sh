@@ -111,7 +111,9 @@ review_containment() {
 extract_report() { # extract_report LOG DEST HEAD MODE
   local log="$1" dest="$2" head="$3" mode="$4" text stop turns
   stop="$(jq -r 'select(.type=="result") | if .is_error then "error" else "stop" end' "$log" 2>/dev/null | tail -1 || echo unknown)"
-  text="$(jq -r 'select(.type=="result") | .result // ""' "$log" 2>/dev/null | tail -1 || true)"
+  # Select the last result ROW first; a multi-line result printed raw and
+  # then cut with tail would keep only its final line (findings and heading lost).
+  text="$(jq -c 'select(.type=="result")' "$log" 2>/dev/null | tail -1 | jq -r '.result // ""' 2>/dev/null || true)"
   turns="$(jq -r 'select(.type=="result") | .num_turns // "?"' "$log" 2>/dev/null | tail -1 || echo '?')"
   case "$stop" in
     stop) ;;
@@ -162,7 +164,14 @@ main() {
   chmod 600 "$prompt_full" 2>/dev/null || true
 
   containment="$(review_containment)"
-  local -a args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
+  # Same input contract as bin/ai-qwen (#1581): one complete stream-json user
+  # message on stdin, which survives the sandbox relaunch that raw text does not.
+  local stream_input
+  stream_input="$(mktemp)"
+  chmod 600 "$stream_input" 2>/dev/null || true
+  jq -cRs '{type:"user",message:{role:"user",content:.},parent_tool_use_id:null}' "$prompt_full" > "$stream_input"
+  mv -f "$stream_input" "$prompt_full"
+  local -a args=(--model "$QWEN_MODEL" --auth-type openai --input-format stream-json --output-format stream-json --safe-mode
     --max-session-turns "$QWEN_MAX_TURNS" --max-subagent-depth 1)
   if [ "$MODE" = implement ]; then
     args+=(--sandbox --approval-mode yolo)
@@ -177,7 +186,7 @@ main() {
   (
     cd "$DOOR_WORKDIR" || exit 1
     if [ -n "$QWEN_KEY" ]; then export OPENAI_API_KEY="$QWEN_KEY"; else unset OPENAI_API_KEY || true; fi
-    reviewer_credit_run qwen "$out" "$out.err" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
+    reviewer_credit_run qwen "$out" "$out.err" --timeout-seconds "$QWEN_TIMEOUT" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
   )
   rc=$?
   set -e

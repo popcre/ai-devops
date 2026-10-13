@@ -1,3 +1,9 @@
+---
+issue: 658
+status: OPEN
+owner: mimo/cut-unneeded-github-traffic
+---
+
 # HANDOFF — cut unneeded GitHub traffic plan (2026-09-25T17:15Z, edge-dev/mimo)
 
 ## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE

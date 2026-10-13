@@ -96,7 +96,7 @@ try {
   Case 'Audit_IsAppendOnlyForOperator' { Assert-Contains $worker '[IO.File]::AppendAllText'; Assert-Contains $installer '*${OperatorSid}:R' }
   Case 'Audit_RecordsRejectedAndFailedRequests' { Assert-Contains $worker 'Write-AuditEvent'; Assert-Contains $worker "'REQUEST_REJECTED'"; Assert-Contains $worker "'OPERATION_FAILED'" }
   Case 'RefreshQualification_UsesFixedEvidencePath' { Assert-Contains $worker "`$script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'"; Assert-Contains $worker ('-EvidencePath ' + [char]34 + '{1}' + [char]34 + [char]39 + ' -f') }
-  Case 'RefreshQualification_PreservesAllExistingGuards' { foreach($m in @('Get-Tpm','Confirm-SecureBootUEFI','CurrentBuildNumber','actions.runner.*','StartMode')) { Assert-Contains (Get-Content -Raw (Join-Path $repo 'bin\qualify-windows-runner.ps1')) $m } }
+  Case 'RefreshQualification_PreservesAllExistingGuards' { foreach($m in @('Get-Tpm','Confirm-SecureBootUEFI','CurrentBuildNumber','actions.runner.*','StartMode','EnableLUA','LocalAccountTokenFilterPolicy','Windows sudo must not be enabled','token_posture_note')) { Assert-Contains (Get-Content -Raw (Join-Path $repo 'bin\qualify-windows-runner.ps1')) $m } }
   Case 'RunnerService_IsReadOnly' { Assert-True (($installer+$worker+$client) -notmatch 'Stop-Service|Start-Service|Restart-Service|Set-Service|sc.exe') 'runner service mutation found' }
   Case 'Recovery_MissingTask' { Assert-Contains $client "throw 'MISSING_TASK'" }
   Case 'Recovery_StaleInstall' { Assert-Contains $worker "'STALE_INSTALLATION'" }

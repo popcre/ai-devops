@@ -114,6 +114,13 @@ check "base_selection_rule_is_stated"         "grep -q 'Base selection rule:' '$
 check "verdict_is_bound_to_head"              "grep -q 'applies to head' '$M'"
 check "manifest_demands_every_finding_and_sibling_issues" "grep -q 'report EVERY finding' '$M' && grep -q 'sibling issues' '$M'"
 for wrapper in ai-claude-review ai-codex-review ai-deepseek-agent ai-gemini ai-glm ai-grok-review ai-kimi ai-muse ai-qwen ai-stepfun; do
+  if [ "$wrapper" = ai-gemini ]; then
+    # Gemini delegates its prompt to the shared provider contract. Check the
+    # emitted instruction as well as the wrapper's actual contract invocation.
+    GEMINI_CONTRACT="$(. "$REPO_ROOT/tools/lib/gemini-review-contract.sh"; gemini_review_contract .sealed-packet)"
+    check "reviewer_${wrapper}_reads_the_shared_manifest_prompt" "grep -q 'tools/lib/gemini-review-contract.sh' '$REPO_ROOT/bin/$wrapper' && grep -q 'brief(){ gemini_review_contract' '$REPO_ROOT/bin/$wrapper' && printf '%s' \"\$GEMINI_CONTRACT\" | grep -qF 'Read .sealed-packet/MANIFEST.md first.'"
+    continue
+  fi
   check "reviewer_${wrapper}_reads_the_shared_manifest_prompt" "grep -q 'MANIFEST[.]md' '$REPO_ROOT/bin/$wrapper' && grep -Eq 'Return ALL findings|MANIFEST[.]md first|MANIFEST[.]md in this directory|source_files=[(]..saved/MANIFEST' '$REPO_ROOT/bin/$wrapper'"
 done
 

@@ -130,7 +130,7 @@ run_turn() { # name model session-or-empty
   local args=(run --agent "$AGENT" --auto --format json --model "$PROVIDER/$model" --dir "$(native_path "$dir")")
   [ -z "$session" ] || args+=(--session "$session")
   set +e
-  printf '%s' "$PROMPT" | run_opencode reviewer_credit_run deepseek "$log" "$log.stderr" -- timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
+  printf '%s' "$PROMPT" | run_opencode reviewer_credit_run deepseek "$log" "$log.stderr" --timeout-seconds "$TIMEOUT" -- timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
   rc=$?; set -e
   DEEPSEEK_KEY=""
   if [ "$rc" -eq 92 ]; then

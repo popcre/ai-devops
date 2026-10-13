@@ -1,6 +1,6 @@
 # Implementation plan — AI sessions clean up their own temporary files (Linux, edge-dev3 first)
 
-Related handoff: [HANDOFF.d/2026-10-07T2230Z-edge-dev3-claude-session-temp-cleanup.md](HANDOFF.d/2026-10-07T2230Z-edge-dev3-claude-session-temp-cleanup.md). Do not rewrite root `HANDOFF.md`.
+Handoff closed 2026-10-09 (work complete). Do not rewrite root `HANDOFF.md`.
 Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanup.md](plan_agent-self-cleanup.md).
 
 ## STATUS
@@ -14,9 +14,9 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 | 5. Orphan sweep as backup only | ✅ code | `bin/ai-session-tmp-sweep` + user timer, `tests/test-ai-session-tmp-sweep.sh` |
 | 6. Guard against regression (lint + test) | ✅ code | `tools/ci/check-temp-hygiene.sh`, `tests/test-temp-hygiene.sh` |
 | 7. Clear the current pile safely | ✅ 2026-10-07 | 26,839 stale entries removed, 6 GB freed; recent/busy entries kept |
-| 8. Live proof on edge-dev3 | 🟡 partial 2026-10-08 | #1472 merged (b6adb3cb), installed 3:03 AM EDT; wrapper run left 0 roots; kill -9'd wrapper root removed in 2 s; timer active. Left: a fresh interactive Claude session's root appears and is removed at session end (issue #1471) |
+| 8. Live proof on edge-dev3 | ✅ 2026-10-09 | wrapper and kill -9 roots removed; Claude session 7f241aff's root removed at session end (3:28 PM EDT); timer re-arm fixed in #1503; issue #1471 closed |
 
-**Where a fresh session starts:** step 8 (live proof) after the PR merges and the installer runs. Read every section first. Re-read Part 3 before each phase (drift check).
+**Where a fresh session starts:** nothing open — plan complete on edge-dev3. Rollout to other Linux hosts is a separate follow-up. Read every section first. Re-read Part 3 before each phase (drift check).
 
 ---
 

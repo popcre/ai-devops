@@ -5,6 +5,11 @@ is no cloud release, container, or CI/CD. Canonical guide:
 [`../AGENTS.md`](../AGENTS.md). First-time / disaster restore:
 [`restore-from-zero.md`](restore-from-zero.md).
 
+For the dated edge-dev3 HTS continuation, see the
+[visible maintenance-route feasibility record](verification/hts-maintenance-route-feasibility-20261011.md).
+It distinguishes the supported visible installer from this session's unavailable
+native desktop access; it grants no privilege or installation authority.
+
 The one application-source exception is the centrally sealed DesignFlow
 backend sandbox target. Its approved source push uses the repository's existing
 Cloud Build route and requires the committed target manifest, local review-gate
@@ -135,6 +140,12 @@ when an interactive/token-backed install selects them; `--require-secrets`
 forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
+
+Reviewer-safety paths are listed in `config/task-gates.json`. They include the
+reviewer wrappers and the reviewer-binary version pins (`config/muse-code/**`,
+`config/opencode/version`, `config/provider-cli-versions.json`), because those
+pins choose which reviewer program runs. A release that only re-pins a reviewer
+binary therefore uses this same reviewed install route (#1650).
 
 For an update containing reviewer-safety paths, leave the installed checkout
 unchanged while preparing two linked worktrees: a disposable installation
@@ -391,6 +402,29 @@ plus the live installed SHA and gate hash. The gate trusts the operation and
 evidence rows only in the wrapper-written header before `## Result`; rows in
 reviewer text never count. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
+
+The bounded private #770 review sends a native-generated, allowlisted evidence
+projection alongside the public enforcement implementation. It contains scope
+flags, opaque commitments, selected code hashes and verified installed source
+identity, never private manifest values, credentials or row data. It is not a
+verdict or live rehearsal proof. Conditional reviewer approval remains bound to
+the unchanged private descriptor, genuine provider completion, and fresh native
+checks at finish, initial-forward and original-restoration. Public enforcement
+and the installation receipt are bound too: source movement requires a fresh
+review. Hold the installer's existing checkout lock throughout any authorized
+rehearsal and mandatory restoration; installation must remain serialized with
+those actions.
+The effective class remains `private-evidence`. Its sole database admission
+requires DesignFlow's existing `synthetic-fixtures-only` declaration, the exact
+closed #770 profile, a genuine independent selected-code APPROVE, and the private
+manifest over stdin. Both native action stages validate and bind the descriptor.
+Ordinary review reports, acknowledgement, small owner entries, other repositories,
+production and credential issuance remain sealed.
+The genuine response must contain one unindented `Action scope:` line naming
+the exact profile and full descriptor hash. Its final sentence period is
+optional; missing, changed, duplicated or decorated scope still refuses.
+Provider response bytes are preserved, and failed earlier invocations are never
+backfilled after this parser repair: obtain a fresh prospective approval.
 
 Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
 

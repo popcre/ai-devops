@@ -90,7 +90,7 @@ measured facts. The P1 issue stays open for that proof and host coverage.
 `ai-gh` writes allowlisted local metadata to
 `~/.ai-devops/gh-throttle/measurements/YYYY-MM-DD.jsonl`, with seven-day retention
 and a 4 MiB daily ceiling. It does not request additional GitHub data. An
-independent non-waiting write lock protects complete records; lock contention,
+independent write lock with a short bounded retry (about half a second) protects complete records; longer lock contention,
 disk failure or capacity exhaustion emits a warning and leaves the command's
 status unchanged. A lock older than one minute is treated as left by a crash
 and cleared once, so collection resumes without manual repair. This never

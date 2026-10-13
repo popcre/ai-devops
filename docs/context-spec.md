@@ -128,6 +128,19 @@ and an independent lifecycle-recorded exact-head `final-check` or
 any other protected action; without the explicit target flag, generic refusal
 remains in force.
 
+The separate `application-workflow` action admits only the authenticated HTS
+Alsand sandbox workflow for backend issue94. It requires a clean committed
+`.ai-devops/application-workflow-target.json` matching the closed target in
+`tools/application_workflow_target.py`, canonical origin, effective reviewer-safety
+or ui-live-workflow class, and independent lifecycle-recorded exact-head final-check
+or security-review APPROVE. All ordinary SQL/database, structural, cloud, production,
+manual-promotion, flag-change and operative Apply/Save prohibitions remain binding.
+Use `check --before application-workflow --application-workflow-target
+.ai-devops/application-workflow-target.json --reviewer-approval <report>`; target
+identity must be proved immediately before requests. Admission is an auditable
+receipt, not an HTTP proxy. Repository-specific workflow prohibitions still win.
+See [the scoped implementation and verification contract](hts-sandbox-workflow-gate.md).
+
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The
 stronger of the declared and observed classes is the effective class whose

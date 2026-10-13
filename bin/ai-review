@@ -11,6 +11,18 @@ if command -v readlink >/dev/null 2>&1; then
   REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
   [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
 fi
+# #1531: the reviewer must see the public code enforcing its action scope.
+# Fixed installed paths only: never attach the private operational manifest.
+action_review_evidence_args(){
+  local evidence_root relative file
+  evidence_root="$(cd "$REAL_DIR/.." && pwd -P)" || return 1
+  action_evidence_args=()
+  for relative in tools/review_action_profile.py config/review-action-profiles.json bin/ai-review-code-only.py bin/ai-task-gates; do
+    file="$evidence_root/$relative"
+    [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1
+    action_evidence_args+=(--file "$file")
+  done
+}
 pool_provider=""
 review_provider="${1:-}"
 case "${1:-}" in
@@ -34,7 +46,30 @@ case "${1:-}" in
   deepseek)
     [ -z "${AI_DEEPSEEK_REVIEW_BIN:-}" ] || [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || { printf 'ai-review: private reviewer substitution is a test hook only.\n' >&2; exit 2; }
     wrapper="${AI_DEEPSEEK_REVIEW_BIN:-$REAL_DIR/ai-deepseek-agent}" ;;
-  doctor) "$ROOT/ai-claude-review" doctor; "$ROOT/ai-codex-review" doctor; exit 0 ;;
+  doctor)
+    # Doctor runs before any gate and must answer "who can review here".
+    # The rotation section comes from the same preflight every session
+    # trusts; providers listed in config/reviewer-membership-scope.json
+    # (gate helpers such as codex) are excluded there so a session never
+    # reads a gate helper as a drawable reviewer.
+    doctor_rc=0
+    _scope=""
+    for _c in "$REAL_DIR/../config/reviewer-membership-scope.json" "$ROOT/../config/reviewer-membership-scope.json"; do
+      [ ! -f "$_c" ] || { _scope="$_c"; break; }
+    done
+    printf 'Rotation reviewers (allocator pool; usable=true means drawable now; gate helpers are excluded):\n'
+    if [ -z "$_scope" ]; then
+      printf 'ai-review: doctor: cannot find config/reviewer-membership-scope.json; rotation section unavailable.\n' >&2
+      doctor_rc=1
+    else
+      "${AI_REVIEW_PREFLIGHT_BIN:-$ROOT/ai-review-preflight}" status \
+        | jq -c --slurpfile scope "$_scope" 'select(.registry_state == "registered") | select((.provider as $p | $scope[0].outside_allocator | has($p)) | not)' \
+        || doctor_rc=$?
+    fi
+    printf 'Approval-gate helpers (approval gates only, never a rotation reviewer):\n'
+    "${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" doctor || doctor_rc=$?
+    "${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" doctor || doctor_rc=$?
+    exit "$doctor_rc" ;;
   -h|--help|help|'') usage; exit 0 ;;
   *)
     # Every other name is a pool candidate. Eligibility comes from the
@@ -311,7 +346,7 @@ if [ "$code_only" -eq 1 ]; then
   lifecycle="$REAL_DIR/ai-review-lifecycle"
   lifecycle_args=(begin --provider deepseek --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
   [ -z "$action_profile" ] || lifecycle_args+=(--action-profile "$action_profile" --action-manifest "$action_manifest")
-  lifecycle_state="$("$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
+  lifecycle_state="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$$ "$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
   if [ -n "$action_profile" ]; then
     descriptor="$(jq -r .action_profile_binding.manifest_descriptor_sha256 "$lifecycle_state")"
     target_identity="$(jq -r .action_profile_binding.target_ref_sha256 "$lifecycle_state")"
@@ -327,11 +362,26 @@ if [ "$code_only" -eq 1 ]; then
   trap code_only_abort EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  action_evidence_args=()
+  if [ -n "$action_profile" ]; then
+    action_review_evidence_args || { printf 'ai-review: installed public action-scope evidence unavailable; no provider was dispatched.\n' >&2; exit 3; }
+    action_evidence_dir="$(mktemp -d "$snapshot/.ai-review-action-scope.XXXXXXXX")" || exit 3
+    action_evidence_file="$action_evidence_dir/evidence.json"
+    python3 "$REAL_DIR/../tools/review_action_profile.py" evidence "$lifecycle_state" --manifest "$action_manifest" --profile "$action_profile" > "$action_evidence_file" || { printf 'ai-review: native private action evidence refused; no provider was dispatched.\n' >&2; exit 3; }
+    action_evidence_sha256="$(sha256sum "$action_evidence_file" | cut -d' ' -f1)" || exit 3
+    action_evidence_args+=(--file "$action_evidence_file")
+    code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
+    code_prompt="$code_prompt The attached native-validated-private-action-commitment is an allowlisted non-authorizing projection produced after fresh native validation of all actual private inputs. Its opaque descriptor commitment is intentionally not remotely recomputable: private values remain local. Judge whether the reviewed implementation and attached enforcement safely constrain that committed action. Any approval is conditional on the native finish and initial-forward/original-restoration checks revalidating the same commitment, genuine provider completion and installed profile; it is neither independent remote inspection of private values nor evidence of a rehearsal already run. The future provider completion/admission receipts do not exist before your verdict. Do not request private manifests, credentials or row data; withhold approval if the conditional enforcement is insufficient."
+  fi
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
   error_file="$(mktemp)" || { printf 'ai-review: cannot reserve private reviewer diagnostics.\n' >&2; exit 3; }
-  if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
+  if ( cd "$snapshot" && AI_DEEPSEEK_CALLER="$implementer" "$wrapper" send "$code_prompt" "${action_evidence_args[@]+"${action_evidence_args[@]}"}" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file" 2>"$error_file"; then provider_rc=0; else provider_rc=$?; fi
   cat "$error_file" >&2
   diagnostics_printed=1
+  if [ -n "$action_profile" ] && [ "$(sha256sum "$action_evidence_file" | cut -d' ' -f1)" != "$action_evidence_sha256" ]; then
+    printf 'ai-review: native action evidence changed during review; verdict refused.\n' >&2
+    exit 3
+  fi
   # DeepSeek retains its packet and transcript under this sanitized repository.
   # Keep it after dispatch, including a failed or stale response, for recovery.
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed during code-only review; verdict refused. Retained evidence: %s\n' "$snapshot" >&2; exit 3; }

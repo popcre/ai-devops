@@ -320,7 +320,10 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     }
     if ($FirstInstall) {
         if ((Test-Path -LiteralPath $expectedLauncher) -or (Test-Path -LiteralPath "$expectedLauncher.cmd") -or
-            $auth.installed_source_sha256 -cne (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            $auth.installed_source_sha256 -cne (Get-CommittedGateHash $Path $InstalledHead)) {
+            # Hash the gate as recorded at the approved starting commit, not the
+            # working tree: a reviewed first install may advance the checkout
+            # before the launcher refresh re-runs this check.
             throw 'First-install source or launcher state changed after approval.'
         }
     }
@@ -1238,6 +1241,21 @@ if (Test-Path -LiteralPath $museWrapper) {
     }
 }
 
+# Optional stage: Muse Code. When the pinned muse-bin-<version>.exe is absent,
+# run Meta's official Windows installer, then verify version and SHA-256.
+# A failure is reported and the install continues; ai-muse refuses to run an
+# unpinned or mismatched binary either way.
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note 'Test mode: not installing Muse Code.'
+} else {
+    try {
+        . (Join-Path $PSScriptRoot 'windows-muse-code-install.ps1')
+        Write-Note (Install-AiDevOpsMuseCode -RepoPath $RepoPath)
+    } catch {
+        Write-Note "Muse Code stage failed (optional): $($_.Exception.Message)"
+    }
+}
+
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
 if ($installBash) {
     $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
@@ -1358,6 +1376,17 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
         Write-Note "GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable."
     } elseif ($ghProbe.ExitCode -ne 0) {
         Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
+    }
+    # SSH logons cannot read Credential Manager; share the login through gh's
+    # own config store so remote sessions and Git work too.
+    $sshCreds = Join-Path $PSScriptRoot 'ai-gh-ssh-credentials.ps1'
+    if ((Test-Path -LiteralPath $sshCreds) -and -not $SkillsDryRun -and $env:AI_DEVOPS_INSTALL_TEST_MODE -ne '1') {
+        $sshProbe = Invoke-NativeProbe -Command 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sshCreds)
+        if ($sshProbe.ExitCode -eq 0 -or $sshProbe.ExitCode -eq 2) {
+            Write-Note "GitHub login for SSH sessions: $($sshProbe.Output -join ' ')"
+        } else {
+            Write-Warning "Sharing the GitHub login with SSH sessions FAILED (exit $($sshProbe.ExitCode)): $($sshProbe.Output -join ' ')"
+        }
     }
 } else {
     Write-Note "GitHub CLI not found. Install when needed: winget install GitHub.cli"
