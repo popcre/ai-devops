@@ -2,6 +2,29 @@
 
 ## STATUS — read first
 
+P1 baseline reconciliation — October 13, 2026, 12:20 PM EDT. Owner of #660
+evidence: MiMo chat on edge-dev. Privacy-safe attribution and a measured
+edge-dev3 baseline are frozen in
+[tests/verification/github-requests/p1-baseline.md](tests/verification/github-requests/p1-baseline.md)
+(input digest `e98b8c1f6026663a73a008a4a4d4c7634e97977ac5622c5a92f0e1560541bdf2`).
+
+- 101 access-context busy reset windows and 1,192 completed non-deadline
+  receipts (949 BlockerWatch ticks, 126 checks-failed PR waits, 108 merged PR
+  waits, 8 ejected, 1 closed) satisfy the two-window and twenty-operation floors
+  for the instrumented types.
+- 1,921 observed GraphQL points, all `ai-pr-wait`/`graphql.pr_status`; 1,823
+  linked to a workflow receipt; 0 unattributed quota-window rows.
+- Unknown residual inside busy windows is bounded below at 83,971 points
+  (85,831 bucket span minus 1,861 observed). Whole-account HTTP requests and
+  GraphQL points remain unknown, never zero.
+- Privacy check: 26,630 rows, 0 violations. Nine fixture rows quarantined with
+  a manifest before the report; live telemetry unchanged.
+- edge-dev3 install manifest `source_sha` matches checkout `1840f783`; installed
+  `ai-gh` hash `f4569f7a`; a normal installed issue read returned exit 0.
+- Still open on #660: dispatch/privacy receipts (P3 wrapper gap), multi-host and
+  external-client coverage, after-workload comparison, safety-event equivalence,
+  qualified useful-work latency. #660 stays open with that checklist.
+
 Closeout reconciliation — October 8, 2026, 1:16 PM EDT. This supersedes the
 historical 10:16 AM EDT snapshot below. Owner remains Codex chat
 `01a116aa-0400-7230-97d9-3fab73f00bd1` under #658.
