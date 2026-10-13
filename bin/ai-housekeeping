@@ -188,15 +188,19 @@ cmd_unschedule() {
     local rc=$?
     if [[ "$rc" -eq 0 ]]; then
       log "removed $TASK_NAME"
-    else
-      # schtasks exit 1 also means "task does not exist" — only warn on real failure
-      if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" >/dev/null 2>&1; then
-        echo "ai-housekeeping: could not delete $TASK_NAME" >&2
-        return 2
-      fi
-      log "removed $TASK_NAME (was already absent)"
+      return 0
     fi
-    return 0
+    # Distinguish "task does not exist" from a real deletion failure.
+    if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" >/dev/null 2>&1; then
+      echo "ai-housekeeping: could not delete $TASK_NAME (still present)" >&2
+      return 2
+    fi
+    if MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" 2>&1 | grep -qi 'cannot find\|cannot open\|ERROR:'; then
+      log "removed $TASK_NAME (was already absent)"
+      return 0
+    fi
+    echo "ai-housekeeping: could not delete $TASK_NAME (status unknown)" >&2
+    return 2
   fi
   command -v crontab >/dev/null 2>&1 || {
     echo "ai-housekeeping: unschedule needs schtasks or crontab" >&2

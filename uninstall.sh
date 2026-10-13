@@ -87,7 +87,7 @@ fi
 # so a later delete of the repo cannot orphan a scheduled task or cron entry.
 hk_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-housekeeping"
 if [ -x "$hk_tool" ]; then
-  if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule AiDevOps-Housekeeping"; else "$hk_tool" unschedule || exit 1; fi
+  if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule AiDevOps-Housekeeping"; else "$hk_tool" unschedule || echo "WARNING: could not unschedule AiDevOps-Housekeeping; remove it manually if present"; fi
 fi
 
 if [ "$PURGE" -eq 1 ]; then
