@@ -134,6 +134,13 @@ owner_lock(){
   LOCK_HELD="$lock"
   trap cleanup EXIT
 }
+# True when every line of the lost list is one of this machine's bundle names.
+lost_list_ok(){
+  local m rc=0
+  m="$(printf '%s' "$1" | sed 's/[.]/[.]/g')"
+  grep -vqE "^$m/bundles/[0-9TZ]+-[0-9a-f]+(-part[0-9]{3})?[.]tar([.]gz)?[.]cms\$" "$2" || rc=$?
+  [ "$rc" -eq 1 ]
+}
 need_openssl(){ command -v openssl >/dev/null 2>&1 || die "openssl is required (install the openssl package)"; }
 is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
 
@@ -143,11 +150,11 @@ stage_tree(){
   local src="$1" into="$2" line digest file rel size sums="$WORK/sums"
   [ -d "$src" ] || return 0
   # One hashing pass per tree; a file is collected again whenever its content changes.
-  find "$src" -type f ! -name '*.tmp' -print0 2>>"$ERRS" | xargs -0 -r sha1sum -z -- > "$sums" 2>>"$ERRS" \
+  find "$src" -type f ! -name '*.tmp' -print0 2>>"$ERRS" | xargs -0 -r sha256sum -z -- > "$sums" 2>>"$ERRS" \
     || printf 'hashing failed under %s\n' "$into" >> "$ERRS"
   while IFS= read -r -d '' line; do
-    # "<40-hex digest><space><' ' or '*' mode marker><path>"
-    digest="${line:0:40}"; file="${line:42}"
+    # "<64-hex digest><space><' ' or '*' mode marker><path>"
+    digest="${line:0:64}"; file="${line:66}"
     rel="${file#"$src"/}"
     if ! size="$(wc -c < "$file" 2>>"$ERRS")"; then continue; fi
     if [ "$size" -gt "$MAX_BYTES" ]; then
@@ -248,6 +255,10 @@ cmd_sync(){
       else
         log "$MACHINE: the archive and this machine both lost $key; collecting everything again"
         SEEN=(); RECOVERING=1
+        # Published record (bundle name only) so view can tell known losses apart.
+        mkdir -p "$HUB/$MACHINE"
+        grep -qxF -- "$key" "$HUB/$MACHINE/LOST-BUNDLES.txt" 2>/dev/null || printf '%s\n' "$key" >> "$HUB/$MACHINE/LOST-BUNDLES.txt"
+        git -C "$HUB" add -- "$MACHINE/LOST-BUNDLES.txt"
       fi
     done < "$HOME_DIR/pushed-bundles"
   fi
@@ -268,7 +279,7 @@ cmd_sync(){
       seen_dirs[$dir]=1
       # Readable name plus a hash of the full path: distinct checkouts never share a folder.
       checkout="$(dirname "$(dirname "$dir")")"
-      checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha1sum | cut -c1-16)"
+      checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha256sum | cut -c1-16)"
       stage_tree "$dir" "reviews/$checkout"
     done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>>"$ERRS")
   done
@@ -277,8 +288,8 @@ cmd_sync(){
   [ -s "$ERRS" ] && partial=1
   # The oversized list is re-published only when it changes.
   local notes_sum notes_changed=0
-  notes_sum="$(sha1sum < "$NOTES" | cut -c1-40)"
-  [ "$notes_sum" = "$(cat "$HOME_DIR/notes.sha1" 2>/dev/null)" ] || notes_changed=1
+  notes_sum="$(sha256sum < "$NOTES" | cut -c1-64)"
+  [ "$notes_sum" = "$(cat "$HOME_DIR/notes.sha256" 2>/dev/null)" ] || notes_changed=1
   if [ "$COPIED" -gt 0 ] || [ "$notes_changed" = 1 ] || [ "$partial" = 1 ]; then
     local id; id="$(date -u +%Y%m%dT%H%M%S%NZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
     mkdir -p "$WORK/stage/_collection"
@@ -327,6 +338,9 @@ cmd_sync(){
   local rel bad=() expected=" ${bundles[*]:-} ${RESTORED[*]:-} "
   while IFS= read -r -d '' rel; do
     if [ "$rel" = "$MACHINE/LAST-SYNC.txt" ]; then continue; fi
+    # Bundle names only, each matching this machine's bundle naming.
+    if [ "$rel" = "$MACHINE/LOST-BUNDLES.txt" ] && \
+       lost_list_ok "$MACHINE" "$HUB/$rel"; then continue; fi
     if [[ "$expected" == *" $rel "* ]] && is_envelope "$HUB/$rel"; then continue; fi
     bad+=("$rel")
   done < <(git -C "$HUB" diff --cached --name-only -z)
@@ -358,7 +372,7 @@ cmd_sync(){
   done
   if [ "$partial" = 0 ]; then
     save_seen
-    printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha1"
+    printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha256"
     if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in ${#bundles[@]} encrypted bundle part(s))"; fi
   fi
   if [ "$partial" = 1 ]; then
@@ -385,9 +399,19 @@ cmd_view(){
   CLEANUP+=("$work")
   # Replay in publication order (the order commits added them), never by clock.
   git -C "$HUB" log --reverse --diff-filter=A --name-only --format= -- '*/bundles/*.tar.cms' '*/bundles/*.tar.gz.cms' > "$work/added"
-  : > "$work/order"
+  : > "$work/order"; : > "$work/missing"
   while IFS= read -r b; do
-    [ -n "$b" ] && [ -f "$HUB/$b" ] && ! grep -qxF -- "$b" "$work/order" && printf '%s\n' "$b" >> "$work/order"
+    [ -n "$b" ] || continue
+    if [ ! -f "$HUB/$b" ]; then
+      # Losses its machine already recorded are reported, not counted as missing.
+      if grep -qxF -- "$b" "$HUB/${b%%/*}/LOST-BUNDLES.txt" 2>/dev/null; then
+        note "known lost (recorded by ${b%%/*}): $b"
+      else
+        printf '%s\n' "$b" >> "$work/missing"
+      fi
+      continue
+    fi
+    grep -qxF -- "$b" "$work/order" || printf '%s\n' "$b" >> "$work/order"
   done < "$work/added"
   # The key must not live inside the folder that is about to be rebuilt.
   local key_abs out_abs
@@ -417,6 +441,14 @@ cmd_view(){
     n=$((n + 1))
   done < "$work/order"
   printf 'decrypted %s bundles into %s (one folder per machine)\n' "$n" "$out"
+  # A bundle that was published once but is gone now makes the view incomplete:
+  # say which, mark the folder, and fail. The machine that sent it restores it
+  # from its local copy on its next hourly sync.
+  if [ -s "$work/missing" ]; then
+    sort -u "$work/missing" > "$out/INCOMPLETE-missing-bundles.txt"
+    note "INCOMPLETE: $(wc -l < "$out/INCOMPLETE-missing-bundles.txt") published bundles are missing from the archive (listed in $out/INCOMPLETE-missing-bundles.txt)"
+    exit 3
+  fi
 }
 
 case "${1:-sync}" in

@@ -94,6 +94,8 @@ rm -f "$ISSUES/many/huge-for-chunk.log"
 first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
 git -C "$VIEW" pull -q; git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q "$first"
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm lose && git -C "$VIEW" push -q origin HEAD:main
+rc=0; run view "$TMP/plain-incomplete" > /dev/null 2> "$TMP/out19" || rc=$?
+check 'view fails loudly when a published bundle is missing' "[ $rc -eq 3 ] && grep -q INCOMPLETE '$TMP/out19' && grep -q 'part' '$TMP/plain-incomplete/INCOMPLETE-missing-bundles.txt'"
 run sync 2> "$TMP/out13" || { cat "$TMP/out13" >&2; exit 1; }
 check 'lost bundles are restored byte for byte' "grep -q 'restored' '$TMP/out13' && git -C '$REMOTE' cat-file -e 'main:$first'"
 view
@@ -108,6 +110,8 @@ run sync 2> "$TMP/out13b" || { cat "$TMP/out13b" >&2; exit 1; }
 run sync 2> "$TMP/out13c" || { cat "$TMP/out13c" >&2; exit 1; }
 view
 check 'bundles lost everywhere are re-collected once' "grep -q 'collecting everything again' '$TMP/out13b' && grep -q 'nothing new' '$TMP/out13c' && cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log'"
+rc=0; run view "$TMP/plain" > /dev/null 2> "$TMP/out20" || rc=$?
+check 'bundles lost everywhere are reported as known losses, not as an incomplete view' "[ $rc -eq 0 ] && grep -q 'known lost' '$TMP/out20'"
 
 # view rebuilds from scratch, never wipes a foreign folder, and refuses unsafe bundles.
 mkdir -p "$TMP/plain/test-box/ghost"; : > "$TMP/plain/test-box/ghost/stale.txt"
@@ -139,9 +143,9 @@ git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid rm -q test-box/bun
 git -C "$VIEW" -c user.name=t -c user.email=t@example.invalid commit -qm unevil && git -C "$VIEW" push -q origin HEAD:main
 
 # Hashing failure: partial, exit 2, never recorded complete; a clean retry clears it.
-mkdir -p "$TMP/badbin"; real_sha1="$(command -v sha1sum)"
-printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha1sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha1" > "$TMP/badbin/sha1sum"
-chmod +x "$TMP/badbin/sha1sum"
+mkdir -p "$TMP/badbin"; real_sha="$(command -v sha256sum)"
+printf '#!/usr/bin/env bash\ncase " $* " in *" -z "*) echo "sha256sum: read error" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_sha" > "$TMP/badbin/sha256sum"
+chmod +x "$TMP/badbin/sha256sum"
 rc=0; PATH="$TMP/badbin:$PATH" run sync 2> "$TMP/out4" || rc=$?
 git -C "$VIEW" pull -q
 check 'read failures fail the run and are published as incomplete' "[ $rc -eq 2 ] && grep -q PARTIAL '$TMP/out4' && grep -q '^complete: no' '$M/LAST-SYNC.txt'"
