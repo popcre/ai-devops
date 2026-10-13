@@ -23,7 +23,17 @@ from jev_review_waste_arc import load_events, chunk_heads, classify_bucket  # no
 CFG = json.loads((ROOT / "config" / "jev-decisions.json").read_text(encoding="utf-8"))
 CH = CFG["decisions"]["chunk_filter"]
 VL = CFG["decisions"]["value_level"]
-ARCHIVE = Path(r"C:\Users\ahazan\Dropbox\ai\chat_transcripts")
+# Private transcript archive: supplied by the operator, never hardcoded.
+ARCHIVE_ENV = "AI_JEV_ARCHIVE_DIR"
+
+
+def archive_root() -> Path:
+    value = os.environ.get(ARCHIVE_ENV, "").strip()
+    path = Path(value).expanduser() if value else None
+    if path is None or not path.is_dir():
+        raise SystemExit(f"{ARCHIVE_ENV} must name the private transcript archive directory "
+                         "(see plan_jev-review-waste-mining.md)")
+    return path
 EVENTS = Path.home() / ".local/state/ai-devops/reviewer-events/events.jsonl"
 WORK = Path(os.environ.get("TEMP", ".")) / "jev-review-waste-work"
 HEAD_RE = re.compile(r"\b[0-9a-f]{40}\b")
@@ -32,7 +42,7 @@ HEAD_RE = re.compile(r"\b[0-9a-f]{40}\b")
 def sample_files(n=12, seed=7, heads: set[str] | None = None):
     random.seed(seed)
     cands = []
-    for p in ARCHIVE.rglob("*.jsonl"):
+    for p in archive_root().rglob("*.jsonl"):
         try:
             sz = p.stat().st_size
         except OSError:

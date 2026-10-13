@@ -7,7 +7,11 @@
 # normalized Noul/Choice/Score values.
 #
 # Shell API (fixed):
-#   jev_bootstrap "$0" "$@"     # before reading stdin; re-execs under op run
+#   jev_bootstrap "$0" ORIGINAL_ARGS...
+#                               # before reading stdin; pass every original
+#                               # argument (save them before option parsing).
+#                               # Re-execs under op run; after the child starts
+#                               # the unkeyed parent exits with its status
 #   jev_request REQ_JSON RESP_JSON
 #   jev_read_noul RESP_JSON QUESTION_ID
 #   jev_read_choice RESP_JSON QUESTION_ID ALLOWED_LABELS_JSON
@@ -91,21 +95,34 @@ jev_cleanup() {
   return 0
 }
 
+# jev_tmp VAR — create a mode-0600 temp file, store its path in VAR, and
+# register it for jev_cleanup. Never call it in $(...): a subshell would lose
+# the registration and leak the file.
 jev_tmp() {
-  local t
+  local _jev_var="$1" t
+  [[ "$_jev_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
   t="$(mktemp)" || return 1
   chmod 600 "$t" 2>/dev/null || true
   JEV_TMPFILES+=("$t")
-  printf '%s' "$t"
+  printf -v "$_jev_var" '%s' "$t"
 }
 
-# jev_bootstrap "$0" "$@"
+# jev_bootstrap "$0" ORIGINAL_ARGS...
 # When the key is absent: spool stdin to a mode-0600 temporary file, resolve
 # the one managed op:// reference, re-exec the consumer through op run, and
-# return only in the keyed child. Empty resolution is nonzero and loud without
-# revealing the reference value.
+# return only in the keyed child. Once the child has started, the unkeyed
+# parent never returns: it cleans up and exits with the child's status, so the
+# consumer's work runs exactly once. If op run fails before starting the child
+# (auth expiry, locked vault), bootstrap returns nonzero so the consumer's own
+# failure output (abstain / FAIL:) still runs. Empty resolution is nonzero and
+# loud without revealing the reference value.
 jev_bootstrap() {
   local self="$1"; shift || true
+  # Child side: tell the parent the keyed child started.
+  if [ -n "${AI_JEV_REEXEC:-}" ] && [ -n "${AI_JEV_CHILD_MARK:-}" ]; then
+    : > "$AI_JEV_CHILD_MARK" 2>/dev/null || true
+    unset AI_JEV_CHILD_MARK
+  fi
   jev_load_config || return 1
   trap 'jev_cleanup' EXIT INT TERM
 
@@ -120,7 +137,7 @@ jev_bootstrap() {
   command -v op >/dev/null 2>&1 || { jev_fail "1Password CLI (op) is required"; return 1; }
 
   local input ref_line ref_file token_file
-  input="$(jev_tmp)" || return 1
+  jev_tmp input || return 1
   cat > "$input"
   ref_line=""
   local f
@@ -131,7 +148,7 @@ jev_bootstrap() {
   done
   [ -n "$ref_line" ] || { jev_fail "no TYPESAFE_API_KEY op:// reference found"; return 1; }
   [ "$(printf '%s\n' "$ref_line" | wc -l)" -eq 1 ] || { jev_fail "more than one TYPESAFE_API_KEY reference"; return 1; }
-  ref_file="$(jev_tmp)" || return 1
+  jev_tmp ref_file || return 1
   printf '%s\n' "$ref_line" > "$ref_file"
 
   token_file="$JEV_TOKEN_FILE"
@@ -140,12 +157,17 @@ jev_bootstrap() {
     export OP_SERVICE_ACCOUNT_TOKEN
   fi
 
-  local rc
-  set +e
-  AI_JEV_REEXEC=1 op run --env-file "$ref_file" -- /usr/bin/env bash "$self" "$@" < "$input"
-  rc=$?
-  set -e
-  return "$rc"
+  local rc mark
+  jev_tmp mark || return 1
+  rm -f "$mark"
+  AI_JEV_REEXEC=1 AI_JEV_CHILD_MARK="$mark" \
+    op run --env-file "$ref_file" -- /usr/bin/env bash "$self" "$@" < "$input" && rc=0 || rc=$?
+  if [ ! -e "$mark" ]; then
+    jev_fail_loud "op run failed before starting the keyed child (exit $rc)"
+    return 1
+  fi
+  jev_cleanup
+  exit "$rc"
 }
 
 # jev_request REQUEST_JSON RESPONSE_JSON
