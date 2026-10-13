@@ -141,6 +141,10 @@ grep -nE 'op", "item"|--reveal' "$ROOT"/tools/jev_*.py && bad "python helper rea
 grep -nE 'C:\\\\Users|Dropbox' "$ROOT/tools/jev_review_waste_sample.py" | grep -v '^\s*#' | grep -q 'Path(' && bad "private archive path hardcoded" || ok
 pyout="$(cd "$T" && env -u AI_JEV_ARCHIVE_DIR python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_sample as s; s.archive_root()" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && [[ "$pyout" == *AI_JEV_ARCHIVE_DIR* ]] && ok || bad "archive root not required: $pyout"
+# The 250-file sweep must follow the same rule (#1650 review of ebaacc11).
+grep -nE 'C:\\\\Users|Dropbox' "$ROOT/tools/jev_review_waste_sweep.py" | grep -v '^\s*#' | grep -q 'Path(' && bad "sweep: private archive path hardcoded" || ok
+pyout="$(cd "$T" && env -u AI_JEV_ARCHIVE_DIR python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_sweep as s; s.archive_root()" 2>&1)"; rc=$?
+[ $rc -ne 0 ] && [[ "$pyout" == *AI_JEV_ARCHIVE_DIR* ]] && ok || bad "sweep: archive root not required: $pyout"
 pyout="$(cd "$T" && env -u TYPESAFE_API_KEY AI_JEV_REEXEC=1 python3 -I -c "import sys; sys.path.insert(0, '$PYROOT/tools'); import jev_review_waste_http as h; h.resolve_key()" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && [[ "$pyout" == *EMPTY* ]] && ok || bad "python empty key after op run not loud: $pyout"
 

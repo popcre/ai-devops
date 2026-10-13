@@ -27,7 +27,19 @@ from jev_review_waste_arc import load_events, classify_bucket  # noqa: E402
 CFG = json.loads((ROOT / "config" / "jev-decisions.json").read_text(encoding="utf-8"))
 CH = CFG["decisions"]["chunk_filter"]
 VL = CFG["decisions"]["value_level"]
-ARCHIVE = Path(r"C:\Users\ahazan\Dropbox\ai\chat_transcripts")
+# Private transcript archive: supplied by the operator, never hardcoded.
+ARCHIVE_ENV = "AI_JEV_ARCHIVE_DIR"
+
+
+def archive_root() -> Path:
+    value = os.environ.get(ARCHIVE_ENV, "").strip()
+    path = Path(value).expanduser() if value else None
+    if path is None or not path.is_dir():
+        raise SystemExit(f"{ARCHIVE_ENV} must name the private transcript archive directory "
+                         "(see plan_jev-review-waste-mining.md)")
+    return path
+
+
 EVENTS = Path.home() / ".local/state/ai-devops/reviewer-events/events.jsonl"
 HEAD_RE = re.compile(r"\b[0-9a-f]{40}\b")
 
@@ -41,7 +53,7 @@ MAX_INTERACTIONS = 400
 def sample_files(n: int, heads: set[str], seed: int = 21):
     random.seed(seed)
     cands = []
-    for p in ARCHIVE.rglob("*.jsonl"):
+    for p in archive_root().rglob("*.jsonl"):
         try:
             sz = p.stat().st_size
         except OSError:
