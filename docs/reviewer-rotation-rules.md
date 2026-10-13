@@ -17,6 +17,9 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
    reviewer is out of rotation, never retry it. If it is in rotation but
    unreachable, move to the next registered reviewer within minutes.
+   For a quick per-machine view, `ai-review doctor` prints the registered
+   rotation rows with live usable state (via `ai-review-preflight status`),
+   with approval-gate helpers listed separately and never as rotation.
 3. **Owner policy lands everywhere at once.** A reviewer policy change
    (membership, concurrency, version, restrictions) updates code, config and
    docs in the same change. A rule only in docs is not applied. Example: "no
