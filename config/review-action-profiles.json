@@ -206,7 +206,7 @@
         "services/oracle-brain/oracle_brain/operating_model/native_page_chain.py": "3fa0bdbcb1eb6a18d87627364acdbc9a0506012e9cb30d94ac5bfadf19242099",
         "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py": "84cbcb3119bb6858915bd4538d5527e5ba6a716ab76a914c6db27f0e4202291d"
       },
-      "public_contract_sha256": "f9b7cf31ac32c7c27202fae48b48db12fdd0a0ae8fd9a052129426f5ec7c5b6f",
+      "public_contract_sha256": "0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d",
       "required_gate": "oracle-native-alternate-v2-descriptor-only-admission"
     }
   },

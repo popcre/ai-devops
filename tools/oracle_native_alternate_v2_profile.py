@@ -179,7 +179,7 @@ def binding(state,m):
     require(m['source_head']==state['head'] and m['source_digest']==state['source_digest'],'source moved')
     repo=Path(state['repository_root'])
     require(set(p['code_sha256'])=={'scripts/oracle2/native_alternate_chain_operator.py','services/oracle-brain/oracle_brain/operating_model/native_page_chain.py','services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py'},'fixed three-code closure required')
-    require(p['public_contract_sha256']=='f9b7cf31ac32c7c27202fae48b48db12fdd0a0ae8fd9a052129426f5ec7c5b6f' and sha(old.git(repo,'show',state['head']+':scripts/oracle2/contracts/native_alternate_chain_v2.json'))==p['public_contract_sha256'],'fixed public contract differs')
+    require(p['public_contract_sha256']=='0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d' and sha(old.git(repo,'show',state['head']+':scripts/oracle2/contracts/native_alternate_chain_v2.json'))==p['public_contract_sha256'],'fixed public contract differs')
     for path,digest in p['code_sha256'].items():require(sha(old.git(repo,'show',state['head']+':'+path))==digest,'frozen public code pin differs')
     explanation=control_metadata.gate_explanation(repo,decode)
     require(explanation['repository']=='u2giants/theoracle' and explanation['declared_class']=='private-tooling'

@@ -104,7 +104,7 @@ PUBLIC_PRODUCER_PATH='docs/operations/offline-original-locators.md'
 PUBLIC_PRODUCER_SHA256='e933892bb53ff2c32f000117dc8267cffd3b3eef8b146ba721a805ef97282532'
 
 PUBLIC_V2_CONTRACT_PATH='scripts/oracle2/contracts/native_alternate_chain_v2.json'
-PUBLIC_V2_CONTRACT_SHA256='f9b7cf31ac32c7c27202fae48b48db12fdd0a0ae8fd9a052129426f5ec7c5b6f'
+PUBLIC_V2_CONTRACT_SHA256='0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d'
 
 def public_document_context(source, paths, profile):
     if not profile:return None
