@@ -15,8 +15,9 @@
 #   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
 #   ai-reviewer-logs-sync unschedule
 #
-# Archive: <machine>/bundles/<UTC time>-<random>.tar.cms, one per run that found
-# new evidence (tar inside CMS, AES-256 to an RSA-4096 recipient), plus the
+# Archive: <machine>/bundles/<UTC time>-<random>-partNNN.tar.gz.cms, one or more
+# per run that found new evidence (gzip tar inside CMS, AES-256 to an RSA-4096
+# recipient; parts keep each file well under GitHub's limit), plus the
 # clear-text <machine>/LAST-SYNC.txt (time, file count, complete or not; no
 # names). Nothing is ever deleted. `view` extracts every bundle in time order,
 # giving one folder per machine:
@@ -60,6 +61,8 @@ HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
 STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
 MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-20000000}"
+# Raw evidence per bundle part before compression (logs compress many times over).
+CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-200000000}"
 CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
 MACHINE="$(printf '%s' "${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}" | lower | tr -c 'a-z0-9.-' '-')"
 case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
@@ -169,6 +172,7 @@ ensure_hub(){
     [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] || die "$HUB is not a clone of $REMOTE"
   fi
   git -C "$HUB" config --replace-all core.symlinks false
+  git -C "$HUB" config --replace-all core.autocrlf false
   GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
   # Always start from exactly what is published.
   if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
@@ -265,7 +269,7 @@ cmd_sync(){
     done < <(find "$root" -maxdepth 4 -type d -path '*/.ai/reviews' -print0 2>>"$ERRS")
   done
 
-  local partial=0 bundle=""
+  local partial=0 bundle="" bundles=()
   [ -s "$ERRS" ] && partial=1
   # The oversized list is re-published only when it changes.
   local notes_sum notes_changed=0
@@ -276,18 +280,34 @@ cmd_sync(){
     mkdir -p "$WORK/stage/_collection"
     cp -f "$NOTES" "$WORK/stage/_collection/$id-skipped.txt"
     cp -f "$ERRS" "$WORK/stage/_collection/$id-read-errors.txt"
-    tar -C "$WORK/stage" -cf "$WORK/bundle.tar" . || die "could not pack the evidence bundle"
+    # Compressed, and split into parts of at most CHUNK_BYTES of raw evidence so
+    # every encrypted part stays well under GitHub's 100 MB file limit.
     mkdir -p "$HUB/$MACHINE/bundles"
-    bundle="$MACHINE/bundles/$id.tar.cms"
-    ossl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$WORK/bundle.tar")" \
-      -out "$(native "$HUB/$bundle")" "$(native "$CERT")" || die "could not encrypt the evidence bundle"
+    local part=0 total=0 size rel
+    : > "$WORK/part.list"
+    pack_part(){
+      [ -s "$WORK/part.list" ] || return 0
+      part=$((part + 1))
+      bundle="$MACHINE/bundles/$id-part$(printf '%03d' "$part").tar.gz.cms"
+      tar -C "$WORK/stage" --null -T "$WORK/part.list" -czf "$WORK/part.tar.gz" || die "could not pack the evidence bundle"
+      ossl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$WORK/part.tar.gz")" \
+        -out "$(native "$HUB/$bundle")" "$(native "$CERT")" || die "could not encrypt the evidence bundle"
+      [ "$(wc -c < "$HUB/$bundle")" -lt 95000000 ] || die "an encrypted bundle exceeds 95 MB; lower AI_REVIEWER_LOGS_CHUNK_BYTES"
+      bundles+=("$bundle"); : > "$WORK/part.list"; total=0
+    }
+    while IFS= read -r -d '' rel; do
+      size="$(wc -c < "$WORK/stage/$rel")"
+      if [ "$total" -gt 0 ] && [ $((total + size)) -gt "$CHUNK_BYTES" ]; then pack_part; fi
+      printf '%s\0' "$rel" >> "$WORK/part.list"; total=$((total + size))
+    done < <(cd "$WORK/stage" && find . -type f -print0 | sort -z)
+    pack_part
     local oversized status
     oversized="$(grep -c . "$NOTES" || true)"
     if [ "$partial" = 1 ]; then status='no - some files could not be read; they are retried next run'
     elif [ "$oversized" -gt 0 ]; then status="no - $oversized files over the size limit were left out (listed in _collection/$id-skipped.txt)"
     else status=yes; fi
     printf 'machine: %s\nlast bundle: %s\nfiles in it: %s\ncomplete: %s\n' "$MACHINE" "$id" "$COPIED" "$status" > "$HUB/$MACHINE/LAST-SYNC.txt"
-    git -C "$HUB" add -- "$bundle" "$MACHINE/LAST-SYNC.txt"
+    git -C "$HUB" add -- "${bundles[@]}" "$MACHINE/LAST-SYNC.txt"
   elif grep -q '^complete: no - some files could not be read' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null; then
     local still_over; still_over="$(grep -c . "$NOTES" || true)"
     if [ "$still_over" -gt 0 ]; then
@@ -300,7 +320,7 @@ cmd_sync(){
 
   # Leak gate on exactly what will be published: only this run's bundle and
   # the clear-text status file, and the bundle must be a CMS envelope.
-  local rel bad=() expected=" $bundle ${RESTORED[*]:-} "
+  local rel bad=() expected=" ${bundles[*]:-} ${RESTORED[*]:-} "
   while IFS= read -r -d '' rel; do
     if [ "$rel" = "$MACHINE/LAST-SYNC.txt" ]; then continue; fi
     if [[ "$expected" == *" $rel "* ]] && is_envelope "$HUB/$rel"; then continue; fi
@@ -314,7 +334,7 @@ cmd_sync(){
 
   if ! git -C "$HUB" diff --cached --quiet; then
     git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)$([ "$partial" = 0 ] || echo ' (partial)')"
-    push_or_die ${bundle:+"$bundle"} ${RESTORED[@]+"${RESTORED[@]}"} "$MACHINE/LAST-SYNC.txt"
+    push_or_die ${bundles[@]+"${bundles[@]}"} ${RESTORED[@]+"${RESTORED[@]}"} "$MACHINE/LAST-SYNC.txt"
   fi
   # Delivery is proven; record it. A sent bundle is kept locally for restores.
   # After a full re-collection, bundles lost everywhere leave the ledger: their
@@ -328,14 +348,14 @@ cmd_sync(){
     done < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new"
     mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
   fi
-  if [ -n "$bundle" ]; then
+  for bundle in ${bundles[@]+"${bundles[@]}"}; do
     mkdir -p "$HOME_DIR/sent"; cp -f "$HUB/$bundle" "$HOME_DIR/sent/$(basename "$bundle")"
     printf '%s\n' "$bundle" >> "$HOME_DIR/pushed-bundles"
-  fi
+  done
   if [ "$partial" = 0 ]; then
     save_seen
     printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha1"
-    if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in $bundle)"; fi
+    if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in ${#bundles[@]} encrypted bundle part(s))"; fi
   fi
   if [ "$partial" = 1 ]; then
     log "PARTIAL: some evidence could not be read (retried next run):"
@@ -360,7 +380,7 @@ cmd_view(){
   work="$(mktemp -d)"; make_private "$work" || die "could not make $work private"
   CLEANUP+=("$work")
   # Replay in publication order (the order commits added them), never by clock.
-  git -C "$HUB" log --reverse --diff-filter=A --name-only --format= -- '*/bundles/*.tar.cms' > "$work/added"
+  git -C "$HUB" log --reverse --diff-filter=A --name-only --format= -- '*/bundles/*.tar.cms' '*/bundles/*.tar.gz.cms' > "$work/added"
   : > "$work/order"
   while IFS= read -r b; do
     [ -n "$b" ] && [ -f "$HUB/$b" ] && ! grep -qxF -- "$b" "$work/order" && printf '%s\n' "$b" >> "$work/order"

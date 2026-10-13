@@ -39,6 +39,7 @@ run(){
   HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
     AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 \
+    AI_REVIEWER_LOGS_CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-200000000}" \
     AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" AI_REVIEWER_LOGS_CERT="$TMP/cert.pem" \
     AI_REVIEWER_LOGS_KEY_FILE="${AI_REVIEWER_LOGS_KEY_FILE-$TMP/key.pem}" \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
@@ -49,8 +50,9 @@ view(){ rm -rf "$TMP/plain"; run view "$TMP/plain" >/dev/null 2>&1; }
 run sync 2> "$TMP/out1" || { cat "$TMP/out1" >&2; exit 1; }
 VIEW="$TMP/view"; git clone -q "$REMOTE" "$VIEW"
 M="$VIEW/test-box"; P="$TMP/plain/test-box"
-check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && ls '$M/bundles' | grep -q 'tar.cms'"
-check 'only encrypted bundles and the status file are published' "[ -z \"\$(git -C '$VIEW' ls-files | grep -v -e '^test-box/bundles/[0-9TZ]*-[0-9a-f]*\.tar\.cms\$' -e '^test-box/LAST-SYNC.txt\$')\" ]"
+check 'first run pushes the machine folder' "[ -f '$M/LAST-SYNC.txt' ] && ls '$M/bundles' | grep -q 'part001.tar.gz.cms'"
+git -C "$VIEW" ls-files > "$TMP/published-1"
+check 'only encrypted bundles and the status file are published' "absent grep -vE '^test-box/(bundles/[0-9TZ]+-[0-9a-f]+-part[0-9]{3}[.]tar[.]gz[.]cms|LAST-SYNC[.]txt)$' '$TMP/published-1'"
 check 'no clear text from the logs reaches the repository' "absent git -C '$VIEW' grep -q -e 'after timeout' -e hunter3word -e APPROVE"
 view
 check 'view decrypts complete, unmasked evidence' "cmp -s '$ISSUES/pkg/provider.log' '$P/reviewer-issues/pkg/provider.log' && cmp -s '$ISSUES/pkg/blob.bin' '$P/reviewer-issues/pkg/blob.bin'"
@@ -71,6 +73,13 @@ run sync 2> "$TMP/out3" || { cat "$TMP/out3" >&2; exit 1; }
 view
 check 'changed content collected even with an old timestamp' "grep -q BBBB '$P/state/review-lifecycle/runs/r1/run.json'"
 check 'files deleted locally stay in the archive' "[ \$(grep -rl APPROVE '$P/reviews' | wc -l) -eq 1 ]"
+
+# Large runs are split into several compressed parts; view joins them back.
+mkdir -p "$ISSUES/many"; for n in 1 2 3 4 5 6; do head -c 1500 /dev/zero | tr '\0' "$n" > "$ISSUES/many/f$n.log"; done
+AI_REVIEWER_LOGS_CHUNK_BYTES=3000 run sync 2> "$TMP/out17" || { cat "$TMP/out17" >&2; exit 1; }
+git -C "$REMOTE" ls-tree -r --name-only main > "$TMP/tree17"
+view
+check 'large runs are split into parts and reassembled' "[ \$(grep -c 'part00[2-9]' '$TMP/tree17') -ge 1 ] && [ \$(ls '$P/reviewer-issues/many' | wc -l) -eq 6 ] && cmp -s '$ISSUES/many/f6.log' '$P/reviewer-issues/many/f6.log'"
 
 # A bundle lost from the published archive is put back from the local copy.
 first="$(git -C "$REMOTE" ls-tree -r --name-only main | grep bundles | sort | head -1)"
