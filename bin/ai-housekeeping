@@ -132,7 +132,7 @@ cmd_schedule() {
     # A bare schtasks /Create would replace that task with an unbounded one.
     local posix launcher win_launcher
     posix="$(cygpath -u "$SELF")"
-    launcher="$HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
+    launcher="$BASE_HOME/.config/ai-devops/ai-housekeeping-hidden.vbs"
     win_launcher="$(cygpath -w "$launcher")"
     mkdir -p "$(dirname "$launcher")" 2>/dev/null || true
     {
