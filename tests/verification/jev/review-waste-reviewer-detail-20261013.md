@@ -50,8 +50,8 @@ The strongest separations in this archive (discretionary, n>=10):
 
 | lane | what it is | history | recommendation |
 |---|---|---|---|
-| **SKIP** | dflow, oracle, most i-devops tooling/docs | 95-100% no-op, almost zero findings | make discretionary review optional |
-| **MIXED** | i-devops with non-Codex reviewers | still mostly no-op | optional, or only for safety-class changes |
+| **SKIP** | dflow, oracle, most ai-devops tooling/docs | 95-100% no-op, almost zero findings | make discretionary review optional |
+| **MIXED** | ai-devops with non-Codex reviewers | still mostly no-op | optional, or only for safety-class changes |
 | **KEEP** | shared-db work, especially with muse / grok / qwen / deepseek | 20%+ real findings (deepseek @ shared-db 67% high) | keep mandatory review |
 
 The 8% that matter are concentrated in **shared-db** and in **non-Codex reviewers**. Codex-on-dflow and Codex-on-oracle produced **zero** real findings in this history.
