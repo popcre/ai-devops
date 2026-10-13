@@ -72,8 +72,8 @@ First supervised run cleanup (already applied):
 - 8→0 MERGED CANDIDATE branches (exact merged-PR `headRefOid` only)
 
 **Left untouched (by design — do not delete without a ruling):**
-- 9 UNATTRIBUTED handoffs (no contract block)
-- 15 UNPROVABLE handoffs (`issue: none`)
+- ~~9 UNATTRIBUTED handoffs (no contract block)~~ — batch 1 landed as PR #1664 (0 UNATTRIBUTED)
+- ~~15 UNPROVABLE handoffs (`issue: none`)~~ — batch 2 universe is 18 UNPROVABLE (count grew); this change retargets 8 and plans to retire 10
 - 16 retained-record plans (`all-steps-done` STATUS — review by hand)
 - 25 UNKNOWN branches
 - 26 UNKNOWN worktrees (review sandboxes, live sessions)

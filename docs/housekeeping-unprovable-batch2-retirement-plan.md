@@ -92,10 +92,12 @@ Successor rule (must all be true; checked here for every file):
 
 ### B5. `2026-09-18T1756Z-edge-dev-kimi-gemini-prepare-timeout.md`
 - **(1)** Special case: deliberately `issue: none`; do **not** open a tracker.
-  Status still says "fix written; ship phase remains" — **stale**. Verified on
-  `main`: `ca47a1fb fix(ai-gemini): bound prepare-phase steps with terminal
-  timeouts (#626)` is merged and `bin/ai-gemini` has `PREPARE_TIMEOUT` /
-  `bounded_inventory`. The ship happened.
+  Status still says "fix written; ship phase remains" — **stale** (condition 1
+  is met by *verified landing*, not by the stale line). **Must re-verify on
+  full `origin/main` before delete:** `ca47a1fb fix(ai-gemini): bound
+  prepare-phase steps with terminal timeouts (#626)` is merged and
+  `bin/ai-gemini` has `PREPARE_TIMEOUT` / `bounded_inventory`. The ship
+  happened; the deletion commit re-proves it.
 - **(2)** Open obligation (batched hashing) is already issue **#633** (open).
   "Do not kill another session's reviews" is standing rule in the handoff and
   globals. Gemini requalification is owned by later Gemini work (#840/#676 lane).
@@ -159,12 +161,49 @@ Successor rule (must all be true; checked here for every file):
 
 ---
 
-## C. What this change does **not** do
+## C. Execution order (this PR)
 
+1. **This commit (already on the branch):** retargets + this plan + reachability
+   links. **No file is deleted yet.** The reviewer is approving the *plan* to
+   delete B1–B10.
+2. **After APPROVE, one follow-up commit in the same PR:**
+   - re-verify on `origin/main` the landing commits cited above
+     (`ca47a1fb`, `074902ed`, `2db96bc`, `49c5627`, `b217e535`, `52b9f76f`,
+     `918866b8`, and the PR #1665 merge) before removing anything;
+   - delete exactly B1–B10;
+   - fix every inbound reference listed in section F in that same commit
+     (handoff-writer skill: "when you delete a handoff, grep for references and
+     fix/remove them in the same commit");
+   - rerun `bin/ai-housekeeping --details` and paste before/after into #1661.
+3. Then PR → merge queue → verify on `origin/main`.
+
+What this change never does:
 - Does not rewrite root `HANDOFF.md`.
 - Does not delete any file not listed in section B.
 - Does not close any GitHub issue.
 - Does not reopen closed parents (#1464, #1061, #608, #1585, #1436).
+
+## F. Inbound references to fix in the deletion commit
+
+`skills/shared/handoff-writer/SKILL.md` requires grepping and fixing inbound
+references when a handoff is deleted. Live references at the plan head
+(`574ed798`) that must be updated in the same commit as the B1–B10 deletions:
+
+| Target | Inbound reference | Fix |
+|---|---|---|
+| B1 `2026-08-14T2015Z-...housekeeping-visibility.md` | `plan_repo-housekeeping-visibility.md:7` | replace link with a short "retired 2026-10-13; plan STATUS is the record" note |
+| B2 `2026-08-16T0303Z-...plan-corrections.md` | `plan_repo-housekeeping-visibility.md:10` | same |
+| B3 `2026-08-18T1404Z-...shared-db-finish-first-plan.md` | `plan_shared-db-finish-first-delivery.md:9` | note supersession by `plan_shared-db-complete-throughput-repair.md` |
+| B4 `2026-09-18T1606Z-...review-packet-race-plan.md` | `plan_review-packet-race-and-evidence-speed.md:15` | note landed via #611/#639 / issue #608 |
+| B5 `2026-09-18T1756Z-...gemini-prepare-timeout.md` | (none outside this plan) | none |
+| B6 `2026-09-28T1513Z-...ssh-916-alien-acl-fix.md` | (none outside this plan) | none; leftover is #1681 |
+| B7 `2026-09-29T1635Z-...c-by-deletion.md` | `plan_shared-db-coordination-deletion.md:3`, `:17`; `tests/verification/shared-db-coordination-deletion/adopt-edge-dev3-20260930T051907Z.md:53` | replace with "decision record is this plan §8; session handoff retired 2026-10-13" |
+| B8 `2026-10-01T2205Z-...watchdog-local-timed-tasks.md` | `plan_watchdog-local-timed-tasks.md:3`; `docs/watchdog-duty-pool.md:13` | note P0–P5 done / duty-pool runbook is the contract |
+| B9 `2026-10-12T1444Z-...jev-review-waste-mining.md` | `plan_jev-review-waste-mining.md:4` | note implementation on `main` (#1620 etc.) |
+| B10 `2026-10-13T1240Z-...memory-index-docs-closeout.md` | (none outside this plan) | none |
+
+No gate catches these (`HANDOFF.d/**` is excluded from doc-reachability); the
+handoff-writer rule is the control, and section C step 2 enforces it.
 
 ## D. Expected housekeeping delta
 
@@ -173,8 +212,8 @@ Before (origin/main `b7c8ec80`, first inventory): 70 OPEN, 0 SUCCESSOR REVIEW,
 is 69 (one unrelated handoff removed upstream); UNPROVABLE is still 18.
 
 After (if all B1–B10 approved): 8 UNPROVABLE files retargeted and stay as OPEN
-(bare number + open issue) → 78 OPEN; 10 files deleted → 0 UNPROVABLE;
-0 UNATTRIBUTED (unchanged).
+(bare number + open issue) → 77 OPEN (69 + 8, matching `ai-housekeeping` at
+head); 10 files deleted → 0 UNPROVABLE; 0 UNATTRIBUTED (unchanged).
 
 ## E. Review ask
 
