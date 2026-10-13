@@ -66,7 +66,6 @@ function Write-Note {
 }
 
 . (Join-Path $PSScriptRoot 'repo-identity.ps1')
-. (Join-Path $PSScriptRoot 'windows-muse-code-install.ps1')
 
 function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 
@@ -1250,6 +1249,7 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note 'Test mode: not installing Muse Code.'
 } else {
     try {
+        . (Join-Path $PSScriptRoot 'windows-muse-code-install.ps1')
         Write-Note (Install-AiDevOpsMuseCode -RepoPath $RepoPath)
     } catch {
         Write-Note "Muse Code stage failed (optional): $($_.Exception.Message)"
