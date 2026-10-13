@@ -1,6 +1,6 @@
 <!-- handoff-contract
 issue: none
-status: OPEN
+status: DONE
 owner: mimo/1547-wrapup-edge-dev3-lab-cleanup
 -->
 
@@ -36,17 +36,19 @@ remaining **lab cleanup** so ~130GB on `edge-dev3` is not forgotten.
   plan, runbook, and `qualify-windows-runner.ps1` posture note.
 - Earlier related merges: [PR #1555](https://github.com/popcre/ai-devops/pull/1555),
   [PR #1576](https://github.com/popcre/ai-devops/pull/1576).
-- On host **`edge-dev3`** (Tailscale, user `ahazan`):
-  - Directory `/home/ahazan/lab-1547/` is about **130GB** (Windows 11 Eval ISO,
-    extracted setup tree, `win11-gpt.img`, `win11-fat.img`, `win11-usb.img`,
-    `lab-1547.qcow2`, many `*.sh` / `*.ps1` probe and boot scripts).
-  - Docker containers **`lab-1547-qemu`** and **`lab-1547-old`** exist in
-    **Exited** state (3+ hours as of 2026-10-12T19:5xZ).
-  - QEMU was run inside Docker with `--ulimit memlock=-1` and `/dev/kvm`
-    (host QEMU hits `Failed to initialize io_uring: Cannot allocate memory`
-    because `ulimit -l` is 8192).
-- 1Password item `labadmin - lab-1547 QEMU Windows VM (edge-dev3, disposable)`
-  (`jzenegsm2nt7brxoeotsnizkx4`) holds the lab VM login.
+- **Lab cleanup COMPLETED** on host **`edge-dev3`** (2026-10-13, MiMo wrap-up):
+  - Final `ls` / `du` confirmed `/home/ahazan/lab-1547/` (~130GB) held only lab
+    assets (Win11 ISOs, disk images, boot probe scripts, screenshots).
+  - Docker containers **`lab-1547-qemu`** and **`lab-1547-old`** were
+    **Exited (0)** and are now removed (`docker rm`).
+  - `/home/ahazan/lab-1547/` is **deleted** (verify: path does not exist).
+  - No `lab-1547` or lab QEMU images remain on `edge-dev3`.
+  - 1Password item `labadmin - lab-1547 QEMU Windows VM (edge-dev3, disposable)`
+    (`jzenegsm2nt7brxoeotsnizkx4`) is **archived** in vault `vibe_coding`.
+- Prior lab notes (historical): QEMU ran inside Docker with `--ulimit
+  memlock=-1` and `/dev/kvm` (host QEMU hits `Failed to initialize io_uring:
+  Cannot allocate memory` because `ulimit -l` is 8192). Windows was never
+  installed on the lab disk.
 
 ## 4. Everything we tried that did NOT work
 
@@ -76,16 +78,21 @@ remaining **lab cleanup** so ~130GB on `edge-dev3` is not forgotten.
 
 ## 6. Exact next steps
 
-1. On `edge-dev3`, confirm nothing needs the lab:
-   `docker ps -a --filter name=lab-1547` and
-   `du -sh /home/ahazan/lab-1547`.
-2. If unused (expected): remove exited containers
-   (`docker rm lab-1547-qemu lab-1547-old`) and delete
-   `/home/ahazan/lab-1547/` after a final `ls` (it holds only lab assets).
-3. Optionally delete the 1Password item
-   `labadmin - lab-1547 QEMU Windows VM (edge-dev3, disposable)`
-   (`jzenegsm2nt7brxoeotsnizkx4`) once the VM disk is gone.
-4. Delete this handoff file only after those steps are done and verified.
+Lab teardown steps 1–3 (was: inventory, `docker rm`, delete
+`/home/ahazan/lab-1547/`, archive the labadmin 1Password item) are **done and
+verified**. Remaining bookkeeping only:
+
+1. Land this handoff on `origin/main` via
+   [PR #1627](https://github.com/popcre/ai-devops/pull/1627) (docs-only).
+   That PR is **blocked** while
+   [issue #1631](https://github.com/popcre/ai-devops/issues/1631) keeps
+   `doc-safety` red on every merge-group run (from #1626 tracking
+   `.ai/reviewer-issues` on main). Do not use `--admin`.
+2. After PR #1627 is MERGED and
+   `HANDOFF.d/2026-10-12T1915Z-edge-dev-mimo-lab-1547-cleanup.md` is on
+   `origin/main`, delete this file on a small docs PR (successor rule).
+3. After the branch is merged, remove worktree `C:/tmp/wt-1547-correct` if
+   its tree is still clean (use `cleanup-worktree`).
 
 ## 7. Constraints and gotchas in force
 
@@ -100,15 +107,15 @@ remaining **lab cleanup** so ~130GB on `edge-dev3` is not forgotten.
 ## 8. Access and environment
 
 - Host: `edge-dev3` (Linux, Tailscale alias `edge-dev3`, user `ahazan`, SSH key
-  `~/.ssh/916-alien` from `edge-dev`).
-- Lab root: `/home/ahazan/lab-1547/` on `edge-dev3` (machine-local; delete here).
-- Password item: 1Password vault `vibe_coding`,
-  `op://vibe_coding/labadmin - lab-1547 QEMU Windows VM (edge-dev3, disposable)/password`.
+  `~/.ssh/916-alien` from `edge-dev`). Lab root `/home/ahazan/lab-1547/` is gone.
+- Password item archived (was 1Password vault `vibe_coding`,
+  `labadmin - lab-1547 QEMU Windows VM (edge-dev3, disposable)`).
 - Repo: https://github.com/popcre/ai-devops — this checkout is `C:/repos/ai-devops`.
 
 ## 9. Open questions and risks
 
-- Disk pressure on `edge-dev3` (~130GB) until cleanup.
+- None on `edge-dev3` disk pressure (lab deleted). Residual risk is only
+  PR #1627 / this handoff waiting on #1631 so `doc-safety` can go green.
 - If anyone still wants a Windows KB bisect for curiosity, rebuild a lab from
   the closed-issue notes; do not treat #1547 as open work.
 
