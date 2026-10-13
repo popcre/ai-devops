@@ -40,7 +40,7 @@ run(){
     AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
     AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 \
     AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" AI_REVIEWER_LOGS_CERT="$TMP/cert.pem" \
-    AI_REVIEWER_LOGS_KEY_FILE="$TMP/key.pem" \
+    AI_REVIEWER_LOGS_KEY_FILE="${AI_REVIEWER_LOGS_KEY_FILE-$TMP/key.pem}" \
     GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
     bash "$ROOT/bin/ai-reviewer-logs-sync" "$@"
 }
@@ -157,6 +157,8 @@ before="$(git -C "$REMOTE" rev-parse main)"
 check 'clear-text output is refused, even when it starts with 0' "! PATH='$TMP/badssl':\"\$PATH\" run sync 2> '$TMP/out7' && grep -q 'not encrypted' '$TMP/out7' && [ \"\$(git -C '$REMOTE' rev-parse main)\" = '$before' ]"
 run sync 2> "$TMP/out7b" || { cat "$TMP/out7b" >&2; exit 1; }
 
+cp "$TMP/key.pem" "$TMP/plain/key.pem"
+check 'a key inside the view folder is refused and kept' "! AI_REVIEWER_LOGS_KEY_FILE='$TMP/plain/key.pem' run view '$TMP/plain' >/dev/null 2>&1 && [ -f '$TMP/plain/key.pem' ]"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"

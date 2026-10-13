@@ -302,6 +302,18 @@ cmd_view(){
   work="$(mktemp -d)"; make_private "$work" || die "could not make $work private"
   # shellcheck disable=SC2064
   trap "rm -rf '$work' '$HOME_DIR/sync.lock'" EXIT
+  # Replay in publication order (the order commits added them), never by clock.
+  git -C "$HUB" log --reverse --diff-filter=A --name-only --format= -- '*/bundles/*.tar.cms' > "$work/added"
+  : > "$work/order"
+  while IFS= read -r b; do
+    [ -n "$b" ] && [ -f "$HUB/$b" ] && ! grep -qxF -- "$b" "$work/order" && printf '%s\n' "$b" >> "$work/order"
+  done < "$work/added"
+  # The key must not live inside the folder that is about to be rebuilt.
+  local key_abs out_abs
+  key_abs="$(cd "$(dirname "$keyfile")" && pwd -P)/$(basename "$keyfile")"
+  mkdir -p "$(dirname "$out")"
+  out_abs="$(cd "$(dirname "$out")" && pwd -P)/$(basename "$out")"
+  case "$key_abs" in "$out_abs"|"$out_abs"/*) die "keep the key file outside $out" ;; esac
   # Always rebuild from scratch, and only ever wipe a folder this command made.
   if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
     die "$out exists and was not made by 'ai-reviewer-logs-sync view'; choose another folder"
@@ -322,8 +334,7 @@ cmd_view(){
     tar -C "$out/$machine" --no-same-owner --no-same-permissions -xf "$work/b.tar" || die "could not unpack $b"
     cp -f "$HUB/$machine/LAST-SYNC.txt" "$out/$machine/" 2>/dev/null || true
     n=$((n + 1))
-  done < <(cd "$HUB" && find . -path ./.git -prune -o -type f -path '*/bundles/*.tar.cms' -print | sed 's#^\./##' |
-    awk -F/ '{ print $3 "\t" $0 }' | sort | cut -f2-)
+  done < "$work/order"
   printf 'decrypted %s bundles into %s (one folder per machine)\n' "$n" "$out"
 }
 
