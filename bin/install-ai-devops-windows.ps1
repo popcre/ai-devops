@@ -1241,6 +1241,21 @@ if (Test-Path -LiteralPath $museWrapper) {
     }
 }
 
+# Optional stage: Muse Code. When the pinned muse-bin-<version>.exe is absent,
+# run Meta's official Windows installer, then verify version and SHA-256.
+# A failure is reported and the install continues; ai-muse refuses to run an
+# unpinned or mismatched binary either way.
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note 'Test mode: not installing Muse Code.'
+} else {
+    try {
+        . (Join-Path $PSScriptRoot 'windows-muse-code-install.ps1')
+        Write-Note (Install-AiDevOpsMuseCode -RepoPath $RepoPath)
+    } catch {
+        Write-Note "Muse Code stage failed (optional): $($_.Exception.Message)"
+    }
+}
+
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
 if ($installBash) {
     $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
