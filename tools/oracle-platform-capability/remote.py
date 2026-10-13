@@ -17,7 +17,7 @@ try:
         if len(rows)>16:raise ValueError('helper population bound')
         if time.time()>=C['expires_at']:raise ValueError('expired')
         print(json.dumps({'mode':'discover','coolify':coolify,'inventory':rows,'configured_helper':'UNKNOWN','capabilities':'UNKNOWN'},separators=(',',':')))
-    else:
+    elif C['mode']=='qualify':
         row=json.loads(run(['docker','inspect','--format',IDENTITY,C['helper_id']],limit=2048))
         expected={'id':C['helper_id'],'name':'/'+C['helper_name'],'image':C['helper_image'],'image_id':C['helper_image_id'],'state':'running'}
         if row!=expected:raise ValueError('helper changed')
@@ -37,4 +37,5 @@ try:
         if json.loads(run(['docker','inspect','--format',IDENTITY,C['helper_id']],limit=2048))!=expected:raise ValueError('helper changed after qualification')
         if time.time()>=C['expires_at']:raise ValueError('expired')
         print(json.dumps({'mode':'qualify','identity':row,'capabilities':receipts,'expired_guard_refused':True,'configured_helper':'UNKNOWN','read_only':True},separators=(',',':')))
+    else:raise ValueError('fixed mode refused')
 except Exception:sys.exit(3)

@@ -95,16 +95,39 @@ read. It follows only the controller's deliberately anchored proc-FD reference,
 not caller path ancestry. Temporary SSH output is anonymous and bounded. Abrupt
 termination may still leave protected custody; retain rather than replay.
 
-**Version API trust prerequisite:** the existing fixed
-http://100.66.37.58:8000/api/v1/version capability is preserved. It has no TLS;
-confidentiality depends on the encrypted Tailscale overlay. Before this new
-purpose's actual action, the coordinator must independently admit and verify
-the exact current Tailscale peer identity/path to100.66.37.58 and bind that proof
-to the current exact review/action inputs. A100.64/10 address, route guess,
-HTTP success or this source does not prove that prerequisite. No public-network
-HTTP, redirect/proxy, token-over-SSH transfer, insecure TLS fallback or new
-credential is authorized. This reader does not perform or claim the separate
-peer qualification; root holds it and must refuse actual use without it.
+**Version API trust requirement, enforced by v3:** the fixed HTTP version API
+is preserved and has no TLS. Confidentiality relies on the existing encrypted
+Tailscale interface and trusted root-owned local daemon. The reader checks the
+exact fixed WHOIS node ID/name/addresses/public node-key SHA and canonical exact
+tags plus OS route target/device/table/source before claim, immediately before
+Bearer HTTP and after reading before accepting metadata. No token enters either
+local CLI argv/environment. Only one fixed WHOIS and one fixed route lookup are
+used per check; no whole-peer/status inventory is requested. Raw key/profile
+fields are never emitted. Missing/null expiry remains UNKNOWN, never proof of
+unexpired/nonrenewed authority. Provided expiry/Expired must pass actual checks.
+
+The contract binds actual independently reviewed OS CLI binary SHA and root-owned
+installed package md5-manifest SHA/association. `/usr/bin/tailscale` and
+`/usr/bin/ip` are root-owned regular executables with root-owned nonwritable
+ancestry; `/run/tailscale/tailscaled.sock` is the existing root-owned Unix socket
+under root-owned nonwritable ancestry. Its existing socket mode is preserved.
+Socket identity and CLI identities are rechecked. The explicit supported
+`--socket=/run/tailscale/tailscaled.sock` avoids caller/default ambiguity. Primary
+source: [official paths](https://github.com/tailscale/tailscale/blob/aaaaa971891b7514ccc3e2191cb5a46d1e5414af/paths/paths.go)
+and [official CLI socket flag](https://github.com/tailscale/tailscale/blob/aaaaa971891b7514ccc3e2191cb5a46d1e5414af/cmd/tailscale/cli/cli.go).
+This source snapshot explains the interface; it is not an asserted historical
+build association for the installed binary, whose actual SHA/package origin is
+separately bound. The root-observed exact peer metadata is prospective input;
+it grants no operating rights and cannot replace fresh runtime checks.
+
+HTTP sockets additionally bind only `tailscale0` and source100.66.9.69. Binding
+failure refuses before HTTP bytes; there is no other interface/source fallback,
+proxy, redirect, insecure TLS or token-over-SSH transfer. Root retains actual OS
+callability and production admission proof; this source performed no socket bind,
+local daemon lookup, HTTP/SSH or credential action. Unknown/missing/moved peer,
+key/tag/route/source/socket/CLI refuses. After claiming, every failure stays spent
+and cannot be retried/renewed. Pure in-memory credential shape and lifetime checks
+occur before claim. V1/v2 contracts do not satisfy this separately reviewed v3.
 
 Actual configured helper remains UNKNOWN: pinned public source calls
 InstanceSettings::findOrFail(0), loading the full credential-bearing row; it
@@ -113,3 +136,14 @@ execute that method or bootstrap PHP. Fresh CLI/source defaults cannot establish
 running queue/cache configuration. Separate platform-owned scalar selector,
 current source/runtime identity and readonly bootstrap qualification remain
 blocked; no helpers are created or existing functionality removed.
+
+Reviewer report arguments must be absolute, bounded, nofollow regular single-link
+files owned by the current UID without group/world writes and with owned private
+parent ancestry. The supported genuine gate keeps its two argv form
+`--reviewer-approval ABS`; an absolute value cannot be a leading-dash option.
+No unsupported generic gate flag was added. Its actual native lifecycle validates
+current report provenance; shape/hash tests do not substitute for that authority.
+All bounded reads use O_NONBLOCK and reject FIFO/device input before read. Remote
+mode is explicitly discover or qualify, with other modes denied before Docker.
+Both Git identity commands use the same hook/fsmonitor overrides. Local daemon
+outputs use anonymous files through an anchored private TMPDIR descriptor.

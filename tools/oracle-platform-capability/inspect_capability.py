@@ -3,6 +3,7 @@
 Discovery and qualification need different exact reviewed contracts/one-use
 claims. No live use is performed by preparation/tests.
 """
+import http.client,socket
 import argparse,base64,hashlib,importlib.util,json,os,re,resource,stat,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
 LIMIT=65536
@@ -17,7 +18,7 @@ HELPER_SHA='35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754'
 def require(ok,message):
     if not ok:raise ValueError(message)
 def bounded_file(path,maximum):
-    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     with os.fdopen(fd,'rb') as f:
         before=os.fstat(f.fileno());require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_size<=maximum,'bounded regular source required')
         raw=f.read(maximum+1);require(len(raw)<=maximum and os.fstat(f.fileno())==before,'source moved')
@@ -57,14 +58,14 @@ def lifetime(c,remaining=0):
     now=time.time();require(type(c['issued_at']) is int and type(c['expires_at']) is int and 0<=now-c['issued_at'] and 0<c['expires_at']-c['issued_at']<=1800 and now+remaining<c['expires_at'],'bounded actual action lifetime required')
 IDENTITY='{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Config.Image}},"image_id":{{json .Image}},"state":{{json .State.Status}}}'
 INVENTORY='{"id":{{json .ID}},"image":{{json .Image}},"name":{{json .Names}},"state":{{json .State}}}'
-BASE={'schema','mode','application','api','platform_source','host','user','port','known_hosts_sha256','issued_at','expires_at','installed_gate','claim_id','operator_sha256','remote_sha256','transport_helper_sha256'}
-FIXED={'schema':'oracle-platform-capability/v2','application':'vhmcdkdk23dgvjvcvhyhcjzd','api':API,'platform_source':SOURCE_PLATFORM,'host':'hetz','user':'ai','port':22}
+BASE={'schema','mode','application','api','platform_source','host','user','port','known_hosts_sha256','issued_at','expires_at','installed_gate','tailnet','claim_id','operator_sha256','remote_sha256','transport_helper_sha256'}
+FIXED={'schema':'oracle-platform-capability/v3','application':'vhmcdkdk23dgvjvcvhyhcjzd','api':API,'platform_source':SOURCE_PLATFORM,'host':'hetz','user':'ai','port':22}
 
 class ReviewedContract(dict):pass
 
 def load_contract(path,seal):
     raw=bounded_file(path,8192);require(re.fullmatch('[a-f0-9]{64}',seal) and hashlib.sha256(raw).hexdigest()==seal,'contract mismatch')
-    c=ReviewedContract(json.loads(raw));extra={'helper_id','helper_name','helper_image','helper_image_id'} if c.get('mode')=='qualify' else set()
+    c=ReviewedContract(json.loads(raw,object_pairs_hook=unique_metadata));extra={'helper_id','helper_name','helper_image','helper_image_id'} if c.get('mode')=='qualify' else set()
     require(set(c)==BASE|extra and all(c[k]==v for k,v in FIXED.items()),'closed contract mismatch')
     require(c['mode'] in {'discover','qualify'} and type(c['expires_at']) is int and type(c['claim_id']) is str and re.fullmatch('[a-z0-9-]{1,64}',c['claim_id']),'contract metadata invalid')
     require(re.fullmatch('[a-f0-9]{64}',c['known_hosts_sha256']),'known host pin invalid')
@@ -75,7 +76,7 @@ def load_contract(path,seal):
         source=bounded_file(path,65536)
         require(re.fullmatch('[a-f0-9]{64}',c[key]) and hashlib.sha256(source).hexdigest()==c[key],'reviewed source changed')
         if key=='remote_sha256':c.remote_source=source
-    lifetime(c)
+    lifetime(c);tailnet_contract(c)
     return c
 
 def remote_command(c,source):
@@ -128,18 +129,101 @@ def read_remote(contract,known_hosts,password,source):
             except OSError:pass # retain protected custody after hostile movement
         parent.close()
 
+TARGET='100.66.37.58'
+SOCKET='/run/tailscale/tailscaled.sock'
+PEER={'node_id':7478501245629156,'node_name':'hetz.coho-banded.ts.net.','addresses':['100.66.37.58/32','fd7a:115c:a1e0::5232:253a/128'],'node_key_sha256':'7f327508633eb57fdd8b054f2334e059e5d9c0354ea0932c5879865eaac0c039','tags':['tag:server'],'route_device':'tailscale0','route_table':'52','route_source':'100.66.9.69'}
+OS_FILES={'tailscale':('/usr/bin/tailscale','/var/lib/dpkg/info/tailscale.md5sums'),'ip':('/usr/bin/ip','/var/lib/dpkg/info/iproute2.md5sums')}
+def root_ancestry(path,socket_leaf=False):
+    parts=Path(path).parts;fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=child
+            info=os.fstat(fd);require(info.st_uid==0 and not stat.S_IMODE(info.st_mode)&0o022,'root-owned OS ancestry required')
+        info=os.stat(parts[-1],dir_fd=fd,follow_symlinks=False)
+        require(info.st_uid==0 and (stat.S_ISSOCK(info.st_mode) if socket_leaf else stat.S_ISREG(info.st_mode) and info.st_nlink==1 and not stat.S_IMODE(info.st_mode)&0o022),'root-owned OS resource required')
+        return (info.st_dev,info.st_ino)
+    finally:os.close(fd)
+def os_identity(kind,pins):
+    path,origin=OS_FILES[kind];root_ancestry(path);root_ancestry(origin)
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(fd,'rb') as code:
+        before=os.fstat(code.fileno());require(before.st_size<=64*1024**2 and before.st_mode&0o111,'bounded executable required')
+        raw=code.read(64*1024**2+1);require(len(raw)==before.st_size and os.fstat(code.fileno())==before,'OS executable moved')
+    require(hashlib.sha256(raw).hexdigest()==pins['binary_sha256'],'reviewed OS executable differs')
+    metadata=bounded_file(origin,1024*1024);require(hashlib.sha256(metadata).hexdigest()==pins['package_manifest_sha256'],'root package origin moved')
+    rows=[x.split() for x in metadata.decode('ascii').splitlines()]
+    require([x[0] for x in rows if len(x)==2 and x[1]==path[1:]]==[hashlib.md5(raw).hexdigest()],'installed package binary association differs')
+def tailnet_contract(c):
+    value=c['tailnet'];require(type(value) is dict and set(value)==set(PEER)|{'os_cli'} and all(value[k]==v for k,v in PEER.items()),'independently reviewed fixed peer/route binding required')
+    require(type(value['os_cli']) is dict and set(value['os_cli'])=={'tailscale','ip'},'fixed OS CLI closure required')
+    for pins in value['os_cli'].values():require(type(pins) is dict and set(pins)=={'binary_sha256','package_manifest_sha256'} and all(isinstance(h,str) and re.fullmatch('[a-f0-9]{64}',h) for h in pins.values()),'exact reviewed OS origin pins required')
+    return value
+
+def local_metadata(argv,maximum):
+    # Fixed root-owned OS program, no inherited credentials/config/proxy.
+    parent=Custody(os.environ.get('TMPDIR',''))
+    try:
+        anchor='/proc/'+str(os.getpid())+'/fd/'+str(parent.fd)
+        with tempfile.TemporaryFile(dir=anchor) as output:
+            def bounded():resource.setrlimit(resource.RLIMIT_FSIZE,(maximum,maximum))
+            parent.recheck()
+            result=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,timeout=5,env={'PATH':'/usr/bin:/bin','LANG':'C'},preexec_fn=bounded)
+            parent.recheck();require(result.returncode==0,'local peer/route metadata refused');output.seek(0);raw=output.read(maximum+1);require(len(raw)<=maximum,'local metadata exceeds bound')
+        return json.loads(raw,object_pairs_hook=unique_metadata)
+    finally:parent.close()
+def unique_metadata(pairs):
+    out={}
+    for k,v in pairs:require(k not in out,'duplicate local metadata field');out[k]=v
+    return out
+
+def verify_tailnet(c):
+    expected=tailnet_contract(c);lifetime(c,15)
+    for kind in OS_FILES:os_identity(kind,expected['os_cli'][kind])
+    identity=root_ancestry(SOCKET,True)
+    who=local_metadata(['/usr/bin/tailscale','--socket='+SOCKET,'whois','--json',TARGET],65536)
+    require(type(who) is dict and type(who.get('Node')) is dict,'fixed peer missing');node=who['Node']
+    key=node.get('Key');require(isinstance(key,str) and re.fullmatch(r'nodekey:[a-fA-F0-9]{64}',key,flags=re.ASCII),'fixed peer key missing')
+    require(type(node.get('ID')) is int and node['ID']==expected['node_id'] and node.get('Name')==expected['node_name'],'fixed peer identity moved')
+    require(type(node.get('Addresses')) is list and sorted(node['Addresses'])==sorted(expected['addresses']),'fixed peer addresses moved')
+    tags=node.get('Tags');require(type(tags) is list and all(isinstance(t,str) for t in tags) and tags==sorted(set(tags)) and tags==expected['tags'],'fixed peer tags moved')
+    require(hashlib.sha256(key.encode('ascii')).hexdigest()==expected['node_key_sha256'],'fixed peer key moved')
+    # Missing/null expiry fields mean UNKNOWN, never false or never-expiring.
+    if node.get('Expired') is not None:require(node['Expired'] is False,'expired peer refused')
+    if node.get('KeyExpiry') is not None:
+        from datetime import datetime,timezone
+        expiry=datetime.fromisoformat(node['KeyExpiry'].replace('Z','+00:00'));require(expiry.tzinfo is not None and expiry>datetime.now(timezone.utc),'expired or malformed peer lifetime')
+    route=local_metadata(['/usr/bin/ip','-j','route','get',TARGET],8192)
+    require(type(route) is list and len(route)==1 and type(route[0]) is dict,'fixed route missing')
+    r=route[0];require(r.get('dst')==TARGET and r.get('dev')==expected['route_device'] and str(r.get('table'))==expected['route_table'] and r.get('prefsrc')==expected['route_source'] and r.get('flags')==[] and not any(k in r for k in ('gateway','via','nhid','multipath')),'fixed encrypted route moved')
+    require(root_ancestry(SOCKET,True)==identity,'local daemon socket moved')
+    for kind in OS_FILES:os_identity(kind,expected['os_cli'][kind])
+    lifetime(c,10)
+    return {'fixed_peer_key_bound':True,'encrypted_route_bound':True,'peer_expiry':'UNKNOWN' if node.get('KeyExpiry') is None or node.get('Expired') is None else 'checked-current'}
+
+class BoundConnection(http.client.HTTPConnection):
+    def connect(self):
+        require(self.host==TARGET and self.port==8000,'fixed HTTP target required')
+        sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        try:
+            sock.settimeout(10);sock.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,b'tailscale0\x00');sock.bind((PEER['route_source'],0));sock.connect((TARGET,8000));self.sock=sock
+        except Exception:sock.close();raise # No other interface/source fallback.
+class BoundHTTP(urllib.request.HTTPHandler):
+    def http_open(self,request):return self.do_open(BoundConnection,request)
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):raise ValueError('API redirect denied')
 
-def version(token):
+def version(token,c):
     require(isinstance(token,str) and re.fullmatch(r'[!-~]{1,8192}',token,flags=re.ASCII),'protected ASCII API credential missing')
-    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+    verify_tailnet(c) # BEFORE constructing/sending any bearer request
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),BoundHTTP(),NoRedirect())
     request=urllib.request.Request(API,headers={'Authorization':'Bearer '+token,'Accept':'text/plain'},method='GET')
     with opener.open(request,timeout=10) as response:
         require(response.status==200 and response.geturl()==API,'version endpoint refused')
         raw=response.read(65)
+    peer=verify_tailnet(c) # Refuse changed peer/route before accepting metadata
     value=raw.decode('ascii').strip();require(len(raw)<=64 and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',value),'version metadata invalid')
-    return value
+    return value,peer
 
 def validate(raw,c):
     require(len(raw)<=LIMIT,'metadata bound')
@@ -177,7 +261,7 @@ def installed_gate(c):
     require([x[2] for x in rows if x[:2]==['meta','source_sha']]==[pins['source_head']],'installed source identity moved')
     require([x for x in rows if x[:2]==['symlink',GATE]]==[['symlink',GATE,GATE_SOURCE,pins['launcher_sha256']]],'installed gate receipt differs')
     require(hashlib.sha256(bounded_file(GATE_SOURCE,1024*1024)).hexdigest()==pins['launcher_sha256'],'installed gate source changed')
-    head=subprocess.run(['/usr/bin/git','-C','/home/ahazan/repos/ai-devops','rev-parse','HEAD'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
+    head=subprocess.run(['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C','/home/ahazan/repos/ai-devops','rev-parse','HEAD'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
     require(head.returncode==0 and head.stdout.decode('ascii').strip()==pins['source_head'],'installed checkout not current')
     status=subprocess.run(['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C','/home/ahazan/repos/ai-devops','status','--porcelain','--untracked-files=no'],capture_output=True,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
     require(status.returncode==0 and not status.stdout,'installed tracked source moved')
@@ -187,10 +271,16 @@ def gate_and_claim(c,contract_sha,report,custody):
     lifetime(c,120);directory=custody if isinstance(custody,Custody) else Custody(custody)
     owned=not isinstance(custody,Custody)
     try:
-        directory.recheck();installed_gate(c)
+        directory.recheck();report=Path(report)
+        require(report.is_absolute() and not any(x in ('..','.') for x in report.parts),'absolute regular reviewer report required')
+        report_parent=Custody(report.parent)
+        try:report_parent.recheck()
+        finally:report_parent.close()
+        report_info=os.lstat(report);require(report_info.st_uid==os.getuid() and stat.S_ISREG(report_info.st_mode) and report_info.st_nlink==1 and not stat.S_IMODE(report_info.st_mode)&0o022,'reviewer report custody differs')
+        bounded_file(report,1024*1024);installed_gate(c)
         gate=subprocess.run([GATE,'check','--before','production','--reviewer-approval',str(report)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'})
         require(gate.returncode==0,'production lifecycle refused')
-        installed_gate(c);directory.recheck();lifetime(c,90)
+        installed_gate(c);directory.recheck();lifetime(c,90);verify_tailnet(c)
         name=c['claim_id']+'.claim.json'
         directory.create(name,json.dumps({'contract_sha256':contract_sha,'mode':c['mode'],'issued_at':c['issued_at'],'expires_at':c['expires_at'],'claimed_at':int(time.time()),'spent':True}).encode())
         return Path(directory.path)/name
@@ -209,13 +299,15 @@ def main():
         c=load_contract(args.contract,args.contract_sha256)
         require(hashlib.sha256(bounded_file(args.known_hosts,8192)).hexdigest()==c['known_hosts_sha256'],'known host changed')
         source=c.remote_source
+        require(isinstance(token,str) and re.fullmatch(r'[!-~]{1,8192}',token,flags=re.ASCII) and isinstance(password,str) and password and len(password.encode())<=LIMIT and not any(x in password for x in ('\x00','\n','\r')),'credential presence/shape refused before claim')
+        lifetime(c,120)
         custody=Custody(args.custody)
         gate_and_claim(c,args.contract_sha256,args.reviewer_approval,custody)
-        actual_version=version(token);del token
+        actual_version,peer_state=version(token,c);del token
         require(c['mode']=='discover' or actual_version=='4.4.6','unqualified installed platform version')
         lifetime(c,60)
         raw=read_remote(c,args.known_hosts,password,source);del password
-        result=validate(raw,c);result.update(platform_version=actual_version,contract_sha256=args.contract_sha256)
+        result=validate(raw,c);result.update(platform_version=actual_version,contract_sha256=args.contract_sha256,tailnet_runtime_checks=peer_state)
         lifetime(c);custody.create(c['claim_id']+'.receipt.json',json.dumps(result,sort_keys=True).encode())
         print('bounded platform metadata receipt retained; no launch admitted')
     except Exception:

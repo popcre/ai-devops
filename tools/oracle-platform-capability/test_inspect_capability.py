@@ -6,10 +6,13 @@ import pytest
 ROOT=Path(__file__).parent
 spec=importlib.util.spec_from_file_location('capability',ROOT/'inspect_capability.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 def contract(mode='discover'):
-    c={**m.FIXED,'mode':mode,'issued_at':int(time.time())-1,'expires_at':int(time.time())+600,'installed_gate':{'source_head':'a'*40,'launcher_sha256':'b'*64,'manifest_sha256':'c'*64},'claim_id':'public-invented-test','known_hosts_sha256':'a'*64}
+    c={**m.FIXED,'mode':mode,'issued_at':int(time.time())-1,'expires_at':int(time.time())+600,'installed_gate':{'source_head':'a'*40,'launcher_sha256':'b'*64,'manifest_sha256':'c'*64},'claim_id':'public-invented-test','known_hosts_sha256':'a'*64,'tailnet':{**m.PEER,'os_cli':{k:{'binary_sha256':'a'*64,'package_manifest_sha256':'b'*64} for k in m.OS_FILES}}}
     for key,path in [('operator_sha256',ROOT/'inspect_capability.py'),('remote_sha256',ROOT/'remote.py'),('transport_helper_sha256',Path(m.helpers.__file__))]:c[key]=hashlib.sha256(path.read_bytes()).hexdigest()
     if mode=='qualify':c.update(helper_id='b'*64,helper_name='fixedhelper',helper_image=m.HELPER+':1.0.12',helper_image_id='sha256:'+'c'*64)
     return c
+
+def public_report(tmp_path):
+    path=tmp_path.parent/(tmp_path.name+'.report');path.write_bytes(b'PUBLIC INVENTED REPORT, NOT APPROVAL');path.chmod(0o600);return path
 
 def test_closed_contract_and_source_pins(tmp_path):
     for mode in ['discover','qualify']:
@@ -25,7 +28,7 @@ def test_closed_scope_refusal(tmp_path,field,value):
 
 
 def test_discovery_never_execs_or_reads_environment_source():
-    source=(ROOT/'remote.py').read_text();discover=source[source.index("if C['mode']=='discover':"):source.index('    else:')]
+    source=(ROOT/'remote.py').read_text();discover=source[source.index("if C['mode']=='discover':"):source.index("    elif C['mode']=='qualify':")]
     assert "'exec'" not in discover and "'ps'" in discover and "'inspect'" in discover
     for forbidden in ['.Config.Env','.State.Health.Log','docker.sock','config.json','logs','restart','start','stop','remove']:
         assert forbidden not in source
@@ -42,19 +45,19 @@ def test_no_helper_discovered_stays_unknown():
 def test_genuine_gate_precedes_oneuse_claim_and_failure_retained(tmp_path):
     os.chmod(tmp_path,0o700);c=contract();gate=[]
     def reject(*a,**k):gate.append(a[0]);return type('R',(),{'returncode':3})()
-    with patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',reject):
-        with pytest.raises(ValueError):m.gate_and_claim(c,'a'*64,'report',tmp_path)
+    with patch.object(m,'verify_tailnet',lambda c:None),patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',reject):
+        with pytest.raises(ValueError):m.gate_and_claim(c,'a'*64,public_report(tmp_path),tmp_path)
     assert not list(tmp_path.iterdir())
-    with patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',lambda *a,**k:type('R',(),{'returncode':0})()):
-        claim=m.gate_and_claim(c,'a'*64,'report',tmp_path);assert claim.stat().st_mode&0o777==0o600
-        with pytest.raises(FileExistsError):m.gate_and_claim(c,'a'*64,'report',tmp_path)
+    with patch.object(m,'verify_tailnet',lambda c:None),patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',lambda *a,**k:type('R',(),{'returncode':0})()):
+        claim=m.gate_and_claim(c,'a'*64,public_report(tmp_path),tmp_path);assert claim.stat().st_mode&0o777==0o600
+        with pytest.raises(FileExistsError):m.gate_and_claim(c,'a'*64,public_report(tmp_path),tmp_path)
     assert json.loads(claim.read_text())['spent'] is True
 
 
 def test_expiry_denies_before_gate_or_claim(tmp_path):
     os.chmod(tmp_path,0o700);c=contract();c['expires_at']=int(time.time())+119
     with patch.object(m.subprocess,'run',side_effect=AssertionError('gate ran')):
-        with pytest.raises(ValueError):m.gate_and_claim(c,'a'*64,'report',tmp_path)
+        with pytest.raises(ValueError):m.gate_and_claim(c,'a'*64,public_report(tmp_path),tmp_path)
     assert not list(tmp_path.iterdir())
 
 
@@ -98,15 +101,15 @@ def test_remote_program_exact_qualification_or_refusal_no_mutation(bad,capsys):
 def test_lifecycle_child_has_no_credential_environment(tmp_path):
     os.chmod(tmp_path,0o700);seen=[]
     def fake(*args,**kwargs):seen.append(kwargs['env']);return type('R',(),{'returncode':0})()
-    with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'public-test-secret','ORACLE_COOLIFY_READ_TOKEN':'public-test-token'}),patch.object(m,'installed_gate',lambda c:None),patch.object(subprocess,'run',fake):
-        m.gate_and_claim(contract(),'a'*64,'report',tmp_path)
+    with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'public-test-secret','ORACLE_COOLIFY_READ_TOKEN':'public-test-token'}),patch.object(m,'verify_tailnet',lambda c:None),patch.object(m,'installed_gate',lambda c:None),patch.object(subprocess,'run',fake):
+        m.gate_and_claim(contract(),'a'*64,public_report(tmp_path),tmp_path)
     assert seen and all('ORACLE_HETZ_READ_PASSWORD' not in env and 'ORACLE_COOLIFY_READ_TOKEN' not in env for env in seen)
 
 
 def test_symlink_custody_denies_before_lifecycle(tmp_path):
     target=tmp_path/'owned';target.mkdir(mode=0o700);link=tmp_path/'link';link.symlink_to(target,target_is_directory=True)
     with patch.object(subprocess,'run',side_effect=AssertionError('gate dispatched')):
-        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,'report',link)
+        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,public_report(tmp_path),link)
 
 
 def test_capability_response_cannot_substitute_arbitrary_argv():
@@ -116,7 +119,7 @@ def test_capability_response_cannot_substitute_arbitrary_argv():
 @pytest.mark.parametrize('token',['bad\x00token','bad\ttoken','badétoken','a'*8193,'','bad token'])
 def test_invalid_token_refuses_before_network(token):
     with patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('network opener')):
-        with pytest.raises(ValueError):m.version(token)
+        with pytest.raises(ValueError):m.version(token,contract())
 
 @pytest.mark.parametrize('issued,expiry',[(True,600),(-1,4000),(600,1200),(0,1801)])
 def test_actual_clock_and_maximum_lifetime(issued,expiry):
@@ -169,8 +172,8 @@ def test_hardlinked_bounded_source_refuses(tmp_path):
 def test_fixed_gate_argv_home_and_secretless_child(tmp_path):
     tmp_path.chmod(0o700);calls=[]
     def fake(argv,**kw):calls.append((argv,kw));return type('R',(),{'returncode':0})()
-    with patch.dict(os.environ,{'PATH':'/UNTRUSTED','HOME':'/UNTRUSTED'}),patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',fake):
-        m.gate_and_claim(contract(),'a'*64,'report',tmp_path)
+    with patch.dict(os.environ,{'PATH':'/UNTRUSTED','HOME':'/UNTRUSTED'}),patch.object(m,'verify_tailnet',lambda c:None),patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',fake):
+        m.gate_and_claim(contract(),'a'*64,public_report(tmp_path),tmp_path)
     assert calls[0][0][0]=='/usr/local/bin/ai-task-gates'
     assert calls[0][1]['env']=={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/home/ahazan'}
 
@@ -214,3 +217,124 @@ def test_installed_gate_manifest_source_identity(tmp_path):
         m.installed_gate(c);assert len(seen)==2 and all(x[1]['env']['HOME']=='/home/ahazan' for x in seen)
         source.write_bytes(b'MOVED PUBLIC SOURCE')
         with pytest.raises(ValueError,match='source changed'):m.installed_gate(c)
+
+@pytest.fixture
+def invented_peer(monkeypatch):
+    key='nodekey:'+'1'*64;expected={**m.PEER,'node_key_sha256':hashlib.sha256(key.encode()).hexdigest()}
+    monkeypatch.setattr(m,'PEER',expected)
+    who={'Node':{'ID':expected['node_id'],'Name':expected['node_name'],'Addresses':expected['addresses'],'Key':key,'Tags':expected['tags']}}
+    route=[{'dst':m.TARGET,'dev':'tailscale0','table':'52','prefsrc':expected['route_source'],'flags':[]}]
+    monkeypatch.setattr(m,'os_identity',lambda *a:None);monkeypatch.setattr(m,'root_ancestry',lambda *a:(1,2))
+    def local(argv,maximum):return who if argv[0]=='/usr/bin/tailscale' else route
+    monkeypatch.setattr(m,'local_metadata',local)
+    return who,route
+
+@pytest.mark.parametrize('damage',['node','key','name','address','tags','missingtags','missingkey','route','device','source','table','expired','unknown'])
+def test_wrong_peer_or_route_sends_zero_http_bytes(invented_peer,damage):
+    who,route=invented_peer
+    if damage=='node':who['Node']['ID']+=1
+    elif damage=='key':who['Node']['Key']='nodekey:'+'2'*64
+    elif damage=='name':who['Node']['Name']='foreign.ts.net.'
+    elif damage=='address':who['Node']['Addresses']=[]
+    elif damage=='tags':who['Node']['Tags']=['tag:foreign']
+    elif damage=='missingtags':del who['Node']['Tags']
+    elif damage=='missingkey':del who['Node']['Key']
+    elif damage=='route':route.append(dict(route[0]))
+    elif damage=='device':route[0]['dev']='eth0'
+    elif damage=='source':route[0]['prefsrc']='192.0.2.1'
+    elif damage=='table':route[0]['table']='main'
+    elif damage=='expired':who['Node']['Expired']=True
+    else:who.clear()
+    with patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('HTTP constructed')):
+        with pytest.raises((ValueError,TypeError)):m.version('INVENTED',contract())
+
+
+def test_fixed_peer_null_expiry_is_unknown_not_unexpired(invented_peer):
+    who,_=invented_peer
+    assert m.verify_tailnet(contract())['peer_expiry']=='UNKNOWN'
+    who['Node'].update(KeyExpiry=None,Expired=None)
+    assert m.verify_tailnet(contract())['peer_expiry']=='UNKNOWN'
+
+
+def test_peer_rechecked_after_http_before_metadata_accepted(invented_peer):
+    who,_=invented_peer
+    class Response:
+        status=200
+        def geturl(self):return m.API
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self,n):who['Node']['Key']='nodekey:'+'2'*64;return b'4.4.6\n'
+    class Opener:
+        def open(self,*a,**k):return Response()
+    with patch.object(m.urllib.request,'build_opener',lambda *a:Opener()):
+        with pytest.raises(ValueError,match='key moved'):m.version('INVENTED',contract())
+
+
+def test_peer_failure_before_oneuse_claim(invented_peer,tmp_path):
+    tmp_path.chmod(0o700);who,_=invented_peer;who['Node']['ID']+=1
+    with patch.object(m,'installed_gate',lambda c:None),patch.object(m.subprocess,'run',lambda *a,**k:type('R',(),{'returncode':0})()):
+        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,public_report(tmp_path),tmp_path)
+    assert not list(tmp_path.iterdir())
+
+@pytest.mark.parametrize('report',['--first-managed-install','relative-report','/nonexistent/report'])
+def test_malicious_report_no_gate_peer_or_http(report,tmp_path):
+    tmp_path.chmod(0o700)
+    with patch.object(m,'installed_gate',side_effect=AssertionError('gate inspected')),patch.object(m,'verify_tailnet',side_effect=AssertionError('peer ran')):
+        with pytest.raises((ValueError,OSError)):m.gate_and_claim(contract(),'a'*64,report,tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+def test_fifo_read_refuses_without_waiting(tmp_path):
+    fifo=tmp_path/'fifo';os.mkfifo(fifo,0o600)
+    before=time.monotonic()
+    with pytest.raises(ValueError):m.bounded_file(fifo,1024)
+    assert time.monotonic()-before<1
+
+
+def test_unknown_remote_mode_no_docker_exec():
+    c=contract();c['mode']='foreign'
+    with patch.object(subprocess,'run',side_effect=AssertionError('remote executed')):
+        with pytest.raises(SystemExit):exec(compile((ROOT/'remote.py').read_bytes(),'remote.py','exec'),{'C':c})
+
+
+def test_bound_http_socket_has_no_interface_fallback():
+    calls=[]
+    class Socket:
+        def settimeout(self,n):calls.append(('timeout',n))
+        def setsockopt(self,*a):calls.append(('device',a));raise PermissionError('INVENTED denied binding')
+        def bind(self,*a):pytest.fail('source bind after denied interface')
+        def connect(self,*a):pytest.fail('HTTP egress after denied interface')
+        def close(self):calls.append(('closed',))
+    with patch.object(m.socket,'socket',lambda *a:Socket()):
+        with pytest.raises(PermissionError):m.BoundConnection(m.TARGET,8000).connect()
+    assert calls[-1]==('closed',)
+
+
+def test_multiple_exact_tags_preserved_not_subset(invented_peer,monkeypatch):
+    who,_=invented_peer;expected={**m.PEER,'tags':['tag:a','tag:server']};monkeypatch.setattr(m,'PEER',expected);who['Node']['Tags']=['tag:a','tag:server']
+    assert m.verify_tailnet(contract())['encrypted_route_bound'] is True
+    who['Node']['Tags']=['tag:server']
+    with pytest.raises(ValueError):m.verify_tailnet(contract())
+
+
+def test_review_templates_pin_current_code_and_stay_unadmitted():
+    for name in ('discovery.contract.template.json','qualification.contract.template.json'):
+        c=json.loads((ROOT/name).read_bytes())
+        assert c['schema']=='oracle-platform-capability/v3' and c['issued_at']==0 and c['expires_at']==0
+        assert c['tailnet']['tags']==['tag:server'] and c['tailnet']['node_key_sha256']=='7f327508633eb57fdd8b054f2334e059e5d9c0354ea0932c5879865eaac0c039'
+        assert c['operator_sha256']==hashlib.sha256((ROOT/'inspect_capability.py').read_bytes()).hexdigest()
+        assert c['remote_sha256']==hashlib.sha256((ROOT/'remote.py').read_bytes()).hexdigest()
+
+
+def test_os_binary_mismatch_before_local_lookup(tmp_path,monkeypatch):
+    binary=tmp_path/'binary';binary.write_bytes(b'PUBLIC INVENTED OS BINARY');binary.chmod(0o700)
+    origin=tmp_path/'md5sums';origin.write_text(hashlib.md5(binary.read_bytes()).hexdigest()+'  '+str(binary)[1:]+'\n')
+    monkeypatch.setattr(m,'OS_FILES',{'tailscale':(str(binary),str(origin))});monkeypatch.setattr(m,'root_ancestry',lambda *a:(1,2))
+    with pytest.raises(ValueError,match='executable differs'):
+        m.os_identity('tailscale',{'binary_sha256':'0'*64,'package_manifest_sha256':hashlib.sha256(origin.read_bytes()).hexdigest()})
+
+
+def test_report_fifo_no_gate_and_no_wait(tmp_path):
+    tmp_path.chmod(0o700);fifo=tmp_path/'fifo';os.mkfifo(fifo,0o600)
+    with patch.object(m,'installed_gate',side_effect=AssertionError('gate ran')):
+        with pytest.raises(ValueError):m.gate_and_claim(contract(),'a'*64,fifo,tmp_path)
