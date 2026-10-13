@@ -121,6 +121,13 @@ class ReachabilityTests(unittest.TestCase):
         self.repo.commit()
         self.assert_fails()
 
+    def test_code_formatted_link_label_counts(self) -> None:
+        # #1698: [`file.md`](path) is a real link; only its label is code.
+        self.add_doc()
+        self.repo.write("README.md", "See [`finding.md`](docs/finding.md) for details.\n")
+        self.repo.commit()
+        self.assert_passes()
+
     def test_bare_url_and_anchor_do_not_count(self) -> None:
         self.add_doc()
         self.repo.write(
