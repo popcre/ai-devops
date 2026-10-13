@@ -1,3 +1,9 @@
+---
+issue: 1563
+status: OPEN
+owner: claude/reviewer-scoped-ci-plan
+---
+
 # Handoff: reviewer-scoped CI selection plan (not started)
 
 Owner issue: [#1563](https://github.com/popcre/ai-devops/issues/1563). Plan: [plan_reviewer-scoped-ci-selection.md](../plan_reviewer-scoped-ci-selection.md).

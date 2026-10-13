@@ -1,3 +1,9 @@
+---
+issue: 1662
+status: BLOCKED
+owner: claude/screenconnect-black-screen
+---
+
 # edge-dev3 ScreenConnect black screen (open)
 
 **Owner:** Claude session on edge-dev3, 2026-09-30. **Waiting on:** ConnectWise support case #03766621.
