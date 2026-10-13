@@ -42,6 +42,13 @@ if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then e
 git -C "$TMP/repo" reset -q HEAD .ai/other-artifact; rm -f "$TMP/repo/.ai/other-artifact"
 mkdir -p "$TMP/repo/.ai/reviewer-issues"; printf '{}\n' > "$TMP/repo/.ai/reviewer-issues/issue.json"; git -C "$TMP/repo" add -f .ai/reviewer-issues/issue.json
 bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null || { echo 'FAIL: published reviewer-issues package rejected'; exit 1; }
+# The generated-artifact exemption must not launder secret-bearing file types.
+printf 'x\n' > "$TMP/repo/.ai/reviewer-issues/secret.pem"; git -C "$TMP/repo" add -f .ai/reviewer-issues/secret.pem
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: reviewer-issues laundered a secret-bearing file type'; exit 1; fi
+git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/secret.pem; rm -f "$TMP/repo/.ai/reviewer-issues/secret.pem"
+printf 'x\n' > "$TMP/repo/.ai/reviewer-issues/.env.local"; git -C "$TMP/repo" add -f .ai/reviewer-issues/.env.local
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: reviewer-issues laundered a .env.* secret'; exit 1; fi
+git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/.env.local; rm -f "$TMP/repo/.ai/reviewer-issues/.env.local"
 git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
-echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass; the allowlist clears words without laundering identifiers'
+echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'
