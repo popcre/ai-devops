@@ -134,7 +134,10 @@ push_or_die(){
     GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG" || true
     GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
     delivered=1
-    for p in "$@"; do git -C "$HUB" cat-file -e "origin/main:$p" 2>/dev/null || delivered=0; done
+    # Exact content: the published blob must equal the one this run committed.
+    for p in "$@"; do
+      [ "$(git -C "$HUB" rev-parse -q --verify "origin/main:$p" 2>/dev/null)" = "$(git -C "$HUB" rev-parse "HEAD:$p")" ] || delivered=0
+    done
     [ "$delivered" = 1 ] && return 0
     if ! git -C "$HUB" rebase -q origin/main 2>>"$LOG"; then
       git -C "$HUB" rebase --abort 2>/dev/null || true
@@ -285,7 +288,20 @@ cmd_view(){
   else
     command -v op >/dev/null 2>&1 || die "1Password CLI (op) is required to read the archive key"
     keyfile="$work/key.pem"
-    op read "$KEY_REF" < /dev/null > "$keyfile" || die "could not read the archive key from 1Password"
+    # Serialize with the other 1Password readers (the reviewer key refreshes use
+    # this same lock folder).
+    local oplock="$HOME/.local/state/ai-devops/muse/credential.lock.d" deadline rc=0
+    mkdir -p "$(dirname "$oplock")"
+    deadline=$(( $(date +%s) + 120 ))
+    until mkdir "$oplock" 2>/dev/null; do
+      if [ -n "$(find "$oplock" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then rm -rf "$oplock"; continue; fi
+      [ "$(date +%s)" -lt "$deadline" ] || die "timed out waiting for the shared 1Password lock"
+      sleep 1
+    done
+    printf '%s %s ai-reviewer-logs-sync\n' "$$" "$(date +%s)" > "$oplock/owner"
+    op read "$KEY_REF" < /dev/null > "$keyfile" || rc=$?
+    rm -rf "$oplock"
+    [ "$rc" = 0 ] || die "could not read the archive key from 1Password"
   fi
   # Always rebuild from scratch, and only ever wipe a folder this command made.
   if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
