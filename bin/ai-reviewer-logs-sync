@@ -86,6 +86,13 @@ make_private(){
 CLEANUP=()
 cleanup(){ ((${#CLEANUP[@]})) && rm -rf -- "${CLEANUP[@]}"; return 0; }
 
+# Reclaim by atomic rename: of several processes racing to reclaim the same
+# dead lock, exactly one rename succeeds; the others simply retry mkdir.
+reclaim_lock(){
+  local grave="$1.reclaimed.$$.$RANDOM"
+  if mv -T -- "$1" "$grave" 2>/dev/null; then note "reclaimed the lock left by $2"; rm -rf -- "$grave"; fi
+}
+
 # Exclusive lock broken only when its recorded owner process is gone, never by
 # age, so a long sync or view is never overrun by the next hourly run.
 owner_lock(){
@@ -93,10 +100,10 @@ owner_lock(){
   until mkdir "$lock" 2>/dev/null; do
     owner="$(cat "$lock/pid" 2>/dev/null || true)"
     if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
-      note "breaking the lock of finished process $owner"; rm -rf "$lock"; continue
+      reclaim_lock "$lock" "finished process $owner"; continue
     fi
     if [ -z "$owner" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
-      rm -rf "$lock"; continue   # never published an owner: an aborted start
+      reclaim_lock "$lock" "an aborted start"; continue
     fi
     die "another sync or view is running (lock $lock, process ${owner:-unknown})"
   done
@@ -362,7 +369,10 @@ cmd_view(){
 case "${1:-sync}" in
   sync) cmd_sync ;;
   view) shift; cmd_view "$@" ;;
-  schedule) register_timer 60 "$TOOL_ROOT/bin/ai-reviewer-logs-sync" sync ;;
+  schedule)
+    # The shared scheduler single-quotes this path into the timer command.
+    case "$TOOL_ROOT" in *"'"*) die "toolkit path contains a quote; cannot schedule safely: $TOOL_ROOT" ;; esac
+    register_timer 60 "$TOOL_ROOT/bin/ai-reviewer-logs-sync" sync ;;
   unschedule) unregister_timer ;;
   -h|--help|help) sed -n '2,38p' "$_self" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command; see ai-reviewer-logs-sync --help" ;;

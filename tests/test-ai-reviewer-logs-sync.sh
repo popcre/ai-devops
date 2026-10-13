@@ -167,6 +167,10 @@ touch -d '2001-01-01' "$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock"
 check 'a live lock is never broken, however old' "! run sync 2>/dev/null && [ -d '$TMP/home/.ai-devops/reviewer-logs-sync/sync.lock' ]"
 kill "$live" 2>/dev/null; wait "$live" 2>/dev/null || true
 check 'a dead owner lock is reclaimed' "run sync 2>/dev/null"
+q="$TMP/it's"; mkdir -p "$q/bin" "$q/tools/lib"
+cp "$ROOT/bin/ai-reviewer-logs-sync" "$q/bin/"; cp "$ROOT/tools/lib/local-watch.sh" "$q/tools/lib/"
+HOME="$TMP/home" bash "$q/bin/ai-reviewer-logs-sync" schedule > "$TMP/out16" 2>&1 || true
+check 'scheduling from a quoted path is refused' "grep -q 'contains a quote' '$TMP/out16'"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
