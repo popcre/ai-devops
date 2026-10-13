@@ -99,9 +99,14 @@ foreach ($t in @('npm','node','op','git')) {
   }
 }
 $GitBash = $null
-foreach ($c in @("C:\Program Files\Git\bin\bash.exe", "C:\Program Files (x86)\Git\bin\bash.exe",
-                 (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe"))) {
-  if (Test-Path -LiteralPath $c) { $GitBash = $c; break }
+foreach ($c in @(
+    "C:\Program Files\Git\bin\bash.exe"
+    "C:\Program Files (x86)\Git\bin\bash.exe"
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe" })
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" })
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe" })
+  )) {
+  if ($c -and $c -notmatch '^[\\/]' -and (Test-Path -LiteralPath $c)) { $GitBash = $c; break }
 }
 if (-not $GitBash) { Die "Git Bash still not found after installing Git. Close and reopen this window, then re-run." }
 & $GitBash -lc "command -v jq" *>$null

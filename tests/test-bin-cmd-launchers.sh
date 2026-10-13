@@ -47,10 +47,16 @@ for ps1 in bin/install-machine-tools.ps1 bin/setup-machine.ps1 bin/install-ai-de
   if grep -E "Join-Path \\\$env:ProgramFiles ['\"]Git" "$REPO_ROOT/$ps1" | grep -vq 'if (\$env:ProgramFiles)'; then
     echo "FAIL: $ps1 calls Join-Path on an unguarded ProgramFiles root" >&2; fail=1
   fi
-  if ! grep -Fq "\$_ -notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1"; then
+  if ! grep -Fq -- "-notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1"; then
     echo "FAIL: $ps1 does not drop root-relative bash candidates" >&2; fail=1
   fi
 done
+
+# setup-opencode-glm.ps1 builds its candidate array eagerly; an empty
+# LOCALAPPDATA root must be guarded the same way (issue #1701 follow-up).
+if grep -E 'Join-Path \$env:LOCALAPPDATA "Programs' "$REPO_ROOT/bin/setup-opencode-glm.ps1" | grep -vq 'if (\$env:LOCALAPPDATA)'; then
+  echo "FAIL: bin/setup-opencode-glm.ps1 calls Join-Path on an unguarded LOCALAPPDATA root" >&2; fail=1
+fi
 
 if command -v pwsh >/dev/null 2>&1; then
   # Candidate walk is Windows-shaped: on the Linux lane those paths never

@@ -253,8 +253,14 @@ Ok "MCP commands installed from the repository lockfile"
 # Concrete machine topology and provider identifiers live in a separate private
 # repository. Sync it before any generated configuration consumes those values.
 Step "Protected machine configuration"
-$gitBash = "C:\Program Files\Git\bin\bash.exe"
-if (-not (Test-Path -LiteralPath $gitBash)) { throw "Git Bash is required at $gitBash." }
+$gitBash = @(
+  $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" }),
+  $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe" }),
+  $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe" }),
+  'C:\Program Files\Git\bin\bash.exe',
+  'C:\Program Files (x86)\Git\bin\bash.exe'
+) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $gitBash) { throw "Git Bash is required to synchronize protected machine configuration." }
 $privateConfigTool = Join-Path $RepoPath "bin\ai-private-config"
 if (-not (Test-Path -LiteralPath $privateConfigTool)) { throw "Missing protected-configuration helper: $privateConfigTool" }
 if (-not [string]::IsNullOrWhiteSpace($PrivateConfigRoot)) { $env:AI_PRIVATE_CONFIG_HOME = $PrivateConfigRoot }
