@@ -40,11 +40,11 @@ done
 # throws, and a bare "\Git\bin\bash.exe" string never exists. Every detection
 # site must guard the root and walk through the hard-coded fallback
 # (issue #1701 follow-up).
-for ps1 in bin/install-machine-tools.ps1 bin/setup-machine.ps1; do
+for ps1 in bin/install-machine-tools.ps1 bin/setup-machine.ps1 bin/install-ai-devops-windows.ps1 tests/test-windows-source-gate.ps1; do
   if ! grep -Fq "'C:\Program Files\Git\bin\bash.exe'" "$REPO_ROOT/$ps1"; then
     echo "FAIL: $ps1 lacks the hard-coded Git Bash candidate" >&2; fail=1
   fi
-  if grep -E 'Join-Path \$env:ProgramFiles "Git' "$REPO_ROOT/$ps1" | grep -vq 'if (\$env:ProgramFiles)'; then
+  if grep -E "Join-Path \\\$env:ProgramFiles ['\"]Git" "$REPO_ROOT/$ps1" | grep -vq 'if (\$env:ProgramFiles)'; then
     echo "FAIL: $ps1 calls Join-Path on an unguarded ProgramFiles root" >&2; fail=1
   fi
   if ! grep -Fq "\$_ -notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1"; then
@@ -53,8 +53,13 @@ for ps1 in bin/install-machine-tools.ps1 bin/setup-machine.ps1; do
 done
 
 if command -v pwsh >/dev/null 2>&1; then
-  if ! out="$(pwsh -NoProfile -Command '
-    $env:ProgramFiles = ""; $env:ProgramFilesx86 = ""
+  # Candidate walk is Windows-shaped: on the Linux lane those paths never
+  # exist, so an unguarded run would fail the required linux-offline check.
+  case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) windows_host=1 ;;
+  *) windows_host=0 ;;
+  esac
+  if [ "$windows_host" = 1 ] && ! out="$(pwsh -NoProfile -Command '
     Remove-Item Env:ProgramFiles* -ErrorAction SilentlyContinue
     $candidates = @(
       $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" }),
@@ -64,9 +69,6 @@ if command -v pwsh >/dev/null 2>&1; then
       "C:\Program Files (x86)\Git\bin\bash.exe"
     ) | Where-Object { $_ -and $_ -notmatch "^[\\/]" -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
     if (-not $candidates) { Write-Error "candidate walk found no Git Bash"; exit 1 }
-    if ($candidates -ne "C:\Program Files\Git\bin\bash.exe" -and -not (Test-Path -LiteralPath $candidates)) {
-      Write-Error "candidate walk returned a missing path: $candidates"; exit 1
-    }
     Write-Output "resolved=$candidates"
   ' 2>&1)"; then
     echo "FAIL: empty-ProgramFiles candidate walk failed:" >&2
