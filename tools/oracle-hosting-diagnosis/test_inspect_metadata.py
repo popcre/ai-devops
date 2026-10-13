@@ -120,4 +120,37 @@ class TestInspector(unittest.TestCase):
                 with self.assertRaises(ValueError):m.read_remote(C,p)
                 run.assert_not_called()
 
+    def test_verified_host_bytes_remain_pinned_after_input_swap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hosts=Path(directory)/'hosts';hosts.write_bytes(b'original-fixture-key')
+            contract=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
+            def fake_run(args,**kwargs):
+                hosts.write_bytes(b'changed-after-verification')
+                pinned=Path(next(x.split('=',1)[1] for x in args if x.startswith('UserKnownHostsFile=')))
+                self.assertNotEqual(pinned,hosts)
+                self.assertEqual(pinned.read_bytes(),b'original-fixture-key')
+                self.assertEqual(pinned.stat().st_mode&0o777,0o600)
+                kwargs['stdout'].write(json.dumps([row()]).encode())
+                return type('R',(),{'returncode':0})()
+            with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential'}),patch.object(m.subprocess,'run',fake_run):
+                m.read_remote(contract,hosts)
+
+    def test_input_links_pipes_and_oversize_refuse_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file=Path(directory)/'file';file.write_bytes(b'x'*9)
+            link=Path(directory)/'link';link.symlink_to(file)
+            pipe=Path(directory)/'pipe';os.mkfifo(pipe)
+            with self.assertRaises(ValueError):m.bounded_file(file,8)
+            with self.assertRaises(OSError):m.bounded_file(link,16)
+            with self.assertRaises(ValueError):m.bounded_file(pipe,16)
+
+    def test_unprotected_explicit_temp_parent_refuses_before_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hosts=Path(directory)/'hosts';hosts.write_bytes(b'fixture')
+            contract=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
+            parent=Path(directory)/'parent';parent.mkdir(mode=0o755)
+            with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential','TMPDIR':str(parent)}),patch.object(m.subprocess,'run') as run:
+                with self.assertRaises(ValueError):m.read_remote(contract,hosts)
+                run.assert_not_called()
+
 if __name__=='__main__':unittest.main()

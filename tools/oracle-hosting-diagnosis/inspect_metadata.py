@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import resource
 import sys
+import stat
 
 LIMIT = 65536
 APP = 'vhmcdkdk23dgvjvcvhyhcjzd'
@@ -35,8 +36,19 @@ def require(value, reason):
         raise ValueError(reason)
 
 
+def bounded_file(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        require(stat.S_ISREG(os.fstat(fd).st_mode), 'regular input file required')
+        value = os.read(fd, limit + 1)
+        require(len(value) <= limit, 'input file bound exceeded')
+        return value
+    finally:
+        os.close(fd)
+
+
 def load_contract(path, digest):
-    raw = Path(path).read_bytes()
+    raw = bounded_file(path, LIMIT)
     require(len(raw) <= LIMIT and hashlib.sha256(raw).hexdigest() == digest, 'contract digest differs')
     contract = json.loads(raw)
     require(set(contract) == {'schema', 'application', 'host', 'user', 'port', 'known_hosts_sha256', 'services', 'image', 'revision', 'application_label', 'project', 'vendor_images'}, 'contract fields differ')
@@ -92,12 +104,19 @@ def validate_rows(raw, contract):
 
 
 def read_remote(contract, known_hosts):
-    hosts=Path(known_hosts).read_bytes()
+    hosts=bounded_file(known_hosts,8192)
     require(len(hosts)<=8192 and hashlib.sha256(hosts).hexdigest()==contract['known_hosts_sha256'],'known-hosts changed')
     password=os.environ.pop('ORACLE_HETZ_READ_PASSWORD',None)
     require(type(password) is str and password and len(password.encode('utf-8')) <= LIMIT and '\x00' not in password and '\n' not in password and '\r' not in password,'protected credential missing')
-    with tempfile.TemporaryDirectory(prefix='oracle-metadata-',dir=os.environ.get('TMPDIR')) as directory:
+    parent=os.environ.get('TMPDIR')
+    if parent is not None:
+        parent_stat=os.stat(parent,follow_symlinks=False)
+        require(stat.S_ISDIR(parent_stat.st_mode) and parent_stat.st_uid==os.getuid() and stat.S_IMODE(parent_stat.st_mode)==0o700,'protected temp parent required')
+    with tempfile.TemporaryDirectory(prefix='oracle-metadata-',dir=parent) as directory:
         os.chmod(directory,0o700)
+        pinned_hosts=Path(directory)/'known-hosts'
+        fd=os.open(pinned_hosts,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
+        with os.fdopen(fd,'wb') as stream:stream.write(hosts)
         secret=Path(directory)/'password'
         fd=os.open(secret,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'w') as stream:stream.write(password)
@@ -111,7 +130,7 @@ def read_remote(contract, known_hosts):
         fd=os.open(helper,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o700)
         with os.fdopen(fd,'w') as stream:stream.write(helper_source)
         child={'PATH':'/usr/bin:/bin','LANG':'C','SSH_ASKPASS':str(helper),'SSH_ASKPASS_REQUIRE':'force','DISPLAY':'oracle-metadata:0'}
-        command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(Path(known_hosts).resolve()),'-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes','ai@hetz',remote_command(contract)]
+        command=['/usr/bin/ssh','-F','/dev/null','-T','-p','22','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(pinned_hosts),'-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','NumberOfPasswordPrompts=1','-o','IdentitiesOnly=yes','-o','PubkeyAuthentication=no','-o','PreferredAuthentications=password','-o','ProxyCommand=none','-o','ProxyJump=none','-o','ClearAllForwardings=yes','ai@hetz',remote_command(contract)]
         def bound_file():resource.setrlimit(resource.RLIMIT_FSIZE,(LIMIT,LIMIT))
         with tempfile.TemporaryFile() as output:
             result=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,timeout=55,env=child,start_new_session=True,preexec_fn=bound_file)

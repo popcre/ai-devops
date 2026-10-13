@@ -16,7 +16,9 @@ count. It never serializes whole inspect/Config/State/Labels, health logs,
 environment, credentials, mounted content or runtime ingress. It never uses
 Docker exec/start/restart/remove, writes remotely or runs a job/provider call.
 
-SSH requires pinned existing known-hosts, disables user/global SSH configuration,
+SSH bounds regular-file input through no-follow descriptors and copies the verified
+known-host bytes into protected temporary custody before authentication. Explicit
+TMPDIR must be an owned0700 directory. SSH requires pinned existing known-hosts, disables user/global SSH configuration,
 proxies, forwarding and public-key attempts, and makes one password attempt.
 Root injects only ORACLE_HETZ_READ_PASSWORD through protected 1Password execution.
 The operator removes that variable before any child, writes a temporary 0600
