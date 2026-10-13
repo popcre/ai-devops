@@ -139,13 +139,22 @@ prune_empty_sections() {
   mv -f "$tmp" "$index"
 }
 
-# MEMORY.md is a recall index written independently by every machine. During
-# migration, a pull must preserve local-only entries while accepting the hub's
-# entries. Start from the hub index, then append any local link lines it lacks.
-# This compatibility merge is intentionally conservative and can be removed
-# after every scheduled writer is running the private-hub protocol.
+# MEMORY.md is a recall index written independently by every machine. Entries
+# merge by TARGET FILE, not by line text: one index line per memory file. When
+# the hub already lists a target the hub's line wins, and a machine's differently
+# worded line for the same target is dropped — otherwise every stale wording
+# re-appears after a hub consolidation and the index re-grows until the health
+# gate blocks the sync. A line for a target the hub does not list is a genuinely
+# new memory and is still added. Lines whose target was tombstoned or no longer
+# exists are not re-added. After a merge the indexes converge.
+#
+# Usage: merge_memory_index LOCAL_INDEX HUB_INDEX OUTPUT [FORGET_FILE]
+#   LOCAL_INDEX  the other side's index (machine memory)
+#   HUB_INDEX    the hub index — its wording wins for every shared target
+#   OUTPUT       where the merged index is written
+#   FORGET_FILE  optional .forgotten tombstone list; listed targets are never re-added
 merge_memory_index() {
-  local local_index="$1" hub_index="$2" output="$3" tmp additions
+  local local_index="$1" hub_index="$2" output="$3" forget="${4:-}" tmp additions memdir
   [[ -f "$local_index" ]] || return 0
   if [[ ! -f "$hub_index" ]]; then
     cp -a "$local_index" "$output" || return 1
@@ -153,22 +162,34 @@ merge_memory_index() {
   fi
   tmp="$output.merge.$$"
   additions="$output.additions.$$"
+  # Bodies live next to OUTPUT, not next to LOCAL_INDEX — pull/push pass a temp
+  # copy of the other side's index. Checking the wrong directory silently dropped
+  # every genuinely new local memory line.
+  memdir="$(dirname "$output")"
   if ! cp -a "$hub_index" "$tmp"; then
     rm -f "$tmp" "$additions"
     return 1
   fi
-  # Repair a duplicate-storm index in place. Earlier versions of this merge
-  # appended a local entry that was already present, so several indexes grew to
-  # tens of thousands of identical link lines (shared-db reached 20 MB) and the
-  # health gate then blocked every outgoing sync. Keep the first occurrence of
-  # each entry line and drop later exact repeats; other lines are untouched.
+  # One entry line per target file, keeping the first (hub) wording. Earlier
+  # versions deduped only exact repeats, so two differently worded lines for the
+  # same memory survived a duplicate storm (shared-db reached 20 MB) and the
+  # health gate then blocked every outgoing sync. Non-entry lines are untouched.
   if ! awk '
-    { value = $0; sub(/\r$/, "", value) }
-    value ~ /^- \[.*\]\(.*\).*/ {
-      if (value in kept_entry) next
-      kept_entry[value] = 1
+    function entry_target(line,  s) {
+      if (line !~ /^- \[.*\]\(/) return ""
+      if (!match(line, /\]\([^)]+\)/)) return ""
+      s = substr(line, RSTART + 2, RLENGTH - 3)
+      return s
     }
-    { print }
+    {
+      value = $0; sub(/\r$/, "", value)
+      target = entry_target(value)
+      if (target != "") {
+        if (target in kept_target) next
+        kept_target[target] = 1
+      }
+      print
+    }
   ' "$tmp" > "$tmp.dedupe"; then
     rm -f "$tmp" "$tmp.dedupe" "$additions"
     return 1
@@ -177,24 +198,48 @@ merge_memory_index() {
     rm -f "$tmp" "$tmp.dedupe" "$additions"
     return 1
   fi
-  # Load the hub entries once, then test every local entry against that in-memory
-  # set. The former grep-per-line loop became quadratic on a duplicate-storm
-  # index (a 20 MB index required hours). Canonicalize CRLF on both sides for the
-  # comparison while preserving the hub file byte-for-byte.
-  if ! awk '
+  # Load hub targets once, then take only genuinely new local entries: a target
+  # the hub already lists keeps the hub wording; a tombstoned or missing target
+  # is never re-added. Canonicalize CRLF for the comparison while preserving the
+  # hub file byte-for-byte. Linear in index size (the former grep-per-line loop
+  # became quadratic on a duplicate-storm index).
+  if ! awk -v memdir="$memdir" -v forget_file="$forget" '
+    function entry_target(line,  s) {
+      if (line !~ /^- \[.*\]\(/) return ""
+      if (!match(line, /\]\([^)]+\)/)) return ""
+      s = substr(line, RSTART + 2, RLENGTH - 3)
+      return s
+    }
+    BEGIN {
+      if (forget_file != "") {
+        while ((getline fline < forget_file) > 0) {
+          split(fline, fparts, "\t")
+          if (fparts[1] != "" && fparts[1] !~ /^#/) tomb[fparts[1]] = 1
+        }
+        close(forget_file)
+      }
+    }
     FILENAME == ARGV[1] {
-      value = $0
-      sub(/\r$/, "", value)
-      if (value ~ /^- \[.*\]\(.*\).*/) seen[value] = 1
+      value = $0; sub(/\r$/, "", value)
+      target = entry_target(value)
+      if (target != "") seen[target] = 1
       next
     }
     {
-      value = $0
-      sub(/\r$/, "", value)
-    }
-    value ~ /^- \[.*\]\(.*\).*/ && !(value in seen) {
+      value = $0; sub(/\r$/, "", value)
+      target = entry_target(value)
+      if (target == "") next
+      if (target in seen) next
+      if (target in tomb) next
+      if (memdir != "") {
+        if ((getline probe < (memdir "/" target)) < 0) {
+          close(memdir "/" target)
+          next
+        }
+        close(memdir "/" target)
+      }
       print value
-      seen[value] = 1
+      seen[target] = 1
     }
   ' "$tmp" "$local_index" > "$additions"; then
     rm -f "$tmp" "$additions"
@@ -426,11 +471,12 @@ case "$DIRECTION" in
           | awk 'NF && !seen[$0]++' > "$dest/$FORGET_NAME.tmp" || true
         mv -f "$dest/$FORGET_NAME.tmp" "$dest/$FORGET_NAME"
       fi
-      # MEMORY.md is union-merged below. An older machine can add entries but
-      # cannot shrink the hub index; only an explicit tombstone removes one.
+      # MEMORY.md is union-merged below. An older machine can add genuinely new
+      # entries but cannot shrink the hub index or rewrite its wording; only an
+      # explicit tombstone removes one.
       copy_fact_union "$md" "$dest" "$(hostname)"
       if [[ -n "$hub_index" ]]; then
-        if ! merge_memory_index "$hub_index" "$md/MEMORY.md" "$dest/MEMORY.md"; then
+        if ! merge_memory_index "$md/MEMORY.md" "$hub_index" "$dest/MEMORY.md" "$dest/$FORGET_NAME"; then
           rm -f "$hub_index"
           echo "[FAIL] Could not merge the memory/$proj index into the hub." >&2
           exit 1
@@ -512,7 +558,7 @@ case "$DIRECTION" in
           fi
           copy_fact_union "$pd" "$md" "hub"
           if [[ -n "$local_index" ]]; then
-            if ! merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md"; then
+            if ! merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md" "$md/$FORGET_NAME"; then
               rm -f "$local_index"
               echo "[FAIL] Could not merge the memory/$proj index into $slug." >&2
               exit 1

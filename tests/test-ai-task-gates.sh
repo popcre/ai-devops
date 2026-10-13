@@ -111,6 +111,12 @@ tools/lib/task-gates.sh|reviewer-safety
 tools/application_workflow_target.py|reviewer-safety
 config/task-gates.json|reviewer-safety
 config/review-action-profiles.json|reviewer-safety
+config/muse-code/version|reviewer-safety
+config/muse-code/sha256|reviewer-safety
+config/muse-code/linux-x86_64/sha256|reviewer-safety
+config/opencode/version|reviewer-safety
+config/provider-cli-versions.json|reviewer-safety
+config/opencode/opencode.json|code
 tools/review_action_profile.py|reviewer-safety
 bin/ai-process-supervisor|reviewer-safety
 services/api/Dockerfile|deployment
@@ -121,6 +127,10 @@ TABLE
 mixed="$(printf 'docs/a.md\nbin/ai-review-lifecycle\ntools/x.sh\n' | ( cd "$TMP/class" && "$GATES" explain --json --paths-from - ))"
 check 'mixed change set takes the strongest class' "jq -e '.observed_class==\"reviewer-safety\"' <<<\"\$mixed\""
 check 'every changed path is still classified individually' "jq -e '.changes|length==3' <<<\"\$mixed\""
+# #1650: a Muse runtime re-pin release (pins + its test + docs) is reviewer-safety,
+# so the reviewed toolkit install route accepts it.
+repin="$(printf 'config/muse-code/version\nconfig/muse-code/sha256\ntests/test-ai-muse-code.sh\ndocs/muse-opencode.md\n' | ( cd "$TMP/class" && "$GATES" explain --json --paths-from - ))"
+check 'reviewer-binary re-pin release is reviewer-safety' "jq -e '.observed_class==\"reviewer-safety\"' <<<\"\$repin\""
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 

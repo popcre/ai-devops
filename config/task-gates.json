@@ -415,6 +415,18 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "config/muse-code/**",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/opencode/version",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/provider-cli-versions.json",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "tools/review_action_profile.py",
           "class": "reviewer-safety"
         },

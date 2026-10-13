@@ -19,6 +19,7 @@
 | 3. Chunk filter + calibration | done | 2026-10-12 | [chunk filter shadow run](tests/verification/jev/review-waste-chunk-shadow-20261012T180611Z.md); fixtures `tests/fixtures/jev/review-waste-chunk-labels.json` |
 | 4. Review-arc stitch + value Score | done | 2026-10-12 | [value score shadow run](tests/verification/jev/review-waste-value-shadow-20261012T180611Z.md); `tools/jev_review_waste_arc.py`; pipeline tests 17/0 |
 | 5. Aggregation + waste report | done | 2026-10-12 | [review waste report](tests/verification/jev/review-waste-report-20261012T180833Z.md) (bounded 12-file sample; slices n≥5 suppressed) |
+| 5b. Large sweep (250 files) | done | 2026-10-13 | [large review-waste sweep report](tests/verification/jev/review-waste-report-20261013T112939Z.md) |
 | 6. Decision brief for the owner | done | 2026-10-12 | Decision brief section of the waste report (options only; no policy change) |
 
 **Where a fresh session starts:** every step above is done — re-read this STATUS table for the evidence links before touching this lane, and do not re-derive or re-plan. The evidence cells name the artifacts a reader can open; a new change to this lane needs its own issue, not a reopened row.

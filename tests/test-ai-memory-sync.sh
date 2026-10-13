@@ -206,6 +206,7 @@ awk '{ printf "%s\r\n", $0 }' "$LARGE_HUB/memory/large/MEMORY.md" \
   > "$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
 printf '%s\r\n' '- [local-only](local-only.md) - local fact.' \
   >> "$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
+printf 'local only\n' > "$LARGE_CLAUDE/projects/C--repos-large/memory/local-only.md"
 if ! CLAUDE_HOME="$LARGE_CLAUDE" AI_MEMORY_HUB_ROOT="$LARGE_HUB" \
   timeout 15 bash "$ROOT/bin/ai-sync-memory" pull >/dev/null; then
   fail "large CRLF index merge did not complete within 15 seconds"
@@ -277,6 +278,8 @@ mkdir -p "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory" \
   "$ZERO_PULL_HUB/memory/zero-pull"
 printf '%s\n' '- [local-survives](local-survives.md) - local fact.' \
   > "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory/MEMORY.md"
+printf 'local survives\n' \
+  > "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory/local-survives.md"
 : > "$ZERO_PULL_HUB/memory/zero-pull/MEMORY.md"
 CLAUDE_HOME="$ZERO_PULL_CLAUDE" AI_MEMORY_HUB_ROOT="$ZERO_PULL_HUB" \
   bash "$ROOT/bin/ai-sync-memory" pull >/dev/null
@@ -363,6 +366,104 @@ lock_status=$?
 set -e
 rmdir "$HUB_A.lock"
 [[ "$lock_status" -ne 0 ]] || fail "duplicate lock returned success"
+
+# Index entries merge by TARGET FILE, not by line text. After a hub
+# consolidation a machine still holding old wordings of the same memory files
+# must drop those lines instead of re-adding every entry and re-growing the
+# index until the health gate blocks the sync.
+TARGET_CLAUDE="$TMP/claude-index-target"
+TARGET_HUB="$TMP/hub-index-target"
+mkdir -p "$TARGET_CLAUDE/projects/C--repos-target/memory" \
+  "$TARGET_HUB/memory/target"
+cat > "$TARGET_HUB/memory/target/MEMORY.md" <<'EOF'
+# Memory index - target
+
+- [alpha](alpha.md) - consolidated alpha wording.
+- [beta](beta.md) - consolidated beta wording.
+EOF
+printf 'alpha\n' > "$TARGET_HUB/memory/target/alpha.md"
+printf 'beta\n' > "$TARGET_HUB/memory/target/beta.md"
+cat > "$TARGET_CLAUDE/projects/C--repos-target/memory/MEMORY.md" <<'EOF'
+# Memory index - target
+
+- [alpha-old](alpha.md) - stale machine wording for alpha.
+- [beta-old](beta.md) - stale machine wording for beta.
+- [gamma](gamma.md) - genuinely new local memory.
+EOF
+printf 'gamma\n' > "$TARGET_CLAUDE/projects/C--repos-target/memory/gamma.md"
+
+target_pull() {
+  CLAUDE_HOME="$TARGET_CLAUDE" AI_MEMORY_HUB_ROOT="$TARGET_HUB" \
+    bash "$ROOT/bin/ai-sync-memory" pull >/dev/null
+}
+target_push() {
+  CLAUDE_HOME="$TARGET_CLAUDE" AI_MEMORY_HUB_ROOT="$TARGET_HUB" \
+    bash "$ROOT/bin/ai-sync-memory" push >/dev/null
+}
+
+# (1) Stale reworded local lines are dropped; the hub wording wins.
+target_pull
+TINDEX="$TARGET_CLAUDE/projects/C--repos-target/memory/MEMORY.md"
+grep -Fq 'consolidated alpha wording' "$TINDEX" ||
+  fail "target merge dropped the hub's alpha wording"
+if grep -Fq 'stale machine wording for alpha' "$TINDEX"; then
+  fail "target merge re-added a stale reworded alpha line"
+fi
+if grep -Fq 'stale machine wording for beta' "$TINDEX"; then
+  fail "target merge re-added a stale reworded beta line"
+fi
+[[ "$(grep -Fc '(alpha.md)' "$TINDEX")" -eq 1 ]] ||
+  fail "target merge left more than one alpha.md index line"
+[[ "$(grep -Fc '(beta.md)' "$TINDEX")" -eq 1 ]] ||
+  fail "target merge left more than one beta.md index line"
+
+# (2) A new local memory's line is kept.
+grep -Fq '(gamma.md)' "$TINDEX" ||
+  fail "target merge dropped a genuinely new local memory line"
+grep -Fq 'genuinely new local memory' "$TINDEX" ||
+  fail "target merge rewrote a new local memory's index wording"
+
+# Push publishes gamma without reviving stale wordings or rewriting the hub.
+target_push
+HINDEX="$TARGET_HUB/memory/target/MEMORY.md"
+grep -Fq '(gamma.md)' "$HINDEX" ||
+  fail "target merge did not publish a new local memory to the hub"
+grep -Fq 'consolidated alpha wording' "$HINDEX" ||
+  fail "push overwrote the hub's consolidated alpha wording"
+if grep -Fq 'stale machine wording' "$HINDEX"; then
+  fail "push published a stale reworded line to the hub"
+fi
+
+# (3) A tombstoned target is not revived.
+printf 'delta\n' > "$TARGET_HUB/memory/target/delta.md"
+printf '%s\n' '- [delta](delta.md) - delta to be forgotten.' >> "$HINDEX"
+printf '%s\n' '- [delta-old](delta.md) - stale delta wording.' >> "$TINDEX"
+printf 'delta stale\n' > "$TARGET_CLAUDE/projects/C--repos-target/memory/delta.md"
+printf 'delta.md\t2026-10-12\ttest tombstone\n' \
+  > "$TARGET_HUB/memory/target/.forgotten"
+rm -f "$TARGET_HUB/memory/target/delta.md"
+awk 'index($0, "(delta.md)") == 0' "$HINDEX" > "$HINDEX.tomb" &&
+  mv -f "$HINDEX.tomb" "$HINDEX"
+target_pull
+if grep -Fq '(delta.md)' "$TINDEX"; then
+  fail "pull revived a tombstoned target line"
+fi
+target_push
+if grep -Fq '(delta.md)' "$HINDEX"; then
+  fail "push revived a tombstoned target line"
+fi
+[[ ! -e "$TARGET_HUB/memory/target/delta.md" ]] ||
+  fail "push resurrected a tombstoned memory file"
+
+# (4) A second sync converges with no change.
+cp -a "$TINDEX" "$TMP/target-machine.before"
+cp -a "$HINDEX" "$TMP/target-hub.before"
+target_pull
+target_push
+cmp -s "$TMP/target-machine.before" "$TINDEX" ||
+  fail "second sync changed the machine index after convergence"
+cmp -s "$TMP/target-hub.before" "$HINDEX" ||
+  fail "second sync changed the hub index after convergence"
 
 # #1646 L2: the unauthenticated public-read probe must not be fooled by a
 # url.*.insteadOf rewrite. Fixture global gitconfig rewrites the probe URL to

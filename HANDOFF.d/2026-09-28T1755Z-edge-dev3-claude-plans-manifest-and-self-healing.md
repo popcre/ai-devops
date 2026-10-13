@@ -1,3 +1,9 @@
+---
+issue: 1001
+status: OPEN
+owner: claude/plans-manifest-and-self-healing
+---
+
 # Handoff: two open plans (manifest split, self-healing locks/settings)
 
 Written 2026-09-28 1:55 PM EDT by Claude on edge-dev3. No implementation started.
