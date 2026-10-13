@@ -68,7 +68,7 @@ Verified on `origin/main` (tip was `ecb4ff76` at closeout time).
 - **`bash` on PATH is WSL / PowerShell steals pipes.** `| tail` in a PowerShell-wrapped `& bash -lc '...'` runs `tail` on Windows and fails. Quote carefully or write a script file.
 - **Git Bash MSYS path conversion breaks remote Windows commands.** `/tmp/foo` becomes `C:\tmp\foo` in `ssh`/`scp` arguments. Use `MSYS_NO_PATHCONV=1` or `C:/Users/...` paths explicitly when talking to Windows hosts.
 - **`ssh ahazan@host "bash script"` failed with `'bash' is not recognized`** on edge-alien because that host is **Windows**, not Linux. Detect with `hostname`/`ver` first. `python` works there.
-- **SSH to t16 and 916 times out** even from edge-alien (same Tailscale tailnet, ping 0). BatchMode, key `~/.ssh/916-alien`. Not a DNS problem (`t16` → 100.96.221.71, `916` → 100.110.219.31). Hostname `916-alien` does not resolve; Tailscale calls it `916`.
+- **SSH to t16 and 916 times out** even from edge-alien (same Tailscale tailnet, ping 0). BatchMode, key `~/.ssh/916-alien`. Not a DNS problem: both names resolve on the tailnet. Hostname `916-alien` does not resolve; Tailscale calls that host `916`.
 - **`bin/ai-gh` throttle lock hangs** under concurrent sessions (`sleep 0.25` killed / `mv` reclaim terminated). Retry with a longer timeout, `AI_GH_MIN_SPACING_SECONDS=0`, sometimes `AI_GH_NO_WAIT=1`. Never bare `gh` for routine calls.
 - **`ai-task-gates` with `--base origin/main` is wrong** when origin/main has moved past your merge-base: it diffs main-tip→HEAD and invents other sessions' files into your change set. Use `--base $(git merge-base HEAD origin/main)`.
 - **`ai-pr-wait` on a prose PR** refuses via task-gates and prints a hint to use `--admin`. Standing rules forbid `--admin`. Let auto-merge / merge queue land docs-only PRs instead.
@@ -117,9 +117,9 @@ You'll know the Railway remainder is done when #1663 is closed with live-clean e
 - Machine: `edge-dev`, Windows 11. Git Bash at `C:\Program Files\Git\bin\bash.exe`.
 - GitHub CLI: OAuth `u2giants` (classic `repo`) worked for merge queue this session.
 - Fleet SSH key for alien/runner hosts: `~/.ssh/916-alien` (`IdentitiesOnly=yes`, user `ahazan`).
-- Reachable this session: `edge-alien` (Windows, Tailscale `100.112.207.98`) — Railway already clean.
-- Unreachable over SSH: `t16` (`100.96.221.71`), `916` (`100.110.219.31`) — ping yes, TCP/22 no.
-- Networking-only (do not install toolkit): `edge-alien`, `edge-runn-envy` (`100.104.201.6`), `edge-runn-xps` (`100.79.241.74`).
+- Reachable this session: `edge-alien` (Windows, on the Tailscale tailnet) — Railway already clean.
+- Unreachable over SSH: `t16`, `916` — ping yes, TCP/22 no. Resolve both on the tailnet first; addresses stay in the private machine atlas.
+- Networking-only (do not install toolkit): `edge-alien`, `edge-runn-envy`, `edge-runn-xps`.
 - Secrets live in 1Password vault `vibe_coding` only — never by value here.
 
 ## 9. Open questions and risks
