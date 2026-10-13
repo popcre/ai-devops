@@ -152,7 +152,7 @@ arc mentions config/security/tests). Mild lift only:
 ### Combined rule that actually separates the 8%
 
 Waste cluster (**skip candidates**):
-caller=codex **AND** mode in (inal-check, diff-review, plan-review)
+caller=codex **AND** mode in (final-check, diff-review, plan-review)
 → in this history that is hundreds of reviews at ~2–3% high rate.
 
 Keep cluster (**mandatory review**):
