@@ -103,6 +103,66 @@ Safety-gate / `reviewer-safety` traffic stays mandatory regardless (assurance).
 
 ---
 
+## 4.5 Stronger separators than repo: review mode and caller
+
+Repo is a good first cut, but two other indicators separate even harder
+(discretionary decided, n=495; baseline high rate 8%):
+
+### By review *mode* (what kind of review was asked for)
+
+| Mode (from review arc) | n | High rate | None rate | Reading |
+|---|---:|---:|---:|---|
+| **plan-review** | 74 | **1%** | 99% | Almost pure waste |
+| **diff-review** | 117 | **2%** | 97% | Almost pure waste |
+| **final-check** | 295 | **3%** | 97% | Almost pure waste |
+| security-review | 38 | 8% | 92% | Baseline |
+| implementation | 225 | **10%** | 89% | Slightly above |
+| investigation / diagnosis | 312 | 8% | 92% | Baseline |
+| (no mode named) | 25 | **24%** | 72% | Small n; often real work reviews |
+
+**Type of review is a first-class signal.** Final-check / diff-review /
+plan-review traffic is where the waste lives.
+
+### By *caller* (which agent sent the work to review)
+
+| Caller | n | High rate | None rate | Reading |
+|---|---:|---:|---:|---|
+| **codex** | 387 | **3%** | 97% | Dominates volume; almost no yield |
+| claude | 47 | **28%** | 72% | Strong |
+| unknown | 36 | 11% | 89% | Mixed |
+| mimo | 15 | **40%** | 60% | Strong (small n) |
+| zcode | 9 | **56%** | 44% | Strong (small n) |
+
+**Who sent it matters as much as what repo it is.** Codex-initiated reviews
+are 3% yield; Claude/MiMo/ZCode-initiated reviews are 28–56% yield.
+
+### Change-type tags (weaker alone)
+
+Keywords in the review arc do **not** separate well on their own (almost every
+arc mentions config/security/tests). Mild lift only:
+
+| Tag | n | High rate |
+|---|---:|---:|
+| data load / scrape | 31 | **23%** |
+| schema / migration | 208 | 12% |
+| CI workflow | 190 | 12% |
+| windows / install | 355 | 5% |
+| docs | 462 | 7% |
+
+### Combined rule that actually separates the 8%
+
+Waste cluster (**skip candidates**):
+caller=codex **AND** mode in (inal-check, diff-review, plan-review)
+→ in this history that is hundreds of reviews at ~2–3% high rate.
+
+Keep cluster (**mandatory review**):
+caller in (claude, mimo, zcode) **OR** shared-db + non-Codex reviewer
+**OR** mode is implementation/investigation on data-load / schema work
+→ 20–56% high rates.
+
+That is a **review-type + caller** rule, not a repo rule. Repo was the first
+cut; this is the sharper one.
+
 ## 5. How good or bad is each reviewer?
 
 Discretionary decided only. **High** = named a real problem (`highest`+`medium`).
