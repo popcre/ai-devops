@@ -5,9 +5,9 @@ owner: mimo/1585-housekeeping-closeout-handoff
 ---
 # Housekeeping leftover triage after parent #1585
 
-One-line reason for `issue: none`: parent #1585 is already closed; this file
-carries only the leftover inventory that the plan forbids auto-deleting, so
-there is no further issue to prove "done" — Albert chooses the next triage.
+Retargeted to #1661 (housekeeping leftover triage tracking issue). Parent
+#1585 is closed; this file carries the leftover inventory and the triage
+decisions that #1661 tracks.
 
 ## 0. ⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE
 
@@ -16,10 +16,11 @@ there is no further issue to prove "done" — Albert chooses the next triage.
    deleting without a human ruling. Recommendation: start with the **9
    unattributed handoffs** (authors can add a contract block; no deletion
    needed). Blocks nothing today; it is housekeeping backlog quality.
-2. **Do the 15 `issue: none` handoffs keep living, or should their work get
-   real GitHub issues?** Recommendation: open one issue per still-relevant
-   workstream and retire the rest under the successor rule. Wrong guess is
-   recoverable (git history keeps the text).
+2. ~~Do the 15 `issue: none` handoffs keep living, or should their work get
+   real GitHub issues?~~ DECIDED and executed in batch 2 (2026-10-13, under
+   this issue #1661): open one issue per still-relevant workstream and retire
+   the rest under the successor rule (with AI reviewer APPROVE before any
+   delete). Wrong guess is recoverable (git history keeps the text).
 3. **Are the 16 retained-record plans intentional forever?** Recommendation:
    yes — leave them; the plan explicitly rejects sweeping all-done plans
    (Finding 9 / R4).
@@ -121,7 +122,7 @@ Not started: grouping those leftovers into owner-choosable triage batches.
    on GitHub, add `issue:` / `status:` / `owner:` if the author is known, or
    open a new issue and point `issue:` at it. Verification: `bash
    bin/ai-housekeeping --details` reports 0 UNATTRIBUTED.
-3. If `issue: none`: open one issue per still-alive workstream, retarget the
+3. If `issue: none`: (batch 2 done — retargeted or planned for retirement) open one issue per still-alive workstream, retarget the
    handoff, then apply the successor rule's three conditions before any
    deletion. Verification: UNPROVABLE count drops only when files are retired
    with those three proofs.

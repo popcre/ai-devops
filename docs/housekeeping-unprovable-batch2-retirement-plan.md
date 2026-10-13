@@ -6,22 +6,38 @@ real issue for each still-relevant workstream; retire the rest under the
 successor rule, **only with an AI reviewer APPROVE covering these exact files**.
 
 Universe: the 18 UNPROVABLE rows from `bin/ai-housekeeping --details` on
-origin/main `b7c8ec80` (before: 18 UNPROVABLE, 0 UNATTRIBUTED).
+origin/main `b7c8ec80` (before: 18 UNPROVABLE, 0 UNATTRIBUTED). The PR base
+moved during the session (`1cc10b53`); UNPROVABLE is still 18 at both refs.
 
 ---
 
 ## A. Retargeted (file stays; `issue:` becomes a bare number)
 
+Issues created in this batch (verified live before the retarget commit):
+
+| Issue | Title | URL |
+|---|---|---|
+| #1676 | Finish DeepSeek/Grok/GLM reviewer repair-plan landing verifications | https://github.com/popcre/ai-devops/issues/1676 |
+| #1677 | Cache-hit token reporting for DeepSeek and Muse wrappers | https://github.com/popcre/ai-devops/issues/1677 |
+| #1678 | Reviewer incident repair: 2026-09-07 residuals and 2026-10-05 open incidents | https://github.com/popcre/ai-devops/issues/1678 |
+| #1679 | Accept pop-ai-watchers statuses/PR write on both installations | https://github.com/popcre/ai-devops/issues/1679 |
+| #1680 | Resume actions-minutes-reduction plan (parent #1464 closed, STATUS still open) | https://github.com/popcre/ai-devops/issues/1680 |
+| #1681 | Disable broad OpenSSH-Server-In-TCP firewall rule on edge-dev | https://github.com/popcre/ai-devops/issues/1681 |
+
+Existing issues reused: [#961](https://github.com/popcre/ai-devops/issues/961)
+(WarpBuild Azure BYOC), [#1661](https://github.com/popcre/ai-devops/issues/1661)
+(housekeeping leftover triage).
+
 | File | New `issue:` | Why that issue |
 |---|---|---|
-| `2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` | 1676 (new) | 3 of 9 linked repair plans still have open STATUS rows (DeepSeek step 6, Grok step 7, GLM 4–5) |
-| `2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md` | 1677 (new) | `plan_reviewer-cache-efficiency.md` steps 2.1–2.3, 4.1 still open |
-| `2026-09-07T1800Z-edge-dev-codex-reviewer-residual-failures.md` | 1678 (new) | named local incident IDs still partially-resolved/OPEN |
-| `2026-09-28T1125Z-edge-dev3-codex-warpbuild-azure-byoc.md` | 961 (existing) | #961 already owns WarpBuild Azure BYOC setup/canary/migration |
-| `2026-09-28T2218Z-edge-dev-mimo-pop-ai-watchers-write-permissions.md` | 1679 (new) | installations still on old read-only grant; handoff itself asked for this issue |
-| `2026-10-05T2205Z-edge-dev-mimo-reviewer-issues-after-watchdog.md` | 1678 (new) | same open `.ai/reviewer-issues/` repair need as the 2026-09-07 residuals |
-| `2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md` | 1680 (new) | parent #1464 closed 2026-10-08 while plan STATUS is still all open |
-| `2026-10-13T1126Z-edge-dev-mimo-housekeeping-leftover-triage.md` | 1661 (existing) | #1661 is the housekeeping leftover-triage tracking issue for this work |
+| `2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` | 1676 | 3 of 9 linked repair plans still have open STATUS rows (DeepSeek step 6, Grok step 7, GLM 4–5) |
+| `2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md` | 1677 | `plan_reviewer-cache-efficiency.md` steps 2.1–2.3, 4.1 still open |
+| `2026-09-07T1800Z-edge-dev-codex-reviewer-residual-failures.md` | 1678 | named local incident IDs still partially-resolved/OPEN |
+| `2026-09-28T1125Z-edge-dev3-codex-warpbuild-azure-byoc.md` | 961 | #961 already owns WarpBuild Azure BYOC setup/canary/migration |
+| `2026-09-28T2218Z-edge-dev-mimo-pop-ai-watchers-write-permissions.md` | 1679 | installations still on old read-only grant; handoff itself asked for this issue |
+| `2026-10-05T2205Z-edge-dev-mimo-reviewer-issues-after-watchdog.md` | 1678 | same open `.ai/reviewer-issues/` repair need as the 2026-09-07 residuals (deliberate shared tracker; both flip to SUCCESSOR REVIEW when #1678 closes) |
+| `2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md` | 1680 | parent #1464 closed 2026-10-08 while plan STATUS is still all open |
+| `2026-10-13T1126Z-edge-dev-mimo-housekeeping-leftover-triage.md` | 1661 | #1661 is the housekeeping leftover-triage tracking issue for this work |
 
 None of these are deleted in this change.
 
@@ -152,8 +168,9 @@ Successor rule (must all be true; checked here for every file):
 
 ## D. Expected housekeeping delta
 
-Before (origin/main `b7c8ec80`): 70 OPEN, 0 SUCCESSOR REVIEW, 18 UNPROVABLE,
-0 UNATTRIBUTED.
+Before (origin/main `b7c8ec80`, first inventory): 70 OPEN, 0 SUCCESSOR REVIEW,
+18 UNPROVABLE, 0 UNATTRIBUTED. On the later PR base `1cc10b53` the OPEN count
+is 69 (one unrelated handoff removed upstream); UNPROVABLE is still 18.
 
 After (if all B1–B10 approved): 8 UNPROVABLE files retargeted and stay as OPEN
 (bare number + open issue) → 78 OPEN; 10 files deleted → 0 UNPROVABLE;
