@@ -1,6 +1,6 @@
 ---
 name: qwen-code
-description: Delegate repository reviews, analysis, debates, and explicitly authorized implementation to Qwen Code through the persistent `ai-qwen` wrapper. Use when the user says "ask Qwen," "use Qwen Code," "run this by Qwen," requests Qwen 3.8, wants a Qwen second opinion, asks to resume a Qwen session, or delegates coding work to Qwen.
+description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not maintained; callable by name. Delegate repository reviews, analysis, debates, and explicitly authorized implementation to Qwen Code through the persistent `ai-qwen` wrapper. Use when the user says \"ask Qwen,\" \"use Qwen Code,\" \"run this by Qwen,\" requests Qwen 3.8, wants a Qwen second opinion, asks to resume a Qwen session, or delegates coding work to Qwen."
 ---
 
 # Qwen Code

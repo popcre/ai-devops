@@ -9,15 +9,15 @@ Written 2026-10-13 by Claude chat `81cdf50d-ed3a-40d2-a846-988d73f7ae7e` on edge
 
 | Step | State | Evidence |
 |---|---|---|
-| 0. Inventory every place that requires or routes review | ⬜ open | — |
-| 1. shared-db allocator: quarantine qwen + gemini | ⬜ open | — |
-| 2. ai-devops registry mirror + drift check | ⬜ open | — |
-| 3. Review-required policy: discretionary review only for shared-db | ⬜ open | — |
-| 4. Freeze non-pool reviewer tooling (CI suites, preflight, doctor) | ⬜ open | — |
-| 5. Docs and skills updated in the same change | ⬜ open | — |
+| 0. Inventory every place that requires or routes review | ✅ done 2026-10-13 | Inventory on issue #1714 (GATED stays; DISCRETIONARY/MEMBERSHIP/FREEZE surfaces listed) |
+| 1. shared-db allocator: quarantine qwen + gemini | ✅ done 2026-10-13 | popcre/shared-db PR [#4272](https://github.com/popcre/shared-db/pull/4272) — `QUARANTINED_REVIEWERS=['grok-4.6','qwen-3.8-max','gemini-3.8-flash-high']`; `scripts/manage-migration-author-lanes.test.mjs` 849/849 |
+| 2. ai-devops registry mirror + drift check | 🟡 code landed | `config/reviewer-registry.json` gemini+qwen absent; drift green after #4272 merges |
+| 3. Review-required policy: discretionary review only for shared-db | 🟡 code landed | `AGENTS.md`, `docs/reviewer-rotation-rules.md` 13–14, `docs/model-setup.md`, `docs/task-router.md` |
+| 4. Freeze non-pool reviewer tooling (CI suites, preflight, doctor) | 🟡 code landed | `config/ci-suite-manifest.json` suspended_* adds grok/qwen/gemini/claude-review/codex-review suites |
+| 5. Docs and skills updated in the same change | 🟡 code landed | rotation rules, model-setup, AGENTS.md, task-router, qwen/grok/gemini/codex-reviewer skills marked FROZEN 2026-10-13 |
 | 6. Live proof | ⬜ open | — |
 
-**Start at Step 0.** Nothing is implemented yet.
+**Start at Step 6** (live proof) once this PR merges and shared-db #4272 is on main.
 
 ---
 

@@ -1,6 +1,8 @@
 ---
 name: ai-reviewer
 description: >-
+  FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not maintained as a
+  rotation reviewer; callable by name and still the approval-gate wrapper.
   Run a read-only Codex second-opinion review (plan, diff, security, visual, or
   final-check) on the current git repo and save the result under .ai/reviews/.
   Use when the user wants Codex to independently review work without changing any

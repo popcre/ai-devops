@@ -8,15 +8,15 @@
     },
     "codex": {
       "registry_state": "registered",
-      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the former Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it; owner confirmed on 2026-09-22 that the rotation pool is Muse, Grok, Qwen, Gemini."
+      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the former Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it. Owner 2026-10-13 (popcre/ai-devops#1714) set the rotation pool to Muse, DeepSeek, GLM, StepFun."
     },
     "deepseek": {
       "registry_state": "registered",
       "reason": "Rotation reviewer (deepseek-flash = DeepSeek V4.1 Flash). Re-entered the pool by owner instruction on 2026-09-23 (\"put DeepSeek back on the reviewer list\") after PR #730 gave it read-only repository tools, a recorded live preflight qualification, and a live formal review of a merged commit that returned a well-formed VERDICT line with the head SHA; see the 2026-09-23 deepseek-requalification record under reviewer-reliability verification. Mirrors the shared-db allocator row deepseek-v4.1-flash (shared-db #3469); the old deepseek-chat name stays retired there."
     },
     "gemini": {
-      "registry_state": "registered",
-      "reason": "Rotation reviewer (gemini-3.8-flash-high). Re-entered the allocating registry on 2026-09-06 after a recorded live safety qualification and a live review of merged commit 99fbefcb that returned a well-formed VERDICT APPROVE line carrying the head SHA above 3,137 characters of real analysis. The earlier bare PASS with an empty report is now caught for every provider by the lifecycle report floor, not trusted."
+      "registry_state": "absent",
+      "reason": "Quarantined out of the maintained rotation pool by owner instruction on 2026-10-13 (popcre/ai-devops#1714: \"only review shared-db work; rotation pool = Muse, DeepSeek, GLM, StepFun\"). Mirrors popcre/shared-db adding gemini-3.8-flash-high to QUARANTINED_REVIEWERS beside grok-4.6. The ai-gemini wrapper stays installed and callable by name. Re-entry requires owner instruction plus a reviewed registry change."
     },
     "glm": {
       "registry_state": "registered",
@@ -35,8 +35,8 @@
       "reason": "Rotation reviewer (Muse Spark 1.3 Contributor)."
     },
     "qwen": {
-      "registry_state": "registered",
-      "reason": "Rotation reviewer on qwen3.8-max using the Alibaba Model Studio Token Plan subscription. Live readiness is determined by current reviewer preflight."
+      "registry_state": "absent",
+      "reason": "Quarantined out of the maintained rotation pool by owner instruction on 2026-10-13 (popcre/ai-devops#1714: \"only review shared-db work; rotation pool = Muse, DeepSeek, GLM, StepFun\"). Mirrors popcre/shared-db adding qwen-3.8-max to QUARANTINED_REVIEWERS beside grok-4.6. The ai-qwen wrapper stays installed and callable by name. Re-entry requires owner instruction plus a reviewed registry change."
     },
     "stepfun": {
       "registry_state": "registered",

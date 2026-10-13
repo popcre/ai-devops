@@ -1,6 +1,6 @@
 ---
 name: gemini-code-delegation
-description: Use Gemini 3.8 Flash through the ai-gemini wrapper for an independent repository review that may run commands, builds and tests and edit files only in a disposable remote-less copy (edits are discarded). Trigger when the user says ask Gemini, use Gemini, Gemini review, run this by Gemini, or Gemini 3.8 Flash.
+description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not maintained; callable by name. Use Gemini 3.8 Flash through the ai-gemini wrapper for an independent repository review that may run commands, builds and tests and edit files only in a disposable remote-less copy (edits are discarded). Trigger when the user says ask Gemini, use Gemini, Gemini review, run this by Gemini, or Gemini 3.8 Flash."
 ---
 
 # Gemini code review

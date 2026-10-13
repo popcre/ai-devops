@@ -1,6 +1,6 @@
 ---
 name: grok-cli
-description: Use xAI Grok Build through ai-grok-review for repository analysis, review (runs code and tests in a disposable snapshot), debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
+description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not maintained; callable by name. Use xAI Grok Build through ai-grok-review for repository analysis, review (runs code and tests in a disposable snapshot), debate, continuation, or explicit isolated implementation. Use for \"ask Grok\", \"run this by Grok\", \"Grok CLI\", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate."
 ---
 
 # Grok CLI
