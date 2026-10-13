@@ -145,7 +145,8 @@ utc_ms(){
   local t="${EPOCHREALTIME:-}"; t="${t//[!0-9]/}"
   if [ "${#t}" -eq 16 ]; then echo $(( 10#$t / 1000 )); return; fi
   t="$(date -u +%s%N 2>/dev/null || true)"
-  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); fi
+  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); return; fi
+  echo $(( $(date -u +%s) * 1000 ))  # seconds-resolution last resort, never empty
 }
 
 bounded_gh() {

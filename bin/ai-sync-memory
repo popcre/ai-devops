@@ -44,6 +44,12 @@ else
 fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve Windows untrusted mount points (see bin/ai-winpath). Interactive
+# Claude can follow ~/.claude/projects when it is a junction; SSH sessions
+# cannot. Physical path is the same memory either way.
+WINPATH="${AI_MEMORY_WINPATH:-$TOOL_ROOT/bin/ai-winpath}"
+CLAUDE_PROJECTS="${AI_MEMORY_CLAUDE_PROJECTS:-$("$WINPATH" "$CLAUDE_HOME/projects" 2>/dev/null || printf '%s\n' "$CLAUDE_HOME/projects")}"
+[[ -n "$CLAUDE_PROJECTS" ]] || CLAUDE_PROJECTS="$CLAUDE_HOME/projects"
 HUB_ROOT="${AI_MEMORY_HUB_ROOT:-$TOOL_ROOT}"
 MEM_REPO="$HUB_ROOT/memory"
 MAP_FILE="$TOOL_ROOT/memory/project-map.tsv"
@@ -394,7 +400,7 @@ case "$DIRECTION" in
     run mkdir -p "$MEM_REPO"
     n=0
     skipped_disposable=0
-    for md in "$CLAUDE_HOME"/projects/*/memory; do
+    for md in "$CLAUDE_PROJECTS"/*/memory; do
       [[ -d "$md" ]] || continue
       slug="$(basename "$(dirname "$md")")"
       if disposable_project "$slug"; then
@@ -455,7 +461,7 @@ case "$DIRECTION" in
     # Finding nothing is almost never legitimate: any machine running this has
     # used Claude Code at least once. Silence here previously read as success.
     if [[ "$n" -eq 0 ]]; then
-      echo "[FAIL] No memory found under $CLAUDE_HOME/projects/." >&2
+      echo "[FAIL] No memory found under $CLAUDE_PROJECTS/." >&2
       echo "[FAIL] Nothing was captured — do NOT report this sync as successful." >&2
       echo "[FAIL] Check that this is the home Claude Code actually uses (Windows: %USERPROFILE%, not a Z:/roaming drive)." >&2
       exit 1
@@ -472,7 +478,7 @@ case "$DIRECTION" in
     declare -A local_memory_paths=()
     memory_path_separator=$'\034'
     local_project_memory_count=0
-    for md in "$CLAUDE_HOME"/projects/*/memory; do
+    for md in "$CLAUDE_PROJECTS"/*/memory; do
       memory_parent="${md%/memory}"
       [[ -d "$memory_parent" ]] || continue
       local_project_memory_count=$((local_project_memory_count+1))

@@ -1,7 +1,0 @@
-ai-review-preflight: Gemini live qualification failed; the previous qualification version stays valid.
-warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'AGENTS.md', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'issue.md', LF will be replaced by CRLF the next time Git touches it
-ai-gemini: error: Gemini request failed; evidence preserved
-reviewer event recording: required evidence publication incomplete; terminal outcome recorded and local recovery retained
-reviewer finished, but required evidence verification failed; private recovery evidence retained

@@ -40,6 +40,20 @@
       "tools/ci-suites/*"
     ],
     "path_suites": {
+      "bin/ai-jev-review-waste": [
+        "test-ai-jev-review-waste.sh",
+        "test-ai-jev-scripts.sh"
+      ],
+      "bin/ai-jev-review-waste.cmd": [
+        "test-ai-jev-review-waste.sh",
+        "test-ai-jev-scripts.sh"
+      ],
+      "bin/ai-jev-probe": [
+        "test-ai-jev-scripts.sh"
+      ],
+      "bin/ai-jev-completion-shadow": [
+        "test-ai-jev-scripts.sh"
+      ],
       "bin/ai-gh": [
         "test-ai-gh.sh"
       ],
@@ -63,6 +77,13 @@
       "bin/ai-memory-sync": [
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"
+      ],
+      "bin/ai-winpath": [
+        "test-ai-winpath.sh"
+      ],
+      "bin/ai-winpath.cmd": [
+        "test-ai-winpath.sh",
+        "test-bin-cmd-launchers.sh"
       ],
       "bin/ai-sync-memory": [
         "test-ai-memory-sync.sh",

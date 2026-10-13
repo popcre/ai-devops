@@ -44,7 +44,7 @@ git -C "$TMP/repo" reset -q HEAD .ai/scratch/issue.json; rm -rf "$TMP/repo/.ai/s
 mkdir -p "$TMP/repo/.ai/reviewer-issues"; printf '{}\n' > "$TMP/repo/.ai/reviewer-issues/issue.json"; git -C "$TMP/repo" add -f .ai/reviewer-issues/issue.json
 bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1 || { echo 'FAIL: reviewer-issues publish path rejected'; exit 1; }
 # Secret-bearing names and extensions must fail even under the publish path.
-for f in leak.env leak.env.production leak.pem leak.key auth.json credentials.json id_rsa id_ed25519 token.txt secret.txt private.key TOKEN.txt Secret.json; do
+for f in leak.env leak.env.production leak.pem leak.key auth.json credentials.json id_rsa id_ed25519 token.txt secret.txt private.key TOKEN.txt Secret.json .env.local; do
   printf 'x\n' > "$TMP/repo/.ai/reviewer-issues/$f"; git -C "$TMP/repo" add -f ".ai/reviewer-issues/$f"
   if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo "FAIL: reviewer-issues $f fixture passed"; exit 1; fi
   git -C "$TMP/repo" reset -q HEAD ".ai/reviewer-issues/$f"; rm -f "$TMP/repo/.ai/reviewer-issues/$f"
@@ -56,5 +56,6 @@ for dir in ".ai/reviewer-issues" ".AI/reviewer-issues" ".Ai/reviewer-issues" ".a
   git -C "$TMP/repo" reset -q HEAD "$dir/secret.txt"; rm -rf "$TMP/repo/$dir"
 done
 git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/repo/.ai/reviewer-issues"
+
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
-echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; the allowlist clears words without laundering identifiers'
+echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'

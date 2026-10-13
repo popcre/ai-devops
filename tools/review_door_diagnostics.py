@@ -49,22 +49,33 @@ for line in native_log.splitlines():
 text = '# Reviewer failed invocation\n\n' + json.dumps(summary, sort_keys=True) + '\n'
 def protect_windows(path, directory=False):
     if os.name != 'nt': return
+    _run_protect([str(path)], directory)
+def protect_windows_files(files):
+    # One PowerShell child for every file; the previous per-file spawn cost
+    # ~5s each on Windows and blew the suite budget (#1562).
+    if os.name != 'nt': return
+    _run_protect([str(p) for p in files], False)
+def _run_protect(paths, directory):
     executable = shutil.which('pwsh') or shutil.which('powershell')
     if not executable: raise ValueError('private diagnostic ACL unavailable')
     helper = pathlib.Path(__file__).resolve().parent.parent / 'bin/windows-private-file.ps1'
     environment = dict(os.environ, AI_DEVOPS_PRIVATE_HELPER=str(helper),
-                       AI_DEVOPS_PRIVATE_TARGET=str(path))
+                       AI_DEVOPS_PRIVATE_FILES='\n'.join(paths))
     # PowerShell 7's modules cannot be loaded by Windows PowerShell 5. Rebuild
     # only this trusted child's module path; leave the caller's environment.
     for name in list(environment):
         if name.casefold() == 'psmodulepath':
             environment.pop(name)
-    command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath '
-               '-Path $env:AI_DEVOPS_PRIVATE_TARGET' + (' -Directory' if directory else '') +
-               '; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET')
+    if directory:
+        command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; '
+                   'Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_FILES -Directory')
+    else:
+        command = ('. $env:AI_DEVOPS_PRIVATE_HELPER; '
+                   'foreach ($p in $env:AI_DEVOPS_PRIVATE_FILES -split "`n") { '
+                   'if ($p) { Protect-AiDevOpsPrivatePath -Path $p } }')
     result = subprocess.run([executable, '-NoProfile', '-NonInteractive',
                              '-ExecutionPolicy', 'Bypass', '-Command', command],
-                            capture_output=True, env=environment, timeout=15)
+                            capture_output=True, env=environment, timeout=30)
     if result.returncode: raise ValueError('private diagnostic ACL refused')
 if destination:
     dest = pathlib.Path(destination)
@@ -86,27 +97,35 @@ if destination:
         dest, collided = sibling, pathlib.Path(destination)
     else:
         collided = None
-    # Secure the empty directory before any native bytes are written. Files
-    # inherit only the current user and SYSTEM; verify each file before write.
+    # Secure the empty directory before any file exists so created files
+    # inherit only the current user and SYSTEM, then one batched PowerShell
+    # call verifies every file before any native bytes are written (#1562).
     protect_windows(dest, directory=True)
+    payloads = [(native_log, 'native.jsonl'), (native_err, 'native.stderr'),
+                (text.encode(), 'report.md')]
+    fds = []
     try:
-        for data, name in [(native_log, 'native.jsonl'), (native_err, 'native.stderr')]:
-            fd = os.open(dest / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'wb') as f:
-                protect_windows(dest / name)
+        for _, name in payloads:
+            fds.append(os.open(dest / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        protect_windows_files([dest / name for _, name in payloads])
+        for i, (data, _) in enumerate(payloads):
+            with os.fdopen(fds[i], 'wb') as f:
+                fds[i] = -1
                 f.write(data)
                 f.flush(); os.fsync(f.fileno())
-        fd = os.open(dest / 'report.md', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            protect_windows(dest / 'report.md')
-            f.write(text); f.flush(); os.fsync(f.fileno())
-        if os.name != 'nt':
-            fd = os.open(dest, os.O_RDONLY)
-            try: os.fsync(fd)
-            finally: os.close(fd)
     except Exception:
-        # Partial evidence remains private and nonauthorizing for recovery.
+        for fd in fds:
+            if fd != -1:
+                try: os.close(fd)
+                except OSError: pass
+        for _, name in payloads:
+            try: (dest / name).unlink()
+            except OSError: pass
         raise
+    if os.name != 'nt':
+        fd = os.open(dest, os.O_RDONLY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
 if destination and collided is not None:
     # Fail closed before the caller-visible report is written.
     raise SystemExit(f'diagnostic storage already existed; both retained: {collided} and {dest}')
