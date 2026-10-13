@@ -17,6 +17,25 @@ declaration, and independent exact-head approval described in
 [`context-spec.md`](context-spec.md). It grants no manual Cloud Run or other
 cloud mutation.
 
+## Machine classes (binding)
+
+Two classes of host exist. Mixing them up has already caused repeated
+wrong installs.
+
+| Class | Hosts | What they get | What they must never get |
+|---|---|---|---|
+| **Dev** | Windows/Ubuntu development computers (Claude Desktop, Codex, editors) | Full toolkit: bootstrap/install, skills, MCP, reviewers, wrappers, secrets wiring | — |
+| **Networking only** | **`edge-alien`, `edge-runn-envy`, `edge-runn-xps`** | SSH key, SSH config, hostnames, Tailscale | The ai-devops toolkit in any form (`bootstrap-windows-dev.ps1`, `install.sh`, `setup-machine.ps1`, skills, MCP, reviewers, agents, model config) |
+
+**Rule:** if the hostname is one of the networking-only hosts, stop. Do not
+clone-and-install, do not "reconcile", do not run a setup script to "clean up"
+an MCP entry. Networking-only means networking only. CI runners and alien
+gateway boxes are not development machines.
+
+When a new non-dev host is added, it joins this table in the same change that
+introduces it. Concrete addresses and keys stay in the private machine atlas
+(`ai-private-config path machine_atlas`).
+
 ## What "deploy" means here
 
 - GitHub Actions runs offline Linux and Windows verification only. It never
