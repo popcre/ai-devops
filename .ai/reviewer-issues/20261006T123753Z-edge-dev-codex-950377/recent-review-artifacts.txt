@@ -1,4 +1,0 @@
-.ai/reviews/.ai-devops-private-reviews-v1	32 bytes
-.ai/reviews/.muse-stage.nC9PxX	0 bytes
-.ai/reviews/codex-final-check-20261005T232215-2404807-1723.md	665 bytes
-.ai/reviews/pr1323-independent-final-review-9b1cb9f.md	9411 bytes
