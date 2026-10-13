@@ -41,8 +41,9 @@ case "${1:-}" in
       exit 0
     fi
     if [[ "${2:-}" == "list" ]]; then
-      if [[ -n "${STUB_ISSUE_LIST:-}" && -f "${STUB_ISSUE_LIST}" ]]; then
-        cat "${STUB_ISSUE_LIST}"
+      # Inline JSON (no filesystem dependency across the stub boundary).
+      if [[ -n "${STUB_ISSUE_LIST_JSON:-}" ]]; then
+        printf '%s\n' "$STUB_ISSUE_LIST_JSON"
       else
         st="${STUB_ISSUE_STATE:-OPEN}"
         printf '[{"number":4242,"state":"%s"},{"number":999,"state":"%s"}]\n' "$st" "$st"
@@ -438,10 +439,8 @@ EOF
 stub15="$TMP/gh15"
 make_gh_stub "$stub15"
 : > "$TMP/gh15-calls.log"
-cat > "$TMP/gh15-issues.json" <<'EOF'
-[{"number":4242,"state":"CLOSED"},{"number":999,"state":"OPEN"}]
-EOF
-( cd "$case15" && STUB_CALL_LOG="$TMP/gh15-calls.log" STUB_ISSUE_LIST="$TMP/gh15-issues.json" \
+( cd "$case15" && STUB_CALL_LOG="$TMP/gh15-calls.log" \
+    STUB_ISSUE_LIST_JSON='[{"number":4242,"state":"CLOSED"},{"number":999,"state":"OPEN"}]' \
     AI_HOUSEKEEPING_GH="$stub15" bash "$TOOL" --details ) > "$TMP/c15.out" 2>&1
 list_calls="$(grep -c '^issue list ' "$TMP/gh15-calls.log" || true)"
 view_calls="$(grep -c '^issue view ' "$TMP/gh15-calls.log" || true)"
@@ -449,7 +448,7 @@ if [[ "$list_calls" -eq 1 && "$view_calls" -eq 0 ]] &&
    grep -q 'Handoffs (git-shared): 1 OPEN, 1 SUCCESSOR REVIEW' "$TMP/c15.out"; then
   ok "numeric handoffs resolve from a single batched issue list (1 list, 0 views)"
 else
-  bad "issue lookups not batched (list=$list_calls views=$view_calls) or classification wrong"
+  bad "issue lookups not batched (list=$list_calls views=$view_calls) or classification wrong | $(grep -m1 'Handoffs (git-shared)' "$TMP/c15.out" || echo NO_SUMMARY) | calls: $(tr '\n' ';' < "$TMP/gh15-calls.log")"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
