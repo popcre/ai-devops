@@ -118,13 +118,38 @@ class OracleTests(unittest.TestCase):
         code='import resource; resource.setrlimit(resource.RLIMIT_AS,(8589934592,)*2);resource.setrlimit(resource.RLIMIT_CPU,(120,)*2);print(resource.getrlimit(resource.RLIMIT_AS),resource.getrlimit(resource.RLIMIT_CPU))'
         result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True)
         self.assertEqual(result.returncode,0);self.assertIn('(8589934592, 8589934592)',result.stdout);self.assertIn('(120, 120)',result.stdout)
-        # This is a PUBLIC fixture only, not an installed/admitted action.
+        # Public real namespace fixture: kernel-created DOWN tunnel devices are
+        # permitted only with no usable non-loopback addresses/routes/egress.
+        parent_namespace=os.readlink('/proc/self/ns/net')
+        probe="""import errno,fcntl,json,os,socket,struct
+assert os.readlink('/proc/self/ns/net') != PARENT_NAMESPACE
+interfaces=socket.if_nameindex();assert any(name=='lo' for _,name in interfaces)
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as control:
+ for _,name in interfaces:
+  if name=='lo':continue
+  request=struct.pack('256s',name.encode())
+  flags=struct.unpack('H',fcntl.ioctl(control.fileno(),0x8913,request)[16:18])[0]
+  assert not flags&1, 'non-loopback interface is UP'
+  try:fcntl.ioctl(control.fileno(),0x8915,request)
+  except OSError as exc:assert exc.errno in (errno.EADDRNOTAVAIL,errno.ENODEV)
+  else:raise AssertionError('non-loopback IPv4 address')
+for line in open('/proc/net/if_inet6'):
+ fields=line.split();assert fields[-1]=='lo' and int(fields[0],16)==1
+for line in list(open('/proc/net/route'))[1:]:assert line.split()[0]=='lo'
+for line in open('/proc/net/ipv6_route'):
+ fields=line.split();assert fields[-1]=='lo'
+with socket.socket() as test:
+ test.settimeout(0.2)
+ try:test.connect(('192.0.2.1',9))
+ except OSError as exc:assert exc.errno in (errno.ENETUNREACH,errno.EHOSTUNREACH)
+ else:raise AssertionError('unexpected network egress')
+print('distinct namespace; only loopback usable; no egress')
+""".replace('PARENT_NAMESPACE',repr(parent_namespace))
         result=subprocess.run(['/usr/bin/bwrap','--unshare-all','--ro-bind','/usr','/usr','--ro-bind','/lib','/lib','--ro-bind','/lib64','/lib64',
-            '--proc','/proc','--dev','/dev','/usr/bin/python3','-c','import socket;print(socket.if_nameindex())'],capture_output=True,text=True)
-        if result.returncode==0:self.assertEqual(result.stdout.strip(),"[(1, 'lo')]")
-        else:
-            self.assertIn('Operation not permitted',result.stderr)
-            print('PUBLIC SANDBOX PROBE: Linux namespace creation refused; actual private execution stays blocked.',file=sys.stderr)
+            '--proc','/proc','--dev','/dev','/usr/bin/python3','-c',probe],capture_output=True,text=True,timeout=10)
+        if result.returncode==0:self.assertEqual(result.stdout.strip(),'distinct namespace; only loopback usable; no egress')
+        else:self.assertIn('Operation not permitted',result.stderr)
+
     def test_real_named_gate_preserves_generic_production_and_foreign_denials(self):
         repo=self.root/'repo';repo.mkdir()
         env=dict(os.environ,AI_TASK_GATES_DIR=str(self.root/'gates'),AI_REVIEW_LIFECYCLE_DIR=str(self.root/'reviews'))
@@ -346,10 +371,14 @@ exercise(){
         self.assertEqual(private_opens,[]);target.unlink();os.mkfifo(target,0o600)
         with self.assertRaises(ValueError):runtime.verify_recipe(root)
         target.unlink();sock=socket.socket(socket.AF_UNIX)
+        parent_fd=os.open(target.parent,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW)
         try:
-            sock.bind(str(target));target.chmod(0o600)
-            with self.assertRaises(ValueError):runtime.verify_recipe(root)
-        finally:sock.close();target.unlink()
+            sock.bind('/proc/self/fd/'+str(parent_fd)+'/'+target.name);target.chmod(0o600)
+            with mock.patch.object(os,'open',side_effect=checked):
+                with self.assertRaises(ValueError):runtime.verify_recipe(root)
+            self.assertEqual(private_opens,[])
+        finally:
+            sock.close();os.close(parent_fd);target.unlink(missing_ok=True)
         target.write_bytes(original);target.chmod(0o644)
         real_stat=os.stat
         def special(name,*args,**kwargs):
