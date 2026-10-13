@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-reviewer-logs-sync — put every machine's complete reviewer logs in one
-# place: the private repository u2giants/ai-devops-reviewer-logs. Evidence is
+# place: the private repository u2giants/ai-devops-reviewer-logs (GitHub); evidence is
 # stored unmasked but encrypted, file names included, so nothing diagnostic is
 # removed and nothing readable reaches GitHub.
 #

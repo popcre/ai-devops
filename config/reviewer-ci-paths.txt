@@ -107,3 +107,6 @@ config/blocker-watch.json
 config/local-watch.json
 tools/lib/local-watch.sh
 tools/stuck-work/watchdog.mjs
+tests/test-ai-reviewer-logs-sync.sh
+tests/test-bin-cmd-launchers.sh
+config/reviewer-logs-archive.crt
