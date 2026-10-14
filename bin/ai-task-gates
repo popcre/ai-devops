@@ -823,6 +823,17 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
   } | sha256sum | cut -d' ' -f1
 }
 
+# Gates this tool actually checks. Anything else a policy lists is recorded
+# and printed under "not checked by this tool"; it is never claimed as satisfied
+# or enforced here. Keep this list in step with the enforcement code paths.
+GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
+# split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
+split_required_gates(){
+  local all="$1"
+  REQUIRED_CHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" | paste -sd, - || true)"
+  REQUIRED_UNCHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -v '^$' | grep -Ev "$GATE_ENFORCED_RE" | paste -sd, - || true)"
+}
+
 cmd_explain_cached(){
   local arg as_json=false paths_from="" other=false key="" dir file out rc
   local -a args=("$@")
@@ -915,14 +926,14 @@ cmd_explain(){
     [ "$reviewer_release" -eq 0 ] || merged_gate "$IDENTITY" reviewer-safety
   } 2>/dev/null | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
-  required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  split_required_gates "$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
 
   if [ "$as_json" = true ]; then
     printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
       --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
       --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg effective "$effective" --arg policy "$POLICY_FILE" \
-      --arg required "$required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" '
+      --arg required "$required" --arg unchecked "$unchecked_required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" '
       {schema_version:1,
        repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
        base:$base, policy_file:$policy,
@@ -931,6 +942,7 @@ cmd_explain(){
        observed_class:$observed,
        effective_class:$effective,
        required_gates:(if $required=="" then [] else ($required|split(",")) end),
+       unchecked_gates:(if $unchecked=="" then [] else ($unchecked|split(",")) end),
        forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
        changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
     return 0
@@ -943,6 +955,7 @@ cmd_explain(){
   printf 'observed class   : %s (%s changed path(s))\n' "$OBSERVED_CLASS" "$CHANGED_COUNT"
   printf 'effective class  : %s\n' "$effective"
   printf 'required gates   : %s\n' "${required:-<none>}"
+  [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool : %s\n' "$unchecked_required"
   printf 'forbidden actions: %s\n' "${forbidden:-<none>}"
   if [ "$CHANGED_COUNT" -gt 0 ]; then
     printf 'changes:\n'
@@ -1333,7 +1346,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   } | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
-  required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  split_required_gates "$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
@@ -1472,6 +1485,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
+  [ -z "${unchecked_required:-}" ] || printf 'recorded but not checked by this tool: %s\n' "$unchecked_required"
   return 0
 }
 

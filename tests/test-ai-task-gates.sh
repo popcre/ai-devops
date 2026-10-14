@@ -139,7 +139,7 @@ newrepo "$TMP/db-redirected" u2giants/shared-db
 db_canonical="$(cd "$TMP/db-canonical" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
 db_redirected="$(cd "$TMP/db-redirected" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
 check 'canonical shared-db identity retains the structural class and gates' \
-  "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- .required_gates|length==0)' <<<\"\$db_canonical\""
+  "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$db_canonical\""
 check 'redirected pre-transfer shared-db identity retains identical structural gates' \
   "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
 
@@ -239,7 +239,7 @@ git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
 check 'reviewer-safety installation needs an assigned AI reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
 check 'reviewer-safety installation keeps independent review and routing proof' \
-  "out '$TMP/class-candidate' explain --json | jq -e '.required_gates | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
+  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates) | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
 check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 class_state="$(state_file_for "$TMP/class-candidate")"
@@ -745,7 +745,7 @@ git -C "$TMP/mixed-explain" commit -qm 'toolkit declaration'
 printf '#!/bin/sh\n' > "$TMP/mixed-explain/bin/ai-review"
 printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
 check 'explain includes reviewer proofs inside a stronger mixed class' \
-  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and (.required_gates|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
+  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates)|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
 
 printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
@@ -854,6 +854,10 @@ check 'a production task refuses ship without an AI reviewer approval' \
   "rc 3 '$TMP/clean' check --before ship"
 newrepo "$TMP/rs"
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
+check 'an unenforced gate is never printed as required' \
+  "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
+check 'explain names the gates this tool does not check' \
+  "out '$TMP/rs' explain | grep -q 'not checked by this tool'"
 check 'a reviewer-safety task refuses ship without an exact-head independent review' \
   "rc 3 '$TMP/rs' check --before ship"
 check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
@@ -1044,7 +1048,7 @@ check 'the formal review stays forbidden on the same change set' \
 check 'and that refusal still has no reviewer-approval path' \
   "out '$TMP/private' check --before review --reviewer-approval \"\$(appr '$TMP/private' review)\" | grep -Fq 'no reviewer-approval'"
 check 'the sealed route retains central and consumer evidence requirements' \
-  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - .required_gates | length==0)'"
+  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - (.required_gates + .unchecked_gates) | length==0)'"
 check 'private-evidence remains protected at its existing rank' \
   "jq -e '.change_classes[\"private-evidence\"] | .protected==true and .rank==90' '$AI_TASK_GATES_FILE'"
 for action in deploy database infrastructure production; do
