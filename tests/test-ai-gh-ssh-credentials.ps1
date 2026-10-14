@@ -2,6 +2,13 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Script = Join-Path $RepoRoot "bin\ai-gh-ssh-credentials.ps1"
+$GitBash = @(
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Git\bin\bash.exe" }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "Git\bin\bash.exe" }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe" }),
+    'C:\Program Files\Git\bin\bash.exe'
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $GitBash) { Write-Host 'SKIP: Git Bash is unavailable.'; exit 0 }
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-gh-ssh-creds-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $TempRoot | Out-Null
 
@@ -73,7 +80,7 @@ try {
     # Real Git Bash login startup, with a non-interactive early return in .bashrc.
     $env:SSH_CONNECTION = '127.0.0.1 1 127.0.0.1 22'
     $oldHome = $env:HOME; $env:HOME = (Join-Path $r.Dir 'home').Replace('\', '/')
-    $seen = & "$env:ProgramFiles\Git\bin\bash.exe" -lc 'printf %s "$GH_CONFIG_DIR"'
+    $seen = & $GitBash -lc 'printf %s "$GH_CONFIG_DIR"'
     $env:HOME = $oldHome
     $psSeen = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $r.Dir 'ps\profile.ps1')'; `$env:GH_CONFIG_DIR"
     Remove-Item Env:SSH_CONNECTION
@@ -127,6 +134,21 @@ try {
 
     $r = Invoke-Case 'none' ''
     Assert-True ($r.Exit -eq 2) "missing login reports exit 2 (got $($r.Exit))"
+
+    # ProgramFiles is empty in some service and restricted logons. Auto-detect
+    # must still find Git Bash instead of resolving through an empty root.
+    $savedPF = $env:ProgramFiles
+    $savedPF86 = ${env:ProgramFiles(x86)}
+    try {
+        [Environment]::SetEnvironmentVariable('ProgramFiles', $null, 'Process')
+        [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $null, 'Process')
+        $r = Invoke-Case 'no-programfiles' 'GOOD'
+        Assert-True ($r.Exit -eq 0) "empty ProgramFiles still finds Git Bash (exit $($r.Exit): $($r.Output))"
+        Assert-True ((Get-Content (Join-Path $r.Dir 'gh-ssh\hosts.yml') -Raw) -match 'oauth_token: GOOD') 'token saved without ProgramFiles'
+    } finally {
+        [Environment]::SetEnvironmentVariable('ProgramFiles', $savedPF, 'Process')
+        [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $savedPF86, 'Process')
+    }
 
     Write-Output 'PASS test-ai-gh-ssh-credentials'
 } finally {

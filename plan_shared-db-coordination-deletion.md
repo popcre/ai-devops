@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — delete shared-db coordination layer (C by deletion) (2026-09-29)
 
-**Session handoff:** [HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md](HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md)  
+**Session handoff:** `HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md` (retired 2026-10-13; decision record is this plan §8)  
 **Full background (why these deletions):** [`docs/shared-db-delivery-failure-background-2026-09-29.md`](docs/shared-db-delivery-failure-background-2026-09-29.md)  
 **External reviews:** Grok consensus C-by-deletion · Opus plan-review REJECT (thin brief) · StepFun REVISE (applied) · BlockerWatch: Grok DELETE / StepFun SHRINK → **SHRINK**.
 
@@ -14,7 +14,7 @@
 
 | Step | State | Date | Evidence / completion gate |
 |---|---|---|---|
-| 0. Freeze decision + register plan | ✅ done | 2026-09-29 | This file + `HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md` + `AGENTS.md` task-router row |
+| 0. Freeze decision + register plan | ✅ done | 2026-09-29 | This file + (retired 2026-10-13) `HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md` + `AGENTS.md` task-router row |
 | 1. Rename `orchestrator-claim` → `claim-admission` (keep required) | ✅ done | 2026-09-29 | PR-A [#1107](https://github.com/popcre/ai-devops/pull/1107) ships #1065+#1066; `config/task-gates.json` + `config/repository-coverage.json` renamed; `rg -n orchestrator-claim` zero live hits (plan/handoff prose only); `bash tests/test-ai-task-gates.sh` 215 passed / 5 pre-existing Windows install-authority failures identical on clean `origin/main` baseline (no gate-name tests red); `bash tests/test-client-globals-required-phrases.sh` PASS |
 | 2. Delete leftover-proof ticket mill; update required-phrase tests | ✅ done | 2026-09-29 | PR-A [#1107](https://github.com/popcre/ai-devops/pull/1107) ships #1065+#1066; four globals carry checklist-on-same-issue rule (no leftover-proof minting); `tools/context-audit/context-audit.py` PARITY_RULES now `Live proof is required before an outcome is closed` + `One issue per application need`; `bash tests/test-client-globals-required-phrases.sh` PASS; `pwsh tests/test-context-audit.ps1` PASS (12/12) |
 | 3. Self-service claim = default; demote orchestrator role | ✅ done | 2026-09-30 | PR-B ships #1067+#1071; four globals carry claim-first / optional reference (safety sentences kept); `shared-db-orchestrator` SKILL.md + operating-manual.md demoted to reference-only (safety bullets intact, no marker role); handover = notes on the same issue; `bash tests/test-shared-db-routing-rules.sh` 26 passed / 0 failed; `bash tests/test-skill-trigger-policy.sh` 31 passed / 0 failed; `bash tests/test-client-globals-required-phrases.sh` PASS; `pwsh tests/test-context-audit.ps1` PASS |

@@ -103,5 +103,7 @@ will within this plan. Report-only is the whole design.
 
 - Plan and locked decisions (including O2: Windows task + Ubuntu crontab):
   [`../plan_repo-housekeeping-visibility.md`](../plan_repo-housekeeping-visibility.md)
+- UNPROVABLE batch-2 triage (retargets + retirement plan):
+  [`housekeeping-unprovable-batch2-retirement-plan.md`](housekeeping-unprovable-batch2-retirement-plan.md)
 - Worktree removal procedure: `skills/shared/cleanup-worktree/SKILL.md`
 - Handoff contract and successor rule: `skills/shared/handoff-writer/SKILL.md`

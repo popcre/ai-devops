@@ -70,6 +70,12 @@ export AI_TEST_SCOREBOARD_META="$TMP/scoreboard-meta.json"
 
 echo '== ai-review-lifecycle'
 IDENTITY="$($SCRIPT identity "$R")"
+# Regression (#1716): the paid report is written into the reviewed repository,
+# which is part of the source digest when .ai/ is not ignored. The post-review
+# identity comparison must run before that write.
+LIFECYCLE_CORE="$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
+check "post_review_identity_checked_before_report_write" \
+  "a=\$(grep -n 'after_identity=\"\$(rlc_identity' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); b=\$(grep -n '^  rlc_write_report \"\$report\"' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); [ -n \"\$a\" ] && [ -n \"\$b\" ] && [ \"\$a\" -lt \"\$b\" ]"
 check "identity_normalizes_github_upstream" \
   "[ \"\$(jq -r .normalized_upstream <<<'$IDENTITY')\" = 'https://github.com/Owner/Repo' ]"
 check "identity_never_retains_remote_credential" "! grep -q secret <<<'$IDENTITY'"
@@ -209,6 +215,18 @@ fi
 STATE_LEGACY="$("$SCRIPT" begin --provider muse --repo "$R" --run-id owner-legacy --caller codex)"
 "$SCRIPT" join "$STATE_LEGACY" >/dev/null
 check "record_without_owner_is_never_guessed_interrupted" "jq -e '.status==\"running\"' '$STATE_LEGACY'"
+# #1691: the sweep closes only ownerless records older than its bound.
+"$SCRIPT" sweep >/dev/null 2>&1
+check "sweep_spares_fresh_ownerless_record" "jq -e '.status==\"running\"' '$STATE_LEGACY'"
+"$SCRIPT" sweep --older-than 0 --dry-run > "$TMP/sweep-dry.txt" 2>/dev/null
+check "sweep_dry_run_lists_without_changing" "grep -qF '$STATE_LEGACY' '$TMP/sweep-dry.txt' && jq -e '.status==\"running\"' '$STATE_LEGACY'"
+STATE_OLD="$("$SCRIPT" begin --provider muse --repo "$R" --run-id owner-legacy-old --caller codex)"
+row="$(jq '.updated_at="2026-01-01T00:00:00Z"' "$STATE_OLD")"; printf '%s\n' "$row" > "$STATE_OLD"
+LOCK_OLD="$(jq -r .lock_path "$STATE_OLD")"
+"$SCRIPT" sweep >/dev/null 2>&1
+check "sweep_interrupts_stale_ownerless_record" "jq -e '.status==\"interrupted\" and .verdict==\"BLOCKED\" and .interruption.detected_by==\"sweep\" and .interruption.reason==\"ownerless-stale\"' '$STATE_OLD' && [ ! -e '$LOCK_OLD' ]"
+check "sweep_leaves_fresh_record_after_real_run" "jq -e '.status==\"running\"' '$STATE_LEGACY'"
+check "sweep_rejects_bad_bound" "! '$SCRIPT' sweep --older-than x >/dev/null 2>&1"
 kill "$LIVE_OWNER" 2>/dev/null; wait "$LIVE_OWNER" 2>/dev/null
 # Every production begin call site must name its owner, or its killed runs can
 # never be reconciled.

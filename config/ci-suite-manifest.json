@@ -74,6 +74,30 @@
       "bin/ai-pr-wait.cmd": [
         "test-ai-pr-wait.sh"
       ],
+      "tools/github-requests/pr_status_singleflight.py": [
+        "test-ai-pr-wait.sh",
+        "test-ai-gh.sh"
+      ],
+      "tools/github-requests/report.py": [
+        "test-ai-gh.sh",
+        "test-ai-pr-wait.sh"
+      ],
+      "tools/github-requests/telemetry.sh": [
+        "test-ai-gh.sh",
+        "test-ai-pr-wait.sh"
+      ],
+      "tools/github-requests/target_ordinal.py": [
+        "test-ai-pr-wait.sh",
+        "test-ai-gh.sh"
+      ],
+      "tools/github-requests/measure_append.py": [
+        "test-ai-pr-wait.sh",
+        "test-ai-gh.sh"
+      ],
+      "tools/github-requests/pr-status-complete.sh": [
+        "test-ai-pr-wait.sh",
+        "test-ai-gh.sh"
+      ],
       "bin/ai-memory-sync": [
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"

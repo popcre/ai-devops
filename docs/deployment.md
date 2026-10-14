@@ -17,6 +17,25 @@ declaration, and independent exact-head approval described in
 [`context-spec.md`](context-spec.md). It grants no manual Cloud Run or other
 cloud mutation.
 
+## Machine classes (binding)
+
+Two classes of host exist. Mixing them up has already caused repeated
+wrong installs.
+
+| Class | Hosts | What they get | What they must never get |
+|---|---|---|---|
+| **Dev** | Windows/Ubuntu development computers (Claude Desktop, Codex, editors) | Full toolkit: bootstrap/install, skills, MCP, reviewers, wrappers, secrets wiring | — |
+| **Networking only** | **`edge-alien`, `edge-runn-envy`, `edge-runn-xps`** | SSH key, SSH config, hostnames, Tailscale | The ai-devops toolkit in any form (`bootstrap-windows-dev.ps1`, `install.sh`, `setup-machine.ps1`, skills, MCP, reviewers, agents, model config) |
+
+**Rule:** if the hostname is one of the networking-only hosts, stop. Do not
+clone-and-install, do not "reconcile", do not run a setup script to "clean up"
+an MCP entry. Networking-only means networking only. CI runners and alien
+gateway boxes are not development machines.
+
+When a new non-dev host is added, it joins this table in the same change that
+introduces it. Concrete addresses and keys stay in the private machine atlas
+(`ai-private-config path machine_atlas`).
+
 ## What "deploy" means here
 
 - GitHub Actions runs offline Linux and Windows verification only. It never
@@ -477,6 +496,40 @@ Windows installer, and the reviewer stays quarantined
 (`live-qualification-required`) until it is fixed. A live canary can take up
 to its qualification timeout (default 30 minutes per reviewer), so a pull
 shortly after a merged wrapper change may pause while requalification runs.
+
+Field notes from the 2026-10-13 Jev-fix rollout (604982bd → 2ccb7208 across
+edge-dev, edge-dev3, and hetz; verified, not theory):
+
+- `authorize-install`'s `start_head` is refreshed by every
+  `ai-task-gates start --class installation` run in that worktree to the
+  worktree's current HEAD (the printed `base` stays sticky at the first-ever
+  base). Declare the installation task while the installation candidate is
+  checked out at the INSTALLED checkout's HEAD, then advance the candidate to
+  the target. Advancing first yields either
+  `Empty release needs an installed receipt or explicit reviewed legacy migration.`
+  (start equals target) or
+  `Installed checkout moved since task declaration outside the reviewed release range.`
+- Other sessions fast-forward the installed checkout while a rollout is in
+  flight (all three hosts moved mid-session on 2026-10-13). Re-read each host's
+  installed HEAD immediately before declaring the task, and pin the target at or
+  ahead of every host; a checkout moved past the pinned target stops
+  authorization by design — re-pin and re-review rather than rewinding the
+  checkout.
+- Reviewer final-checks can REJECT a merged target for defects in content
+  another stream already merged (on 2026-10-13 both GLM and DeepSeek rejected
+  `c4df0467` solely for a missing `HANDOFF.d` contract block and an unreachable
+  plan-index link). Fix the named defects through the normal docs-only PR
+  route, pin the new merged SHA, and re-review; do not shop for a reviewer
+  that ignores the finding.
+- edge-dev3 specifics: the codex symlink lives in `~/.local/bin`
+  (`codex -> /usr/lib/chatgpt/resources/codex`), which non-interactive ssh does
+  not put on PATH; without it the required `ai-devops doctor` stage FAILs with
+  `review provider codex status invalid` and the install stops. Export
+  `PATH="$HOME/.local/bin:$PATH"` for the update run. Sudo needs a PTY:
+  `sudo -S -v` over a plain pipe caches per-ppid and the installer's `$SUDO`
+  calls still stop with `A terminal is required to authenticate`; run the whole
+  update under `script -qec '<run>' /dev/null` with the password line fed to
+  the PTY so one tty ticket covers every later `$SUDO`.
 
 ## Rollback
 

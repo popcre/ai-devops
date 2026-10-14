@@ -72,16 +72,22 @@ gh_measure_local_clock(){
   GH_MEASURE_LOCAL_CLOCK_BASIS=unknown
   if [ "$GH_MEASURE_LOCAL_PLATFORM_INITIALIZED" -eq 0 ]; then
     GH_MEASURE_LOCAL_PLATFORM_INITIALIZED=1
-    [ "$(uname -s 2>/dev/null || true)" = Linux ] && GH_MEASURE_LOCAL_PLATFORM=linux
+    # MSYS/Git Bash/Cygwin expose the same /proc/uptime centisecond BOOTTIME
+    # interface as Linux (GetTickCount64-based, monotonic).  Accept every
+    # POSIX-procfs platform so Windows waiters get real duration rows instead
+    # of clock_unknown on every observation.
+    case "$(uname -s 2>/dev/null || true)" in
+      Linux|MINGW*|MSYS*|CYGWIN*) GH_MEASURE_LOCAL_PLATFORM=posix_procfs ;;
+    esac
   fi
-  [ "$GH_MEASURE_LOCAL_PLATFORM" = linux ] || return 0
+  [ "$GH_MEASURE_LOCAL_PLATFORM" = posix_procfs ] || return 0
   local uptime
   IFS=' ' read -r uptime _ < /proc/uptime 2>/dev/null || return 0
   gh_measure_local_clock_parse "$uptime"
 }
 
 gh_measure_local_observation(){
-  local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown lower=null upper=null error=null start_json=null end_json=null
+  local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown acceptance=unknown lower=null upper=null error=null start_json=null end_json=null
   case "$outcome" in merged|closed|checks_failed|ejected|deadline) ;; *) return 2 ;; esac
   [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
   if [ "$output_failed" = 1 ]; then
@@ -95,7 +101,12 @@ gh_measure_local_observation(){
       local elapsed=$((end - start))
       if [ "$elapsed" -le 604800000 ]; then
         lower=$((elapsed - 20)); [ "$lower" -lt 0 ] && lower=0
-        upper=$((elapsed + 20)); error=20; reason=source_unknown
+        upper=$((elapsed + 20)); error=20
+        # A supported monotonic clock that produced a non-negative bounded
+        # interval qualifies the duration.  Source verification stays a
+        # separate axis and is genuinely unknown here.
+        reason=source_unknown
+        acceptance=qualified
       else
         reason=clock_negative
         start_json=null; end_json=null
@@ -103,8 +114,8 @@ gh_measure_local_observation(){
     fi
   fi
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
-  record=$(printf '{"schema":5,"utc":"%s","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","outcome":"%s","boundary":"receipt_init_to_terminal_output","clock_basis":"%s","start_monotonic_ms":%s,"end_monotonic_ms":%s,"duration_lower_ms":%s,"duration_upper_ms":%s,"clock_error_bound_ms":%s,"source_verified":"unknown","acceptance":"unknown","unknown_reason":"%s"}' \
-    "$utc" "$id" "$outcome" "$basis" "$start_json" "$end_json" "$lower" "$upper" "$error" "$reason")
+  record=$(printf '{"schema":5,"utc":"%s","measurement":"local_workflow_observation","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","outcome":"%s","boundary":"receipt_init_to_terminal_output","clock_basis":"%s","start_monotonic_ms":%s,"end_monotonic_ms":%s,"duration_lower_ms":%s,"duration_upper_ms":%s,"clock_error_bound_ms":%s,"source_verified":"unknown","acceptance":"%s","unknown_reason":"%s"}' \
+    "$utc" "$id" "$outcome" "$basis" "$start_json" "$end_json" "$lower" "$upper" "$error" "$acceptance" "$reason")
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
@@ -271,6 +282,57 @@ gh_measure_graphql_cost(){
   record=$(printf '{"schema":2,"utc":"%s","measurement":"observed_graphql_cost","caller":"%s","operation":"%s","workflow":"%s","workflow_id":%s,"access_context":%s,"http_requests":null,%s}' \
     "$utc" "$caller" "$operation" "$workflow" "$id_json" "$context_json" "$observation")
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Count a completed local read of a correlated target. Cache hits are saved
+# upstream reads; the report denominates them by same-target replays.
+gh_measure_read_observation(){
+  local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" source="${4:-}" utc record cache_hit=false saved=false
+  case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$source" in cache) cache_hit=true; saved=true ;; upstream) ;; *) return 2 ;; esac
+  [ -z "$ordinal" ] || [[ "$ordinal" =~ ^[0-9]{1,10}$ ]] || return 2
+  local ordinal_json=null
+  [ -z "$ordinal" ] || ordinal_json="$ordinal"
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":6,"utc":"%s","measurement":"read_observation","caller":"%s","workflow":"%s","target_ordinal":%s,"source":"%s","cache_hit":%s,"saved_upstream_read":%s}' \
+    "$utc" "$caller" "$workflow" "$ordinal_json" "$source" "$cache_hit" "$saved")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Count a managed write attempt and whether its content was already present.
+# duplicate_unchanged_write must stay zero for section 13 item 2.
+gh_measure_write_observation(){
+  local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" action="${4:-}" relation="${5:-}" utc record dup=false
+  case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$action" in written|skipped) ;; *) return 2 ;; esac
+  case "$relation" in new|unchanged|unknown) ;; *) return 2 ;; esac
+  if [ "$action" = written ] && [ "$relation" = unchanged ]; then dup=true; fi
+  [ -z "$ordinal" ] || [[ "$ordinal" =~ ^[0-9]{1,10}$ ]] || return 2
+  local ordinal_json=null
+  [ -z "$ordinal" ] || ordinal_json="$ordinal"
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":6,"utc":"%s","measurement":"write_observation","caller":"%s","workflow":"%s","target_ordinal":%s,"action":"%s","content_relation":"%s","duplicate_unchanged_write":%s}' \
+    "$utc" "$caller" "$workflow" "$ordinal_json" "$action" "$relation" "$dup")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Resolve a local target ordinal through the reviewed-shaped correlation
+# adapter. Missing adapter or private state yields empty (uncorrelated), never
+# an invented ordinal.
+gh_measure_target_ordinal(){
+  GH_MEASURE_TARGET_ORDINAL=''
+  local key="${1:-}" helper python result state
+  [ -n "$key" ] || return 0
+  helper="${BASH_SOURCE[0]%/*}/target_ordinal.py"
+  python="${PYTHON_RUNNER:-}"
+  [ -n "$python" ] || python="$(command -v python3 || command -v python || true)"
+  [ -n "$python" ] && [ -f "$helper" ] || return 0
+  state="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+  result="$("$python" "$helper" --state-dir "$state" --key "$key" 2>/dev/null)" || return 0
+  [[ "$result" =~ ^[0-9]{1,10}$ ]] || return 0
+  GH_MEASURE_TARGET_ORDINAL="$result"
 }
 
 # Both command records and server snapshots share the same filesystem boundary.

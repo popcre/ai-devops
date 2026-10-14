@@ -35,8 +35,17 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $GhGate) { $GhGate = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'ai-gh' }
 if (-not $Bash) {
-    $Bash = @("$env:ProgramFiles\Git\bin\bash.exe", "${env:ProgramFiles(x86)}\Git\bin\bash.exe") |
-        Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    # ProgramFiles is empty in some service and restricted logons; never resolve
+    # through an empty root or the path becomes \Git\bin\bash.exe.
+    $Bash = @(
+        "$env:ProgramFiles\Git\bin\bash.exe"
+        "${env:ProgramFiles(x86)}\Git\bin\bash.exe"
+        "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
+        'C:\Program Files\Git\bin\bash.exe'
+        'C:\Program Files (x86)\Git\bin\bash.exe'
+    ) | Where-Object {
+        $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_)
+    } | Select-Object -First 1
 }
 if (-not $Bash) { throw 'Git Bash is required to reach the shared GitHub gate.' }
 $gate = $GhGate -replace '\\', '/'

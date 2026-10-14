@@ -89,9 +89,9 @@ check "missing telemetry helper skips the local end read without changing status
 OUT="$(AI_GH_STATE_DIR="$TMP/transient-duration-state" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
-if [ "$(uname -s)" = Linux ]; then
+if [ -r /proc/uptime ]; then
   check 'transient-read deadline records the successful terminal boundary' \
-    "jq -se '[.[]|select(.schema==5)] | length == 1 and .[0].unknown_reason == \"source_unknown\" and .[0].end_monotonic_ms != null' '$TMP/transient-duration-state/measurements/'*.jsonl"
+    "jq -se '[.[]|select(.schema==5)] | length == 1 and .[0].unknown_reason == \"source_unknown\" and .[0].acceptance == \"qualified\" and .[0].end_monotonic_ms != null' '$TMP/transient-duration-state/measurements/'*.jsonl"
 fi
 
 # A recorded machine-wide back-off: the throttle exits 75 without calling GitHub,
@@ -579,10 +579,13 @@ printf '%s\n' "$*" >> "$EVIDENCE_CALLS"
 printf '{"data":{"repository":{"pullRequest":{"state":"%s","mergedAt":"2026-01-01T00:00:00Z","closedAt":"2026-01-01T00:00:00Z","headRefOid":"abc","isInMergeQueue":false,"mergeCommit":{"oid":"abc"}}}}}\n' "$EVIDENCE_TERMINAL"
 EOF
 chmod +x "$TMP/evidence-bin/gh"
-case "$(uname -s 2>/dev/null || true)" in
-  Linux) expected_local_reason=source_unknown ;;
-  *) expected_local_reason=clock_unknown ;;
-esac
+if [ -r /proc/uptime ]; then
+  expected_local_reason=source_unknown
+  expected_qualified_count=1
+else
+  expected_local_reason=clock_unknown
+  expected_qualified_count=0
+fi
 for terminal in MERGED CLOSED; do
   for broken in 0 1; do
     state="$TMP/native-evidence-$terminal-$broken"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
@@ -597,7 +600,7 @@ for terminal in MERGED CLOSED; do
       "[ '$rc' -eq '$expected' ] && grep -q '$terminal' '$state/output' && [ \"\$(wc -l < '$calls')\" -eq 1 ] && grep -q 'mergedAt closedAt' '$calls'"
     if [ "$broken" = 0 ]; then
       check 'native terminal companion is consistent and never claims source or clock proof' \
-        "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq --arg expected '$expected_local_reason' -e '.workflow_evidence_records == 1 and .local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \$expected and .qualified_latency_ms.count == 0'"
+        "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq --arg expected '$expected_local_reason' --argjson qualified '$expected_qualified_count' -e '.workflow_evidence_records == 1 and .local_workflow_observations.count == 1 and .local_workflow_observations.reason_counts[0].unknown_reason == \$expected and .qualified_latency_ms.count == \$qualified'"
     else
       check 'observer write failure remains a visible measurement gap' "grep -q 'workflow evidence not saved' '$state/output'"
     fi
@@ -619,6 +622,8 @@ fi
 
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
+check "GitHub request counters stay complete and private" \
+  "python3 '$ROOT/tests/test-github-request-counters.py' -q"
 
 # Exercise the real waiter and complete reader: advisory cancellation must not
 # end a queued PR, while required or unproved cancellations remain terminal.

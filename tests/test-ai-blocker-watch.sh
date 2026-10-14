@@ -16,6 +16,8 @@ BRIEF
 cat > "$TMP/gh" <<'EOF'
 #!/usr/bin/env bash
 F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
+# Optional one-shot: drop a catch-up marker mid-tick, as a concurrent fire would.
+[ -f "$F/write-misd" ] && { rm -f "$F/write-misd"; : > "$AI_BLOCKER_WATCH_HOME/tick.misd"; }
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$F/callers"
 printf '%s\n' "${AI_GH_OPERATION:-unset}" >> "$F/operations"
 kind=other
@@ -582,7 +584,48 @@ rm -f "$FAKE/is_pr"
 
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
+check 'a fire that hits a live tick leaves a catch-up marker' "[ -f '$TMP/home/tick.misd' ]"
 rmdir "$TMP/home/tick.lock"
+# A marker left from a killed run is consumed once, not treated as new demand.
+: > "$TMP/home/tick.misd"
+BW tick >"$TMP/tick-catchup.out" 2>&1
+check 'a successful tick consumes a leftover catch-up marker' "[ ! -f '$TMP/home/tick.misd' ]"
+check 'the leftover marker does not request a second body run' \
+  "[ \"\$(grep -c 'tick catch-up' '$TMP/tick-catchup.out' || true)\" = 0 ]"
+# A fire that lands while this tick holds the lock is owed work now.
+touch "$FAKE/write-misd"
+BW tick >"$TMP/tick-concurrent.out" 2>&1
+check 'a concurrent fire during a tick triggers one catch-up body' \
+  "grep -q 'tick catch-up after a concurrent fire hit the live lock' '$TMP/tick-concurrent.out'"
+check 'catch-up clears the marker' "[ ! -f '$TMP/home/tick.misd' ]"
+check 'catch-up does not leak the tick lock' "[ ! -d '$TMP/home/tick.lock' ]"
+BW tick >"$TMP/tick-after.out" 2>&1
+check 'a tick after catch-up can take the lock' \
+  "! grep -q 'another tick is running' '$TMP/tick-after.out'"
+
+# schedule_windows_reliability must re-point the Windows task away from the
+# schtasks defaults that drop fires (IgnoreNew, no StartWhenAvailable, battery).
+sed -n '/^schedule_windows_reliability()/,/^}/p' "$SCRIPT" > "$FAKE/schedule_windows_reliability.sh"
+check 'Windows schedule reliability sets StartWhenAvailable' \
+  "grep -qF 'StartWhenAvailable=\\\$true' '$FAKE/schedule_windows_reliability.sh'"
+check 'Windows schedule reliability allows start on batteries' \
+  "grep -qF 'DisallowStartIfOnBatteries=\\\$false' '$FAKE/schedule_windows_reliability.sh'"
+check 'Windows schedule reliability does not stop on batteries' \
+  "grep -qF 'StopIfGoingOnBatteries=\\\$false' '$FAKE/schedule_windows_reliability.sh'"
+check 'Windows schedule reliability queues a fire instead of dropping it' \
+  "grep -qF \"MultipleInstances='Queue'\" '$FAKE/schedule_windows_reliability.sh'"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Name the policy, not a number: prove the real Task Scheduler settings
+    # object maps 'Queue' to the Queue policy (#1698).
+    check 'Task Scheduler maps the Queue policy name to Queue' \
+      "[ \"\$(powershell.exe -NoProfile -Command '\$s=New-ScheduledTaskSettingsSet; \$s.MultipleInstances=\"Queue\"; [string]\$s.MultipleInstances' | tr -d '\\r')\" = Queue ]"
+    ;;
+esac
+check 'cmd_schedule applies the reliability settings after schtasks create' \
+  "grep -q 'schedule_windows_reliability' '$SCRIPT'"
+
+rmdir "$TMP/home/tick.lock" 2>/dev/null || true
 
 # Per-tick read cache and node budget (#809). issue_json runs under $(...), so
 # both must survive that subshell: a repeated read is served from the cache, and

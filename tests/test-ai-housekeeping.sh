@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# tests/test-ai-housekeeping.sh — twelve named cases for bin/ai-housekeeping.
-# Cases 3/4 encode D1/D3, case 8 encodes R4, cases 10/11 encode D3a.
+# tests/test-ai-housekeeping.sh — named cases for bin/ai-housekeeping.
+# Cases 3/4 encode D1/D3, case 8 encodes R4, cases 10/11 encode D3a,
+# case 15 encodes the batched issue lookup (#1646 M3).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,16 +24,30 @@ new_repo() {
   git -C "$dir" branch -M main
 }
 
-# Stub gh: honors STUB_PR_JSON and STUB_ISSUE_STATE.
+# Stub gh: honors STUB_PR_JSON, STUB_ISSUE_STATE, STUB_ISSUE_LIST, and logs
+# every invocation to STUB_CALL_LOG when that is set (#1646 M3 batch check).
 make_gh_stub() {
   local path="$1"
   cat > "$path" <<'STUB'
 #!/usr/bin/env bash
+if [[ -n "${STUB_CALL_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$STUB_CALL_LOG"
+fi
 case "${1:-}" in
   auth) exit 0 ;;
   issue)
     if [[ "${2:-}" == "view" ]]; then
       printf '%s\n' "${STUB_ISSUE_STATE:-OPEN}"
+      exit 0
+    fi
+    if [[ "${2:-}" == "list" ]]; then
+      # Inline JSON (no filesystem dependency across the stub boundary).
+      if [[ -n "${STUB_ISSUE_LIST_JSON:-}" ]]; then
+        printf '%s\n' "$STUB_ISSUE_LIST_JSON"
+      else
+        st="${STUB_ISSUE_STATE:-OPEN}"
+        printf '[{"number":4242,"state":"%s"},{"number":999,"state":"%s"}]\n' "$st" "$st"
+      fi
       exit 0
     fi
     ;;
@@ -400,6 +415,41 @@ else
   bad "offline --log records UNKNOWN in a dated block and exits 0 (exit=$c14)"
 fi
 unset AI_HOUSEKEEPING_LOG
+
+# ---------------------------------------------------------------------------
+# 15. numeric handoffs batch into ONE issue list round trip  (#1646 M3)
+# ---------------------------------------------------------------------------
+case15="$TMP/handoff-batch"
+new_repo "$case15"
+mkdir -p "$case15/HANDOFF.d"
+cat > "$case15/HANDOFF.d/2026-01-05T0000Z-test-agent-a.md" <<'EOF'
+---
+issue: 4242
+status: OPEN
+owner: test/batch-a
+---
+EOF
+cat > "$case15/HANDOFF.d/2026-01-05T0001Z-test-agent-b.md" <<'EOF'
+---
+issue: 999
+status: OPEN
+owner: test/batch-b
+---
+EOF
+stub15="$TMP/gh15"
+make_gh_stub "$stub15"
+: > "$TMP/gh15-calls.log"
+( cd "$case15" && STUB_CALL_LOG="$TMP/gh15-calls.log" \
+    STUB_ISSUE_LIST_JSON='[{"number":4242,"state":"CLOSED"},{"number":999,"state":"OPEN"}]' \
+    AI_HOUSEKEEPING_GH="$stub15" bash "$TOOL" --details ) > "$TMP/c15.out" 2>&1
+list_calls="$(grep -c '^issue list ' "$TMP/gh15-calls.log" || true)"
+view_calls="$(grep -c '^issue view ' "$TMP/gh15-calls.log" || true)"
+if [[ "$list_calls" -eq 1 && "$view_calls" -eq 0 ]] &&
+   grep -q 'Handoffs (git-shared): 1 OPEN, 1 SUCCESSOR REVIEW' "$TMP/c15.out"; then
+  ok "numeric handoffs resolve from a single batched issue list (1 list, 0 views)"
+else
+  bad "issue lookups not batched (list=$list_calls views=$view_calls) or classification wrong | $(grep -m1 'Handoffs (git-shared)' "$TMP/c15.out" || echo NO_SUMMARY) | calls: $(tr '\n' ';' < "$TMP/gh15-calls.log")"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

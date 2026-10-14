@@ -336,6 +336,7 @@ sed -i '$d' "$TMP/bin/gemini"
 check "Gemini can be requalified after wrapper drift" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini standard check works outside any AI harness and does not quarantine" "env -u AI_GEMINI_CALLER -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SANDBOX $SCRIPT check gemini '$REPO' | grep -q 'health=ok' && $SCRIPT status gemini | jq -e '.usable==true'"
 check "Gemini live preflight performs a genuine live probe" "rm -f '$MOCK_GEMINI_LIVE_CONTACT'; $SCRIPT check gemini '$REPO' --live | grep -q 'allowance=live-verified' && test \"\$(wc -l < '$MOCK_GEMINI_LIVE_CONTACT')\" -eq 1"
+check "A non-installed preflight copy never records a shared provider quarantine" "env -u AI_REVIEW_QUARANTINE_DIR PATH=/usr/bin:/bin HOME='$TMP/nonint-home' $SCRIPT quarantine gemini provider-unhealthy --seconds 5 >/dev/null 2>&1; ! test -e '$TMP/nonint-home/.local/state/ai-devops/review-quarantine/gemini.json'"
 check "Qwen status enforces built-in quarantine until live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Qwen check cannot report healthy while credits block live qualification" "! $SCRIPT check qwen '$REPO' 2>&1 | grep -q 'health=ok'"
 check "successful Qwen live qualification durably releases quarantine" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
@@ -713,8 +714,8 @@ check "the Gemini entry still records why the empty report mattered"   "jq -e '.
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
-check "Grok is back in the shipped reviewer pool (owner instruction 2026-10-08)" "jq -e '.providers.grok.registry_state==\"registered\" and (.providers.grok.reason|test(\"2026-10-08\"))' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "Grok is quarantined out of the shipped reviewer pool (owner instruction 2026-10-13, out of credit)" "jq -e '.providers.grok.registry_state==\"absent\" and (.providers.grok.reason|test(\"2026-10-13\"))' '$REAL_REGISTRY'"
 check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.

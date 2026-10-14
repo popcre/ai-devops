@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — watchdogs as local timed tasks (2026-10-01)
 
-Handoff registration: [HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md](HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md)
+Handoff registration: `HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md` (retired 2026-10-13; P0–P5 done, duty-pool runbook `docs/watchdog-duty-pool.md` is the contract)
 
 Operator / agent runbook (name, add-a-machine, claim rules): [`docs/watchdog-duty-pool.md`](docs/watchdog-duty-pool.md) — keep that contract in sync when a STATUS row turns done.
 

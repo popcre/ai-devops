@@ -1,6 +1,6 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Handover is notes on the same issue — not a new ticket. Claim-first is the default; no orchestrator chat or marker is required. Use for database handoff after schema work, fresh-session transfer, or dispatched database agents. Keep every safety disclosure (claims, preview writes, private artifacts).
+description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Handover is notes on the same issue — not a new ticket. Claim-first is the default; no orchestrator chat or marker is required. Use for database handoff after schema work, fresh-session transfer, or explicitly delegated work. Keep every safety disclosure (claims, preview writes, private artifacts).
 ---
 
 # shared-db-handover
@@ -22,11 +22,59 @@ app works live.
 
 ## (A) Hand over unfinished work — notes on the same issue
 
-**Stop working now.** Do not continue the task, and do not commit, push, merge,
-apply, promote, or write anything further to any database. Do not create
+**Stop implementation now.** Do not continue the task, merge its implementation
+PR, apply, promote, or write anything further to any database. Do not create
 background task chips. Do not delete or clean up your worktree or branch —
 another session may resume them, and an agent that tidies itself away destroys
-the evidence.
+the evidence. The native ownership operations below and a prose-only closeout PR
+are allowed solely to complete a safe handover; they authorize no implementation.
+
+**Finish ownership cleanup before ending.** The stop instruction freezes task
+execution; supported claim/stage handoff metadata operations remain required.
+A prose-only closeout PR may still be committed, pushed and normally merged;
+this exception finishes closeout and authorizes no new implementation or database
+write. Use claim-first rules below; historical marker examples are not live steps.
+A note alone is not a release. Enumerate this actual session's claims, subagents
+and exclusive stages, stop its writers, and verify each outcome:
+
+- Completed and live-accepted work: use native release only after its delivery,
+  source, recovery and closed-issue gates pass.
+- Unfinished clean source: execute merged `--stop-author` with exact claim,
+  issue, PR/head, owner, branch and worktree. Re-read the relinquished claim and
+  create-only owner-issued handoff-ready receipt. A qualified successor can take
+  over immediately without waiting for the former deadline or waking the old chat.
+- Known successor: that actual recipient uses `--handoff-claim-author` with
+  the exact ready receipt, declares its own identity, and verifies source,
+  reservation, object protection, clean custody and its thirty-minute permission.
+  Do not impersonate the predecessor or call cooperative handoff abandonment.
+- Dirty, remote, legacy or ambiguous custody: preserve unique bytes through the
+  governed route and record the precise refusal on the same issue. Never delete
+  source/object/version protection or fake expiry. Release only finished stages
+  this session owns; never claim readiness without the actual receipt.
+
+These ownership flags require the native helper to be available from merged
+shared-db source. Before reporting that they work, verify source change #4271 is
+merged, and use a clean canonical `shared-db` tool worktree at the current merged
+source. Inspect that source's CLI option definitions to confirm the exact
+supported flags; this helper has no `--help` handler. Run supported flags from
+that tool worktree and pass the preserved source worktree with `--worktree`. Verify
+the tool's current source identity, supplied worktree/claim inputs, and native
+readiness or operation receipts before claiming capability. Do not run an old
+helper from, or overwrite, the source worktree. If the merged helper, its
+documented flags, or its required readiness evidence is unavailable, report the
+ownership action as blocked; do not claim live capability.
+
+This is also the normal completion/stop rule; wrap-up repeats it as a fallback.
+Before declaring closeout complete, freshly verify that no execution capacity
+remains with the stopped session and every retained object claim has a verified
+successor or immediately acceptable ready receipt. A refused gate leaves closeout
+incomplete; AI owns its repair.
+
+Active structural sessions explicitly confirm continued need using owner-bound
+`--check-in-author` every ten minutes and before protected writes. New permissions
+last at most thirty minutes. Do not renew merely because a process exists.
+Missing confirmation stops execution while retaining source and permanent
+version/object protection.
 
 **If the unfinished work changes the database's shape, leave a handover block on
 the existing GitHub issue** in `popcre/shared-db` describing what you were doing
@@ -38,7 +86,10 @@ block already exists, extend it; never infer the route from the repository,
 gh issue comment <existing-issue> --repo popcre/shared-db --body-file <a file you wrote>
 ```
 
-Only structural work uses `route: shared-db-orchestrator`. Source-data decisions,
+Sign each GitHub post with the actual client engine: `Posted by <Codex or Claude>
+chat <id> on <machine>`. Never attribute a post to an engine that did not make it.
+
+Only structural work uses `route: claim-first`. Source-data decisions,
 application data, documentation, repository maintenance, and security settings
 keep their own routes. Outside-sourced writes into curated `core.*` Master Data
 use `route: curated-master-data-governance`; they remain governed without entering
@@ -59,7 +110,7 @@ the ones that save the next session a day:
 3. What you applied to **preview**, and what to **production**. "Nothing" is a fine
    answer and is worth saying explicitly.
 4. What is **half-finished or abandoned mid-way**.
-5. What you **own right now** — branches, worktrees, open PRs, dispatched agents.
+5. What you **own right now** — branches, worktrees, open PRs, and explicitly delegated work.
 6. What you were **about to do next**.
 7. What you are **blocked on**.
 8. **What you tried that did NOT work, and why. [MANDATORY]** Never leave this out.
@@ -80,10 +131,13 @@ for ~15 hours until Albert asked (ai-devops #596). The `depends_on:` line in the
 `db-work-scope` block is the durable record — the watcher's tick derives the native
 "blocked by" link from it automatically — but the WAIT belongs to a named session.
 
-**Right path.** If you had **already started** work, this is a handover — this path.
-If you had **not** started and simply need a database **change** made, that is a
-**request**, and the skill is `shared-db-orchestrator`. Filing one as the other sends
-it to the wrong triage.
+**Right path.** If you had **already started** structural work, this is a handover —
+this path. If you have not started and need a database shape change, use the
+existing issue that tracks that application need and follow the claim-first route:
+claim the exact objects and begin in your own current-upstream worktree. If no issue
+exists for a genuinely new application need, create one issue for that need with
+`route: claim-first`; do not create a second issue for its handover or live-proof
+gap. There is no orchestrator or marker step.
 
 **Read-only inspection is neither.** If all you did was *look* — schemas, tables,
 columns, keys, indexes, views, functions/RPCs, triggers, RLS policies, migration
@@ -103,8 +157,8 @@ this repo nothing for them. Two things still do trigger a handover:
 - **any bulk or ad-hoc load of outside-sourced content into curated Master Data**
   (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`,
   `*_ext`) — the §6.4 carve-out, unchanged; and
-- **any data you wrote to the protected shared preview project while running as, or dispatched
-  by, the orchestrator** — point 3 below. Preview is a shared rehearsal environment, so
+- **any data you wrote to the protected shared preview project while doing
+  structural work** — point 3 below. Preview is a shared rehearsal environment, so
   the disclosure is about not poisoning the next rehearsal, not about permission.
 
 Your block must cover, at minimum:
@@ -143,9 +197,9 @@ opened one. Do not start anything else, and do not "just finish this one thing".
 ## (B) Ending a structural session — the two-halves handover
 
 The end of a `popcre/shared-db` structural session. A session that claimed exact
-objects and dispatched sub-agents (see the `shared-db-orchestrator` reference)
-must leave enough state for the next session to resume or retire **each agent
-individually**.
+objects and explicitly delegated work must leave enough state for the next session
+to resume or retire **each agent individually**. The authoring session remains
+responsible for its claim, safety decisions, and verified closeout.
 
 > **This skill does not replace `handoff-writer`.** Follow that skill's file
 > convention (one write-once file at
@@ -159,7 +213,7 @@ individually**.
 A structural handoff that omits half (b) is **incomplete**, no matter how long
 it is. **A handoff that leaves outstanding work with no note on the existing
 issue is equally incomplete**, and carries exactly the same weight —
-see "Seed the outstanding work" below. *(Corrected 2026-08-09: this named the `REQUEST
+see "Keep unfinished work on its existing issue" below. *(Corrected 2026-08-09: this named the `REQUEST
 QUEUE` in `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
 
 **(a) Coordination state**
@@ -190,40 +244,16 @@ One clearly headed block per agent — never merged into a single narrative:
 That last line matters most. Without it the next session redoes abandoned work
 or, worse, undoes a deliberate omission.
 
-## Seed the outstanding work — REQUIRED, and a handover without it is INCOMPLETE
+## Keep unfinished work on its existing issue
 
-**Before you call the handover done, leave a note for EVERY outstanding
-item** on the existing issue — everything in `HANDOFF.md`'s opening agenda, its
-"waiting on Albert" list, and its `## BACKLOG` section, plus anything you
-dispatched that did not finish. **Do not open a new ticket per item.** Nothing
-outstanding may exist only in `HANDOFF.md` prose.
-
-**Why this rule exists — 2026-07-31.** A fresh orchestrator opened a session, read
-the `REQUEST QUEUE`, `INTAKE QUEUE` and `IN PROGRESS` sections of
-`COORDINATOR_INTAKE.md` exactly as `shared-db-orchestrator` instructs, found all
-three empty, and reported **"there is no pending work"** while roughly **twenty
-real jobs** sat in `HANDOFF.md`'s `## BACKLOG`. Every word of that report was
-true and the conclusion was completely wrong. The cause was not the incoming
-session: the **outgoing** orchestrator had written a long narrative handover and
-never populated the queue, because nothing in this standard required it. It does
-now.
-
-How to do it correctly:
-
-- **Short entries only** — a heading, one or two sentences of what outcome is
-  needed, and a pointer to the section of `HANDOFF.md` that holds the detail.
-  Open an issue with the `db-work` label; see `shared-db-orchestrator`.
-- **Never duplicate content.** Detail copied into the queue is detail that will
-  drift out of date; the two documents have already drifted apart repeatedly in
-  this repo. **No document wins by name or by date.** Where the queue and
-  `HANDOFF.md` (or the newest `HANDOFF.d/` file) disagree, **re-derive the fact
-  from `git`/`gh` and believe that** — do not rank the documents and pick one.
-- **Every `HANDOFF.md` `## BACKLOG` item `B<n>` gets an entry**, titled so the
-  B-number is visible in the heading (`### REQUEST — Backlog B7 — …`).
-- **Refresh, do not restart.** Issues already open and still outstanding stay
-  open; issues whose work has landed get a closing comment naming the PR and are
-  then closed. Never delete an issue. *(Corrected 2026-08-09: this pointed at
-  lifecycle rules owned by the retired `COORDINATOR_INTAKE.md`.)*
+Before closeout, verify that every outstanding action is recorded on the existing
+issue for that application need, with its current owner, blocker, exact next step,
+and live-proof checklist where acceptance remains incomplete. Do not create a
+duplicate structural request, a per-phase ticket, or a leftover-proof ticket. If a
+truly new application need has no issue, create one issue for that need and use
+`route: claim-first`; this is not a reason to split its implementation, handover,
+or live proof across tickets. Re-derive current state from the repository and the
+issue rather than relying on historical backlog documents or retired intake files.
 
 ## Ingesting a handover note
 
@@ -245,11 +275,9 @@ OVER section", which was the retired `COORDINATOR_INTAKE.md` workflow.)*
 The handover describes the state you leave behind, so tidy the state first.
 Three passes, and then a fourth that is just honesty:
 
-1. **Close out the issues you handled.** Every `db-work` issue you dispatched and
-   every `HANDOVER:` issue you ingested gets a dated comment saying what happened
-   and, where the work has landed, a close referencing the merged PR — never
-   deleted. *(Corrected 2026-08-09: this instructed moving blocks between sections
-   of `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
+1. **Update the existing issue you handled.** Add a dated, signed comment with
+   what happened; close it only after its outcome and live acceptance are verified.
+   Never delete an issue or create a second ticket for a handover or proof gap.
 2. **Verify each finished branch is actually merged, then retire its worktree.**
    For each agent you are calling finished: confirm the PR is merged
    (`gh pr view`), confirm the commits are in `origin/main`, and only then retire
@@ -260,10 +288,13 @@ Three passes, and then a fourth that is just honesty:
    branches looked unmerged to git while their pull request was merged.** Every
    cleanup keyed on git ancestry therefore reports live work and cleans nothing —
    which is exactly why 29 worktrees and 130 branches accumulated. **Ask GitHub
-   whether the PULL REQUEST merged.** `scripts/reap-merged-worktrees.mjs` in
-   `shared-db` does this: dry run by default, `--apply` to act, and it refuses
-   while any `orchestrator-marker` issue is open because a clean worktree on a
-   merged branch is indistinguishable from one a live sub-agent just pushed from.
+   whether the PULL REQUEST merged.** Use the current `shared-db` worktree-recovery
+   procedure and its ownership, clean-custody, and recoverability proofs.
+   `popcre/shared-db/scripts/reap-merged-worktrees.mjs` identifies merged-PR candidates (dry-run
+   by default); apply cleanup only after the current `cleanup-worktree` checks
+   prove ownership, clean custody and recoverability. It has no marker predicate
+   and does not authorize removal by itself. Preserve dirty or unproven bytes and
+   resolve the exact ownership refusal before any cleanup.
 
    Remote branches now delete themselves — `delete-branch-on-merge` was turned on
    for `popcre/shared-db` on 2026-08-13.
@@ -289,14 +320,15 @@ Three passes, and then a fourth that is just honesty:
    concurrent workstreams means twenty files and that is correct (owner ruling,
    2026-08-13). Report **stale** files — those whose issue is already closed —
    by name, with the owner from their contract block.
-2b. **Open or refresh a `db-work` issue for every outstanding item** — the
-   section above. This is not optional tidying: a handover that leaves outstanding
-   work unqueued is **incomplete**, in exactly the same way as one missing the
-   per-sub-agent blocks. On 2026-07-31 an un-seeded queue caused a fresh
-   orchestrator to report "there is no pending work" over a twenty-item backlog.
+2b. **Verify every outstanding item remains on its existing work issue.** This
+   is not optional tidying: a handover that leaves outstanding work only in a
+   handoff file is incomplete. Do not open or refresh a second `db-work` issue for
+   the same application need, implementation phase, handover, or live-proof gap.
+   A genuinely new need without an issue gets one claim-first issue, as described
+   above.
 
 3. **Flag anything you deliberately left.** A worktree you chose not to touch, a
-   branch you left alive, a request you decided not to dispatch — each gets one
+   branch you left alive, a request you left unstarted — each gets one
    line saying it was a decision, not an oversight. Unexplained leftovers get
    treated as abandoned by the next session and deleted.
 
@@ -307,7 +339,9 @@ Three passes, and then a fourth that is just honesty:
   assumed.
 - **Remote branches are deleted by the merge itself, never by hand.**
 - **A worktree is NEVER removed if it is dirty, locked, or held by a live
-  process.** Uncommitted work in a worktree is the only copy of that work.
+  process.** Uncommitted work in a worktree is the only copy of that work. Verify
+  its claim owner, exact source, and recovery custody before acting; age or a stale
+  marker never proves that unique bytes are disposable.
 
 Use the **`cleanup-worktree`** skill as the safe procedure for any of this. Do
 not improvise `git worktree remove --force` or `git branch -D`.
@@ -349,42 +383,25 @@ shows no open work issue you own, no live sub-agent or claim, no open PR of
 yours, and no dirty worktree, do NOT write a `HANDOFF.d/` file (a handoff is only
 for unfinished work — `handoff-writer`'s own rule). Instead:
 
-- Post the closeout record as **one comment on your marker issue**: `main` tip
+- Post the closeout record as **one comment on the existing work issue**: `main` tip
   SHA and time checked, maximum migration version, each open PR you touched with
   its state, the secrets-sweep result, the docs-pass result, and "no follow-up".
-- Close the marker with `gh issue close <marker> --repo popcre/shared-db`.
-  Nothing else waits on it. Secrets sweep and docs pass still report a result,
+- Create or close no marker. Close the existing work issue only after its actual
+  delivery and live-acceptance gates pass. Secrets sweep and docs pass report a result,
   but "n/a — no credential appeared; no durable fact changed" is a complete
   result when true; do not open files to look busy.
 
-**2. Unfinished work → one prose-only PR, merged directly.** Keep the PR to
-`HANDOFF.d/*.md` and `docs/**/*.md` only — no `.agent/` pair, no `AGENTS.md`,
-no skill files. Then:
-
-```bash
-until gh pr checks <n> --repo popcre/shared-db --required >/dev/null 2>&1 || [ $? -eq 8 ]; do sleep 10; done
-gh pr checks <n> --repo popcre/shared-db --required --watch --interval 30
-gh pr merge <n> --repo popcre/shared-db --squash
-```
-
-- `Documents-only merge authorization` posts the required
-  `Migration guarded merge authorization` status itself in about 30 seconds; all
-  required checks finish in about 2 minutes. Branch protection is not strict, so
-  `main` moving underneath you does not matter — **never** merge `main` into the
-  branch (that restarts every check).
-- **Never** use `--admin` (admins are enforced; it is refused), **never**
-  dispatch `guarded-migration-merge` for prose (it demands exactly one ready
-  repo-maintenance work issue and refuses a handoff), and **never** create a
-  throwaway issue to satisfy it.
-- If the required status never appears, the PR is not prose-only: the
-  `Documents-only merge authorization` job log names the offending file. Remove
-  that file from the PR rather than switching lanes.
-- The `until` line matters: for the first seconds after the PR opens, `--watch`
-  exits at once with "no checks reported" and the merge is then refused (live
-  proof #3060, 2026-09-16).
-- Wait with `gh pr checks --required`, not a `statusCheckRollup` count: the
-  rollup includes an unnamed commit status that never finishes.
-- Record the PR number in the marker comment; close the marker after the merge.
+**2. Unfinished work → one prose-only PR, merged through the normal route.** Keep
+the PR to handoff and documentation files only; do not include code, tests,
+scripts, workflows, or configuration. The stop instruction freezes implementation
+work, while this docs-only PR is the closeout deliverable. Under the shared-db
+`AGENTS.md`, prose-only PRs do not wait for CI: merge promptly through the normal
+repository path, using the merge queue where configured. Never use `--admin` or
+another bypass.
+Do not merge the unfinished implementation PR. If any non-prose file is included,
+the docs-only exception does not apply; follow the full required review and bounded
+PR-wait route for that change. Record the handoff PR on the same existing work
+issue. Open no marker or leftover-proof issue.
 
 ## Before you call the handover done
 
@@ -405,20 +422,19 @@ gh pr merge <n> --repo popcre/shared-db --squash
    through to tidy up the session — that is what this rule was for. But a
    **docs-only** PR (the handover itself, queue entries, notes) is merged by the
    session that wrote it: `AGENTS.md` §5 says docs-only merges promptly and §2
-   says never leave an open PR behind. Merge it by the direct route in
-   "Fast close" above; with nothing unfinished there is no PR at all.
+   says never leave an open PR behind. Merge it through the normal repository path
+   in "Fast close" above, including the merge queue where configured; with nothing
+   unfinished there is no PR at all.
 
    This split exists because the old blanket "never merge on the way out" is what
-   stranded the **2026-08-05** handover in open PR #451. The next orchestrator read
+   stranded the **2026-08-05** handover in open PR #451. The next session read
    `main`, saw a five-day-old handover, and concluded the session had been lost.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
-5b. **No marker to close.** Markers are not part of the default path. If an
-   older `orchestrator-marker` issue is still open from a previous process,
-   close it as housekeeping — it is not a lock and never was one. Merges are
-   dispatched by guarded-merge / train tooling and stage leases
-   (`EXCLUSIVE_REFS` in `manage-migration-author-lanes.mjs`), not by a chat
-   conductor.
+5b. **Do not create, resolve, or close markers.** The claim-first route has no
+   marker. A historical marker is neither a lock nor a cleanup blocker; leave it
+   untouched. Merges follow the normal repository path, with protected stage
+   leases enforced by the shared-db tools.
 6. **The secrets sweep — DO IT, do not delegate it to a skill the user has to
    invoke.** This step is part of the handover, not a follow-on ritual. Albert
    should never have to run a second closing skill because this one stopped short.
@@ -461,20 +477,16 @@ gh pr merge <n> --repo popcre/shared-db --squash
 
    Both 6 and 6b go in the handover PR with the handover file, so the whole
    closeout is one docs-only PR and one merge.
-7. **Confirm the sweep above was actually run** — queue blocks moved on, every
+7. **Confirm the sweep above was actually run** — every
    "finished" branch confirmed merged and its worktree retired, and everything
    you deliberately left behind flagged as a decision. This is a checklist item,
-   not a nicety: an unswept repo is how the next orchestrator inherits phantom
+   not a nicety: an unswept repo is how the next session inherits phantom
    worktrees and branches nobody dares delete.
-8. **Confirm the queue is seeded.** Run
-   `gh issue list --repo popcre/shared-db --label db-work --state open` and
-   check that every outstanding item — the opening agenda, the waiting-on-Albert
-   list, and **every `B<n>` in `HANDOFF.md`'s `## BACKLOG`** — has an open issue
-   pointing back at `HANDOFF.md`. **A handover without this is INCOMPLETE**, the
-   same as one missing half (b). *(Corrected 2026-08-09: this told you to open
-   `COORDINATOR_INTAKE.md`, which has been a 37-line pointer since 2026-08-07 —
-   following it would have shown an empty queue over a live backlog, the exact
-   2026-07-31 failure this step exists to prevent.)*
+8. **Confirm outstanding work is on its existing application issue.** Verify
+   actions against the issue, including any older agenda or backlog note. **Do not
+   create a ticket per backlog item**; create one claim-first issue only for a
+   distinct new application need that has no issue. Historical queues and handoff
+   prose are not current issue state.
 9. **Pass the gate:** could a developer who walked in off the street this morning
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
@@ -482,13 +494,13 @@ gh pr merge <n> --repo popcre/shared-db --squash
     INCOMPLETE.** The very last thing in the closing reply to Albert is a fenced,
     copy-paste prompt he can drop into a fresh session. It must be
     self-contained: a session with no chat context must be able to continue from
-    it alone. It states the repository, that the reader is the successor
-    orchestrator (with the closed marker number) and must open its OWN marker
-    with its own `route_id`, the path of the `HANDOFF.d/` file and the PR that
+    it alone. It states the repository, the successor's claim-first responsibility
+    and actual session identity, the path of the `HANDOFF.d/` file and the PR that
     carries it (and whether that PR is merged), the ordered next actions with
     issue and PR numbers, what must not be touched, and any standing owner
     instruction still in force. If the handover PR could not be merged, the
-    prompt's first action is merging it. If nothing is outstanding, say
+    prompt's first action is to resume its normal docs-only merge path. If nothing
+    is outstanding, say
     "No follow-up prompt — this workstream is closed" instead of inventing one.
     *(Added 2026-09-11: this skill tells sessions not to run `wrap-up`, which is
     where the prompt requirement lived, so marker #2689's closeout ended with no
@@ -498,11 +510,11 @@ gh pr merge <n> --repo popcre/shared-db --squash
 
 **`shared-db-handover` is all-encompassing for a shared-db session.** When it is
 done, every loose end is tied: swept, documented, committed, pushed, merged, and
-the marker closed.
+ownership verified through native release, handoff-ready consent or succession.
 
 **Do NOT run `wrap-up` after this skill.** They overlap, and `wrap-up`'s ship step
-is already owned here — steps 5 and 5b merge the docs-only handover PR and close
-the marker. Running it afterwards duplicates work and invites a second, competing
+is already owned here — steps 5 and 5b merge the docs-only handover PR and finish
+claim-first ownership verification. Running it afterwards duplicates work and invites a second, competing
 handover document.
 
 `wrap-up`'s next-session prompt is NOT dropped by this rule: step 10 above
@@ -540,10 +552,9 @@ silent skip and a clean result look identical, and only one of them is finished.
   WINS over this skill wherever the two disagree.** This file is a portable
   summary; §12 "Standing facts an incoming session must know" is the canonical
   version of the safety rules restated here.
-- `shared-db-orchestrator` — how the session is opened and run (the request path
-  for anyone who needs a database change, the session-start hygiene sweep,
-  orchestrator + sub-agents, single-writer ownership, the never-use-task-chips
-  rule, and the incident ledger behind each rule).
+- `shared-db-orchestrator` — optional historical safety reference. Current
+  structural work is claim-first; do not route requests to an orchestrator, wait
+  for dispatch, create a marker, or use a marker as a lock.
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
   never improvise a forced removal.
 - `handoff-writer` — the canonical 9-section handoff standard and file naming.

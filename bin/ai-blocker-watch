@@ -337,6 +337,16 @@ parse_ref(){ # owner/repo#N -> "owner/repo N"
 }
 gh_api(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then gh_call api "$@"; else gh_call api "$@" | tr -d '\r'; fi; }
 
+# #658 section 13 item 2: count managed writes and skipped unchanged writes
+# against a local target ordinal. A written unchanged content must never
+# happen; the skipped path is the intended avoidance.
+bw_write_observation(){
+  local key="${1:-}" action="${2:-}" relation="${3:-}" workflow="${4:-${BW_WORKFLOW:-blocker_watch_tick}}"
+  [ "$GH_COST_READY" = 1 ] || return 0
+  gh_measure_target_ordinal "$key"
+  gh_measure_write_observation ai-blocker-watch "$workflow" "${GH_MEASURE_TARGET_ORDINAL:-}" "$action" "$relation" || true
+}
+
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
@@ -350,15 +360,16 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
   # SNAPDEP is keyed by blocker: SNAPDEP[blocker] lists the issues it blocks.
   if [ -n "${SNAPREPO[$br]+set}" ]; then
     case "${SNAPDEP[$kr#$kn]:- }" in *" $br#$bn "*)
-      note "$1 is already blocked by $2"; return 0 ;;
+      note "$1 is already blocked by $2"; bw_write_observation "$1" skipped unchanged; return 0 ;;
     esac
   fi
   if AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
-    note "$1 is already blocked by $2"; return 0
+    note "$1 is already blocked by $2"; bw_write_observation "$1" skipped unchanged; return 0
   fi
   AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
     die "GitHub refused the link $1 blocked by $2"
   note "recorded: $1 is blocked by $2"
+  bw_write_observation "$1" written new
 }
 
 ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempotent
@@ -605,12 +616,13 @@ propagate(){
       fi
       for dep in $deps; do
         key="$repo#$n	$dep"
-        grep -qxF "$key" "$NOTIFIED" && continue
+        grep -qxF "$key" "$NOTIFIED" && { bw_write_observation "$dep" skipped unchanged; continue; }
         read -r dr dn <<<"$(parse_ref "$dep")"
         if [ "$DRY" = 1 ]; then note "would tell $dep that $repo#$n closed"; continue; fi
         if gh_call issue comment "$dn" -R "$dr" --body "<!-- ai-blocker-watch:$repo#$n -->
 Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (ai-blocker-watch)" >/dev/null; then
           printf '%s\n' "$key" >> "$NOTIFIED"; note "told $dep that $repo#$n closed"
+          bw_write_observation "$dep" written new
         else note "could not comment on $dep"; ok=0; fi
       done
     done <<<"$closed"
@@ -625,7 +637,7 @@ parked_comment(){ # parked_comment <wait file> <wait id> <mode> <rc> <log> <fina
   local pr pn; read -r pr pn <<<"$(parse_ref "$pi")"
   local marker="<!-- ai-blocker-watch:woke:$wid -->" existing
   existing="$(gh_api "repos/$pr/issues/$pn/comments" --jq '.[].body' 2>/dev/null || true)"
-  if printf '%s' "$existing" | grep -qF "$marker"; then return 0; fi
+  if printf '%s' "$existing" | grep -qF "$marker"; then bw_write_observation "$pi" skipped unchanged; return 0; fi
   local ref what how body
   ref="$(jq -r '.blocker // ""' "$f")"
   if [ -n "$ref" ]; then what="Blocker $ref closed."; else what="The wait time $(jq -r '.until // ""' "$f") passed."; fi
@@ -637,6 +649,7 @@ $what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unkn
   fi
   body="$body (ai-blocker-watch)"
   if gh_call issue comment "$pn" -R "$pr" --body "$body" >/dev/null; then
+    bw_write_observation "$pi" written new
     if [ "$rc" = 0 ]; then
       gh_call issue edit "$pn" -R "$pr" --remove-label "$(cfg .parked_label)" --add-label "$(cfg .resumed_label)" >/dev/null ||
         { note "could not swap the labels on $pi"; FAILED=1; }
@@ -1065,12 +1078,13 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     fi
   } > "$body"
   for key in $sorted; do
-    [ "${salarmed[$key]}" = true ] && continue
+    [ "${salarmed[$key]}" = true ] && { bw_write_observation "$key" skipped unchanged blocker_watch_alarm; continue; }
     if [ "$dry" = 1 ]; then note "would ask $key for an owner (no owner, no activity for ${sage[$key]})"; continue; fi
     if gh_call issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
 This open issue blocks ${spar[$key]} and has gone ${sage[$key]} with no owner: no assignee, no \`owner:\` line, no open linked pull request, no activity.
 Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand it to a named queue owner. Listed in today's ai-blocker-watch digest. (ai-blocker-watch)" >/dev/null; then
       note "asked $key for an owner"
+      bw_write_observation "$key" written new blocker_watch_alarm
     else note "alarm: could not comment on $key"; afail=1; fi
   done
   if [ "${#stall[@]}" -gt 0 ] || [ -e "$HOME_DIR/digest-$day.done" ]; then
@@ -1322,7 +1336,15 @@ lock_take(){
         wake_cache_remove "$cache" || { note 'unrecognized stale wake cache preserved'; return 1; }
       done
       rmdir "$lock"; mkdir "$lock"
-    else note "another tick is running"; return 1; fi
+    else
+      # A fire that lands on a live tick is owed a run. Windows Task Scheduler
+      # IgnoreNew and Linux cron both drop that fire; the running tick reads
+      # this marker when it finishes and catches up so the detection gap stays
+      # at one interval instead of two (#658 section 13 item 7).
+      note "another tick is running"
+      : > "$HOME_DIR/tick.misd" 2>/dev/null || true
+      return 1
+    fi
   fi
   trap 'rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true' EXIT
   return 0
@@ -1351,7 +1373,37 @@ cmd_tick(){
   # The offline suite never mints real tokens.
   [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
-  lock_take || return 0
+  local rc=0
+  if run_tick_body; then
+    # A fire that hit this tick's lock is owed a scan now, not one interval later.
+    if [ -f "$HOME_DIR/tick.misd" ] && [ "$DRY" != 1 ]; then
+      rm -f "$HOME_DIR/tick.misd"
+      note "tick catch-up after a concurrent fire hit the live lock"
+      # Release this run's lock, including any Linux wake cache, or catch-up
+      # cannot take the lock (rmdir fails on a non-empty directory) and later
+      # ticks stay blocked on the leaked lock.
+      if [ -n "${BW_WAKE_CACHE:-}" ]; then
+        wake_cache_remove "$BW_WAKE_CACHE" || true
+        BW_WAKE_CACHE=''
+      fi
+      rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true
+      trap - EXIT
+      run_tick_body || rc=$?
+      [ "$rc" = 2 ] && rc=0
+    fi
+  else
+    rc=$?
+    # 2 = lock held by another live tick; that tick performs the catch-up
+    [ "$rc" = 2 ] && rc=0
+  fi
+  return "$rc"
+}
+
+run_tick_body(){
+  lock_take || return 2
+  # A leftover marker belongs to a fire that hit a previous lock; this run is
+  # that owed work. Clear it so only a fire during *this* run requests catch-up.
+  rm -f "$HOME_DIR/tick.misd"
   BW_WAKE_CACHE=''
   # POSIX mode protection is sufficient only on Linux. Windows keeps the
   # original reads until this optional cache has a qualified NTFS ACL path.
@@ -1396,7 +1448,7 @@ cmd_tick(){
     if reap_one "$reap_f" 0; then reap_n=$((reap_n + 1)); fi
   done
   [ "$reap_n" -eq 0 ] || note "tick reaped $reap_n aged task/session record(s)"
-  [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+  [ "$FAILED" = 0 ] || { note "tick finished with failures"; return 1; }
   if [ -n "$BW_TICK_RECEIPT_ID" ]; then
     gh_measure_clock
     tick_elapsed_ms=$(( GH_MEASURE_CLOCK - tick_started_ms ))
@@ -1422,6 +1474,18 @@ cron_job_line(){
   local every off; every="$(cfg .schedule_every_minutes)"; off="$(tick_offset "$every")"
   printf '%s-59/%s * * * * %s tick >> %s 2>&1' "$off" "$every" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"
 }
+# schtasks defaults drop fires: IgnoreNew never queues a run that lands on a
+# live instance, StartWhenAvailable=false discards a missed run, and the
+# battery flags refuse to start on a laptop. Those defaults produced measured
+# detection gaps over the ten-minute ceiling (#658 section 13 item 7).
+# MultipleInstances='Queue' (enum value 1) makes a fire wait for the live tick instead of
+# vanishing; the tool's tick.misd catch-up covers Linux cron, which cannot queue.
+schedule_windows_reliability(){
+  command -v powershell.exe >/dev/null 2>&1 || { note 'powershell.exe missing; blocker-watch schedule reliability settings not applied'; return 1; }
+  MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -Command "\$s=Get-ScheduledTask -TaskName 'blocker-watch' -TaskPath '\\ai-devops\\'; \$s.Settings.StartWhenAvailable=\$true; \$s.Settings.DisallowStartIfOnBatteries=\$false; \$s.Settings.StopIfGoingOnBatteries=\$false; \$s.Settings.MultipleInstances='Queue'; Set-ScheduledTask -TaskName 'blocker-watch' -TaskPath '\\ai-devops\\' -Settings \$s.Settings | Out-Null" >/dev/null 2>&1 \
+    || { note 'could not apply blocker-watch schedule reliability settings'; return 1; }
+  return 0
+}
 cmd_schedule(){
   local every self
   every="$(cfg .schedule_every_minutes)"
@@ -1432,6 +1496,7 @@ cmd_schedule(){
     # /F re-points an existing task, so rerunning the installer stays safe.
     MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /ST "$(printf '00:%02d' "$(tick_offset "$every")")" /TN "$TASK_NAME" \
       /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
+    schedule_windows_reliability
     note "scheduled every $every minutes as $TASK_NAME"
     return
   fi

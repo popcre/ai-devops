@@ -699,12 +699,14 @@ $(tail -n "$tests_tail" "$tests_out")
 | operation | \`${operation}\` |"
   [ -z "$operation_evidence" ] || extra_fields="$extra_fields
 $operation_evidence"
-  rlc_write_report "$report" "$provider" "$mode" "$repo" "$head" "$digest" "$run_id" "$caller" "$elapsed" "$body_file" "$extra_fields"
-
+  # Compare identity BEFORE writing the report into the reviewed repository:
+  # an untracked .ai/reviews file is part of the source digest wherever .ai/
+  # is not git-ignored, so writing first made every review look changed (#1716).
   after_identity=""
   if ! after_identity="$(rlc_identity "$repo" "$base" "$assert_head" 2>/dev/null)"; then
     after_identity=""
   fi
+  rlc_write_report "$report" "$provider" "$mode" "$repo" "$head" "$digest" "$run_id" "$caller" "$elapsed" "$body_file" "$extra_fields"
   if [ -z "$after_identity" ] || [ "$after_identity" != "$identity" ]; then
     mv "$report" "$report.stale" 2>/dev/null || true
     rlc_lifecycle_fail "$state" "$elapsed" source-identity-changed "$report.stale" "$packet_dir" "$packet_sha"

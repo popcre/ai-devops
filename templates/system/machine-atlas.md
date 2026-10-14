@@ -13,3 +13,14 @@ ai-private-config path machine_atlas
 
 Installers and global-instruction adoption must resolve the protected file at
 runtime. Do not copy concrete topology back into this public placeholder.
+
+## Machine classes (rule is public; addresses are not)
+
+| Class | Allowed | Forbidden |
+|---|---|---|
+| Dev | Full ai-devops toolkit install and updates | — |
+| **Networking only** (`edge-alien`, `edge-runn-envy`, `edge-runn-xps`) | SSH key, SSH config, hostnames, Tailscale | Any ai-devops toolkit install (bootstrap, install.sh, setup-machine, skills, MCP, reviewers, agents) |
+
+These three hosts are **not development machines**. Repeated mistakes installed
+toolkit on them. Always check the hostname before installing. Binding detail:
+[`../../docs/deployment.md`](../../docs/deployment.md) § Machine classes.

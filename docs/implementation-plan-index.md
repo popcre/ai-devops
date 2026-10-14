@@ -13,6 +13,7 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
+| [`plan_review-scope-reduction.md`](../plan_review-scope-reduction.md) | [#1714](https://github.com/popcre/ai-devops/issues/1714) | Step 0; plan only, nothing implemented |
 | [`Windows render admission plan`](plans/windows-render-production-admission-20261011.md) | [#1455](https://github.com/popcre/ai-devops/issues/1455), Root coordinator | Step 0 STOP: supported ephemeral structurally read-only reviewer qualification not proved; no allowance/code/live action implemented; PopDAM #162 retains application acceptance |
 | [`plan_blockerwatch-reliability-repair.md`](../plan_blockerwatch-reliability-repair.md) | [#632](https://github.com/popcre/ai-devops/issues/632) | Step 0; comprehensive audit/repair plan written, no implementation started |
 | [`plan_blockerwatch-parked-work.md`](../plan_blockerwatch-parked-work.md) | [#617](https://github.com/popcre/ai-devops/issues/617) | Steps 1-9 and 11 done (merge `eb92356e`); step 10 partly proved on 916-alien - the fresh session must still be proved on a machine with a working headless agent, owned by #617 |
@@ -32,6 +33,7 @@ record merely to reduce the file count.
 | [`plan_reviewer-scoped-ci-selection.md`](../plan_reviewer-scoped-ci-selection.md) | [#1563](https://github.com/popcre/ai-devops/issues/1563) | Complete — live proof PR #1571 (7 of 143 suites) |
 | [`plan_github-request-reduction.md`](../plan_github-request-reduction.md) | [#658](https://github.com/popcre/ai-devops/issues/658) | P5 (BlockerWatch → existing App) before any multi-App split |
 | [`plan_mimo-windows-support.md`](../plan_mimo-windows-support.md) | (see plan STATUS) | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` |
+| [plan_mimo-reviewer-wrappers.md](../plan_mimo-reviewer-wrappers.md) | [#1696](https://github.com/popcre/ai-devops/issues/1696) | Step 0 first: install and qualify `mimo run` on both platforms; one door, two engine paths (StepFun pattern) |
 | [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md) | [#782](https://github.com/popcre/ai-devops/issues/782) | Steps 5–6 open: re-adopt globals on edge-dev, land PR, add router row |
 | [`plan_review-packet-race-and-evidence-speed.md`](../plan_review-packet-race-and-evidence-speed.md) | (see plan STATUS) | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict |
 | [`plan_reviewer-pipeline-core.md`](../plan_reviewer-pipeline-core.md) | (see plan STATUS) | Phases A–C then D–E; new 2026-09-29, index retro-fix |
@@ -101,3 +103,9 @@ commit. When work closes, move it to the correct record table with completion
 or successor evidence. Deletion is optional and requires proof that no live
 issue or handoff relies on the path and that every unique decision remains in a
 successor or Git history.
+
+## Housekeeping leftover triage (batch 2)
+
+UNPROVABLE HANDOFF.d retargets and the file-by-file retirement plan:
+[`housekeeping-unprovable-batch2-retirement-plan.md`](housekeeping-unprovable-batch2-retirement-plan.md)
+(tracking issue [#1661](https://github.com/popcre/ai-devops/issues/1661)).

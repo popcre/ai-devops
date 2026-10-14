@@ -22,6 +22,70 @@ if os.name == "nt":
 else:
     import fcntl
 
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+
+def _gh_state_dir():
+    root = os.environ.get("AI_GH_STATE_DIR") or str(Path.home() / ".ai-devops" / "gh-throttle")
+    return Path(root)
+
+
+def _measurement_dir():
+    return _gh_state_dir() / "measurements"
+
+
+def _target_ordinal(key):
+    try:
+        import target_ordinal
+        return target_ordinal.ordinal_for(_gh_state_dir(), key)
+    except Exception:
+        return None
+
+
+def _emit_record(record_obj):
+    try:
+        import measure_append
+        measure_append.append_record(_measurement_dir(), json.dumps(record_obj, separators=(",", ":")))
+    except Exception:
+        pass
+
+
+def emit_read_observation(key, source, caller=None):
+    """Count a completed status read: cache saves an upstream read."""
+    ordinal = _target_ordinal(key)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _emit_record({
+        "schema": 6,
+        "utc": now,
+        "measurement": "read_observation",
+        "caller": caller or os.environ.get("AI_GH_CALLER") or "ai-pr-wait",
+        "workflow": "pr_wait",
+        "target_ordinal": ordinal,
+        "source": source,
+        "cache_hit": source == "cache",
+        "saved_upstream_read": source == "cache",
+    })
+
+
+def emit_write_observation(key, action, content_changed, caller=None):
+    """Record a managed cache write or the skip that avoids an unchanged rewrite."""
+    ordinal = _target_ordinal(key)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    relation = "new" if content_changed else "unchanged"
+    _emit_record({
+        "schema": 6,
+        "utc": now,
+        "measurement": "write_observation",
+        "caller": caller or os.environ.get("AI_GH_CALLER") or "ai-pr-wait",
+        "workflow": "pr_wait",
+        "target_ordinal": ordinal,
+        "action": action,
+        "content_relation": relation,
+        "duplicate_unchanged_write": action == "written" and not content_changed,
+    })
+
 
 def windows_acl(mode, path):
     helper = Path(__file__).with_name("secure-windows-path.ps1")
@@ -223,7 +287,7 @@ def main():
 
     def upstream(cache_path):
         return run(command, cache_path, args.age_file, args.source_file, args.expected_head,
-                   deadline, args.cap_supervisor_timeout, args.defer_source_mark)
+                   deadline, args.cap_supervisor_timeout, args.defer_source_mark, args.key)
 
     directory = Path(args.state_dir)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
@@ -302,6 +366,7 @@ def main():
                         age = 0 if same_flight else int(wall_age)
                         Path(args.age_file).write_text(str(age))
                         Path(args.source_file).write_text("cache")
+                        emit_read_observation(args.key, "cache")
                         sys.stdout.buffer.write(raw)
                         return 0
             return upstream(cache)
@@ -310,7 +375,7 @@ def main():
 
 
 def run(command, cache, age_file, source_file, expected_head=None,
-        deadline=None, cap_supervisor_timeout=False, defer_source_mark=False):
+        deadline=None, cap_supervisor_timeout=False, defer_source_mark=False, args_key=None):
     if cap_supervisor_timeout:
         try:
             index = command.index("--timeout-seconds")
@@ -337,12 +402,28 @@ def run(command, cache, age_file, source_file, expected_head=None,
     if not complete(result.stdout):
         print("ai-pr-wait: incomplete or invalid pull-request status; refusing cached success", file=sys.stderr)
         return 4
+    if args_key:
+        emit_read_observation(args_key, "upstream")
     if cache is not None and len(result.stdout) <= 1048576 and complete(result.stdout):
-        try:
-            atomic_write(cache, result.stdout)
-        except OSError:
-            # A cache write must not erase an otherwise valid fresh outcome.
-            pass
+        previous = None
+        if cache.is_file() and not cache.is_symlink():
+            try:
+                previous = cache.read_bytes()
+            except OSError:
+                previous = None
+        if previous == result.stdout:
+            # Zero duplicate unchanged writes: an identical snapshot is already
+            # present, so skip the rewrite and count the avoided duplicate.
+            if args_key:
+                emit_write_observation(args_key, "skipped", False)
+        else:
+            try:
+                atomic_write(cache, result.stdout)
+                if args_key:
+                    emit_write_observation(args_key, "written", True)
+            except OSError:
+                # A cache write must not erase an otherwise valid fresh outcome.
+                pass
     return 0
 
 

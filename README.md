@@ -28,6 +28,18 @@ strategy remediation, so old clones must be replaced after that rewrite.
 
 ## Set up a new machine (start here)
 
+> ### ⚠️ Machine classes — read before installing anything
+>
+> **`edge-alien`, `edge-runn-envy`, and `edge-runn-xps` are NOT development
+> machines.** They get **networking only**: SSH key, SSH config, hostnames,
+> Tailscale. Nothing else.
+>
+> **Never** install the ai-devops toolkit on them — no `bootstrap-windows-dev.ps1`,
+> no `install.sh`, no `setup-machine.ps1`, no skills/MCP/reviewers/agents.
+> This mistake has happened repeatedly. **Check the hostname before any install.**
+>
+> Full rule: [docs/deployment.md](docs/deployment.md) § Machine classes.
+
 Goal: on a brand-new computer, run **one script**, complete GitHub's one-time
 browser authorization for the private restore inputs, paste **one 1Password
 code once**, and then Claude works everywhere with all passwords filled in
@@ -286,6 +298,9 @@ exclusions, rollout workflow, and legacy-document boundary.
 Active multi-session work is catalogued in the
 [implementation-plan index](docs/implementation-plan-index.md), including the
 evidence that establishes each completed gate.
+Housekeeping leftover triage (UNPROVABLE handoff retargets and the retirement
+plan for finished files) is in
+[docs/housekeeping-unprovable-batch2-retirement-plan.md](docs/housekeeping-unprovable-batch2-retirement-plan.md).
 For #660's isolated request measurement build and separate offline/live
 qualification, see the [outgoing-write counter prototype](tools/github-requests/instrumented-gh/README.md).
 

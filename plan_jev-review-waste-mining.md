@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN — Jev review-waste mining from AI transcripts
 
 **Handoff (read first together with this file):**
-[`HANDOFF.d/2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md`](HANDOFF.d/2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md)
+Session handoff `2026-10-12T1444Z-edge-dev-mimo-jev-review-waste-mining.md` (retired 2026-10-13; implementation on `main` via #1620/#1647/#1656/#1668).
 
 **Related plans (do not duplicate their work):**
 [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md),
@@ -20,9 +20,10 @@
 | 4. Review-arc stitch + value Score | done | 2026-10-12 | [value score shadow run](tests/verification/jev/review-waste-value-shadow-20261012T180611Z.md); `tools/jev_review_waste_arc.py`; pipeline tests 17/0 |
 | 5. Aggregation + waste report | done | 2026-10-12 | [review waste report](tests/verification/jev/review-waste-report-20261012T180833Z.md) (bounded 12-file sample; slices n≥5 suppressed) |
 | 5b. Large sweep (250 files) | done | 2026-10-13 | [large review-waste sweep report](tests/verification/jev/review-waste-report-20261013T112939Z.md) |
+| 5c. Full sweep and owner analysis | done | 2026-10-13 | [full sweep report](tests/verification/jev/review-waste-report-20261013T162000Z.md); [per-reviewer detail](tests/verification/jev/review-waste-reviewer-detail-20261013.md); [Flash verification](tests/verification/jev/review-waste-flash-verify-20261013.md); [analysis](docs/review-waste-analysis-2026-10-13.md); [recommendation](docs/review-waste-recommendation-2026-10-13.md) |
 | 6. Decision brief for the owner | done | 2026-10-12 | Decision brief section of the waste report (options only; no policy change) |
 
-**Where a fresh session starts:** Step 0. Re-read this STATUS table first — do not re-derive or re-plan. Every row stays `⬜ open` until its verification gate passes and the evidence cell names an artifact a reader can open.
+**Where a fresh session starts:** every step above is done — re-read this STATUS table for the evidence links before touching this lane, and do not re-derive or re-plan. The evidence cells name the artifacts a reader can open; a new change to this lane needs its own issue, not a reopened row.
 
 ---
 
@@ -98,16 +99,16 @@ Worktree base for this plan: `ae490d6d` (`origin/main` as of 2026-10-12).
 
 | Thing | State |
 |---|---|
-| `bin/ai-jev-probe` | Exists. One bounded reachability call; self-resolves API key via `op run`; 10s connect / 20s call timeout. Uses moving `jev-latest` alias — **not** acceptable for calibrated thresholds. |
-| `bin/ai-jev-completion-shadow` | Exists. Record-only completion check; duplicated secret bootstrap (must move onto shared client). |
-| `tools/lib/jev-client.sh` | **Does not exist.** Advisory plan §9.2 is still open. This plan's Step 2 may have to build it, or consume it if another session landed it first. |
-| `config/jev-decisions.json` | **Does not exist.** Same rule as above. |
-| `tests/test-ai-jev-scripts.sh` | Exists. Six offline guards for empty secrets, timeouts, malformed `Noul`/`Choice`, etc. |
-| `tests/fixtures/jev/` | Does not yet hold review-waste labels. |
+| `bin/ai-jev-probe` | Exists. One bounded reachability call; self-resolves API key via `op run` through the shared client; 10s connect / 20s call timeout. Uses the pinned model (the `jev-latest` alias is forbidden for calibration). |
+| `bin/ai-jev-completion-shadow` | Exists. Record-only completion check; secret bootstrap and transport live in the shared client (`tools/lib/jev-client.sh`). |
+| `tools/lib/jev-client.sh` | Exists. The single bounded TypeSafe Jev transport (advisory plan §9.2 landed): key resolution via `op run`, timeouts, byte/call caps, model-pin prechecks. |
+| `config/jev-decisions.json` | Exists. Model pin, endpoint, timeouts, byte/call caps, and the frozen decision thresholds. |
+| `tests/test-ai-jev-scripts.sh` | Exists. Offline guards: empty secrets fail loudly, vendor outage records escalate (never clean), network failure reports FAIL, no leaked temp files; plus the op run re-exec path through a stub `op`. |
+| `tests/fixtures/jev/` | Holds the review-waste chunk and value label fixtures (30+ cases each). |
 | `tests/verification/jev/spend-baseline-20260928T0243Z.md` | Exists. Negative result for the *old* target (no qualifying displaced paid call). Do not treat as evidence for this target. |
 | `tools/reviewer_events.py` | Exists. Reviewer event log writer/reader. |
 | `~/.local/state/ai-devops/reviewer-events/events.jsonl` | Live reviewer dispatch/outcome log on installed machines. |
-| `bin/ai-jev-review-waste*` (any caller) | **Does not exist.** To be added under Step 2/3/4. |
+| `bin/ai-jev-review-waste*` | Exists. Thin read-only consumer of the shared client (`chunk-filter` / `value-level`) with a Windows `.cmd` shim. |
 | Transcript archive | Local, outside the repo. See §12. `tools/jev_review_waste_sample.py` reads it from the `AI_JEV_ARCHIVE_DIR` environment variable (a directory; `~` is expanded); the path is never committed. Owner ruled 2026-10-12: **redacted, no longer private** for the purpose of sending to TypeSafe. Raw files still must never be committed here. |
 | Shared-db allocator / roster | Untouched. |
 
