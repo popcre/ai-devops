@@ -185,6 +185,13 @@ Codex-specific repeated workflows now live in `skills/codex/`; see
 [`docs/codex-skills-usage-guide.md`](docs/codex-skills-usage-guide.md) and
 [`docs/codex-chat-analysis.md`](docs/codex-chat-analysis.md).
 
+Shared token-waste rules and the optional ScaleDown compress path for
+pasted/retrieved documents are recorded in
+[`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md).
+The [`skills/shared/scaledown-compress/SKILL.md`](skills/shared/scaledown-compress/SKILL.md)
+skill triggers that path and is the only supported way to call the compress API
+from a session.
+
 ### GLM as a full coding agent
 
 `ai-glm` gives Claude and Codex named, persistent GLM sessions hosted by a
