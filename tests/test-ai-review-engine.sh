@@ -103,6 +103,15 @@ printf '## Verdict\nAPPROVE\n' > "$FLOOR_EMPTY"
 } > "$FLOOR_REAL"
 check "report_floor_rejects_bare_decision" "! bash -c 'set -e; . \"'$CORE'\"; rlc_report_floor_ok \"'$FLOOR_EMPTY'\"'"
 check "report_floor_accepts_substance" "bash -c 'set -e; . \"'$CORE'\"; rlc_report_floor_ok \"'$FLOOR_REAL'\"'"
+VERDICT_BLANK="$TMP/verdict-blank.md"
+VERDICT_INTERVENING="$TMP/verdict-intervening.md"
+VERDICT_EOF="$TMP/verdict-eof.md"
+printf '## Verdict\n\nREJECT\n' > "$VERDICT_BLANK"
+printf '## Verdict\ncommentary\nREJECT\n' > "$VERDICT_INTERVENING"
+printf '## Verdict\n\n' > "$VERDICT_EOF"
+check "core_parser_accepts_exact_reject_after_blank_lines" "[ \"\$(rlc_parse_verdict '$VERDICT_BLANK')\" = REJECT ]"
+check "core_parser_refuses_intervening_text_before_token" "! rlc_parse_verdict '$VERDICT_INTERVENING' >/dev/null 2>&1"
+check "core_parser_refuses_empty_verdict_until_eof" "! rlc_parse_verdict '$VERDICT_EOF' >/dev/null 2>&1"
 
 # --- structural forcing function: door refuses without the runner token -----
 echo '== structural forcing function (doors)'
@@ -591,6 +600,39 @@ EOF
     "find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 done
 unset _prov _mock _ov _prc _pstate
+
+# A real StepFun engine-path fixture with the provider's reported formatting:
+# the exact REJECT token follows a blank line, and lifecycle must finish REJECT.
+STEPFUN_BLANK_REJECT="$TMP/stepfun-blank-reject-door.sh"
+cat > "$STEPFUN_BLANK_REJECT" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ]
+{
+  printf 'Reviewed exact head %s. ' "$DOOR_HEAD"
+  printf 'The complete change, sibling paths, evidence binding, source identity, fail-closed checks, lifecycle behavior and tests were examined. '
+  printf 'This analysis is deliberately long enough to satisfy the report floor and records a substantive rejection. '
+  printf 'No approval is granted because the tested fixture models the exact StepFun report shape under review.
+
+## Verdict
+
+REJECT
+'
+} > "$DOOR_REPORT_OUT"
+EOF
+chmod +x "$STEPFUN_BLANK_REJECT"
+set +e
+( cd "$MREPO" && AI_REVIEW_DOOR_STEPFUN="$STEPFUN_BLANK_REJECT" timeout 90 "$ENGINE" review --provider stepfun \
+    --name engine-stepfun-blank-reject --repo "$MREPO" --mode final-check --caller codex ) \
+    >"$TMP/stepfun-blank-reject.out" 2>"$TMP/stepfun-blank-reject.err"
+STEPFUN_BLANK_REJECT_RC=$?
+set -e
+STEPFUN_BLANK_REJECT_REPORT="$(tail -1 "$TMP/stepfun-blank-reject.out" 2>/dev/null || true)"
+STEPFUN_BLANK_REJECT_STATE="$(grep -RslF "$STEPFUN_BLANK_REJECT_REPORT" "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"
+check "stepfun_engine_blankline_reject_completes_not_missing_verdict" \
+  "test '$STEPFUN_BLANK_REJECT_RC' -eq 0 && test -s '$STEPFUN_BLANK_REJECT_REPORT' && jq -e '.status==\"completed\" and .verdict==\"REJECT\" and .failure_class==null' '$STEPFUN_BLANK_REJECT_STATE' >/dev/null"
+check "stepfun_engine_blankline_reject_keeps_reject_in_report" \
+  "test -s '$STEPFUN_BLANK_REJECT_REPORT' && tail -2 '$STEPFUN_BLANK_REJECT_REPORT' | grep -qx REJECT && ! grep -q 'no valid ## Verdict' '$TMP/stepfun-blank-reject.err'"
 
 # A door's out-of-credit exit (92, rotation rule 10) must survive the runner,
 # as ai-review-pool keeps it for wrappers; anything else is provider-failed.

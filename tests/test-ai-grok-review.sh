@@ -1500,6 +1500,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   verdictblankline) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence across the complete adapter diff, including the front door, packet identity, lifecycle begin and finish records, report binding, source drift and every refusal branch. This paragraph is deliberately longer than the required report floor so only the verdict formatting behavior is exercised. Head under review: %s. The final decision follows after an allowed blank line and must be preserved as an actual rejection.\n\n## Verdict\n\nREJECT\n' "$HEAD" ;;
   intervening) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence, written long enough to clear the report floor. Head under review: %s.\n\n## Verdict\nThis line is not a verdict.\nREJECT\n' "$HEAD" ;;
+  emptyuntilEOF) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence across the complete adapter diff, with enough detail to clear the report floor. Head under review: %s.\n\n## Verdict\n\n' "$HEAD" ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   provisional) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nREJECT\n' "$HEAD" ;;
   provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
@@ -1675,6 +1676,8 @@ check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no 
 check "pool_adapter_accepts_exact_verdict_after_blank_lines" "[ '$RC_VBLANK' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=intervening bash "$POOL" qwen security-review ) > "$POOLTMP/out-intervening" 2>&1; RC_INTERVENING=$?
 check "pool_adapter_refuses_text_between_heading_and_verdict" "[ '$RC_INTERVENING' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-intervening'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=emptyuntilEOF bash "$POOL" qwen security-review ) > "$POOLTMP/out-empty-verdict" 2>&1; RC_EMPTY_VERDICT=$?
+check "pool_adapter_refuses_blank_verdict_until_eof" "[ '$RC_EMPTY_VERDICT' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-empty-verdict'"
 rm -f "$POOLTMP/finish-verdicts"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" qwen security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
 check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
@@ -1694,7 +1697,7 @@ GSHAPE_REPORT="$(tail -1 "$POOLTMP/out-gshape" 2>/dev/null)"
 check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && [ -f '$GSHAPE_REPORT' ] && grep -q APPROVE '$GSHAPE_REPORT'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishapeblank bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape-blank" 2>&1; RC_GSHAPE_BLANK=$?
 GSHAPE_BLANK_REPORT="$(tail -1 "$POOLTMP/out-gshape-blank" 2>/dev/null)"
-check "pool_adapter_accepts_blank_lines_in_gemini_verdict_first_shape" "[ '$RC_GSHAPE_BLANK' -eq 0 ] && [ -f '$GSHAPE_BLANK_REPORT' ] && grep -q APPROVE '$GSHAPE_BLANK_REPORT'"
+check "pool_adapter_records_exact_gemini_verdict_after_blank_lines" "[ '$RC_GSHAPE_BLANK' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = APPROVE ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape-qwen" 2>&1; RC_GSHAPE_QWEN=$?
 check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
