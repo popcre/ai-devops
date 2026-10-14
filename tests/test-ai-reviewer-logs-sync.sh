@@ -246,6 +246,11 @@ view
 check 'bundles from a failed push are published by the next run' "grep -q 'restored' '$TMP/out24' && grep -q 'during an outage' '$P/reviewer-issues/pkg/outage.log'"
 AI_REVIEWER_LOGS_REMOTE='https://user:SECRETTOKEN@github.com/u2giants/ai-devops-reviewer-logs.git' HOME="$TMP/home" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out25" 2>&1 || true
 check 'addresses carrying credentials are refused without echoing them' "grep -q 'must not contain credentials' '$TMP/out25' && absent grep -q SECRETTOKEN '$TMP/out25'"
+git -C "$TMP/hub" remote set-url origin "file://user:STOREDSECRET@localhost$REMOTE"
+git -C "$TMP/hub" config remote.origin.pushurl "file://user:STOREDSECRET@localhost$REMOTE"
+printf 's\n' >> "$STATE/reviewer-events/events.jsonl"
+run sync > "$TMP/out26" 2>&1 || { cat "$TMP/out26" >&2; exit 1; }
+check 'a stored address with credentials is replaced before any use' "absent grep -q STOREDSECRET '$TMP/hub/.git/config' && absent grep -q STOREDSECRET '$TMP/out26' && absent grep -rq STOREDSECRET '$TMP/home/.ai-devops/reviewer-logs-sync'"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
