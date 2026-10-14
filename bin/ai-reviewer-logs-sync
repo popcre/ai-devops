@@ -183,7 +183,9 @@ stage_tree(){
 
 ensure_hub(){
   if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
-    [ "$(canonical_remote "$REMOTE")" = "$CANONICAL" ] || die "remote is not the private reviewer-logs repository"
+    # Exactly one of the three standard GitHub forms of the archive address.
+    [[ "$REMOTE" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)u2giants/ai-devops-reviewer-logs(\.git)?$ ]] \
+      || die "remote is not the private reviewer-logs repository"
     # Truly anonymous: no askpass programs, no user or system git config.
     if env -u GIT_ASKPASS -u SSH_ASKPASS -u GH_TOKEN -u GITHUB_TOKEN \
         GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
@@ -212,10 +214,12 @@ ensure_hub(){
   git -C "$HUB" config --replace-all core.autocrlf false
   GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
   # Always start from exactly what is published.
-  if git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1; then
-    git -C "$HUB" checkout -q -B main origin/main 2>>"$LOG" || git -C "$HUB" checkout -q -f -B main origin/main
-    git -C "$HUB" reset -q --hard origin/main
-  fi
+  # An archive without a published main is refused: there is nothing to start
+  # from, and local history must never be pushed in its place.
+  git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1 \
+    || die "the reviewer-logs archive has no main branch; it must be initialized before syncing"
+  git -C "$HUB" checkout -q -B main origin/main 2>>"$LOG" || git -C "$HUB" checkout -q -f -B main origin/main
+  git -C "$HUB" reset -q --hard origin/main
   git -C "$HUB" clean -qfdx
   if [ -n "$(git -C "$HUB" ls-files -s | awk '$1 == "120000"')" ]; then
     die "the reviewer-logs repository contains symbolic links; refusing to write into it"

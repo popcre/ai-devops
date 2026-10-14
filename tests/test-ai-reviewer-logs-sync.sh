@@ -18,6 +18,9 @@ native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else prin
 REMOTE="$TMP/logs.git"
 git init -q --bare "$REMOTE"
 git -C "$REMOTE" symbolic-ref HEAD refs/heads/main
+# Like the real archive, the test archive starts with one empty commit on main.
+git init -q "$TMP/seed" && git -C "$TMP/seed" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m start
+git -C "$TMP/seed" push -q "$REMOTE" HEAD:main
 
 STATE="$TMP/state"; ISSUES="$TMP/issues"; REPOS="$TMP/repos"; REPOS2="$TMP/other/repos"
 mkdir -p "$STATE/review-scoreboard" "$STATE/reviewer-events" "$STATE/review-lifecycle/runs/r1" \
@@ -36,8 +39,8 @@ printf '# review\nVERDICT: APPROVE\n' > "$REPOS/app-one/.ai/reviews/codex-final-
 printf 'second checkout\n' > "$REPOS2/app-one/.ai/reviews/codex-final-check.md"
 
 run(){
-  HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="$REMOTE" \
-    AI_REVIEWER_LOGS_HUB="$TMP/hub" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
+  HOME="$TMP/home" AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE="${AI_REVIEWER_LOGS_REMOTE:-$REMOTE}" \
+    AI_REVIEWER_LOGS_HUB="${AI_REVIEWER_LOGS_HUB:-$TMP/hub}" AI_REVIEWER_STATE_BASE="$STATE" AI_REVIEWER_ISSUE_DIR="$ISSUES" \
     AI_REVIEWER_LOGS_ROOTS="$REPOS:$REPOS2" AI_REVIEWER_LOGS_MAX_FILE_BYTES=2000 \
     AI_REVIEWER_LOGS_CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-80000000}" \
     AI_REVIEWER_LOGS_MACHINE="${AI_REVIEWER_LOGS_MACHINE:-test-box}" AI_REVIEWER_LOGS_CERT="$TMP/cert.pem" \
@@ -65,7 +68,7 @@ check 'oversized files skipped and listed inside the bundle' "[ ! -e '$P/reviewe
 check 'provider session stores are not collected' "[ ! -e '$P/state/qwen' ]"
 
 run sync 2> "$TMP/out2"
-check 'unchanged rerun pushes nothing new' "grep -q 'nothing new' '$TMP/out2' && [ \$(git -C '$REMOTE' rev-list --count main) -eq 1 ]"
+check 'unchanged rerun pushes nothing new' "grep -q 'nothing new' '$TMP/out2' && [ \$(git -C '$REMOTE' rev-list --count main) -eq 2 ]"
 
 printf 'BBBB\n' > "$STATE/review-lifecycle/runs/r1/run.json"; touch -d '2002-02-02' "$STATE/review-lifecycle/runs/r1/run.json"
 rm -f "$REPOS/app-one/.ai/reviews/codex-final-check.md"
@@ -255,6 +258,13 @@ for addr in 'SCPSECRET@github.com:u2giants/ai-devops-reviewer-logs.git' 'ssh://S
   AI_REVIEWER_LOGS_REMOTE="$addr" HOME="$TMP/home" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out27" 2>&1 || true
   check "credential-bearing address refused: ${addr%%SCPSECRET*}...@" "grep -q 'must not contain credentials' '$TMP/out27' && absent grep -q SCPSECRET '$TMP/out27'"
 done
+for addr in 'github.com:u2giants/ai-devops-reviewer-logs.git' 'git@github.com/u2giants/ai-devops-reviewer-logs.git'; do
+  AI_REVIEWER_LOGS_REMOTE="$addr" HOME="$TMP/home" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out28" 2>&1 || true
+  check "malformed archive address refused: $addr" "grep -q 'not the private reviewer-logs repository' '$TMP/out28'"
+done
+git init -q --bare "$TMP/empty.git"
+AI_REVIEWER_LOGS_REMOTE="$TMP/empty.git" AI_REVIEWER_LOGS_HUB="$TMP/empty-hub" run sync > "$TMP/out29" 2>&1 || true
+check 'an archive without main is refused and nothing is pushed' "grep -q 'has no main branch' '$TMP/out29' && [ -z \"\$(git -C '$TMP/empty.git' for-each-ref)\" ]"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
