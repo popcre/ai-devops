@@ -180,14 +180,13 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   load into curated Master Data, is authored first in `popcre/shared-db` via
   branch and PR. Prove the target database before every write. Load
   `shared-db-change` for the procedure.
-  **Small owner entry** (owner ruling 2026-10-02, verbatim: "yes, small
-  entries can skip the reviewer"): an owner-requested row-data write of at
-  most 10 rows, with no structure, schema, security change, or deletion, run
-  as one guarded transaction asserting the exact row count after proving the
-  target database, with Albert's request quoted verbatim in the linked issue,
-  skips the AI reviewer APPROVE and keeps every other gate:
-  `ai-task-gates check --before database --small-owner-entry <issue-url>
-  --row-count N --owner-quote "<quote>"`. Details doc: "Small owner entries".
+  **Database writes skip the second AI** (owner ruling 2026-10-14, verbatim:
+  "Our own safety rules require a second AI to approve database writes.
+  Remove that rule."): no assigned AI reviewer APPROVE is required for a
+  database write. Every other gate stays: task declaration, class escalation,
+  protected-class seals, target identity proof, claim rules, and live proof.
+  `ai-task-gates check --before database` opens without `--reviewer-approval`.
+  Details doc: "Database writes".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data
