@@ -836,8 +836,16 @@ check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
 check 'a declared production task retains its production gate with no file change' \
   "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
-check 'a declared production task may enter its guarded production path' \
-  "rc 0 '$TMP/clean' check --before production"
+check 'a declared production task is refused without an AI reviewer approval' \
+  "rc 3 '$TMP/clean' check --before production"
+check 'a production refusal names the missing reviewer approval' \
+  "out '$TMP/clean' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
+check 'a production task refuses a reviewer report path that does not exist' \
+  "rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/no-such-report.json'"
+check 'a production task with a valid exact-head AI APPROVE may enter its guarded path' \
+  "rc 0 '$TMP/clean' check --before production --reviewer-approval \"\$(appr '$TMP/clean' production)\""
+check 'a production task refuses a report that is not an AI APPROVE for this head' \
+  "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 
 printf 'stale and corrupt intent state\n'
 newrepo "$TMP/stale"
