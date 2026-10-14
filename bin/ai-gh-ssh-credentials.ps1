@@ -149,7 +149,14 @@ try {
     $sshDir = $finalDir
 }
 Backup-File $sshHosts
-Move-Item -LiteralPath (Join-Path $stage 'hosts.yml') -Destination $sshHosts -Force
+# One atomic NTFS replace: there is no moment when hosts.yml is missing, and on
+# failure the working copy is untouched.
+$newHosts = Join-Path $stage 'hosts.yml'
+if (Test-Path -LiteralPath $sshHosts) {
+    [IO.File]::Replace($newHosts, $sshHosts, [NullString]::Value)
+} else {
+    [IO.File]::Move($newHosts, $sshHosts)
+}
 if (-not (Test-Path -LiteralPath (Join-Path $SshConfigDir 'config.yml')) -and (Test-Path -LiteralPath (Join-Path $stage 'config.yml'))) {
     Move-Item -LiteralPath (Join-Path $stage 'config.yml') -Destination (Join-Path $SshConfigDir 'config.yml')
 }
