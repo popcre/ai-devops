@@ -213,11 +213,19 @@ use a held private parent FD, nofollow owner0600 single-link leaf,8192byte cap,
 exact source/contract hashes and pre/post custody checks. TMPDIR must already be
 owned0700. Public templates retain null topology and zero lifetime.
 
-Its output contains ONLY the versioned projection schema, discovery mode,
-claim/time identifiers, contract/operator/remote/transport-helper hashes,
+Its v2 output contains ONLY the versioned projection schema, discovery mode,
+the full protected-contract commitment, operator/remote/transport-helper hashes,
 fixed opaque target and peer/route commitments, current installation hashes,
 managed-link count, fixed GET version/five identity-field/16 inventory scope,
 and explicit nonauthorizing/no-claim/no-credential/no-remote-traffic facts.
+The claim ID and action lifetime stay in the protected contract and one-use
+custody; they are never included in the public projection.
+
+Before constructing any bearer request, the reader now requires the pinned peer
+to report `Expired: false` and a nonempty timezone-aware future `KeyExpiry`.
+Missing, null, malformed, or expired values refuse locally. This is a fail-closed
+input check; it does not prove that the observation itself is fresh or admit an
+actual operation.
 No actual target/peer addresses, node names, credentials or private paths enter
 stdout or error messages. It does not invoke the production gate, claim writer,
 HTTP, SSH, remote Docker or providers. The existing fixed local WHOIS/route
