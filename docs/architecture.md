@@ -148,7 +148,7 @@ never overwrites them. See [`configuration.md`](configuration.md).
 Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex,
 DeepSeek, and StepFun—is known to preflight and the scoreboard so historical evidence stays
 readable; only providers `registered` in `config/reviewer-registry.json` (today
-Muse, Qwen, Gemini, GLM, DeepSeek, the Codex approval-gate wrapper, and StepFun, in the allocator since shared-db#3657 and drawn only where preflight reports it usable) receive reviews. Grok is quarantined out of the pool (owner instruction 2026-10-13, xAI account out of credit). Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
+Muse, DeepSeek, GLM, and StepFun, plus the Codex approval-gate wrapper; drawn only where preflight reports it usable) receive reviews. Qwen, Gemini, and Grok are quarantined out of the maintained rotation pool (owner instruction 2026-10-13, popcre/ai-devops#1714) but stay installed and callable by name. Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes
