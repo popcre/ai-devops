@@ -164,7 +164,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
-  Small owner entries (below) skip only that reviewer APPROVE.
+  Database writes skip that reviewer APPROVE.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.

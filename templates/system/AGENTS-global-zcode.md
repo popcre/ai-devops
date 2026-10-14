@@ -193,7 +193,7 @@ the task needs the detail.
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
-  Small owner entries (below) skip only that reviewer APPROVE.
+  Database writes skip that reviewer APPROVE.
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration

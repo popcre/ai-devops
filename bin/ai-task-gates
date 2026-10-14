@@ -1347,14 +1347,6 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       fi
       return 0
     fi
-    if [ -n "$small_entry" ]; then
-      approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$effective")" || exit "$EX_BLOCKED"
-      state_record_override small-owner-entry "$action" "$approval_summary" "$effective" \
-        && jq -e --arg r "$approval_summary" '.overrides | map(select(.kind=="small-owner-entry" and .reason==$r)) | length > 0' "$(state_path)" >/dev/null 2>&1 \
-        || blocked 'ai-task-gates: STOP. The small owner entry could not be recorded in the task state; nothing was released.'
-      printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
-      return 0
-    fi
     if [ -z "$reviewer_approval" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
