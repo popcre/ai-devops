@@ -312,11 +312,14 @@ restore_install_crontab() {
   strip_managed_cron() {
     awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
         -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" \
-        -v lw="$REPO_ROOT/bin/ai-local-watch" '
+        -v lw="$REPO_ROOT/bin/ai-local-watch" \
+        -v rl="$REPO_ROOT/bin/ai-reviewer-logs-sync" '
       index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
       index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
       index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
       index($0,"# ai-devops housekeeping (managed by ai-housekeeping schedule") == 0 &&
+      index($0,"# ai-devops ai-reviewer-logs-sync (managed by ai-reviewer-logs-sync schedule") == 0 &&
+      index($0,"\047" rl "\047") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
       index($0,"\047" reap "\047 run") == 0 &&
       index($0,"\047" lw "\047") == 0 &&
@@ -340,7 +343,8 @@ restore_install_crontab() {
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
       "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
       "$REPO_ROOT/bin/ai-local-watch" unschedule &&
-      "$REPO_ROOT/bin/ai-housekeeping" unschedule
+      "$REPO_ROOT/bin/ai-housekeeping" unschedule &&
+      "$REPO_ROOT/bin/ai-reviewer-logs-sync" unschedule
   else
     return 1
   fi
@@ -717,6 +721,10 @@ run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-
 # watch_hosts (docs/watchdog-duty-pool.md). Only a pool member schedules;
 # others exit 0 with "not in watch_hosts". Free Actions stay backup only.
 run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin/ai-local-watch" schedule
+
+# Optional: every machine sends its complete reviewer logs hourly to the private
+# fleet repository u2giants/ai-devops-reviewer-logs (bin/ai-reviewer-logs-sync).
+run_stage optional "Reviewer logs fleet sync scheduling" "$REPO_ROOT/bin/ai-reviewer-logs-sync" schedule
 
 # Optional: daily housekeeping report (plan_repo-housekeeping-visibility.md
 # step 7). Same shape as the stages above - one marked, idempotent `schedule`

@@ -1,0 +1,525 @@
+#!/usr/bin/env bash
+# ai-reviewer-logs-sync — put every machine's complete reviewer logs in one
+# place: the private repository u2giants/ai-devops-reviewer-logs (GitHub); evidence is
+# stored unmasked but encrypted, file names included, so nothing diagnostic is
+# removed and nothing readable reaches GitHub.
+#
+# Usage:
+#   ai-reviewer-logs-sync [sync]      pack new or changed evidence into one encrypted bundle, push it
+#   ai-reviewer-logs-sync view [DIR]  decrypt the whole fleet archive into DIR
+#                                     (default ~/.cache/ai-devops-reviewer-logs-plain).
+#     The key comes from a private file named by AI_REVIEWER_LOGS_KEY_FILE. Read it
+#     with your normal (serialized) 1Password access, e.g. into a 0600 file:
+#       (umask 077; op read "op://vibe_coding/3bqds3sk7eac2i5izq2alsc7my/REVIEWER_LOGS_PRIVATE_KEY_PEM" > "$keyfile")
+#     and delete the file afterwards. (The item ID is used because the entry
+#     title contains parentheses, which op:// references do not accept.)
+#   ai-reviewer-logs-sync schedule    register an hourly sync (Task Scheduler / crontab)
+#   ai-reviewer-logs-sync unschedule
+#
+# Archive: <machine>/bundles/<UTC time>-<random>-partNNN.tar.gz.cms, one or more
+# per run that found new evidence (gzip tar inside CMS, AES-256 to an RSA-4096
+# recipient; parts keep each file well under GitHub's limit), plus the
+# clear-text <machine>/LAST-SYNC.txt (time, file count, complete or not; no
+# names). Nothing is ever deleted. `view` extracts every bundle in time order,
+# giving one folder per machine:
+#   reviewer-issues/   incident packages (ai-reviewer-issue); <checkout>/ for other copies
+#   state/             review scoreboard, invocation events, lifecycle runs
+#   reviews/<checkout>/ .ai/reviews reports from every checkout
+#   _collection/       per-bundle notes: files skipped as oversized, read errors
+#
+# Writers need only the public certificate config/reviewer-logs-archive.crt.
+# Readers need the private key in 1Password (vibe_coding):
+#   "Reviewer logs archive private key - ai-devops-reviewer-logs (fleet, decrypt only)"
+# Bundles are encrypted, not signed: anyone able to push to the private archive
+# (only the u2giants account) could add a forged bundle. `view` therefore
+# unpacks only plain files and folders with relative names, so a forged bundle
+# can add misleading evidence but can never write outside the view folder.
+# Every run starts from the published archive (unpushed local commits are
+# discarded; their evidence is collected again because nothing is remembered as
+# collected until a push succeeds). A push happens only when the repository is
+# private (unauthenticated access fails) and every new file is a CMS
+# enveloped-data bundle.
+#
+# Environment:
+#   AI_REVIEWER_LOGS_REMOTE / _HUB / _ROOTS / _MAX_FILE_BYTES / _MACHINE / _CERT
+#   AI_REVIEWER_ISSUE_DIR, AI_REVIEWER_STATE_BASE   as in ai-reviewer-issue
+#   AI_REVIEWER_LOGS_KEY_FILE   view: private file holding the archive private key
+#   AI_REVIEWER_LOGS_TEST_MODE=1  tests: local remote allowed, no privacy probe
+set -euo pipefail
+umask 077
+
+# Resolve an installed symlink (/usr/local/bin) back to the checkout.
+_self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+TOOL_NAME=ai-reviewer-logs-sync
+HOME_DIR="$HOME/.ai-devops/reviewer-logs-sync"
+# shellcheck source=../tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+CANONICAL="github.com/u2giants/ai-devops-reviewer-logs"
+REMOTE="${AI_REVIEWER_LOGS_REMOTE:-https://$CANONICAL.git}"
+# Credentials come from the Git credential helper, never from the address: an
+# address carrying user info would leak through every Git error and the log.
+# The only user part allowed is the standard SSH user "git" (git@host:path or
+# ssh://git@host/path); anything else before an "@" is treated as a credential.
+case "$REMOTE" in
+  *@*) [[ "$REMOTE" =~ ^(ssh://)?git@[^@/:]+[:/][^@]*$ ]] || die "the archive address must not contain credentials" ;;
+esac
+HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
+STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
+ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"
+MAX_BYTES="${AI_REVIEWER_LOGS_MAX_FILE_BYTES:-20000000}"
+# Raw evidence per bundle part. Kept at or below 80 MB and never below the
+# largest file allowed, so a part stays under 95 MB encrypted even when nothing
+# compresses (gzip and CMS add well under 1%).
+CHUNK_BYTES="${AI_REVIEWER_LOGS_CHUNK_BYTES:-80000000}"
+[ "$CHUNK_BYTES" -le 80000000 ] || die "AI_REVIEWER_LOGS_CHUNK_BYTES may not exceed 80000000"
+[ "$MAX_BYTES" -le "$CHUNK_BYTES" ] || MAX_BYTES="$CHUNK_BYTES"
+CERT="${AI_REVIEWER_LOGS_CERT:-$TOOL_ROOT/config/reviewer-logs-archive.crt}"
+MACHINE_RAW="${AI_REVIEWER_LOGS_MACHINE:-$(hostname)}"
+MACHINE="$(printf '%s' "$MACHINE_RAW" | lower | tr -c 'a-z0-9.-' '-')"
+# If cleaning the name changed it, add a fingerprint of the original so names
+# such as build_1 and build-1 never share one archive folder.
+if [ "$MACHINE" != "$(printf '%s' "$MACHINE_RAW" | lower)" ]; then
+  MACHINE="$MACHINE-$(printf '%s' "$MACHINE_RAW" | sha256sum | cut -c1-8)"
+fi
+case "$MACHINE" in ''|.*|-*|*..*) die "invalid machine folder name: $MACHINE" ;; esac
+LOG="$HOME_DIR/sync.log"
+
+log(){ printf '%s %s\n' "$(stamp)" "$*" | tee -a "$LOG" >&2; }
+canonical_remote(){
+  printf '%s\n' "$1" | sed -E -e 's#^(https?://|ssh://)?([^@/]+@)?##' -e 's#^github\.com:#github.com/#' -e 's#\.git$##' -e 's#/$##'
+}
+# Native Windows openssl needs Windows paths; elsewhere this is a no-op.
+native(){ if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+ossl(){ MSYS2_ARG_CONV_EXCL='*' openssl "$@"; }
+# Owner-only folder: chmod everywhere, plus NTFS owner/SYSTEM-only on Windows
+# (same helper and pattern as the review wrappers).
+make_private(){
+  local kind="${2:-directory}"
+  if [ "$kind" = directory ]; then chmod 700 "$1" || return 1; else chmod 600 "$1" || return 1; fi
+  if [ -z "${SYSTEMROOT:-}" ]; then
+    local mode; mode="$(stat -c %a -- "$1" 2>/dev/null)" || return 1
+    [ $(( 8#$mode & 8#077 )) -eq 0 ]; return
+  fi
+  local ps helper="$TOOL_ROOT/bin/windows-private-file.ps1"
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  [ -n "$ps" ] && [ -f "$helper" ] || return 1
+  # Owner and SYSTEM only, then verified (Assert fails on any other identity).
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$1")" AI_DEVOPS_PRIVATE_KIND="$kind" \
+    "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null
+}
+# Paths removed on every exit. Kept as an array, never re-parsed as shell text,
+# so no folder name can break cleanup or run as a command.
+CLEANUP=()
+LOCK_HELD=""
+cleanup(){
+  ((${#CLEANUP[@]})) && rm -rf -- "${CLEANUP[@]}"
+  # The lock is removed only while it still records this process as owner.
+  if [ -n "$LOCK_HELD" ] && [ "$(cat "$LOCK_HELD/owner" 2>/dev/null)" = "$(proc_id "$$")" ]; then rm -rf -- "$LOCK_HELD"; fi
+  return 0
+}
+
+# Reclaim by atomic rename: of several processes racing to reclaim the same
+# dead lock, exactly one rename succeeds; the others simply retry mkdir.
+reclaim_lock(){
+  local grave="$1.reclaimed.$$.$RANDOM"
+  if mv -T -- "$1" "$grave" 2>/dev/null; then note "reclaimed the lock left by $2"; rm -rf -- "$grave"; fi
+}
+
+# Exclusive lock broken only when its recorded owner process is gone, never by
+# age, so a long sync or view is never overrun by the next hourly run.
+# A process identity that survives PID reuse: "<pid> <start time>".
+proc_id(){ local st; st="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1; printf '%s %s' "$1" "$(printf '%s' "$st" | awk '{print $22}')"; }
+owner_lock(){
+  local lock="$1" owner pid
+  until mkdir "$lock" 2>/dev/null; do
+    owner="$(cat "$lock/owner" 2>/dev/null || true)"
+    pid="${owner%% *}"
+    if [ -n "$owner" ] && [ "$(proc_id "$pid" 2>/dev/null)" != "$owner" ]; then
+      reclaim_lock "$lock" "finished process $pid"; continue
+    fi
+    if [ -z "$owner" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+      reclaim_lock "$lock" "an aborted start"; continue
+    fi
+    die "another sync or view is running (lock $lock, process ${pid:-unknown})"
+  done
+  proc_id "$$" > "$lock/owner" || { rm -rf -- "$lock"; die "cannot identify this process"; }
+  LOCK_HELD="$lock"
+  trap cleanup EXIT
+}
+# True when every line of the lost list is one of this machine's bundle names.
+lost_list_ok(){
+  local m rc=0
+  m="$(printf '%s' "$1" | sed 's/[.]/[.]/g')"
+  grep -vqE "^$m/bundles/[0-9TZ]+-[0-9a-f]+(-part[0-9]{3})?[.]tar([.]gz)?[.]cms\$" "$2" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+need_openssl(){ command -v openssl >/dev/null 2>&1 || die "openssl is required (install the openssl package)"; }
+is_envelope(){ ossl cms -cmsout -print -noout -inform DER -in "$(native "$1")" 2>/dev/null | grep -q 'pkcs7-envelopedData'; }
+
+# stage_tree <source dir> <path inside the bundle>: copy new or changed files
+# into the private staging folder.
+stage_tree(){
+  local src="$1" into="$2" line digest file rel size sums="$WORK/sums"
+  [ -d "$src" ] || return 0
+  # One hashing pass per tree; a file is collected again whenever its content changes.
+  find "$src" -type f ! -name '*.tmp' -print0 2>>"$ERRS" | xargs -0 -r sha256sum -z -- > "$sums" 2>>"$ERRS" \
+    || printf 'hashing failed under %s\n' "$into" >> "$ERRS"
+  while IFS= read -r -d '' line; do
+    # "<64-hex digest><space><' ' or '*' mode marker><path>"
+    digest="${line:0:64}"; file="${line:66}"
+    rel="${file#"$src"/}"
+    # Unchanged since the last delivered collection: nothing to do.
+    if [ "${SEEN[$file]:-}" = "$digest" ]; then NEW_SEEN["$file"]="$digest"; continue; fi
+    # Cheap pre-check so a huge file is never copied just to be dropped.
+    if size="$(wc -c < "$file" 2>/dev/null)" && [ "$size" -gt "$MAX_BYTES" ]; then
+      printf '%s/%s\t%s bytes, over the size limit\n' "$into" "$rel" "$size" >> "$NOTES"; continue
+    fi
+    # Copy first, then measure and fingerprint the COPY: what is archived is
+    # exactly what is recorded, even if the live file is being rewritten.
+    local staged="$WORK/stage/$into/$rel"
+    mkdir -p "$(dirname "$staged")"
+    if ! cp -f -- "$file" "$staged" 2>>"$ERRS"; then rm -f -- "$staged"; continue; fi
+    size="$(wc -c < "$staged")"
+    if [ "$size" -gt "$MAX_BYTES" ]; then
+      rm -f -- "$staged"
+      printf '%s/%s\t%s bytes, over the size limit\n' "$into" "$rel" "$size" >> "$NOTES"; continue
+    fi
+    NEW_SEEN["$file"]="$(sha256sum < "$staged" | cut -c1-64)"
+    COPIED=$((COPIED + 1))
+  done < "$sums"
+}
+
+ensure_hub(){
+  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
+    # Exactly one of the three standard GitHub forms of the archive address.
+    [[ "$REMOTE" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)u2giants/ai-devops-reviewer-logs(\.git)?$ ]] \
+      || die "remote is not the private reviewer-logs repository"
+    # Truly anonymous: no askpass programs, no user or system git config.
+    if env -u GIT_ASKPASS -u SSH_ASKPASS -u GH_TOKEN -u GITHUB_TOKEN \
+        GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+        git -c credential.helper= -c core.askPass= ls-remote "https://$CANONICAL.git" >/dev/null 2>&1; then
+      die "reviewer-logs repository is publicly readable; refusing to sync"
+    fi
+    # A failed anonymous read could just be a network error: GitHub itself must
+    # also say the repository is private (fail closed if it cannot be asked).
+    local private
+    private="$(AI_GH_CALLER=ai-reviewer-logs-sync "$TOOL_ROOT/bin/ai-gh" api "repos/${CANONICAL#github.com/}" --jq .private 2>>"$LOG")" \
+      || die "could not confirm with GitHub that the reviewer-logs repository is private"
+    [ "$private" = true ] || die "GitHub does not report the reviewer-logs repository as private; refusing to sync"
+  fi
+  if [ ! -d "$HUB/.git" ]; then
+    mkdir -p "$(dirname "$HUB")"
+    GIT_TERMINAL_PROMPT=0 git clone -q -c core.symlinks=false "$REMOTE" "$HUB" 2>>"$LOG" || die "could not clone $REMOTE"
+  fi
+  if [ "${AI_REVIEWER_LOGS_TEST_MODE:-}" != 1 ]; then
+    [ "$(canonical_remote "$(git -C "$HUB" remote get-url origin)")" = "$CANONICAL" ] || die "$HUB is not a clone of $REMOTE"
+  fi
+  # Whatever address the clone stored, from here on it uses only the clean one,
+  # so a stored address with credentials can never reach fetch, push or the log.
+  git -C "$HUB" remote set-url origin "$REMOTE"
+  git -C "$HUB" config --unset-all remote.origin.pushurl 2>/dev/null || true
+  git -C "$HUB" config --replace-all core.symlinks false
+  git -C "$HUB" config --replace-all core.autocrlf false
+  GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
+  # Always start from exactly what is published.
+  # An archive without a published main is refused: there is nothing to start
+  # from, and local history must never be pushed in its place.
+  git -C "$HUB" rev-parse -q --verify origin/main >/dev/null 2>&1 \
+    || die "the reviewer-logs archive has no main branch; it must be initialized before syncing"
+  git -C "$HUB" checkout -q -B main origin/main 2>>"$LOG" || git -C "$HUB" checkout -q -f -B main origin/main
+  git -C "$HUB" reset -q --hard origin/main
+  git -C "$HUB" clean -qfdx
+  if [ -n "$(git -C "$HUB" ls-files -s | awk '$1 == "120000"')" ]; then
+    die "the reviewer-logs repository contains symbolic links; refusing to write into it"
+  fi
+}
+
+save_seen(){
+  local k
+  for k in "${!NEW_SEEN[@]}"; do printf '%s\0%s\0' "$k" "${NEW_SEEN[$k]}"; done > "$HOME_DIR/seen.new"
+  mv -f "$HOME_DIR/seen.new" "$HOME_DIR/seen"
+}
+
+# Push, then prove delivery: every path passed must be in the published main.
+push_or_die(){
+  local attempt p delivered
+  for attempt in 1 2 3; do
+    GIT_TERMINAL_PROMPT=0 git -C "$HUB" push -q origin HEAD:main 2>>"$LOG" || true
+    GIT_TERMINAL_PROMPT=0 git -C "$HUB" fetch -q origin 2>>"$LOG" || die "could not fetch $REMOTE"
+    delivered=1
+    # Exact content: the published blob must equal the one this run committed.
+    for p in "$@"; do
+      [ "$(git -C "$HUB" rev-parse -q --verify "origin/main:$p" 2>/dev/null)" = "$(git -C "$HUB" rev-parse "HEAD:$p")" ] || delivered=0
+    done
+    [ "$delivered" = 1 ] && return 0
+    if ! git -C "$HUB" rebase -q origin/main 2>>"$LOG"; then
+      git -C "$HUB" rebase --abort 2>/dev/null || true
+      die "could not rebase onto the published archive; nothing was recorded as delivered"
+    fi
+  done
+  die "push to $REMOTE failed after 3 attempts; nothing was recorded as delivered"
+}
+
+cmd_sync(){
+  need_openssl
+  mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
+  owner_lock "$HOME_DIR/sync.lock"
+  rotate_log "$LOG"
+  [ -f "$CERT" ] || die "archive certificate missing: $CERT"
+  ensure_hub
+  WORK="$HOME_DIR/work.$$"; rm -rf "$WORK"; mkdir -p "$WORK/stage"
+  # Clear-text staging never outlives the run, whatever way it ends.
+  CLEANUP+=("$WORK")
+  ERRS="$WORK/errors"; NOTES="$WORK/notes"; : > "$ERRS"; : > "$NOTES"
+  COPIED=0; RECOVERING=0
+  declare -gA SEEN=() NEW_SEEN=()
+  local key val
+  if [ -f "$HOME_DIR/seen" ]; then
+    while IFS= read -r -d '' key && IFS= read -r -d '' val; do SEEN["$key"]="$val"; done < "$HOME_DIR/seen"
+  fi
+  # Every bundle this machine delivered is also kept locally (encrypted). If the
+  # published archive lost one, put the very same bundle back; only if the local
+  # copy is gone too is everything collected again.
+  RESTORED=()
+  if [ -f "$HOME_DIR/pushed-bundles" ]; then
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      [ -f "$HUB/$key" ] && continue
+      if [ -f "$HOME_DIR/sent/$(basename "$key")" ]; then
+        mkdir -p "$(dirname "$HUB/$key")"
+        cp -f "$HOME_DIR/sent/$(basename "$key")" "$HUB/$key"
+        git -C "$HUB" add -- "$key"; RESTORED+=("$key")
+        log "$MACHINE: restored $key to the archive from the local copy"
+      else
+        log "$MACHINE: the archive and this machine both lost $key; collecting everything again"
+        SEEN=(); RECOVERING=1
+        # Published record (bundle name only) so view can tell known losses apart.
+        mkdir -p "$HUB/$MACHINE"
+        grep -qxF -- "$key" "$HUB/$MACHINE/LOST-BUNDLES.txt" 2>/dev/null || printf '%s\n' "$key" >> "$HUB/$MACHINE/LOST-BUNDLES.txt"
+        git -C "$HUB" add -- "$MACHINE/LOST-BUNDLES.txt"
+      fi
+    done < "$HOME_DIR/pushed-bundles"
+  fi
+
+  stage_tree "$ISSUES" reviewer-issues
+  stage_tree "$STATE/review-scoreboard" state/review-scoreboard
+  stage_tree "$STATE/reviewer-events" state/reviewer-events
+  stage_tree "$STATE/review-lifecycle/runs" state/review-lifecycle/runs
+  local roots root dir checkout
+  roots="${AI_REVIEWER_LOGS_ROOTS:-$(dirname "$TOOL_ROOT"):/c/repos:/d/repos:$HOME/repos:/worksp}"
+  declare -A seen_dirs=()
+  [ -d "$ISSUES" ] && seen_dirs["$(cd "$ISSUES" && pwd -P)"]=1
+  IFS=: read -r -a root_list <<< "$roots"
+  # Review reports AND incident packages live inside whichever checkout ran the
+  # reviewer, so every checkout under the roots is collected.
+  for root in "${root_list[@]}"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r -d '' dir; do
+      dir="$(cd "$dir" && pwd -P)"
+      [ -n "${seen_dirs[$dir]:-}" ] && continue
+      seen_dirs[$dir]=1
+      # Readable name plus a hash of the full path: distinct checkouts never share a folder.
+      checkout="$(dirname "$(dirname "$dir")")"
+      checkout="$(basename "$(dirname "$checkout")")_$(basename "$checkout")--$(printf '%s' "$checkout" | sha256sum | cut -c1-16)"
+      case "$dir" in
+        */.ai/reviews) stage_tree "$dir" "reviews/$checkout" ;;
+        */.ai/reviewer-issues) stage_tree "$dir" "reviewer-issues/$checkout" ;;
+      esac
+    done < <(find "$root" -maxdepth 4 -type d \( -path '*/.ai/reviews' -o -path '*/.ai/reviewer-issues' \) -print0 2>>"$ERRS")
+  done
+
+  local partial=0 bundle="" bundles=()
+  [ -s "$ERRS" ] && partial=1
+  # The oversized list is re-published only when it changes.
+  local notes_sum notes_changed=0
+  notes_sum="$(sha256sum < "$NOTES" | cut -c1-64)"
+  [ "$notes_sum" = "$(cat "$HOME_DIR/notes.sha256" 2>/dev/null)" ] || notes_changed=1
+  if [ "$COPIED" -gt 0 ] || [ "$notes_changed" = 1 ] || [ "$partial" = 1 ]; then
+    local id; id="$(date -u +%Y%m%dT%H%M%S%NZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+    mkdir -p "$WORK/stage/_collection"
+    cp -f "$NOTES" "$WORK/stage/_collection/$id-skipped.txt"
+    cp -f "$ERRS" "$WORK/stage/_collection/$id-read-errors.txt"
+    # Compressed, and split into parts of at most CHUNK_BYTES of raw evidence so
+    # every encrypted part stays well under GitHub's 100 MB file limit.
+    mkdir -p "$HUB/$MACHINE/bundles"
+    local part=0 total=0 size rel
+    : > "$WORK/part.list"
+    pack_part(){
+      [ -s "$WORK/part.list" ] || return 0
+      part=$((part + 1))
+      bundle="$MACHINE/bundles/$id-part$(printf '%03d' "$part").tar.gz.cms"
+      tar -C "$WORK/stage" --null -T "$WORK/part.list" -czf "$WORK/part.tar.gz" || die "could not pack the evidence bundle"
+      ossl cms -encrypt -binary -aes-256-cbc -outform DER -in "$(native "$WORK/part.tar.gz")" \
+        -out "$(native "$HUB/$bundle")" "$(native "$CERT")" || die "could not encrypt the evidence bundle"
+      [ "$(wc -c < "$HUB/$bundle")" -lt 95000000 ] || die "an encrypted bundle exceeds 95 MB; lower AI_REVIEWER_LOGS_CHUNK_BYTES"
+      bundles+=("$bundle"); : > "$WORK/part.list"; total=0
+    }
+    while IFS= read -r -d '' rel; do
+      size="$(wc -c < "$WORK/stage/$rel")"
+      if [ "$total" -gt 0 ] && [ $((total + size)) -gt "$CHUNK_BYTES" ]; then pack_part; fi
+      printf '%s\0' "$rel" >> "$WORK/part.list"; total=$((total + size))
+    done < <(cd "$WORK/stage" && find . -type f -print0 | sort -z)
+    pack_part
+    local oversized status
+    oversized="$(grep -c . "$NOTES" || true)"
+    if [ "$partial" = 1 ]; then status='no - some files could not be read; they are retried next run'
+    elif [ "$oversized" -gt 0 ]; then status="no - $oversized files over the size limit were left out (listed in _collection/$id-skipped.txt)"
+    else status=yes; fi
+    printf 'machine: %s\nlast bundle: %s\nfiles in it: %s\ncomplete: %s\n' "$MACHINE" "$id" "$COPIED" "$status" > "$HUB/$MACHINE/LAST-SYNC.txt"
+    git -C "$HUB" add -- "${bundles[@]}" "$MACHINE/LAST-SYNC.txt"
+  elif grep -q '^complete: no - some files could not be read' "$HUB/$MACHINE/LAST-SYNC.txt" 2>/dev/null; then
+    local still_over; still_over="$(grep -c . "$NOTES" || true)"
+    if [ "$still_over" -gt 0 ]; then
+      sed -i "s/^complete: no.*/complete: no - $still_over files over the size limit were left out (listed in the latest skipped notes)/" "$HUB/$MACHINE/LAST-SYNC.txt"
+    else
+      sed -i 's/^complete: no.*/complete: yes (a later run collected everything)/' "$HUB/$MACHINE/LAST-SYNC.txt"
+    fi
+    git -C "$HUB" add -- "$MACHINE/LAST-SYNC.txt"
+  fi
+
+  # Leak gate on exactly what will be published: only this run's bundle and
+  # the clear-text status file, and the bundle must be a CMS envelope.
+  local rel bad=() expected=" ${bundles[*]:-} ${RESTORED[*]:-} "
+  while IFS= read -r -d '' rel; do
+    if [ "$rel" = "$MACHINE/LAST-SYNC.txt" ]; then continue; fi
+    # Bundle names only, each matching this machine's bundle naming.
+    if [ "$rel" = "$MACHINE/LOST-BUNDLES.txt" ] && \
+       lost_list_ok "$MACHINE" "$HUB/$rel"; then continue; fi
+    if [[ "$expected" == *" $rel "* ]] && is_envelope "$HUB/$rel"; then continue; fi
+    bad+=("$rel")
+  done < <(git -C "$HUB" diff --cached --name-only -z)
+  if ((${#bad[@]})); then
+    git -C "$HUB" reset -q --hard
+    log "BLOCKED: refusing to publish files that are not encrypted bundles:"; printf '  %s\n' "${bad[@]}" | tee -a "$LOG" >&2
+    rm -rf "$WORK"; exit 1
+  fi
+
+  # Keep the recovery copy and ledger entry BEFORE publishing: if this run dies
+  # after the push, nothing is unknown; if the push fails, the next run finds the
+  # bundle missing from the archive and publishes it from this copy.
+  for bundle in ${bundles[@]+"${bundles[@]}"}; do
+    mkdir -p "$HOME_DIR/sent"; cp -f "$HUB/$bundle" "$HOME_DIR/sent/$(basename "$bundle")"
+    grep -qxF -- "$bundle" "$HOME_DIR/pushed-bundles" 2>/dev/null || printf '%s\n' "$bundle" >> "$HOME_DIR/pushed-bundles"
+  done
+  if ! git -C "$HUB" diff --cached --quiet; then
+    # Owner identity, always: never whatever this machine happens to have set.
+    GIT_AUTHOR_NAME="Albert Hazan" GIT_AUTHOR_EMAIL="u2giants@users.noreply.github.com" \
+    GIT_COMMITTER_NAME="Albert Hazan" GIT_COMMITTER_EMAIL="u2giants@users.noreply.github.com" \
+      git -C "$HUB" commit -qm "reviewer logs: $MACHINE $(stamp)$([ "$partial" = 0 ] || echo ' (partial)')"
+    # Every file this commit carries must be proven published.
+    local delivered_paths=()
+    while IFS= read -r -d '' rel; do delivered_paths+=("$rel"); done < <(git -C "$HUB" diff-tree --root --no-commit-id --name-only -r -z HEAD)
+    push_or_die "${delivered_paths[@]}"
+  fi
+  # Delivery is proven; record it. A sent bundle is kept locally for restores.
+  # After a full re-collection, bundles lost everywhere leave the ledger: their
+  # current files are in this run's bundle (deleted files and older versions
+  # that existed only in them cannot be recovered and are reported once).
+  if [ "$RECOVERING" = 1 ] && [ "$partial" = 0 ]; then
+    local entry
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      if [ -f "$HUB/$entry" ]; then printf '%s\n' "$entry"; else log "$MACHINE: permanently lost: $entry"; fi
+    done < "$HOME_DIR/pushed-bundles" > "$HOME_DIR/pushed-bundles.new"
+    mv -f "$HOME_DIR/pushed-bundles.new" "$HOME_DIR/pushed-bundles"
+  fi
+  if [ "$partial" = 0 ]; then
+    save_seen
+    printf '%s\n' "$notes_sum" > "$HOME_DIR/notes.sha256"
+    if [ "$COPIED" = 0 ]; then log "$MACHINE: nothing new"; else log "$MACHINE: sync complete ($COPIED files in ${#bundles[@]} encrypted bundle part(s))"; fi
+  fi
+  if [ "$partial" = 1 ]; then
+    log "PARTIAL: some evidence could not be read (retried next run):"
+    sed 's/^/  /' "$ERRS" | tee -a "$LOG" >&2
+    rm -rf "$WORK"; exit 2
+  fi
+  rm -rf "$WORK"
+}
+
+cmd_view(){
+  local out="${1:-$HOME/.cache/ai-devops-reviewer-logs-plain}" keyfile="${AI_REVIEWER_LOGS_KEY_FILE:-}" work b machine n=0 entry
+  # The key is supplied as a private file; this tool never calls 1Password, so
+  # the caller's own serialized 1Password access applies (see --help).
+  [ -n "$keyfile" ] && [ -f "$keyfile" ] || die "set AI_REVIEWER_LOGS_KEY_FILE to a private file holding the archive key (see --help)"
+  # The key file is locked down to its owner before use (and refused if that fails).
+  make_private "$keyfile" file || die "could not make the key file owner-only: $keyfile"
+  need_openssl
+  # Same lock as sync: view's reset of the clone must never race a sync.
+  mkdir -p "$HOME_DIR"; make_private "$HOME_DIR" || die "could not make $HOME_DIR private"
+  owner_lock "$HOME_DIR/sync.lock"
+  ensure_hub
+  work="$(mktemp -d)"; make_private "$work" || die "could not make $work private"
+  CLEANUP+=("$work")
+  # Replay in publication order (the order commits added them), never by clock.
+  git -C "$HUB" log --reverse --diff-filter=A --name-only --format= -- '*/bundles/*.tar.cms' '*/bundles/*.tar.gz.cms' > "$work/added"
+  : > "$work/order"; : > "$work/missing"
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    if [ ! -f "$HUB/$b" ]; then
+      # Losses its machine already recorded are reported, not counted as missing.
+      if grep -qxF -- "$b" "$HUB/${b%%/*}/LOST-BUNDLES.txt" 2>/dev/null; then
+        note "known lost (recorded by ${b%%/*}): $b"
+      else
+        printf '%s\n' "$b" >> "$work/missing"
+      fi
+      continue
+    fi
+    grep -qxF -- "$b" "$work/order" || printf '%s\n' "$b" >> "$work/order"
+  done < "$work/added"
+  # The key must not live inside the folder that is about to be rebuilt.
+  local key_abs out_abs
+  key_abs="$(readlink -f -- "$keyfile")" || die "cannot resolve the key file"
+  mkdir -p "$(dirname "$out")"
+  out_abs="$(readlink -f -- "$out")" || die "cannot resolve $out"
+  case "$key_abs" in "$out_abs"|"$out_abs"/*) die "keep the key file outside $out" ;; esac
+  # Always rebuild from scratch, and only ever wipe a folder this command made.
+  if [ -e "$out" ] && [ ! -f "$out/.ai-reviewer-logs-view" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
+    die "$out exists and was not made by 'ai-reviewer-logs-sync view'; choose another folder"
+  fi
+  rm -rf "$out"; mkdir -p "$out"; make_private "$out" || die "could not make $out private"; : > "$out/.ai-reviewer-logs-view"
+  while IFS= read -r b; do
+    machine="${b%%/*}"
+    ossl cms -decrypt -binary -inform DER -inkey "$(native "$keyfile")" -in "$(native "$HUB/$b")" \
+      -out "$(native "$work/b.tar")" || die "could not decrypt $b"
+    # Only plain files and folders with relative, non-escaping names are unpacked.
+    while IFS= read -r entry; do
+      # Backslashes and drive colons are refused too: on Windows they are separators.
+      case "$entry" in /*|*\\*|*:*|..|../*|*/..|*/../*) die "$b contains an unsafe path; not unpacking it" ;; esac
+    done < <(tar -tf "$work/b.tar")
+    tar -tvf "$work/b.tar" > "$work/list" || die "could not list $b"
+    if grep -v '^[-d]' "$work/list" > /dev/null; then die "$b contains links or special files; not unpacking it"; fi
+    mkdir -p "$out/$machine"
+    tar -C "$out/$machine" --no-same-owner --no-same-permissions -xf "$work/b.tar" || die "could not unpack $b"
+    cp -f "$HUB/$machine/LAST-SYNC.txt" "$out/$machine/" 2>/dev/null || true
+    n=$((n + 1))
+  done < "$work/order"
+  printf 'decrypted %s bundles into %s (one folder per machine)\n' "$n" "$out"
+  # A bundle that was published once but is gone now makes the view incomplete:
+  # say which, mark the folder, and fail. The machine that sent it restores it
+  # from its local copy on its next hourly sync.
+  if [ -s "$work/missing" ]; then
+    sort -u "$work/missing" > "$out/INCOMPLETE-missing-bundles.txt"
+    note "INCOMPLETE: $(wc -l < "$out/INCOMPLETE-missing-bundles.txt") published bundles are missing from the archive (listed in $out/INCOMPLETE-missing-bundles.txt)"
+    exit 3
+  fi
+}
+
+# The fleet is Linux and Windows (Git Bash); GNU tools and /proc are required.
+case "$(uname -s)" in
+  Linux|MINGW*|MSYS*|CYGWIN*) ;;
+  *) case "${1:-sync}" in -h|--help|help|unschedule) ;; *) die "supported on Linux and Windows (Git Bash) only" ;; esac ;;
+esac
+
+case "${1:-sync}" in
+  sync) cmd_sync ;;
+  view) shift; cmd_view "$@" ;;
+  schedule)
+    # The shared scheduler single-quotes this path into the timer command.
+    case "$TOOL_ROOT" in *"'"*) die "toolkit path contains a quote; cannot schedule safely: $TOOL_ROOT" ;; esac
+    register_timer 60 "$TOOL_ROOT/bin/ai-reviewer-logs-sync" sync ;;
+  unschedule) unregister_timer ;;
+  -h|--help|help) sed -n '2,38p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-reviewer-logs-sync --help" ;;
+esac

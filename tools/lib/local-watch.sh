@@ -51,6 +51,8 @@ register_timer(){
   local every="$1"; shift
   local task="${TASK_NAME:-ai-devops\\$TOOL_NAME}"
   local marker="${CRON_MARKER:-# ai-devops $TOOL_NAME (managed by $TOOL_NAME schedule; unschedule removes)}"
+  # Paths are single-quoted into the timer command; a quote in one is refused.
+  case "$HOME_DIR$1" in *"'"*) die "a path contains a quote; cannot schedule $TOOL_NAME safely" ;; esac
   mkdir -p "$HOME_DIR"
   if command -v schtasks.exe >/dev/null 2>&1; then
     local bash_exe self
@@ -67,7 +69,7 @@ register_timer(){
       sc=DAILY; mo=$(( every / 1440 )); [ "$mo" -ge 1 ] || mo=1
     fi
     MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC "$sc" /MO "$mo" /TN "$task" \
-      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self'$quoted >> $HOME_DIR/cron.log 2>&1\"" >/dev/null \
+      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self'$quoted >> '$HOME_DIR/cron.log' 2>&1\"" >/dev/null \
       || die "schtasks refused $task"
     note "scheduled every $every minutes as $task ($sc /MO $mo)"
     return 0

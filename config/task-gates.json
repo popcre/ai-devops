@@ -397,6 +397,34 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/ai-reviewer-logs-sync",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/reviewer-logs-archive.crt",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-reviewer-logs-sync.cmd",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-ai-reviewer-logs-sync.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/lib/local-watch.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-gh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/windows-private-file.ps1",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },
