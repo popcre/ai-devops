@@ -146,10 +146,16 @@ client could not decode it.
 **Repair (done):** real ELF restored as `claude` on edge-dev3; DietCode proxy
 stopped; no `ANTHROPIC_BASE_URL` left in shell/env files. Claude is stock again.
 
-**Pilot consequence:** history-compaction proxy path is **not** running. Do not
-re-wrap Claude Desktop until DietCode's response-decoding bug is fixed or a
-different intercept is proven on a throwaway session first. Paired-week numbers
-are blocked.
+**Intercept re-installed after fix (2026-10-14 later same day).** Root cause:
+undici decoded the upstream body but left `content-encoding: br` on the
+forwarded response. Patch + proofs: [`dietcode-proxy-header-patch.md`](dietcode-proxy-header-patch.md).
+Wrapper is back on the Claude Desktop spawn path (fail-open). Headless CLI
+cannot complete an OAuth round-trip (Desktop's token is process-bound); the
+final live check is **one new Claude Desktop session**.
+
+**Pilot consequence (updated):** header bug fixed and proven on mock, undici,
+and real Anthropic responses. Waiting on one live Desktop session before
+counting pilot-week traffic.
 
 ## Known risks (from handoff §9)
 
@@ -170,7 +176,9 @@ are blocked.
 - [x] Claude Desktop spawn path wrapped (proxy on 127.0.0.1:8788, fail-open)
 - [x] ChatGPT Desktop / MiMoCode documented as out of scope for this proxy
 - [x] **Rolled back** Claude Desktop wrap after BrotliDecompressionError (see Incident)
-- [ ] DietCode proxy defect fixed or alternate intercept proven on a throwaway session
-- [ ] Pilot week sessions collected (blocked on working history-compaction path)
+- [x] DietCode proxy header bug patched + proven (mock / undici / real 401 JSON)
+- [x] Claude Desktop wrap re-installed (fail-open) on edge-dev3
+- [ ] One live Claude Desktop session as auth+proxy canary
+- [ ] Pilot week sessions collected
 - [ ] Paired table filled
 - [ ] Decision (adopt / iterate / drop) on issue 1751 + doc update
