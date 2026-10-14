@@ -46,7 +46,7 @@ class AuthPipeTests(unittest.TestCase):
                 )
                 fakecurl.chmod(0o700)
                 source = (ROOT / "bin/setup-opencode-glm.sh").read_text()
-                start = source.index("ok=0\nfor _ in $(seq 1 30); do")
+                start = source.index("ok=0\n")
                 stop = source.index('\ninfo "OpenCode GLM server is up', start)
                 block = source[start:stop]
                 env = dict(
