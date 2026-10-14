@@ -1,3 +1,9 @@
+---
+issue: 1714
+status: OPEN
+owner: mimo/edge-dev
+---
+
 # HANDOFF — review-waste skip-rule decision & implementation (2026-10-13T2120Z, edge-dev/MiMo)
 
 This is a **write-once** session handoff. Do not edit it later; create a new file for follow-on work.
