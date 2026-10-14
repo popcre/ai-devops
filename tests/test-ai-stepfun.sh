@@ -60,6 +60,11 @@ case "$STUB_MODE" in
   ok) echo STEPFUN-OK ;;
   verdict) printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE %s\n' "$head" ;;
   noverdict) echo 'Looks fine.' ;;
+  heading) printf 'Analysis of the change with plenty of detail in f:1.\n\n## Verdict\n\nREVISE %s\n' "$head" ;;
+  headingbold) printf 'Analysis of the change with plenty of detail in f:1.\n\n## **Verdict**\n\n**APPROVE** %s\n' "$head" ;;
+  headingwrong) printf 'Analysis of the change with plenty of detail in f:1.\n\n## Verdict\n\nREVISE %s\n' 0000000000000000000000000000000000000000 ;;
+  headingprose) printf 'Analysis of the change with plenty of detail in f:1.\n\nSo overall:\n\nREVISE %s\n' "$head" ;;
+  headingtwo) printf 'Analysis of the change with plenty of detail in f:1.\nVERDICT: APPROVE %s\n\n## Verdict\n\nREVISE %s\n' "$head" "$head" ;;
   short) printf 'ok\nVERDICT: APPROVE %s\n' "$head" ;;
   credit) attempt; echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
   write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
@@ -201,6 +206,12 @@ check "review door ignores ambient keys when the protected store exists" "mode o
 check "review door refuses ambient keys without a protected store" "AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR='$TMP/repo' DOOR_PACKET_DIR='$TMP' DOOR_PROMPT_FILE='$TMP/missing-prompt' DOOR_REPORT_OUT='$TMP/missing-report' DOOR_HEAD='$HEAD_SHA' AI_STEPFUN_ALLOW_NO_CREDS=0 AI_STEPFUN_KEY_STORE='$TMP/missing-store' AI_STEPFUN_KEY=ambient-one STEPFUN_API_KEY=ambient-two STEP_API_KEY=ambient-three bash '$ROOT/tools/lib/review-doors/stepfun.sh' review >'$TMP/no-store.out' 2>&1; rc=\$?; [ \$rc = 127 ] && grep -q 'no StepFun key in the protected store' '$TMP/no-store.out'"
 
 check "review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+# shared-db #4284: a "## Verdict" heading followed by a bare decision naming the head is normalized; nothing else is.
+check "a Verdict heading with a bare REVISE naming the head becomes the terminal VERDICT line" "mode heading; out=\$('$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null) && [ \"\$(printf '%s\\n' \"\$out\" | grep -c '^VERDICT:')\" = 1 ] && printf '%s\\n' \"\$out\" | grep -qx \"VERDICT: REVISE $HEAD_SHA\""
+check "a bold Verdict heading with a bold bare APPROVE is normalized" "mode headingbold; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -qx \"VERDICT: APPROVE $HEAD_SHA\""
+check "a bare decision naming another sha is still refused" "mode headingwrong; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
+check "a bare decision under prose (no Verdict heading) is still refused" "mode headingprose; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
+check "a report that already has a VERDICT line is never rewritten" "mode headingtwo; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "StepCode retains its only verdict-format instructions" "[ \"\$(grep -c '^VERDICT: APPROVE <head sha>' '$STUB_ARGS.prompt')\" = 1 ] && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$STUB_ARGS.prompt'"
 check "StepCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$STUB_ARGS.prompt' | grep -Eq '[0-9a-f]{40}' && tail -n1 '$STUB_ARGS.prompt' | grep -qx 'check f'"
 check "every turn runs inside the sandbox with an empty home and /tmp" "grep -qx -- --unshare-all '$STUB_ARGS.bwrap' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx '$HOME' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /tmp"
