@@ -860,6 +860,67 @@ check 'an unenforced gate is never printed as required' \
   "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
 check 'explain names the gates this tool does not check' \
   "out '$TMP/rs' explain | grep -q 'not checked by this tool'"
+newrepo "$TMP/rawarchive"
+( cd "$TMP/rawarchive" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/rawarchive/transcripts" && printf '{}\n' > "$TMP/rawarchive/transcripts/session.jsonl"
+check 'a raw transcript archive in the change set is refused for every action' \
+  "rc 3 '$TMP/rawarchive' check --before ship"
+check 'the raw transcript refusal names the archive path' \
+  "out '$TMP/rawarchive' check --before ship | grep -q 'transcripts/session.jsonl'"
+newrepo "$TMP/rawclean"
+( cd "$TMP/rawclean" && "$GATES" start --class code ) >/dev/null
+printf 'ok\n' > "$TMP/rawclean/notes.md"
+check 'a change set without raw archives is not refused by the archive rule' \
+  "out '$TMP/rawclean' check --before ship | grep -q 'raw transcript' ; ! out '$TMP/rawclean' check --before ship | grep -q 'raw transcript'"
+# The archive rule must hold for every action, match case-insensitive
+# spellings, fire before weaker action-specific checks, and judge only the
+# change set — not files that merely exist in the repository (Muse review
+# 2026-10-14).
+check 'a raw transcript archive is refused for the database action' \
+  "rc 3 '$TMP/rawarchive' check --before database"
+check 'the database refusal names the archive path' \
+  "out '$TMP/rawarchive' check --before database | grep -q 'transcripts/session.jsonl'"
+check 'a raw transcript archive is refused for code-only-review' \
+  "rc 3 '$TMP/rawarchive' check --before code-only-review"
+check 'a raw transcript archive is refused for deploy' \
+  "rc 3 '$TMP/rawarchive' check --before deploy"
+check 'the deploy refusal names the archive path before the installation pre-checks' \
+  "out '$TMP/rawarchive' check --before deploy | grep -q 'transcripts/session.jsonl'"
+check 'a raw transcript archive is refused before the application-workflow argument checks' \
+  "rc 3 '$TMP/rawarchive' check --before application-workflow"
+check 'the application-workflow refusal names the archive path' \
+  "out '$TMP/rawarchive' check --before application-workflow | grep -q 'transcripts/session.jsonl'"
+check 'explain surfaces the raw transcript refusal' \
+  "out '$TMP/rawarchive' explain | grep -q 'raw transcript or chat archives'"
+check 'explain --json lists the raw archive paths' \
+  "out '$TMP/rawarchive' explain --json | jq -e '.raw_archive_paths | index(\"transcripts/session.jsonl\") != null'"
+newrepo "$TMP/rawupper"
+( cd "$TMP/rawupper" && "$GATES" start --class code >/dev/null )
+printf '{}\n' > "$TMP/rawupper/session.JSONL"
+check 'an uppercase .JSONL extension is refused' "rc 3 '$TMP/rawupper' check --before ship"
+check 'the uppercase refusal names the archive path' \
+  "out '$TMP/rawupper' check --before ship | grep -q 'session.JSONL'"
+newrepo "$TMP/rawuppertree"
+( cd "$TMP/rawuppertree" && "$GATES" start --class code >/dev/null )
+mkdir -p "$TMP/rawuppertree/Transcripts" && printf 'x\n' > "$TMP/rawuppertree/Transcripts/note.md"
+check 'an uppercase Transcripts/ directory is refused' "rc 3 '$TMP/rawuppertree' check --before ship"
+newrepo "$TMP/rawupperchat"
+( cd "$TMP/rawupperchat" && "$GATES" start --class code >/dev/null )
+mkdir -p "$TMP/rawupperchat/Chat_Archives" && printf 'x\n' > "$TMP/rawupperchat/Chat_Archives/note.md"
+check 'an uppercase Chat_Archives/ directory is refused' "rc 3 '$TMP/rawupperchat' check --before ship"
+newrepo "$TMP/rawnear"
+( cd "$TMP/rawnear" && "$GATES" start --class code >/dev/null )
+mkdir -p "$TMP/rawnear/my-transcripts" && printf 'x\n' > "$TMP/rawnear/my-transcripts/note.md"
+printf 'ok\n' > "$TMP/rawnear/transcripts_backup.md"
+check 'transcript-like names outside the archive shapes are not refused' \
+  "rc 0 '$TMP/rawnear' check --before ship"
+newrepo "$TMP/rawhistory"
+mkdir -p "$TMP/rawhistory/transcripts" && printf '{}\n' > "$TMP/rawhistory/transcripts/old.jsonl"
+git -C "$TMP/rawhistory" add -A && git -C "$TMP/rawhistory" commit -qm 'historical archive'
+check 'a historical archive outside the change set does not block code-only-review' \
+  "rc 0 '$TMP/rawhistory' check --before code-only-review"
+check 'a historical archive outside the change set does not block ship' \
+  "rc 0 '$TMP/rawhistory' check --before ship"
 check 'a reviewer-safety task refuses ship without an exact-head independent review' \
   "rc 3 '$TMP/rs' check --before ship"
 check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
