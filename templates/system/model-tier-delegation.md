@@ -35,6 +35,35 @@ All four must be true before you dispatch a single step:
 If any item fails, the work is frontier work. Fix the plan or do the step
 yourself — never loosen the checklist to justify a handoff.
 
+## Task packet (what the child actually receives)
+
+Children get a **packet**, not a re-paste of `AGENTS.md`, global rules, skills,
+or plan STATUS. Keep the packet under ~20 lines. Long rules stay on the parent;
+the child opens a named file only if the step needs it.
+
+```
+Goal: <one sentence outcome>
+Issue/PR: <url or id>
+Scope: <exact files or paths this child may touch>
+Do only: <bounded steps>
+Do not: <top 2–3 traps for this job>
+Gates: <commands or checks the child must run and pass>
+Evidence: <where results go (issue comment, path)>
+Context paths (open only if needed):
+  - docs/task-router.md#<row name>
+  - <file>#<section name>
+```
+
+Rules for the packet:
+
+- Pass **paths and section names**, not full document text.
+- Safety gates for the task class stay named in `Gates` — never omitted to
+  save tokens.
+- Two children on one issue get **divided scope** (different files), never the
+  same paths.
+- Reuse the same packet for sequential children on the same issue instead of
+  regenerating it.
+
 ## Do-NOT-handoff list
 
 Never dispatch to the lower tier:

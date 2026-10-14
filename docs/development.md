@@ -559,6 +559,14 @@ boundaries, rename detection, island graphs, and PR-base selection. Also verify 
 - Match the existing style: `info`/`warn` helpers, colorized headings, clear
   usage text on `-h`/`--help`.
 - Keep machine-specific values in `/etc/ai-devops/*.env`, never hard-coded.
+- **PowerShell-safe command shapes.** Avoid nested quotes across PowerShell and
+  Git Bash — Windows PowerShell 5.1 drops embedded double quotes from native
+  arguments, so `cut -d" " -f1` becomes `cut -d -f1`. Prefer single quotes,
+  separate argument arrays, or a small `.ps1`/`.sh` script under the session
+  temp (or `bin/` when reused) over rebuilding a fragile one-liner each turn.
+- **One status probe per state change.** Record the answer after a wait or
+  merge; do not re-check an unchanged head. Reuse a green result when head and
+  digest are unchanged.
 
 ## Debugging
 
