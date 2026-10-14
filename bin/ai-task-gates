@@ -363,10 +363,16 @@ classify_paths(){
   valid_class "$fallback" || fail_closed "fallback_class '$fallback' is not a declared change class"
   rules="$(applicable_path_rules "$identity")"
 
-  OBSERVED_CLASS=""; OBSERVED_RANK=0; CONTRIBUTORS=(); CHANGED_COUNT=0
+  OBSERVED_CLASS=""; OBSERVED_RANK=0; CONTRIBUTORS=(); CHANGED_COUNT=0; RAW_ARCHIVE_PATHS=""
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
+    # Raw chat/transcript archives may never enter a change set (AGENTS.md:
+    # "never open or commit raw transcript .jsonl"). Path shape is the proof.
+    case "$path" in
+      *.jsonl|*.jsonl.gz|transcripts/*|*/transcripts/*|chat_archives/*|*/chat_archives/*)
+        RAW_ARCHIVE_PATHS="${RAW_ARCHIVE_PATHS}${path}"$'\n' ;;
+    esac
     # Compile the applicable rules once for the complete path set. Calling
     # tg_glob_match for every path/rule pair starts a Bash command substitution
     # for each comparison, which dominates large --paths-from inputs on Windows.
@@ -826,7 +832,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # Gates this tool actually checks. Anything else a policy lists is recorded
 # and printed under "not checked by this tool"; it is never claimed as satisfied
 # or enforced here. Keep this list in step with the enforcement code paths.
-GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
+GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
   local all="$1"
@@ -1329,6 +1335,12 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # only. No acknowledge or reviewer approval can carry it to another class.
   if [ "$action" = shared-db-promotion ] && [ "$effective" != shared-db ]; then
     blocked "$(printf 'ai-task-gates: STOP. "shared-db-promotion" opens only for the shared-db class; the effective class here is "%s" in %s.' "$effective" "$IDENTITY")"
+  fi
+
+  # never-open-raw-transcript-archives is enforced for every action, whether or
+  # not a policy lists it: a raw transcript archive in the change set is refused.
+  if [ -n "${RAW_ARCHIVE_PATHS:-}" ]; then
+    blocked "$(printf 'ai-task-gates: STOP before "%s". The change set contains raw transcript or chat archives, which "never-open-raw-transcript-archives" forbids in any repository:\n%s' "$action" "$RAW_ARCHIVE_PATHS")"
   fi
 
   # 2. Forbidden action for the observed class.

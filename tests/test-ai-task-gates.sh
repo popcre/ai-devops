@@ -860,6 +860,18 @@ check 'an unenforced gate is never printed as required' \
   "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
 check 'explain names the gates this tool does not check' \
   "out '$TMP/rs' explain | grep -q 'not checked by this tool'"
+newrepo "$TMP/rawarchive"
+( cd "$TMP/rawarchive" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/rawarchive/transcripts" && printf '{}\n' > "$TMP/rawarchive/transcripts/session.jsonl"
+check 'a raw transcript archive in the change set is refused for every action' \
+  "rc 3 '$TMP/rawarchive' check --before ship"
+check 'the raw transcript refusal names the archive path' \
+  "out '$TMP/rawarchive' check --before ship | grep -q 'transcripts/session.jsonl'"
+newrepo "$TMP/rawclean"
+( cd "$TMP/rawclean" && "$GATES" start --class code ) >/dev/null
+printf 'ok\n' > "$TMP/rawclean/notes.md"
+check 'a change set without raw archives is not refused by the archive rule' \
+  "out '$TMP/rawclean' check --before ship | grep -q 'raw transcript' ; ! out '$TMP/rawclean' check --before ship | grep -q 'raw transcript'"
 check 'a reviewer-safety task refuses ship without an exact-head independent review' \
   "rc 3 '$TMP/rs' check --before ship"
 check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
