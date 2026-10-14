@@ -70,6 +70,7 @@ tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
 tools/lib/grok-paid-keys.sh
 tools/lib/provider-wrapper-common.sh
+tools/lib/opencode-curl-auth.sh
 tools/lib/gemini-review-contract.sh
 tools/lib/grok-runtime.sh
 tools/lib/deepseek-opencode.sh
