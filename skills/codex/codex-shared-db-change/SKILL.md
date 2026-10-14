@@ -49,9 +49,9 @@ one app repo can silently break another. All durable DB **structure** lives in s
 > 2. **Claim-first — there is no orchestrator (owner ruling, Albert Hazan, 2026-10-02:
 >    "there is no longer an orchestrator").** Claim the exact database objects on the
 >    existing `popcre/shared-db` issue and start the change yourself: own worktree and
->    branch, migration version from the lane tool where one exists, pull request, the
->    assigned AI reviewer's APPROVE of the exact apply, and target proof before every
->    write. No orchestrator chat, marker, dispatch, or HANDOVER-and-stop.
+>    branch, migration version from the lane tool where one exists, pull request,
+>    and target proof before every write. Database writes skip the second AI
+>    (owner ruling 2026-10-14). No orchestrator chat, marker, dispatch, or HANDOVER-and-stop.
 >    `shared-db-orchestrator` is optional reference for its safety rules only.
 > 3. **Prove which database you are on before every write** — `AGENTS.md` §4.2, an owner
 >    ruling. Immediately before any statement that writes, changes or removes data,
@@ -142,8 +142,9 @@ the correct route. A predecessor's repository is context, not routing proof.
    promote to production that way.** Production almost always carries pending
    migrations from other workstreams that other teams have deliberately kept off it,
    so a plain `db push` either refuses or sweeps up work that was never approved.
-   Production promotion normally requires **the assigned AI reviewer's exact-head APPROVE
-   for that exact change** (never Albert's approval — owner ruling 2026-09-28), the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
+   Ordinary database writes skip the second AI (owner ruling 2026-10-14).
+   Production promotion is a separate action (`shared-db-promotion`) and still
+   needs the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
    recipe. The sole exception is the separately activated automatic workflow recorded
    by issue #2716: only after exact structural admission, guarded merge, merged-main
    preview, and every immutable evidence gate may that workflow dispatch its existing

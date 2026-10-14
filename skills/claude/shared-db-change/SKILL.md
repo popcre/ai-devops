@@ -25,8 +25,9 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > Any session that needs a STRUCTURE change claims the exact database objects on
 > the existing `popcre/shared-db` issue and starts, doing the change itself:
 > own worktree and branch in `popcre/shared-db`, migration version from the lane
-> tool where one exists, pull request, the assigned AI reviewer's APPROVE of the
-> exact apply, and proof of the target database immediately before every write.
+> tool where one exists, pull request, and proof of the target database
+> immediately before every write. Database writes skip the second AI (owner
+> ruling 2026-10-14).
 > Read-only inspection is always allowed (Rule 0); your own application's rows are
 > not gated (Rule 0.5). `shared-db-orchestrator` is optional reference only for its
 > safety rules (claims, exact-object locks, review, live proof). To end or hand

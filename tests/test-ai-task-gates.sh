@@ -1424,10 +1424,9 @@ for args in 'start --class' 'start --class prose --reason' 'start --base' 'check
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
 
-# Owner ruling 2026-10-02 ("yes, small entries can skip the reviewer"): a
-# small owner-requested row-data write (1..10 rows) may pass the database gate
-# without an AI reviewer, but only when the gate itself reads the repository's
-# issue from GitHub (through ai-gh) and finds the owner's words verbatim.
+# Owner ruling 2026-10-14 ("Our own safety rules require a second AI to
+# approve database writes. Remove that rule."): database writes open without
+# an AI reviewer. --small-owner-entry remains optional history only.
 newrepo "$TMP/small-entry" popcre/some-app
 ( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
 SMALL_URL='https://github.com/popcre/some-app/issues/7'
@@ -1446,13 +1445,13 @@ EOF
 chmod +x "$TMP/small-gh/gh"
 export AI_GH_REAL_GH="$TMP/small-gh/gh" AI_GH_STATE_DIR="$TMP/small-gh/state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_NO_WAIT=1
 SMALL="--before database --small-owner-entry"
-check 'database without reviewer or small entry stays blocked' \
-  "rc 3 '$TMP/small-entry' check --before database"
-check 'a 3-row owner entry passes the database gate without a reviewer' \
-  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'allowed as a small owner-requested entry'"
-check 'a 10-row owner entry is still small' \
+check 'database without reviewer or small entry is allowed (owner ruling 2026-10-14)' \
+  "out '$TMP/small-entry' check --before database | grep -q 'skip second-AI approval' && rc 0 '$TMP/small-entry' check --before database"
+check 'a 3-row owner entry records optional history without a reviewer' \
+  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'optional small owner entry'"
+check 'a 10-row owner entry is still valid optional history' \
   "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
-check 'an 11-row entry needs a reviewer' \
+check 'an 11-row entry is refused on the optional path' \
   "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
 check 'a zero or non-numeric row count is refused' \
   "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
@@ -1498,7 +1497,7 @@ check 'an infrastructure change set never qualifies as a small owner entry' \
 newrepo "$TMP/small-structural" popcre/some-app
 ( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
 mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
-check 'a structural change set never qualifies as a small owner entry' \
+check 'a structural change set escalates and never uses the small-entry path' \
   "! rc 0 '$TMP/small-structural' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' && ! jq -e '(.overrides // [])|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-structural')\" >/dev/null 2>&1"
 unset AI_GH_REAL_GH AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS AI_GH_NO_WAIT
 for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do
