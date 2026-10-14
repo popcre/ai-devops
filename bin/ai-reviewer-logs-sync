@@ -170,14 +170,24 @@ stage_tree(){
     # "<64-hex digest><space><' ' or '*' mode marker><path>"
     digest="${line:0:64}"; file="${line:66}"
     rel="${file#"$src"/}"
-    if ! size="$(wc -c < "$file" 2>>"$ERRS")"; then continue; fi
-    if [ "$size" -gt "$MAX_BYTES" ]; then
+    # Unchanged since the last delivered collection: nothing to do.
+    if [ "${SEEN[$file]:-}" = "$digest" ]; then NEW_SEEN["$file"]="$digest"; continue; fi
+    # Cheap pre-check so a huge file is never copied just to be dropped.
+    if size="$(wc -c < "$file" 2>/dev/null)" && [ "$size" -gt "$MAX_BYTES" ]; then
       printf '%s/%s\t%s bytes, over the size limit\n' "$into" "$rel" "$size" >> "$NOTES"; continue
     fi
-    NEW_SEEN["$file"]="$digest"
-    [ "${SEEN[$file]:-}" = "$digest" ] && continue
-    mkdir -p "$WORK/stage/$into/$(dirname "$rel")"
-    if cp -f -- "$file" "$WORK/stage/$into/$rel" 2>>"$ERRS"; then COPIED=$((COPIED + 1)); else unset 'NEW_SEEN[$file]'; fi
+    # Copy first, then measure and fingerprint the COPY: what is archived is
+    # exactly what is recorded, even if the live file is being rewritten.
+    local staged="$WORK/stage/$into/$rel"
+    mkdir -p "$(dirname "$staged")"
+    if ! cp -f -- "$file" "$staged" 2>>"$ERRS"; then rm -f -- "$staged"; continue; fi
+    size="$(wc -c < "$staged")"
+    if [ "$size" -gt "$MAX_BYTES" ]; then
+      rm -f -- "$staged"
+      printf '%s/%s\t%s bytes, over the size limit\n' "$into" "$rel" "$size" >> "$NOTES"; continue
+    fi
+    NEW_SEEN["$file"]="$(sha256sum < "$staged" | cut -c1-64)"
+    COPIED=$((COPIED + 1))
   done < "$sums"
 }
 

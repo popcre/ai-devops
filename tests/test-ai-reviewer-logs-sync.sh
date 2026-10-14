@@ -265,6 +265,16 @@ done
 git init -q --bare "$TMP/empty.git"
 AI_REVIEWER_LOGS_REMOTE="$TMP/empty.git" AI_REVIEWER_LOGS_HUB="$TMP/empty-hub" run sync > "$TMP/out29" 2>&1 || true
 check 'an archive without main is refused and nothing is pushed' "grep -q 'has no main branch' '$TMP/out29' && [ -z \"\$(git -C '$TMP/empty.git' for-each-ref)\" ]"
+# A file rewritten while it is being copied: the archived bytes are what is recorded.
+mkdir -p "$TMP/racy-cp"
+real_cp="$(command -v cp)"
+printf '#!/usr/bin/env bash\nsrc="${@: -2:1}"; dst="${@: -1}"\ncase "$src" in *racy.log) printf "rewritten mid-copy\n" > "$src"; esac\nexec "%s" "$@"\n' "$real_cp" > "$TMP/racy-cp/cp"
+chmod +x "$TMP/racy-cp/cp"
+printf 'original\n' > "$ISSUES/pkg/racy.log"
+PATH="$TMP/racy-cp:$PATH" run sync 2> "$TMP/out30" || { cat "$TMP/out30" >&2; exit 1; }
+run sync 2> "$TMP/out31" || { cat "$TMP/out31" >&2; exit 1; }
+view
+check 'a file rewritten mid-copy is archived as copied and not re-sent needlessly' "grep -q 'rewritten mid-copy' '$P/reviewer-issues/pkg/racy.log' && grep -q 'nothing new' '$TMP/out31'"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
