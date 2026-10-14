@@ -60,7 +60,11 @@ CANONICAL="github.com/u2giants/ai-devops-reviewer-logs"
 REMOTE="${AI_REVIEWER_LOGS_REMOTE:-https://$CANONICAL.git}"
 # Credentials come from the Git credential helper, never from the address: an
 # address carrying user info would leak through every Git error and the log.
-case "$REMOTE" in *://*@*|*:*@*) die "the archive address must not contain credentials" ;; esac
+# The only user part allowed is the standard SSH user "git" (git@host:path or
+# ssh://git@host/path); anything else before an "@" is treated as a credential.
+case "$REMOTE" in
+  *@*) [[ "$REMOTE" =~ ^(ssh://)?git@[^@/:]+[:/][^@]*$ ]] || die "the archive address must not contain credentials" ;;
+esac
 HUB="${AI_REVIEWER_LOGS_HUB:-$HOME/.cache/ai-devops-reviewer-logs}"
 STATE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
 ISSUES="${AI_REVIEWER_ISSUE_DIR:-$TOOL_ROOT/.ai/reviewer-issues}"

@@ -251,6 +251,10 @@ git -C "$TMP/hub" config remote.origin.pushurl "file://user:STOREDSECRET@localho
 printf 's\n' >> "$STATE/reviewer-events/events.jsonl"
 run sync > "$TMP/out26" 2>&1 || { cat "$TMP/out26" >&2; exit 1; }
 check 'a stored address with credentials is replaced before any use' "absent grep -q STOREDSECRET '$TMP/hub/.git/config' && absent grep -q STOREDSECRET '$TMP/out26' && absent grep -rq STOREDSECRET '$TMP/home/.ai-devops/reviewer-logs-sync'"
+for addr in 'SCPSECRET@github.com:u2giants/ai-devops-reviewer-logs.git' 'ssh://SCPSECRET@github.com/u2giants/ai-devops-reviewer-logs.git' 'https://SCPSECRET@github.com/u2giants/ai-devops-reviewer-logs.git'; do
+  AI_REVIEWER_LOGS_REMOTE="$addr" HOME="$TMP/home" bash "$ROOT/bin/ai-reviewer-logs-sync" sync > "$TMP/out27" 2>&1 || true
+  check "credential-bearing address refused: ${addr%%SCPSECRET*}...@" "grep -q 'must not contain credentials' '$TMP/out27' && absent grep -q SCPSECRET '$TMP/out27'"
+done
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
