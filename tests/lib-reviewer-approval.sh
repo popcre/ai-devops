@@ -19,8 +19,8 @@ mint_reviewer_approval(){
   report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; hash="$(sha256sum "$report" | cut -d' ' -f1)"
   state="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/grok/claude/$run.json"
   mkdir -p "$(dirname "$state")"
-  jq -n --arg h "$head" --arg p "$report" --arg s "$hash" --arg k "$key" --arg d "$digest" --arg r "$run" --arg m "$mode" \
-    '{schema_version:1,status:"completed",provider:"grok",caller:"zcode",implementer_engine:"claude",review_mode:$m,run_id:$r,repository_key:$k,source_digest:$d,head:$h,verdict:"APPROVE",stale:false,report_path:$p,report_sha256:$s}' \
+  jq -n --arg t "$(printf '0%.0s' {1..64})" --arg h "$head" --arg p "$report" --arg s "$hash" --arg k "$key" --arg d "$digest" --arg r "$run" --arg m "$mode" \
+    '{schema_version:1,tests:{command:"fixture",exit:0,output_sha256:$t},status:"completed",provider:"grok",caller:"zcode",implementer_engine:"claude",review_mode:$m,run_id:$r,repository_key:$k,source_digest:$d,head:$h,verdict:"APPROVE",stale:false,report_path:$p,report_sha256:$s}' \
     | jq "$extra" > "$state"
   printf '%s\n' "$report"
 }

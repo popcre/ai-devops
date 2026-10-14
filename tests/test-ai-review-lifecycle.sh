@@ -168,6 +168,13 @@ check "scoreboard_metadata_carries_source_digest" "jq -e '.source_digest|test(\"
 check "incident_join_is_exact" \
   "'$SCRIPT' join '$STATE' | jq -e '.run_id==\"run-one\" and .session_id==\"session-one\" and .caller==\"codex\" and .status==\"completed\"'"
 
+# record-tests writes machine-readable test evidence into a running review record
+# (the local-tests gate reads it) and refuses a failing run or a bad digest.
+STATE_TESTS="$($SCRIPT begin --provider grok --repo "$R" --run-id tests-one --caller codex)"
+H64="$(printf 'a%.0s' {1..64})"
+check "record_tests_writes_passing_evidence" "'$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 0 --output-sha256 '$H64' && jq -e '.tests.exit==0 and .tests.output_sha256==\"$H64\" and .tests.command==\"bash tests/x.sh\"' '$STATE_TESTS' >/dev/null"
+check "record_tests_refuses_a_failing_run" "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 1 --output-sha256 '$H64' >/dev/null 2>&1"
+check "record_tests_refuses_a_bad_digest" "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 0 --output-sha256 nothex >/dev/null 2>&1"
 STATE_STALE="$($SCRIPT begin --provider qwen --repo "$R" --run-id stale-one --caller codex)"
 printf 'changed\n' >> "$R/a.txt"
 $SCRIPT finish --state "$STATE_STALE" --verdict APPROVE --report "$REPORT" --elapsed 3 >/dev/null

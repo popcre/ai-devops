@@ -476,6 +476,11 @@ reviewer_approval_summary(){
       and ((.provider|ascii_downcase) != (.implementer_engine|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
   done
   [ -n "$row" ] || return 1
+  # local-tests: a release action in a class that requires local tests needs a
+  # review record that carries a passing test run with its output digest.
+  if [ "${LOCAL_TESTS_REQUIRED:-0}" = 1 ]; then
+    jq -e '(.tests.exit==0) and (.tests.output_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$row" >/dev/null 2>&1 || return 1
+  fi
   local oracle_script=""
   if [ "$action" = offline-private-capture-transform ]; then
     jq -e ' .evidence_scope=="selected-code" and .code_only!=null and .code_only_export!=null' "$row" >/dev/null || return 1
@@ -829,9 +834,16 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
-  local all="$1"
-  REQUIRED_CHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" | paste -sd, - || true)"
-  REQUIRED_UNCHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -v '^$' | grep -Ev "$GATE_ENFORCED_RE" | paste -sd, - || true)"
+  local all="$1" checked tests=""
+  checked="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" || true)"
+  # local-tests is enforced only where a reviewer approval is required: the review
+  # record then carries the passing test evidence. Elsewhere it stays unchecked.
+  if printf '%s\n' "$all" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$' \
+     && printf '%s\n' "$all" | tr ',' '\n' | grep -qx local-tests; then
+    checked="$(printf '%s\nlocal-tests\n' "$checked")"
+  fi
+  REQUIRED_CHECKED="$(printf '%s\n' "$checked" | grep -v '^$' | paste -sd, - || true)"
+  REQUIRED_UNCHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -v '^$' | grep -vxF "$(printf '%s\n' "$REQUIRED_CHECKED" | tr ',' '\n')" | paste -sd, - || true)"
 }
 
 cmd_explain_cached(){
@@ -1454,6 +1466,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # before any reviewer exists), so they are not gated here; they mutate nothing.
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
+  LOCAL_TESTS_REQUIRED=0
+  if [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -qx local-tests && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'; then LOCAL_TESTS_REQUIRED=1; fi
   if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \

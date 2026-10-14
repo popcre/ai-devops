@@ -389,6 +389,24 @@ report_substance(){ # FILE -> substantive character count
     | tr -d '[:space:]' | wc -c | tr -d ' '
 }
 
+# record-tests STATE COMMAND EXIT OUTPUT_SHA256: machine-readable evidence that the
+# review snapshot's test command ran before dispatch. The local-tests gate reads
+# this record; a failing run never reaches here (the review refuses first).
+record_tests(){
+  local state="" command="" exit_code="" output_sha=""
+  while [ "$#" -gt 0 ]; do case "$1" in
+    --state) state="${2:-}"; shift 2;; --command) command="${2:-}"; shift 2;;
+    --exit) exit_code="${2:-}"; shift 2;; --output-sha256) output_sha="${2:-}"; shift 2;;
+    *) die "unknown record-tests option: $1";; esac; done
+  state="$(state_checked "$state")"; [ "$(jq -r .status "$state")" = running ] || die "lifecycle is not running: $state"
+  [ -n "$command" ] || die "record-tests requires --command."
+  [ "$exit_code" = 0 ] || die "record-tests records only a passing run (--exit 0)."
+  printf '%s' "$output_sha" | grep -Eq '^[0-9a-f]{64}$' || die "--output-sha256 must be 64 hex characters."
+  local row; row="$(jq --arg c "$command" --arg h "$output_sha" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.tests={command:$c,exit:0,output_sha256:$h,recorded_at:$at}' "$state")" || die "could not record tests."
+  atomic_json "$state" "$row"
+}
+
 terminal(){ # finish|fail args
   local operation="$1"; shift; local state="" verdict="" report="" elapsed="" failure="" current row report_sha="" stale=false scoreboard_rc=0 now
   local packet_dir="" packet_sha256="" provider_session="" proof=""
@@ -443,6 +461,7 @@ usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycl
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;
   begin) shift; begin "$@";; finish) shift; terminal finish "$@";; fail) shift; terminal fail "$@";;
+  record-tests) shift; record_tests "$@";;
   observe) shift; diagnostic_observe "$@";;
   sweep) shift; sweep "$@";;
   join) shift; [ "$#" -eq 1 ] || die "join requires one state file."; join "$1";;

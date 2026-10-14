@@ -856,12 +856,18 @@ check 'a production task refuses ship without an AI reviewer approval' \
   "rc 3 '$TMP/clean' check --before ship"
 newrepo "$TMP/rs"
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
+newrepo "$TMP/unchecked"
+( cd "$TMP/unchecked" && "$GATES" start --class code ) >/dev/null
 check 'an unenforced gate is never printed as required' \
-  "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
+  "out '$TMP/unchecked' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
 check 'explain names the gates this tool does not check' \
-  "out '$TMP/rs' explain | grep -q 'not checked by this tool'"
+  "out '$TMP/unchecked' explain | grep -q 'not checked by this tool'"
+check 'local-tests is a checked gate where a reviewer approval is required' \
+  "out '$TMP/rs' explain --json | jq -e '.required_gates | index(\"local-tests\") != null'"
 check 'a reviewer-safety task refuses ship without an exact-head independent review' \
   "rc 3 '$TMP/rs' check --before ship"
+check 'a reviewer-gated release refuses an approval that carries no passing test evidence' \
+  "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\""
 check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
   "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
 check 'a production task refuses a report that is not an AI APPROVE for this head' \
