@@ -14,6 +14,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/tools/lib/opencode-curl-auth.sh"
+source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 OC_HOME="$CFG_DIR/opencode"            # our own metadata (password, installed-version)
 OC_XDG="$CFG_DIR/opencode-xdg"         # becomes XDG_CONFIG_HOME for the server
@@ -38,6 +40,14 @@ VERSION="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
 command -v npm >/dev/null 2>&1 || die "npm is required to install the pinned OpenCode release."
 command -v jq  >/dev/null 2>&1 || die "jq is required by ai-glm."
 command -v op  >/dev/null 2>&1 || die "1Password CLI (op) is required."
+
+# Bootstrap only the private password parent before taking the stable lock.
+# Keep the exclusive descriptor through every config, password, launcher and
+# unit write, the service restart, and authenticated health verification.
+if [ ! -e "$OC_HOME" ] && [ ! -L "$OC_HOME" ]; then
+  ( umask 077; mkdir -p -- "$OC_HOME" )
+fi
+glm_maintenance_lock_acquire "$OC_HOME" exclusive "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" || die "could not safely acquire the local OpenCode maintenance lock."
 
 # ---------------------------------------------------------------------------
 # 1. Pinned OpenCode binary
@@ -179,8 +189,10 @@ systemctl --user restart opencode-glm.service
 info "Waiting for the server to become healthy"
 PW="$(<"$PW_FILE")"
 ok=0
+health_rc=0
 for _ in $(seq 1 30); do
-  if curl -fsS -m 3 -u "opencode:$PW" "http://127.0.0.1:$PORT/global/health" >/dev/null 2>&1; then ok=1; break; fi
+  if opencode_curl_auth_health_request opencode "$PW" "http://127.0.0.1:$PORT/global/health" 3 >/dev/null 2>&1; then ok=1; break
+  else health_rc=$?; [ "$health_rc" -ne 2 ] || die "could not generate authenticated curl configuration; no health request was sent"; fi
   sleep 2
 done
 [ "$ok" = 1 ] || die "server did not become healthy. Check: systemctl --user status opencode-glm; journalctl --user -u opencode-glm -n 50"

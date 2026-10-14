@@ -150,6 +150,12 @@ The completed reconciliation plan is [`plan_sync-machine-wrapper-reconciliation.
 
 ## GLM: persistent sessions on a local OpenCode server
 
+The GLM client and Linux installer share `tools/lib/opencode-curl-auth.sh`.
+It streams escaped loopback authentication through curl's standard input and
+bypasses proxies for the fixed local endpoint. Passwords must never enter
+command arguments. The existing GLM harness owns this helper, which consolidates
+authentication transport for its client and installer.
+
 `ai-glm` talks to a pinned OpenCode server bound to `127.0.0.1` and running as a
 systemd user service. Claude Code is no longer involved. The server uses
 OpenCode's built-in `zai-coding-plan` provider against Z.ai's Coding Plan

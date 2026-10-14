@@ -311,6 +311,9 @@
         "test-mcp-session-guard.sh",
         "test-mcp-launch-lock.sh"
       ],
+      "bin/setup-opencode-glm.sh": [
+        "test-ai-glm.sh"
+      ],
       "tests/test-mcp-session-guard.sh": [
         "test-mcp-session-guard.sh"
       ],
@@ -333,6 +336,9 @@
         "test-pool-dispatch-doors.sh",
         "test-ubuntu-install-stages.sh",
         "test-workflow-policy.sh"
+      ],
+      "tools/lib/opencode-maintenance-lock.sh": [
+        "test-ai-glm.sh"
       ],
       "tools/lib/provider-wrapper-common.sh": [
         "test-ai-gemini.sh",

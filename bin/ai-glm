@@ -81,6 +81,8 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 # engine name — independence recording keys off this value. main() fails
 # closed when no caller remains.
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/opencode-curl-auth.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/opencode-maintenance-lock.sh"
 CALLER=''
 caller_rc=0
 CALLER="$(provider_wrapper_resolve_caller "${AI_GLM_CALLER:-}")" || caller_rc=$?
@@ -196,11 +198,9 @@ server_pw() {
   tr -d '\r\n' < "$PW_FILE"
 }
 curl_auth_config() {
-  local pw user auth
+  local pw user
   pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
-  case "$user$pw" in *$'\n'*|*$'\r'*) return 1;; esac
-  auth="$user:$pw"; auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
-  printf 'user = "%s"\n' "$auth"
+  opencode_curl_auth_config "$user" "$pw"
 }
 glm_now() { date +%s; }
 glm_new_deadline() {
@@ -217,20 +217,23 @@ glm_http_budget() { # bound each request and sleep by the current turn's remaini
   printf '%s' "$limit"
 }
 api() { # api METHOD PATH [JSON_BODY_FILE]
-  local method="$1" path="$2" body="${3:-}" budget
+  local method="$1" path="$2" body="${3:-}" budget pw user
   budget="$(glm_http_budget 120)" || return $?
+  pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
   if [ -n "$body" ]; then
-    curl_auth_config | curl --config - -sS -m "$budget" \
+    opencode_curl_auth_request "$user" "$pw" -sS -m "$budget" \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
   else
-    curl_auth_config | curl --config - -sS -m "$budget" -X "$method" "$BASE$path"
+    opencode_curl_auth_request "$user" "$pw" -sS -m "$budget" -X "$method" "$BASE$path"
   fi
 }
 api_code() { # api_code METHOD PATH [MAX_SECONDS] -> HTTP status only
-  local max_seconds="${3:-30}"
+  local max_seconds="${3:-30}" pw user result
   max_seconds="$(glm_http_budget "$max_seconds")" || return $?
-  curl_auth_config | curl --config - -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
-    -X "$1" "$BASE$2" 2>/dev/null || echo 000
+  pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
+  result="$(opencode_curl_auth_request "$user" "$pw" -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
+    -X "$1" "$BASE$2" 2>/dev/null)" || { printf '000'; return 0; }
+  printf '%s' "$result"
 }
 server_up() { [ "$(api_code GET /global/health "${1:-30}")" = "200" ]; }
 require_server() {
@@ -973,17 +976,21 @@ PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
 PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
 PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget
+  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget auth_config
   GLM_HTTP_DEADLINE_HIT=0
+  budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
+  auth_config="$(curl_auth_config)" || {
+    HTTP_STATUS=000; HTTP_BODY=""; warn 'could not generate authenticated curl configuration; no request was sent.'; return 0;
+  }
   while :; do
     budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
     rc=0; tmp="$(mktemp)"
     if [ -n "$json" ]; then
-      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+      HTTP_STATUS="$(opencode_curl_with_auth_config "$auth_config" -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
         -X "$method" "$BASE$path" \
         -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
     else
-      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+      HTTP_STATUS="$(opencode_curl_with_auth_config "$auth_config" -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
         -X "$method" "$BASE$path" \
         2>/dev/null)" || rc=$?
     fi
@@ -3293,6 +3300,7 @@ cmd_doctor() {
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 main() {
+local local_maintenance_mode
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
 OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 CMD="${1:-}"; shift || true
@@ -3338,6 +3346,32 @@ if [ -z "$CALLER" ]; then
     AI_GLM_CALLER=mimo ai-glm doctor'
 fi
 provider_wrapper_valid_caller "$CALLER" || die "caller name $CALLER is not path-safe (letters, digits, . _ - only; no leading dot)."
+
+# Local metadata inspection does not contact the authenticated server and must
+# remain usable before the private password directory is bootstrapped. Transcript
+# and diff do authenticate; all server lifecycle changes use the exclusive lock.
+glm_maintenance_mode_for_cli() {
+  case "${1:-}" in
+    -h|--help|help|list|show) printf none ;;
+    doctor) [ -s "$PW_FILE" ] && printf shared || printf none ;;
+    server)
+      case "${2:-}" in
+        start|stop|restart) printf exclusive ;;
+        status) [ -s "$PW_FILE" ] && printf shared || printf none ;;
+        *) printf shared ;;
+      esac
+      ;;
+    *) printf shared ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" = "$0" && "$IS_WINDOWS" != 1 ]]; then
+  local_maintenance_mode="$(glm_maintenance_mode_for_cli "$CMD" "$ARG")"
+  if [ "$local_maintenance_mode" != none ]; then
+    glm_maintenance_lock_acquire "$(dirname "$PW_FILE")" "$local_maintenance_mode" "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" \
+      || die 'could not safely acquire the local OpenCode maintenance lock.'
+  fi
+fi
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
