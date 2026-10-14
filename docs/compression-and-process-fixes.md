@@ -47,14 +47,36 @@ Optional local helper pattern (session temp, not a fleet install):
 3. Use `results.compressed_prompt` in the next LLM call; record
    `compression_ratio` in the session notes.
 
-## DietCode (not adopted)
+## Session history compaction with a cheap SLM (worth piloting)
 
-DietCode (npm hooks + optional Claude proxy) was evaluated and **not installed**:
+**Corrected verdict (2026-10-14).** Using ScaleDown (or another cheap SLM) to
+**compact session history** — replacing the expensive frontier model's
+auto-compaction summary — can save real money. That is a different path from
+tool-output compression.
 
-- Real history shrink needs their Claude-only proxy; hooks only add tokens.
-- Must be measured against cache busts (Headroom lesson).
-- Cursor path currently gets no automatic optimization.
-- Revisit only with a one-machine, one-week paired measurement.
+| Path | What it shrinks | Measured / expected |
+|---|---|---|
+| Tool-output compression (Headroom) | `ls`/`grep`/logs in the request | ~2% net after prompt cache |
+| Paste/retrieval compress (ScaleDown Compress) | pasted docs before a question | ~85% on redundant material |
+| **History compaction (ScaleDown Summarize / DietCode proxy)** | **old turns in every later request** | **high leverage on long sessions** |
+
+Long sessions dominate spend (a small share of sessions drives most input
+tokens). Every later turn re-sends history; a cheap running summary of older
+turns plus a short verbatim tail shrinks that baseline. Frontier auto-compaction
+itself is an expensive LLM call — replacing it with an SLM summarize is a direct
+cost cut, and the smaller prefix cuts every following turn.
+
+Caveats that still hold:
+
+- DietCode's real history shrink is their **Claude-only proxy**; hooks alone
+  only add tokens.
+- Measure billed tokens **and** cache hit rate (rewritten prefixes can bust
+  cache).
+- Keep exact code/evidence recoverable (`sd_retrieve` or local stash).
+- Cursor currently gets no automatic DietCode optimization.
+
+**Next:** one machine, one week, paired measurement — same work with and
+without SLM history compaction. Do not adopt fleet-wide before that number.
 
 ## Process fixes that landed (A–E)
 
