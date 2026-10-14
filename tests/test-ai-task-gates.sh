@@ -848,6 +848,10 @@ check 'a production task may still dispatch its review (the approval producer is
   "rc 0 '$TMP/clean' check --before review"
 check 'a production task may still wait on its pull request without a reviewer report' \
   "rc 0 '$TMP/clean' check --before pr-wait"
+check 'a production task may still run code-only review without a reviewer report' \
+  "rc 0 '$TMP/clean' check --before code-only-review"
+check 'a production task refuses ship without an AI reviewer approval' \
+  "rc 3 '$TMP/clean' check --before ship"
 check 'a production task refuses a report that is not an AI APPROVE for this head' \
   "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 
