@@ -39,6 +39,18 @@ manifest_json() {
       printf 'test-all.sh: suite manifest loader is missing: %s\n' "$LOADER" >&2; exit 2; }
     MANIFEST_JSON="$(AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$LOADER")" || {
       printf 'test-all.sh: the suite manifest failed to assemble\n' >&2; exit 2; }
+    # Drop suspended suites from every assembled lane list so a frozen suite
+    # never fails an undiscovered/union check after it is skipped.
+    if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>&1; then
+      MANIFEST_JSON="$(printf '%s' "$MANIFEST_JSON" | jq --slurpfile m "$MANIFEST" '
+        ($m[0].suspended_bash // []) as $s
+        | .windows_offline_bash = ((.windows_offline_bash // []) - $s)
+        | .windows_offline_shards = ((.windows_offline_shards // []) | map(. - $s))
+        | .windows_reviewer_safety_bash = ((.windows_reviewer_safety_bash // []) - $s)
+        | .linux_offline_suite_seconds |= with_entries(select(.key as $k | ($s | index($k) | not)))
+      ')" || {
+        printf 'test-all.sh: could not apply suspended_bash to the assembled manifest\n' >&2; exit 2; }
+    fi
     MANIFEST_JSON_LOADED=1
   fi
   printf '%s' "$MANIFEST_JSON"
@@ -204,6 +216,11 @@ elif [ "$windows_offline" = true ]; then
   manifest_json | jq -e '.windows_offline_bash | type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1 || {
     printf 'test-all.sh: Windows suite manifest has no valid windows_offline_bash group\n' >&2; exit 2; }
   mapfile -t tests < <(manifest_json | jq -r '.windows_offline_bash[]' | tr -d '\r')
+  # A suspended suite is already removed from all_tests; drop it from the
+  # Windows lane too so the undiscovered-suite check below stays honest.
+  if [ "${#suspended_tests[@]}" -gt 0 ]; then
+    mapfile -t tests < <(printf '%s\n' "${tests[@]}" | grep -Fxv -f <(printf '%s\n' "${suspended_tests[@]}") || true)
+  fi
   [ "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#tests[@]}" ] || {
     printf 'test-all.sh: windows_offline_bash contains a duplicate suite\n' >&2; exit 2; }
   if [ "$exclude_reviewer_safety" = true ]; then
