@@ -85,7 +85,7 @@ write_policy "$TMP/db" '{"schema_version":1,"paths":[{"glob":"supabase/**","clas
 start "$TMP/db" shared-db
 db_json="$(explain "$TMP/db" supabase/migrations/001.sql)"
 check 'shared-db structure retains branch, review, and target proof' "jq -e '.observed_class==\"shared-db\" and ([\"repository-branch-and-pr\",\"exact-head-independent-review\",\"target-database-proof-before-write\"]- .required_gates|length==0)' <<<\"\$db_json\""
-check 'shared-db fixture may enter its governed database path' "rc '$TMP/db' 0 check --before database"
+check 'shared-db structure is refused a database write without an exact-head independent review' "rc '$TMP/db' 3 check --before database"
 
 # 7. A raw-evidence consumer explicitly forbids review transmission. Private
 # code review is allowed centrally; this stricter artifact policy remains binding.

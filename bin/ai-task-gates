@@ -1439,7 +1439,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # before any reviewer exists), so they are not gated here; they mutate nothing.
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
-  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -q 'reviewer-approval$'; then
+  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
         || blocked "$(printf 'ai-task-gates: STOP before "%s". The required gates for "%s" in %s are: %s\nA small owner entry applies only to a row-data database write; this action needs --reviewer-approval.' "$action" "$effective" "$IDENTITY" "$required")"

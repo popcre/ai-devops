@@ -852,6 +852,12 @@ check 'a production task may still run code-only review without a reviewer repor
   "rc 0 '$TMP/clean' check --before code-only-review"
 check 'a production task refuses ship without an AI reviewer approval' \
   "rc 3 '$TMP/clean' check --before ship"
+newrepo "$TMP/rs"
+( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
+check 'a reviewer-safety task refuses ship without an exact-head independent review' \
+  "rc 3 '$TMP/rs' check --before ship"
+check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
+  "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
 check 'a production task refuses a report that is not an AI APPROVE for this head' \
   "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 
