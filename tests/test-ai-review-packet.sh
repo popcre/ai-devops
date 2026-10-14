@@ -751,7 +751,10 @@ sed -n '/^identity_stable()/,/^}/p' "$POOL" > "$STABLE_FN"
 ID_OLD='{"repository":"r","head":"'"$FWD_RECORDED_TIP"'","source_digest":"d","base":"'"$FWD_RECORDED_TIP"'","merge_base":"'"$FWD_BASE"'","rule":"explicitly requested by the caller as '"'"'main'"'"'","requested_base":"main","target_ref":"main","target":"'"$FWD_RECORDED_TIP"'"}'
 ID_FWD=$(jq -c --arg b "$FWD_NEW_TIP" '.base=$b | .target=$b' <<<"$ID_OLD")
 ID_HEAD=$(jq -c '.head="ffffffffffffffffffffffffffffffffffffffff"' <<<"$ID_FWD")
-ID_BASEX=$(jq -c '.base="ffffffffffffffffffffffffffffffffffffffff"' <<<"$ID_FWD")
+FEAT_SHA="$(git -C "$FWD" rev-parse feature)"
+ID_BASEX=$(jq -c --arg b "$FEAT_SHA" '.base=$b' <<<"$ID_FWD")
+ID_INCL=$(jq -c --arg b "$FEAT_SHA" '.base=$b | .merge_base=$b' <<<"$ID_FWD")
+check "pool_identity_refuses_base_moving_to_include_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_INCL'"
 check "pool_identity_tolerates_forward_move_of_explicit_base" "bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_FWD'"
 check "pool_identity_refuses_head_change" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_HEAD'"
 check "pool_identity_refuses_non_forward_base_move" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_BASEX'"
