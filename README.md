@@ -196,6 +196,8 @@ Coding Plan key is resolved from 1Password only at launch. See
 either Claude or Codex invoke it when
 Albert says “ask GLM” or “run this by GLM.”
 
+For the closed Oracle private-source review boundary, read the [offline alternate serialization controls](docs/oracle-native-alternate-offline-action.md) and the [separate v2 admission and staged parent-chain rules](docs/operations/oracle-native-alternate-v2-admission.md). These procedures distinguish reviewed source, installed capability, current permission and one-use execution.
+
 ### Reviewer health and measurement
 
 `ai-review-preflight check <provider> <repo>` verifies the repository,
