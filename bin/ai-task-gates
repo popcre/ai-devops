@@ -826,7 +826,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # Gates this tool actually checks. Anything else a policy lists is recorded
 # and printed under "not checked by this tool"; it is never claimed as satisfied
 # or enforced here. Keep this list in step with the enforcement code paths.
-GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
+GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
   local all="$1"
@@ -926,7 +926,8 @@ cmd_explain(){
     [ "$reviewer_release" -eq 0 ] || merged_gate "$IDENTITY" reviewer-safety
   } 2>/dev/null | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
-  split_required_gates "$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
+  local required_full="" unchecked_required=""
+  required_full="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; split_required_gates "$required_full"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
 
   if [ "$as_json" = true ]; then
@@ -955,7 +956,7 @@ cmd_explain(){
   printf 'observed class   : %s (%s changed path(s))\n' "$OBSERVED_CLASS" "$CHANGED_COUNT"
   printf 'effective class  : %s\n' "$effective"
   printf 'required gates   : %s\n' "${required:-<none>}"
-  [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool : %s\n' "$unchecked_required"
+  [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool: %s\n' "$unchecked_required"
   printf 'forbidden actions: %s\n' "${forbidden:-<none>}"
   if [ "$CHANGED_COUNT" -gt 0 ]; then
     printf 'changes:\n'
@@ -1346,7 +1347,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   } | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
-  split_required_gates "$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
+  local required_full="" unchecked_required=""
+  required_full="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; split_required_gates "$required_full"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
@@ -1452,7 +1454,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # before any reviewer exists), so they are not gated here; they mutate nothing.
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
-  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
+  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
         || blocked "$(printf 'ai-task-gates: STOP before "%s". The required gates for "%s" in %s are: %s\nA small owner entry applies only to a row-data database write; this action needs --reviewer-approval.' "$action" "$effective" "$IDENTITY" "$required")"
@@ -1485,7 +1487,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
-  [ -z "${unchecked_required:-}" ] || printf 'recorded but not checked by this tool: %s\n' "$unchecked_required"
+  [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool: %s\n' "$unchecked_required"
   return 0
 }
 

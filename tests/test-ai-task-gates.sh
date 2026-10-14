@@ -142,6 +142,8 @@ check 'canonical shared-db identity retains the structural class and gates' \
   "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$db_canonical\""
 check 'redirected pre-transfer shared-db identity retains identical structural gates' \
   "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
+check 'an enforced promotion gate stays a required gate, not an unchecked one' \
+  "jq -e '.required_gates | index(\"production-promotion-authorization\") != null' <<<\"\$db_canonical\""
 
 printf 'shared-db promotion launch (owner ruling 2026-10-02)\n'
 for repo in db-canonical db-redirected; do
