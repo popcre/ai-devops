@@ -368,11 +368,13 @@ classify_paths(){
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
     # Raw chat/transcript archives may never enter a change set (AGENTS.md:
-    # "never open or commit raw transcript .jsonl"). Path shape is the proof.
-    case "$path" in
-      *.jsonl|*.jsonl.gz|transcripts/*|*/transcripts/*|chat_archives/*|*/chat_archives/*)
-        RAW_ARCHIVE_PATHS="${RAW_ARCHIVE_PATHS}${path}"$'\n' ;;
-    esac
+    # "never open or commit raw transcript .jsonl"). Path shape is the proof,
+    # matched case-insensitively: on case-insensitive filesystems .JSONL,
+    # Transcripts/ and CHAT_ARCHIVES/ name the same files as their lowercase
+    # spellings, so a case-sensitive match would let them evade the rule.
+    if raw_archive_path "$path"; then
+      RAW_ARCHIVE_PATHS="${RAW_ARCHIVE_PATHS}${path}"$'\n'
+    fi
     # Compile the applicable rules once for the complete path set. Calling
     # tg_glob_match for every path/rule pair starts a Bash command substitution
     # for each comparison, which dominates large --paths-from inputs on Windows.
@@ -419,6 +421,63 @@ classify_paths(){
   if [ "$CHANGED_COUNT" -eq 0 ]; then
     OBSERVED_CLASS="none"; OBSERVED_RANK=0
   fi
+}
+
+# --------------------------------------------------------------------------
+# never-open-raw-transcript-archives. One matcher, one refusal message, used
+# by check, explain, authorize-install and install-verify so no command path
+# can enforce a different rule than classify_paths recorded.
+# --------------------------------------------------------------------------
+
+# Path shape of a raw transcript/chat archive. Case-insensitive so .JSONL,
+# Transcripts/ and CHAT_ARCHIVES/ cannot evade the rule on the
+# case-insensitive filesystems these archives actually live on.
+raw_archive_path(){
+  case "${1,,}" in
+    *.jsonl|*.jsonl.gz|transcripts/*|*/transcripts/*|chat_archives/*|*/chat_archives/*) return 0 ;;
+  esac
+  return 1
+}
+
+# refuse_raw_archives ACTION PATHS — block when any newline-separated path is
+# a raw transcript/chat archive. This gate is enforced for every action,
+# whether or not a policy lists it: the path shape is the proof.
+refuse_raw_archives(){
+  local action="$1" paths="$2" path found=""
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if raw_archive_path "$path"; then
+      found="${found}${path}"$'\n'
+    fi
+  done <<< "$paths"
+  [ -n "$found" ] || return 0
+  blocked "$(printf 'ai-task-gates: STOP before "%s". The change set contains raw transcript or chat archives, which "never-open-raw-transcript-archives" forbids in any repository:\n%s' "$action" "$found")"
+}
+
+# refuse_release_raw_archives ACTION OLD TARGET — the same refusal for a
+# committed release range (install verification), NUL-separated so Git never
+# quotes a path out of the match.
+refuse_release_raw_archives(){
+  local action="$1" old="$2" target="$3" paths
+  [ "$old" != "$target" ] || return 0
+  paths="$(git -C "$TOPLEVEL" diff --no-renames --name-only -z "$old" "$target" 2>/dev/null | tr '\0' '\n')" || return 0
+  refuse_raw_archives "$action" "$paths"
+}
+
+# check_change_set ACTION REQUESTED_BASE — the change set `check` will judge,
+# resolved before any action-specific argument, declaration, or class check so
+# a raw transcript archive refusal names the archive itself instead of a
+# weaker misdirection. Deploy resolves its start-head base exactly as the
+# deploy pre-checks in cmd_check will, so the scan and `prepare` agree.
+check_change_set(){
+  local action="$1" req_base="$2" start_head
+  resolve_repo
+  if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
+    start_head="$(state_field start_head)"
+    if [ -n "$start_head" ] && [ -z "$req_base" ]; then req_base="$start_head"; fi
+  fi
+  resolve_base "$req_base"
+  change_set | LC_ALL=C sort -u
 }
 
 # --------------------------------------------------------------------------
@@ -940,7 +999,8 @@ cmd_explain(){
     printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
       --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
       --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg effective "$effective" --arg policy "$POLICY_FILE" \
-      --arg required "$required" --arg unchecked "$unchecked_required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" '
+      --arg required "$required" --arg unchecked "$unchecked_required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" \
+      --arg rawarch "${RAW_ARCHIVE_PATHS:-}" '
       {schema_version:1,
        repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
        base:$base, policy_file:$policy,
@@ -951,6 +1011,7 @@ cmd_explain(){
        required_gates:(if $required=="" then [] else ($required|split(",")) end),
        unchecked_gates:(if $unchecked=="" then [] else ($unchecked|split(",")) end),
        forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
+       raw_archive_paths:($rawarch|split("\n")|map(select(length>0))),
        changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
     return 0
   fi
@@ -964,6 +1025,10 @@ cmd_explain(){
   printf 'required gates   : %s\n' "${required:-<none>}"
   [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool: %s\n' "$unchecked_required"
   printf 'forbidden actions: %s\n' "${forbidden:-<none>}"
+  if [ -n "${RAW_ARCHIVE_PATHS:-}" ]; then
+    printf 'raw archives     : %s\n' "$(printf '%s' "$RAW_ARCHIVE_PATHS" | sed '/^$/d' | paste -sd' ' -)"
+    printf '%s\n' '                 raw transcript or chat archives found; never-open-raw-transcript-archives refuses every action until they leave the change set.'
+  fi
   if [ "$CHANGED_COUNT" -gt 0 ]; then
     printf 'changes:\n'
     for line in "${CONTRIBUTORS[@]}"; do printf '  %-18s %s\n' "${line%%	*}" "${line#*	}"; done
@@ -1165,6 +1230,14 @@ cmd_check(){
   fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
+  # never-open-raw-transcript-archives is enforced for every action, whether
+  # or not a policy lists it. Scan the change set before every
+  # action-specific argument, declaration, dispatch, and class check below so
+  # the refusal names the archive itself — including before the
+  # application-workflow dispatch, which returns without ever reaching a
+  # later archive check. A scan that cannot classify (no repository yet)
+  # falls through to the same checks it would have mirrored in `prepare`.
+  refuse_raw_archives "$action" "$(check_change_set "$action" "$base")"
   if [ "$action" = application-workflow ] || [ -n "$application_workflow_target" ]; then
     [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] && [ -n "$reviewer_approval" ] \
       && [ -z "$base$acknowledge$small_entry$application_release_target$target_head$installed_checkout$installed_launcher" ] \
@@ -1184,6 +1257,11 @@ cmd_check(){
     fi
   fi
   prepare "$base" ""
+  # The classified change set must carry no raw transcript archive either.
+  # This runs before any full-inventory reclassification below, so the check
+  # always judges the original change-set paths — historical files that merely
+  # exist in the repository never rewrite the verdict.
+  refuse_raw_archives "$action" "${RAW_ARCHIVE_PATHS:-}"
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
     [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
@@ -1261,7 +1339,12 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       fail_closed "the repository inventory contains file names this gate cannot represent; refusing to start '$action'."
     fi
     printf 'ai-task-gates: note: no change set observed; classifying the complete inventory for the proof-bound action "%s".\n' "$action" >&2
+    local change_set_raw_archives="${RAW_ARCHIVE_PATHS:-}"
     classify_paths "$IDENTITY" "$(printf '%s\n' "$inv_names" | LC_ALL=C sort -u)"
+    # never-open-raw-transcript-archives judges the change set only; files
+    # that merely exist in the repository's full inventory are not part of it
+    # and must not rewrite the change-set verdict.
+    RAW_ARCHIVE_PATHS="$change_set_raw_archives"
   fi
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
@@ -1335,12 +1418,6 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # only. No acknowledge or reviewer approval can carry it to another class.
   if [ "$action" = shared-db-promotion ] && [ "$effective" != shared-db ]; then
     blocked "$(printf 'ai-task-gates: STOP. "shared-db-promotion" opens only for the shared-db class; the effective class here is "%s" in %s.' "$effective" "$IDENTITY")"
-  fi
-
-  # never-open-raw-transcript-archives is enforced for every action, whether or
-  # not a policy lists it: a raw transcript archive in the change set is refused.
-  if [ -n "${RAW_ARCHIVE_PATHS:-}" ]; then
-    blocked "$(printf 'ai-task-gates: STOP before "%s". The change set contains raw transcript or chat archives, which "never-open-raw-transcript-archives" forbids in any repository:\n%s' "$action" "$RAW_ARCHIVE_PATHS")"
   fi
 
   # 2. Forbidden action for the observed class.
@@ -1840,6 +1917,7 @@ cmd_install_verify(){
         [ "$old" != "$target" ] || blocked 'ai-task-gates: STOP. An uncompleted first install cannot be finalized as ordinary.'
       fi
       classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Ordinary transaction range cannot be classified.'
+      refuse_release_raw_archives 'install-verify' "$old" "$target"
       while IFS=$'\t' read -r cls protected_flag; do
         [ -n "$cls" ] || continue
         [ "$protected_flag" != true ] || blocked 'ai-task-gates: STOP. Protected release cannot finalize as ordinary.'
@@ -1919,6 +1997,7 @@ cmd_install_verify(){
   class_base="$old"
   if [ "$stale_recovery" -eq 1 ]; then class_base="$receipt"; fi
   classes="$(install_release_classes "$class_base" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Could not classify Linux release.'
+  refuse_release_raw_archives 'install-verify' "$class_base" "$target"
   local protected_flag
   while IFS=$'\t' read -r cls protected_flag; do
     [ -n "$cls" ] || continue
@@ -2007,9 +2086,14 @@ cmd_authorize_install(){
   git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate is not in fetched origin/main history.'
   [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
+  # The reviewed release is the change set from the recorded pre-update HEAD;
+  # a raw transcript archive inside it is refused here, before any
+  # authorization artifact is written.
+  refuse_raw_archives 'authorize-install' "${RAW_ARCHIVE_PATHS:-}"
   if [ "$legacy_migration" -eq 1 ] && [ "$start_head" != "$target_head" ]; then
     local legacy_classes legacy_class legacy_protected
     legacy_classes="$(install_release_classes "$start_head" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify the legacy Windows release range.'
+    refuse_release_raw_archives 'authorize-install' "$start_head" "$target_head"
     while IFS=$'\t' read -r legacy_class legacy_protected; do
       [ -n "$legacy_class" ] || continue
       if [ "$legacy_protected" = true ] && [ "$legacy_class" != reviewer-safety ]; then
@@ -2097,6 +2181,7 @@ cmd_authorize_install(){
       git -C "$installed_root" merge-base --is-ancestor "$manifest_recorded_sha" "$installed_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Manifest source is not ancestor of installed HEAD.'
       local stale_classes stale_class stale_protected
       stale_classes="$(install_release_classes "$manifest_recorded_sha" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify stale-manifest release range.'
+      refuse_release_raw_archives 'authorize-install' "$manifest_recorded_sha" "$target_head"
       while IFS=$'\t' read -r stale_class stale_protected; do
         [ -n "$stale_class" ] || continue
         if [ "$stale_protected" = true ] && [ "$stale_class" != reviewer-safety ]; then
