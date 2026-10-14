@@ -15,6 +15,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/tools/lib/opencode-curl-auth.sh"
+source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 OC_HOME="$CFG_DIR/opencode"            # our own metadata (password, installed-version)
 OC_XDG="$CFG_DIR/opencode-xdg"         # becomes XDG_CONFIG_HOME for the server
@@ -39,6 +40,14 @@ VERSION="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
 command -v npm >/dev/null 2>&1 || die "npm is required to install the pinned OpenCode release."
 command -v jq  >/dev/null 2>&1 || die "jq is required by ai-glm."
 command -v op  >/dev/null 2>&1 || die "1Password CLI (op) is required."
+
+# Bootstrap only the private password parent before taking the stable lock.
+# Keep the exclusive descriptor through every config, password, launcher and
+# unit write, the service restart, and authenticated health verification.
+if [ ! -e "$OC_HOME" ] && [ ! -L "$OC_HOME" ]; then
+  ( umask 077; mkdir -p -- "$OC_HOME" )
+fi
+glm_maintenance_lock_acquire "$OC_HOME" exclusive "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" || die "could not safely acquire the local OpenCode maintenance lock."
 
 # ---------------------------------------------------------------------------
 # 1. Pinned OpenCode binary

@@ -422,6 +422,119 @@ export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
 export AI_GLM_CALLER=test         # explicit caller for offline tests; fail-closed paths are tested in test-reviewer-caller-detection.sh
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
+chmod 0700 "$AI_DEVOPS_CONFIG_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
+
+glm_maintenance_lock_cases() {
+  [ "$(uname -s)" = Linux ] || { ok 'GLM maintenance flock fixtures skipped outside Linux'; return 0; }
+  local root="$TMP/maintenance-lock" helper="$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh" script
+  mkdir -p "$root"; chmod 0700 "$root"
+  script="$root/acquire.sh"
+  cat > "$script" <<'LOCK_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+source "$HELPER"
+glm_maintenance_lock_acquire "$LOCK_DIR" "$LOCK_MODE" "$LOCK_TIMEOUT"
+: > "$MARKER"
+if [ -n "${HOLD_FILE:-}" ]; then
+  for _ in {1..500}; do [ -e "$HOLD_FILE" ] && exit 0; sleep 0.01; done
+  exit 91
+fi
+LOCK_SCRIPT
+  chmod 0700 "$script"
+
+  local dir="$root/parallel" pid1 pid2 acquired=0
+  mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-1" HOLD_FILE="$root/release-1" bash "$script" >"$root/shared-1.log" 2>&1 & pid1=$!
+  for _ in {1..200}; do [ -e "$root/shared-1" ] && break; sleep 0.01; done
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-2" bash "$script" >"$root/shared-2.log" 2>&1 & pid2=$!
+  wait "$pid2" >/dev/null 2>&1 && [ -e "$root/shared-1" ] && [ -e "$root/shared-2" ] && acquired=1
+  : > "$root/release-1"; wait "$pid1" >/dev/null 2>&1 || true
+  check 'two GLM clients hold shared maintenance locks concurrently' "test '$acquired' -eq 1"
+
+  dir="$root/exclusive-waits"; mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-held" HOLD_FILE="$root/release-shared" bash "$script" >"$root/shared-held.log" 2>&1 & pid1=$!
+  for _ in {1..200}; do [ -e "$root/shared-held" ] && break; sleep 0.01; done
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=exclusive LOCK_TIMEOUT=2 MARKER="$root/exclusive-after-shared" bash "$script" >"$root/exclusive-after-shared.log" 2>&1 & pid2=$!
+  sleep 0.1; acquired=0; [ ! -e "$root/exclusive-after-shared" ] && acquired=1
+  : > "$root/release-shared"; wait "$pid1" >/dev/null 2>&1 || true; wait "$pid2" >/dev/null 2>&1 || true
+  check 'exclusive GLM maintenance waits for existing clients' "test '$acquired' -eq 1 && test -e '$root/exclusive-after-shared'"
+
+  dir="$root/shared-waits"; mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=exclusive LOCK_TIMEOUT=2 MARKER="$root/exclusive-held" HOLD_FILE="$root/release-exclusive" bash "$script" >"$root/exclusive-held.log" 2>&1 & pid1=$!
+  for _ in {1..200}; do [ -e "$root/exclusive-held" ] && break; sleep 0.01; done
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-after-exclusive" bash "$script" >"$root/shared-after-exclusive.log" 2>&1 & pid2=$!
+  sleep 0.1; acquired=0; [ ! -e "$root/shared-after-exclusive" ] && acquired=1
+  : > "$root/release-exclusive"; wait "$pid1" >/dev/null 2>&1 || true; wait "$pid2" >/dev/null 2>&1 || true
+  check 'exclusive maintenance blocks new GLM clients' "test '$acquired' -eq 1 && test -e '$root/shared-after-exclusive'"
+
+  dir="$root/busy"; mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=exclusive LOCK_TIMEOUT=2 MARKER="$root/busy-holder" HOLD_FILE="$root/release-busy" bash "$script" >"$root/busy-holder.log" 2>&1 & pid1=$!
+  for _ in {1..200}; do [ -e "$root/busy-holder" ] && break; sleep 0.01; done
+  local inode_before inode_after busy_rc
+  inode_before="$(stat -c '%d:%i' "$dir/maintenance.lock")"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0.1 MARKER="$root/should-not-acquire" bash "$script" >"$root/busy-client.log" 2>&1
+  busy_rc=$?
+  inode_after="$(stat -c '%d:%i' "$dir/maintenance.lock")"
+  : > "$root/release-busy"; wait "$pid1" >/dev/null 2>&1 || true
+  check 'busy lock timeout does not mutate or replace the stable inode' "test '$busy_rc' -ne 0 && test '$inode_before' = '$inode_after' && test ! -e '$root/should-not-acquire' && test -z \"\$(find '$dir' -mindepth 1 -maxdepth 1 ! -name maintenance.lock -print -quit)\""
+
+  dir="$root/unsafe-symlink"; mkdir -p "$dir"; chmod 0700 "$dir"; : > "$root/target"; ln -s "$root/target" "$dir/maintenance.lock"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/symlink-acquired" bash "$script" >/dev/null 2>&1
+  local symlink_rc=$?
+  check 'maintenance lock refuses a symlink leaf' "test '$symlink_rc' -ne 0 && test ! -e '$root/symlink-acquired' && test ! -s '$root/target'"
+
+  dir="$root/unsafe-hardlink"; mkdir -p "$dir"; chmod 0700 "$dir"; : > "$dir/maintenance.lock"; chmod 0600 "$dir/maintenance.lock"; ln "$dir/maintenance.lock" "$root/hardlink"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/hardlink-acquired" bash "$script" >/dev/null 2>&1
+  local hardlink_rc=$?
+  check 'maintenance lock refuses a hardlinked leaf' "test '$hardlink_rc' -ne 0 && test ! -e '$root/hardlink-acquired'"
+
+  dir="$root/unsafe-mode"; mkdir -p "$dir"; chmod 0700 "$dir"; : > "$dir/maintenance.lock"; chmod 0640 "$dir/maintenance.lock"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/mode-acquired" bash "$script" >/dev/null 2>&1
+  local mode_rc=$?
+  check 'maintenance lock refuses an unsafe file mode' "test '$mode_rc' -ne 0 && test ! -e '$root/mode-acquired'"
+
+  dir="$root/timeout-bound"; mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=301 MARKER="$root/timeout-acquired" bash "$script" >/dev/null 2>&1
+  local timeout_rc=$?
+  check 'maintenance lock timeout is capped and refuses before file creation' "test '$timeout_rc' -ne 0 && test ! -e '$root/timeout-acquired' && test ! -e '$dir/maintenance.lock'"
+
+  local dispatch="$root/dispatch.sh" dispatch_rc
+  cat > "$dispatch" <<'DISPATCH_SCRIPT'
+set -u
+source "$AI_GLM_SOURCE"
+IS_WINDOWS=0
+PW_FILE="$FIXTURE/server-password"
+main() {
+  if [ "${1:-}" = doctor ]; then [ ! -e "$FIXTURE/maintenance.lock" ] || exit 72; return 0; fi
+  if [ "${1:-}" = server ] && [ "${2:-}" = restart ]; then
+    flock -n -s "$FIXTURE/maintenance.lock" true >/dev/null 2>&1 && exit 73
+    : > "$FIXTURE/dispatch-exclusive"; return 0
+  fi
+  flock -n -x "$FIXTURE/maintenance.lock" true >/dev/null 2>&1 && exit 74
+  : > "$FIXTURE/dispatch-shared"; return 0
+}
+glm_main_with_maintenance_lock "$@"
+DISPATCH_SCRIPT
+  mkdir -p "$root/dispatch"; chmod 0700 "$root/dispatch"; printf 'invented-password\n' > "$root/dispatch/server-password"; chmod 0600 "$root/dispatch/server-password"
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" HELPER="$helper" bash "$dispatch" list >"$root/dispatch-client.log" 2>&1
+  dispatch_rc=$?
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" HELPER="$helper" bash "$dispatch" server restart >"$root/dispatch-server.log" 2>&1
+  local restart_rc=$?
+  if [ "$dispatch_rc" -ne 0 ] || [ "$restart_rc" -ne 0 ]; then cat "$root/dispatch-client.log" "$root/dispatch-server.log" >&2; fi
+  check 'actual ai-glm dispatch keeps client calls shared and service restart exclusive' "test '$dispatch_rc' -eq 0 && test '$restart_rc' -eq 0 && test -e '$root/dispatch/dispatch-shared' && test -e '$root/dispatch/dispatch-exclusive'"
+
+  dir="$root/unsafe-directory"; mkdir -p "$dir"; chmod 0755 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/dir-acquired" bash "$script" >/dev/null 2>&1
+  local dir_rc=$?
+  check 'maintenance lock refuses a nonprivate password directory' "test '$dir_rc' -ne 0 && test ! -e '$root/dir-acquired'"
+}
+
+echo '== shared GLM maintenance lock =='
+check 'GLM maintenance lock exclusion and custody fixtures' 'glm_maintenance_lock_cases'
+if [ "${AI_GLM_MAINTENANCE_TESTS_ONLY:-0}" = 1 ]; then
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
 
 glm_deadline_cases() {
   local result
@@ -1767,8 +1880,9 @@ fi
 # of its own, even though the server it needed was running. ai-glm now falls
 # back to the owning user's password file. These guard the mechanics of that.
 echo "== shared-server attach =="
-SHTMP="$TMP/shared"; mkdir -p "$SHTMP/fakehome/.config/ai-devops/opencode"
+SHTMP="$TMP/shared"; mkdir -p "$SHTMP/fakehome/.config/ai-devops/opencode"; chmod 0700 "$SHTMP/fakehome/.config/ai-devops" "$SHTMP/fakehome/.config/ai-devops/opencode"
 printf 'secret-pw\n' > "$SHTMP/fakehome/.config/ai-devops/opencode/server-password"
+chmod 0600 "$SHTMP/fakehome/.config/ai-devops/opencode/server-password"
 
 # The whole script must still LOAD on a machine with no getent (Git Bash). This
 # is the regression that broke 21 tests when the fallback was first added: an
@@ -1783,7 +1897,7 @@ check "ai-glm loads when getent fails/absent" \
 check "ai-glm parses cleanly"  "bash -n '$AI_GLM'"
 
 # With its own password present, the fallback must NOT engage.
-mkdir -p "$SHTMP/own/opencode"; printf 'own-pw\n' > "$SHTMP/own/opencode/server-password"
+mkdir -p "$SHTMP/own/opencode"; chmod 0700 "$SHTMP/own" "$SHTMP/own/opencode"; printf 'own-pw\n' > "$SHTMP/own/opencode/server-password"; chmod 0600 "$SHTMP/own/opencode/server-password"
 OUT="$(AI_DEVOPS_CONFIG_DIR="$SHTMP/own" bash "$AI_GLM" doctor 2>&1 || true)"
 check "own password wins over the shared one" "! printf '%s' \"\$OUT\" | grep -q 'attached to the OpenCode server'"
 

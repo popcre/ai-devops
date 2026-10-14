@@ -82,6 +82,7 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 # closed when no caller remains.
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/opencode-curl-auth.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/opencode-maintenance-lock.sh"
 CALLER=''
 caller_rc=0
 CALLER="$(provider_wrapper_resolve_caller "${AI_GLM_CALLER:-}")" || caller_rc=$?
@@ -3357,6 +3358,27 @@ case "$CMD" in
 esac
 }
 
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+# A shared lock lets independent GLM clients run in parallel. Server lifecycle
+# changes take the exclusive side until the command and its health check finish.
+# Keep source-only test harnesses free to import and exercise individual helpers.
+glm_main_with_maintenance_lock() {
+  local mode=shared
+  case "${1:-}" in
+    -h|--help|help) main "$@"; return $? ;;
+    server)
+      case "${2:-status}" in start|stop|restart) mode=exclusive ;; esac
+      ;;
+  esac
+  # Doctor is the bootstrap diagnostic for an unconfigured machine. It must
+  # still explain the missing service when no private password directory exists.
+  if [[ "${1:-}" = doctor && ! -s "$PW_FILE" ]]; then main "$@"; return $?; fi
+  if [[ "$IS_WINDOWS" != 1 ]]; then
+    glm_maintenance_lock_acquire "$(dirname "$PW_FILE")" "$mode" "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" \
+      || die 'could not safely acquire the local OpenCode maintenance lock.'
+  fi
   main "$@"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  glm_main_with_maintenance_lock "$@"
 fi
