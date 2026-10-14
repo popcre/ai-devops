@@ -3,6 +3,9 @@
 set -uo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The protected updater is the only sanctioned advance of the installed checkout;
+# the post-merge detector skips runs made with this set.
+export AI_DEVOPS_PROTECTED_UPDATE=1
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
 normalized_path() {

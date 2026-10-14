@@ -2230,8 +2230,24 @@ cmd_authorize_install(){
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$installed_head"
 }
 
+# Warn (never block) about checkout advances that bypassed the protected install.
+# The post-merge hook records every plain pull or merge in the installed checkout;
+# a record whose head is not the installed receipt is reported on the next run.
+warn_unprotected_advances(){
+  local log="$STATE_DIR/unprotected-advances.log" manifest="${AI_TASK_GATES_MANIFEST:-/etc/ai-devops/install-manifest.tsv}" receipt when from to
+  [ -s "$log" ] || return 0
+  receipt="$(awk -F'\t' '$1=="meta" && $2=="source_sha"{print $3; exit}' "$manifest" 2>/dev/null || true)"
+  tail -n 20 "$log" | while IFS=$'\t' read -r when _root from to; do
+    [ -n "${to:-}" ] && [ "$to" != "$receipt" ] || continue
+    printf 'ai-task-gates: warning: %s moved the checkout %s -> %s outside the protected install path (installed receipt %s). Install through update.sh with a reviewed authority.\n' "$when" "${from:-none}" "$to" "${receipt:-unknown}" >&2
+  done
+}
+
 main(){
   local command="${1:-}"; [ $# -gt 0 ] && shift
+  case "$command" in
+    check|explain) warn_unprotected_advances || true ;;
+  esac
   case "$command" in
     start) cmd_start "$@" ;;
     check) cmd_check "$@" ;;
