@@ -868,6 +868,10 @@ check 'a reviewer-safety task refuses ship without an exact-head independent rev
   "rc 3 '$TMP/rs' check --before ship"
 check 'a reviewer-gated release refuses an approval that carries no passing test evidence' \
   "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\""
+check 'the local-tests refusal names the missing test evidence' \
+  "out '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\" | grep -q 'local-tests'"
+check 'a refused local-tests release records no reviewer approval in task state' \
+  "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\" && state=\"\$(state_file_for '$TMP/rs')\" && jq -e '((.overrides // []) | map(select(.kind==\"reviewer-approval\")) | length) == 0' \"\$state\""
 check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
   "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
 check 'a production task refuses a report that is not an AI APPROVE for this head' \

@@ -175,6 +175,15 @@ H64="$(printf 'a%.0s' {1..64})"
 check "record_tests_writes_passing_evidence" "'$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 0 --output-sha256 '$H64' && jq -e '.tests.exit==0 and .tests.output_sha256==\"$H64\" and .tests.command==\"bash tests/x.sh\"' '$STATE_TESTS' >/dev/null"
 check "record_tests_refuses_a_failing_run" "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 1 --output-sha256 '$H64' >/dev/null 2>&1"
 check "record_tests_refuses_a_bad_digest" "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/x.sh' --exit 0 --output-sha256 nothex >/dev/null 2>&1"
+# The usage text documents the record-tests entry, and a refused attempt cleans
+# up after itself: it never overwrites or partially writes the recorded evidence.
+check "usage_lists_record-tests" "'$SCRIPT' --help | grep -q 'record-tests'"
+check "a_refused_record-tests_leaves_the_recorded_evidence_untouched" \
+  "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/bad.sh' --exit 1 --output-sha256 '$H64' >/dev/null 2>&1 && jq -e '.tests.command==\"bash tests/x.sh\" and .tests.exit==0 and .tests.output_sha256==\"$H64\"' '$STATE_TESTS' >/dev/null"
+# Failure cleanup: when the tests command fails, the runner removes its output,
+# fails the lifecycle, and cleans up the snapshot BEFORE refusing to dispatch.
+check "the_tests_failure_branch_cleans_up_before_refusing_to_dispatch" \
+  "grep -B4 'tests command failed; no review was dispatched' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh' | grep -q 'rlc_cleanup_after_store'"
 STATE_STALE="$($SCRIPT begin --provider qwen --repo "$R" --run-id stale-one --caller codex)"
 printf 'changed\n' >> "$R/a.txt"
 $SCRIPT finish --state "$STATE_STALE" --verdict APPROVE --report "$REPORT" --elapsed 3 >/dev/null

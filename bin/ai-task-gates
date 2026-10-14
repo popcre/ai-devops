@@ -478,8 +478,10 @@ reviewer_approval_summary(){
   [ -n "$row" ] || return 1
   # local-tests: a release action in a class that requires local tests needs a
   # review record that carries a passing test run with its output digest.
+  # Return 2 (not 1) here so callers can refuse with a message that names the
+  # missing test evidence instead of reporting the approval itself as absent.
   if [ "${LOCAL_TESTS_REQUIRED:-0}" = 1 ]; then
-    jq -e '(.tests.exit==0) and (.tests.output_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$row" >/dev/null 2>&1 || return 1
+    jq -e '(.tests.exit==0) and (.tests.output_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$row" >/dev/null 2>&1 || return 2
   fi
   local oracle_script=""
   if [ "$action" = offline-private-capture-transform ]; then
@@ -518,6 +520,18 @@ reviewer_approval_summary(){
   fi
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
+}
+
+# approval_refused ACTION RC MESSAGE: refuse an approval that failed
+# reviewer_approval_summary. RC 2 is that function's local-tests evidence
+# check; its refusal must name the missing test evidence rather than report
+# the approval itself as absent.
+approval_refused(){
+  local action="$1" rc="$2"; shift 2
+  if [ "$rc" -eq 2 ]; then
+    blocked "$(printf 'ai-task-gates: STOP before "%s". The reviewer approval carries no passing local-tests evidence: its lifecycle record must hold a passing tests run (tests.exit==0 with a 64-hex tests.output_sha256, recorded by ai-review-lifecycle record-tests from the review snapshot before dispatch). Run the repository tests through the review (--tests), obtain that APPROVE, and re-run with --reviewer-approval <that report>.' "$action")"
+  fi
+  blocked "$@"
 }
 
 # Application source-release admission is intentionally one closed target.
@@ -641,7 +655,7 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
   [ "$head" = "$APP_RELEASE_HEAD" ] \
     || blocked 'ai-task-gates: STOP. Application source changed after target validation.'
   summary="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
-    || blocked 'ai-task-gates: STOP. Application release needs an independent lifecycle-recorded final-check or security-review APPROVE bound to this exact repository, HEAD, worktree digest, and deploy action.'
+    || approval_refused deploy $? 'ai-task-gates: STOP. Application release needs an independent lifecycle-recorded final-check or security-review APPROVE bound to this exact repository, HEAD, worktree digest, and deploy action.'
   application_release_validate_target "$APP_RELEASE_MANIFEST_PATH" "$effective"
   [ "$APP_RELEASE_HEAD" = "$head" ] \
     || blocked 'ai-task-gates: STOP. Application source moved during release proof validation.'
@@ -1361,6 +1375,15 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
   local required_full="" unchecked_required=""
   required_full="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; split_required_gates "$required_full"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
+  # local-tests evidence must be decided BEFORE the first approval call site:
+  # the offline-native route and the protected reviewer release below both call
+  # reviewer_approval_summary, and a release taken through either must not skip
+  # the evidence check (flagged in review of d4ebbf1c). review, code-only-review,
+  # and pr-wait PRODUCE or wait on the approval; they are not gated here.
+  local reviewer_gated_action=1
+  case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
+  LOCAL_TESTS_REQUIRED=0
+  if [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -qx local-tests && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'; then LOCAL_TESTS_REQUIRED=1; fi
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
@@ -1369,7 +1392,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -Eqx 'oracle-native-alternate(-v2)?-descriptor-only-admission' \
       || blocked 'ai-task-gates: STOP. Oracle has not opted in to the exact offline native action.'
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
-      || blocked 'ai-task-gates: STOP. Genuine independent dual-scoped native registration/action completion is absent.'
+      || approval_refused "$action" $? 'ai-task-gates: STOP. Genuine independent dual-scoped native registration/action completion is absent.'
     state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
       && jq -e --arg r "$approval_summary" --arg a "$action" --arg c "$effective" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r and .observed_class==$c)) | length>0' "$(state_path)" >/dev/null 2>&1 \
       || blocked 'ai-task-gates: STOP. Native action approval persistence/readback failed.'
@@ -1424,7 +1447,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
-      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
+      || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
     if [ "$action_manifest_stdin" -eq 1 ]; then
       state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
         && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
@@ -1464,10 +1487,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # review, code-only-review, and pr-wait are the verification actions that
   # produce or wait on the approval (ai-review and ai-pr-wait preflight them
   # before any reviewer exists), so they are not gated here; they mutate nothing.
-  local reviewer_gated_action=1
-  case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
-  LOCAL_TESTS_REQUIRED=0
-  if [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -qx local-tests && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'; then LOCAL_TESTS_REQUIRED=1; fi
+  # LOCAL_TESTS_REQUIRED was already set with the gate split above, before every
+  # approval call site in this function.
   if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
@@ -1486,7 +1507,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     [ "$action_manifest_stdin" -eq 0 ] \
       || blocked "$(printf 'ai-task-gates: STOP before "%s". A bounded stdin action cannot take this reviewer route; re-declare it through its own closed action.' "$action")"
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
-      || blocked "$(printf 'ai-task-gates: STOP before "%s". The reviewer approval is not a lifecycle-recorded independent APPROVE for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
+      || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP before "%s". The reviewer approval is not a lifecycle-recorded independent APPROVE for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
     state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
       && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
       || blocked 'ai-task-gates: STOP. The reviewer approval could not be recorded in the task state; nothing was released.'
