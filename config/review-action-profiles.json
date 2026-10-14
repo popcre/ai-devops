@@ -1,5 +1,37 @@
 {
   "profiles": {
+    "oracle-native-alternate-serialization-v1": {
+      "action": "offline-private-capture-transform",
+      "capture_count": 33,
+      "control_count": 15,
+      "entrypoint": "scripts/oracle2/native_alternate_operator.py",
+      "input_format": "historical-custom-native-pages-v1",
+      "limits": {
+        "address_space_bytes": 8589934592,
+        "cpu_seconds": 120,
+        "input_bytes": 268435456,
+        "network": "none",
+        "output_bytes": 268435456,
+        "per_file_bytes": 8388608,
+        "threads": 2,
+        "wall_seconds": 180,
+        "workers": 1
+      },
+      "owner": "Oracle coordinator on u2giants/theoracle#27/#58",
+      "path_set_sha256": "16d06ee569b61f6598191d46242f16d2277df35e6e7b1826c0c21bbebfa8f51f",
+      "paths": [
+        ".ai-devops/task-gates.json",
+        "docs/operations/offline-original-locators.md",
+        "scripts/oracle2/contracts/native_alternate_serialization.json",
+        "scripts/oracle2/native_alternate_operator.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py",
+        "services/oracle-brain/tests/test_native_alternate_operator.py",
+        "services/oracle-brain/tests/test_native_page_alternate.py"
+      ],
+      "purpose": "native-alternate-serialization",
+      "repository": "https://github.com/u2giants/theoracle",
+      "retirement": "Retain until unqualified serialization is reconciled; no source adoption rights."
+    },
     "shared-db-770-isolated-timing-rehearsal-v1": {
       "acceptance_callback": false,
       "action": "database",
@@ -136,6 +168,46 @@
       "schema": "dflow_prod",
       "source_host_sha256": "67b2a6290a92e6a9f833aecacaf59654d97c9db2513e3c5a60600e299aa06d15",
       "target_ref_sha256": "f3bb365eb5cb7bec231af99cfefd9701cdfc6cdf299049e4a985f77f241d549c"
+    },
+    "oracle-native-alternate-serialization-v2": {
+      "action": "offline-private-capture-transform",
+      "capture_count": 33,
+      "control_count": 15,
+      "entrypoint": "scripts/oracle2/native_alternate_chain_operator.py",
+      "input_format": "historical-custom-native-pages-chain-v2",
+      "limits": {
+        "address_space_bytes": 8589934592,
+        "cpu_seconds": 120,
+        "input_bytes": 268435456,
+        "network": "none",
+        "output_bytes": 268435456,
+        "per_file_bytes": 8388608,
+        "threads": 2,
+        "wall_seconds": 180,
+        "workers": 1
+      },
+      "owner": "Oracle coordinator on u2giants/theoracle#27/#58",
+      "path_set_sha256": "088f206c0901d62e1acaa4e2b0da60642c744fdd63a06ca75c6aaff10230702f",
+      "paths": [
+        ".ai-devops/task-gates.json",
+        "docs/operations/offline-original-locators.md",
+        "scripts/oracle2/contracts/native_alternate_chain_v2.json",
+        "scripts/oracle2/native_alternate_chain_operator.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_chain.py",
+        "services/oracle-brain/tests/test_native_alternate_chain_operator.py"
+      ],
+      "purpose": "native-alternate-serialization",
+      "repository": "https://github.com/u2giants/theoracle",
+      "retirement": "Keep v1 and spent history unchanged; consolidate only after v2 actual acceptance.",
+      "manifest_schema_version": 2,
+      "code_sha256": {
+        "scripts/oracle2/native_alternate_chain_operator.py": "d2a3a0076fcf46fdd7a3ddb3fbc00583b0811b2fd5b61fd81cafd346f97b0d5b",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_chain.py": "3fa0bdbcb1eb6a18d87627364acdbc9a0506012e9cb30d94ac5bfadf19242099",
+        "services/oracle-brain/oracle_brain/operating_model/native_page_alternate.py": "84cbcb3119bb6858915bd4538d5527e5ba6a716ab76a914c6db27f0e4202291d"
+      },
+      "public_contract_sha256": "0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d",
+      "required_gate": "oracle-native-alternate-v2-descriptor-only-admission"
     }
   },
   "schema_version": 1

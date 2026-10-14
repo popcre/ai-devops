@@ -37,7 +37,8 @@
     "database",
     "infrastructure",
     "production",
-    "shared-db-promotion"
+    "shared-db-promotion",
+    "offline-private-capture-transform"
   ],
   "action_gates": {
     "code-only-review": {
@@ -49,6 +50,11 @@
     "shared-db-promotion": {
       "require_gate": {
         "shared-db": "production-promotion-authorization"
+      }
+    },
+    "offline-private-capture-transform": {
+      "require_gate": {
+        "private-tooling": "oracle-native-alternate-descriptor-only-admission"
       }
     }
   },
@@ -461,6 +467,18 @@
         {
           "glob": "tools/application_workflow_target.py",
           "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/oracle_native_alternate_*.py",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-oracle-native-alternate",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-oracle-native-alternate-v2",
+          "class": "reviewer-safety"
         }
       ],
       "gates": {}
@@ -634,7 +652,7 @@
         "Licensed rows and captures stay private-evidence under the ** catch-all.",
         "Named tooling paths are a narrow exception: they demand local-tests, but",
         "review stays forbidden because a formal review snapshots the whole private",
-        "repository. Classification is still path-based — never put licensed rows",
+        "repository. Classification is still path-based \u2014 never put licensed rows",
         "under scripts/ or scraper/."
       ],
       "paths": [
