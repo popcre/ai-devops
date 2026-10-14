@@ -34,7 +34,7 @@ current() {
 case "$1 $2" in
   "api --hostname") case "$(current)" in GOOD) echo u2giants; exit 0 ;; POPCRE) echo popcre; exit 0 ;; esac; exit 1 ;;
   "auth token") t="$(current)"; [ -n "$t" ] && { echo "$t"; exit 0; }; exit 1 ;;
-  "auth login") t="$(cat | tr -d '\r\n')"; [ -n "$GH_CONFIG_DIR" ] || exit 4
+  "auth login") t="$(cat | tr -d '\r\n')"; [ -n "$GH_CONFIG_DIR" ] || exit 4; [ -z "${FAKE_LOGIN_FAIL:-}" ] || exit 5
     printf 'github.com:\n    oauth_token: %s\n    user: u2giants\n' "$t" > "$GH_CONFIG_DIR/hosts.yml"; exit 0 ;;
 esac
 exit 3
@@ -99,6 +99,14 @@ try {
     Assert-True ($r2.Exit -eq 0) "rerun succeeds (exit $($r2.Exit))"
     $rc = Get-Content (Join-Path $r.Dir 'home\.bashrc') -Raw
     Assert-True (([regex]::Matches($rc, 'ai-devops gh-ssh \(managed')).Count -eq 1) 'rerun keeps one managed block'
+
+    # A failed renewal leaves the working copy untouched.
+    $env:FAKE_LOGIN_FAIL = '1'
+    $r3 = Invoke-Script $r.Dir
+    Remove-Item Env:FAKE_LOGIN_FAIL
+    Assert-True ($r3.Exit -ne 0) 'a failed renewal is reported'
+    Assert-True ((Get-Content (Join-Path $r.Dir 'gh-ssh\hosts.yml') -Raw) -match 'oauth_token: GOOD') 'a failed renewal keeps the working SSH copy'
+    Assert-True (-not (Test-Path (Join-Path $r.Dir 'gh-ssh.staging'))) 'no staging folder is left behind'
 
     $env:GH_TOKEN = 'AMBIENT'; $env:GH_HOST = 'ghe.example.com'
     $r = Invoke-Case 'env-token' 'GOOD'
