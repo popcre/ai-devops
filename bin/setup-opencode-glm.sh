@@ -14,6 +14,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/tools/lib/opencode-curl-auth.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 OC_HOME="$CFG_DIR/opencode"            # our own metadata (password, installed-version)
 OC_XDG="$CFG_DIR/opencode-xdg"         # becomes XDG_CONFIG_HOME for the server
@@ -180,7 +181,7 @@ info "Waiting for the server to become healthy"
 PW="$(<"$PW_FILE")"
 ok=0
 for _ in $(seq 1 30); do
-  if curl -fsS -m 3 -u "opencode:$PW" "http://127.0.0.1:$PORT/global/health" >/dev/null 2>&1; then ok=1; break; fi
+  if opencode_curl_auth_config opencode "$PW" | curl --config - -fsS -m 3 "http://127.0.0.1:$PORT/global/health" >/dev/null 2>&1; then ok=1; break; fi
   sleep 2
 done
 [ "$ok" = 1 ] || die "server did not become healthy. Check: systemctl --user status opencode-glm; journalctl --user -u opencode-glm -n 50"

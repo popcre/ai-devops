@@ -81,6 +81,7 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 # engine name — independence recording keys off this value. main() fails
 # closed when no caller remains.
 source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/opencode-curl-auth.sh"
 CALLER=''
 caller_rc=0
 CALLER="$(provider_wrapper_resolve_caller "${AI_GLM_CALLER:-}")" || caller_rc=$?
@@ -196,11 +197,9 @@ server_pw() {
   tr -d '\r\n' < "$PW_FILE"
 }
 curl_auth_config() {
-  local pw user auth
+  local pw user
   pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
-  case "$user$pw" in *$'\n'*|*$'\r'*) return 1;; esac
-  auth="$user:$pw"; auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
-  printf 'user = "%s"\n' "$auth"
+  opencode_curl_auth_config "$user" "$pw"
 }
 glm_now() { date +%s; }
 glm_new_deadline() {
