@@ -3293,6 +3293,7 @@ cmd_doctor() {
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 main() {
+local local_maintenance_mode
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
 OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 CMD="${1:-}"; shift || true
@@ -3339,6 +3340,32 @@ if [ -z "$CALLER" ]; then
 fi
 provider_wrapper_valid_caller "$CALLER" || die "caller name $CALLER is not path-safe (letters, digits, . _ - only; no leading dot)."
 
+# Local metadata inspection does not contact the authenticated server and must
+# remain usable before the private password directory is bootstrapped. Transcript
+# and diff do authenticate; all server lifecycle changes use the exclusive lock.
+glm_maintenance_mode_for_cli() {
+  case "${1:-}" in
+    -h|--help|help|list|show) printf none ;;
+    doctor) [ -s "$PW_FILE" ] && printf shared || printf none ;;
+    server)
+      case "${2:-}" in
+        start|stop|restart) printf exclusive ;;
+        status) [ -s "$PW_FILE" ] && printf shared || printf none ;;
+        *) printf shared ;;
+      esac
+      ;;
+    *) printf shared ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" = "$0" && "$IS_WINDOWS" != 1 ]]; then
+  local_maintenance_mode="$(glm_maintenance_mode_for_cli "$CMD" "$ARG")"
+  if [ "$local_maintenance_mode" != none ]; then
+    glm_maintenance_lock_acquire "$(dirname "$PW_FILE")" "$local_maintenance_mode" "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" \
+      || die 'could not safely acquire the local OpenCode maintenance lock.'
+  fi
+fi
+
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-glm ask <name> ..."; cmd_ask "$ARG" ;;
@@ -3358,27 +3385,6 @@ case "$CMD" in
 esac
 }
 
-# A shared lock lets independent GLM clients run in parallel. Server lifecycle
-# changes take the exclusive side until the command and its health check finish.
-# Keep source-only test harnesses free to import and exercise individual helpers.
-glm_main_with_maintenance_lock() {
-  local mode=shared
-  case "${1:-}" in
-    -h|--help|help) main "$@"; return $? ;;
-    server)
-      case "${2:-status}" in start|stop|restart) mode=exclusive ;; esac
-      ;;
-  esac
-  # Doctor is the bootstrap diagnostic for an unconfigured machine. It must
-  # still explain the missing service when no private password directory exists.
-  if [[ "${1:-}" = doctor && ! -s "$PW_FILE" ]]; then main "$@"; return $?; fi
-  if [[ "$IS_WINDOWS" != 1 ]]; then
-    glm_maintenance_lock_acquire "$(dirname "$PW_FILE")" "$mode" "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" \
-      || die 'could not safely acquire the local OpenCode maintenance lock.'
-  fi
-  main "$@"
-}
-
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  glm_main_with_maintenance_lock "$@"
+  main "$@"
 fi

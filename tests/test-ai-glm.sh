@@ -498,30 +498,45 @@ LOCK_SCRIPT
   local timeout_rc=$?
   check 'maintenance lock timeout is capped and refuses before file creation' "test '$timeout_rc' -ne 0 && test ! -e '$root/timeout-acquired' && test ! -e '$dir/maintenance.lock'"
 
-  local dispatch="$root/dispatch.sh" dispatch_rc
-  cat > "$dispatch" <<'DISPATCH_SCRIPT'
-set -u
-source "$AI_GLM_SOURCE"
-IS_WINDOWS=0
-PW_FILE="$FIXTURE/server-password"
-main() {
-  if [ "${1:-}" = doctor ]; then [ ! -e "$FIXTURE/maintenance.lock" ] || exit 72; return 0; fi
-  if [ "${1:-}" = server ] && [ "${2:-}" = restart ]; then
-    flock -n -s "$FIXTURE/maintenance.lock" true >/dev/null 2>&1 && exit 73
-    : > "$FIXTURE/dispatch-exclusive"; return 0
-  fi
-  flock -n -x "$FIXTURE/maintenance.lock" true >/dev/null 2>&1 && exit 74
-  : > "$FIXTURE/dispatch-shared"; return 0
-}
-glm_main_with_maintenance_lock "$@"
-DISPATCH_SCRIPT
+  local dispatch_rc restart_rc offline_rc auth_rc
   mkdir -p "$root/dispatch"; chmod 0700 "$root/dispatch"; printf 'invented-password\n' > "$root/dispatch/server-password"; chmod 0600 "$root/dispatch/server-password"
-  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" HELPER="$helper" bash "$dispatch" list >"$root/dispatch-client.log" 2>&1
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" bash -c '
+    source "$AI_GLM_SOURCE"; BASH_ARGV0="$AI_GLM_SOURCE"; IS_WINDOWS=0; PW_FILE="$FIXTURE/server-password"
+    cmd_transcript(){ flock -n -x "$FIXTURE/maintenance.lock" true && return 73; : > "$FIXTURE/dispatch-shared"; }
+    cmd_server(){ flock -n -s "$FIXTURE/maintenance.lock" true && return 74; : > "$FIXTURE/dispatch-exclusive"; }
+    main "$@"
+  ' dispatch-harness transcript --caller codex fixture-id >"$root/dispatch-client.log" 2>&1
   dispatch_rc=$?
-  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" HELPER="$helper" bash "$dispatch" server restart >"$root/dispatch-server.log" 2>&1
-  local restart_rc=$?
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/dispatch" bash -c '
+    source "$AI_GLM_SOURCE"; BASH_ARGV0="$AI_GLM_SOURCE"; IS_WINDOWS=0; PW_FILE="$FIXTURE/server-password"
+    cmd_server(){ flock -n -s "$FIXTURE/maintenance.lock" true && return 74; : > "$FIXTURE/dispatch-exclusive"; }
+    main "$@"
+  ' dispatch-harness server --caller codex restart >"$root/dispatch-server.log" 2>&1
+  restart_rc=$?
   if [ "$dispatch_rc" -ne 0 ] || [ "$restart_rc" -ne 0 ]; then cat "$root/dispatch-client.log" "$root/dispatch-server.log" >&2; fi
-  check 'actual ai-glm dispatch keeps client calls shared and service restart exclusive' "test '$dispatch_rc' -eq 0 && test '$restart_rc' -eq 0 && test -e '$root/dispatch/dispatch-shared' && test -e '$root/dispatch/dispatch-exclusive'"
+  check 'parsed ai-glm dispatch keeps authenticated clients shared and flag-ordered restart exclusive' "test '$dispatch_rc' -eq 0 && test '$restart_rc' -eq 0 && test -e '$root/dispatch/dispatch-shared' && test -e '$root/dispatch/dispatch-exclusive'"
+
+  for command in list show; do
+    local marker="$root/offline-$command"
+    AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/not-configured" MARKER="$marker" bash -c '
+      source "$AI_GLM_SOURCE"; BASH_ARGV0="$AI_GLM_SOURCE"; IS_WINDOWS=0; PW_FILE="$FIXTURE/server-password"
+      cmd_list(){ : > "$MARKER"; }; cmd_show(){ : > "$MARKER"; }
+      main "$@"
+    ' dispatch-harness "$command" --caller codex fixture-id >"$root/offline-$command.log" 2>&1
+    offline_rc=$?
+    check "offline ai-glm $command works without a password directory" "test '$offline_rc' -eq 0 && test -e '$marker' && test ! -e '$root/not-configured'"
+  done
+
+  for command in transcript diff; do
+    local marker="$root/auth-$command"
+    AI_GLM_SOURCE="$AI_GLM" FIXTURE="$root/not-configured" MARKER="$marker" bash -c '
+      source "$AI_GLM_SOURCE"; BASH_ARGV0="$AI_GLM_SOURCE"; IS_WINDOWS=0; PW_FILE="$FIXTURE/server-password"
+      cmd_transcript(){ : > "$MARKER"; }; cmd_diff(){ : > "$MARKER"; }
+      main "$@"
+    ' dispatch-harness "$command" --caller codex fixture-id >"$root/auth-$command.log" 2>&1
+    auth_rc=$?
+    check "authenticated ai-glm $command refuses to bypass missing-password lock custody" "test '$auth_rc' -ne 0 && test ! -e '$marker' && grep -q 'maintenance lock' '$root/auth-$command.log'"
+  done
 
   dir="$root/unsafe-directory"; mkdir -p "$dir"; chmod 0755 "$dir"
   HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/dir-acquired" bash "$script" >/dev/null 2>&1
