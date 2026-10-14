@@ -265,6 +265,13 @@ check 'a runner-door header repeated below Result still names the exact target' 
 # stays authorizable while it is in fetched origin/main history.
 class_later="$(git -C "$TMP/class" commit-tree "$class_target^{tree}" -p "$class_target" -m 'later merge')"
 git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_later"
+# The install routes decide LOCAL_TESTS_REQUIRED before their approval call
+# site; an approval without passing test evidence must be refused there, with a
+# refusal that names the missing evidence (review finding on d1e12965).
+check 'authorize-install refuses an approval that carries no passing test evidence' \
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
+check 'authorize-install local-tests refusal names the missing test evidence' \
+  "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" | grep -q 'local-tests'"
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
@@ -876,6 +883,20 @@ check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
   "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
 check 'a production task refuses a report that is not an AI APPROVE for this head' \
   "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
+# The evidence requirement must be decided BEFORE every approval call site: a
+# LOCAL_TESTS_REQUIRED assigned after the call would never be seen by
+# reviewer_approval_summary, and the refusal would silently disappear. This
+# static ordering check pins every function that calls it — including the
+# offline-native route, the forbidden-release route, install-verify, and
+# authorize-install, which have no separate behavioral pin below.
+lt_undecided="$(awk '
+  /^[A-Za-z_][A-Za-z0-9_]*\(\)/ { fn=$0; sub(/\(.*/, "", fn); decided=0 }
+  /^[[:space:]]*#/ { next }
+  /decide_local_tests_required[[:space:]]/ { decided=1 }
+  /\$\(reviewer_approval_summary/ { if (!decided) printf "%s line %d\n", fn, NR }
+' "$GATES")"
+check 'LOCAL_TESTS_REQUIRED is decided before every approval call site' \
+  "[ -z \"\$lt_undecided\" ] || { printf 'approval call sites with no preceding decide_local_tests_required:\n%s\n' \"\$lt_undecided\" >&2; false; }"
 
 printf 'stale and corrupt intent state\n'
 newrepo "$TMP/stale"
@@ -1624,6 +1645,8 @@ check 'workflow cannot use plan review' "rc 3 '$WF' check $WF_ARGS --reviewer-ap
 check 'workflow refuses stale approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.stale=true')\""
 check 'workflow refuses foreign digest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.source_digest=\"foreign\"')\""
 check 'workflow refuses non-independent approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.provider=.implementer_engine')\""
+check 'workflow refuses an approval that carries no passing test evidence' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
+check 'workflow local-tests refusal names the missing test evidence' "out '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\" | grep -q 'local-tests'"
 cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"
 python3 - "$ROOT" "$WF" <<'PY'
 import importlib.util, json, pathlib, sys

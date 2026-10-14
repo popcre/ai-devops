@@ -534,6 +534,27 @@ approval_refused(){
   blocked "$@"
 }
 
+# decide_local_tests_required ACTION REQUIRED_GATES_CSV [APPROVAL_MANDATORY]
+# Decide the local-tests evidence requirement BEFORE an approval call site: a
+# release whose required gates pair local-tests with a reviewer-approval gate —
+# or whose call site requires the approval unconditionally
+# (APPROVAL_MANDATORY=1) — needs passing test evidence in that approval.
+# review, pr-wait, and code-only-review PRODUCE or wait on the approval, so
+# they are never gated. A decision only raises the requirement: a later call
+# site in the same invocation can never lower it.
+decide_local_tests_required(){
+  local action="$1" gates="${2:-}" mandatory="${3:-0}"
+  case "$action" in
+    review|code-only-review|pr-wait) LOCAL_TESTS_REQUIRED=0; return 0 ;;
+  esac
+  if printf '%s\n' "$gates" | tr ',' '\n' | grep -qx local-tests \
+     && { [ "$mandatory" = 1 ] || printf '%s\n' "$gates" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'; }; then
+    LOCAL_TESTS_REQUIRED=1
+  fi
+}
+# Every approval call site must be preceded by a decide_local_tests_required
+# in its function; tests/test-ai-task-gates.sh enforces that source ordering.
+
 # Application source-release admission is intentionally one closed target.
 APP_RELEASE_MANIFEST_PATH='.ai-devops/application-release-target.json'
 APP_RELEASE_CONSUMER_GATE='cloud-build-release-review'
@@ -648,6 +669,9 @@ application_release_validate_target(){ # SUPPLIED_PATH EFFECTIVE_CLASS
 
 application_release_finish(){ # REPORT EFFECTIVE_CLASS
   local report="$1" effective="$2" head summary summary_after reason state
+  # local-tests: decide the evidence requirement from this release class's own
+  # gates before either approval call; the approval is mandatory here.
+  decide_local_tests_required deploy "$(merged_gate "$IDENTITY" "$effective" | sed -n 's/^required\t//p' | paste -sd, -)" 1
   [ -n "$report" ] \
     || blocked 'ai-task-gates: STOP. Application source release requires --reviewer-approval with an independent final-check or security-review APPROVE.'
   head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
@@ -660,7 +684,7 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
   [ "$APP_RELEASE_HEAD" = "$head" ] \
     || blocked 'ai-task-gates: STOP. Application source moved during release proof validation.'
   summary_after="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
-    || blocked 'ai-task-gates: STOP. Application approval became invalid during release proof validation.'
+    || approval_refused deploy $? 'ai-task-gates: STOP. Application approval became invalid during release proof validation.'
   [ "$summary_after" = "$summary" ] \
     || blocked 'ai-task-gates: STOP. Application approval evidence changed during release proof validation.'
   reason="head=$head manifest_blob=$APP_RELEASE_MANIFEST_BLOB consumer_blob=$APP_RELEASE_CONSUMER_BLOB approval=$summary"
@@ -677,7 +701,7 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
 # Ordinary application-owned rows use an authenticated application workflow,
 # never the SQL/structure or cloud-action gates. This is deliberately one target.
 application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
-  local manifest="$1" report="$2" effective="$3" head blob summary reason state py
+  local manifest="$1" report="$2" effective="$3" head blob summary summary_again reason state py
   [ "$IDENTITY" = popcre/designflow-backend ] \
     || blocked 'ai-task-gates: STOP. Application workflow requires canonical popcre/designflow-backend.'
   case "$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null)" in
@@ -697,8 +721,12 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
   blob="$(application_release_file_blob "$manifest")" \
     || blocked 'ai-task-gates: STOP. Application workflow manifest must be clean and committed at HEAD.'
   head="$(git -C "$TOPLEVEL" rev-parse HEAD)"
+  # local-tests: this function runs before cmd_check's gate split and returns
+  # early, so decide the evidence requirement from this class's own gates
+  # before either approval call; the approval is mandatory here.
+  decide_local_tests_required application-workflow "$(merged_gate "$IDENTITY" "$effective" | sed -n 's/^required\t//p' | paste -sd, -)" 1
   summary="$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" \
-    || blocked 'ai-task-gates: STOP. Application workflow requires independent lifecycle-recorded exact-head final-check or security-review APPROVE.'
+    || approval_refused application-workflow $? 'ai-task-gates: STOP. Application workflow requires independent lifecycle-recorded exact-head final-check or security-review APPROVE.'
   reason="head=$head manifest_blob=$blob approval=$summary"
   state_record_override application-workflow application-workflow "$reason" "$effective" \
     && state="$(state_path)" \
@@ -707,7 +735,10 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
   [ "$(git -C "$TOPLEVEL" rev-parse HEAD)" = "$head" ] \
     && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
     && [ "$(application_release_file_blob "$manifest")" = "$blob" ] \
-    && [ "$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" = "$summary" ] \
+    || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
+  summary_again="$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" \
+    || approval_refused application-workflow $? 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
+  [ "$summary_again" = "$summary" ] \
     || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
   printf 'ai-task-gates: reviewed authenticated HTS sandbox workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
 }
@@ -848,7 +879,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 GATE_ENFORCED_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
-  local all="$1" checked tests=""
+  local all="$1" checked
   checked="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" || true)"
   # local-tests is enforced only where a reviewer approval is required: the review
   # record then carries the passing test evidence. Elsewhere it stays unchecked.
@@ -1207,7 +1238,12 @@ cmd_check(){
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
     [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
+    # local-tests: this route runs BEFORE the gate split below, so decide the
+    # evidence requirement here; installation gates require both local-tests
+    # and the reviewer approval this branch demands unconditionally.
+    decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+      || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
     [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
     local same_root same_head expected_launcher
@@ -1375,15 +1411,16 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
   local required_full="" unchecked_required=""
   required_full="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; split_required_gates "$required_full"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
-  # local-tests evidence must be decided BEFORE the first approval call site:
-  # the offline-native route and the protected reviewer release below both call
-  # reviewer_approval_summary, and a release taken through either must not skip
-  # the evidence check (flagged in review of d4ebbf1c). review, code-only-review,
-  # and pr-wait PRODUCE or wait on the approval; they are not gated here.
+  # local-tests evidence must be decided BEFORE the first approval call site in
+  # this function's gate sections: the offline-native route and the protected
+  # reviewer release below both call reviewer_approval_summary, and a release
+  # taken through either must not skip the evidence check (flagged in review of
+  # d4ebbf1c). The same-source installation branch above decided it for itself
+  # because it runs before this split. review, code-only-review, and pr-wait
+  # PRODUCE or wait on the approval; they are not gated here.
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
-  LOCAL_TESTS_REQUIRED=0
-  if [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -qx local-tests && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'; then LOCAL_TESTS_REQUIRED=1; fi
+  decide_local_tests_required "$action" "$required_full"
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
@@ -1398,7 +1435,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       || blocked 'ai-task-gates: STOP. Native action approval persistence/readback failed.'
     local oracle_admission_summary
     oracle_admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
-      || blocked 'ai-task-gates: STOP. Current-purpose registration/one-use admission publication failed.'
+      || approval_refused "$action" $? 'ai-task-gates: STOP. Current-purpose registration/one-use admission publication failed.'
     [ "$oracle_admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Oracle approval changed during native admission.'
     jq -e --arg r "$approval_summary" --arg a "$action" --arg c "$effective" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r and .observed_class==$c)) | length>0' "$(state_path)" >/dev/null 2>&1 \
       || blocked 'ai-task-gates: STOP. Oracle action override changed during native admission.'
@@ -1454,7 +1491,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         || blocked 'ai-task-gates: STOP. Native reviewer receipt was not persisted; bounded action admission was not issued.'
       local admission_summary
       admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
-        || blocked 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
+        || approval_refused "$action" $? 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
       [ "$admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Bounded approval changed during native admission.'
     else
       state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
@@ -1968,7 +2005,11 @@ cmd_install_verify(){
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
-      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" "$candidate_root")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+      # local-tests: the ordinary install approval is mandatory; decide the
+      # evidence requirement from the installation gates before the call.
+      decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" "$candidate_root")" \
+        || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
     else
       jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
         '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
@@ -2015,7 +2056,11 @@ cmd_authorize_install(){
   [[ "$start_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Installation task lacks recorded pre-update HEAD.'
   [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Candidate HEAD differs from requested target.'
   [ -n "$reviewer_approval" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs an assigned AI reviewer APPROVE, exact review, checkout, and launcher.'
-  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+  # local-tests: install authority always demands an approval; decide the
+  # evidence requirement from the installation gates before the call.
+  decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
+  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")" \
+    || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
   [ $((legacy_migration + first_install + recover_launchers + stale_manifest_recovery)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
   if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
