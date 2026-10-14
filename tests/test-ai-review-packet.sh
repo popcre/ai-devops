@@ -494,6 +494,11 @@ FWD_PKT="$("$SCRIPT" build "$FWD" fwd --tests 'true')"
 check "forward_fixture_records_main_as_target" "grep -qF '\"target_ref\": \"main\"' '$FWD_PKT/identity.json' && grep -q '$FWD_RECORDED_TIP' '$FWD_PKT/identity.json'"
 check "base_ref_written_at_build" "[ \"\$(git -C '$FWD' rev-parse refs/ai-review-packets/fwd)\" = '$FWD_BASE' ]"
 
+# An explicit --base that IS the target ref records the moving tip as its base.
+# Sealed that way, a forward move of the ref must still verify (the recorded
+# base is an ancestor of the live tip), and must not refuse as a base mismatch.
+FWD_EXPLICIT_PKT="$("$SCRIPT" build "$FWD" fwd-explicit --base main --tests 'true')"
+check "explicit_base_packet_records_tip_as_base" "grep -q '\"requested_base\": \"main\"' '$FWD_EXPLICIT_PKT/identity.json' && grep -q '$FWD_RECORDED_TIP' '$FWD_EXPLICIT_PKT/identity.json'"
 # The target ref moves FORWARD by one commit after sealing — without touching
 # the checked-out feature worktree — and the sealed packet must still verify,
 # with one explicit line naming the ref, the recorded tip, and the current tip.
@@ -501,6 +506,7 @@ FWD_NEW_TIP="$(git -C "$FWD" commit-tree "$(git -C "$FWD" rev-parse 'main^{tree}
 git -C "$FWD" update-ref refs/heads/main "$FWD_NEW_TIP"
 check "forward_moved_target_still_verifies" "'$SCRIPT' verify '$FWD_PKT' > '$TMP/forward.log' 2>&1 && grep -q 'moved forward' '$TMP/forward.log' && grep -q '$FWD_RECORDED_TIP' '$TMP/forward.log' && grep -q '$FWD_NEW_TIP' '$TMP/forward.log'"
 
+check "explicit_base_forward_move_still_verifies" "'$SCRIPT' verify '$FWD_EXPLICIT_PKT' > '$TMP/fwd-explicit.log' 2>&1 && grep -q 'moved forward' '$TMP/fwd-explicit.log'"
 # A REWRITE that orphans the recorded tip must refuse loudly, naming the rewrite
 # and the private ref that preserved the base — and the base object must still
 # be there, pinned by that ref.
@@ -735,6 +741,26 @@ check "retain_of_packet_already_at_dest_does_not_destroy_input" \
 echo RETAIN-TAMPER2 >> "$RET4_DEST/patch.diff"
 check "retain_of_broken_packet_at_dest_fails_without_deleting" \
   "! '$SCRIPT' retain '$RET4_DEST' >/dev/null 2>&1 && [ -d '$RET4_DEST' ] && [ -s '$RET4_DEST/MANIFEST.md' ]"
+
+# The review pool's post-review identity gate must tolerate the same forward move
+# of an explicit base that is the target ref, and still refuse a head change or a
+# non-forward base move. identity_stable is extracted from the pool itself.
+POOL="$REPO_ROOT/bin/ai-review-pool"
+STABLE_FN="$TMP/identity_stable.sh"
+sed -n '/^identity_stable()/,/^}/p' "$POOL" > "$STABLE_FN"
+FEAT_SHA="$(git -C "$FWD" rev-parse feature)"
+ID_OLD='{"repository":"r","head":"'"$FEAT_SHA"'","source_digest":"d","base":"'"$FWD_RECORDED_TIP"'","merge_base":"'"$FWD_BASE"'","rule":"explicitly requested by the caller as '"'"'main'"'"'","requested_base":"main","target_ref":"main","target":"'"$FWD_RECORDED_TIP"'"}'
+ID_FWD=$(jq -c --arg b "$FWD_NEW_TIP" '.base=$b | .target=$b' <<<"$ID_OLD")
+ID_HEAD=$(jq -c '.head="ffffffffffffffffffffffffffffffffffffffff"' <<<"$ID_FWD")
+ID_BASEX=$(jq -c --arg b "$FEAT_SHA" '.base=$b' <<<"$ID_FWD")
+ID_INCL=$(jq -c --arg b "$FEAT_SHA" '.base=$b | .merge_base=$b' <<<"$ID_FWD")
+ID_HEADIN=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD" | jq -c --arg b "$FEAT_SHA" '.base=$b | .merge_base=$b | .target=$b')
+ID_HEADIN_OLD=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD")
+check "pool_identity_refuses_base_moved_to_contain_reviewed_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_HEADIN_OLD' '$ID_HEADIN'"
+check "pool_identity_refuses_base_moving_to_include_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_INCL'"
+check "pool_identity_tolerates_forward_move_of_explicit_base" "bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_FWD'"
+check "pool_identity_refuses_head_change" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_HEAD'"
+check "pool_identity_refuses_non_forward_base_move" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_BASEX'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

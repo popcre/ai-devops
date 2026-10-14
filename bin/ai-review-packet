@@ -474,7 +474,7 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   # on origin/main mid-review destroyed two complete review rounds. A deleted
   # ref or a REWRITE that orphans the recorded tip still refuses loudly. HEAD
   # equality above and the digest, re-resolved base, and merge-base checks
-  # below stay byte-strict. #393's locked direction is preserved: base/head
+  # below stay byte-strict, except an explicit target-ref base proven below. #393's locked direction is preserved: base/head
   # movement still invalidates, and sealed evidence is never rewritten.
   if [ -n "$ref" ]; then
     local current_tip preserving_ref="refs/ai-review-packets/<tag>"
@@ -483,7 +483,7 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     [ -n "$current_tip" ] || die "source-target-missing: target ref '$ref' no longer exists in $source. The recorded tip was $target; the recorded base $base is preserved at $preserving_ref. A deleted ref cannot be re-anchored; rebuild the review against a live target."
     if [ "$current_tip" != "$target" ]; then
       if git -C "$source" merge-base --is-ancestor "$target" "$current_tip" 2>/dev/null; then
-        warn "target ref '$ref' moved forward since this packet was sealed: recorded tip $target, current tip $current_tip. The recorded tip is still an ancestor of the live tip, so the sealed base..head comparison is unchanged and the evidence stays exact."
+        warn "target ref '$ref' moved forward since this packet was sealed: recorded tip $target, current tip $current_tip. The recorded tip is still an ancestor of the live tip, so the sealed base..head evidence stays exact and is not re-anchored to the live tip."
         FORWARD_REF="$ref"; FORWARD_RECORDED="$target"; FORWARD_CURRENT="$current_tip"
       else
         die "source-target-rewritten: target ref '$ref' no longer contains the recorded tip $target (current tip $current_tip). History was rewritten under sealed evidence. The recorded base $base is preserved at $preserving_ref — do not re-anchor this packet; rebuild the review against current '$ref'."
@@ -495,8 +495,19 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   # TARGET_SHA is deliberately NOT re-checked here: it is the ref's live tip by
   # construction, so it legitimately differs after a tolerated forward move.
   # Tip semantics are enforced by the ancestry check above; the re-resolved
-  # BASE_SHA / TARGET_REF equality and the merge-base equality stay strict.
-  [ "$BASE_SHA" = "$base" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
+  # BASE_SHA / TARGET_REF equality and the merge-base equality stay strict,
+  # except the explicit target-ref base proven below (same merge-base only).
+  # An explicit base that is the moving target ref records the tip as its base:
+  # tolerate only a forward move of that recorded base (ancestry-proven).
+  # Only when the live merge-base with head is still the sealed merge-base: a
+  # move that shifts the reviewed content (for example a base that moves to
+  # include head, #608) stays refused.
+  local base_forward=0
+  if [ -n "$ref" ] && [ "$(jqr .requested_base "$file")" = "$ref" ] && [ -n "$BASE_SHA" ] \
+     && git -C "$source" merge-base --is-ancestor "$base" "$BASE_SHA" 2>/dev/null \
+     && [ "$(git -C "$source" merge-base "$BASE_SHA" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] \
+     && ! git -C "$source" merge-base --is-ancestor "$head" "$BASE_SHA" 2>/dev/null; then base_forward=1; fi
+  { [ "$BASE_SHA" = "$base" ] || [ "$base_forward" -eq 1 ]; } && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
@@ -1103,7 +1114,7 @@ cmd_verify() {
     rm -f "$expected_patch"
     publish_receipt "$pkt" "$have"
     if [ -n "$FORWARD_REF" ]; then
-      printf 'ai-review-packet: note: target ref %s moved forward since this packet was sealed (recorded tip %s, current tip %s); the recorded base is still an ancestor of the live tip and the sealed base..head diff is unchanged.\n' \
+      printf 'ai-review-packet: note: target ref %s moved forward since this packet was sealed (recorded tip %s, current tip %s); the recorded base is still an ancestor of the live tip; the sealed base..head evidence is exact and not re-anchored.\n' \
         "$FORWARD_REF" "$FORWARD_RECORDED" "$FORWARD_CURRENT"
     fi
     printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
