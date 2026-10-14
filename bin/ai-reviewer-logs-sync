@@ -327,9 +327,12 @@ cmd_sync(){
         */.ai/reviews) stage_tree "$dir" "reviews/$checkout" ;;
         */.ai/reviewer-issues) stage_tree "$dir" "reviewer-issues/$checkout" ;;
       esac
-    # Folders this account may not enter (other users' projects on a shared
-    # host) cannot hold its evidence and are skipped, not counted as failures.
-    done < <(find "$root" -maxdepth 4 \( -type d ! -readable -prune \) -o       \( -type d \( -path '*/.ai/reviews' -o -path '*/.ai/reviewer-issues' \) -print0 \) 2>>"$ERRS")
+    # Evidence folders are always listed, even unreadable ones (their read
+    # failure then marks the run partial). Any OTHER folder this account cannot
+    # open or enter (another user's project on a shared host) is skipped.
+    done < <(find "$root" -maxdepth 4 \
+      \( -type d \( -path '*/.ai/reviews' -o -path '*/.ai/reviewer-issues' \) -print0 -prune \) -o \
+      \( -type d \( ! -readable -o ! -executable \) -prune \) 2>>"$ERRS")
   done
 
   local partial=0 bundle="" bundles=()
