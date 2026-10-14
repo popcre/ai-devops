@@ -317,7 +317,10 @@ cmd_sync(){
   for root in "${root_list[@]}"; do
     [ -d "$root" ] || continue
     while IFS= read -r -d '' dir; do
-      dir="$(cd "$dir" && pwd -P)"
+      # An evidence folder that cannot be entered is a read failure (partial run).
+      if ! dir="$(cd "$dir" 2>/dev/null && pwd -P)"; then
+        printf 'cannot enter evidence folder under %s\n' "$root" >> "$ERRS"; continue
+      fi
       [ -n "${seen_dirs[$dir]:-}" ] && continue
       seen_dirs[$dir]=1
       # Readable name plus a hash of the full path: distinct checkouts never share a folder.
