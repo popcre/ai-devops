@@ -9,15 +9,23 @@ Handoff: `HANDOFF.d/2026-10-14T1710Z-edge-dev-mimo-slm-compaction-pilot.md`
 ## Scope limit (read this first)
 
 **DietCode's history-compaction proxy is Claude Code only.** It speaks the
-Anthropic Messages API (`dietcode claude`). It does **not** optimize MiMoCode,
-Codex, or Cursor history. This pilot can only prove or disprove savings for
-**Claude sessions**. Any MiMoCode spend claim would be a different workstream.
+Anthropic Messages API. It does **not** optimize MiMoCode, ChatGPT Desktop, or
+Cursor history. This pilot can only prove or disprove savings for **Claude
+sessions**. Any MiMoCode or ChatGPT spend claim would be a different workstream.
 
-| Client on edge-dev | Used here? | DietCode proxy? |
-|---|---|---|
-| Claude Code | yes (edge-dev3) | **yes** (`dietcode claude`) |
-| MiMoCode | yes (edge-dev is MiMo-first) | **no** |
-| Codex / Cursor | present | hooks only, not history compaction |
+**What "hooks" means.** DietCode can install small plugins into Claude Code
+CLI and Codex *CLI* (terminal tools): they label your prompt's intent and
+squeeze large tool output. Hooks **add** tokens; they do **not** shrink
+history. The real history savings is only the **proxy** (below), and that
+proxy is Claude-only.
+
+| Client | Albert's actual use | DietCode history proxy? | DietCode hooks? |
+|---|---|---|---|
+| Claude Desktop (GUI) → spawns Claude Code | edge-dev3, primary | **yes**, if the spawned binary is wrapped | n/a (Desktop owns the process) |
+| Claude Code CLI | not used day-to-day | yes (`dietcode claude`) | yes |
+| MiMoCode / MiMo Desktop | edge-dev | **no** | no |
+| ChatGPT Desktop for Windows | Windows host | **no** — no DietCode path | no (Codex *CLI* only) |
+| Codex CLI / Cursor | not Albert's daily drivers | no history proxy | Codex CLI hooks only; Cursor rules only |
 
 ## Owner decisions (this session)
 
@@ -86,24 +94,25 @@ Notes:
 |---|---|
 | Host | **edge-dev3** |
 | Package | `dietcode@0.5.0` (`npm install -g --prefix ~/.local`) |
-| Path | `~/.local/bin/dietcode claude` → local proxy + real `claude` |
-| `claude` on PATH | symlink `~/.local/bin/claude` → `~/.config/Claude/claude-code/2.1.295/.../claude` (v2.1.295) |
+| Claude Desktop path | **wrapped**: `~/.config/Claude/claude-code/2.1.295/71164c85f9d2/claude` is a fail-open script; real ELF kept as `claude-real` |
+| Why wrap | Claude Desktop launches that absolute path as a child; a PATH alias alone never saw Albert's real sessions |
+| Proxy | persistent `dietcode proxy --port 8788` on 127.0.0.1, started by the wrapper |
 | Config | `~/.scaledown/config.json` (key from 1Password `vibe_coding` → `scaledown.ai API key for testing` → field `credential`) |
 | Upstream | `https://api.anthropic.com` (default `SCALEDOWN_PROXY_UPSTREAM`) |
-| Native compact | pushed aside by the wrapper (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`) |
-| Full `dietcode setup` hooks/MCP | **Not installed** for this pilot (hooks only add tokens; proxy is the history-compaction path) |
-| edge-dev | DietCode **uninstalled** (was the wrong host) |
+| Native compact | pushed aside (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=95` in wrapper) |
+| Full `dietcode setup` hooks/MCP | **Not installed** (hooks only add tokens) |
+| edge-dev | DietCode **uninstalled** (wrong host) |
+| Claude Desktop already-running sessions | keep old env until that session ends; **new** Desktop agent sessions hit the proxy |
+| Remote Claude (`claude-ssh-remote` / vps2) | **out of scope** — runs on the VPS, not behind this proxy |
 | Fleet | 4837 and any other host must not get DietCode until step 5 says adopt |
 
-How to run a pilot session on edge-dev3:
+How a pilot session is produced on edge-dev3:
 
-```text
-export PATH="$HOME/.local/bin:$PATH"
-dietcode claude
-```
-
-(or `dietcode claude -p "..."` for a one-shot). Plain `claude` stays the
-control arm when needed.
+- **Normal path (what Albert does):** open Claude Desktop and work. New agent
+  sessions spawn `claude`, which the wrapper sends through DietCode.
+- **CLI path:** `dietcode claude` or the wrapped `claude` binary.
+- **Control arm:** temporarily point at `claude-real` (bypass wrapper) for a
+  same-work comparison without compaction.
 
 ## How to re-measure
 
@@ -140,6 +149,8 @@ detail lost in compaction. One incident is recorded and the pilot continues.
 - [x] Task class declared (`code`)
 - [x] Baseline ≥ 10 sessions with numbers (edge-dev3: 21 sessions, 95.35% hit)
 - [x] DietCode installed on edge-dev3 only (proxy path); removed from edge-dev
+- [x] Claude Desktop spawn path wrapped (proxy on 127.0.0.1:8788, fail-open)
+- [x] ChatGPT Desktop / MiMoCode documented as out of scope for this proxy
 - [ ] Pilot week sessions collected (waiting on real Claude work through `dietcode claude`)
 - [ ] Paired table filled
 - [ ] Decision (adopt / iterate / drop) on issue 1751 + doc update
