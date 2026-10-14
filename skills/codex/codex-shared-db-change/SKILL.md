@@ -142,9 +142,9 @@ the correct route. A predecessor's repository is context, not routing proof.
    promote to production that way.** Production almost always carries pending
    migrations from other workstreams that other teams have deliberately kept off it,
    so a plain `db push` either refuses or sweeps up work that was never approved.
-   Production promotion does not need a second AI (owner ruling 2026-10-14:
-   database writes skip the second AI). It still needs the `AGENTS.md` §5 merge
-   checklist, and the §5.1 bounded temp-checkout
+   Ordinary database writes skip the second AI (owner ruling 2026-10-14).
+   Production promotion is a separate action (`shared-db-promotion`) and still
+   needs the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
    recipe. The sole exception is the separately activated automatic workflow recorded
    by issue #2716: only after exact structural admission, guarded merge, merged-main
    preview, and every immutable evidence gate may that workflow dispatch its existing
