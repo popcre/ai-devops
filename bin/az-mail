@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Use the isolated, mailbox-scoped Azure CLI profile provisioned by ai-devops.
+set -euo pipefail
+
+die() { printf 'az-mail: %s\n' "$1" >&2; exit 1; }
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    command -v cygpath >/dev/null 2>&1 || die 'Git for Windows path conversion is unavailable.'
+    [[ -n "${USERPROFILE:-}" ]] || die 'the Windows user profile is unavailable.'
+    config_base="$(cygpath -u "$USERPROFILE")/.config"
+    ;;
+  *) config_base="${XDG_CONFIG_HOME:-${HOME:?HOME is unavailable}/.config}" ;;
+esac
+toolkit_config_dir=ai-devops
+config_dir="$config_base/$toolkit_config_dir/az-mail"
+config_file="$config_dir/config.json"
+certificate="$config_dir/certificate.pem"
+[[ -f "$config_file" && ! -L "$config_file" ]] || die 'not configured on this computer; rerun the ai-devops machine setup.'
+[[ -f "$certificate" && ! -L "$certificate" ]] || die 'the protected certificate is missing; rerun the ai-devops machine setup.'
+
+if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
+  dir_mode="$(stat -c '%a' -- "$config_dir" 2>/dev/null)" || die 'cannot verify credential file permissions.'
+  config_mode="$(stat -c '%a' -- "$config_file" 2>/dev/null)" || die 'cannot verify credential file permissions.'
+  certificate_mode="$(stat -c '%a' -- "$certificate" 2>/dev/null)" || die 'cannot verify credential file permissions.'
+  [[ "$dir_mode" == 700 && "$config_mode" == 600 && "$certificate_mode" == 600 ]] || die 'credential files must be private to this user; rerun the ai-devops machine setup.'
+fi
+
+client_id="$(jq -er '.application_id' "$config_file")" || die 'mailbox profile is invalid.'
+tenant_id="$(jq -er '.tenant_id' "$config_file")" || die 'mailbox profile is invalid.'
+expected_fingerprint="$(jq -er '.certificate_sha256' "$config_file" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')" || die 'mailbox profile is invalid.'
+[[ "$expected_fingerprint" =~ ^[0-9A-F]{64}$ ]] || die 'mailbox profile is invalid.'
+actual_fingerprint="$(openssl x509 -in "$certificate" -noout -fingerprint -sha256 2>/dev/null | sed 's/^[^=]*=//' | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')" || die 'the protected certificate cannot be read.'
+[[ -n "$expected_fingerprint" && "$actual_fingerprint" == "$expected_fingerprint" ]] || die 'the protected certificate does not match the approved mailbox profile.'
+
+azure_config="$config_dir/azure"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    [[ -d "$azure_config" && ! -L "$azure_config" ]] || die 'the protected Azure CLI profile is missing; rerun the ai-devops machine setup.'
+    ;;
+  *)
+    [[ ! -L "$azure_config" ]] || die 'the Azure CLI profile directory cannot be a symlink.'
+    mkdir -p -- "$azure_config"
+    ;;
+esac
+chmod 700 -- "$config_dir" "$azure_config"
+if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
+  azure_mode="$(stat -c '%a' -- "$azure_config" 2>/dev/null)" || die 'cannot verify Azure CLI profile permissions.'
+  [[ "$azure_mode" == 700 ]] || die 'the Azure CLI profile directory must be private to this user; rerun machine setup.'
+fi
+export AZURE_CONFIG_DIR="$azure_config"
+certificate_arg="$certificate"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    AZURE_CONFIG_DIR="$(cygpath -aw "$azure_config")"
+    export AZURE_CONFIG_DIR
+    certificate_arg="$(cygpath -aw "$certificate")"
+    ;;
+esac
+
+command -v az >/dev/null 2>&1 || die 'Azure CLI is not installed or is missing from PATH.'
+if ! az login --service-principal --username "$client_id" --tenant "$tenant_id" \
+  --certificate "$certificate_arg" --allow-no-subscriptions --output none >/dev/null; then
+  die 'mailbox sign-in failed; no Graph request was sent.'
+fi
+
+az "$@"
