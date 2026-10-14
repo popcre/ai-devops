@@ -1,0 +1,33 @@
+{
+  "api": null,
+  "application": "vhmcdkdk23dgvjvcvhyhcjzd",
+  "claim_id": "unadmitted-discovery",
+  "expires_at": 0,
+  "host": null,
+  "installed_gate": {
+    "launcher_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_head": "0000000000000000000000000000000000000000"
+  },
+  "issued_at": 0,
+  "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
+  "mode": "discover",
+  "operator_sha256": "369b0706a7e6f7751efa2b2132d51ca23248533dd8a9db27c8b6a17f3f3238a8",
+  "platform_source": "f55efc859dfcbbf79274c4907b3df89f9767c11d",
+  "port": 22,
+  "remote_sha256": "39714e7850da26684bf987b74431bbd368020322c6f2b39c876decc2eab3f061",
+  "schema": "oracle-platform-capability/v4",
+  "tailnet": {
+    "addresses": null,
+    "node_id": null,
+    "node_key_sha256": null,
+    "node_name": null,
+    "os_cli": null,
+    "route_device": null,
+    "route_source": null,
+    "route_table": null,
+    "tags": null
+  },
+  "transport_helper_sha256": "35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754",
+  "user": "ai"
+}

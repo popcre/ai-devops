@@ -108,6 +108,8 @@ How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.m
 
 ---
 
+For the separately admitted Oracle hosting investigation, read the [fixed platform metadata and helper capability procedure](tools/oracle-platform-capability/README.md). It preserves private target metadata, exact independent action review, bounded reads and spent one-use custody. Source publication alone does not authorize a live read or launch.
+
 ## Where this lives
 
 This system lives at:
