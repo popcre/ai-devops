@@ -1432,9 +1432,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # assigned-ai-reviewer-approval on installation) is enforced here for every
   # action the policy does not forbid. Listing the gate is not satisfying it:
   # without a --reviewer-approval report that binds an independent APPROVE to
-  # this exact head and source, the action is refused. The only exemption is the
-  # small owner entry, which the database action alone may use.
-  if [ "$application_release_ready" -eq 0 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -q 'reviewer-approval$'; then
+  # this exact head and source, the release action is refused. The small owner
+  # entry, which the database action alone may use, is the one other exemption.
+  # review, code-only-review, and pr-wait are the verification actions that
+  # produce or wait on the approval (ai-review and ai-pr-wait preflight them
+  # before any reviewer exists), so they are not gated here; they mutate nothing.
+  local reviewer_gated_action=1
+  case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
+  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -q 'reviewer-approval$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
         || blocked "$(printf 'ai-task-gates: STOP before "%s". The required gates for "%s" in %s are: %s\nA small owner entry applies only to a row-data database write; this action needs --reviewer-approval.' "$action" "$effective" "$IDENTITY" "$required")"
@@ -1446,8 +1451,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       return 0
     fi
     if [ -z "$reviewer_approval" ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s". "%s" in %s requires an assigned AI reviewer APPROVE of this exact head and resource, and none was supplied.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (implementer must differ from the reviewer) and re-run with --reviewer-approval <that report>.' \
-        "$action" "$action" "$IDENTITY" "$required")"
+      blocked "$(printf 'ai-task-gates: STOP before "%s". The "%s" class in %s requires an assigned AI reviewer APPROVE of this exact head and resource, and none was supplied.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (implementer must differ from the reviewer) and re-run with --reviewer-approval <that report>.' \
+        "$action" "$effective" "$IDENTITY" "$required")"
     fi
     [ "$action_manifest_stdin" -eq 0 ] \
       || blocked "$(printf 'ai-task-gates: STOP before "%s". A bounded stdin action cannot take this reviewer route; re-declare it through its own closed action.' "$action")"

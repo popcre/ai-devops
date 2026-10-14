@@ -844,6 +844,10 @@ check 'a production task refuses a reviewer report path that does not exist' \
   "rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/no-such-report.json'"
 check 'a production task with a valid exact-head AI APPROVE may enter its guarded path' \
   "rc 0 '$TMP/clean' check --before production --reviewer-approval \"\$(appr '$TMP/clean' production)\""
+check 'a production task may still dispatch its review (the approval producer is not gated)' \
+  "rc 0 '$TMP/clean' check --before review"
+check 'a production task may still wait on its pull request without a reviewer report' \
+  "rc 0 '$TMP/clean' check --before pr-wait"
 check 'a production task refuses a report that is not an AI APPROVE for this head' \
   "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 
