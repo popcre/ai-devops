@@ -22,6 +22,16 @@ action_review_evidence_args(){
     [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1
     action_evidence_args+=(--file "$file")
   done
+  if [[ "${action_profile:-}" = oracle-native-alternate-serialization-v1 || "${action_profile:-}" = oracle-native-alternate-serialization-v2 ]]; then
+    local oracle_sources=(tools/oracle_native_alternate_profile.py tools/oracle_native_alternate_guardian.py tools/oracle_native_alternate_runtime.py bin/ai-oracle-native-alternate)
+    [ "$action_profile" != oracle-native-alternate-serialization-v2 ] || oracle_sources=(tools/oracle_native_alternate_v2_profile.py tools/oracle_native_alternate_v2_guardian.py tools/oracle_native_alternate_v2_runtime.py bin/ai-oracle-native-alternate-v2)
+    oracle_sources+=(tools/oracle_native_alternate_output.py tools/oracle_native_alternate_control.py)
+    for relative in "${oracle_sources[@]}"; do
+      file="$evidence_root/$relative"
+      [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(realpath -- "$file")" = "$file" ] || return 1
+      action_evidence_args+=(--file "$file")
+    done
+  fi
 }
 pool_provider=""
 review_provider="${1:-}"
@@ -321,6 +331,7 @@ if [ "$code_only" -eq 1 ]; then
   tag="code-only-$(date +%s)-$$-$RANDOM"
   export_args=(ensure-code-only "$source_root" "$tag" --paths-file "$paths_file")
   [ -z "$review_base" ] || export_args+=(--base "$review_base")
+  [[ "$action_profile" != oracle-native-alternate-serialization-v1 && "$action_profile" != oracle-native-alternate-serialization-v2 ]] || export_args+=(--action-profile "$action_profile")
   snapshot="$("$SANDBOX" "${export_args[@]}")" || { printf 'ai-review: code-only export refused; no reviewer was started.\n' >&2; exit 3; }
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only source verification refused; no reviewer was started.\n' >&2; exit 3; }
   synthetic_head="$(git -C "$snapshot" rev-parse HEAD 2>/dev/null)" || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only export has no HEAD.\n' >&2; exit 3; }
@@ -350,7 +361,13 @@ if [ "$code_only" -eq 1 ]; then
   if [ -n "$action_profile" ]; then
     descriptor="$(jq -r .action_profile_binding.manifest_descriptor_sha256 "$lifecycle_state")"
     target_identity="$(jq -r .action_profile_binding.target_ref_sha256 "$lifecycle_state")"
+    if [[ "$action_profile" = oracle-native-alternate-serialization-v1 || "$action_profile" = oracle-native-alternate-serialization-v2 ]]; then
+      oracle_prompt_script=oracle_native_alternate_profile.py
+      [ "$action_profile" != oracle-native-alternate-serialization-v2 ] || oracle_prompt_script=oracle_native_alternate_v2_profile.py
+      code_prompt="$code_prompt $(python3 "$REAL_DIR/../tools/$oracle_prompt_script" prompt "$lifecycle_state")"
+    else
     code_prompt="$code_prompt Review approval is requested ONLY for action profile $action_profile, database rehearsal on isolated destination identity sha256:$target_identity schema dflow_prod, entrypoint scripts/cutover-rehearsal/orchestrator.py, TIMING_ONLY, credentials disabled, no application callback, mandatory original restoration. Private operational inputs were validated locally and are not attached. Exact canonical operational descriptor sha256: $descriptor. Approval never authorizes production or grants root action permission. If approving, include the exact standalone line: Action scope: $action_profile descriptor sha256:$descriptor."
+    fi
   fi
   lifecycle_started=$SECONDS
   result_file=""; error_file=""; diagnostics_printed=0
@@ -371,7 +388,11 @@ if [ "$code_only" -eq 1 ]; then
     action_evidence_sha256="$(sha256sum "$action_evidence_file" | cut -d' ' -f1)" || exit 3
     action_evidence_args+=(--file "$action_evidence_file")
     code_prompt="$code_prompt The additional attachments are the actual installed public enforcement implementation and profile; they contain no private operational inputs. Inspect their scope validation, immutable input/target binding and fail-closed admission rather than treating generic rehearsal capability as permission to issue credentials or invoke an application."
+    if [[ "$action_profile" = oracle-native-alternate-serialization-v1 || "$action_profile" = oracle-native-alternate-serialization-v2 ]]; then
+      code_prompt="$code_prompt Attached Oracle facts are stat/metadata only; capture byte hashes are claimed and unverified before approved execution. Both current-purpose registration and one-use action approval must be explicitly scoped. No private control values or capture bytes are attached."
+    else
     code_prompt="$code_prompt The attached native-validated-private-action-commitment is an allowlisted non-authorizing projection produced after fresh native validation of all actual private inputs. Its opaque descriptor commitment is intentionally not remotely recomputable: private values remain local. Judge whether the reviewed implementation and attached enforcement safely constrain that committed action. Any approval is conditional on the native finish and initial-forward/original-restoration checks revalidating the same commitment, genuine provider completion and installed profile; it is neither independent remote inspection of private values nor evidence of a rehearsal already run. The future provider completion/admission receipts do not exist before your verdict. Do not request private manifests, credentials or row data; withhold approval if the conditional enforcement is insufficient."
+    fi
   fi
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
   error_file="$(mktemp)" || { printf 'ai-review: cannot reserve private reviewer diagnostics.\n' >&2; exit 3; }

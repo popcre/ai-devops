@@ -85,7 +85,7 @@ missing=0
 # which a github.com-only pattern never saw -- changing either literal to
 # another owner would not have turned this check red.
 : > "$TMP/listed"
-for key in ai-devops ai-devops-memory ai-devops-transcripts ai-devops-private-config; do "$SCRIPT" list "$key" >> "$TMP/listed"; done
+for key in ai-devops ai-devops-memory ai-devops-transcripts ai-devops-reviewer-logs ai-devops-private-config; do "$SCRIPT" list "$key" >> "$TMP/listed"; done
 sed -E "s#^github[.]com/##" "$TMP/listed" > "$TMP/listed.bare"
 cat "$TMP/listed.bare" >> "$TMP/listed"
 # `-e` is load-bearing: a candidate that begins with a hyphen would otherwise be

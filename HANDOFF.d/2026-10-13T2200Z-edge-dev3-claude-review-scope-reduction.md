@@ -1,3 +1,8 @@
+---
+issue: 1714
+status: OPEN
+owner: Claude chat 81cdf50d-ed3a-40d2-a846-988d73f7ae7e on edge-dev3
+---
 # Handoff — review scope reduction (plan only)
 
 Owner issue: [popcre/ai-devops#1714](https://github.com/popcre/ai-devops/issues/1714)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and verify a deliberately narrow, history-free private code review export."""
 
+import importlib.util
 import argparse
 import hashlib
 import json
@@ -26,6 +27,7 @@ CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
 CONTRACT_PARTS = {"contract", "contracts", "migration", "migrations", "schema", "schemas", "types"}
 GATE_DECLARATION = ".ai-devops/task-gates.json"
+SHARED_DB_BYPASS_WORKFLOW = ".github/workflows/forbid-shared-db-bypass.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -39,7 +41,12 @@ def has_exact_action_scope(content, binding):
     scopes = [line for line in content.splitlines() if line.lstrip().startswith("Action scope:")]
     # Sentence punctuation has no authority. The profile, complete descriptor
     # and unique unindented line remain exact; do not normalize other wording.
-    return len(scopes) == 1 and scopes[0] in (expected, expected + ".")
+    valid = len(scopes) == 1 and scopes[0] in (expected, expected + ".")
+    if binding["profile"] in ("oracle-native-alternate-serialization-v1","oracle-native-alternate-serialization-v2"):
+        purpose = "Purpose registration: " + binding["profile"] + " descriptor sha256:" + binding["permission_registration_descriptor_sha256"]
+        lines = [line for line in content.splitlines() if line.lstrip().startswith("Purpose registration:")]
+        valid = valid and len(lines) == 1 and lines[0] in (purpose, purpose + ".")
+    return valid
 
 
 # Absolute repository-location variables in the inherited environment (set by
@@ -92,7 +99,32 @@ def denied_component(part):
     return lower in DENIED_PARTS or re.sub(r"[-_\s]", "", lower) in DENIED_PARTS
 
 
-def safe_path(raw):
+PUBLIC_PRODUCER_PROFILE='oracle-native-alternate-serialization-v1'
+PUBLIC_PRODUCER_PROFILES=(PUBLIC_PRODUCER_PROFILE,'oracle-native-alternate-serialization-v2')
+PUBLIC_PRODUCER_PATH='docs/operations/offline-original-locators.md'
+PUBLIC_PRODUCER_SHA256='e933892bb53ff2c32f000117dc8267cffd3b3eef8b146ba721a805ef97282532'
+
+PUBLIC_V2_CONTRACT_PATH='scripts/oracle2/contracts/native_alternate_chain_v2.json'
+PUBLIC_V2_CONTRACT_SHA256='0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d'
+
+def public_document_context(source, paths, profile):
+    if not profile:return None
+    if profile not in PUBLIC_PRODUCER_PROFILES:fail('unsupported public document profile')
+    registry=json.loads((Path(__file__).resolve().parents[1]/'config/review-action-profiles.json').read_text())['profiles'][profile]
+    spec=importlib.util.spec_from_file_location('oracle_public_identity',Path(__file__).resolve().parents[1]/'tools/oracle_native_alternate_control.py')
+    control=importlib.util.module_from_spec(spec);spec.loader.exec_module(control)
+    proc=subprocess.run(['/usr/bin/git','-C',str(source),'config','--local','--no-includes','--get','remote.origin.url'],env=control.sealed_git_env(),capture_output=True,timeout=5)
+    if proc.returncode or len(proc.stdout)>4096:fail('public repository identity unavailable')
+    remote=control.normalize_upstream(proc.stdout.decode())
+    if remote!=registry['repository'] or sorted(paths)!=registry['paths']:fail('public document requires exact Oracle profile closure')
+    if tree_mode(source,'HEAD',PUBLIC_PRODUCER_PATH) is None or digest(git(source,'show','HEAD:'+PUBLIC_PRODUCER_PATH))!=PUBLIC_PRODUCER_SHA256:fail('public producer document is not pinned tracked source')
+    if git(source,'status','--porcelain','--',PUBLIC_PRODUCER_PATH):fail('public producer document worktree moved')
+    if profile=='oracle-native-alternate-serialization-v2':
+        if tree_mode(source,'HEAD',PUBLIC_V2_CONTRACT_PATH) is None or digest(git(source,'show','HEAD:'+PUBLIC_V2_CONTRACT_PATH))!=PUBLIC_V2_CONTRACT_SHA256:fail('public v2 contract is not pinned tracked source')
+        if git(source,'status','--porcelain','--',PUBLIC_V2_CONTRACT_PATH):fail('public v2 contract worktree moved')
+    return profile
+
+def safe_path(raw, document_profile=None):
     if not isinstance(raw, str) or not raw or raw.startswith("/") or "\\" in raw or "\0" in raw:
         fail("invalid approved path")
     if any(ord(char) < 32 or ord(char) == 127 for char in raw):
@@ -106,6 +138,10 @@ def safe_path(raw):
     # rows; it is the one hidden path a sealed review may see, exactly (#1239).
     if raw == GATE_DECLARATION:
         return raw
+    # This one publishing-gate workflow is exact-source policy needed to review
+    # the scoped exemption; no other hidden workflow or YAML path is admitted.
+    if raw == SHARED_DB_BYPASS_WORKFLOW:
+        return raw
     lower = [part.lower() for part in parts]
     if any(denied_component(part) or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
@@ -113,6 +149,7 @@ def safe_path(raw):
     # code suffix or the bin/ai-* launcher exception must not admit those rows.
     if "licensed" in Path(raw).stem.lower():
         fail("licensed evidence filename refused")
+    if raw==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES:return raw
     suffix = Path(raw).suffix.lower()
     executable_bin = len(parts) == 2 and lower[0] == "bin" and lower[1].startswith("ai-") and suffix == ""
     if not executable_bin and suffix not in CODE_SUFFIXES and not (suffix in CONTRACT_SUFFIXES and any(p in CONTRACT_PARTS for p in lower[:-1])):
@@ -120,11 +157,11 @@ def safe_path(raw):
     return raw
 
 
-def approved_paths(path):
+def approved_paths(path, document_profile=None):
     parsed = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(parsed, list) or not parsed or not all(isinstance(p, str) for p in parsed):
         fail("approved path file must be a nonempty JSON string array")
-    paths = [safe_path(p) for p in parsed]
+    paths = [safe_path(p, document_profile) for p in parsed]
     if len(set(paths)) != len(paths) or len({p.casefold() for p in paths}) != len(paths):
         fail("duplicate approved path")
     return sorted(paths)
@@ -146,7 +183,7 @@ def tree_mode(source, ref, path):
     return mode
 
 
-def current_bytes(source, path):
+def current_bytes(source, path, document_profile=None):
     item = source.joinpath(*path.split("/"))
     if item.is_symlink():
         fail("symlink refused")
@@ -180,13 +217,17 @@ def current_bytes(source, path):
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
     relative = resolved.relative_to(resolved_root)
-    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() != path:
+    if relative.as_posix() in (GATE_DECLARATION, SHARED_DB_BYPASS_WORKFLOW) and relative.as_posix() != path:
         fail("approved path resolves into a refused location")
     try:
-        safe_path(relative.as_posix())
+        safe_path(relative.as_posix(), document_profile)
     except ValueError:
         fail("approved path resolves into a refused location")
     value = item.read_bytes()
+    if path==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES and digest(value)!=PUBLIC_PRODUCER_SHA256:
+        fail('actual public producer bytes differ from pinned blob')
+    if path==PUBLIC_V2_CONTRACT_PATH and document_profile=='oracle-native-alternate-serialization-v2' and digest(value)!=PUBLIC_V2_CONTRACT_SHA256:
+        fail('actual public v2 contract bytes differ from pinned blob')
     validate_text(value)
     return value
 
@@ -200,7 +241,7 @@ def validate_text(value):
         fail("non-UTF-8 approved path refused")
 
 
-def manifest_for(source, paths, head, base):
+def manifest_for(source, paths, head, base, document_profile=None):
     entries = []
     for path in paths:
         head_mode = tree_mode(source, head, path)
@@ -209,9 +250,13 @@ def manifest_for(source, paths, head, base):
             ignored = git(source, "check-ignore", "--no-index", "--", path, check=False)
             if ignored.returncode == 0:
                 fail("ignored approved path refused")
-        value = current_bytes(source, path)
+        value = current_bytes(source, path, document_profile)
         if head_mode is None and base_mode is None and value is None:
             fail("approved path is absent from base, head, and worktree")
+        if path==PUBLIC_V2_CONTRACT_PATH and document_profile=='oracle-native-alternate-serialization-v2' and base_mode and git(source,'rev-parse',base+':'+path)!=git(source,'rev-parse',head+':'+path):
+            fail('public v2 contract baseline is not pinned')
+        if path==PUBLIC_PRODUCER_PATH and document_profile in PUBLIC_PRODUCER_PROFILES and base_mode and git(source,'rev-parse',base+':'+path)!=git(source,'rev-parse',head+':'+path):
+            fail('public producer baseline is not the pinned public blob')
         if base_mode:
             validate_text(git(source, "show", f"{base}:{path}"))
         entries.append({"path": path, "current_sha256": digest(value) if value is not None else None,
@@ -220,10 +265,10 @@ def manifest_for(source, paths, head, base):
     return entries
 
 
-def write_tree(stage, source, paths, base=None):
+def write_tree(stage, source, paths, base=None, document_profile=None):
     for path in paths:
         if base is None:
-            value = current_bytes(source, path)
+            value = current_bytes(source, path, document_profile)
         else:
             value = git(source, "show", f"{base}:{path}") if tree_mode(source, base, path) else None
         target = stage.joinpath(*path.split("/"))
@@ -295,14 +340,15 @@ def validate_snapshot(stage, expected=None):
     if source_digest(source) != record.get("source_digest"):
         fail("original source digest moved")
     paths = record.get("paths")
-    if not isinstance(paths, list) or not paths or [safe_path(p) for p in paths] != sorted(set(paths)):
+    document_profile=public_document_context(source,paths,record.get("document_profile"))
+    if not isinstance(paths, list) or not paths or [safe_path(p, document_profile) for p in paths] != sorted(set(paths)):
         fail("approved paths invalid")
     base = record.get("original_base")
     if not isinstance(base, str) or not HEX40.fullmatch(base):
         fail("original base invalid")
     if git(source, "merge-base", base, head).decode().strip() != base:
         fail("original base no longer anchors source HEAD")
-    actual = manifest_for(source, paths, head, base)
+    actual = manifest_for(source, paths, head, base, document_profile)
     if digest(json.dumps(actual, sort_keys=True, separators=(",", ":")).encode()) != record.get("path_manifest_sha256"):
         fail("approved path contents moved")
     if git(stage, "rev-list", "--count", "HEAD").decode().strip() != "2":
@@ -323,8 +369,8 @@ def validate_snapshot(stage, expected=None):
     if not baseline.issubset(set(paths)):
         fail("unapproved file in synthetic history")
     for path in paths:
-        value = current_bytes(stage, path)
-        expected_value = current_bytes(source, path)
+        value = current_bytes(stage, path, document_profile)
+        expected_value = current_bytes(source, path, document_profile)
         if value != expected_value:
             fail("synthetic file content mismatch")
         tree_mode(stage, "HEAD", path)
@@ -359,7 +405,9 @@ def create(args):
     stage = Path(args.stage)
     if stage.exists() or stage.is_symlink():
         fail("export destination already exists")
-    paths = approved_paths(args.paths_file)
+    raw_paths=json.loads(Path(args.paths_file).read_text())
+    document_profile=public_document_context(source,raw_paths,getattr(args,'action_profile',None))
+    paths = approved_paths(args.paths_file,document_profile)
     head = git(source, "rev-parse", "HEAD").decode().strip()
     if not HEX40.fullmatch(head):
         fail("original head invalid")
@@ -372,13 +420,13 @@ def create(args):
     base = git(source, "merge-base", "HEAD", target_sha).decode().strip()
     if args.base and base != target_sha:
         fail("requested code-only base is not an ancestor of source HEAD")
-    manifest = manifest_for(source, paths, head, base)
+    manifest = manifest_for(source, paths, head, base, document_profile)
     stage.mkdir(parents=True)
     git(stage, "init", "--quiet")
     git(stage, "config", "--local", "core.autocrlf", "false")
-    write_tree(stage, source, paths, base)
+    write_tree(stage, source, paths, base, document_profile)
     commit(stage, "Approved code baseline")
-    write_tree(stage, source, paths)
+    write_tree(stage, source, paths, document_profile=document_profile)
     commit(stage, "Approved code under review")
     if git(source, "rev-parse", "HEAD").decode().strip() != head or source_digest(source) != source_before:
         fail("original source changed during export")
@@ -388,6 +436,7 @@ def create(args):
               "export_head": git(stage, "rev-parse", "HEAD").decode().strip(),
               "export_tree": git(stage, "rev-parse", "HEAD^{tree}").decode().strip(),
               "export_digest": digest(git(stage, "archive", "--format=tar", "HEAD"))}
+    if document_profile:record['document_profile']=document_profile
     (stage / ".ai-review-sandbox").write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
     sidecar = stage.with_name(stage.name + ".source.json")
     sidecar.write_text(json.dumps({"source": str(source)}, sort_keys=True) + "\n", encoding="utf-8")
@@ -599,6 +648,7 @@ def main():
     builder.add_argument("stage")
     builder.add_argument("paths_file")
     builder.add_argument("--base")
+    builder.add_argument("--action-profile")
     cloner = sub.add_parser("clone")
     cloner.add_argument("source_export")
     cloner.add_argument("stage")

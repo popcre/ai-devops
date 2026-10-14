@@ -558,11 +558,22 @@ identity_stable() { # identity_stable BEFORE_JSON AFTER_JSON REPO
     [ -n "$after" ] && [ "$after" = "$before" ]
     return
   fi
-  for field in repository head source_digest base merge_base rule requested_base; do
+  for field in repository head source_digest merge_base rule requested_base; do
     [ "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$before")" = "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$after")" ] || return 1
   done
   b_ref="$(jq -r '.target_ref // ""' <<<"$before")"; a_ref="$(jq -r '.target_ref // ""' <<<"$after")"
   [ "$b_ref" = "$a_ref" ] || return 1
+  # An explicit base that IS the moving target ref (--base origin/main) records
+  # the ref's tip as its base, so the base moves with the ref. Tolerate only a
+  # FORWARD move of that base (ancestry-proven); any other base change refuses.
+  b_base="$(jq -r '.base // ""' <<<"$before")"; a_base="$(jq -r '.base // ""' <<<"$after")"
+  if [ -n "$b_ref" ] && [ "$(jq -r '.requested_base // ""' <<<"$before")" = "$b_ref" ]; then
+    # ...and never once the reviewed head itself is contained in the moved base.
+    b_head="$(jq -r '.head // ""' <<<"$before")"
+    [ "$b_base" = "$a_base" ] || { [ -n "$b_base" ] && [ -n "$a_base" ] && git -C "$repo" merge-base --is-ancestor "$b_base" "$a_base" 2>/dev/null && ! git -C "$repo" merge-base --is-ancestor "$b_head" "$a_base" 2>/dev/null; } || return 1
+  else
+    [ "$b_base" = "$a_base" ] || return 1
+  fi
   b_target="$(jq -r '.target // ""' <<<"$before")"; a_target="$(jq -r '.target // ""' <<<"$after")"
   [ "$b_target" = "$a_target" ] && return 0
   [ -n "$b_target" ] && [ -n "$a_target" ] || return 1

@@ -107,3 +107,18 @@ config/blocker-watch.json
 config/local-watch.json
 tools/lib/local-watch.sh
 tools/stuck-work/watchdog.mjs
+tests/test-ai-reviewer-logs-sync.sh
+tests/test-bin-cmd-launchers.sh
+config/reviewer-logs-archive.crt
+
+# Closed Oracle native action source dependencies.
+tools/oracle_native_alternate_v2_runtime.py
+tools/oracle_native_alternate_output.py
+tools/oracle_native_alternate_runtime.py
+tools/oracle_native_alternate_control.py
+tools/oracle_native_alternate_v2_guardian.py
+tools/oracle_native_alternate_profile.py
+tools/oracle_native_alternate_guardian.py
+bin/ai-oracle-native-alternate
+tools/oracle_native_alternate_v2_profile.py
+bin/ai-oracle-native-alternate-v2

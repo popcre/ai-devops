@@ -252,6 +252,35 @@ rate_limited(){
     | grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
 }
 
+# normalize_verdict_heading OUT HEAD: StepFun sometimes ends a complete review
+# with a "## Verdict" heading followed by a bare "REVISE <head>" line instead of
+# the requested "VERDICT: REVISE <head>" (shared-db PR #4284, 2026-10-14: the
+# decision was lost and the reviewer was released as unable to emit a verdict).
+# Only that exact shape is rewritten in place: the LAST non-empty line must be a
+# bare APPROVE/REVISE/REJECT naming exactly HEAD (optional ** emphasis), the
+# previous non-empty line must be a Markdown heading reading "Verdict", and the
+# report must contain no VERDICT: line at all. Anything else is left untouched
+# and still fails the well-formed check below.
+normalize_verdict_heading(){
+  local out="$1" head="$2" tmp
+  [ -s "$out" ] || return 0
+  python3 - "$out" "$head" <<'PY' || return 0
+import re, sys
+path, head = sys.argv[1], sys.argv[2].lower()
+text = open(path, encoding="utf-8", errors="strict").read().replace("\r\n", "\n")
+lines = text.split("\n")
+idx = [i for i, l in enumerate(lines) if l.strip()]
+if len(idx) < 2 or any(re.match(r"^\s*VERDICT:", l) for l in lines):
+    sys.exit(0)
+last, prev = lines[idx[-1]].strip(), lines[idx[-2]].strip()
+m = re.fullmatch(r"\**\s*(APPROVE|REVISE|REJECT)\s*\**\s+([0-9a-fA-F]{40})\s*", last)
+if not m or m.group(2).lower() != head or not re.fullmatch(r"#{1,6}\s*\**\s*verdict\s*\**\s*:?\s*", prev, re.I):
+    sys.exit(0)
+lines[idx[-1]] = f"VERDICT: {m.group(1)} {head}"
+open(path, "w", encoding="utf-8").write("\n".join(lines[: idx[-1] + 1]) + "\n")
+PY
+}
+
 retry_report_well_formed(){
   local out="$1" last
   [ -s "$out" ] || return 1
@@ -833,6 +862,7 @@ $prompt"
   after="$("$SANDBOX_BIN" digest "$repo")"
   [ "$before" = "$after" ] || die "the caller's checkout changed during the review; response rejected ($repo)"
   "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet changed during the review; response rejected.'
+  normalize_verdict_heading "$out" "$head"
   report="$(tr -d '\r' < "$out")"
   if ! printf '%s\n' "$report" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | tail -n1 | grep -Eq "^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+$head[[:space:]]*$"; then
     credit_stop "$out"; die "no well-formed final VERDICT line naming $head; output kept at $out"

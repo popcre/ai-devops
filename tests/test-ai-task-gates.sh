@@ -139,9 +139,11 @@ newrepo "$TMP/db-redirected" u2giants/shared-db
 db_canonical="$(cd "$TMP/db-canonical" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
 db_redirected="$(cd "$TMP/db-redirected" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
 check 'canonical shared-db identity retains the structural class and gates' \
-  "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- .required_gates|length==0)' <<<\"\$db_canonical\""
+  "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$db_canonical\""
 check 'redirected pre-transfer shared-db identity retains identical structural gates' \
   "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
+check 'an enforced promotion gate stays a required gate, not an unchecked one' \
+  "jq -e '.required_gates | index(\"production-promotion-authorization\") != null' <<<\"\$db_canonical\""
 
 printf 'shared-db promotion launch (owner ruling 2026-10-02)\n'
 for repo in db-canonical db-redirected; do
@@ -239,7 +241,7 @@ git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
 check 'reviewer-safety installation needs an assigned AI reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
 check 'reviewer-safety installation keeps independent review and routing proof' \
-  "out '$TMP/class-candidate' explain --json | jq -e '.required_gates | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
+  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates) | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
 check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 class_state="$(state_file_for "$TMP/class-candidate")"
@@ -745,7 +747,7 @@ git -C "$TMP/mixed-explain" commit -qm 'toolkit declaration'
 printf '#!/bin/sh\n' > "$TMP/mixed-explain/bin/ai-review"
 printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
 check 'explain includes reviewer proofs inside a stronger mixed class' \
-  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and (.required_gates|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
+  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates)|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
 
 printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
@@ -836,8 +838,34 @@ check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
 check 'a declared production task retains its production gate with no file change' \
   "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
-check 'a declared production task may enter its guarded production path' \
-  "rc 0 '$TMP/clean' check --before production"
+check 'a declared production task is refused without an AI reviewer approval' \
+  "rc 3 '$TMP/clean' check --before production"
+check 'a production refusal names the missing reviewer approval' \
+  "out '$TMP/clean' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
+check 'a production task refuses a reviewer report path that does not exist' \
+  "rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/no-such-report.json'"
+check 'a production task with a valid exact-head AI APPROVE may enter its guarded path' \
+  "rc 0 '$TMP/clean' check --before production --reviewer-approval \"\$(appr '$TMP/clean' production)\""
+check 'a production task may still dispatch its review (the approval producer is not gated)' \
+  "rc 0 '$TMP/clean' check --before review"
+check 'a production task may still wait on its pull request without a reviewer report' \
+  "rc 0 '$TMP/clean' check --before pr-wait"
+check 'a production task may still run code-only review without a reviewer report' \
+  "rc 0 '$TMP/clean' check --before code-only-review"
+check 'a production task refuses ship without an AI reviewer approval' \
+  "rc 3 '$TMP/clean' check --before ship"
+newrepo "$TMP/rs"
+( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
+check 'an unenforced gate is never printed as required' \
+  "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
+check 'explain names the gates this tool does not check' \
+  "out '$TMP/rs' explain | grep -q 'not checked by this tool'"
+check 'a reviewer-safety task refuses ship without an exact-head independent review' \
+  "rc 3 '$TMP/rs' check --before ship"
+check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
+  "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
+check 'a production task refuses a report that is not an AI APPROVE for this head' \
+  "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 
 printf 'stale and corrupt intent state\n'
 newrepo "$TMP/stale"
@@ -1022,7 +1050,7 @@ check 'the formal review stays forbidden on the same change set' \
 check 'and that refusal still has no reviewer-approval path' \
   "out '$TMP/private' check --before review --reviewer-approval \"\$(appr '$TMP/private' review)\" | grep -Fq 'no reviewer-approval'"
 check 'the sealed route retains central and consumer evidence requirements' \
-  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - .required_gates | length==0)'"
+  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - (.required_gates + .unchecked_gates) | length==0)'"
 check 'private-evidence remains protected at its existing rank' \
   "jq -e '.change_classes[\"private-evidence\"] | .protected==true and .rank==90' '$AI_TASK_GATES_FILE'"
 for action in deploy database infrastructure production; do
@@ -1396,10 +1424,9 @@ for args in 'start --class' 'start --class prose --reason' 'start --base' 'check
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
 
-# Owner ruling 2026-10-02 ("yes, small entries can skip the reviewer"): a
-# small owner-requested row-data write (1..10 rows) may pass the database gate
-# without an AI reviewer, but only when the gate itself reads the repository's
-# issue from GitHub (through ai-gh) and finds the owner's words verbatim.
+# Owner ruling 2026-10-14 ("Our own safety rules require a second AI to
+# approve database writes. Remove that rule."): database writes open without
+# an AI reviewer. --small-owner-entry remains optional history only.
 newrepo "$TMP/small-entry" popcre/some-app
 ( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
 SMALL_URL='https://github.com/popcre/some-app/issues/7'
@@ -1418,13 +1445,13 @@ EOF
 chmod +x "$TMP/small-gh/gh"
 export AI_GH_REAL_GH="$TMP/small-gh/gh" AI_GH_STATE_DIR="$TMP/small-gh/state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_NO_WAIT=1
 SMALL="--before database --small-owner-entry"
-check 'database without reviewer or small entry stays blocked' \
-  "rc 3 '$TMP/small-entry' check --before database"
-check 'a 3-row owner entry passes the database gate without a reviewer' \
-  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'allowed as a small owner-requested entry'"
-check 'a 10-row owner entry is still small' \
+check 'database without reviewer or small entry is allowed (owner ruling 2026-10-14)' \
+  "out '$TMP/small-entry' check --before database | grep -q 'skip second-AI approval' && rc 0 '$TMP/small-entry' check --before database"
+check 'a 3-row owner entry records optional history without a reviewer' \
+  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'optional small owner entry'"
+check 'a 10-row owner entry is still valid optional history' \
   "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
-check 'an 11-row entry needs a reviewer' \
+check 'an 11-row entry is refused on the optional path' \
   "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
 check 'a zero or non-numeric row count is refused' \
   "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
@@ -1470,7 +1497,7 @@ check 'an infrastructure change set never qualifies as a small owner entry' \
 newrepo "$TMP/small-structural" popcre/some-app
 ( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
 mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
-check 'a structural change set never qualifies as a small owner entry' \
+check 'a structural change set escalates and never uses the small-entry path' \
   "! rc 0 '$TMP/small-structural' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' && ! jq -e '(.overrides // [])|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-structural')\" >/dev/null 2>&1"
 unset AI_GH_REAL_GH AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS AI_GH_NO_WAIT
 for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do

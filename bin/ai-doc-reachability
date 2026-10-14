@@ -106,7 +106,10 @@ def strip_code(text: str) -> str:
             kept.append("\n" if line.endswith("\n") else "")
             continue
         # Inline code is not a Markdown link, including multi-backtick spans on one line.
-        line = re.sub(r"(`+)(.+?)\1", "", line)
+        # Keep a one-space placeholder so a code-formatted link label such as
+        # [`plan.md`](plan.md) still counts as a link (#1698), while a code
+        # span in the destination can never become a resolvable path.
+        line = re.sub(r"(`+)(.+?)\1", " ", line)
         kept.append(line)
     return "".join(kept)
 

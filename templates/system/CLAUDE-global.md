@@ -24,6 +24,10 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
   himself. Never hand him a command to run.
 - **No tables, status headers, bullet lists over four lines, or bold labels
   like "Result:".**
+- **No empty `Still open`, no provisional verdicts, no status boards.** Omit
+  `Still open` when nothing is pending. Give one final verdict with decisive
+  evidence — never restate intermediate "probably blocked / maybe reject".
+  Report only what changed since the last turn, not the full board again.
 - **The only things allowed to run long are artifacts Albert asked for** — a
   document, plan, or handoff written to a file; the reply stays 120 words.
 
@@ -164,7 +168,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
-  Small owner entries (below) skip only that reviewer APPROVE.
+  Database writes skip that reviewer APPROVE.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.
@@ -180,14 +184,13 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   load into curated Master Data, is authored first in `popcre/shared-db` via
   branch and PR. Prove the target database before every write. Load
   `shared-db-change` for the procedure.
-  **Small owner entry** (owner ruling 2026-10-02, verbatim: "yes, small
-  entries can skip the reviewer"): an owner-requested row-data write of at
-  most 10 rows, with no structure, schema, security change, or deletion, run
-  as one guarded transaction asserting the exact row count after proving the
-  target database, with Albert's request quoted verbatim in the linked issue,
-  skips the AI reviewer APPROVE and keeps every other gate:
-  `ai-task-gates check --before database --small-owner-entry <issue-url>
-  --row-count N --owner-quote "<quote>"`. Details doc: "Small owner entries".
+  **Database writes skip the second AI** (owner ruling 2026-10-14, verbatim:
+  "Our own safety rules require a second AI to approve database writes.
+  Remove that rule."): no assigned AI reviewer APPROVE is required for a
+  database write. Every other gate stays: task declaration, class escalation,
+  protected-class seals, target identity proof, claim rules, and live proof.
+  `ai-task-gates check --before database` opens without `--reviewer-approval`.
+  Details doc: "Database writes".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data
@@ -222,6 +225,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - Before the first commit in a repository, run `git var GIT_COMMITTER_IDENT`; it
   must show `Albert Hazan <u2giants@users.noreply.github.com>`. Stage only owned
   files.
+- **Never run `git pull` (or merge) in the installed ai-devops checkout (`/worksp/ai-devops`).** It is advanced only by the protected install: create a candidate worktree at the reviewed merged commit and run its `update.sh` with the exact-head APPROVE, following `docs/deployment.md`. A plain pull breaks the install receipt and is recorded and warned about by `ai-task-gates`.
 - **Never push directly to a protected `main`.** Branch, open a pull request,
   and let checks and the merge queue decide.
   `config/repository-policy.json` in `ai-devops` is authoritative;
@@ -238,6 +242,11 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
   Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
+- **One status probe per state change.** After a wait completes or a merge
+  lands, record the answer and move on — do not re-check the same head
+  "just to be sure". Reuse a passing result when head and digest are unchanged.
+  Prefer bounded waiters over open polling; if a wait outlives the turn, leave
+  the issue or pull request as the card and return later.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 
@@ -245,8 +254,15 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 
 - Put scratch files under `$TMPDIR` (your session's own temp folder, deleted
   when the session ends), never hand-named `/tmp/<issue>-...` paths.
+- **If output would fill more than a few reply lines, write a file** and return
+  only the decisive lines (exit status, failing assertion, SHA, count, one
+  error string). Hand the path to whoever needs the full log.
 - Keep routine tool output short; save long output to a scratch file and
   return only the decisive result.
+- **Compress pasted/retrieved docs only when the question is retrieval-style.**
+  Never send secrets, private transcripts, review verdicts, or code to write
+  verbatim through a third-party compressor. Measure billed tokens and cache
+  hit rate; do not budget 85% on live coding turns.
 - **Never delegate a decision** (schema, merge, production, security). A
   subagent returns finished work or a blocker with its verbatim evidence line;
   anything else is a failure - resume that agent immediately. When relaying

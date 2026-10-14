@@ -121,15 +121,46 @@ New-Item -ItemType Directory -Force -Path $SshConfigDir | Out-Null
 Set-PrivateAcl $SshConfigDir
 $sshHosts = Join-Path $SshConfigDir 'hosts.yml'
 if (Test-Path -LiteralPath $sshHosts) {
-    # Never rewrite a token through a link: refuse links, then start from a fresh file.
+    # Never rewrite a token through a link.
     if (Test-Redirected $sshHosts) { throw "Refusing to write through a junction or symbolic link: $sshHosts" }
     $links = @(& fsutil hardlink list $sshHosts 2>$null)
     if ($LASTEXITCODE -ne 0 -or $links.Count -ne 1) { throw "Refusing to rewrite ${sshHosts}: it has other hard links." }
-    Backup-File $sshHosts
-    Remove-Item -LiteralPath $sshHosts -Force
 }
-$copy = Invoke-Gate '"$0" auth token --hostname github.com | GH_CONFIG_DIR="$1" "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
-if ($copy.ExitCode -ne 0) { throw 'The GitHub CLI could not save the SSH copy of the login.' }
+
+# Build the new copy in a private staging folder and prove it works there; the
+# working copy is replaced only afterwards, so a failed run never leaves SSH
+# sessions without a login.
+$stage = "$SshConfigDir.staging"
+if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+Set-PrivateAcl $stage
+$finalDir = $sshDir
+$sshDir = $stage -replace '\\', '/'
+try {
+    $copy = Invoke-Gate '"$0" auth token --hostname github.com | GH_CONFIG_DIR="$1" "$0" auth login --hostname github.com --git-protocol https --with-token --insecure-storage'
+    if ($copy.ExitCode -ne 0) { throw 'The GitHub CLI could not save the SSH copy of the login.' }
+    foreach ($file in Get-ChildItem -LiteralPath $stage -File) { Set-PrivateAcl $file.FullName }
+    $staged = Invoke-Gate 'GH_CONFIG_DIR="$1" "$0" api --hostname github.com user --jq .login'
+    if ($staged.ExitCode -ne 0 -or $staged.Output -ne $ExpectedLogin) { throw "The new SSH copy of the GitHub login does not work (got '$($staged.Output)'); the existing copy was left in place." }
+} catch {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    throw
+} finally {
+    $sshDir = $finalDir
+}
+Backup-File $sshHosts
+# One atomic NTFS replace: there is no moment when hosts.yml is missing, and on
+# failure the working copy is untouched.
+$newHosts = Join-Path $stage 'hosts.yml'
+if (Test-Path -LiteralPath $sshHosts) {
+    [IO.File]::Replace($newHosts, $sshHosts, [NullString]::Value)
+} else {
+    [IO.File]::Move($newHosts, $sshHosts)
+}
+if (-not (Test-Path -LiteralPath (Join-Path $SshConfigDir 'config.yml')) -and (Test-Path -LiteralPath (Join-Path $stage 'config.yml'))) {
+    Move-Item -LiteralPath (Join-Path $stage 'config.yml') -Destination (Join-Path $SshConfigDir 'config.yml')
+}
+Remove-Item -LiteralPath $stage -Recurse -Force
 Set-PrivateAcl $SshConfigDir
 foreach ($file in Get-ChildItem -LiteralPath $SshConfigDir -File) { Set-PrivateAcl $file.FullName }
 
