@@ -15,8 +15,8 @@ roles, adapting CLI flags, and how the scripts use the commands.
   2026-09-30 and is no longer an approval reviewer.
 - **GLM-5.3** — rotation reviewer (restored 2026-09-30). Never reviews
   GLM-orchestrated (ZCode) work. Also usable as an explicitly requested second
-  opinion through `ai-glm`. The rotation pool is Muse, Grok, Qwen, Gemini, GLM,
-  and DeepSeek.
+  opinion through `ai-glm`. The rotation pool is Muse, Gemini, GLM,
+  and DeepSeek. Qwen was removed from rotation on 2026-10-13 by owner ruling.
 - **Grok Build 4.6** — optional independent review through `ai-grok-review`
   (read-only) and isolated edits through `ai-grok-implement`. Advisory
   look-into-this work uses `ai-grok-implement investigate`; that is not a formal

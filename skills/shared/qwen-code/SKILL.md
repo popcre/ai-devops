@@ -1,6 +1,6 @@
 ---
 name: qwen-code
-description: Delegate repository reviews, analysis, debates, and explicitly authorized implementation to Qwen Code through the persistent `ai-qwen` wrapper. Use when the user says "ask Qwen," "use Qwen Code," "run this by Qwen," requests Qwen 3.8, wants a Qwen second opinion, asks to resume a Qwen session, or delegates coding work to Qwen.
+description: Qwen is no longer a reviewer (owner ruling 2026-10-13: "drop qwen completely"). Do not use this skill for reviews or rotation; it remains only for explicitly requested non-review Qwen Code work through the `ai-qwen` wrapper.
 ---
 
 # Qwen Code

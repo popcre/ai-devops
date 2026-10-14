@@ -67,6 +67,6 @@ does not pay to load them. Read only the matching row and its named sources.
 - A merge-queue ejection can leave a pull request OPEN. Use `bin/ai-pr-wait`
   instead of watching PR state, and never rerun a green result for an identical
   commit.
-- Qwen registry membership is not usability. `ai-review-preflight status qwen`
-  is the live answer. An npm `qwen` on PATH is not the approved runtime; restore
-  the vendor standalone and re-qualify after any wrapper or runtime hash change.
+- Qwen is not a reviewer. Owner ruling 2026-10-13 ("drop qwen completely"):
+  its registry state is `absent`, `ai-review qwen` refuses, and the pool never
+  draws it. Do not re-add it without a new owner ruling.

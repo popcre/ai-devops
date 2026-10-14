@@ -35,8 +35,8 @@
       "reason": "Rotation reviewer (Muse Spark 1.3 Contributor)."
     },
     "qwen": {
-      "registry_state": "registered",
-      "reason": "Rotation reviewer on qwen3.8-max using the Alibaba Model Studio Token Plan subscription. Live readiness is determined by current reviewer preflight."
+      "registry_state": "absent",
+      "reason": "Removed from reviewer rotation by owner ruling (Albert, 2026-10-13: \"drop qwen completely\"). Not a rotation reviewer; ai-qwen remains installed for non-review use only."
     },
     "stepfun": {
       "registry_state": "registered",
