@@ -48,7 +48,8 @@ clone + `./install.sh` on Ubuntu).
    route in `docs/deployment.md` on both platforms, including separate candidates
    and exact-head reviewer authorization when required. Keep the installed
    checkout unchanged until that route permits advancement. Use the full Windows
-   installer or Linux candidate `update.sh`; a bare `git pull` or Windows
+   installer or Linux candidate `update.sh`; never run `git pull` in the installed
+   checkout, and a bare `git pull` or Windows
    `-SourceGateOnly` is not an installation. Continue only after the installed
    source, managed launchers, source receipt, and required reviewer qualification
    stages agree with the pinned release, including supported capacity deferrals.

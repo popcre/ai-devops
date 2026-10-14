@@ -222,6 +222,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - Before the first commit in a repository, run `git var GIT_COMMITTER_IDENT`; it
   must show `Albert Hazan <u2giants@users.noreply.github.com>`. Stage only owned
   files.
+- **Never run `git pull` (or merge) in the installed ai-devops checkout (`/worksp/ai-devops`).** It is advanced only by the protected install: create a candidate worktree at the reviewed merged commit and run its `update.sh` with the exact-head APPROVE, following `docs/deployment.md`. A plain pull breaks the install receipt and is recorded and warned about by `ai-task-gates`.
 - **Never push directly to a protected `main`.** Branch, open a pull request,
   and let checks and the merge queue decide.
   `config/repository-policy.json` in `ai-devops` is authoritative;
