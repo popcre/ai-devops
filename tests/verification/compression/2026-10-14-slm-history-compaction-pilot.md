@@ -133,6 +133,24 @@ detail lost in compaction. One incident is recorded and the pilot continues.
 |---|---|---|---|---:|
 | — | — | — | — | 0 |
 
+## Incident — DietCode proxy broke Claude Desktop (2026-10-14)
+
+**Symptom (Albert):** cannot start new Claude sessions.
+`BrotliDecompressionError fetching "http://127.0.0.1:8788/v1/messages?beta=true"`.
+
+**Cause:** the Claude Desktop spawn path was wrapped to force
+`ANTHROPIC_BASE_URL=http://127.0.0.1:8788` through DietCode's proxy. The proxy
+mishandled `Content-Encoding: br` on the Messages API response, so the Claude
+client could not decode it.
+
+**Repair (done):** real ELF restored as `claude` on edge-dev3; DietCode proxy
+stopped; no `ANTHROPIC_BASE_URL` left in shell/env files. Claude is stock again.
+
+**Pilot consequence:** history-compaction proxy path is **not** running. Do not
+re-wrap Claude Desktop until DietCode's response-decoding bug is fixed or a
+different intercept is proven on a throwaway session first. Paired-week numbers
+are blocked.
+
 ## Known risks (from handoff §9)
 
 - Cache-hit impact of DietCode on our traffic is unmeasured until this week.
@@ -151,6 +169,8 @@ detail lost in compaction. One incident is recorded and the pilot continues.
 - [x] DietCode installed on edge-dev3 only (proxy path); removed from edge-dev
 - [x] Claude Desktop spawn path wrapped (proxy on 127.0.0.1:8788, fail-open)
 - [x] ChatGPT Desktop / MiMoCode documented as out of scope for this proxy
-- [ ] Pilot week sessions collected (waiting on real Claude work through `dietcode claude`)
+- [x] **Rolled back** Claude Desktop wrap after BrotliDecompressionError (see Incident)
+- [ ] DietCode proxy defect fixed or alternate intercept proven on a throwaway session
+- [ ] Pilot week sessions collected (blocked on working history-compaction path)
 - [ ] Paired table filled
 - [ ] Decision (adopt / iterate / drop) on issue 1751 + doc update
