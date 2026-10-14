@@ -223,4 +223,6 @@ fi
   warn 'installation finalization refused; authorization remains pending for safe retry'
   exit 1
 }
+# Acknowledge the protected advance so earlier unprotected records stop warning.
+{ mkdir -p "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_ROOT" protected "$source_sha" >> "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/unprotected-advances.log"; } 2>/dev/null || true
 info "update.sh installed source SHA $source_sha"

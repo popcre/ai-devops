@@ -20,12 +20,11 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # merge that moved the checkout outside the reviewed install path. Record it;
 # ai-task-gates warns on its next run until a protected install lands on the
 # advanced head. Recording never blocks the pull.
-if [ -z "${AI_DEVOPS_PROTECTED_UPDATE:-}" ]; then
+if [ -z "${AI_DEVOPS_PROTECTED_UPDATE:-}" ] && [ "$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" = "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]; then
   adv_dir="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
-  mkdir -p "$adv_dir" 2>/dev/null || true
-  printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
-    "$(git rev-parse --verify --quiet ORIG_HEAD 2>/dev/null || echo none)" \
-    "$(git rev-parse HEAD 2>/dev/null || echo none)" >> "$adv_dir/unprotected-advances.log" 2>/dev/null || true
+  { mkdir -p "$adv_dir" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
+      "$(git rev-parse --verify --quiet ORIG_HEAD 2>/dev/null || echo none)" \
+      "$(git rev-parse HEAD 2>/dev/null || echo none)" >> "$adv_dir/unprotected-advances.log"; } 2>/dev/null || true
 fi
 [ -n "$root" ] && [ -x "$root/bin/ai-review-preflight" ] || exit 0
 [ "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse origin/main 2>/dev/null)" ] || exit 0

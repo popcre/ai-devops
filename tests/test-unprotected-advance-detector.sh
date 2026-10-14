@@ -38,5 +38,19 @@ check "warning names the unprotected advance" "( cd '$R' && '$GATES' explain 2>&
 printf 'meta\tsource_sha\t%s\t-\n' "$NEW" > "$MAN"
 check "no warning once the receipt matches the advanced head" "! ( cd '$R' && '$GATES' explain 2>&1 >/dev/null | grep -q 'outside the protected install path' )"
 
+printf '\n== recording never writes to stderr, even when the state dir is unwritable ==\n'
+RO="$TMP/readonly"; mkdir -p "$RO"; chmod 500 "$RO"
+git -C "$R" reset -q --hard "$OLD" 2>/dev/null
+ERR="$( (AI_TASK_GATES_DIR="$RO/state" git -C "$R" merge -q --ff-only "$NEW") 2>&1 >/dev/null )"
+check "unwritable state dir leaves stderr silent" "[ -z '$ERR' ]"
+chmod 700 "$RO"
+
+printf '\n== a protected acknowledgement settles earlier unprotected records ==\n'
+rm -f "$LOG"; git -C "$R" reset -q --hard "$OLD"; git -C "$R" merge -q --ff-only "$NEW"
+printf '%s\t%s\t%s\t%s\n' "2026-10-14T00:00:00Z" "$R" protected "$NEW" >> "$LOG"
+check "acknowledged advance no longer warns" "! ( cd '$R' && '$GATES' explain 2>&1 >/dev/null | grep -q 'outside the protected install path' )"
+printf '%s\t%s\t%s\t%s\n' "2026-10-14T01:00:00Z" "$R" "$NEW" "$OLD" >> "$LOG"
+check "a later unprotected advance warns and names the checkout" "( cd '$R' && '$GATES' explain 2>&1 >/dev/null | grep -q \"$R\" )"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

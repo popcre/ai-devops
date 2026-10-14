@@ -2234,12 +2234,19 @@ cmd_authorize_install(){
 # The post-merge hook records every plain pull or merge in the installed checkout;
 # a record whose head is not the installed receipt is reported on the next run.
 warn_unprotected_advances(){
-  local log="$STATE_DIR/unprotected-advances.log" manifest="${AI_TASK_GATES_MANIFEST:-/etc/ai-devops/install-manifest.tsv}" receipt when from to
+  local log="$STATE_DIR/unprotected-advances.log" manifest="${AI_TASK_GATES_MANIFEST:-/etc/ai-devops/install-manifest.tsv}" receipt when root from to pending=""
   [ -s "$log" ] || return 0
   receipt="$(awk -F'\t' '$1=="meta" && $2=="source_sha"{print $3; exit}' "$manifest" 2>/dev/null || true)"
-  tail -n 20 "$log" | while IFS=$'\t' read -r when _root from to; do
+  # Only records after the last protected acknowledgement (written by update.sh
+  # after a verified install) are still pending; older ones are settled.
+  while IFS=$'\t' read -r when root from to; do
+    if [ "$from" = protected ]; then pending=""; continue; fi
     [ -n "${to:-}" ] && [ "$to" != "$receipt" ] || continue
-    printf 'ai-task-gates: warning: %s moved the checkout %s -> %s outside the protected install path (installed receipt %s). Install through update.sh with a reviewed authority.\n' "$when" "${from:-none}" "$to" "${receipt:-unknown}" >&2
+    pending="$pending$when"$'\t'"$root"$'\t'"${from:-none}"$'\t'"$to"$'\n'
+  done < <(tail -n 200 "$log")
+  printf '%s' "$pending" | while IFS=$'\t' read -r when root from to; do
+    [ -n "${to:-}" ] || continue
+    printf 'ai-task-gates: warning: %s moved %s from %s to %s outside the protected install path (installed receipt %s). Install through update.sh with a reviewed authority.\n' "$when" "$root" "$from" "$to" "${receipt:-unknown}" >&2
   done
 }
 
