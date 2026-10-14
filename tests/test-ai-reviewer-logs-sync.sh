@@ -275,6 +275,14 @@ PATH="$TMP/racy-cp:$PATH" run sync 2> "$TMP/out30" || { cat "$TMP/out30" >&2; ex
 run sync 2> "$TMP/out31" || { cat "$TMP/out31" >&2; exit 1; }
 view
 check 'a file rewritten mid-copy is archived as copied and not re-sent needlessly' "grep -q 'rewritten mid-copy' '$P/reviewer-issues/pkg/racy.log' && grep -q 'nothing new' '$TMP/out31'"
+# Folders this account cannot enter are skipped, not counted as read failures.
+mkdir -p "$REPOS/locked/inner"; chmod 000 "$REPOS/locked"
+if [ ! -r "$REPOS/locked" ]; then
+  printf 'u\n' >> "$STATE/reviewer-events/events.jsonl"
+  rc=0; run sync 2> "$TMP/out32" || rc=$?
+  check 'unreadable folders do not make a run partial' "[ $rc -eq 0 ] && absent grep -q PARTIAL '$TMP/out32'"
+fi
+chmod 755 "$REPOS/locked"
 check 'view needs a key file and never calls 1Password itself' "! AI_REVIEWER_LOGS_KEY_FILE= HOME='$TMP/home' AI_REVIEWER_LOGS_TEST_MODE=1 AI_REVIEWER_LOGS_REMOTE='$REMOTE' AI_REVIEWER_LOGS_HUB='$TMP/hub' bash '$ROOT/bin/ai-reviewer-logs-sync' view '$TMP/nokey' 2>/dev/null && ! grep -q 'op read' <(grep -v '^#' '$ROOT/bin/ai-reviewer-logs-sync')"
 if [ -n "${SYSTEMROOT:-}" ]; then
   acl="$(icacls "$(cygpath -w "$TMP/home/.ai-devops/reviewer-logs-sync")")"
