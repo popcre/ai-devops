@@ -69,7 +69,7 @@ make_approved_report(){
   mkdir -p "$dir/.ai/reviews"
   digest="$("$ROOT/bin/ai-review-sandbox" digest "$dir")" || return 1
   report="$dir/.ai/reviews/codex-final-check-test.md"
-  printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes.\nApproved %s.\n\n## Verdict\nAPPROVE\n' \
+  printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes.\nApproved %s.\n\n## Verdict\n\nAPPROVE\n\n' \
     "$(printf '\140')" "$target" "$(printf '\140')" "$(printf '\140')" "$digest" "$(printf '\140')" "$operation" > "$report"
   case "$operation" in
     legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery)
@@ -87,6 +87,16 @@ make_approved_report(){
     '{status:"completed",verdict:"APPROVE",stale:false,head:$head,source_digest:$source,report_path:$report,report_sha256:$hash}' \
     > "$state_dir/test.json"
   printf '%s\n' "$report"
+}
+
+refresh_report_lifecycle_hash(){
+  local report="$1" hash state
+  hash="$(sha256sum "$report" | cut -d' ' -f1)"
+  while IFS= read -r state; do
+    [ -f "$state" ] || continue
+    jq -e --arg report "$report" '.report_path==$report' "$state" >/dev/null 2>&1 || continue
+    jq --arg hash "$hash" '.report_sha256=$hash' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  done < <(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' 2>/dev/null)
 }
 
 printf 'classification\n'
@@ -261,6 +271,23 @@ dup_report_door(){
 dup_report_door "$class_report" "$class_target"
 check 'a runner-door header repeated below Result still names the exact target' \
   "[ \"\$(grep -c 'reviewed commit' '$class_report')\" = 2 ]"
+# Keep the lifecycle record bound to each fixture mutation so these cases
+# exercise the raw terminal-shape guard rather than failing only on a hash.
+cp "$class_report" "$TMP/class-report-valid"
+awk '{ print } /^## Verdict$/ { print "intervening prose" }' "$TMP/class-report-valid" > "$class_report"
+refresh_report_lifecycle_hash "$class_report"
+check 'intervening text between verdict heading and token is rejected' \
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
+awk '{ if ($0=="APPROVE") print "REJECT"; else print }' "$TMP/class-report-valid" > "$class_report"
+refresh_report_lifecycle_hash "$class_report"
+check 'raw REJECT cannot be overridden by a completed lifecycle APPROVE' \
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
+awk '{ print } /^APPROVE$/ { print "trailing prose" }' "$TMP/class-report-valid" > "$class_report"
+refresh_report_lifecycle_hash "$class_report"
+check 'trailing report prose after APPROVE is rejected' \
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
+cp "$TMP/class-report-valid" "$class_report"
+refresh_report_lifecycle_hash "$class_report"
 # A later merge may land between review and authorization; the reviewed target
 # stays authorizable while it is in fetched origin/main history.
 class_later="$(git -C "$TMP/class" commit-tree "$class_target^{tree}" -p "$class_target" -m 'later merge')"
