@@ -44,6 +44,10 @@ pipeline. The recovery procedure lives in
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.
+- **Never run `git pull` or merge in the installed checkout** (`/worksp/ai-devops`). It
+  advances only through the protected install: a candidate worktree at the reviewed merged commit,
+  its `update.sh` with the exact-head APPROVE, per `docs/deployment.md`. A plain pull is recorded by
+  the post-merge detector and warned about by `ai-task-gates`.
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.

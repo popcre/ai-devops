@@ -3,6 +3,9 @@
 set -uo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The protected updater is the only sanctioned advance of the installed checkout;
+# the post-merge detector skips runs made with this set.
+export AI_DEVOPS_PROTECTED_UPDATE=1
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
 normalized_path() {
@@ -220,4 +223,6 @@ fi
   warn 'installation finalization refused; authorization remains pending for safe retry'
   exit 1
 }
+# Acknowledge the protected advance so earlier unprotected records stop warning.
+{ mkdir -p "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_ROOT" protected "$source_sha" >> "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/unprotected-advances.log"; } 2>/dev/null || true
 info "update.sh installed source SHA $source_sha"
