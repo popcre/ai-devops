@@ -209,18 +209,27 @@ def verify_tailnet(c):
     require(type(node.get('Addresses')) is list and sorted(node['Addresses'])==sorted(expected['addresses']),'fixed peer addresses moved')
     tags=node.get('Tags');require(type(tags) is list and all(isinstance(t,str) for t in tags) and tags==sorted(set(tags)) and tags==expected['tags'],'fixed peer tags moved')
     require(hashlib.sha256(key.encode('ascii')).hexdigest()==expected['node_key_sha256'],'fixed peer key moved')
-    # Missing/null expiry fields mean UNKNOWN, never false or never-expiring.
-    if node.get('Expired') is not None:require(node['Expired'] is False,'expired peer refused')
-    if node.get('KeyExpiry') is not None:
-        from datetime import datetime,timezone
-        expiry=datetime.fromisoformat(node['KeyExpiry'].replace('Z','+00:00'));require(expiry.tzinfo is not None and expiry>datetime.now(timezone.utc),'expired or malformed peer lifetime')
+    from datetime import datetime,timezone
+    require(type(node.get('Expired')) is bool and node['Expired'] is False,
+            'peer expiry state missing or expired')
+    key_expiry=node.get('KeyExpiry')
+    require(type(key_expiry) is str and key_expiry.strip(),
+            'peer key expiry missing')
+    try:
+        expiry=datetime.fromisoformat(key_expiry.replace('Z','+00:00'))
+    except ValueError as error:
+        raise ValueError('peer key expiry malformed') from error
+    require(expiry.tzinfo is not None and expiry.utcoffset() is not None and
+            expiry>datetime.now(timezone.utc),
+            'peer key expiry is not finite, timezone-aware, and current')
     route=local_metadata(['/usr/bin/ip','-j','route','get',target],8192)
     require(type(route) is list and len(route)==1 and type(route[0]) is dict,'fixed route missing')
     r=route[0];require(r.get('dst')==target and r.get('dev')==expected['route_device'] and str(r.get('table'))==expected['route_table'] and r.get('prefsrc')==expected['route_source'] and r.get('flags')==[] and not any(k in r for k in ('gateway','via','nhid','multipath')),'fixed encrypted route moved')
     require(root_ancestry(SOCKET,True)==identity,'local daemon socket moved')
     for kind in OS_FILES:os_identity(kind,expected['os_cli'][kind])
     lifetime(c,10)
-    return {'fixed_peer_key_bound':True,'encrypted_route_bound':True,'peer_expiry':'UNKNOWN' if node.get('KeyExpiry') is None or node.get('Expired') is None else 'checked-current'}
+    require(expiry>datetime.now(timezone.utc),'peer key expired during local preflight')
+    return {'fixed_peer_key_bound':True,'encrypted_route_bound':True,'peer_expiry':'checked-current'}
 
 class BoundConnection(http.client.HTTPConnection):
     def __init__(self,host,*,contract,**kwargs):

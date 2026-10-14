@@ -11,7 +11,7 @@ SPEC=importlib.util.spec_from_file_location('platform_projection_inspector',Path
 inspector=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(inspector)
 # This entrypoint has no credential operation and retains none from import.
 inspector._PASSWORD=inspector._TOKEN=None
-PROJECTION_SCHEMA='oracle-platform-discovery-action-projection/v1'
+PROJECTION_SCHEMA='oracle-platform-discovery-action-projection/v2'
 SCOPE={'api_version':{'method':'GET','resource':'/api/v1/version'},'coolify_identity_fields':['id','name','image','image_id','state'],'helper_inventory':{'maximum':16,'fields':['id','image','name','state']},'remote_mutations':0}
 
 outside_git=inspector.outside_git
@@ -29,7 +29,7 @@ def describe(path,seal):
         rows=[r.split('\t') for r in manifest.decode('ascii').splitlines()]
         closure_count=sum(r[0]=='symlink' for r in rows)
         inspector.verify_tailnet(c);unchanged();inspector.lifetime(c,120)
-        return {'schema':PROJECTION_SCHEMA,'contract_schema':c['schema'],'mode':c['mode'],'claim_id':c['claim_id'],'issued_at':c['issued_at'],'expires_at':c['expires_at'],'contract_sha256':seal,'operator_sha256':c['operator_sha256'],'remote_sha256':c['remote_sha256'],'transport_helper_sha256':c['transport_helper_sha256'],'fixed_target_commitment_sha256':inspector.TARGET_SHA256,'fixed_peer_route_commitment_sha256':inspector.PEER_SHA256,'installed_gate':installed,'managed_link_count':closure_count,'scope':SCOPE,'non_authorizing':True,'claims_created':0,'credentials_used':False,'remote_traffic':0}
+        return {'schema':PROJECTION_SCHEMA,'contract_schema':c['schema'],'mode':c['mode'],'contract_sha256':seal,'operator_sha256':c['operator_sha256'],'remote_sha256':c['remote_sha256'],'transport_helper_sha256':c['transport_helper_sha256'],'fixed_target_commitment_sha256':inspector.TARGET_SHA256,'fixed_peer_route_commitment_sha256':inspector.PEER_SHA256,'installed_gate':installed,'managed_link_count':closure_count,'scope':SCOPE,'non_authorizing':True,'claims_created':0,'credentials_used':False,'remote_traffic':0}
     finally:
         held.close()
 
