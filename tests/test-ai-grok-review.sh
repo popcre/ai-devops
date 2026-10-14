@@ -1498,6 +1498,9 @@ case "${POOL_RUNNER_MODE:-approve}" in
   approve) printf 'Analysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
+  verdictblankline) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence across the complete adapter diff, including the front door, packet identity, lifecycle begin and finish records, report binding, source drift and every refusal branch. This paragraph is deliberately longer than the required report floor so only the verdict formatting behavior is exercised. Head under review: %s. The final decision follows after an allowed blank line and must be preserved as an actual rejection.\n\n## Verdict\n\nREJECT\n' "$HEAD" ;;
+  intervening) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence, written long enough to clear the report floor. Head under review: %s.\n\n## Verdict\nThis line is not a verdict.\nREJECT\n' "$HEAD" ;;
+  emptyuntilEOF) printf 'Analysis with findings, severity groups, source binding and refusal-path evidence across the complete adapter diff, with enough detail to clear the report floor. Head under review: %s.\n\n## Verdict\n\n' "$HEAD" ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   provisional) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nREJECT\n' "$HEAD" ;;
   provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
@@ -1509,10 +1512,12 @@ case "${POOL_RUNNER_MODE:-approve}" in
   # analysis and the head binding sit AFTER the verdict block. The pool gate
   # must accept this, or every valid Gemini response fails one gate.
   geminishape) printf '## Verdict\nAPPROVE\n\nAnalysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n' "$HEAD" ;;
+  geminishapeblank) printf '## Verdict\n\nAPPROVE\n\nAnalysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n' "$HEAD" ;;
   # Contradictory verdicts: first says REJECT, last says APPROVE. For Gemini
   # the pool must refuse (ai-gemini validates the first). For other providers
   # the last verdict is authoritative.
   contradictory) printf '## Verdict\nREJECT\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  contradictoryblank) printf '## Verdict\n\nREJECT\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\n\nAPPROVE\n' "$HEAD" ;;
   # Footer-only body: a leading verdict word and nothing else. No analysis on
   # either side of the block, so the pool gate must still refuse it.
   footerempty) printf '## Verdict\nAPPROVE\n' ;;
@@ -1667,6 +1672,12 @@ check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_A
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" qwen security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
 check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=verdictblankline bash "$POOL" qwen security-review ) > "$POOLTMP/out-vblank" 2>&1; RC_VBLANK=$?
+check "pool_adapter_accepts_exact_verdict_after_blank_lines" "[ '$RC_VBLANK' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=intervening bash "$POOL" qwen security-review ) > "$POOLTMP/out-intervening" 2>&1; RC_INTERVENING=$?
+check "pool_adapter_refuses_text_between_heading_and_verdict" "[ '$RC_INTERVENING' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-intervening'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=emptyuntilEOF bash "$POOL" qwen security-review ) > "$POOLTMP/out-empty-verdict" 2>&1; RC_EMPTY_VERDICT=$?
+check "pool_adapter_refuses_blank_verdict_until_eof" "[ '$RC_EMPTY_VERDICT' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-empty-verdict'"
 rm -f "$POOLTMP/finish-verdicts"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" qwen security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
 check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
@@ -1684,6 +1695,9 @@ check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape" 2>&1; RC_GSHAPE=$?
 GSHAPE_REPORT="$(tail -1 "$POOLTMP/out-gshape" 2>/dev/null)"
 check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && [ -f '$GSHAPE_REPORT' ] && grep -q APPROVE '$GSHAPE_REPORT'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishapeblank bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape-blank" 2>&1; RC_GSHAPE_BLANK=$?
+GSHAPE_BLANK_REPORT="$(tail -1 "$POOLTMP/out-gshape-blank" 2>/dev/null)"
+check "pool_adapter_records_exact_gemini_verdict_after_blank_lines" "[ '$RC_GSHAPE_BLANK' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = APPROVE ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape-qwen" 2>&1; RC_GSHAPE_QWEN=$?
 check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
@@ -1693,6 +1707,8 @@ check "pool_adapter_refuses_a_footer_only_empty_body" "[ '$RC_FEMPTY' -ne 0 ]"
 # providers the last verdict is authoritative (provisional + final is normal).
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=contradictory bash "$POOL" gemini final-check ) > "$POOLTMP/out-contrad" 2>&1; RC_CONTRAD=$?
 check "pool_adapter_refuses_contradictory_verdicts_gemini" "[ '$RC_CONTRAD' -ne 0 ] && grep -q 'contradictory' '$POOLTMP/out-contrad'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=contradictoryblank bash "$POOL" gemini final-check ) > "$POOLTMP/out-contrad-blank" 2>&1; RC_CONTRAD_BLANK=$?
+check "pool_adapter_refuses_contradictory_blankline_verdicts_gemini" "[ '$RC_CONTRAD_BLANK' -ne 0 ] && grep -q 'contradictory' '$POOLTMP/out-contrad-blank'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=contradictory bash "$POOL" qwen security-review ) > "$POOLTMP/out-contrad-qwen" 2>&1; RC_CONTRAD_QWEN=$?
 CONTRAD_QWEN_REPORT="$(tail -1 "$POOLTMP/out-contrad-qwen" 2>/dev/null)"
 check "pool_adapter_takes_last_verdict_for_non_gemini_contradictory" "[ '$RC_CONTRAD_QWEN' -eq 0 ] && grep -q APPROVE '$CONTRAD_QWEN_REPORT'"

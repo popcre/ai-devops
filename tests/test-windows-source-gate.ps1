@@ -34,7 +34,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $report=Join-Path $reviewDir 'approved-review.md'
   $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh.' } elseif ($FirstInstall) { 'Approved first-managed-install.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery.' } else { 'Approved source update.' }
   $operationRow = if ($operation -match '^Approved ((legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery))\.$') { @('| operation | ' + [char]96 + $Matches[1] + [char]96 + ' |') } else { @() }
-  @(@('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |')) + $(if ($OperationInBody) { @() } else { $operationRow }) + @('## Result') + $(if ($OperationInBody) { $operationRow } else { @() }) + @($operation,'## Verdict','APPROVE')) | Set-Content -LiteralPath $report -Encoding ASCII
+  @(@('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |')) + $(if ($OperationInBody) { @() } else { $operationRow }) + @('## Result') + $(if ($OperationInBody) { $operationRow } else { @() }) + @($operation,'## Verdict','','APPROVE','')) | Set-Content -LiteralPath $report -Encoding ASCII
   $reportHash=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
   $bashReport=(& $bash -c 'cygpath -u -- "$1"' 'ai-devops' $report).Trim()
   $stateDir=Join-Path (Split-Path -Parent $Fixture.Launcher) ('review-lifecycle\runs\' + $identity.repository_key + '\codex\codex')
@@ -65,6 +65,19 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   }
   @{schema_version=1;target_head=$Target;installed_head=$Base;installed_checkout=$Fixture.Repo;installed_launcher=$Fixture.Launcher;policy_digest=$policy;source_digest=$sourceDigest;review_report=$report;review_report_sha256=$reportHash;reviewer_approval='APPROVE by grok (implementer claude, assignment alloc-test-1) for deploy';legacy_migration=$LegacyMigration;first_install=$FirstInstall;recover_launchers=$RecoverLaunchers;managed_inventory=$inventory;installed_launcher_sha256=$launcherHash;installed_cmd_sha256=$cmdHash;installed_source_sha256=$installedSourceHash;windows_receipt_sha=$receiptSha;issued_at='2026-09-28T00:00:00Z'} | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $authPath -Encoding ASCII
   return $authPath
+}
+function Set-TestReportAndRebind($Fixture, [string[]]$ReportLines) {
+  $authDir=Join-Path (Split-Path -Parent $Fixture.Launcher) 'install-authorizations'
+  $authPath=Get-ChildItem -LiteralPath $authDir -Filter '*.json' -File | Select-Object -First 1 -ExpandProperty FullName
+  $auth=Get-Content -Raw -LiteralPath $authPath | ConvertFrom-Json
+  $ReportLines | Set-Content -LiteralPath $auth.review_report -Encoding ASCII
+  $reportHash=(Get-FileHash -LiteralPath $auth.review_report -Algorithm SHA256).Hash.ToLowerInvariant()
+  $auth.review_report_sha256=$reportHash
+  $auth | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $authPath -Encoding ASCII
+  $lifecycle=Get-ChildItem -LiteralPath (Join-Path (Split-Path -Parent $Fixture.Launcher) 'review-lifecycle') -Filter fixture.json -Recurse | Select-Object -First 1
+  $state=Get-Content -Raw -LiteralPath $lifecycle.FullName | ConvertFrom-Json
+  $state.report_sha256=$reportHash
+  $state | ConvertTo-Json -Compress | Set-Content -LiteralPath $lifecycle.FullName -Encoding ASCII
 }
 function New-Fixture([string]$Name) {
   $remote = Join-Path $temp "$Name.git"
@@ -105,6 +118,30 @@ function Invoke-Gate($Fixture, [switch]$ExpectFailure, [string]$ExpectedHead = '
 
 try {
   $clean=New-Fixture clean; Invoke-Gate $clean
+
+  foreach ($case in @(
+    @{ Name='intervening-prose'; Lines=@('# Review', '| reviewed commit | `TARGET` |', '| source digest | `DIGEST` |', 'Approved source update.', '## Verdict', '', 'Reviewer says APPROVE', '') },
+    @{ Name='wrong-token'; Lines=@('# Review', '| reviewed commit | `TARGET` |', '| source digest | `DIGEST` |', 'Approved source update.', '## Verdict', '', 'REJECT', '') },
+    @{ Name='trailing-prose'; Lines=@('# Review', '| reviewed commit | `TARGET` |', '| source digest | `DIGEST` |', 'Approved source update.', '## Verdict', '', 'APPROVE', 'extra') },
+    @{ Name='heading-whitespace'; Lines=@('# Review', '| reviewed commit | `TARGET` |', '| source digest | `DIGEST` |', 'Approved source update.', '## Verdict ', '', 'APPROVE', '') },
+    @{ Name='token-whitespace'; Lines=@('# Review', '| reviewed commit | `TARGET` |', '| source digest | `DIGEST` |', 'Approved source update.', '## Verdict', '', 'APPROVE ', '') }
+  )) {
+    $verdictCase=New-Fixture ('verdict-' + $case.Name)
+    $caseBase=(git -C $verdictCase.Repo rev-parse HEAD).Trim()
+    'changed gate' | Set-Content (Join-Path $verdictCase.Repo 'bin/ai-task-gates')
+    git -C $verdictCase.Repo add bin/ai-task-gates
+    git -C $verdictCase.Repo commit -m protected | Out-Null
+    git -C $verdictCase.Repo push origin main | Out-Null
+    $caseTarget=(git -C $verdictCase.Repo rev-parse HEAD).Trim()
+    git -C $verdictCase.Repo reset --hard $caseBase | Out-Null
+    Write-TestAuthorization $verdictCase $caseTarget $caseBase | Out-Null
+    $caseAuthPath=Join-Path (Split-Path -Parent $verdictCase.Launcher) ('install-authorizations\' + $caseTarget + '.json')
+    $caseDigest=(Get-Content -Raw -LiteralPath $caseAuthPath | ConvertFrom-Json).source_digest
+    $tampered=@($case.Lines | ForEach-Object { $_.Replace('TARGET',$caseTarget).Replace('DIGEST',$caseDigest) })
+    Set-TestReportAndRebind $verdictCase $tampered
+    Invoke-Gate $verdictCase -ExpectedHead $caseTarget -ExpectFailure -FailureContains 'does not approve the exact target and source'
+    Assert ((git -C $verdictCase.Repo rev-parse HEAD).Trim() -eq $caseBase) "$($case.Name) authorization advanced checkout"
+  }
 
   $dirty=New-Fixture dirty; 'dirty' | Add-Content (Join-Path $dirty.Repo 'README.md'); Invoke-Gate $dirty -ExpectFailure
 

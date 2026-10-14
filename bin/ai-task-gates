@@ -54,6 +54,20 @@ need_value(){ [ $# -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."; }
 fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX_UNCLASSIFIED"; }
 blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
 
+# Keep the terminal report-shape check alongside the lifecycle verdict check.
+# Provider adapters may put blank lines around a structured verdict, but the
+# last nonblank line must be the token and the preceding nonblank line its
+# exact heading; any prose or contradictory trailing material fails closed.
+report_has_terminal_approve(){
+  local report="${1:-}"
+  [ -f "$report" ] || return 1
+  awk '
+    { sub(/\r$/, "") }
+    $0 !~ /^[[:space:]]*$/ { previous = last; last = $0 }
+    END { exit !(last == "APPROVE" && previous == "## Verdict") }
+  ' "$report"
+}
+
 usage(){
   cat <<'EOF'
 usage: ai-task-gates <command> [options]
@@ -1680,7 +1694,7 @@ linux_review_authority(){
   report="$(jq -r .review_report "$auth")"; [ -f "$report" ] || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   [ "$(jq -r .review_report_sha256 "$auth")" = "$report_hash" ] || return 1
-  [ "$(tail -n 2 "$report" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || return 1
+  report_has_terminal_approve "$report" || return 1
   grep -Fqx "| reviewed commit | \`$target\` |" "$report" || return 1
   source_digest="$(jq -r .source_digest "$auth")"
   grep -Fqx "| source digest | \`$source_digest\` |" "$report" || return 1
@@ -2217,7 +2231,7 @@ cmd_authorize_install(){
   # below it, and reviewer text never names the target.
   reviewed_commit="$(sed '/^## Result$/,$d' "$report_real" | awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}')"
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
-  [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
+  report_has_terminal_approve "$report_real" || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
   # A migration review approves exactly one operation: the report's recorded
   # operation (written by the review wrapper from `ai-review --operation`) must
   # be the requested one, and no sibling operation may be approved beside it.

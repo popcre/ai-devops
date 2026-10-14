@@ -103,6 +103,15 @@ printf '## Verdict\nAPPROVE\n' > "$FLOOR_EMPTY"
 } > "$FLOOR_REAL"
 check "report_floor_rejects_bare_decision" "! bash -c 'set -e; . \"'$CORE'\"; rlc_report_floor_ok \"'$FLOOR_EMPTY'\"'"
 check "report_floor_accepts_substance" "bash -c 'set -e; . \"'$CORE'\"; rlc_report_floor_ok \"'$FLOOR_REAL'\"'"
+VERDICT_BLANK="$TMP/verdict-blank.md"
+VERDICT_INTERVENING="$TMP/verdict-intervening.md"
+VERDICT_EOF="$TMP/verdict-eof.md"
+printf '## Verdict\n\nREJECT\n' > "$VERDICT_BLANK"
+printf '## Verdict\ncommentary\nREJECT\n' > "$VERDICT_INTERVENING"
+printf '## Verdict\n\n' > "$VERDICT_EOF"
+check "core_parser_accepts_exact_reject_after_blank_lines" "[ \"\$(rlc_parse_verdict '$VERDICT_BLANK')\" = REJECT ]"
+check "core_parser_refuses_intervening_text_before_token" "! rlc_parse_verdict '$VERDICT_INTERVENING' >/dev/null 2>&1"
+check "core_parser_refuses_empty_verdict_until_eof" "! rlc_parse_verdict '$VERDICT_EOF' >/dev/null 2>&1"
 
 # --- structural forcing function: door refuses without the runner token -----
 echo '== structural forcing function (doors)'
@@ -591,6 +600,106 @@ EOF
     "find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 done
 unset _prov _mock _ov _prc _pstate
+
+# A real StepFun engine-path fixture with the provider's reported formatting:
+# the exact REJECT token follows a blank line, and lifecycle must finish REJECT.
+STEPFUN_BLANK_REJECT="$TMP/stepfun-blank-reject-door.sh"
+cat > "$STEPFUN_BLANK_REJECT" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ]
+{
+  printf 'Reviewed exact head %s. ' "$DOOR_HEAD"
+  printf 'The complete change, sibling paths, evidence binding, source identity, fail-closed checks, lifecycle behavior and tests were examined. '
+  printf 'This analysis is deliberately long enough to satisfy the report floor and records a substantive rejection. '
+  printf 'No approval is granted because the tested fixture models the exact StepFun report shape under review.
+
+## Verdict
+
+REJECT
+'
+} > "$DOOR_REPORT_OUT"
+EOF
+chmod +x "$STEPFUN_BLANK_REJECT"
+set +e
+( cd "$MREPO" && AI_REVIEW_DOOR_STEPFUN="$STEPFUN_BLANK_REJECT" timeout 90 "$ENGINE" review --provider stepfun \
+    --name engine-stepfun-blank-reject --repo "$MREPO" --mode final-check --caller codex ) \
+    >"$TMP/stepfun-blank-reject.out" 2>"$TMP/stepfun-blank-reject.err"
+STEPFUN_BLANK_REJECT_RC=$?
+set -e
+STEPFUN_BLANK_REJECT_REPORT="$(tail -1 "$TMP/stepfun-blank-reject.out" 2>/dev/null || true)"
+STEPFUN_BLANK_REJECT_STATE="$(grep -RslF "$STEPFUN_BLANK_REJECT_REPORT" "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"
+check "stepfun_engine_blankline_reject_completes_not_missing_verdict" \
+  "test '$STEPFUN_BLANK_REJECT_RC' -eq 0 && test -s '$STEPFUN_BLANK_REJECT_REPORT' && jq -e '.status==\"completed\" and .verdict==\"REJECT\" and .failure_class==null' '$STEPFUN_BLANK_REJECT_STATE' >/dev/null"
+check "stepfun_engine_blankline_reject_keeps_reject_in_report" \
+  "test -s '$STEPFUN_BLANK_REJECT_REPORT' && tail -2 '$STEPFUN_BLANK_REJECT_REPORT' | grep -qx REJECT && ! grep -q 'no valid ## Verdict' '$TMP/stepfun-blank-reject.err'"
+
+# Exercise the original StepFun route end to end: a fake StepCode CLI emits the
+# provider's blank-line verdict shape, the real StepFun adapter builds the
+# report, and the shared engine must record semantic REJECT (not missing).
+SF_E2E="$TMP/stepfun-real-adapter"
+mkdir -p "$SF_E2E/home/.config/ai-devops/secrets" "$SF_E2E/bin"
+printf 'synthetic-test-key\n' > "$SF_E2E/home/.config/ai-devops/secrets/stepfun-api-key"
+chmod 600 "$SF_E2E/home/.config/ai-devops/secrets/stepfun-api-key"
+cat > "$SF_E2E/bin/step" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = --help ]; then echo 'step - AI coding assistant'; exit 0; fi
+if [ "${1:-}" = --version ]; then echo '0.1.1'; exit 0; fi
+case " $* " in *' rpc '*) ;; *) exit 2;; esac
+read -r request
+prompt="$(jq -r '.message' <<<"$request")"
+head="HEAD_PLACEHOLDER"
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'
+read -r request
+text="Reviewed exact head $head. The packet identity, source binding, report lifecycle, rejection preservation, whitespace parsing, invalid intervening text, empty verdict handling, and downstream caller impact were checked in detail. The adapter preserves the substantive findings and terminal decision exactly, and the lifecycle records the review as completed with no failure classification. This is a meaningful negative review result that must remain visible to callers and release gates. No approval is granted."
+text+=$'\n\n## Verdict\n\nREJECT'
+jq -cn --arg text "$text" \
+  '{id:"door-text",type:"response",data:{text:$text}}'
+EOF
+sed -i "s/HEAD_PLACEHOLDER/$HEAD_SHA/" "$SF_E2E/bin/step"
+chmod 700 "$SF_E2E/bin/step"
+cat > "$SF_E2E/bin/bwrap" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --) shift; break ;;
+    --chdir) shift 2 ;;
+    --setenv) export "$2=$3"; shift 3 ;;
+    --ro-bind|--bind|--symlink) shift 3 ;;
+    --tmpfs|--dev|--proc|--dir) shift 2 ;;
+    --unshare-all|--die-with-parent|--new-session|--share-net) shift ;;
+    *) echo "unexpected bwrap argument" >&2; exit 2 ;;
+  esac
+done
+exec "$@"
+EOF
+chmod 700 "$SF_E2E/bin/bwrap"
+SF_E2E_RC=0
+env -i PATH="$PATH" HOME="$SF_E2E/home" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none \
+  AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_REVIEW_LIFECYCLE_DIR="$AI_REVIEW_LIFECYCLE_DIR" \
+  AI_REVIEW_SCOREBOARD_DIR="$AI_REVIEW_SCOREBOARD_DIR" AI_REVIEW_SCOREBOARD_FILE="$AI_REVIEW_SCOREBOARD_FILE" \
+  AI_REVIEW_PACKET_STORE="$AI_REVIEW_PACKET_STORE" AI_REVIEW_IMPLEMENT_ROOT="$AI_REVIEW_IMPLEMENT_ROOT" \
+  AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" AI_REVIEW_SCOREBOARD_BIN="$SCOREBOARD_STUB" \
+  AI_REVIEW_DOOR_STEPFUN="$STEPFUN_DOOR" AI_STEPFUN_ENGINE=stepcode \
+  AI_STEPFUN_STEP_BIN="$SF_E2E/bin/step" AI_STEPFUN_BWRAP="$SF_E2E/bin/bwrap" \
+  AI_STEPFUN_KEY_STORE="$SF_E2E/home/.config/ai-devops/secrets/stepfun-api-key" \
+  AI_STEPFUN_STATE_DIR="$SF_E2E/home/.local/state/ai-devops/stepfun" \
+  AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_RPM=100000 timeout 90 "$ENGINE" review --provider stepfun \
+    --name engine-stepfun-real-adapter-blank-reject --repo "$MREPO" --mode final-check --caller codex \
+    >"$SF_E2E/stdout" 2>"$SF_E2E/stderr" || SF_E2E_RC=$?
+SF_E2E_REPORT="$(tail -1 "$SF_E2E/stdout" 2>/dev/null || true)"
+SF_E2E_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -path '*/stepfun/codex/*.json' -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
+if [ "$SF_E2E_RC" -ne 0 ]; then
+  cat "$SF_E2E/stderr" >&2
+  if [ -n "$SF_E2E_STATE" ]; then cat "$SF_E2E_STATE.diagnostics/report.md" "$SF_E2E_STATE.failure-diagnostics/report.md" 2>/dev/null >&2 || true; fi
+fi
+check "stepfun_real_adapter_blankline_reject_completes_semantically_through_engine" \
+  "test '$SF_E2E_RC' -eq 0 && test -s '$SF_E2E_REPORT' && jq -e '.status==\"completed\" and .verdict==\"REJECT\" and .failure_class==null' '$SF_E2E_STATE' >/dev/null"
+check "stepfun_real_adapter_blankline_reject_preserves_terminal_report" \
+  "test -s '$SF_E2E_REPORT' && tail -2 '$SF_E2E_REPORT' | grep -qx REJECT && ! grep -q 'no valid ## Verdict' '$SF_E2E/stderr'"
 
 # A door's out-of-credit exit (92, rotation rule 10) must survive the runner,
 # as ai-review-pool keeps it for wrappers; anything else is provider-failed.
