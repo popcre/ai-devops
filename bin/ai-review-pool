@@ -568,7 +568,9 @@ identity_stable() { # identity_stable BEFORE_JSON AFTER_JSON REPO
   # FORWARD move of that base (ancestry-proven); any other base change refuses.
   b_base="$(jq -r '.base // ""' <<<"$before")"; a_base="$(jq -r '.base // ""' <<<"$after")"
   if [ -n "$b_ref" ] && [ "$(jq -r '.requested_base // ""' <<<"$before")" = "$b_ref" ]; then
-    [ "$b_base" = "$a_base" ] || { [ -n "$b_base" ] && [ -n "$a_base" ] && git -C "$repo" merge-base --is-ancestor "$b_base" "$a_base" 2>/dev/null; } || return 1
+    # ...and never once the reviewed head itself is contained in the moved base.
+    b_head="$(jq -r '.head // ""' <<<"$before")"
+    [ "$b_base" = "$a_base" ] || { [ -n "$b_base" ] && [ -n "$a_base" ] && git -C "$repo" merge-base --is-ancestor "$b_base" "$a_base" 2>/dev/null && ! git -C "$repo" merge-base --is-ancestor "$b_head" "$a_base" 2>/dev/null; } || return 1
   else
     [ "$b_base" = "$a_base" ] || return 1
   fi

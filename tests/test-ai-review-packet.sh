@@ -748,12 +748,15 @@ check "retain_of_broken_packet_at_dest_fails_without_deleting" \
 POOL="$REPO_ROOT/bin/ai-review-pool"
 STABLE_FN="$TMP/identity_stable.sh"
 sed -n '/^identity_stable()/,/^}/p' "$POOL" > "$STABLE_FN"
-ID_OLD='{"repository":"r","head":"'"$FWD_RECORDED_TIP"'","source_digest":"d","base":"'"$FWD_RECORDED_TIP"'","merge_base":"'"$FWD_BASE"'","rule":"explicitly requested by the caller as '"'"'main'"'"'","requested_base":"main","target_ref":"main","target":"'"$FWD_RECORDED_TIP"'"}'
+FEAT_SHA="$(git -C "$FWD" rev-parse feature)"
+ID_OLD='{"repository":"r","head":"'"$FEAT_SHA"'","source_digest":"d","base":"'"$FWD_RECORDED_TIP"'","merge_base":"'"$FWD_BASE"'","rule":"explicitly requested by the caller as '"'"'main'"'"'","requested_base":"main","target_ref":"main","target":"'"$FWD_RECORDED_TIP"'"}'
 ID_FWD=$(jq -c --arg b "$FWD_NEW_TIP" '.base=$b | .target=$b' <<<"$ID_OLD")
 ID_HEAD=$(jq -c '.head="ffffffffffffffffffffffffffffffffffffffff"' <<<"$ID_FWD")
-FEAT_SHA="$(git -C "$FWD" rev-parse feature)"
 ID_BASEX=$(jq -c --arg b "$FEAT_SHA" '.base=$b' <<<"$ID_FWD")
 ID_INCL=$(jq -c --arg b "$FEAT_SHA" '.base=$b | .merge_base=$b' <<<"$ID_FWD")
+ID_HEADIN=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD" | jq -c --arg b "$FEAT_SHA" '.base=$b | .merge_base=$b | .target=$b')
+ID_HEADIN_OLD=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD")
+check "pool_identity_refuses_base_moved_to_contain_reviewed_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_HEADIN_OLD' '$ID_HEADIN'"
 check "pool_identity_refuses_base_moving_to_include_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_INCL'"
 check "pool_identity_tolerates_forward_move_of_explicit_base" "bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_FWD'"
 check "pool_identity_refuses_head_change" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_HEAD'"
