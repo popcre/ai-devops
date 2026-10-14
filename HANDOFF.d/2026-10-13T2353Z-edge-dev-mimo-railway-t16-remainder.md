@@ -39,14 +39,14 @@ Verified 2026-10-13 on `origin/main` after PR https://github.com/popcre/ai-devop
 |---|---|---|
 | PR #1712 closeout handoff landed | merge `091f69ef` | done |
 | edge-alien Railway MCP | prior session live probe: clean | done |
-| 916 / 916-alien Railway MCP | SSH `ahazan2@100.110.219.31` → hostname `916-alien`; no `railway` in `~/.claude.json` (incl. projects) or `~/.codex/config.toml`; also clean in `~/.claude/settings.json` and `%APPDATA%\Claude\claude_desktop_config.json` | done |
+| 916 / 916-alien Railway MCP | SSH `ahazan2@916-direct` (Tailscale alias in the managed SSH config) → hostname `916-alien`; no `railway` in `~/.claude.json` (incl. projects) or `~/.codex/config.toml`; also clean in `~/.claude/settings.json` and `%APPDATA%\Claude\claude_desktop_config.json` | done |
 | Machine-class docs | on main (PR #1690) | done |
 | t16 / albt16 Railway MCP | **not done** — no admin channel | **BLOCKED** |
 | issue #1663 | closed by owner request 2026-10-13 | closed |
 
 Live comment with 916 evidence and the t16 block: https://github.com/popcre/ai-devops/issues/1663#issuecomment-6155541398
 
-t16 addresses (keep out of public docs if sensitive; values are Tailscale/private LAN): Tailscale `100.96.221.71` (`t16.coho-banded.ts.net`), LAN `albt16.local` `10.0.5.131`. NetBIOS name `ALBT16`.
+t16 identity (addresses live in the private machine atlas / Tailscale admin, not here): hostname `albt16` / NetBIOS `ALBT16`, Tailscale MagicDNS name `t16`. NetBIOS workgroup `IML`.
 
 ## 4. Everything we tried that did NOT work
 
@@ -65,7 +65,7 @@ t16 addresses (keep out of public docs if sensitive; values are Tailscale/privat
 
 ## 5. Root causes and key findings
 
-- 916's Windows OpenSSH is on and accepts the fleet key `916-alien` as user `ahazan2` over Tailscale. LAN `10.0.5.55:22` was closed when probed; use Tailscale `100.110.219.31` (or `916-direct`).
+- 916's Windows OpenSSH is on and accepts the fleet key `916-alien` as user `ahazan2` over Tailscale. The LAN address :22 was closed when probed; use the Tailscale SSH alias `916-direct` (or host `916` with the LAN probe failing closed).
 - t16 has no remote admin listener at all except SMB/RPC. Opening OpenSSH needs an existing admin channel (working ScreenConnect login, console, or credentials that can create a process). Chicken-and-egg until that appears.
 - Saved browser passwords can be complete and still useless — they go stale. A vault entry must be a *working* login; do not store a rejected password as if it were live.
 - Networking-only hosts (`edge-alien`, `edge-runn-envy`, `edge-runn-xps`) must not get the toolkit. Removal of stray MCP entries is the correct cleanup; do not re-run `setup-machine.ps1` on them.
@@ -74,7 +74,7 @@ t16 addresses (keep out of public docs if sensitive; values are Tailscale/privat
 
 1. Get an admin channel on **t16 / albt16** (one of):
    - Working ScreenConnect login for `https://edgehome.screenconnect.com` (user `albert@popcre.com` or `ahazan@edgeucational.com` — current password unknown; browser copy rejected), then use remote control or Run Command.
-   - Or Windows credentials that can open `C$` / WMI / `schtasks` on `100.96.221.71`.
+   - Or Windows credentials that can open `C$` / WMI / `schtasks` on host `t16` / `albt16`.
    - Or physical/console access to enable OpenSSH.
 2. Enable Windows OpenSSH on t16 the same way as other fleet hosts (see https://github.com/popcre/ai-devops/blob/main/bin/configure-windows-bootstrap-access.ps1 and https://github.com/popcre/ai-devops/blob/main/bin/setup-runner-host.ps1). Authorize the `916-alien` public key. Firewall only on the Tailscale address if following the bootstrap script. Do **not** run `setup-machine.ps1` (toolkit) on networking-only hosts; t16 is a **dev box** per docs/config-inventory.md, so toolkit install is allowed only if the owner wants it — this workstream only needs config cleanup.
 3. On t16, inspect and clear Railway MCP if present:
@@ -99,8 +99,8 @@ You'll know it worked when SSH hostname returns on t16 and both config files sho
 - Repo: https://github.com/popcre/ai-devops on `origin/main`.
 - Machine: `edge-dev`, Windows 11. Git Bash at `C:\Program Files\Git\bin\bash.exe`.
 - Fleet SSH key: `~/.ssh/916-alien` (`IdentitiesOnly=yes`).
-- Reachable now: **916** (`ahazan2@100.110.219.31`), **edge-alien** (`ahazan@100.112.207.98`) — both Railway-clean.
-- Not reachable for admin: **t16** (`100.96.221.71` / `10.0.5.131`).
+- Reachable now: **916** (`ahazan2@916-direct`), **edge-alien** (`ahazan@alien-direct`) — both Railway-clean. Addresses stay in the private machine atlas.
+- Not reachable for admin: **t16** / **albt16** (Tailscale name `t16`).
 - Secrets vault: `vibe_coding`. ScreenConnect password not stored (browser copy rejected). Tailscale OAuth items already in the vault — do not recreate.
 - 916 is powered on intermittently (SSH config note); check `tailscale status` before relying on it.
 
