@@ -496,7 +496,12 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   # construction, so it legitimately differs after a tolerated forward move.
   # Tip semantics are enforced by the ancestry check above; the re-resolved
   # BASE_SHA / TARGET_REF equality and the merge-base equality stay strict.
-  [ "$BASE_SHA" = "$base" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
+  # An explicit base that is the moving target ref records the tip as its base:
+  # tolerate only a forward move of that recorded base (ancestry-proven).
+  local base_forward=0
+  if [ -n "$ref" ] && [ "$(jqr .requested_base "$file")" = "$ref" ] && [ -n "$BASE_SHA" ] \
+     && git -C "$source" merge-base --is-ancestor "$base" "$BASE_SHA" 2>/dev/null; then base_forward=1; fi
+  { [ "$BASE_SHA" = "$base" ] || [ "$base_forward" -eq 1 ]; } && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
