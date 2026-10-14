@@ -34,7 +34,14 @@ diagnose the failure first.
 3. If the command is not on PATH, locate the installed launcher or the canonical
    ai-devops checkout and invoke its `bin/ai-reviewer-issue`. Do not claim the
    recorder is missing until both were checked.
-4. Report only the computer name, resulting issue ID, and saved path to Albert.
+4. After a successful record, run `ai-reviewer-logs-sync sync` to publish the
+   encrypted reviewer-log bundle to the private archive. This uses the existing
+   fleet sync and may include other new reviewer logs from this machine. If the
+   command is not on PATH, locate the installed launcher or canonical ai-devops
+   checkout and invoke its `bin/ai-reviewer-logs-sync sync`.
+5. Report the computer name, resulting issue ID, saved path, and whether the
+   sync completed. If sync fails or is unavailable, keep the local incident and
+   report that it remains pending upload; do not record it again.
 
 ## Required behavior
 
@@ -49,6 +56,9 @@ diagnose the failure first.
 - Do not reduce the details to one sentence.
 - Do not invent a log path, command, duration, or retry.
 - Do not include secrets. The recorder also redacts common credential forms.
+- Sync only through `ai-reviewer-logs-sync`; it encrypts evidence before upload.
+- A failed sync does not undo the local incident record. Report the upload
+  failure plainly so the hourly sync or a later retry can publish it.
 - Do not run `ai-reviewer-issue list` or `show` while recording a new failure;
   those are maintenance actions.
 
