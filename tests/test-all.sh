@@ -151,6 +151,9 @@ mapfile -t all_tests < <(find "$SUITE_DIR" -maxdepth 1 -type f -name 'test-*.sh'
 # deleting the file: a suspended suite stays runnable directly by file name
 # (bash tests/test-ai-kimi.sh) and returns to the lanes when its manifest
 # entry is removed.
+# Suspended suites (frozen tooling, owner 2026-10-13) are dropped here and
+# stripped from the assembled Windows lane lists in manifest_json.
+suspended_tests=()
 if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>&1; then
   jq -e '.suspended_bash | type == "array" and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
     printf 'test-all.sh: suite manifest has an invalid suspended_bash group\n' >&2; exit 2; }
@@ -216,11 +219,6 @@ elif [ "$windows_offline" = true ]; then
   manifest_json | jq -e '.windows_offline_bash | type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1 || {
     printf 'test-all.sh: Windows suite manifest has no valid windows_offline_bash group\n' >&2; exit 2; }
   mapfile -t tests < <(manifest_json | jq -r '.windows_offline_bash[]' | tr -d '\r')
-  # A suspended suite is already removed from all_tests; drop it from the
-  # Windows lane too so the undiscovered-suite check below stays honest.
-  if [ "${#suspended_tests[@]}" -gt 0 ]; then
-    mapfile -t tests < <(printf '%s\n' "${tests[@]}" | grep -Fxv -f <(printf '%s\n' "${suspended_tests[@]}") || true)
-  fi
   [ "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#tests[@]}" ] || {
     printf 'test-all.sh: windows_offline_bash contains a duplicate suite\n' >&2; exit 2; }
   if [ "$exclude_reviewer_safety" = true ]; then
