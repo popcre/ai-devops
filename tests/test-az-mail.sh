@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d)"
-trap 'rm -rf -- "$TMP"' EXIT
+trap 'status=$?; if [ "$status" -ne 0 ]; then printf "FAIL: test-az-mail.sh exited %s at: %s\n" "$status" "${BASH_COMMAND:-unknown}" >&2; fi; rm -rf -- "$TMP"' EXIT
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$1"; }
