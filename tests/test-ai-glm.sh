@@ -483,6 +483,60 @@ LOCK_SCRIPT
   local symlink_rc=$?
   check 'maintenance lock refuses a symlink leaf' "test '$symlink_rc' -ne 0 && test ! -e '$root/symlink-acquired' && test ! -s '$root/target'"
 
+  dir="$root/root-race"; mkdir -p "$dir"; chmod 0700 "$dir"
+  local race_bin="$root/root-race-bin" race_target="$root/root-race-target" race_saved="$root/root-race-saved" race_marker="$root/root-race-swapped"
+  mkdir -p "$race_bin"; printf 'synthetic target\n' > "$race_target"; chmod 0644 "$race_target"
+  local race_target_before race_target_after race_hash_before race_hash_after race_rc
+  race_target_before="$(stat -c '%u:%g:%a:%h:%s' "$race_target")"; race_hash_before="$(sha256sum "$race_target" | cut -d' ' -f1)"
+  cat > "$race_bin/id" <<'RACE_ID'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ]; then printf 0; else exec /usr/bin/id "$@"; fi
+RACE_ID
+  cat > "$race_bin/chown" <<'RACE_CHOWN'
+#!/usr/bin/env bash
+: > "$RACE_CHOWN_CALLED"
+RACE_CHOWN
+  cat > "$race_bin/chmod" <<'RACE_CHMOD'
+#!/usr/bin/env bash
+: > "$RACE_CHMOD_CALLED"
+RACE_CHMOD
+  cat > "$race_bin/stat" <<'RACE_STAT'
+#!/usr/bin/env bash
+last="${!#}"
+out="$(/usr/bin/stat "$@")" || exit $?
+format="${2:-}"
+if [[ ( "$last" = "$RACE_LOCK" || "$last" = /proc/*/fd/* ) && "$format" = *'%d:%i:%u:%g:'* ]]; then
+  IFS=: read -r dev ino uid gid mode links size kind <<<"$out"
+  if [[ -e "$RACE_CHOWN_CALLED" ]]; then uid="$RACE_DIR_UID"; gid="$RACE_DIR_GID"; else uid=0; fi
+  out="$dev:$ino:$uid:$gid:$mode:$links:$size:$kind"
+  if [[ "$RACE_DO_SWAP" = 1 && "$last" = "$RACE_LOCK" && ! -e "$RACE_MARKER" && ! -L "$RACE_LOCK" ]]; then
+    /bin/mv -- "$RACE_LOCK" "$RACE_SAVED"
+    /bin/ln -s -- "$RACE_TARGET" "$RACE_LOCK"
+    : > "$RACE_MARKER"
+  fi
+fi
+printf '%s\n' "$out"
+RACE_STAT
+  chmod 0700 "$race_bin/id" "$race_bin/chown" "$race_bin/chmod" "$race_bin/stat"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/root-race-acquired" \
+    RACE_LOCK="$dir/maintenance.lock" RACE_TARGET="$race_target" RACE_SAVED="$race_saved" RACE_MARKER="$race_marker" \
+    RACE_DO_SWAP=1 RACE_DIR_UID="$(id -u)" RACE_DIR_GID="$(id -g)" RACE_CHOWN_CALLED="$root/root-race-chown" RACE_CHMOD_CALLED="$root/root-race-chmod" PATH="$race_bin:$PATH" \
+    bash "$script" > "$root/root-race.log" 2>&1
+  race_rc=$?
+  race_target_after="$(stat -c '%u:%g:%a:%h:%s' "$race_target")"; race_hash_after="$(sha256sum "$race_target" | cut -d' ' -f1)"
+  check 'root lock attach detects path swap before chown/chmod touches a foreign target' \
+    "test '$race_rc' -ne 0 && test -e '$race_marker' && test ! -e '$root/root-race-chown' && test ! -e '$root/root-race-chmod' && test ! -e '$root/root-race-acquired' && test '$race_target_before' = '$race_target_after' && test '$race_hash_before' = '$race_hash_after'"
+
+  dir="$root/root-attach"; mkdir -p "$dir"; chmod 0700 "$dir"
+  HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/root-attach-acquired" \
+    RACE_LOCK="$dir/maintenance.lock" RACE_TARGET="$race_target" RACE_SAVED="$race_saved" RACE_MARKER="$root/root-attach-swapped" \
+    RACE_DO_SWAP=0 RACE_DIR_UID="$(id -u)" RACE_DIR_GID="$(id -g)" RACE_CHOWN_CALLED="$root/root-attach-chown" RACE_CHMOD_CALLED="$root/root-attach-chmod" PATH="$race_bin:$PATH" \
+    bash "$script" > "$root/root-attach.log" 2>&1
+  local root_attach_rc=$?
+  check 'root attach keeps the verified inode and repairs only its owner and mode' \
+    "test '$root_attach_rc' -eq 0 && test -e '$root/root-attach-acquired' && test -e '$root/root-attach-chown' && test -e '$root/root-attach-chmod'"
+  if [ "$root_attach_rc" -ne 0 ]; then cat "$root/root-attach.log"; fi
+
   dir="$root/unsafe-hardlink"; mkdir -p "$dir"; chmod 0700 "$dir"; : > "$dir/maintenance.lock"; chmod 0600 "$dir/maintenance.lock"; ln "$dir/maintenance.lock" "$root/hardlink"
   HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=0 MARKER="$root/hardlink-acquired" bash "$script" >/dev/null 2>&1
   local hardlink_rc=$?
@@ -551,6 +605,86 @@ if [ "${AI_GLM_MAINTENANCE_TESTS_ONLY:-0}" = 1 ]; then
   ((FAIL == 0)); exit $?
 fi
 
+glm_auth_fail_closed_cases() {
+  local fixture="$TMP/auth-fail-closed" script rc
+  mkdir -p "$fixture"; chmod 0700 "$fixture"
+  printf '{"body":"invented"}' > "$fixture/body.json"
+  cat > "$fixture/cases.sh" <<'AUTH_CASES'
+set -u
+source "$AI_GLM_SOURCE"
+PW_FILE="$FIXTURE/server-password"
+BASE=http://127.0.0.1:59999
+server_pw(){ printf '%s' "$TEST_PASSWORD"; }
+curl(){
+  printf called >> "$CURL_CALLS"
+  cat > "$CONFIG_CAPTURE"
+  printf '%s\n' "$@" > "$ARGS_CAPTURE"
+  local output='' status=0 arg
+  while [ "$#" -gt 0 ]; do
+    case "$1" in -o) output="$2"; shift 2 ;; -w) status=1; shift 2 ;; *) shift ;; esac
+  done
+  [ -z "$output" ] || [ "$output" = /dev/null ] || printf '{"data":[]}' > "$output"
+  if [ "$status" = 1 ]; then printf 200; else printf '{}'; fi
+}
+no_calls(){ [ ! -e "$CURL_CALLS" ]; }
+assert_valid_capture(){
+  grep -Fxq 'noproxy = "*"' "$CONFIG_CAPTURE" &&
+    grep -Fxq 'user = "user\"\\name:pw\"\\key"' "$CONFIG_CAPTURE"
+}
+
+# CR/LF in the username refuses every real request API before curl can launch.
+OPENCODE_SERVER_USERNAME=$'bad\nname'; TEST_PASSWORD=synthetic
+if api GET /global/health >/dev/null 2>&1; then exit 11; fi
+[ "$(api_code GET /global/health)" = 000 ] || exit 12
+permission_http GET /global/health
+[ "$HTTP_STATUS" = 000 ] && [ -z "$HTTP_BODY" ] && no_calls || exit 13
+if api POST /session/example/permission "$FIXTURE/body.json" >/dev/null 2>&1; then exit 14; fi
+no_calls && [ "$(cat "$FIXTURE/body.json")" = '{"body":"invented"}' ] || exit 15
+
+# CR/LF in the password has the same fail-closed result for each API surface.
+OPENCODE_SERVER_USERNAME=valid; TEST_PASSWORD=$'bad\rpass'
+if api GET /global/health >/dev/null 2>&1; then exit 21; fi
+[ "$(api_code GET /global/health)" = 000 ] || exit 22
+permission_http POST /session/example/permission/reply '{"reply":"always"}'
+[ "$HTTP_STATUS" = 000 ] && [ -z "$HTTP_BODY" ] && no_calls || exit 23
+if api POST /session/example/permission "$FIXTURE/body.json" >/dev/null 2>&1; then exit 24; fi
+no_calls && [ "$(cat "$FIXTURE/body.json")" = '{"body":"invented"}' ] || exit 25
+
+# Escaped quote/backslash credentials remain valid and curl receives loopback
+# proxy bypass on stdin even when hostile proxy variables are present.
+OPENCODE_SERVER_USERNAME='user"\name'; TEST_PASSWORD='pw"\key'
+export http_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9
+api GET /global/health >/dev/null || exit 31
+[ "$(api_code GET /global/health)" = 200 ] || exit 32
+permission_http GET /global/health
+[ "$HTTP_STATUS" = 200 ] && [ "$HTTP_BODY" = '{"data":[]}' ] || exit 33
+[ "$(grep -o called "$CURL_CALLS" | wc -l | tr -d ' ')" = 3 ] && assert_valid_capture || exit 34
+
+# Setup's authenticated health request uses the same fail-closed helper.
+rm -f "$CURL_CALLS"
+if opencode_curl_auth_health_request $'bad\nuser' synthetic http://127.0.0.1:59999/global/health 3; then exit 41; else [ "$?" = 2 ]; fi
+no_calls || exit 42
+if opencode_curl_auth_health_request opencode $'bad\rpass' http://127.0.0.1:59999/global/health 3; then exit 43; else [ "$?" = 2 ]; fi
+no_calls || exit 44
+opencode_curl_auth_health_request 'user"\name' 'pw"\key' http://127.0.0.1:59999/global/health 3 || exit 45
+assert_valid_capture || exit 46
+printf 'AUTH_FAIL_CLOSED_OK\n'
+AUTH_CASES
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" CURL_CALLS="$fixture/curl.calls" CONFIG_CAPTURE="$fixture/curl.conf" ARGS_CAPTURE="$fixture/curl.args" \
+    http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1
+  rc=$?
+  check 'GLM APIs and installer auth configuration fail before curl and preserve valid escaped credentials' \
+    "test '$rc' -eq 0 && grep -q AUTH_FAIL_CLOSED_OK '$fixture/result.log'"
+  if [ "$rc" -ne 0 ]; then cat "$fixture/result.log"; fi
+}
+
+echo '== GLM authenticated curl failure behavior =='
+check 'GLM authentication generation is fail-closed across client and installer APIs' 'glm_auth_fail_closed_cases'
+if [ "${AI_GLM_AUTH_TESTS_ONLY:-0}" = 1 ]; then
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
+
 glm_deadline_cases() {
   local result
   result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
@@ -600,7 +734,8 @@ AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; JSON_OUT=1; emit usage
 check "GLM labels last-step usage without inventing whole-turn completeness" "jq -e '.response.text==\"unchanged answer\" and .usage.input==0 and .usage_scope==\"last-assistant-step\" and .usage_completeness==\"adapter-provider-missingness-unknown\"' '$TMP/usage-scope.json'"
 AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; JSON_OUT=1; emit usage-fixture review synthetic "unchanged answer" null report.md' > "$TMP/usage-unavailable.json"
 check "GLM explicitly reports absent usage as unavailable while preserving the answer" "jq -e '.response.text==\"unchanged answer\" and .usage==null and .usage_scope==\"last-assistant-step\" and .usage_completeness==\"unavailable\"' '$TMP/usage-unavailable.json'"
-check "GLM password is streamed to curl instead of exposed in argv" "grep -q 'curl_auth_config | curl --config -' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM'"
+check "GLM auth is validated before curl and never exposed in curl argv" "grep -q 'opencode_curl_auth_request' '$AI_GLM' && grep -q 'opencode_curl_with_auth_config' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM' && ! grep -q 'curl_auth_config | curl' '$AI_GLM'"
+check "installer health requests use the fail-closed shared auth helper" "grep -q 'opencode_curl_auth_health_request' '$REPO_ROOT/bin/setup-opencode-glm.sh' && ! grep -q 'opencode_curl_auth_config.*|.*curl' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "both GLM review dispatches gate capacity before send_prompt" "test \"\$(grep -c 'if ! capacity_gate' '$AI_GLM')\" -eq 2 && grep -q \"exhausted).*return 3\" '$AI_GLM'"
 check "GLM diagnostics distinguish local health and permission transport" "grep -q 'local-health-timeout' '$AI_GLM' && grep -q 'permission-endpoint-timeout' '$AI_GLM'"
 check "GLM review health observation preserves the prior 30-second tolerance" "grep -q 'AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT:-30' '$AI_GLM'"

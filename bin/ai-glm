@@ -217,20 +217,23 @@ glm_http_budget() { # bound each request and sleep by the current turn's remaini
   printf '%s' "$limit"
 }
 api() { # api METHOD PATH [JSON_BODY_FILE]
-  local method="$1" path="$2" body="${3:-}" budget
+  local method="$1" path="$2" body="${3:-}" budget pw user
   budget="$(glm_http_budget 120)" || return $?
+  pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
   if [ -n "$body" ]; then
-    curl_auth_config | curl --config - -sS -m "$budget" \
+    opencode_curl_auth_request "$user" "$pw" -sS -m "$budget" \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
   else
-    curl_auth_config | curl --config - -sS -m "$budget" -X "$method" "$BASE$path"
+    opencode_curl_auth_request "$user" "$pw" -sS -m "$budget" -X "$method" "$BASE$path"
   fi
 }
 api_code() { # api_code METHOD PATH [MAX_SECONDS] -> HTTP status only
-  local max_seconds="${3:-30}"
+  local max_seconds="${3:-30}" pw user result
   max_seconds="$(glm_http_budget "$max_seconds")" || return $?
-  curl_auth_config | curl --config - -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
-    -X "$1" "$BASE$2" 2>/dev/null || echo 000
+  pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
+  result="$(opencode_curl_auth_request "$user" "$pw" -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
+    -X "$1" "$BASE$2" 2>/dev/null)" || { printf '000'; return 0; }
+  printf '%s' "$result"
 }
 server_up() { [ "$(api_code GET /global/health "${1:-30}")" = "200" ]; }
 require_server() {
@@ -973,17 +976,21 @@ PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
 PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
 PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget
+  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget auth_config
   GLM_HTTP_DEADLINE_HIT=0
+  budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
+  auth_config="$(curl_auth_config)" || {
+    HTTP_STATUS=000; HTTP_BODY=""; warn 'could not generate authenticated curl configuration; no request was sent.'; return 0;
+  }
   while :; do
     budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
     rc=0; tmp="$(mktemp)"
     if [ -n "$json" ]; then
-      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+      HTTP_STATUS="$(opencode_curl_with_auth_config "$auth_config" -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
         -X "$method" "$BASE$path" \
         -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
     else
-      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+      HTTP_STATUS="$(opencode_curl_with_auth_config "$auth_config" -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
         -X "$method" "$BASE$path" \
         2>/dev/null)" || rc=$?
     fi

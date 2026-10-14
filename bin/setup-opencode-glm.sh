@@ -189,8 +189,10 @@ systemctl --user restart opencode-glm.service
 info "Waiting for the server to become healthy"
 PW="$(<"$PW_FILE")"
 ok=0
+health_rc=0
 for _ in $(seq 1 30); do
-  if opencode_curl_auth_config opencode "$PW" | curl --config - -fsS -m 3 "http://127.0.0.1:$PORT/global/health" >/dev/null 2>&1; then ok=1; break; fi
+  if opencode_curl_auth_health_request opencode "$PW" "http://127.0.0.1:$PORT/global/health" 3 >/dev/null 2>&1; then ok=1; break
+  else health_rc=$?; [ "$health_rc" -ne 2 ] || die "could not generate authenticated curl configuration; no health request was sent"; fi
   sleep 2
 done
 [ "$ok" = 1 ] || die "server did not become healthy. Check: systemctl --user status opencode-glm; journalctl --user -u opencode-glm -n 50"
