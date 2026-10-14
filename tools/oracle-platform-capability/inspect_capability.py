@@ -79,8 +79,8 @@ def load_contract(path,seal):
     if c['mode']=='qualify':
         require(re.fullmatch('[a-f0-9]{64}',c['helper_id']) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,63}',c['helper_name']),'helper identity invalid')
         require(re.fullmatch(re.escape(HELPER)+r'(?::[a-zA-Z0-9_.-]{1,64}|@sha256:[a-f0-9]{64})',c['helper_image']) and re.fullmatch('sha256:[a-f0-9]{64}',c['helper_image_id']),'immutable helper image required')
-    for key,path in [('operator_sha256',Path(__file__)),('remote_sha256',Path(__file__).with_name('remote.py')),('transport_helper_sha256',Path(helpers.__file__))]:
-        source=bounded_file(path,65536)
+    for key,source_path in [('operator_sha256',Path(__file__)),('remote_sha256',Path(__file__).with_name('remote.py')),('transport_helper_sha256',Path(helpers.__file__))]:
+        source=bounded_file(source_path,65536)
         require(re.fullmatch('[a-f0-9]{64}',c[key]) and hashlib.sha256(source).hexdigest()==c[key],'reviewed source changed')
         if key=='remote_sha256':c.remote_source=source
     target_contract(c);lifetime(c);tailnet_contract(c)

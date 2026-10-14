@@ -760,3 +760,22 @@ def test_v5_knownhost_exact142_before_byte_read(tmp_path,size):
     tmp_path.chmod(0o700);hosts=tmp_path/'known-hosts';hosts.write_bytes(b'X'*size);hosts.chmod(0o600)
     with patch.object(m.os,'read',side_effect=AssertionError('unexpected host bytes read')):
         with pytest.raises(ValueError):m.HeldInput(hosts,142,exact_size=142)
+
+
+@pytest.mark.parametrize('damage',['leafwrite','leafreplace','parentrename'])
+def test_final_held_contract_recheck_after_source_pin_loop(tmp_path,monkeypatch,damage):
+    tmp_path.chmod(0o700);parent=tmp_path/'inputs';parent.mkdir(mode=0o700)
+    leaf=parent/'contract';raw=json.dumps(contract()).encode();leaf.write_bytes(raw);leaf.chmod(0o600)
+    held=m.HeldInput(leaf,8192);original=m.bounded_file;source_reads=[]
+    def source_read(path,maximum):
+        result=original(path,maximum);source_reads.append(str(path))
+        if len(source_reads)==3:
+            if damage=='leafwrite':leaf.write_bytes(b'MUTATED PUBLIC FIXTURE')
+            elif damage=='leafreplace':leaf.rename(parent/'original');leaf.write_bytes(raw);leaf.chmod(0o600)
+            else:parent.rename(tmp_path/'moved');parent.mkdir(mode=0o700)
+        return result
+    try:
+        with patch.object(m,'bounded_file',side_effect=source_read),patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'verify_tailnet',side_effect=AssertionError('WHOIS')),patch.object(m.subprocess,'run',side_effect=AssertionError('child')):
+            with pytest.raises((ValueError,OSError)):m.load_contract(held,hashlib.sha256(raw).hexdigest())
+        assert len(source_reads)==3 and held.raw==raw
+    finally:held.close()
