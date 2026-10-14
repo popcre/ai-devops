@@ -999,10 +999,27 @@ check 'the release never opens production for the same writer' \
   "out '$TMP/writer' check --before production --reviewer-approval \"\$(appr '$TMP/writer' production)\" | grep -Fq 'no reviewer-approval'"
 check 'the release never opens a formal review' \
   "rc 3 '$TMP/writer' check --before review"
+# A private repository can only be reviewed through the code-only attachment
+# route, so the writer release must accept that row shape (#1239 unblock).
+codeonly_filter='.code_only_export="/fixture"|.code_only={}|.evidence_scope="selected-code"'
+check 'a code-only final-check APPROVE satisfies reviewed-private-data-writer for database' \
+  "rc 0 '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database '' '$codeonly_filter')\""
 printf 'id,name\n1,secret\n' > "$TMP/writer/reconciliation/x/rows.csv"
 check 'one licensed row keeps database sealed despite the declaration' \
   "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
 rm -rf "$TMP/writer"
+
+printf 'code-only writer approval does not open the non-writer database path\n'
+newrepo "$TMP/nonwriter" popcre/designflow-backend
+mkdir -p "$TMP/nonwriter/.ai-devops"
+printf '%s\n' '{"schema_version":1,"paths":[{"glob":"**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"]}}}' > "$TMP/nonwriter/.ai-devops/task-gates.json"
+git -C "$TMP/nonwriter" add -A && git -C "$TMP/nonwriter" commit -qm declare
+( cd "$TMP/nonwriter" && "$GATES" start --class private-evidence ) >/dev/null
+printf 'change\n' >> "$TMP/nonwriter/README.md"
+nonwriter_report="$(appr "$TMP/nonwriter" database '' "$codeonly_filter")"
+check 'the same code-only row does not satisfy the non-writer 770 database path' \
+  "printf 'x\n' | (cd '$TMP/nonwriter' && '$GATES' check --before database --action-manifest-stdin --reviewer-approval '$nonwriter_report') 2>&1 | grep -Fq 'not a lifecycle-recorded'"
+rm -rf "$TMP/nonwriter"
 
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'

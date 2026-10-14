@@ -456,9 +456,13 @@ state_record_override(){
 # recorded implementer_engine differs from its provider (#996). Live actions
 # need review_mode final-check or security-review; review, pr-wait, and
 # code-only-review also accept plan-review, which is itself ungated.
-# Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE
+# A code-only / selected-code row satisfies database only with the closed
+# #770 action profile plus its manifest — or, solely on the
+# reviewed-private-data-writer release path, as a plain final-check or
+# security-review APPROVE (no profile binding required).
+# Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE [ACTION_MANIFEST_FILE] [ACTION_STAGE] [PUBLISH_ADMISSION] [RELEASE_GATE]
 reviewer_approval_summary(){
-  local report="$1" action="$2" head="$3" worktree="$4" action_manifest_file="${5:-}" action_stage="${6:-initial-forward}" publish_admission="${7:-0}" identity key digest report_hash lifecycle_root state row mode
+  local report="$1" action="$2" head="$3" worktree="$4" action_manifest_file="${5:-}" action_stage="${6:-initial-forward}" publish_admission="${7:-0}" release_gate="${8:-}" identity key digest report_hash lifecycle_root state row mode
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
   report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
@@ -477,9 +481,14 @@ reviewer_approval_summary(){
   done
   [ -n "$row" ] || return 1
   if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
-    [ "$action" = database ] && [ -n "$action_manifest_file" ] || return 1
-    jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
-    python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    [ "$action" = database ] || return 1
+    if [ "$release_gate" = reviewed-private-data-writer ]; then
+      : # a code-only final-check/security-review APPROVE satisfies the writer release
+    else
+      [ -n "$action_manifest_file" ] || return 1
+      jq -e '.action_profile_binding.profile=="shared-db-770-isolated-timing-rehearsal-v1" and .action_profile_binding.action=="database"' "$row" >/dev/null || return 1
+      python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
+    fi
   fi
   [ -z "$action_manifest_file" ] || jq -e '.action_profile_binding!=null and .evidence_scope=="selected-code"' "$row" >/dev/null || return 1
   mode="$(jq -r '.review_mode // ""' "$row")"
@@ -1355,14 +1364,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 0 "$release_gate")" \
       || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
     if [ "$action_manifest_stdin" -eq 1 ]; then
       state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
         && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
         || blocked 'ai-task-gates: STOP. Native reviewer receipt was not persisted; bounded action admission was not issued.'
       local admission_summary
-      admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
+      admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1 "$release_gate")" \
         || blocked 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
       [ "$admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Bounded approval changed during native admission.'
     else
