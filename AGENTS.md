@@ -55,6 +55,15 @@ pipeline. The recovery procedure lives in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
+- **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
+  Outside `popcre/shared-db`, dispatch a review only when the task class's gate
+  already demands one (installation, reviewer-safety, deployment,
+  infrastructure, production, shared-db promotion). Ordinary docs, tooling, and
+  non-shared-db code land with no review; a review stays available on request
+  by name. The rotation pool is Muse, DeepSeek, GLM, and StepFun. Other
+  wrappers stay installed and callable by name but are frozen (best-effort,
+  not maintained). Rules: [`docs/reviewer-rotation-rules.md`](docs/reviewer-rotation-rules.md)
+  13–14; plan [`plan_review-scope-reduction.md`](plan_review-scope-reduction.md).
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
   recheck the real change set first and refuse an action the work does not

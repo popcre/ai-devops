@@ -39,6 +39,18 @@ manifest_json() {
       printf 'test-all.sh: suite manifest loader is missing: %s\n' "$LOADER" >&2; exit 2; }
     MANIFEST_JSON="$(AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$LOADER")" || {
       printf 'test-all.sh: the suite manifest failed to assemble\n' >&2; exit 2; }
+    # Drop suspended suites from every assembled lane list so a frozen suite
+    # never fails an undiscovered/union check after it is skipped.
+    if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>&1; then
+      MANIFEST_JSON="$(printf '%s' "$MANIFEST_JSON" | jq --slurpfile m "$MANIFEST" '
+        ($m[0].suspended_bash // []) as $s
+        | .windows_offline_bash = ((.windows_offline_bash // []) - $s)
+        | .windows_offline_shards = ((.windows_offline_shards // []) | map(. - $s))
+        | .windows_reviewer_safety_bash = ((.windows_reviewer_safety_bash // []) - $s)
+        | .linux_offline_suite_seconds |= with_entries(select(.key as $k | ($s | index($k) | not)))
+      ')" || {
+        printf 'test-all.sh: could not apply suspended_bash to the assembled manifest\n' >&2; exit 2; }
+    fi
     MANIFEST_JSON_LOADED=1
   fi
   printf '%s' "$MANIFEST_JSON"
@@ -139,6 +151,9 @@ mapfile -t all_tests < <(find "$SUITE_DIR" -maxdepth 1 -type f -name 'test-*.sh'
 # deleting the file: a suspended suite stays runnable directly by file name
 # (bash tests/test-ai-kimi.sh) and returns to the lanes when its manifest
 # entry is removed.
+# Suspended suites (frozen tooling, owner 2026-10-13) are dropped here and
+# stripped from the assembled Windows lane lists in manifest_json.
+suspended_tests=()
 if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>&1; then
   jq -e '.suspended_bash | type == "array" and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
     printf 'test-all.sh: suite manifest has an invalid suspended_bash group\n' >&2; exit 2; }

@@ -97,5 +97,15 @@ printf '%s\n' "$OUT" | grep -q 'cannot find config/reviewer-membership-scope.jso
 printf '%s\n' "$OUT" | grep -q 'PASS provider=codex' \
   && ok "gate_helpers_still_reported_when_scope_file_is_missing" || bad "gate_helpers_still_reported_when_scope_file_is_missing"
 
+# Owner 2026-10-13 (popcre/ai-devops#1714): the maintained rotation pool is
+# exactly Muse, DeepSeek, GLM, StepFun. Codex stays registered only as the
+# approval-gate helper in reviewer-membership-scope.json.
+REAL_REGISTRY="$ROOT/config/reviewer-registry.json"
+REAL_SCOPE="$ROOT/config/reviewer-membership-scope.json"
+POOL="$(python -c 'import json,sys; r=json.load(open(sys.argv[1]))["providers"]; s=json.load(open(sys.argv[2])).get("outside_allocator",{}); print(",".join(sorted(p for p,v in r.items() if v.get("registry_state")=="registered" and p not in s)))' "$REAL_REGISTRY" "$REAL_SCOPE")"
+[ "$POOL" = "deepseek,glm,muse,stepfun" ] \
+  && ok "real_registry_rotation_pool_is_muse_deepseek_glm_stepfun" \
+  || bad "real_registry_rotation_pool_is_muse_deepseek_glm_stepfun (got: $POOL)"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

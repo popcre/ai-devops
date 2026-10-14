@@ -12,15 +12,17 @@ roles, adapting CLI flags, and how the scripts use the commands.
   and fixing. Only implementation and testing receive workspace write access.
 - **Pipeline review stages** — a registered pool reviewer (default Muse; override
   with `AI_PIPELINE_REVIEW_PROVIDER`). Claude left the reviewer pool on
-  2026-09-30 and is no longer an approval reviewer.
+  2026-09-30 and is no longer an approval reviewer. Discretionary pipeline review
+  runs only for `popcre/shared-db` work and for task classes whose gate already
+  demands a review (owner 2026-10-13, popcre/ai-devops#1714).
 - **GLM-5.3** — rotation reviewer (restored 2026-09-30). Never reviews
   GLM-orchestrated (ZCode) work. Also usable as an explicitly requested second
-  opinion through `ai-glm`. The rotation pool is Muse, Grok, Qwen, Gemini, GLM,
-  and DeepSeek.
-- **Grok Build 4.6** — optional independent review through `ai-grok-review`
-  (read-only) and isolated edits through `ai-grok-implement`. Advisory
-  look-into-this work uses `ai-grok-implement investigate`; that is not a formal
-  pass.
+  opinion through `ai-glm`. The rotation pool is Muse, DeepSeek, GLM, and StepFun
+  (owner 2026-10-13, popcre/ai-devops#1714).
+- **Grok Build 4.6** — frozen 2026-10-13: installed and callable by name through
+  `ai-grok-review` (read-only) and `ai-grok-implement`, but not maintained as a
+  rotation reviewer. Advisory look-into-this work uses `ai-grok-implement
+  investigate`; that is not a formal pass.
 
 ## GLM configuration
 
