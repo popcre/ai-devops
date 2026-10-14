@@ -57,6 +57,11 @@ class AuthPipeTests(unittest.TestCase):
                     PUBLIC_PASSWORD=password,
                     PUBLIC_PORT=str(server.server_port),
                     PUBLIC_HELPER=str(ROOT / "tools/lib/opencode-curl-auth.sh"),
+                    http_proxy="http://127.0.0.1:9",
+                    HTTP_PROXY="http://127.0.0.1:9",
+                    ALL_PROXY="http://127.0.0.1:9",
+                    all_proxy="http://127.0.0.1:9",
+                    NO_PROXY="", no_proxy="",
                 )
                 run = subprocess.run(
                     ["bash", "-c", 'set -euo pipefail; source "$PUBLIC_HELPER"; PW="$PUBLIC_PASSWORD"; PORT="$PUBLIC_PORT"; die(){ exit 1; }; ' + block],
@@ -82,6 +87,22 @@ class AuthPipeTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, b"")
+
+    def test_username_control_bytes_and_missing_fields_refuse(self):
+        for user in ("PUBLIC\nINJECTION", "PUBLIC\rINJECTION"):
+            env = dict(os.environ, PUBLIC_USER=user, PUBLIC_HELPER=str(ROOT / "tools/lib/opencode-curl-auth.sh"))
+            result = subprocess.run(
+                ["bash", "-c", 'source "$PUBLIC_HELPER"; opencode_curl_auth_config "$PUBLIC_USER" PUBLIC'],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b"")
+        result = subprocess.run(
+            ["bash", "-c", 'source "$1"; opencode_curl_auth_config PUBLIC', "fixture", str(ROOT / "tools/lib/opencode-curl-auth.sh")],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, b"")
 
 
 if __name__ == "__main__":

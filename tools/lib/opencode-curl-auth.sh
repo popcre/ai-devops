@@ -6,5 +6,6 @@ opencode_curl_auth_config() {
   local auth="$1:$2"
   case "$auth" in *$'\n'*|*$'\r'*) return 1 ;; esac
   auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
-  printf 'user = "%s"\n' "$auth"
+  # Both callers have a fixed loopback URL. Never send its auth to a proxy.
+  printf 'noproxy = "*"\nuser = "%s"\n' "$auth"
 }
