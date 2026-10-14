@@ -28,6 +28,10 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
   himself. Never hand him a command to run.
 - **No tables, no status headers, no bullet lists longer than four lines, no
   bold labels like "Result:" or "Impact:".**
+- **No empty `Still open`, no provisional verdicts, no status boards.** Omit
+  `Still open` when nothing is pending. Give one final verdict with decisive
+  evidence — never restate intermediate "probably blocked / maybe reject".
+  Report only what changed since the last turn, not the full board again.
 - **The only things allowed to run long are artifacts Albert asked for** — a
   document, plan, or handoff written to a file. The reply that hands it over is
   still 120 words.
@@ -275,6 +279,11 @@ the task needs the detail.
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
   Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
+- **One status probe per state change.** After a wait completes or a merge
+  lands, record the answer and move on — do not re-check the same head
+  "just to be sure". Reuse a passing result when head and digest are unchanged.
+  Prefer bounded waiters over open polling; if a wait outlives the turn, leave
+  the issue or pull request as the card and return later.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 
@@ -282,9 +291,16 @@ the task needs the detail.
 
 - Put scratch files under `$TMPDIR` (your session's own temp folder, deleted
   when the session ends), never hand-named `/tmp/<issue>-...` paths.
+- **If output would fill more than a few reply lines, write a file** and return
+  only the decisive lines (exit status, failing assertion, SHA, count, one
+  error string). Hand the path to whoever needs the full log.
 - Keep routine tool output short. Do not paste full logs, JSON, diffs, or
   command output into the conversation — save long output to a scratch file and
   return only the decisive result.
+- **Compress pasted/retrieved docs only when the question is retrieval-style.**
+  Never send secrets, private transcripts, review verdicts, or code to write
+  verbatim through a third-party compressor. Measure billed tokens and cache
+  hit rate; do not budget 85% on live coding turns.
 - **Never delegate a decision.** A schema change, a merge decision, a production
   command, or a security judgement stays with you. A subagent reports a verdict
   plus the verbatim evidence line behind it; you decide. When relaying owner

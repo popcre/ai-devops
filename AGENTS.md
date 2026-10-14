@@ -118,6 +118,7 @@ pipeline. The recovery procedure lives in
 | Write a handoff | `handoff-writer`, [`templates/system/handoff-standard.md`](templates/system/handoff-standard.md) | Root `HANDOFF.md` is a static pointer |
 | Write an implementation plan | `implementation-plan-writer`, [`templates/system/implementation-plan-standard.md`](templates/system/implementation-plan-standard.md) | Write for a session with no chat context |
 | Documentation-only cleanup | [`README.md`](README.md) and affected docs | Do not touch source code except to verify accuracy |
+| AI token waste, reply discipline, compression pilots | [`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md), `skills/shared/scaledown-compress/SKILL.md` | Measure billed tokens and cache hits; never send secrets or private transcripts through a compressor |
 | Markdown reachability gate or rollout | [`docs/doc-reachability.md`](docs/doc-reachability.md), `bin/ai-doc-reachability`, `.doc-reachability.json`, and its tests | Gate only PR-added or moved Markdown; do not make legacy orphans block unrelated work |
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
@@ -142,6 +143,10 @@ but will be reported as `UNPROVABLE`.
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.
+- **One status probe per state change.** After a wait completes or a merge
+  lands, record the answer and move on. Prefer `bin/ai-pr-wait` /
+  `bin/ai-gh-wait` over open polling; leave the issue or pull request as the
+  card when a wait outlives the turn.
 - A reviewer repair is complete only when tests pass and every affected local
   reviewer-issue record is resolved or partially resolved with exact evidence.
   Follow `log-reviewer-issue` and preserve the incident package.
