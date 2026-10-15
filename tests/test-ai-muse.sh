@@ -297,6 +297,8 @@ muse_failed_turn_cases(){
   out_lines="$(printf '%s\n' "$out" | wc -l)"
   check 'dry-run output contains only the concise qualification result' "test '$out_lines' -eq 1 && printf '%s' '$out' | grep -q '^QUALIFIED NON-AUTHORIZING failed turn: session=ses_new invocation=' && ! printf '%s' '$out' | grep -q 'evidence_references\|wrapper_exit_code\|timestamp'"
   check 'dry-run does not emit a report, approval, or finalized status' "jq -e '.status==\"provider_outcome_uncertain\" and .last_report==null and (has(\"failed_turn_receipts\")|not)' '$m'"
+  (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile $name --finalize-failed-turn extra") > "$TMP/failedturn-extra-finalize-args.log" 2>&1 && rc=0 || rc=$?
+  check 'reconcile rejects extra failed-turn finalization arguments without mutation or provider calls' "test '$rc' -ne 0 && grep -q '^ai-muse: error: usage: ai-muse reconcile <name>' '$TMP/failedturn-extra-finalize-args.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(sha256sum '$event_file')\" = '$events_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before' && test ! -e '$archive'"
   cp "$m" "$TMP/$name.original-meta"
   if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' finalize-failed-turn $name") > "$TMP/failedturn-finalize.stdout" 2> "$TMP/failedturn-finalize.stderr"; then bad 'verified failed-turn receipt is recorded'; return; fi
   finalize_lines="$(wc -l < "$TMP/failedturn-finalize.stdout")"
@@ -774,6 +776,7 @@ check 'the key probe sends the key from a header file, never argv' "grep -q 'cur
 check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"
 muse_failed_turn_cases
 muse_recovery_cases
+muse_turn_identity_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then
   fake_op_dir="$TMP/la/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"; mkdir -p "$fake_op_dir"
@@ -782,6 +785,5 @@ if command -v cygpath >/dev/null 2>&1; then
   check 'op missing from PATH resolves to the WinGet package folder' "env -i PATH=/usr/bin LOCALAPPDATA='$(cygpath -w "$TMP/la")' bash -c '. \"$TMP/opfallback.sh\"; command -v op'"
 fi
 fi  # part 3
-muse_turn_identity_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

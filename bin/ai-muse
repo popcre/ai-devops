@@ -19,6 +19,15 @@ if [ "${1:-}" = finalize-failed-turn ]; then
   fi
 fi
 
+
+# Reject malformed local requests before an invocation or session can change.
+if [ "${1:-}" = reconcile ]; then
+  if ! { [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "${3:-}" = --finalize-failed-turn ]; }; }; then
+    printf 'ai-muse: error: usage: ai-muse reconcile <name> [--finalize-failed-turn]\n' >&2
+    exit 2
+  fi
+fi
+
 # Read-only commands do not create a Muse review event. An outer review may
 # have its own event identity, which must not be reconciled as Muse evidence.
 MUSE_EVENT_READ_ONLY=0
@@ -1411,7 +1420,14 @@ case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
   implement) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse implement <name> ...'; shift; cmd_implement "$n" "$@";;
-  list) cmd_list;; show) shift; if [ "${MUSE_INTERNAL_ACTION:-}" = finalize-failed-turn-dry-run ]; then cmd_finalize_failed_turn "${1:-}" --dry-run; else cmd_show "${1:-}"; fi;; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; if [ "${2:-}" = --finalize-failed-turn ] && [ "$#" -eq 2 ]; then cmd_finalize_failed_turn "${1:-}"; else cmd_reconcile "${1:-}"; fi;; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
+  list) cmd_list;; show) shift; if [ "${MUSE_INTERNAL_ACTION:-}" = finalize-failed-turn-dry-run ]; then cmd_finalize_failed_turn "${1:-}" --dry-run; else cmd_show "${1:-}"; fi;; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift
+    if [ "$#" -eq 1 ]; then
+      cmd_reconcile "$1"
+    elif [ "$#" -eq 2 ] && [ "$2" = --finalize-failed-turn ]; then
+      cmd_finalize_failed_turn "$1"
+    else
+      die 'usage: ai-muse reconcile <name> [--finalize-failed-turn]'
+    fi;; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;
