@@ -9,7 +9,6 @@ die() { printf 'az-mail: %s\n' "$1" >&2; exit 1; }
 mail_url="$5"
 [[ "$mail_url" =~ ^https://graph\.microsoft\.com/v1\.0/users/[^/?#]+/(messages|mailFolders(/[A-Za-z0-9%._~-]+(/messages)?)?)(\?[^#]*)?$ ]] ||
   die 'only read-only Graph mail requests for the configured mailbox are allowed.'
-
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     command -v cygpath >/dev/null 2>&1 || die 'Git for Windows path conversion is unavailable.'
@@ -24,6 +23,10 @@ config_file="$config_dir/config.json"
 certificate="$config_dir/certificate.pem"
 [[ -f "$config_file" && ! -L "$config_file" ]] || die 'not configured on this computer; rerun the ai-devops machine setup.'
 [[ -f "$certificate" && ! -L "$certificate" ]] || die 'the protected certificate is missing; rerun the ai-devops machine setup.'
+mailbox_upn="$(jq -er '.mailbox_upn' "$config_file" 2>/dev/null)" || die 'mailbox profile is invalid.'
+requested_mailbox="${mail_url#https://graph.microsoft.com/v1.0/users/}"
+requested_mailbox="${requested_mailbox%%/*}"
+[[ "${requested_mailbox,,}" == "${mailbox_upn,,}" ]] || die 'only the configured mailbox can be read.'
 
 if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
   dir_mode="$(stat -c '%a' -- "$config_dir" 2>/dev/null)" || die 'cannot verify credential file permissions.'

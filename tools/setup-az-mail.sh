@@ -43,6 +43,7 @@ fi
 
 application_id="$(private_value azure_cli_mail_application_id)"
 tenant_id="$(private_value azure_cli_mail_tenant_id)"
+mailbox_upn='albert@popcre.com'
 certificate_ref="$(private_value azure_cli_mail_certificate_ref)"
 expected_fingerprint="$(private_value azure_cli_mail_certificate_sha256 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
 [[ "$application_id" =~ ^[[:xdigit:]-]{36}$ && "$tenant_id" =~ ^[[:xdigit:]-]{36}$ ]] || die 'private mailbox identity is invalid.'
@@ -114,8 +115,8 @@ certificate_public_key="$(openssl x509 -in "$stage_cert" -pubkey -noout 2>/dev/n
 private_key_public_key="$(openssl pkey -in "$stage_cert" -pubout -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)" || die 'cannot verify the mailbox certificate key pair.'
 [[ -n "$certificate_public_key" && "$certificate_public_key" == "$private_key_public_key" ]] || die 'the mailbox certificate and private key do not match.'
 
-jq -n -c --arg app "$application_id" --arg tenant "$tenant_id" --arg fingerprint "$expected_fingerprint" \
-  '{application_id:$app,tenant_id:$tenant,certificate_sha256:$fingerprint}' > "$stage_config" || die 'cannot prepare the mailbox profile.'
+jq -n -c --arg app "$application_id" --arg tenant "$tenant_id" --arg fingerprint "$expected_fingerprint" --arg mailbox "$mailbox_upn" \
+  '{application_id:$app,tenant_id:$tenant,mailbox_upn:$mailbox,certificate_sha256:$fingerprint}' > "$stage_config" || die 'cannot prepare the mailbox profile.'
 chmod 600 -- "$stage_cert" "$stage_config"
 mv -f -- "$stage_cert" "$config_dir/certificate.pem" || die 'cannot install the protected mailbox certificate.'
 mv -f -- "$stage_config" "$config_dir/config.json" || die 'cannot install the mailbox profile.'

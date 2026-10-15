@@ -61,13 +61,14 @@ fi
 pass 'setup installs a verified certificate and private profile files'
 
 env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/calls" PATH="$TMP/stubs:$PATH" \
-  bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages >/dev/null || fail 'mail command failed'
+  bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages >/dev/null || fail 'mail command failed'
 grep -q -- "--service-principal --username $test_application_id --tenant $test_tenant_id" "$TMP/calls" || fail 'service-principal sign-in was not isolated through az-mail'
-grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' "$TMP/calls" || fail 'Azure CLI arguments were not forwarded'
+grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages' "$TMP/calls" || fail 'Azure CLI mail request was not sent'
 pass 'command signs in with the scoped app and sends only a read-only mail request'
 for denied in \
   'rest --method POST --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' \
   'rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/drive' \
+  'rest --method GET --url https://graph.microsoft.com/v1.0/users/another@example.test/messages' \
   'account show'; do
   if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/denied-calls" PATH="$TMP/stubs:$PATH" \
     bash "$ROOT/bin/az-mail" $denied >/dev/null 2>&1; then fail "unsafe command was accepted: $denied"; fi
@@ -101,7 +102,7 @@ env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
   AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" \
   bash "$ROOT/tools/setup-az-mail.sh" >/dev/null || fail 'allowlisted Windows setup failed'
 env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-calls" AZ_MAIL_TEST_ACL_CALLS="$TMP/windows-acl-calls" PSModulePath='C:\\incompatible\\pwsh-modules' \
-  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/mailFolders/inbox/messages >/dev/null || fail 'Windows path handling failed'
+  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/inbox/messages >/dev/null || fail 'Windows path handling failed'
 grep -q '^AZURE_CONFIG_DIR=C:/fixture/azure$' "$TMP/windows-calls" || fail 'Windows Azure CLI config path was not converted'
 grep -q -- '--certificate C:/fixture/certificate.pem' "$TMP/windows-calls" || fail 'Windows certificate path was not converted'
 grep -q 'az-mail-windows-acl.ps1' "$TMP/windows-acl-calls" || fail 'Windows use-time ACL check was not run'
