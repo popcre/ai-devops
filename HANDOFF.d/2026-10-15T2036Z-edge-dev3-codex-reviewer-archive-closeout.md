@@ -95,6 +95,10 @@ the queue's actual head and state after that push.
   The normal merge request without deletion succeeded; do not use admin bypass.
 - Documentation was not merged immediately: the queue runs combined checks
   even after the PR's own checks succeed. Do not weaken checks to finish wrap-up.
+- GitHub refuses pushes to a queued PR branch. The ordinary merge command with
+  `--disable-auto` did not dequeue it. A required source update must use GitHub's
+  explicit `dequeuePullRequest` mutation, push normally, and submit a fresh
+  ordinary merge request; never force-push or bypass branch protection.
 
 ## 5. Root causes and important findings
 
