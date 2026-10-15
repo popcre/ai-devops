@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — Xiaomi MiMo (MiMo Desktop / MiMoCode) parity in ai-devops (2026-09-23)
 
-Paired handoff: [`HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md`](HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md)
+Paired handoff: `HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md` (retired; recoverable from git history)
 
 ## STATUS
 

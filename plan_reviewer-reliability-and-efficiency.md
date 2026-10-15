@@ -6,7 +6,7 @@ Albert should get accurate, usable reviews without paying repeatedly for the wro
 
 **If a step conflicts with this goal, the goal wins — stop and flag it.** “100% optimal” means the explicit qualification criteria below are satisfied; it is not a promise of zero provider outages or a mathematically maximal cache-hit rate.
 
-Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops/issues/337), registered under repository-throughput parent [#159](https://github.com/popcre/ai-devops/issues/159). Authored September 8, 2026; coding-boundary refactor September 11, 2026. [Execution handoff](HANDOFF.d/2026-09-08T1957Z-edge-dev-codex-reviewer-reliability-plan.md).
+Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops/issues/337), registered under repository-throughput parent [#159](https://github.com/popcre/ai-devops/issues/159). Authored September 8, 2026; coding-boundary refactor September 11, 2026. `HANDOFF.d/2026-09-08T1957Z-edge-dev-codex-reviewer-reliability-plan.md` (retired; recoverable from git history).
 
 ## STATUS — implementation, not planning progress
 

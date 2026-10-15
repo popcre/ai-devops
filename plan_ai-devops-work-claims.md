@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN — collision-resistant ai-devops work claims (revised 2026-08-27)
 
 **Tracking issue:** [popcre/ai-devops#131](https://github.com/popcre/ai-devops/issues/131)
-**Registered handoff:** [`HANDOFF.d/2026-08-27T1939Z-edge-dev-codex-ai-devops-work-claims-plan.md`](HANDOFF.d/2026-08-27T1939Z-edge-dev-codex-ai-devops-work-claims-plan.md)
+**Registered handoff:** `HANDOFF.d/2026-08-27T1939Z-edge-dev-codex-ai-devops-work-claims-plan.md` (retired; recoverable from git history)
 
 ## STATUS — read this first
 
