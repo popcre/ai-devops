@@ -36,7 +36,7 @@ else
   acl_helper="$(cygpath -aw "$script_dir/az-mail-windows-acl.ps1")"
   acl_root="$(cygpath -aw "$config_dir")"
   [[ -f "$script_dir/az-mail-windows-acl.ps1" ]] || die 'Windows credential access checker is missing.'
-  if ! powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$acl_helper" -Root "$acl_root" >/dev/null; then
+  if ! env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$acl_helper" -Root "$acl_root" >/dev/null; then
     die 'credential files must be private to this user; rerun the ai-devops machine setup.'
   fi
 fi
