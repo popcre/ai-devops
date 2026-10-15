@@ -20,9 +20,10 @@ else
 fi
 mkdir -p "$profile_root/ai-devops"
 chmod 700 "$profile_root/ai-devops"
-# Git Bash otherwise rewrites the slash-prefixed OpenSSL subject as a Windows path.
-MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/certificate.pem" \
-  -days 30 -subj '/CN=az-mail-fixture' >/dev/null 2>&1
+# Keep the subject attached to its option so Git Bash leaves it alone while
+# still converting the certificate output paths for Windows OpenSSL.
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/certificate.pem" \
+  -days 30 -subj=/CN=az-mail-fixture >/dev/null 2>&1
 cat "$TMP/key.pem" >> "$TMP/certificate.pem"
 fingerprint="$(openssl x509 -in "$TMP/certificate.pem" -noout -fingerprint -sha256 | sed 's/^[^=]*=//')"
 test_application_id='11111111-1111-4111-8111-111111111111'
