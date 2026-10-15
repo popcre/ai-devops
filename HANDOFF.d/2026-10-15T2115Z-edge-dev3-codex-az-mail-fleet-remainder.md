@@ -1,7 +1,7 @@
 ---
 issue: none
 status: BLOCKED
-owner: codex/az-mail-fleet-handoff
+owner: codex/az-mail-credential-boundary-note
 ---
 
 Tracking reason: the existing delivery card is [PR #1763](https://github.com/popcre/ai-devops/pull/1763); its comments retain remaining host-proof checkboxes. No parallel issue was created.
@@ -72,6 +72,8 @@ The source repair, merge, Linux installation, Windows 4837 installation, and liv
 9. Windows' old GitHub authentication and the stored PAT were not usable. Authentication was repaired rather than replacing the protected-config sync with copied files. The protected configuration sync then passed. The initial full-setup transport inherited input; the idle transport was closed only after completion and absence of a setup process were established.
 10. No successful live read, ping, clean status, remote-tracking name, or unrelated source review authorizes overwriting 916's divergent source or claiming t16 is installed.
 
+11. A later broad credential-permission audit initially applied the mailbox-only user/SYSTEM rule too broadly to GitHub settings. Source intentionally grants CodexSandboxUsers read-only access to default non-secret settings. The audit also found that group on the separate SSH credential copy, contrary to the SSH helper's private-store policy. The SSH grant was removed with the canonical private-path helper, and the approved default-settings grant was restored narrowly. Non-secret settings inheritance was restored; token-containing files were kept private. A subsequent GitHub API call succeeded as u2giants, the SSH tree again passed user/SYSTEM-only checks, and mailbox ACL checks still passed. Original ACL descriptors and the assessment remain private.
+
 ## 5. Root causes and policy boundaries
 
 The fixture failure was an ordering error. The [fixture now runs before the first mailbox call](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/tests/test-az-mail.sh#L91-L95), emits captured output, and fails if that diagnostic is absent.
@@ -79,6 +81,16 @@ The fixture failure was an ordering error. The [fixture now runs before the firs
 CI's actual initial credential root allowed Authenticated Users (`S-1-5-11`), Administrators (`S-1-5-32-544`), Users (`S-1-5-32-545`), and SYSTEM. After protection, each entry allowed only the runner identity NETWORK SERVICE (`S-1-5-20`) and SYSTEM (`S-1-5-18`). Production [ACL enforcement](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/bin/az-mail-windows-acl.ps1) remained strict throughout: unexpected Allow identities and reparse points still refuse access.
 
 The two remaining blockers are independent of that fixture: a divergent installed source on 916 and unavailable management access to t16. Neither is cured by loosening ACLs, mailbox boundaries, review, source ancestry, installation receipts, or machine eligibility.
+
+### Late GitHub permission assessment — contained, historical access unproved
+
+The [default settings repair](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/bin/repair-codex-github-cli-access.ps1) explicitly permits read/execute, not write, for CodexSandboxUsers on default GitHub settings. The [SSH credential helper](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/bin/ai-gh-ssh-credentials.ps1) separately requires a private credential copy outside that settings directory. These policies must not be conflated with each other or with mailbox certificate ACLs.
+
+At the end of setup, the SSH profile directory and its config/hosts files had an extra CodexSandboxUsers read ACE. It was removed and strict current-user/SYSTEM-only checks passed. Default non-secret settings access was restored through the existing repair, without directing it at the SSH profile. A working GitHub API call as u2giants and a subsequent private-SSH check passed. Token-containing default settings files were not made group-readable. The actual mailbox tree remained strict and passed again.
+
+A protected Muse follow-up on the exact installed source characterized this as a **contained policy violation with an unproven effective read**. A group ACE alone does not establish what an actual restricted Codex token could read, and no unauthorized file read or use was observed. Historical effective access and the cause of the extra SSH ACE remain UNKNOWN. Do not claim that this proves historical non-exposure. No credential replacement was authorized or performed; any later replacement needs a complete consumer inventory, provider revocation authority, and a fresh exact-credential AI-approved plan. The original working credential and the two known consumers were identified by a private opaque commitment, never a public token value.
+
+The assessment report is retained privately as `muse-az-mail-credential-assessment-20261015-20261015T214157Z-3108038-30279.md`; original permission descriptors and runtime evidence are retained with the host-local review records. No credential value was printed or published. The coordinator retains the security judgement; this assessment is not a rotation approval or an installation receipt.
 
 ## 6. Exact next steps and success gates
 
@@ -111,6 +123,7 @@ Linked installation/review worktrees and host-local review evidence were retaine
 
 - Owner: the next AI session taking this work. **Blocked:** 916 has no admitted update route from the observed divergent source; the two local commits must remain recoverable. Their remote backup status is not established by a tracking name.
 - Owner: the next AI session taking this work. **Blocked:** t16 lacks authenticated management access. Root cause is UNKNOWN; no source or live proof exists for it from this continuation.
+- Historical effective access to the temporarily group-readable GitHub SSH copy is UNKNOWN; its current permission policy is corrected and normal GitHub access was verified. No credential was rotated, and no actual unauthorized read or use was established. Future credential work must preserve the private assessment and obtain its own exact-plan approval.
 - Optional provider/bootstrap and desktop acceptance are outside the completed mailbox claims. Linux's optional native Muse bootstrap pin mismatch and Windows' optional GLM startup warning are retained above; current configured Muse/GLM health checks passed. Do not turn mailbox proof into broader provider acceptance.
 - Predecessor handoffs from [first predecessor](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/HANDOFF.d/2026-10-15T0354Z-edge-dev3-codex-global-az-mail-rollout.md), [second predecessor](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/HANDOFF.d/2026-10-15T1147Z-edge-dev3-codex-global-az-mail-rollout-review.md), and [third predecessor](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/HANDOFF.d/2026-10-15T1619Z-edge-dev3-codex-az-mail-ci-closeout.md) are retired under the successor rule. Their source is merged, their next source/install/live phase is now completed on both ready hosts, all outstanding machine obligations are carried here, and their material decisions/dead ends are retained above and in immutable history. These linked timestamps are filename identifiers, not current local activity times.
 
