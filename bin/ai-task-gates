@@ -632,7 +632,7 @@ decide_local_tests_required(){
   fi
 }
 # Every approval call site must be preceded by a decide_local_tests_required
-# in its function; tests/test-ai-task-gates.sh enforces that source ordering.
+# in its function; the task-gates unit test enforces that source ordering.
 
 # Application source-release admission is intentionally one closed target.
 APP_RELEASE_MANIFEST_PATH='.ai-devops/application-release-target.json'
