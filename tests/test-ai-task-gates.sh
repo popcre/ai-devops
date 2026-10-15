@@ -1779,4 +1779,77 @@ git -C "$WF" commit -qm 'local workflow prohibition'
 WF_APPROVAL="$(appr "$WF" application-workflow)"
 check 'workflow preserves consumer prohibition' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 
+# --- private-data gates: no-raw-content-read, licensed-row-containment,
+# privacy-classification. Matchers refuse on path shape and label mismatch;
+# content findings present before the label finding. (Cite gate ids and class
+# names in matcher comments only.)
+newrepo "$TMP/pdsecret"
+( cd "$TMP/pdsecret" && "$GATES" start --class code ) >/dev/null
+printf 'x\n' > "$TMP/pdsecret/.env"
+check 'a secret-shaped path is refused by no-raw-content-read' \
+  "out '$TMP/pdsecret' check --before ship | grep -q 'no-raw-content-read: REFUSED'"
+check 'the secret refusal is universal and forbids re-declare as a fix' \
+  "out '$TMP/pdsecret' check --before ship | grep -q 'Re-declaring does not permit this read'"
+check 'explain --json lists the private content paths' \
+  "out '$TMP/pdsecret' explain --json | jq -e '.raw_private_content_paths | index(\".env\") != null'"
+newrepo "$TMP/pdenvok"
+( cd "$TMP/pdenvok" && "$GATES" start --class code ) >/dev/null
+printf 'x\n' > "$TMP/pdenvok/.env.example"
+check 'an .env.example template is not refused as private content' \
+  "out '$TMP/pdenvok' explain --json | jq -e '(.raw_private_content_paths | length) == 0'"
+newrepo "$TMP/pdkey"
+( cd "$TMP/pdkey" && "$GATES" start --class code ) >/dev/null
+printf 'x\n' > "$TMP/pdkey/id_rsa"
+check 'an id_rsa key path is refused' \
+  "out '$TMP/pdkey' check --before ship | grep -q 'no-raw-content-read: REFUSED'"
+newrepo "$TMP/pdescape"
+( cd "$TMP/pdescape" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/pdescape/scripts" && printf 'a,b\n' > "$TMP/pdescape/scripts/rows.csv"
+check 'a data file under a tooling slot is refused by licensed-row-containment' \
+  "out '$TMP/pdescape' check --before ship | grep -q 'licensed-row-containment: REFUSED'"
+check 'the licensed escape refusal names the path' \
+  "out '$TMP/pdescape' check --before ship | grep -q 'scripts/rows.csv'"
+check 'explain --json lists the licensed escape paths' \
+  "out '$TMP/pdescape' explain --json | jq -e '.licensed_row_escape_paths | index(\"scripts/rows.csv\") != null'"
+newrepo "$TMP/pdtoolok"
+( cd "$TMP/pdtoolok" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/pdtoolok/scripts" && printf 'x\n' > "$TMP/pdtoolok/scripts/tool.mjs"
+check 'ordinary tooling code under scripts/ is not a licensed escape' \
+  "out '$TMP/pdtoolok' explain --json | jq -e '(.licensed_row_escape_paths | length) == 0'"
+# privacy-classification: under-declaration fails closed; over-declaration passes.
+newrepo "$TMP/pdlabel"
+( cd "$TMP/pdlabel" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/pdlabel/fixtures/licensed" && printf 'a,b\n' > "$TMP/pdlabel/fixtures/licensed/rows.csv"
+check 'private observed paths under a non-private declaration refuse privacy-classification' \
+  "out '$TMP/pdlabel' check --before ship | grep -q 'privacy-classification: REFUSED'"
+check 'the privacy refusal names the private classes to declare' \
+  "out '$TMP/pdlabel' check --before ship | grep -q 'private-evidence'"
+check 'explain --json reports observed_privacy private and declared_covers false' \
+  "out '$TMP/pdlabel' explain --json | jq -e '.observed_privacy==\"private\" and (.declared_covers_privacy|not)'"
+newrepo "$TMP/pdover"
+( cd "$TMP/pdover" && "$GATES" start --class private-tooling ) >/dev/null
+printf 'x\n' > "$TMP/pdover/notes.md"
+check 'over-declaration to a private class is not refused by privacy-classification' \
+  "! out '$TMP/pdover' check --before ship | grep -q 'privacy-classification: REFUSED'"
+newrepo "$TMP/pdmulti"
+( cd "$TMP/pdmulti" && "$GATES" start --class code ) >/dev/null
+printf 'x\n' > "$TMP/pdmulti/.env"
+mkdir -p "$TMP/pdmulti/scripts" && printf 'a,b\n' > "$TMP/pdmulti/scripts/rows.csv"
+mkdir -p "$TMP/pdmulti/fixtures/licensed" && printf 'a,b\n' > "$TMP/pdmulti/fixtures/licensed/rows.csv"
+check 'content refusal presents before the label mismatch' \
+  "out '$TMP/pdmulti' check --before ship | awk '/no-raw-content-read: REFUSED/{c=NR} /privacy-classification: REFUSED/{p=NR} END{exit !(c && p && c<p)}'"
+check 'both content and label findings appear together' \
+  "out '$TMP/pdmulti' check --before ship | grep -q 'no-raw-content-read: REFUSED' && out '$TMP/pdmulti' check --before ship | grep -q 'privacy-classification: REFUSED'"
+# Positive controls: a known-private fixture path is private; a known-code path is not.
+newrepo "$TMP/pdpos"
+( cd "$TMP/pdpos" && "$GATES" start --class private-evidence ) >/dev/null
+mkdir -p "$TMP/pdpos/fixtures/licensed" && printf 'a,b\n' > "$TMP/pdpos/fixtures/licensed/probe.csv"
+check 'positive control: known-private fixture classifies private' \
+  "out '$TMP/pdpos' explain --json | jq -e '.observed_privacy==\"private\"'"
+newrepo "$TMP/pdneg"
+( cd "$TMP/pdneg" && "$GATES" start --class code ) >/dev/null
+mkdir -p "$TMP/pdneg/src" && printf 'x\n' > "$TMP/pdneg/src/app.js"
+check 'positive control: known-code path classifies public' \
+  "out '$TMP/pdneg' explain --json | jq -e '.observed_privacy==\"public\" and .declared_covers_privacy'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

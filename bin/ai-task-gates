@@ -368,6 +368,7 @@ change_set(){
 # Classification
 # --------------------------------------------------------------------------
 OBSERVED_CLASS=""; OBSERVED_RANK=0; CHANGED_PATHS=""; CHANGED_COUNT=0
+RAW_PRIVATE_PATHS=""; LICENSED_ESCAPE_PATHS=""; PRIVACY_MISMATCH=0
 declare -a CONTRIBUTORS=()
 
 classify_paths(){
@@ -378,9 +379,11 @@ classify_paths(){
   rules="$(applicable_path_rules "$identity")"
 
   OBSERVED_CLASS=""; OBSERVED_RANK=0; CONTRIBUTORS=(); CHANGED_COUNT=0; RAW_ARCHIVE_PATHS=""
+  RAW_PRIVATE_PATHS=""; LICENSED_ESCAPE_PATHS=""; CHANGED_PATHS=""; PRIVACY_MISMATCH=0
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
+    CHANGED_PATHS="${CHANGED_PATHS}${path}"$'\n'
     # Raw chat/transcript archives may never enter a change set (AGENTS.md:
     # "never open or commit raw transcript .jsonl"). Path shape is the proof,
     # matched case-insensitively: on case-insensitive filesystems .JSONL,
@@ -388,6 +391,22 @@ classify_paths(){
     # spellings, so a case-sensitive match would let them evade the rule.
     if raw_archive_path "$path"; then
       RAW_ARCHIVE_PATHS="${RAW_ARCHIVE_PATHS}${path}"$'\n'
+    fi
+    if raw_private_content_path "$path"; then
+      RAW_PRIVATE_PATHS="${RAW_PRIVATE_PATHS}${path}"$'\n'
+    fi
+    if licensed_row_containment_breach "$path"; then
+      LICENSED_ESCAPE_PATHS="${LICENSED_ESCAPE_PATHS}${path}"$'\n'
+    fi
+    # Ancestry closure (Muse final word): a known-private root makes the path
+    # private regardless of leaf shape. Evaluated before the rule table so a
+    # new layout under a known root cannot fall through to the fallback class.
+    if private_root_path "$path"; then
+      CONTRIBUTORS+=("private-evidence	$path")
+      if [ "${TG_RANK[private-evidence]:-0}" -gt "$OBSERVED_RANK" ]; then
+        OBSERVED_CLASS=private-evidence; OBSERVED_RANK="${TG_RANK[private-evidence]:-0}"
+      fi
+      continue
     fi
     # Compile the applicable rules once for the complete path set. Calling
     # tg_glob_match for every path/rule pair starts a Bash command substitution
@@ -476,6 +495,218 @@ refuse_release_raw_archives(){
   [ "$old" != "$target" ] || return 0
   paths="$(git -C "$TOPLEVEL" diff --no-renames --name-only -z "$old" "$target" 2>/dev/null | tr '\0' '\n')" || return 0
   refuse_raw_archives "$action" "$paths"
+}
+
+# --------------------------------------------------------------------------
+# no-raw-content-read. Secret/PII path shapes refused for every action and
+# every declared class. One owner: this gate alone refuses content shapes;
+# privacy-classification never re-lists them (single-owner rule).
+# --------------------------------------------------------------------------
+
+# raw_private_content_path PATH — secret/PII shapes. Case-insensitive.
+# `.env` is refused unless the name is an explicit example/template.
+raw_private_content_path(){
+  local base lower blower
+  base="${1##*/}"
+  lower="${1,,}"
+  blower="${base,,}"
+  case "$blower" in
+    .env.example|.env.sample|.env.template|.env.example.*|.env.sample.*|.env.template.*) return 1 ;;
+  esac
+  case "$lower" in
+    */.env|*/.env.*|.env|.env.*|*.pem|*.p12|*.pfx|*/id_rsa|*/id_rsa.*|id_rsa|id_rsa.*) return 0 ;;
+  esac
+  case "$blower" in
+    id_rsa|id_rsa.*|*.pem|*.p12|*.pfx) return 0 ;;
+  esac
+  return 1
+}
+
+# refuse_raw_private_content ACTION PATHS — collect secret/PII shapes.
+# Does not block: the combined private-data presenter emits content findings
+# first, then the label mismatch, so both gates always report (Muse final word).
+collect_raw_private_content(){
+  local paths="$1" path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if raw_private_content_path "$path"; then
+      RAW_PRIVATE_PATHS="${RAW_PRIVATE_PATHS}${path}"$'\n'
+    fi
+  done <<< "$paths"
+}
+
+# --------------------------------------------------------------------------
+# licensed-row-containment. A licensed stem must stay in its private evidence
+# location. Escape = licensed stem under scripts/ or scraper/, or disguised
+# as code. One owner: this gate alone refuses licensed escapes.
+# --------------------------------------------------------------------------
+
+# licensed_row_name PATH — a path that carries licensed row material: the
+# licensed fixture tree, or a data-file stem that belongs there.
+licensed_row_name(){
+  local lower base blower
+  lower="${1,,}"
+  base="${1##*/}"
+  blower="${base,,}"
+  case "$lower" in
+    */fixtures/licensed/*|fixtures/licensed/*) return 0 ;;
+  esac
+  # Data files that carry rows are licensed stems when their name sits in a
+  # licensed/capture context, or when the basename itself is a capture extract.
+  case "$blower" in
+    *.csv|*.tsv|*.xlsx|*.xls|*.jsonl)
+      case "$lower" in
+        *licens*|*licensor*|*rights*|*capture*|*scrape*|*property*|*character*) return 0 ;;
+      esac
+      # A bare data file under a tooling slot is a licensed-row escape even
+      # without a licensed token in the name: the policy comment is absolute
+      # ("never put licensed rows under scripts/ or scraper/").
+      case "$lower" in
+        */scripts/*|scripts/*|*/scraper/*|scraper/*) return 0 ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+# licensed_row_containment_breach PATH — licensed stem in a tooling slot
+# (scripts/, scraper/) or disguised as code.
+licensed_row_containment_breach(){
+  local path="$1" lower="${1,,}"
+  case "$lower" in
+    */scripts/*|scripts/*|*/scraper/*|scraper/*)
+      # Data material under a tooling slot is the escape.
+      case "$lower" in
+        *.csv|*.tsv|*.xlsx|*.xls|*.jsonl|*.json|*.parquet) return 0 ;;
+      esac
+      licensed_row_name "$path" && return 0
+      return 1
+      ;;
+  esac
+  # Disguised as code: licensed stem renamed to a code extension.
+  if licensed_row_name "$path"; then
+    case "$lower" in
+      *.mjs|*.js|*.ts|*.py|*.sh|*.ps1) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+# refuse_licensed_row_escape ACTION PATHS — collect licensed escapes.
+# Does not block: see collect_raw_private_content.
+collect_licensed_row_escape(){
+  local paths="$1" path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if licensed_row_containment_breach "$path"; then
+      LICENSED_ESCAPE_PATHS="${LICENSED_ESCAPE_PATHS}${path}"$'\n'
+    fi
+  done <<< "$paths"
+}
+
+# --------------------------------------------------------------------------
+# privacy-classification. Recorded-label consistency (Muse, sharper D, final
+# word): the task state must hold a declared class that covers the privacy
+# observed from the work. FAIL iff observed paths classify private and
+# declared_class is not private-evidence/private-tooling (including unset).
+# Over-declaration passes. Zero shape refusals here — content shapes belong to
+# no-raw-content-read; licensed escapes belong to licensed-row-containment.
+# Ancestry closure: any path under a known-private root inherits private
+# regardless of leaf shape. Unknown roots fail-open with an explain advisory.
+# --------------------------------------------------------------------------
+
+private_class(){
+  case "$1" in
+    private-evidence|private-tooling) return 0 ;;
+  esac
+  return 1
+}
+
+# Known-private roots. Prefix rules, evaluated before leaf-shape rules: a new
+# archive layout or new leaf names under a known root are still private.
+# Case-insensitive on the root segments that case-insensitive filesystems use.
+private_root_path(){
+  local lower="${1,,}"
+  case "$lower" in
+    transcripts/*|*/transcripts/*|chat_archives/*|*/chat_archives/*) return 0 ;;
+    private-evidence/*|*/private-evidence/*|fixtures/licensed/*|*/fixtures/licensed/*) return 0 ;;
+    licensed/*|*/licensed/*|private/*|*/private/*) return 0 ;;
+  esac
+  return 1
+}
+
+# privacy_observed_private PATH SET — true when the path is private by the
+# shared observed_class mapping, by ancestry under a known-private root, or
+# because a contributor already classified private (stickiness).
+privacy_observed_private(){
+  case "${OBSERVED_CLASS:-none}" in
+    private-evidence|private-tooling) return 0 ;;
+  esac
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    private_root_path "$path" && return 0
+  done <<< "${1:-}"
+  return 1
+}
+
+# privacy_capability_ok — the classifier must recognize an embedded
+# known-private fixture path as private. A mapping regression refuses loudly
+# (Muse final word: never a silent no-op ship).
+privacy_capability_ok(){
+  local probe="fixtures/licensed/privacy-classification-capability-probe.csv"
+  private_root_path "$probe" && return 0
+  return 1
+}
+
+# refuse_privacy_classification ACTION — label-consistency verdict (does not
+# block alone; the combined presenter emits content first, then this).
+# Sets PRIVACY_MISMATCH=1 when under-declared.
+PRIVACY_MISMATCH=0
+privacy_label_mismatch(){
+  local declared observed
+  declared="$(state_field declared_class)"
+  observed="${OBSERVED_CLASS:-none}"
+  PRIVACY_MISMATCH=0
+  privacy_capability_ok || {
+    blocked 'ai-task-gates: STOP. privacy-classification: REFUSED — classifier lacks private-shape support; update the path mapping, do not proceed.'
+  }
+  privacy_observed_private "${CHANGED_PATHS:-}" || return 0
+  private_class "$declared" && return 0
+  PRIVACY_MISMATCH=1
+}
+
+# refuse_private_data_gates ACTION — single presenter for the three private
+# data gates. Content findings first (terminal: re-declaring never permits the
+# read), then the label mismatch (conditional: fixable by re-declaring).
+# Each finding cites exactly its own gate id. Both predicates always run.
+refuse_private_data_gates(){
+  local action="$1" msg=""
+  privacy_label_mismatch
+  if [ -n "${RAW_PRIVATE_PATHS:-}" ]; then
+    msg="${msg}ai-task-gates: STOP before \"$action\". no-raw-content-read: REFUSED — the change set contains raw private content paths (secret/PII shapes), which this gate forbids in any repository or class:
+${RAW_PRIVATE_PATHS}Private content is never read, committed, or shipped. Re-declaring does not permit this read. Remove these paths from the change set.
+
+"
+  fi
+  if [ -n "${LICENSED_ESCAPE_PATHS:-}" ]; then
+    msg="${msg}ai-task-gates: STOP before \"$action\". licensed-row-containment: REFUSED — licensed-row material sits in a tooling slot or code disguise:
+${LICENSED_ESCAPE_PATHS}Licensed stems stay in their private evidence location — never under scripts/ or scraper/, never renamed to a code extension. Move the file to its licensed tree.
+
+"
+  fi
+  if [ "$PRIVACY_MISMATCH" -eq 1 ]; then
+    local declared
+    declared="$(state_field declared_class)"
+    msg="${msg}ai-task-gates: STOP before \"$action\". privacy-classification: REFUSED — changed paths classify as private but declared_class is ${declared:-<unset>}.
+Private work must record a private classification before proceeding:
+  ai-task-gates start --class private-evidence ...   # handling private evidence/rows
+  ai-task-gates start --class private-tooling ...    # building tooling that touches private data
+This gate fails closed: unrecorded private work would escape the private-class action forbids (review/deploy/database/infrastructure/production/shared-db-promotion). Re-run check after re-declaring.
+"
+  fi
+  [ -n "$msg" ] || return 0
+  blocked "$msg"
 }
 
 # check_change_set ACTION REQUESTED_BASE — the change set `check` will judge,
@@ -944,7 +1175,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # Gates this tool actually checks. Anything else a policy lists is recorded
 # and printed under "not checked by this tool"; it is never claimed as satisfied
 # or enforced here. Keep this list in step with the enforcement code paths.
-GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
+GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|no-raw-content-read|licensed-row-containment|privacy-classification|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
   local all="$1" checked
@@ -1056,11 +1287,21 @@ cmd_explain(){
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
 
   if [ "$as_json" = true ]; then
+    local observed_privacy="public"
+    case "${OBSERVED_CLASS:-none}" in
+      private-evidence|private-tooling) observed_privacy="private" ;;
+    esac
+    local declared_covers="true"
+    case "${declared:-}" in
+      private-evidence|private-tooling) ;;
+      *) [ "$observed_privacy" = public ] || declared_covers="false" ;;
+    esac
     printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
       --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
       --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg effective "$effective" --arg policy "$POLICY_FILE" \
       --arg required "$required" --arg unchecked "$unchecked_required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" \
-      --arg rawarch "${RAW_ARCHIVE_PATHS:-}" '
+      --arg rawarch "${RAW_ARCHIVE_PATHS:-}" --arg rawpriv "${RAW_PRIVATE_PATHS:-}" --arg licesc "${LICENSED_ESCAPE_PATHS:-}" \
+      --arg observed_privacy "$observed_privacy" --arg declared_covers "$declared_covers" '
       {schema_version:1,
        repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
        base:$base, policy_file:$policy,
@@ -1072,6 +1313,10 @@ cmd_explain(){
        unchecked_gates:(if $unchecked=="" then [] else ($unchecked|split(",")) end),
        forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
        raw_archive_paths:($rawarch|split("\n")|map(select(length>0))),
+       raw_private_content_paths:($rawpriv|split("\n")|map(select(length>0))),
+       licensed_row_escape_paths:($licesc|split("\n")|map(select(length>0))),
+       observed_privacy:$observed_privacy,
+       declared_covers_privacy:($declared_covers=="true"),
        changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
     return 0
   fi
@@ -1088,6 +1333,14 @@ cmd_explain(){
   if [ -n "${RAW_ARCHIVE_PATHS:-}" ]; then
     printf 'raw archives     : %s\n' "$(printf '%s' "$RAW_ARCHIVE_PATHS" | sed '/^$/d' | paste -sd' ' -)"
     printf '%s\n' '                 raw transcript or chat archives found; never-open-raw-transcript-archives refuses every action until they leave the change set.'
+  fi
+  if [ -n "${RAW_PRIVATE_PATHS:-}" ]; then
+    printf 'private content  : %s\n' "$(printf '%s' "$RAW_PRIVATE_PATHS" | sed '/^$/d' | paste -sd' ' -)"
+    printf '%s\n' '                 secret/PII shapes found; no-raw-content-read refuses every action and class until they leave the change set.'
+  fi
+  if [ -n "${LICENSED_ESCAPE_PATHS:-}" ]; then
+    printf 'licensed escapes : %s\n' "$(printf '%s' "$LICENSED_ESCAPE_PATHS" | sed '/^$/d' | paste -sd' ' -)"
+    printf '%s\n' '                 licensed stems in tooling slots or code disguises; licensed-row-containment refuses until they move to the licensed tree.'
   fi
   if [ "$CHANGED_COUNT" -gt 0 ]; then
     printf 'changes:\n'
@@ -1247,6 +1500,7 @@ cmd_check(){
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
   local application_release_target="" application_workflow_target="" base_explicit=0 application_release_ready=0
+  local early_change_set=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --action-stage) need_value "$@"; action_stage="$2"; shift 2 ;;
@@ -1297,7 +1551,15 @@ cmd_check(){
   # application-workflow dispatch, which returns without ever reaching a
   # later archive check. A scan that cannot classify (no repository yet)
   # falls through to the same checks it would have mirrored in `prepare`.
-  refuse_raw_archives "$action" "$(check_change_set "$action" "$base")"
+  local early_change_set
+  early_change_set="$(check_change_set "$action" "$base")"
+  refuse_raw_archives "$action" "$early_change_set"
+  # no-raw-content-read and licensed-row-containment collect universal content
+  # findings (path shape is the proof, every action, every class). The
+  # combined presenter runs after prepare so privacy-classification sees
+  # OBSERVED_CLASS; both predicates always report (content first).
+  collect_raw_private_content "$early_change_set"
+  collect_licensed_row_escape "$early_change_set"
   if [ "$action" = application-workflow ] || [ -n "$application_workflow_target" ]; then
     [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] && [ -n "$reviewer_approval" ] \
       && [ -z "$base$acknowledge$small_entry$application_release_target$target_head$installed_checkout$installed_launcher" ] \
@@ -1322,6 +1584,12 @@ cmd_check(){
   # always judges the original change-set paths — historical files that merely
   # exist in the repository never rewrite the verdict.
   refuse_raw_archives "$action" "${RAW_ARCHIVE_PATHS:-}"
+  # Private-data gates: content shapes first, then label consistency. Runs
+  # here — after classify_paths has set OBSERVED_CLASS/CHANGED_PATHS, before
+  # undeclared-class adoption — so an empty declared_class cannot be silently
+  # rewritten to match private observed paths. Universal: not gated on the
+  # policy required-gates list. Both predicates always report (Muse final word).
+  refuse_private_data_gates "$action"
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
     [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
