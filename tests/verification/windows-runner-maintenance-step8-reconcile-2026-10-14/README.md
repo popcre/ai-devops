@@ -1,8 +1,8 @@
 # Step 8 reconcile — both Windows runner maintenance hosts (plan step 8 / #262)
 
 Date: 2026-10-14 (America/New_York)
-Operator: MiMo chat `ses_ffe5ec2a5978affe0rPcyOSHaY` on this machine
-Scope: read-only `-Verify`, leftover audit, and rollback-bundle ACL/size check on both hosts. No install, update, remove, invoke, or runner-service change.
+Operators: MiMo chat `ses_ffe5ec2a5978affe0rPcyOSHaY` (initial audit) and `ses_ffe5ec2a10135ffeHg4O8YjV0C` (correction + final verify) on edge-dev
+Scope: `-Verify`, leftover audit, rollback-bundle ACL/size check, and evidence-contract sibling restore on both hosts. No install, update, remove, invoke, or runner-service change.
 
 ## Host records reconciled
 
@@ -30,10 +30,10 @@ Command on each host: `pwsh -NoProfile -File C:\repos\ai-devops\bin\install-wind
 | Live `requests\` | 0 entries | 0 entries |
 | Live `temp\` | 0 entries | 0 entries |
 | Live `results\` | 1 historical result (intentional runtime record) | 2 historical results (intentional runtime records) |
-| `*.tmp` / `*.lock` / `*.lck` leftovers | `windows-runner-security.json.tmp` (0 bytes) found and **deleted**; recheck `File Not Found` | same |
+| `*.tmp` / `*.lock` / `*.lck` leftovers | no lock files. `windows-runner-security.json.tmp` is a **required** evidence-contract sibling (not a leftover): verify (`Test-MaintenanceInstallation`) and the worker's `Test-EvidenceBoundary` both require it. It had been consumed by the atomic refresh rename and was **restored** to the post-refresh contract (0 bytes, `BUILTIN\Administrators`/`SYSTEM` Full, `Everyone` Read) per `windows-runner-maintenance-worker.ps1` lines 362–370. Recheck after restore: verify PASS. | same |
 | Stuck `Running` maintenance task (lock) | none (`Ready`) | none (`Ready`) |
 
-After the empty `.tmp` cleanup, neither host holds temporary tasks, backups outside the intentional recovery/rollback bundles, leftover request files, or locks.
+Correction (2026-10-14, session `ses_ffe5ec2a10135ffeHg4O8YjV0C`): the initial audit incorrectly treated `windows-runner-security.json.tmp` as a leftover and deleted it. That file is the pinned evidence-write sibling the worker re-creates after every refresh so no pre-creation race starts from a missing sibling. Deleting it makes `-Verify` fail (`Missing required path: ...windows-runner-security.json.tmp`). It was restored with the Evidence ACL contract on both hosts; `-Verify` then returned PASS on each. No other artifact was changed.
 
 ## Rollback / recovery bundles — protected and bounded
 
@@ -56,9 +56,9 @@ Evidence file `C:\ProgramData\ai-devops\windows-runner-security.json` was not mo
 ## Acceptance for step 8
 
 - [x] Both host evidence records compared and consistent with the plan STATUS rows 6–7
-- [x] `-Verify` still passes on both hosts (fresh, 2026-10-14)
+- [x] `-Verify` still passes on both hosts (fresh, 2026-10-14, after evidence-sibling restore)
 - [x] No temporary tasks / leftover request files / locks remain except the intentional installed task
-- [x] Empty evidence-write `.tmp` leftovers removed on both hosts
+- [x] Evidence-contract sibling `windows-runner-security.json.tmp` present with Evidence ACL on both hosts (required by verify; not a leftover)
 - [x] Rollback and recovery bundles present, Administrators-owned, 0 non-admin Allow ACEs, bounded size
 - [x] Runner services unchanged (`Running` / `Automatic`); no service stop/start/reconfigure
 
