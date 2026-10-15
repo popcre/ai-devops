@@ -1102,6 +1102,11 @@ failed_turn_stream_check(){
       last.type=="step_finish" and last.part.reason=="tool-calls")
   ' "$stream" >/dev/null 2>&1
 }
+# Retained paths may be stored in Windows (C:/...) or MSYS (/tmp/...) spelling;
+# compare one canonical spelling of the same physical file.
+failed_turn_path(){
+  if command -v cygpath >/dev/null 2>&1; then realpath -m "$(cygpath -u "$1")"; else realpath -m "$1"; fi
+}
 failed_turn_source_check(){
   local source_meta="$1" name="$2" root="$3" rid="$4" event stem sid head packet review_dir expected actual item
   [ "$ENGINE" = opencode ] || return 1
@@ -1130,7 +1135,7 @@ failed_turn_source_check(){
   for item in stream prompt; do
     actual="$(jq -r --arg key "$item" '.retained_turn[$key] // empty' "$source_meta")"
     expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
-    [ -n "$actual" ] && [ -f "$actual" ] && [ ! -L "$actual" ] && [ "$(realpath -m "$actual")" = "$(realpath -m "$expected")" ] || return 1
+    [ -n "$actual" ] && [ -f "$actual" ] && [ ! -L "$actual" ] && [ "$(failed_turn_path "$actual")" = "$(failed_turn_path "$expected")" ] || return 1
     [ "$(sha256sum "$actual" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key] // empty' "$source_meta")" ] || return 1
   done
   failed_turn_stream_check "$stem.jsonl" "$sid" || return 1
@@ -1147,7 +1152,7 @@ verify_failed_turn_receipt(){
   event="$(jq -r '.failed_turn_receipts[-1].original_invocation_id // empty' "$meta")"
   [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
   archive="${meta%.json}.$event.failed-turn.json"
-  [ "$(jq -r '.failed_turn_receipts[-1].archive_path // empty' "$meta")" = "$archive" ] || return 1
+  [ "$(failed_turn_path "$(jq -r '.failed_turn_receipts[-1].archive_path // empty' "$meta")")" = "$(failed_turn_path "$archive")" ] || return 1
   [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
   digest="$(sha256sum "$archive" | cut -d' ' -f1)"
   [ "$digest" = "$(jq -r '.failed_turn_receipts[-1].archive_sha256 // empty' "$meta")" ] || return 1
