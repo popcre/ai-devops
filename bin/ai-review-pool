@@ -488,7 +488,15 @@ fi
 # For Gemini, contradictory verdicts are refused (fail closed).  For other
 # providers a provisional-then-final pair is expected; only the last counts.
 if [ "$provider" = gemini ]; then
-  ALL_VERDICTS="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print}' "$TMP_TEXT")"
+  ALL_VERDICTS="$(awk '
+    /^## Verdict[[:space:]]*$/ { pending=1; next }
+    pending {
+      if ($0 ~ /^[[:space:]]*$/) next
+      pending=0
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      if ($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print
+    }
+  ' "$TMP_TEXT")"
   UNIQUE_VERDICTS="$(printf '%s\n' "$ALL_VERDICTS" | sort -u)"
   VERDICT_COUNT="$(printf '%s\n' "$UNIQUE_VERDICTS" | grep -c . || true)"
   if [ "$VERDICT_COUNT" -gt 1 ]; then
@@ -499,7 +507,17 @@ if [ "$provider" = gemini ]; then
 else
   VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
 fi
-VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+VERDICT_RECORD="$(awk -v n="$VERDICT_LINE" '
+  NR==n { pending=1; next }
+  pending {
+    if ($0 ~ /^[[:space:]]*$/) next
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+    if ($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print NR "\t" $0
+    exit
+  }
+' "$TMP_TEXT")"
+VERDICT_TOKEN_LINE="${VERDICT_RECORD%%$'\t'*}"
+VERDICT="${VERDICT_RECORD#*$'\t'}"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome. The analysis is the
@@ -513,7 +531,7 @@ case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STA
 # side and is still refused.
 FIRST_NONEMPTY="$(awk 'NF{print NR; exit}' "$TMP_TEXT")"
 if [ "$provider" = gemini ] && [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
-  ANALYSIS_START="$((VERDICT_LINE + 2))"  # skip the heading and its one verdict word
+  ANALYSIS_START="$((VERDICT_TOKEN_LINE + 1))"  # skip the verdict even when blank lines precede it
   ANALYSIS_END=0                          # 0 = through end of body
 else
   ANALYSIS_START=1

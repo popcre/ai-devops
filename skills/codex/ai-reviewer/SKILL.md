@@ -1,6 +1,7 @@
 ---
 name: ai-reviewer
 description: >-
+  Approval-gate wrapper (maintained). Not a rotation reviewer.
   Run a read-only Codex second-opinion review (plan, diff, security, visual, or
   final-check) on the current git repo and save the result under .ai/reviews/.
   Use when the user wants Codex to independently review work without changing any

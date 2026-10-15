@@ -247,14 +247,14 @@ def invented_peer(monkeypatch):
     key='nodekey:'+'1'*64;expected={**TEST_PEER,'node_key_sha256':hashlib.sha256(key.encode()).hexdigest()}
     monkeypatch.setattr(m,'PEER_SHA256',m.canonical_commitment('oracle-platform-peer-route/v4',expected))
     for field,value in expected.items():monkeypatch.setitem(TEST_PEER,field,value)
-    who={'Node':{'ID':expected['node_id'],'Name':expected['node_name'],'Addresses':expected['addresses'],'Key':key,'Tags':expected['tags']}}
+    who={'Node':{'ID':expected['node_id'],'Name':expected['node_name'],'Addresses':expected['addresses'],'Key':key,'Tags':expected['tags'],'Expired':False,'KeyExpiry':'2099-01-01T00:00:00Z'}}
     route=[{'dst':'127.0.0.1','dev':'tailscale0','table':'52','prefsrc':expected['route_source'],'flags':[]}]
     monkeypatch.setattr(m,'os_identity',lambda *a:None);monkeypatch.setattr(m,'root_ancestry',lambda *a:(1,2))
     def local(argv,maximum):return who if argv[0]=='/usr/bin/tailscale' else route
     monkeypatch.setattr(m,'local_metadata',local)
     return who,route
 
-@pytest.mark.parametrize('damage',['node','key','name','address','tags','missingtags','missingkey','route','device','source','table','expired','unknown'])
+@pytest.mark.parametrize('damage',['node','key','name','address','tags','missingtags','missingkey','route','device','source','table','expired','missing-expired','null-expired','nonbool-expired','missing-key-expiry','null-key-expiry','empty-key-expiry','malformed-key-expiry','naive-key-expiry','past-key-expiry','unknown'])
 def test_wrong_peer_or_route_sends_zero_http_bytes(invented_peer,damage):
     who,route=invented_peer
     if damage=='node':who['Node']['ID']+=1
@@ -269,16 +269,22 @@ def test_wrong_peer_or_route_sends_zero_http_bytes(invented_peer,damage):
     elif damage=='source':route[0]['prefsrc']='192.0.2.1'
     elif damage=='table':route[0]['table']='main'
     elif damage=='expired':who['Node']['Expired']=True
+    elif damage=='missing-expired':who['Node'].pop('Expired')
+    elif damage=='null-expired':who['Node']['Expired']=None
+    elif damage=='nonbool-expired':who['Node']['Expired']=0
+    elif damage=='missing-key-expiry':who['Node'].pop('KeyExpiry')
+    elif damage=='null-key-expiry':who['Node']['KeyExpiry']=None
+    elif damage=='empty-key-expiry':who['Node']['KeyExpiry']=' '
+    elif damage=='malformed-key-expiry':who['Node']['KeyExpiry']='not-a-time'
+    elif damage=='naive-key-expiry':who['Node']['KeyExpiry']='2099-01-01T00:00:00'
+    elif damage=='past-key-expiry':who['Node']['KeyExpiry']='2000-01-01T00:00:00Z'
     else:who.clear()
-    with patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('HTTP constructed')):
+    with patch.object(m.urllib.request,'build_opener',side_effect=AssertionError('HTTP opener constructed')),patch.object(m.urllib.request,'Request',side_effect=AssertionError('bearer request constructed')):
         with pytest.raises((ValueError,TypeError)):m.version('INVENTED',contract())
 
 
-def test_fixed_peer_null_expiry_is_unknown_not_unexpired(invented_peer):
-    who,_=invented_peer
-    assert m.verify_tailnet(contract())['peer_expiry']=='UNKNOWN'
-    who['Node'].update(KeyExpiry=None,Expired=None)
-    assert m.verify_tailnet(contract())['peer_expiry']=='UNKNOWN'
+def test_fixed_peer_finite_expiry_is_checked(invented_peer):
+    assert m.verify_tailnet(contract())['peer_expiry']=='checked-current'
 
 
 def test_peer_rechecked_after_http_before_metadata_accepted(invented_peer):
@@ -561,13 +567,18 @@ def projection_fixture(tmp_path,monkeypatch,mode='discover'):
 
 def test_projection_exact_closed_privacy_and_no_authority(tmp_path,monkeypatch):
     module=projection_module();path,seal,c=projection_fixture(tmp_path,monkeypatch)
+    c['claim_id']='future-claim-secret-sentinel'
+    c['issued_at']=int(time.time())-1
+    c['expires_at']=c['issued_at']+600
+    raw=json.dumps(c).encode();path.write_bytes(raw);path.chmod(0o600);seal=hashlib.sha256(raw).hexdigest()
     with patch.object(m,'gate_and_claim',side_effect=AssertionError('claim')),patch.object(m,'version',side_effect=AssertionError('HTTP')),patch.object(m,'read_remote',side_effect=AssertionError('SSH')):
         value=module.describe(path,seal)
     text=json.dumps(value,sort_keys=True)
     assert value['schema']==module.PROJECTION_SCHEMA and value['contract_sha256']==seal and value['managed_link_count']==97
     assert value['non_authorizing'] is True and value['claims_created']==0 and value['credentials_used'] is False and value['remote_traffic']==0
+    assert 'future-claim-secret-sentinel' not in text and str(c['issued_at']) not in text and str(c['expires_at']) not in text
     for forbidden in (str(path),str(path.parent),c['api'],c['host'],c['tailnet']['node_name'],*c['tailnet']['addresses'],c['tailnet']['route_source']):assert forbidden not in text
-    assert set(value)=={'schema','contract_schema','mode','claim_id','issued_at','expires_at','contract_sha256','operator_sha256','remote_sha256','transport_helper_sha256','fixed_target_commitment_sha256','fixed_peer_route_commitment_sha256','installed_gate','managed_link_count','scope','non_authorizing','claims_created','credentials_used','remote_traffic'}
+    assert set(value)=={'schema','contract_schema','mode','contract_sha256','operator_sha256','remote_sha256','transport_helper_sha256','fixed_target_commitment_sha256','fixed_peer_route_commitment_sha256','installed_gate','managed_link_count','scope','non_authorizing','claims_created','credentials_used','remote_traffic'}
     assert len(list(path.parent.iterdir()))==1
 
 

@@ -716,12 +716,12 @@ check "substantive finding stops shopping" "$SCRIPT explain substantive-finding 
 echo '== registry membership is a separate gate from install health'
 REAL_REGISTRY="$ROOT/config/reviewer-registry.json"
 check "shipped reviewer registry is valid JSON" "jq -e '.version==1 and (.providers|type==\"object\")' '$REAL_REGISTRY'"
-check "Gemini is carried in the shipped reviewer registry after live re-qualification"   "jq -e '.providers.gemini.registry_state==\"registered\"' '$REAL_REGISTRY'"
-check "the Gemini entry still records why the empty report mattered"   "jq -e '.providers.gemini.reason|test(\"empty report\")' '$REAL_REGISTRY'"
+check "Gemini is quarantined out of the maintained rotation pool (owner instruction 2026-10-13)"   "jq -e '.providers.gemini.registry_state==\"absent\" and (.providers.gemini.reason|test(\"2026-10-13\"))' '$REAL_REGISTRY'"
+check "Qwen is quarantined out of the maintained rotation pool (owner instruction 2026-10-13)"   "jq -e '.providers.qwen.registry_state==\"absent\" and (.providers.qwen.reason|test(\"2026-10-13\"))' '$REAL_REGISTRY'"
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, DeepSeek, GLM, StepFun, plus the Codex gate" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"glm\",\"muse\",\"stepfun\"]' '$REAL_REGISTRY'"
 check "Grok is quarantined out of the shipped reviewer pool (owner instruction 2026-10-13, out of credit)" "jq -e '.providers.grok.registry_state==\"absent\" and (.providers.grok.reason|test(\"2026-10-13\"))' '$REAL_REGISTRY'"
 check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that

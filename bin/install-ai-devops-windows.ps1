@@ -267,6 +267,13 @@ function Get-TargetPolicyDigest([string]$Path, [string]$TargetHead) {
     return ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
 }
 
+function Test-ExactTerminalApproval([string[]]$Lines) {
+    $nonblankLines = @($Lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    return $nonblankLines.Count -ge 2 -and
+        $nonblankLines[-2] -ceq '## Verdict' -and
+        $nonblankLines[-1] -ceq 'APPROVE'
+}
+
 function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string]$InstalledHead, [bool]$LegacyMigration, [bool]$FirstInstall, [bool]$RecoverLaunchers) {
     $fixture = $env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
         (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/'
@@ -354,7 +361,7 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         throw 'Reviewed toolkit install report is missing or changed.'
     }
     $lines = @(Get-Content -LiteralPath $report)
-    if (($lines | Select-Object -Last 2) -join [char]10 -cne ('## Verdict' + [char]10 + 'APPROVE') -or
+    if (-not (Test-ExactTerminalApproval $lines) -or
         -not ($lines | Where-Object { $_ -ceq ('| reviewed commit | ' + [char]96 + $TargetHead + [char]96 + ' |') }) -or
         -not ($lines | Where-Object { $_ -ceq ('| source digest | ' + [char]96 + $auth.source_digest + [char]96 + ' |') })) {
         throw 'Reviewed toolkit install report does not approve the exact target and source.'

@@ -4,7 +4,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-selection.sh"
 
-fails=0; n=0; total=28
+fails=0; n=0; total=29
 check() { # check <label> <expected> <actual>
   n=$((n + 1))
   if [ "$2" = "$3" ]; then
@@ -96,6 +96,8 @@ check 'shared task-gates library still fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/task-gates.sh')"
 check 'a mapped reviewer tool selects exactly its declared suites' \
   "$(mapped 'tools/reviewer_credit_watch.py')" "$(raff 'tools/reviewer_credit_watch.py')"
+check 'the GLM maintenance helper selects its lock regression suite' \
+  'test-ai-glm.sh' "$(raff 'tools/lib/opencode-maintenance-lock.sh')"
 check 'an unmapped new tools/lib file fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/brand-new-helper.sh')"
 gone_manifest="$(mktemp)"

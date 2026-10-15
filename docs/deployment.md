@@ -60,6 +60,10 @@ also has a row in `config/machine-tools.tsv`. Ubuntu picks it up from the
 the catalog. Add the row in the same change that adds the script, or sessions
 will be told to run a command that does not exist on the machine.
 
+The scoped `az-mail` command is provisioned during the Ubuntu secrets stage and
+Windows machine setup. Its private host allowlist comes from the protected
+machine config; unsupported hosts receive no mailbox certificate.
+
 The Windows runner maintenance boundary is the one narrow exception to the
 global command catalog. Its explicit `.ps1` entrypoints are installed only by
 an elevated administrator following

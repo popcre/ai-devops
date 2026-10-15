@@ -55,6 +55,15 @@ pipeline. The recovery procedure lives in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
+- **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
+  Outside `popcre/shared-db`, dispatch a review only when the task class's gate
+  already demands one (installation, reviewer-safety, deployment,
+  infrastructure, production, shared-db promotion). Ordinary docs, tooling, and
+  non-shared-db code land with no review; a review stays available on request
+  by name. The rotation pool is Muse, DeepSeek, GLM, and StepFun. Other
+  wrappers stay installed and callable by name but are frozen (best-effort,
+  not maintained). Rules: [`docs/reviewer-rotation-rules.md`](docs/reviewer-rotation-rules.md)
+  13–14; plan [`plan_review-scope-reduction.md`](plan_review-scope-reduction.md).
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
   recheck the real change set first and refuse an action the work does not
@@ -94,6 +103,7 @@ pipeline. The recovery procedure lives in
 | Context size or routing ownership | [`docs/context-spec.md`](docs/context-spec.md), relevant STATUS in [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) | One owner per rule; measure before and after |
 | Standing behavior, trigger quality, false completion, “instructions not working,” or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Preserve client parity, safety gates, and private-data boundaries |
 | Tool, workflow, prompt, install, model, secret, or machine setup | The matching row in [`docs/task-router.md`](docs/task-router.md) | Read the affected verification header before edits |
+| Azure CLI mailbox access | [`docs/onboarding-secrets.md#azure-cli-mailbox-access`](docs/onboarding-secrets.md#azure-cli-mailbox-access) | Use the isolated profile and private machine allowlist; Exchange continues to enforce mailbox scope |
 | BlockerWatch waking (registration is OUT), dependency links, scheduler health, or repair | [`plan_blockerwatch-reliability-repair.md`](plan_blockerwatch-reliability-repair.md) STATUS, then the BlockerWatch row in [`docs/task-router.md`](docs/task-router.md) | Do not trust exit 0 until the plan's reconciliation and live-health gates are complete |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | [`docs/task-router.md`](docs/task-router.md) | Resolve current status; preserve safety behavior |
 | StepFun OpenCode compaction or Windows runner list | [StepFun OpenCode profile](config/opencode-stepfun/README.md) | Keep explicit compaction settings until measured evidence supports a change; preserve hashed runner gates |
@@ -118,6 +128,7 @@ pipeline. The recovery procedure lives in
 | Write a handoff | `handoff-writer`, [`templates/system/handoff-standard.md`](templates/system/handoff-standard.md) | Root `HANDOFF.md` is a static pointer |
 | Write an implementation plan | `implementation-plan-writer`, [`templates/system/implementation-plan-standard.md`](templates/system/implementation-plan-standard.md) | Write for a session with no chat context |
 | Documentation-only cleanup | [`README.md`](README.md) and affected docs | Do not touch source code except to verify accuracy |
+| AI token waste, reply discipline, compression pilots | [`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md), `skills/shared/scaledown-compress/SKILL.md` | Measure billed tokens and cache hits; never send secrets or private transcripts through a compressor |
 | Markdown reachability gate or rollout | [`docs/doc-reachability.md`](docs/doc-reachability.md), `bin/ai-doc-reachability`, `.doc-reachability.json`, and its tests | Gate only PR-added or moved Markdown; do not make legacy orphans block unrelated work |
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
@@ -142,6 +153,10 @@ but will be reported as `UNPROVABLE`.
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.
+- **One status probe per state change.** After a wait completes or a merge
+  lands, record the answer and move on. Prefer `bin/ai-pr-wait` /
+  `bin/ai-gh-wait` over open polling; leave the issue or pull request as the
+  card when a wait outlives the turn.
 - A reviewer repair is complete only when tests pass and every affected local
   reviewer-issue record is resolved or partially resolved with exact evidence.
   Follow `log-reviewer-issue` and preserve the incident package.

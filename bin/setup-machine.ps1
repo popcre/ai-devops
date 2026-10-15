@@ -379,6 +379,40 @@ $who = (op whoami 2>$null | Out-String)
 if ($who -match "SERVICE_ACCOUNT") { Ok "Token authenticates as a scoped SERVICE ACCOUNT" }
 else { Warn "op whoami did not confirm a service account; check the token." }
 
+# Dev-class Windows computers get the same mailbox-scoped Azure CLI entrypoint
+# as Ubuntu. The helper resolves its app identity from private config and writes
+# the certificate only to the user's protected local config directory.
+Step "Scoped Azure CLI mailbox profile"
+$azMailSetup = Join-Path $RepoPath "tools\setup-az-mail.sh"
+if (-not (Test-Path -LiteralPath $azMailSetup)) { throw "Missing Azure CLI mailbox setup helper: $azMailSetup" }
+$azMailDirectory = Join-Path $CfgDir "az-mail"
+$azMailAzureDirectory = Join-Path $azMailDirectory "azure"
+New-Item -ItemType Directory -Force -Path $azMailAzureDirectory | Out-Null
+Protect-AiDevOpsPrivatePath -Path $azMailDirectory -Directory
+Assert-AiDevOpsPrivateAcl -Path $azMailDirectory
+Protect-AiDevOpsPrivatePath -Path $azMailAzureDirectory -Directory
+Assert-AiDevOpsPrivateAcl -Path $azMailAzureDirectory
+$opRefreshMutex = [Threading.Mutex]::new($false, 'Local\ai-devops-1password-refresh')
+$opRefreshAcquired = $false
+try {
+  try { $opRefreshAcquired = $opRefreshMutex.WaitOne([TimeSpan]::FromSeconds(90)) }
+  catch [Threading.AbandonedMutexException] { $opRefreshAcquired = $true }
+  if (-not $opRefreshAcquired) { throw "Timed out waiting for the serialized 1Password refresh." }
+  & $gitBash $azMailSetup
+  if ($LASTEXITCODE -ne 0) { throw "Scoped Azure CLI mailbox profile setup failed." }
+} finally {
+  if ($opRefreshAcquired) { try { $opRefreshMutex.ReleaseMutex() } catch { } }
+  $opRefreshMutex.Dispose()
+}
+$azMailCertificate = Join-Path $azMailDirectory "certificate.pem"
+$azMailConfig = Join-Path $azMailDirectory "config.json"
+if (-not (Test-Path -LiteralPath $azMailCertificate) -or -not (Test-Path -LiteralPath $azMailConfig)) {
+  throw "Scoped Azure CLI mailbox profile files are missing after setup."
+}
+Set-AiDevOpsPrivateFileAtomic -Path $azMailCertificate -Bytes ([IO.File]::ReadAllBytes($azMailCertificate)) | Out-Null
+Set-AiDevOpsPrivateFileAtomic -Path $azMailConfig -Bytes ([IO.File]::ReadAllBytes($azMailConfig)) | Out-Null
+Ok "Scoped Azure CLI mailbox profile has user-only file ACLs"
+
 # --------------------------------------------------------------------------
 # 4. Central reference file
 # --------------------------------------------------------------------------

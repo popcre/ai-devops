@@ -1,9 +1,13 @@
 ---
 name: grok-cli
-description: Use xAI Grok Build through ai-grok-review for repository analysis, review (runs code and tests in a disposable snapshot), debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
+description: "FROZEN 2026-10-13 (popcre/ai-devops#1714) — best-effort, not maintained; callable by name. Use xAI Grok Build through ai-grok-review for repository analysis, review (runs code and tests in a disposable snapshot), debate, continuation, or explicit isolated implementation. Use for \"ask Grok\", \"run this by Grok\", \"Grok CLI\", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate."
 ---
 
 # Grok CLI
+
+> **FROZEN 2026-10-13** (popcre/ai-devops#1714): best-effort, not maintained.
+> The wrappers stay installed and callable by name. The registry marks `grok`
+> absent, so `ai-review grok` refuses formal dispatch.
 
 This repository sets a minimum Grok Build version, recorded in
 `config/provider-cli-versions.json` (currently 1.0.13 with `version_match:

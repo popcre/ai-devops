@@ -1,10 +1,18 @@
 ---
-issue: 262
-status: BLOCKED
+issue: 963
+status: OPEN
 owner: codex/edge-dev-runner-wrapup
 ---
 
 # EDGE-DEV Windows runner qualification and maintenance recovery
+
+> **2026-10-14 retarget:** Parent issue #262 (maintenance elevation) is closed
+> (PR #1759 `971fadcd`; step 8 record in
+> `tests/verification/windows-runner-maintenance-step8-reconcile-2026-10-14/`).
+> Child #962 (maintenance recovery) is closed (PR #1551 `b10a8dd3`). The only
+> live obligation in this handoff is the GitHub runner qualification of
+> `edge-dev-win` — now tracked by [#963](https://github.com/popcre/ai-devops/issues/963).
+> Keep this file as the operational runbook for #963 until that outcome lands.
 
 ## 0. Decisions only Albert can make
 

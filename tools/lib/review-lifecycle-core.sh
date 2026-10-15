@@ -371,7 +371,15 @@ rlc_parse_verdict() { # FILE -> prints APPROVE|REJECT|BLOCKED or nothing
   local file="$1" line verdict
   line="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$file")"
   [ "$line" -gt 0 ] || return 1
-  verdict="$(awk -v n="$line" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$file")"
+  verdict="$(awk -v n="$line" '
+    NR==n { pending=1; next }
+    pending {
+      if ($0 ~ /^[[:space:]]*$/) next
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      if ($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print
+      exit
+    }
+  ' "$file")"
   case "$verdict" in APPROVE|REJECT|BLOCKED) printf '%s\n' "$verdict"; return 0;; *) return 1;; esac
 }
 

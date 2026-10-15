@@ -106,6 +106,13 @@ tokens fill in by themselves.
 
 How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md). Full Windows desired-state setup: [`docs/windows-winget-configuration.md`](docs/windows-winget-configuration.md).
 
+On configured Dev computers, `az-mail` signs Azure CLI into the separately
+scoped mailbox profile and forwards your Azure CLI arguments. For example,
+`az-mail rest --method GET --url 'https://graph.microsoft.com/v1.0/users/{mailbox}/mailFolders/inbox/messages'`
+(replace `{mailbox}` with the mailbox UPN).
+This profile is installed by machine setup; see
+[`docs/onboarding-secrets.md`](docs/onboarding-secrets.md#azure-cli-mailbox-access).
+
 ---
 
 For the separately admitted Oracle hosting investigation, read the [fixed platform metadata and helper capability procedure](tools/oracle-platform-capability/README.md). It preserves private target metadata, exact independent action review, bounded reads and spent one-use custody. Source publication alone does not authorize a live read or launch.
@@ -184,6 +191,13 @@ edited per machine (see `docs/model-setup.md`).
 Codex-specific repeated workflows now live in `skills/codex/`; see
 [`docs/codex-skills-usage-guide.md`](docs/codex-skills-usage-guide.md) and
 [`docs/codex-chat-analysis.md`](docs/codex-chat-analysis.md).
+
+Shared token-waste rules and the optional ScaleDown compress path for
+pasted/retrieved documents are recorded in
+[`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md).
+The [`skills/shared/scaledown-compress/SKILL.md`](skills/shared/scaledown-compress/SKILL.md)
+skill triggers that path and is the only supported way to call the compress API
+from a session.
 
 ### GLM as a full coding agent
 
@@ -283,6 +297,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops doctor` | Health-check the toolkit and its dependencies |
 | `ai-devops version` | Print the toolkit version |
 | `ai-devops paths` | Print the paths this toolkit uses |
+| `az-mail <az arguments>` | Use the separately scoped Azure CLI mailbox profile on an enabled Dev computer |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
 | `ai-housekeeping` | Read-only inventory of housekeeping candidates (worktrees, branches, handoffs, plans, job records) |
 | `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |

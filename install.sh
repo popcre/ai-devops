@@ -663,10 +663,13 @@ secrets_available=0
 [ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$HOME/.config/ai-devops/op-service-account" ] && secrets_available=1
 if [ "$REQUIRE_SECRETS" = "yes" ] || { [ "$REQUIRE_SECRETS" = "auto" ] && [ "$secrets_available" -eq 1 ]; }; then
   run_stage required "Secrets wiring" "$REPO_ROOT/bin/setup-secrets.sh"
+  run_stage optional "Scoped Azure CLI mailbox profile" bash "$REPO_ROOT/tools/setup-az-mail.sh"
 elif [ "$REQUIRE_SECRETS" = "no" ]; then
   stage_results+=("SKIP\tselected\tSecrets wiring (--skip-secrets)")
+  stage_results+=("SKIP\tselected\tAzure CLI mailbox profile (--skip-secrets)")
 else
   stage_results+=("SKIP\toptional\tSecrets wiring (no interactive input or protected token)")
+  stage_results+=("SKIP\toptional\tAzure CLI mailbox profile (no protected token)")
   info "Secrets wiring skipped: no interactive input or protected token"
 fi
 # Desktop GUI apps (Claude Desktop, ChatGPT/Codex). Skips any app not installed

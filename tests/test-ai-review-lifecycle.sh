@@ -450,9 +450,10 @@ check "private code-only route refuses arbitrary tests commands before provider"
 CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
 check "private code-only route refuses tool-capable CLI reviewers before provider" "[ '$CLI_RC' -ne 0 ] && printf '%s' \"\$CLI_OUT\" | grep -q 'attachment-only DeepSeek'"
 rm -f "$AI_TEST_PRIVATE_ARGS"
-# Grok is paused out of the registry (owner instruction 2026-10-07); a registered
-# pool provider exercises the same private-source guard in its place.
-for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-review' 'qwen diff-review'; do
+# Grok (owner instruction 2026-10-07) and Qwen (#1714, 2026-10-13) are paused
+# out of the registry, so the front door refuses them before the private-source
+# guard; a registered pool provider exercises that guard in their place.
+for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-review' 'muse diff-review'; do
   set -- $provider_mode
   RAW_CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_CODEX_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" "$1" "$2" 2>&1)"; RAW_CLI_RC=$?
   check "ordinary $provider_mode refuses private source before provider" "[ '$RAW_CLI_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$RAW_CLI_OUT\" | grep -q 'private source requires'"

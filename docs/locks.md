@@ -42,6 +42,7 @@ advisory lock on the exact inode, so the whole cost is one harmless retry.
 
 | Where | Acquire / wait | Release | Staleness handling |
 |---|---|---|---|
+| `tools/lib/opencode-maintenance-lock.sh` (called by `bin/ai-glm` and `bin/setup-opencode-glm.sh`) | Shared for the full lifetime of each Linux client command; exclusive for setup and `ai-glm server start|stop|restart`; bounded `flock -w` | Kernel releases the inherited file descriptor when the command exits | Stable empty mode-0600 single-link inode in the mode-0700 password directory; never removed or recreated; unsafe path/file metadata and contention fail closed; no stale-holder recovery |
 | `bin/setup-secrets.sh:287-299` (generated MCP launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:292`), retry (`:296`) | kernel | conflict code 87, then `ai-lock-doctor --recover --older-than 90` (`:295`), then one retry; op's own errors keep their status |
 | `bin/setup-secrets.sh:332-348` (generated remote launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:337`), retry (`:341`) | kernel | same shape; call site `:348` |
 | `bin/ai-qwen:494` (`cmd_store_key`; path resolved at `ai-qwen:421`; `lock_doctor` at `:466`) | `flock --close -E 87 -w 120` (`:494`), retry (`:497`) | kernel | conflict code 87, doctor (`--recover --older-than 120`), one retry (#1002) |
@@ -71,6 +72,7 @@ has no `flock`.
 | `bin/ai-muse:500` (`muse_credential_acquire`, publish `muse_credential_publish` at `:398`) | poll until `budget` (120 s default) | `release_credential_lock` (`ai-muse:161`) removes only its own token | owner record: liveness x3 with winpid (`ps -W`); legacy pid-only: never reclaimed on Windows; no pid at all: reclaimed after 60 s |
 | `bin/ai-qwen:596` `lock_acquire` (call at `ai-qwen:480` inside `cmd_store_key`, path via `qwen_shared_credential_lock_path` `:421`) | poll until 120 s deadline | `lock_release` removes only its own token | owner record: liveness x3 with winpid; legacy pid-only (Muse's old format): reclaimed on Windows only under the pid+age rule — pid not observable AND lock older than 15 minutes (`ai-qwen:613-626`); no pid: reclaimed after 7200 s |
 | `bin/ai-deepseek-agent:327` (inline `acquire_lock`/`publish_lock`) | poll until 120 s deadline | inline `release_lock`, token-checked | owner record only: liveness x3 with winpid; refuses every legacy lock without a winpid ("Wait or fail closed") |
+| `bin/setup-machine.ps1` calling `tools/setup-az-mail.sh` (Windows) | waits up to 90 s for `Local\ai-devops-1password-refresh`; helper also atomically creates `~/.config/ai-devops/az-mail/op-refresh.lock.d` before `op read` | PowerShell releases the named mutex; helper EXIT/signal cleanup removes only its own directory lock | abandoned mutex is acquired by the next caller; stale directory lock fails closed and requires process-end verification before manual reconciliation |
 
 Grep hits covered: `ai-muse:500`; `ai-qwen:427,443` (Windows path branch of
 `qwen_shared_credential_lock_path`); `ai-deepseek-agent:327`.

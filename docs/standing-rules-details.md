@@ -93,7 +93,12 @@ shared-db allocator draws; everywhere else, a rotation reviewer run through
 shared-db there is no draw command: the session itself picks any reviewer the
 registry lists as in rotation (`config/reviewer-registry.json`, mirrored from
 the allocator) and moves to the next one if it is unreachable. The
-implementing session never approves its own change. Authority an AI cannot
+implementing session never approves its own change. Discretionary AI review is
+**shared-db-only** (owner 2026-10-13, popcre/ai-devops#1714): outside
+`popcre/shared-db`, dispatch a review only when the task class's gate already
+demands one (installation, reviewer-safety, deployment, infrastructure,
+production, shared-db promotion). Ordinary docs, tooling, and non-shared-db
+code land with no review. Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's
 exact-head APPROVE report (popcre/ai-devops#996), from a review run with
@@ -109,42 +114,23 @@ its full checklist lives in `skills/shared/shared-db-orchestrator/` and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
 
-## Small owner entries
+## Database writes
 
-Owner ruling (2026-10-02, Albert Hazan, from chat, verbatim): Q: "should small
-owner-requested record entries skip the AI reviewer?" A: "yes, small entries
-can skip the reviewer".
+Owner ruling (2026-10-14, Albert Hazan, verbatim: "Our own safety rules
+require a second AI to approve database writes. Remove that rule."): no
+assigned AI reviewer APPROVE is required for a database write. This replaces
+the earlier small-owner-entry exception (2026-10-02) and the general
+second-AI approval step for `check --before database`.
 
-"Small" is defined narrowly (an implementing assumption; a broader reading
-needs a new owner ruling). A write qualifies only when ALL hold:
+Every other gate stays: task declaration, class escalation, protected-class
+seals, target identity proof, claim rules, and live proof. Prove which
+database you are pointed at immediately before every write. Run:
 
-1. Albert asked for it, and the linked GitHub issue quotes his request verbatim.
-2. It writes application row data only: no structure, schema, migration,
-   security-rule, permission, or curated Master Data bulk-load change, and no
-   deletion of any row.
-3. It touches at most 10 rows in the shared database.
-4. It runs as one guarded transaction that first proves the target database
-   and asserts the exact affected row count, rolling back on any mismatch.
+    ai-task-gates check --before database
 
-Such a write skips only the assigned-AI-reviewer APPROVE. Every other gate
-stays: task declaration, class escalation, protected-class seals, target
-identity proof, claim rules, and live proof. Run:
-
-    ai-task-gates check --before database \
-      --small-owner-entry https://github.com/OWNER/REPO/issues/N \
-      --row-count 3 --owner-quote "<Albert's words, verbatim>"
-
-The issue must belong to the repository being worked on; the gate reads it
-from GitHub itself (through `ai-gh`), and the quote (one line, at least 12 characters) must appear in text authored by
-an owner account (`u2giants` or `popcre`). A declared task is required so the
-release is always recorded. The gate refuses a row count outside 1..10, a multi-line
-quote, a quote missing from the issue body or comments, any action other than
-`database`, any change set above `code` (structure, security, infrastructure,
-or a protected class), and combining it with `--reviewer-approval`. It checks
-the file change set, not the SQL: row-data-only and no-deletion are, like the
-row count below, part of the caller's declared contract. The row
-count and the transaction guard are the caller's declared contract; the
-release, URL, row count, and quote digest are recorded in the task state.
+`--small-owner-entry` is no longer needed; if passed, the gate records it as
+optional history and still opens without a reviewer. Private-evidence and
+private-tooling licensed-row seals are unchanged.
 
 ## Reviewer rotation details
 
