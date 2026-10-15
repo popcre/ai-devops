@@ -265,11 +265,7 @@ rlc_packet_build() { # rlc_packet_build REVIEW_DIR TAG [IDENTITY_FILE] [BASE] ->
   local err
   err="$(mktemp)"
   set +e
-  # This packet is runner-owned evidence for lifecycle bookkeeping. The
-  # provider wrapper builds the final packet later and owns publication of
-  # AI_REVIEW_SOURCE_RECEIPT_FILE; letting this preparatory build inherit that
-  # variable would claim the immutable receipt with a different packet.
-  pkt="$( ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" build "${args[@]}" ) 2>"$err")"
+  pkt="$("$RLC_PACKET" build "${args[@]}" 2>"$err")"
   local rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then
@@ -279,7 +275,10 @@ rlc_packet_build() { # rlc_packet_build REVIEW_DIR TAG [IDENTITY_FILE] [BASE] ->
   fi
   rm -f "$err"
   if [ -n "$identity" ]; then
-    "$RLC_PACKET" verify "$pkt" --identity "$identity" >/dev/null \
+    # This runner-owned packet is preparatory evidence. Preserve any packet
+    # routing guards during build, but do not let its verification claim the
+    # immutable receipt reserved for the provider's final packet.
+    ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" verify "$pkt" --identity "$identity" ) >/dev/null \
       || rlc_die 'source evidence verification failed.'
   fi
   printf '%s\n' "$pkt"
