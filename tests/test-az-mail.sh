@@ -49,6 +49,36 @@ printf '%s\n' "$*" >> "$AZ_MAIL_TEST_CALLS"
 EOF
 chmod +x "$TMP/stubs/op" "$TMP/stubs/az"
 
+prepare_windows_fixture() {
+  [ "$actual_windows" -eq 1 ] || return 0
+  cat > "$TMP/restrict-az-mail-acl.ps1" <<'EOF'
+param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Helper)
+$ErrorActionPreference = 'Stop'
+. $Helper
+$items = @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Force -Recurse)
+foreach ($item in $items) {
+    $allows = @((Get-Acl -LiteralPath $item.FullName).Access | Where-Object AccessControlType -eq Allow | ForEach-Object {
+        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    } | Sort-Object -Unique)
+    Write-Output ("fixture ACL before: {0} => {1}" -f $item.FullName, ($allows -join ','))
+    if ($item.PSIsContainer) { Protect-AiDevOpsPrivatePath -Path $item.FullName -Directory }
+    else { Protect-AiDevOpsPrivatePath -Path $item.FullName }
+}
+foreach ($item in $items) {
+    $allows = @((Get-Acl -LiteralPath $item.FullName).Access | Where-Object AccessControlType -eq Allow | ForEach-Object {
+        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    } | Sort-Object -Unique)
+    Write-Output ("fixture ACL: {0} => {1}" -f $item.FullName, ($allows -join ','))
+}
+EOF
+  fixture_acl_output="$(env -u PSModulePath powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -aw "$TMP/restrict-az-mail-acl.ps1")" \
+    -Root "$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail")" \
+    -Helper "$(cygpath -aw "$ROOT/bin/windows-private-file.ps1")" 2>&1)" || { printf '%s\n' "$fixture_acl_output" >&2; fail 'could not prepare a private Windows ACL fixture'; }
+  printf '%s\n' "$fixture_acl_output"
+  [[ "$fixture_acl_output" == *'fixture ACL:'* ]] || fail 'Windows ACL diagnostic was not captured'
+}
+
+
 env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
   XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
   AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/stubs:$PATH" \
@@ -58,6 +88,7 @@ if [ "$actual_windows" -eq 0 ]; then
   [[ "$(stat -c '%a' "$profile_root/ai-devops/az-mail/config.json")" == 600 ]] || fail 'profile config is not private'
   [[ "$(stat -c '%a' "$profile_root/ai-devops/az-mail/certificate.pem")" == 600 ]] || fail 'certificate is not private'
 fi
+prepare_windows_fixture
 pass 'setup installs a verified certificate and private profile files'
 
 env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/calls" PATH="$TMP/stubs:$PATH" \
@@ -111,26 +142,8 @@ env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
   AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$windows_test_path" \
   bash "$ROOT/tools/setup-az-mail.sh" >/dev/null || fail 'allowlisted Windows setup failed'
 
+prepare_windows_fixture
 if [ "$actual_windows" -eq 1 ]; then
-  cat > "$TMP/restrict-az-mail-acl.ps1" <<'EOF'
-param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Helper)
-$ErrorActionPreference = 'Stop'
-. $Helper
-$items = @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Force -Recurse)
-foreach ($item in $items) {
-    if ($item.PSIsContainer) { Protect-AiDevOpsPrivatePath -Path $item.FullName -Directory }
-    else { Protect-AiDevOpsPrivatePath -Path $item.FullName }
-}
-foreach ($item in $items) {
-    $allows = @((Get-Acl -LiteralPath $item.FullName).Access | Where-Object AccessControlType -eq Allow | ForEach-Object {
-        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-    } | Sort-Object -Unique)
-    Write-Host ("fixture ACL: {0} => {1}" -f $item.FullName, ($allows -join ','))
-}
-EOF
-  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -aw "$TMP/restrict-az-mail-acl.ps1")" \
-    -Root "$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail")" \
-    -Helper "$(cygpath -aw "$ROOT/bin/windows-private-file.ps1")" || fail 'could not prepare a private Windows ACL fixture'
   expected_azure_config="$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail/azure")"
   expected_certificate="$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail/certificate.pem")"
 else
