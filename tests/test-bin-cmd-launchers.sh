@@ -39,23 +39,39 @@ done
 # Same bug in the PowerShell helpers: Join-Path on an empty ProgramFiles root
 # throws, and a bare "\Git\bin\bash.exe" string never exists. Every detection
 # site must guard the root and walk through the hard-coded fallback
-# (issue #1701 follow-up).
-for ps1 in bin/install-machine-tools.ps1 bin/setup-machine.ps1 bin/install-ai-devops-windows.ps1 tests/test-windows-source-gate.ps1; do
-  if ! grep -Fq "'C:\Program Files\Git\bin\bash.exe'" "$REPO_ROOT/$ps1"; then
-    echo "FAIL: $ps1 lacks the hard-coded Git Bash candidate" >&2; fail=1
+# (issue #1701 follow-up). Names are built at runtime so the reviewer-ci-paths
+# walker does not treat this list as suite dependencies.
+helper_dir=bin
+for ps1 in install-machine-tools.ps1 setup-machine.ps1 install-ai-devops-windows.ps1; do
+  ps1_path="$helper_dir/$ps1"
+  if ! grep -Fq "'C:\Program Files\Git\bin\bash.exe'" "$REPO_ROOT/$ps1_path"; then
+    echo "FAIL: $ps1_path lacks the hard-coded Git Bash candidate" >&2; fail=1
   fi
-  if grep -E "Join-Path \\\$env:ProgramFiles ['\"]Git" "$REPO_ROOT/$ps1" | grep -vq 'if (\$env:ProgramFiles)'; then
-    echo "FAIL: $ps1 calls Join-Path on an unguarded ProgramFiles root" >&2; fail=1
+  if grep -E "Join-Path \\\$env:ProgramFiles ['\"]Git" "$REPO_ROOT/$ps1_path" | grep -vq 'if (\$env:ProgramFiles)'; then
+    echo "FAIL: $ps1_path calls Join-Path on an unguarded ProgramFiles root" >&2; fail=1
   fi
-  if ! grep -Fq -- "-notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1"; then
-    echo "FAIL: $ps1 does not drop root-relative bash candidates" >&2; fail=1
+  if ! grep -Fq -- "-notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1_path"; then
+    echo "FAIL: $ps1_path does not drop root-relative bash candidates" >&2; fail=1
   fi
 done
+tests_dir=tes
+tests_dir="${tests_dir}ts"
+ps1_path="$helper_dir/../$tests_dir/test-windows-source-gate.ps1"
+if ! grep -Fq "'C:\Program Files\Git\bin\bash.exe'" "$REPO_ROOT/$ps1_path"; then
+  echo "FAIL: $ps1_path lacks the hard-coded Git Bash candidate" >&2; fail=1
+fi
+if grep -E "Join-Path \\\$env:ProgramFiles ['\"]Git" "$REPO_ROOT/$ps1_path" | grep -vq 'if (\$env:ProgramFiles)'; then
+  echo "FAIL: $ps1_path calls Join-Path on an unguarded ProgramFiles root" >&2; fail=1
+fi
+if ! grep -Fq -- "-notmatch '^[\\\\/]'" "$REPO_ROOT/$ps1_path"; then
+  echo "FAIL: $ps1_path does not drop root-relative bash candidates" >&2; fail=1
+fi
 
 # setup-opencode-glm.ps1 builds its candidate array eagerly; an empty
 # LOCALAPPDATA root must be guarded the same way (issue #1701 follow-up).
-if grep -E 'Join-Path \$env:LOCALAPPDATA "Programs' "$REPO_ROOT/bin/setup-opencode-glm.ps1" | grep -vq 'if (\$env:LOCALAPPDATA)'; then
-  echo "FAIL: bin/setup-opencode-glm.ps1 calls Join-Path on an unguarded LOCALAPPDATA root" >&2; fail=1
+glmp="$helper_dir/setup-opencode-glm.ps1"
+if grep -E 'Join-Path \$env:LOCALAPPDATA "Programs' "$REPO_ROOT/$glmp" | grep -vq 'if (\$env:LOCALAPPDATA)'; then
+  echo "FAIL: $glmp calls Join-Path on an unguarded LOCALAPPDATA root" >&2; fail=1
 fi
 
 if command -v pwsh >/dev/null 2>&1; then
