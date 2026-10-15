@@ -64,11 +64,15 @@ env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_
   bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages/AAMkAGVmMDEtYQ== >/dev/null || fail 'mail command failed'
 grep -q -- "--service-principal --username $test_application_id --tenant $test_tenant_id" "$TMP/calls" || fail 'service-principal sign-in was not isolated through az-mail'
 grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages/AAMkAGVmMDEtYQ==' "$TMP/calls" || fail 'Azure CLI mail request was not sent'
+env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/calls" PATH="$TMP/stubs:$PATH" \
+  bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/AAMkAGVmMDEtYQ==/messages >/dev/null || fail 'padded folder ID was rejected'
+grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/AAMkAGVmMDEtYQ==/messages' "$TMP/calls" || fail 'Azure CLI folder request was not sent'
 pass 'command signs in with the scoped app and sends only a read-only mail request'
 for denied in \
   'rest --method POST --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' \
   'rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/drive' \
   'rest --method GET --url https://graph.microsoft.com/v1.0/users/another@example.test/messages' \
+  'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages/..' \
   'account show'; do
   if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/denied-calls" PATH="$TMP/stubs:$PATH" \
     bash "$ROOT/bin/az-mail" $denied >/dev/null 2>&1; then fail "unsafe command was accepted: $denied"; fi
