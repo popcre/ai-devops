@@ -296,8 +296,18 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 prepare_review() { # prepare_review ROOT NAME [RECORDED_BOUNDARY]
   local root="$1" name="$2" recorded="${3:-}" pkt want refreshed identity
   identity="$(mktemp)" || die "could not reserve source identity"
-  "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
-    || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
+  # A governed pool dispatch launches this wrapper inside its own snapshot but
+  # asks for a source receipt bound to the ORIGINAL checkout. The pool then
+  # hands over its resolved original identity; the packet build re-verifies it
+  # live (head and whole-source digest) before anything is sealed.
+  if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] && [ -n "${AI_REVIEW_SOURCE_IDENTITY_FILE:-}" ]; then
+    [ -f "$AI_REVIEW_SOURCE_IDENTITY_FILE" ] && [ ! -L "$AI_REVIEW_SOURCE_IDENTITY_FILE" ] \
+      && cp "$AI_REVIEW_SOURCE_IDENTITY_FILE" "$identity" \
+      || { rm -f "$identity"; die "governed source identity is unavailable"; }
+  else
+    "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+      || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
+  fi
   if [ -z "$recorded" ]; then
     REVIEW_DIR="$(review_boundary "$root" "$name")"
   elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
