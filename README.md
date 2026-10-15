@@ -106,10 +106,11 @@ tokens fill in by themselves.
 
 How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md). Full Windows desired-state setup: [`docs/windows-winget-configuration.md`](docs/windows-winget-configuration.md).
 
-On configured Dev computers, `az-mail` signs Azure CLI into the separately
-scoped mailbox profile and forwards your Azure CLI arguments. For example,
-`az-mail rest --method GET --url 'https://graph.microsoft.com/v1.0/users/{mailbox}/mailFolders/inbox/messages'`
-(replace `{mailbox}` with the mailbox UPN).
+On configured Dev computers, `az-mail` signs Azure CLI into a separate profile
+that can read Albert's mailbox. For example,
+`az-mail rest --method GET --url 'https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/inbox/messages'`.
+It also accepts a single message ID in that mailbox. The command rejects other
+mailboxes and all non-read requests.
 This profile is installed by machine setup; see
 [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md#azure-cli-mailbox-access).
 
@@ -297,7 +298,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops doctor` | Health-check the toolkit and its dependencies |
 | `ai-devops version` | Print the toolkit version |
 | `ai-devops paths` | Print the paths this toolkit uses |
-| `az-mail <az arguments>` | Use the separately scoped Azure CLI mailbox profile on an enabled Dev computer |
+| `az-mail rest --method GET --url <Graph mail URL>` | Read Albert's mailbox through the separate profile on an enabled Dev computer |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
 | `ai-housekeeping` | Read-only inventory of housekeeping candidates (worktrees, branches, handoffs, plans, job records) |
 | `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |

@@ -106,11 +106,12 @@ private local configuration directory. The command uses a separate Azure CLI
 profile, so it does not replace the user's normal `az` sign-in. Its app is
 restricted to Albert's mailbox by the tenant's Exchange application access
 policy; tenant-wide Graph Explorer consent does not make other mailboxes
-readable through this command. Run `az-mail` with the same arguments as `az`,
-for example `az-mail rest --method GET --url
-'https://graph.microsoft.com/v1.0/users/{mailbox}/mailFolders/inbox/messages'`
-(replace `{mailbox}` with the mailbox UPN). Re-run machine setup to refresh the
-protected local profile after certificate rotation.
+readable through this command. It permits only read-only Graph mail requests
+for `albert@popcre.com`, including individual messages. For example,
+`az-mail rest --method GET --url
+'https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/inbox/messages'`.
+Re-run machine setup to refresh
+the protected local profile after certificate rotation.
 
 ## Two platforms, one model
 
