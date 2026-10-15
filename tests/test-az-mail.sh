@@ -6,6 +6,7 @@ trap 'status=$?; if [ "$status" -ne 0 ]; then printf "FAIL: test-az-mail.sh exit
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$1"; }
+native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 for tool in jq openssl sha256sum; do command -v "$tool" >/dev/null || fail "test dependency unavailable: $tool"; done
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) actual_windows=1 ;; *) actual_windows=0; command -v flock >/dev/null || fail 'test dependency unavailable: flock' ;; esac
@@ -20,10 +21,9 @@ else
 fi
 mkdir -p "$profile_root/ai-devops"
 chmod 700 "$profile_root/ai-devops"
-# Keep the subject attached to its option so Git Bash leaves it alone while
-# still converting the certificate output paths for Windows OpenSSL.
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/certificate.pem" \
-  -days 30 -subj=/CN=az-mail-fixture >/dev/null 2>&1
+(umask 077; MSYS2_ARG_CONV_EXCL='*' openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "$(native "$TMP/key.pem")" -out "$(native "$TMP/certificate.pem")" \
+  -days 30 -subj '/CN=az-mail-fixture' >/dev/null 2>&1)
 cat "$TMP/key.pem" >> "$TMP/certificate.pem"
 fingerprint="$(openssl x509 -in "$TMP/certificate.pem" -noout -fingerprint -sha256 | sed 's/^[^=]*=//')"
 test_application_id='11111111-1111-4111-8111-111111111111'
