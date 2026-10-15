@@ -81,6 +81,7 @@ done
 pass 'command rejects writes and non-mail Azure CLI requests before sign-in'
 
 mkdir -p "$TMP/windows-stubs"
+if [ "$actual_windows" -eq 0 ]; then
 cat > "$TMP/windows-stubs/uname" <<'EOF'
 #!/usr/bin/env bash
 printf 'MINGW64_NT-10.0\n'
@@ -101,17 +102,44 @@ printf '%s\n' "$*" >> "$AZ_MAIL_TEST_ACL_CALLS"
 exit 0
 EOF
 chmod +x "$TMP/windows-stubs/powershell.exe"
+  windows_test_path="$TMP/windows-stubs:$TMP/stubs:$PATH"
+else
+  windows_test_path="$TMP/stubs:$PATH"
+fi
 env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
-  XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
-  AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" \
+  XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
+  AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$windows_test_path" \
   bash "$ROOT/tools/setup-az-mail.sh" >/dev/null || fail 'allowlisted Windows setup failed'
-env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-calls" AZ_MAIL_TEST_ACL_CALLS="$TMP/windows-acl-calls" PSModulePath='C:\\incompatible\\pwsh-modules' \
-  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/inbox/messages >/dev/null || fail 'Windows path handling failed'
-grep -q '^AZURE_CONFIG_DIR=C:/fixture/azure$' "$TMP/windows-calls" || fail 'Windows Azure CLI config path was not converted'
-grep -q -- '--certificate C:/fixture/certificate.pem' "$TMP/windows-calls" || fail 'Windows certificate path was not converted'
-grep -q 'az-mail-windows-acl.ps1' "$TMP/windows-acl-calls" || fail 'Windows use-time ACL check was not run'
-if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-denied-calls" \
-  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" account show >/dev/null 2>&1; then fail 'Windows accepted a non-mail command'; fi
+
+if [ "$actual_windows" -eq 1 ]; then
+  cat > "$TMP/restrict-az-mail-acl.ps1" <<'EOF'
+param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Helper)
+$ErrorActionPreference = 'Stop'
+. $Helper
+$items = @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Force -Recurse)
+foreach ($item in $items) {
+    if ($item.PSIsContainer) { Protect-AiDevOpsPrivatePath -Path $item.FullName -Directory }
+    else { Protect-AiDevOpsPrivatePath -Path $item.FullName }
+}
+EOF
+  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -aw "$TMP/restrict-az-mail-acl.ps1")" \
+    -Root "$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail")" \
+    -Helper "$(cygpath -aw "$ROOT/bin/windows-private-file.ps1")" || fail 'could not prepare a private Windows ACL fixture'
+  expected_azure_config="$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail/azure")"
+  expected_certificate="$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail/certificate.pem")"
+else
+  expected_azure_config='C:/fixture/azure'
+  expected_certificate='C:/fixture/certificate.pem'
+fi
+env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-calls" AZ_MAIL_TEST_ACL_CALLS="$TMP/windows-acl-calls" PSModulePath='C:\\incompatible\\pwsh-modules' \
+  PATH="$windows_test_path" bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/mailFolders/inbox/messages >/dev/null || fail 'Windows path handling failed'
+grep -Fq "AZURE_CONFIG_DIR=$expected_azure_config" "$TMP/windows-calls" || fail 'Windows Azure CLI config path was not converted'
+grep -Fq -- "--certificate $expected_certificate" "$TMP/windows-calls" || fail 'Windows certificate path was not converted'
+if [ "$actual_windows" -eq 0 ]; then
+  grep -q 'az-mail-windows-acl.ps1' "$TMP/windows-acl-calls" || fail 'Windows use-time ACL check was not run'
+fi
+if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-denied-calls" \
+  PATH="$windows_test_path" bash "$ROOT/bin/az-mail" account show >/dev/null 2>&1; then fail 'Windows accepted a non-mail command'; fi
 [[ ! -e "$TMP/windows-denied-calls" ]] || fail 'Azure CLI ran for a denied Windows command'
 [[ ! -e "$TMP/windows-profile/.config/ai-devops/az-mail/op-refresh.lock.d" ]] || fail 'Windows setup left its 1Password lock behind'
 pass 'Windows setup and Azure CLI paths use the Windows profile paths'
