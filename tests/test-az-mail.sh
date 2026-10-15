@@ -121,6 +121,12 @@ foreach ($item in $items) {
     if ($item.PSIsContainer) { Protect-AiDevOpsPrivatePath -Path $item.FullName -Directory }
     else { Protect-AiDevOpsPrivatePath -Path $item.FullName }
 }
+foreach ($item in $items) {
+    $allows = @((Get-Acl -LiteralPath $item.FullName).Access | Where-Object AccessControlType -eq Allow | ForEach-Object {
+        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    } | Sort-Object -Unique)
+    Write-Host ("fixture ACL: {0} => {1}" -f $item.FullName, ($allows -join ','))
+}
 EOF
   powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -aw "$TMP/restrict-az-mail-acl.ps1")" \
     -Root "$(cygpath -aw "$TMP/windows-profile/.config/ai-devops/az-mail")" \
