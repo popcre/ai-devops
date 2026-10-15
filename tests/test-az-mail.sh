@@ -20,7 +20,8 @@ else
 fi
 mkdir -p "$profile_root/ai-devops"
 chmod 700 "$profile_root/ai-devops"
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/certificate.pem" \
+# Git Bash otherwise rewrites the slash-prefixed OpenSSL subject as a Windows path.
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/certificate.pem" \
   -days 30 -subj '/CN=az-mail-fixture' >/dev/null 2>&1
 cat "$TMP/key.pem" >> "$TMP/certificate.pem"
 fingerprint="$(openssl x509 -in "$TMP/certificate.pem" -noout -fingerprint -sha256 | sed 's/^[^=]*=//')"
