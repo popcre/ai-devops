@@ -1,8 +1,8 @@
 # Retirement plan — UNPROVABLE HANDOFF.d batch 2
 
-Tracking: popcre/ai-devops#1661 (comment will carry before/after counts).
-Owner: MiMo housekeeping leftover triage (batch 2). Retire this doc when #1661
-closes and the before/after counts are posted; do not keep it as a second ledger.
+Status: RETIRED tracking plan; historical provenance only. Issue [#1661](https://github.com/popcre/ai-devops/issues/1661) closed on October 13, 2026, at 3:05 PM EDT after its closing note recorded UNATTRIBUTED 8 → 0 and UNPROVABLE 18 → 0. No active work is tracked here. The original retargeting and successor evidence below is retained because restored handover records still cite it; later retirement must re-prove their obligations independently.
+
+Original tracking: popcre/ai-devops#1661. Original owner: MiMo housekeeping leftover triage (batch 2).
 Branch: `mimo/housekeeping-unprovable-batch2`. Owner ruling this session: open a
 real issue for each still-relevant workstream; retire the rest under the
 successor rule, **only with an AI reviewer APPROVE covering these exact files**.

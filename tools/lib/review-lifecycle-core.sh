@@ -602,7 +602,7 @@ $operation_request"
     # custody (diagnostics, report, runner token) to write into (#1562).
     local tests_name; local -a tests_scrub=()
     for tests_name in $(compgen -e); do
-      case "$tests_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+      case "$tests_name" in AI_REVIEW_SOURCE_RECEIPT_FILE|DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
         tests_scrub+=(-u "$tests_name");; esac
     done
     if ( cd "$review_dir" && env "${tests_scrub[@]}" bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
@@ -614,8 +614,11 @@ $(tail -n "$tests_tail" "$tests_out")
 \`\`\`"
       tests_sha="$(sha256sum "$tests_out" | cut -d' ' -f1)"
       rm -f "$tests_out"
-      "$RLC_LIFECYCLE" record-tests --state "$state" --command "$tests_cmd" --exit 0 --output-sha256 "$tests_sha" >/dev/null \
-        || rlc_die 'could not record the tests evidence in the review record.'
+      if ! "$RLC_LIFECYCLE" record-tests --state "$state" --command "$tests_cmd" --exit 0 --output-sha256 "$tests_sha" >/dev/null; then
+        rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-evidence-recording-failed
+        rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+        rlc_die 'could not record the tests evidence in the review record; no review was dispatched.'
+      fi
     else
       rm -f "$tests_out"
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-command-failed
