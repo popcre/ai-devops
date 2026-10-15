@@ -80,6 +80,20 @@ check "core_owns_both_contracts" "grep -q 'rlc_run_review' '$CORE' && grep -q 'r
 # --- tag budget -------------------------------------------------------------
 # shellcheck disable=SC1090
 . "$CORE"
+cat > "$TMP/mock-packet-builder" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}" > "$PACKET_RECEIPT_ENV"
+printf '%s\n' "$PACKET_BUILD_RESULT"
+EOF
+chmod +x "$TMP/mock-packet-builder"
+RLC_PACKET="$TMP/mock-packet-builder"
+PACKET_RECEIPT_ENV="$TMP/packet-receipt-env"
+PACKET_BUILD_RESULT="$TMP/mock-packet"
+export RLC_PACKET PACKET_RECEIPT_ENV PACKET_BUILD_RESULT
+export AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/provider-final-receipt.json"
+PREPARATORY_PACKET="$(rlc_packet_build "$TMP" receipt-isolation)"
+check "preparatory_packet_does_not_claim_provider_receipt" "[ '$PREPARATORY_PACKET' = '$TMP/mock-packet' ] && [ \"\$(cat '$PACKET_RECEIPT_ENV')\" = unset ] && [ \"\$AI_REVIEW_SOURCE_RECEIPT_FILE\" = '$TMP/provider-final-receipt.json' ]"
+unset AI_REVIEW_SOURCE_RECEIPT_FILE RLC_PACKET PACKET_RECEIPT_ENV PACKET_BUILD_RESULT
 NAME300="$(printf 'x%.0s' $(seq 1 300))"
 BOUNDED="$(rlc_short_name "$NAME300" 64)"
 check "short_name_bounds_to_dir_budget" "test \${#BOUNDED} -le 64"

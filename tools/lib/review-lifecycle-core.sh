@@ -265,7 +265,11 @@ rlc_packet_build() { # rlc_packet_build REVIEW_DIR TAG [IDENTITY_FILE] [BASE] ->
   local err
   err="$(mktemp)"
   set +e
-  pkt="$("$RLC_PACKET" build "${args[@]}" 2>"$err")"
+  # This packet is runner-owned evidence for lifecycle bookkeeping. The
+  # provider wrapper builds the final packet later and owns publication of
+  # AI_REVIEW_SOURCE_RECEIPT_FILE; letting this preparatory build inherit that
+  # variable would claim the immutable receipt with a different packet.
+  pkt="$( ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" build "${args[@]}" ) 2>"$err")"
   local rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then
