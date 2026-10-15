@@ -1,5 +1,5 @@
 # AI-context ignore list for Cursor.
-# Matches .claudeignore and the "What to ignore" section of AGENTS.md.
+# Keep aligned with the "What to ignore" section of AGENTS.md and with .claudeignore.
 #
 # This repo is small and text-only, so most entries below are guardrails for
 # generated/runtime dirs that may not exist yet.
@@ -19,6 +19,12 @@ codex_chats/
 .ai/runs/
 .ai/tmp/
 .ai/reviews/
+
+# Playwright MCP scratch output (page snapshots), generated during a session.
+.playwright-mcp/
+.playwright-cli/
+test-results/
+playwright-report/
 
 # Real machine-local config (lives in /etc/ai-devops, never committed).
 # Only *.env.example belongs in git.

@@ -275,7 +275,10 @@ rlc_packet_build() { # rlc_packet_build REVIEW_DIR TAG [IDENTITY_FILE] [BASE] ->
   fi
   rm -f "$err"
   if [ -n "$identity" ]; then
-    "$RLC_PACKET" verify "$pkt" --identity "$identity" >/dev/null \
+    # This runner-owned packet is preparatory evidence. Preserve any packet
+    # routing guards during build, but do not let its verification claim the
+    # immutable receipt reserved for the provider's final packet.
+    ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" verify "$pkt" --identity "$identity" ) >/dev/null \
       || rlc_die 'source evidence verification failed.'
   fi
   printf '%s\n' "$pkt"
