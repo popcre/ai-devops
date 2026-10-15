@@ -61,9 +61,9 @@ fi
 pass 'setup installs a verified certificate and private profile files'
 
 env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/calls" PATH="$TMP/stubs:$PATH" \
-  bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages >/dev/null || fail 'mail command failed'
+  bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages/AAMkAGVmMDEtYQ== >/dev/null || fail 'mail command failed'
 grep -q -- "--service-principal --username $test_application_id --tenant $test_tenant_id" "$TMP/calls" || fail 'service-principal sign-in was not isolated through az-mail'
-grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages' "$TMP/calls" || fail 'Azure CLI mail request was not sent'
+grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/albert@popcre.com/messages/AAMkAGVmMDEtYQ==' "$TMP/calls" || fail 'Azure CLI mail request was not sent'
 pass 'command signs in with the scoped app and sends only a read-only mail request'
 for denied in \
   'rest --method POST --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' \

@@ -7,7 +7,7 @@ die() { printf 'az-mail: %s\n' "$1" >&2; exit 1; }
 [[ "$#" == 5 && "$1" == rest && "$2" == --method && "$3" == GET && "$4" == --url ]] ||
   die 'usage: az-mail rest --method GET --url https://graph.microsoft.com/v1.0/users/<mailbox>/(messages|mailFolders...)'
 mail_url="$5"
-[[ "$mail_url" =~ ^https://graph\.microsoft\.com/v1\.0/users/[^/?#]+/(messages|mailFolders(/[A-Za-z0-9%._~-]+(/messages)?)?)(\?[^#]*)?$ ]] ||
+[[ "$mail_url" =~ ^https://graph\.microsoft\.com/v1\.0/users/[^/?#]+/(messages(/[A-Za-z0-9%._~=-]+)?|mailFolders(/[A-Za-z0-9%._~-]+(/messages(/[A-Za-z0-9%._~=-]+)?)?)?)(\?[^#]*)?$ ]] ||
   die 'only read-only Graph mail requests for the configured mailbox are allowed.'
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
