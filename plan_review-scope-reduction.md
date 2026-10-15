@@ -1,7 +1,7 @@
 # Plan — shrink AI review to shared-db work and a four-reviewer pool
 
 Owner issue: [popcre/ai-devops#1714](https://github.com/popcre/ai-devops/issues/1714)
-Handoff: [`HANDOFF.d/2026-10-13T2200Z-edge-dev3-claude-review-scope-reduction.md`](HANDOFF.d/2026-10-13T2200Z-edge-dev3-claude-review-scope-reduction.md)
+Handoff: retired 2026-10-15 (work complete; live proof recorded on issue #1714)
 Evidence: [`docs/review-waste-recommendation-2026-10-13.md`](docs/review-waste-recommendation-2026-10-13.md), [`docs/review-waste-analysis-2026-10-13.md`](docs/review-waste-analysis-2026-10-13.md)
 Written 2026-10-13 by Claude chat `81cdf50d-ed3a-40d2-a846-988d73f7ae7e` on edge-dev3.
 
@@ -15,9 +15,9 @@ Written 2026-10-13 by Claude chat `81cdf50d-ed3a-40d2-a846-988d73f7ae7e` on edge
 | 3. Review-required policy: discretionary review only for shared-db | 🟡 code landed | `AGENTS.md`, `docs/reviewer-rotation-rules.md` 13–14, `docs/model-setup.md`, `docs/task-router.md`, `docs/standing-rules-details.md` |
 | 4. Freeze non-pool reviewer tooling (CI suites, preflight, doctor) | 🟡 code landed | `config/ci-suite-manifest.json` suspends grok-implement/qwen/gemini/claude-review suites; `test-ai-grok-review.sh` and `test-ai-codex-review.sh` stay running (GLM debate contract + Codex approval gate) |
 | 5. Docs and skills updated in the same change | 🟡 code landed | rotation rules, model-setup, AGENTS.md, task-router, standing-rules, plan-index; qwen/grok/gemini/codex-reviewer skills FROZEN 2026-10-13 (frontmatter + body banner) |
-| 6. Live proof | ⬜ open | — |
+| 6. Live proof | ✅ done 2026-10-14 | Issue #1714 closed: shared-db#4272 MERGED, ai-devops#1728 MERGED; live proof posted on the issue |
 
-**Start at Step 6** (live proof) once this PR merges and shared-db #4272 is on main.
+All six steps are complete (2026-10-14). Residual rows 🟡 above were accepted when #1714 closed.
 
 ---
 
