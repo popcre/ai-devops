@@ -6,6 +6,27 @@ _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp
 # Caller-supplied credentials or preload markers are never trusted. Only this
 # process may set the marker after validating its protected local key store.
 unset MODEL_API_KEY MUSE_KEY_PRELOADED
+unset MUSE_INTERNAL_ACTION
+if [ "${1:-}" = finalize-failed-turn ]; then
+  if [ "$#" -eq 3 ] && [ "${3:-}" = --dry-run ]; then
+    MUSE_INTERNAL_ACTION=finalize-failed-turn-dry-run
+    set -- show "${2:-}"
+  elif [ "$#" -eq 2 ]; then
+    set -- reconcile "${2:-}" --finalize-failed-turn
+  else
+    printf 'ai-muse: error: usage: ai-muse finalize-failed-turn <name> [--dry-run]\n' >&2
+    exit 2
+  fi
+fi
+
+
+# Reject malformed local requests before an invocation or session can change.
+if [ "${1:-}" = reconcile ]; then
+  if ! { [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "${3:-}" = --finalize-failed-turn ]; }; }; then
+    printf 'ai-muse: error: usage: ai-muse reconcile <name> [--finalize-failed-turn]\n' >&2
+    exit 2
+  fi
+fi
 
 # Read-only commands do not create a Muse review event. An outer review may
 # have its own event identity, which must not be reconciled as Muse evidence.
@@ -711,6 +732,19 @@ turn_usage(){
 }
 sid_filter(){ if [ "$ENGINE" = muse-code ]; then printf '%s' 'select(.stream.kind=="session")|.stream.id//empty'; else printf '%s' '.sessionID//.part.sessionID//empty'; fi; }
 new_session_uuid(){ local h; h="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"; [ "${#h}" -eq 32 ] || return 1; printf '%s-%s-4%s-%x%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" $(( (16#${h:16:1} & 3) | 8 )) "${h:17:3}" "${h:20:12}"; }
+begin_turn(){ # Preserve the previous descriptor before any follow-up can replace its source.
+  local meta="$1" event="${AI_REVIEW_EVENT_RUN_ID:-}" prior archive tmp
+  [[ "$event" =~ ^[0-9a-f]{32}$ ]] || die 'current Muse invocation identity is missing.'
+  prior="$(jq -r '.retained_turn.original_invocation_id // empty' "$meta")"
+  if [ -n "$prior" ]; then
+    [[ "$prior" =~ ^[0-9a-f]{32}$ ]] || die 'previous Muse invocation identity is invalid.'
+    archive="${meta%.json}.$prior.metadata.json"
+    [ ! -e "$archive" ] && [ ! -L "$archive" ] || die 'previous Muse metadata archive already exists; preserve both turns for inspection.'
+    (set -C; cat "$meta" > "$archive") && chmod 600 "$archive" && protect_windows_path "$archive" file || die 'could not preserve previous Muse metadata.'
+  fi
+  tmp="$(tmp_file)"
+  jq --arg event "$event" 'del(.retained_turn)|.active_invocation_id=$event' "$meta" > "$tmp" && mv -f "$tmp" "$meta" || die 'could not bind the current Muse invocation.'
+}
 retain_turn(){ # retain exact bytes and optional observations in one metadata write
   local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item usage observed_sid
   [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
@@ -724,7 +758,7 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   observed_sid="$(jq -sr "[.[]|$(sid_filter)]|last//empty" "$stem.jsonl" 2>/dev/null || true)"
   usage="$(turn_usage "$stem.jsonl" "$observed_sid" "$event")"
   tmp="$(tmp_file)"
-  jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
+  jq -e --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" 'select(.active_invocation_id==$event)|.retained_turn={original_invocation_id:$event,head:.head,packet_sha256:.packet_sha256,review_dir:.review_dir,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 capacity_rejection(){ # an answer-free model 404; any produced text, step, or output means a real turn
   local out="$1"
@@ -976,6 +1010,7 @@ cmd_new(){
   load_key
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
+  begin_turn "$meta"
   test_interrupt_at preparing
   [ -z "${AI_MUSE_TEST_PREPARE_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PREPARE_MARKER"; sleep "${AI_MUSE_TEST_PREPARE_DELAY:-3}"; }
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; before_paths="$(tmp_file)"; tree_paths "$root" > "$before_paths" 2>/dev/null || : > "$before_paths"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
@@ -997,11 +1032,19 @@ cmd_new(){
 cmd_ask(){
   local name="$1"; shift; local root rid meta sid status stored_model prompt out rep tmp before after report_path before_paths after_paths delta
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."
-  status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = active ] || die "session '$name' requires reconciliation ($status). Inspect: AI_MUSE_CALLER=$CALLER ai-muse transcript $name ; then run: AI_MUSE_CALLER=$CALLER ai-muse reconcile $name"
+  status="$(jq -r '.status//"active"' "$meta")"
+  case "$status" in
+    active) ;;
+    failed_turn_finalized) verify_failed_turn_receipt "$meta" "$name" "$root" "$rid" || die "session '$name' has an invalid failed-turn receipt; keep it fenced.";;
+    *) die "session '$name' requires reconciliation ($status). Inspect: AI_MUSE_CALLER=$CALLER ai-muse transcript $name ; then run: AI_MUSE_CALLER=$CALLER ai-muse reconcile $name";;
+  esac
   stored_model="$(jq -r '.model//""' "$meta")"; [ "$stored_model" = "$MODEL" ] || die "session '$name' belongs to model '${stored_model:-unknown}', not '$MODEL'. Preserve its transcript, then delete it and start a new Spark 1.3 conversation."
   validate_heartbeat
+  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
-  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; load_key; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
+  load_key
+  begin_turn "$meta"
+  tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; before_paths="$(tmp_file)"; tree_paths "$root" > "$before_paths" 2>/dev/null || : > "$before_paths"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
@@ -1017,8 +1060,139 @@ cmd_ask(){
   tmp="$(tmp_file)"; jq --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg report "$rep" --arg now "$(date -u +%FT%TZ)" '.status="active"|.head=$head|.packet_sha256=$packet|.last_report=$report|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META=""; rm -f "$prompt" "$out" "$out.stderr"; unlock_session; printf '%s\n' "$TEXT"; printf 'Muse session: %s\nReport: %s\n' "$name" "$rep" >&2
 }
 find_meta(){ local root rid m; name_ok "$1" || die "invalid session name '$1'."; root="$(repo_root)"; rid="$(repo_id "$root")"; m="$(meta_path "$rid" "$1")"; [ -f "$m" ] || die "no session '$1' for caller '$CALLER' in this repository."; printf '%s' "$m"; }
-cmd_list(){ local f; printf '%-24s %-8s %-26s %s\n' NAME CALLER UPDATED REPOSITORY; while IFS= read -r -d '' f; do jq -r '[.name,.caller,.updated_at,.repository_root]|@tsv' "$f"; done < <(find "$STATE/sessions" -type f -name '*.json' -print0 2>/dev/null) | awk -F '\t' '{printf "%-24s %-8s %-26s %s\n",$1,$2,$3,$4}'; }
+cmd_list(){
+  local f stored_caller stored_name expected
+  printf '%-24s %-8s %-26s %s\n' NAME CALLER UPDATED REPOSITORY
+  while IFS= read -r -d '' f; do
+    stored_caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)" || continue
+    stored_name="$(jq -r '.name // empty' "$f" 2>/dev/null)" || continue
+    caller_ok "$stored_caller" && name_ok "$stored_name" || continue
+    # Archive JSON is deliberately adjacent to the current descriptor. List
+    # only the native live filename derived from its own stored caller/name;
+    # this preserves dotted and bounded-hash names without exposing archives
+    # as duplicate active sessions.
+    expected="$(state_leaf "$(dirname "$f")" "$stored_caller--$stored_name" .json)"
+    [ "$f" = "$expected" ] || continue
+    jq -r '[.name,.caller,.updated_at,.repository_root]|@tsv' "$f"
+  done < <(find "$STATE/sessions" -type f -name '*.json' -print0 2>/dev/null) \
+    | awk -F '\t' '{printf "%-24s %-8s %-26s %s\n",$1,$2,$3,$4}'
+}
 cmd_show(){ jq . "$(find_meta "$1")"; }
+failed_turn_event_check(){
+  local event="$1" root="$2" head="$3" caller="$4"
+  reviewer_event_verify_private verify-failed-invocation muse "$event" "$root" "$head" "$caller" >/dev/null
+}
+failed_turn_stream_check(){
+  local stream="$1" sid="$2"
+  jq -es --arg sid "$sid" '
+    length >= 4 and
+    all(.[]; type=="object" and .sessionID==$sid and
+      (.type=="step_start" or .type=="step_finish" or .type=="text" or .type=="tool_use")) and
+    ([.[]|select(.type=="step_start")]|length)>0 and
+    ([.[]|select(.type=="step_start")]|length)==([.[]|select(.type=="step_finish")]|length) and
+    all(.[]|select(.type=="step_start"); .part.type=="step-start") and
+    all(.[]|select(.type=="step_finish"); .part.type=="step-finish" and .part.reason=="tool-calls") and
+    all(.[]|select(.type=="tool_use"); .part.type=="tool" and (.part.state.status=="completed" or .part.state.status=="error")) and
+    all(.[]|select(.type=="text"); .part.type=="text" and ((.part.text//"")|test("(?i)(VERDICT\\s*:|\\bAPPROV(ED|AL|E)\\b|\\bREJECT(ED|ION)?\\b|\\bSTOP(PED)?\\b|DECISION\\s*:)" )|not)) and
+    ([.[]|select(.type=="tool_use" and .part.state.status=="error")]|length)==1 and
+    (([.[]|select(.type=="tool_use" and .part.state.status=="error")][0]) as $denied |
+      $denied.part.tool=="read" and $denied.part.state.error=="The user rejected permission to use this specific tool call." and
+      (index($denied)==length-2) and
+      ([range(0;length) as $i|select(.[ $i ].type=="text" and $i>index($denied))]|length)==0 and
+      last.type=="step_finish" and last.part.reason=="tool-calls")
+  ' "$stream" >/dev/null 2>&1
+}
+# Retained paths may be stored in Windows (C:/...) or MSYS (/tmp/...) spelling;
+# compare one canonical spelling of the same physical file.
+failed_turn_path(){
+  if command -v cygpath >/dev/null 2>&1; then realpath -m "$(cygpath -u "$1")"; else realpath -m "$1"; fi
+}
+failed_turn_source_check(){
+  local source_meta="$1" name="$2" root="$3" rid="$4" event stem sid head packet review_dir expected actual item
+  [ "$ENGINE" = opencode ] || return 1
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" --arg root "$root" \
+    '.name==$name and .caller==$caller and .repository_id==$rid and .repository_root==$root and
+     .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and .status=="provider_outcome_uncertain" and
+     (.retained_turn.process_exit==0) and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and
+     (.head|type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$")) and
+     (.packet_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.review_dir|type=="string" and length>0)' \
+    "$source_meta" >/dev/null || return 1
+  event="$(jq -r '.retained_turn.original_invocation_id' "$source_meta")"; stem="${source_meta%.json}.$event"
+  case "$source_meta" in *."$event".failed-turn.json) stem="${source_meta%."$event".failed-turn.json}.$event";; esac
+  head="$(jq -r '.head' "$source_meta")"; packet="$(jq -r '.packet_sha256' "$source_meta")"; review_dir="$(jq -r '.review_dir' "$source_meta")"
+  sid="$(jq -r '.session_id // empty' "$source_meta")"; [ -n "$sid" ] || return 1
+  # Legacy retained turns did not store source bindings beside their exact
+  # stream. Bind only through the immutable invocation start, unchanged
+  # metadata descriptor, and the exact retained packet; never fill old fields.
+  jq -e --arg id "$event" --arg head "$head" --arg packet "$packet" --arg dir "$review_dir" --arg sid "$sid" \
+    '(.active_invocation_id==null or .active_invocation_id==$id) and
+     (.retained_turn.head==null or .retained_turn.head==$head) and
+     (.retained_turn.packet_sha256==null or .retained_turn.packet_sha256==$packet) and
+     (.retained_turn.review_dir==null or .retained_turn.review_dir==$dir) and
+     (.retained_turn.expected_session_id=="" or .retained_turn.expected_session_id==$sid)' \
+    "$source_meta" >/dev/null || return 1
+  failed_turn_event_check "$event" "$root" "$head" "$CALLER" || return 1
+  for item in stream prompt; do
+    actual="$(jq -r --arg key "$item" '.retained_turn[$key] // empty' "$source_meta")"
+    expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
+    [ -n "$actual" ] && [ -f "$actual" ] && [ ! -L "$actual" ] && [ "$(failed_turn_path "$actual")" = "$(failed_turn_path "$expected")" ] || return 1
+    [ "$(sha256sum "$actual" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key] // empty' "$source_meta")" ] || return 1
+  done
+  failed_turn_stream_check "$stem.jsonl" "$sid" || return 1
+  actual="$(jq -r '.retained_turn.expected_session_id // empty' "$source_meta")"
+  [ -z "$actual" ] || [ "$actual" = "$sid" ] || return 1
+  expected="$("$PACKET" path "$review_dir" "$(tag "$name")" 2>/dev/null)" || return 1
+  [ -n "$expected" ] && [ -d "$expected" ] && [ ! -L "$expected" ] || return 1
+  [ "$(cat "$expected/MANIFEST.sha256" 2>/dev/null)" = "$packet" ] || return 1
+  "$PACKET" verify-retained "$expected" >/dev/null 2>&1 || return 1
+  return 0
+}
+verify_failed_turn_receipt(){
+  local meta="$1" name="$2" root="$3" rid="$4" event archive digest sid
+  event="$(jq -r '.failed_turn_receipts[-1].original_invocation_id // empty' "$meta")"
+  [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
+  archive="${meta%.json}.$event.failed-turn.json"
+  [ "$(failed_turn_path "$(jq -r '.failed_turn_receipts[-1].archive_path // empty' "$meta")")" = "$(failed_turn_path "$archive")" ] || return 1
+  [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
+  digest="$(sha256sum "$archive" | cut -d' ' -f1)"
+  [ "$digest" = "$(jq -r '.failed_turn_receipts[-1].archive_sha256 // empty' "$meta")" ] || return 1
+  jq -e --arg event "$event" --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" \
+    '.status=="provider_outcome_uncertain" and .name==$name and .caller==$caller and
+     .repository_id==$rid and .model==$model and .retained_turn.original_invocation_id==$event' "$archive" >/dev/null || return 1
+  failed_turn_source_check "$archive" "$name" "$root" "$rid" || return 1
+  sid="$(jq -r '.session_id // empty' "$archive")"
+  jq -e --slurpfile original "$archive" --arg sid "$sid" --arg rid "$rid" --arg root "$root" --arg name "$name" --arg caller "$CALLER" --arg model "$MODEL" \
+    '.status=="failed_turn_finalized" and .session_id==$sid and .repository_id==$rid and .repository_root==$root and .name==$name and
+     .caller==$caller and .model==$model and .caller==$original[0].caller and .model==$original[0].model and
+     .head==$original[0].head and .packet_sha256==$original[0].packet_sha256 and .review_dir==$original[0].review_dir and
+     .retained_turn==$original[0].retained_turn and
+     .failed_turn_receipts[-1].original_invocation_id==.retained_turn.original_invocation_id' "$meta" >/dev/null
+}
+cmd_finalize_failed_turn(){
+  local name="$1" mode="${2:-}" root rid meta status event archive tmp before sid head packet report
+  name_ok "$name" || die "invalid session name '$name'."; need jq; need git
+  [ -z "$mode" ] || [ "$mode" = --dry-run ] || die 'usage: ai-muse finalize-failed-turn <name> [--dry-run]'
+  root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."
+  [ "$mode" != --dry-run ] || before="$(sha256sum "$meta")"
+  [ "$mode" = --dry-run ] || lock_session "$rid" "$name"
+  status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = provider_outcome_uncertain ] || die "failed-turn finalization requires provider_outcome_uncertain (found $status)."
+  failed_turn_source_check "$meta" "$name" "$root" "$rid" || die 'the retained turn does not prove the exact completed permission-denied read failure; it remains fenced.'
+  event="$(jq -r '.retained_turn.original_invocation_id' "$meta")"; sid="$(jq -r '.session_id' "$meta")"; head="$(jq -r '.head' "$meta")"; packet="$(jq -r '.packet_sha256' "$meta")"
+  archive="${meta%.json}.$event.failed-turn.json"
+  if [ "$mode" = --dry-run ]; then
+    [ "$(sha256sum "$meta")" = "$before" ] || die 'session metadata changed during read-only qualification.'
+    printf 'QUALIFIED NON-AUTHORIZING failed turn: session=%s invocation=%s source=%s packet=%s\n' "$sid" "$event" "$head" "$packet"
+    return 0
+  fi
+  [ ! -L "$archive" ] || die 'failed-turn archive path is linked.'
+  if [ -e "$archive" ]; then cmp -s "$meta" "$archive" || die 'failed-turn archive already exists with different bytes.'
+  else (set -C; cat "$meta" > "$archive") && chmod 600 "$archive" && protect_windows_path "$archive" file || die 'could not preserve original failed-turn metadata.'; fi
+  tmp="$(tmp_file)"; report="$(sha256sum "$archive" | cut -d' ' -f1)"
+  jq --arg id "$event" --arg path "$archive" --arg sha "$report" --arg now "$(date -u +%FT%TZ)" \
+    '.status="failed_turn_finalized"|.failed_turn_receipts=((.failed_turn_receipts//[])+[{original_invocation_id:$id,archive_path:$path,archive_sha256:$sha,finalized_at:$now,authorization:"non-authorizing-failed-turn"}])|.updated_at=$now' \
+    "$meta" > "$tmp" && mv -f "$tmp" "$meta" || die 'could not record non-authorizing failed-turn receipt.'
+  printf 'non-authorizing failed-turn receipt recorded for session %s; no report or approval was created.\n' "$sid"
+}
 require_engine_model(){ # older same-engine models stay deletable; only a session from the other engine is refused
   local stored owner; stored="$(jq -r '.model//""' "$1")"; case "$stored" in */*) owner=opencode;; "") owner="$ENGINE";; *) owner=muse-code;; esac
   [ "$owner" = "$ENGINE" ] || die "session '$2' was created by the $owner engine (model '$stored'); rerun with AI_MUSE_ENGINE=$owner."
@@ -1104,6 +1278,9 @@ cmd_reconcile(){
   status="$(jq -r .status "$m")"
   case "$status" in active|provider_outcome_uncertain|completed_pending_local_checks|turn_in_progress) ;; *) die "session cannot be reconciled from status: $status";; esac
   event="$(jq -r .retained_turn.original_invocation_id "$m")"; stem="${m%.json}.$event"
+  # New metadata binds every component to one invocation. Legacy records still
+  # require the original invocation's sandbox ownership below, before mutation.
+  jq -e 'if has("active_invocation_id") then .active_invocation_id==.retained_turn.original_invocation_id and .head==.retained_turn.head and .packet_sha256==.retained_turn.packet_sha256 and .review_dir==.retained_turn.review_dir else true end' "$m" >/dev/null || die 'retained Muse completion belongs to a different invocation or source; current turn remains fenced.'
   for item in stream prompt; do
     path="$(jq -r --arg key "$item" '.retained_turn[$key]' "$m")"; expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
     if command -v cygpath >/dev/null 2>&1; then
@@ -1128,6 +1305,7 @@ cmd_reconcile(){
     rep="$(jq -r .last_report "$m")"; [ -f "$rep" ] && [ ! -L "$rep" ] && [ "$(sha256sum "$rep" | cut -d' ' -f1)" = "$(jq -r .retained_turn.report_sha256 "$m")" ] || die 'retained Muse report changed.'
     printf 'already reconciled Muse session: %s (retained evidence only)\n' "$name"; return
   fi
+  reviewer_event_evidence require-report muse "$REVIEW_DIR" "$event" || die 'could not reserve exact recovered Muse evidence; session metadata was not changed.'
   MUSE_RECOVERY_EVENT_RUN_ID="$event"; MUSE_RECOVERY_STATE=''; MUSE_ORIGINAL_HEAD_SHA=''
   rep="$(jq -r .retained_turn.report_path "$m")"; [ -n "$rep" ] && [ "$rep" != null ] || die 'original Muse report destination was not retained.'
   if [ "$stale" = 1 ]; then
@@ -1138,7 +1316,6 @@ $TEXT"
   fi
   tmp="$(tmp_file)"; jq --arg state "$MUSE_RECOVERY_STATE" --arg report "$rep" '.retained_turn.recovery_state=$state|.retained_turn.recovery_report_path=$report' "$m" > "$tmp" && mv -f "$tmp" "$m"
   MUSE_RECOVERY_REPORT_PATH="$rep"
-  reviewer_event_evidence require-report muse "$REVIEW_DIR" "$event" || die 'could not reserve exact recovered Muse evidence.'
   ensure_report_destination "$root" "$rep"; reserve_report_staging "$root"; report "$root" "$name" "$prompt" "$rep" >/dev/null
   tmp="$(tmp_file)"; jq --arg sid "$TURN_SID" --arg report "$rep" --arg sha "$(sha256sum "$rep" | cut -d' ' -f1)" --arg now "$(date -u +%FT%TZ)" '.status="active"|.session_id=$sid|.last_report=$report|.retained_turn.finalized=true|.retained_turn.report_sha256=$sha|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp" && mv -f "$tmp" "$m"
   unlock_session
@@ -1225,7 +1402,7 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse implement <name> [--base REF] --prompt TEXT|--prompt-file FILE|stdin  (writes on branch muse/<name>)' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key [--if-missing]' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse implement <name> [--base REF] --prompt TEXT|--prompt-file FILE|stdin  (writes on branch muse/<name>)' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | finalize-failed-turn <name> [--dry-run] | delete <name> | doctor | store-key [--if-missing]' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ] || [ "${1:-}" = implement ]; then
@@ -1248,7 +1425,14 @@ case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
   implement) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse implement <name> ...'; shift; cmd_implement "$n" "$@";;
-  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
+  list) cmd_list;; show) shift; if [ "${MUSE_INTERNAL_ACTION:-}" = finalize-failed-turn-dry-run ]; then cmd_finalize_failed_turn "${1:-}" --dry-run; else cmd_show "${1:-}"; fi;; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift
+    if [ "$#" -eq 1 ]; then
+      cmd_reconcile "$1"
+    elif [ "$#" -eq 2 ] && [ "$2" = --finalize-failed-turn ]; then
+      cmd_finalize_failed_turn "$1"
+    else
+      die 'usage: ai-muse reconcile <name> [--finalize-failed-turn]'
+    fi;; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;

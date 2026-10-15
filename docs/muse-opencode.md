@@ -29,6 +29,18 @@ or ambiguous terminal evidence stays blocked. If the source moved, reconciliatio
 retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
+For the narrowly recognized OpenCode case where the original turn ended only
+because a read tool was denied permission, use `ai-muse finalize-failed-turn <name>
+--dry-run` first. It qualifies the original packet, retained bytes, native event
+start/finish, and exact permission-denial stream without changing session state.
+Only a qualified result permits `ai-muse finalize-failed-turn <name>`; this
+archives the original descriptor and records a non-authorizing failure receipt.
+It creates no accepted review, verdict, refund, or billing conclusion. A fresh
+same-session `ask` then follows the ordinary provider path. Any other error,
+verdict text, stop, missing or inconsistent receipt remains fenced; do not use
+this route to recover an incomplete or successful review. Muse Code failures
+remain fenced because they do not have this qualifying OpenCode event stream.
+
 If the source repository changes during a turn, the completed review is rejected as
 stale. The message names the paths that appeared or vanished (capped at 10) and
 points at `reconcile` as the recovery step — the paid review is kept. `delete`

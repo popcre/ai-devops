@@ -22,6 +22,8 @@ check 'Windows setup passes the Muse script as a direct Bash argument' "grep -Fq
 check 'exact Contributor model is pinned' "grep -q 'meta-model-api/muse-spark-1.3-contributor' '$SCRIPT'"
 check 'persistent new command exists' "grep -q 'cmd_new' '$SCRIPT'"
 check 'persistent ask command exists' "grep -q 'cmd_ask' '$SCRIPT'"
+check 'failed-turn recovery is a separate non-authorizing command' "grep -q 'cmd_finalize_failed_turn' '$SCRIPT' && grep -q 'authorization:\"non-authorizing-failed-turn\"' '$SCRIPT' && grep -q 'verify-failed-invocation' '$ROOT/tools/reviewer_events.py'"
+check 'shared skill fences failure recovery behind read-only qualification' "grep -q 'finalize-failed-turn <stable-name> --dry-run' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'does not publish an accepted review' '$ROOT/skills/shared/ask-muse/SKILL.md'"
 check 'ask resumes exact session' "grep -q -- '--session \"\$sid\"' '$SCRIPT'"
 check 'same named session is locked across turns' "grep -q 'lock_session \"\$rid\" \"\$name\"' '$SCRIPT'"
 check 'failed lock acquisition cannot remove its owner' "grep -q 'LOCK=\"\$candidate\"' '$SCRIPT'"
@@ -172,6 +174,15 @@ case "${1:-}" in
     sid=ses_new; prior=''
     while [ $# -gt 0 ]; do [ "$1" = --session ] && { sid="$2"; prior=1; shift 2; continue; }; shift; done
     [ "${MUSE_STUB_MODE:-}" = wrongsid ] && sid=ses_wrong
+    if [ "${MUSE_STUB_MODE:-}" = permission-denied ] || [ "${MUSE_STUB_MODE:-}" = generic-tool-calls ]; then
+      printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
+      printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"partial, non-authorizing output"}}\n' "$sid"
+      error='The user rejected permission to use this specific tool call.'
+      [ "${MUSE_STUB_MODE:-}" != generic-tool-calls ] || error='The read tool returned an unrelated error.'
+      printf '{"type":"tool_use","sessionID":"%s","part":{"type":"tool","tool":"read","state":{"status":"error","error":"%s"}}}\n' "$sid" "$error"
+      printf '{"type":"step_finish","sessionID":"%s","part":{"type":"step-finish","reason":"tool-calls","tokens":{"total":3}}}\n' "$sid"
+      exit 0
+    fi
     printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
     [ "${MUSE_STUB_MODE:-}" = mixedstart ] && printf '{"type":"step_start","sessionID":"ses_other","part":{"type":"step-start"}}\n'
     [ -z "${MUSE_STUB_TOUCH:-}" ] || printf changed >> "$MUSE_STUB_TOUCH"
@@ -244,6 +255,143 @@ muse_recovery_cases(){
   if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
   rm -f "$TMP/bin/jq"
 }
+muse_turn_identity_cases(){
+  local name m prior archive before calls="$TMP/identity-calls" field
+  : > "$calls"
+  for name in identity-same-head identity-new-head; do
+    check "$name creates a completed first turn" "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first\""
+    m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+    prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+    cp "$m" "$TMP/$name.before"
+    for field in active_invocation_id head packet_sha256 review_dir; do
+      jq --arg field "$field" '.[$field]="different"|.status="completed_pending_local_checks"' "$TMP/$name.before" > "$m"
+      before="$(sha256sum "$m")"
+      check "$name rejects mismatched $field without mutating metadata" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-refusal.log' 2>&1 && grep -q 'different invocation or source' '$TMP/identity-refusal.log' && test \"\$(sha256sum '$m')\" = '$before'"
+    done
+    cp "$TMP/$name.before" "$m"
+    if [ "$name" = identity-new-head ]; then
+      printf 'new reviewed source\n' >> "$REPO/a.txt"; git -C "$REPO" add a.txt; git -C "$REPO" commit -qm 'identity regression source change'
+    fi
+    check "$name interrupts the next provider before retention" "cd '$REPO' && ! eval \"$ENV AI_MUSE_TEST_INTERRUPT_AT=post_launch MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 '$SCRIPT' ask $name --prompt followup\" > '$TMP/identity-interrupt.log' 2>&1"
+    archive="${m%.json}.$prior.metadata.json"
+    check "$name archives previous completion before replacing source" "cmp -s '$TMP/$name.before' '$archive' && jq -e 'has(\"retained_turn\")|not' '$m' && jq -e '.active_invocation_id!=\"$prior\" and .status==\"provider_outcome_uncertain\"' '$m'"
+    before="$(sha256sum "$m")"
+    check "$name cannot use the old successful completion to unlock new work" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-reconcile.log' 2>&1 && grep -q 'no exact successful retained Muse process' '$TMP/identity-reconcile.log' && test \"\$(sha256sum '$m')\" = '$before' && ! eval \"$ENV '$SCRIPT' ask $name --prompt duplicate\" > /dev/null 2>&1"
+    jq --slurpfile prior "$archive" 'del(.active_invocation_id)|.retained_turn=$prior[0].retained_turn' "$m" > "$m.legacy"; mv "$m.legacy" "$m"
+    before="$(sha256sum "$m")"
+    check "$name refuses legacy stale completion before any metadata mutation" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-legacy.log' 2>&1 && grep -q 'could not reserve exact recovered Muse evidence' '$TMP/identity-legacy.log' && test \"\$(sha256sum '$m')\" = '$before'"
+  done
+}
+muse_failed_turn_cases(){
+  local name=failedturn.positive m event archive report_before meta_before events_before calls_before out rc oldhead list_output list_rows
+  local calls="$TMP/failedturn-provider-calls" event_file="$AI_REVIEW_EVENT_DIR/events.jsonl"
+  : > "$calls"
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+  if [ -z "$m" ]; then bad 'permission-denied fixture retains its uncertain turn'; cat "$TMP/failedturn-new.log" >&2; return; fi
+  check 'permission-denied fixture retains its uncertain turn' "test -n '$m' && jq -e '.status==\"provider_outcome_uncertain\"' '$m'"
+  event="$(jq -r '.retained_turn.original_invocation_id' "$m")"; archive="${m%.json}.$event.failed-turn.json"
+  report_before="$(sha256sum "$(jq -r .last_failure_report "$m")")"; meta_before="$(sha256sum "$m")"; events_before="$(sha256sum "$event_file")"; calls_before="$(wc -l < "$calls")"
+  out="$(cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' finalize-failed-turn $name --dry-run" 2>&1)" || rc=$?; rc="${rc:-0}"
+  check 'exact denied read turn qualifies non-authorizingly without writes or provider calls' "test '$rc' -eq 0 && printf '%s' '$out' | grep -q 'QUALIFIED NON-AUTHORIZING' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(sha256sum '$event_file')\" = '$events_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before' && test ! -e '$archive'"
+  out_lines="$(printf '%s\n' "$out" | wc -l)"
+  check 'dry-run output contains only the concise qualification result' "test '$out_lines' -eq 1 && printf '%s' '$out' | grep -q '^QUALIFIED NON-AUTHORIZING failed turn: session=ses_new invocation=' && ! printf '%s' '$out' | grep -q 'evidence_references\|wrapper_exit_code\|timestamp'"
+  check 'dry-run does not emit a report, approval, or finalized status' "jq -e '.status==\"provider_outcome_uncertain\" and .last_report==null and (has(\"failed_turn_receipts\")|not)' '$m'"
+  (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile $name --finalize-failed-turn extra") > "$TMP/failedturn-extra-finalize-args.log" 2>&1 && rc=0 || rc=$?
+  check 'reconcile rejects extra failed-turn finalization arguments without mutation or provider calls' "test '$rc' -ne 0 && grep -q '^ai-muse: error: usage: ai-muse reconcile <name>' '$TMP/failedturn-extra-finalize-args.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(sha256sum '$event_file')\" = '$events_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before' && test ! -e '$archive'"
+  cp "$m" "$TMP/$name.original-meta"
+  if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' finalize-failed-turn $name") > "$TMP/failedturn-finalize.stdout" 2> "$TMP/failedturn-finalize.stderr"; then bad 'verified failed-turn receipt is recorded'; return; fi
+  finalize_lines="$(wc -l < "$TMP/failedturn-finalize.stdout")"
+  check 'finalization output contains only a concise non-authorizing receipt' "test '$finalize_lines' -eq 1 && grep -q '^non-authorizing failed-turn receipt recorded for session ses_new; no report or approval was created\.$' '$TMP/failedturn-finalize.stdout' && ! grep -q 'evidence_references\|wrapper_exit_code\|timestamp' '$TMP/failedturn-finalize.stdout'"
+  # The accepted archive is compared with the immutable pre-finalization bytes
+  # captured above, never reconstructed from the changed current metadata.
+  check 'finalization archives the original descriptor without creating an accepted report' "cmp -s '$TMP/$name.original-meta' '$archive' && jq -e '.status==\"failed_turn_finalized\" and .failed_turn_receipts[-1].authorization==\"non-authorizing-failed-turn\" and .retained_turn.original_invocation_id==\"'$event'\" and .last_report==null' '$m'"
+  check 'failed-turn finalization preserves the incomplete report' "test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before'"
+  list_output="$(cd "$REPO" && eval "$ENV '$SCRIPT' list")"
+  list_rows="$(printf '%s\n' "$list_output" | awk -v n="$name" '$1==n{count++} END{print count+0}')"
+  check 'list shows one dotted live session and excludes its failed-turn archive' "test '$list_rows' -eq 1"
+  cp "$m" "$TMP/$name.finalized-meta"
+  jq '.retained_turn.prompt_sha256="0000000000000000000000000000000000000000000000000000000000000000"' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+  meta_before="$(sha256sum "$m")"; calls_before="$(wc -l < "$calls")"; archive_before="$(sha256sum "$archive")"
+  (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask $name --prompt tampered") > "$TMP/failedturn-retained-tamper.log" 2>&1 && rc=0 || rc=$?
+  check 'fresh ask refuses changed current retained hash without altering archive or contacting provider' "test '$rc' -ne 0 && grep -q 'invalid failed-turn receipt' '$TMP/failedturn-retained-tamper.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(sha256sum '$archive')\" = '$archive_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  cp "$TMP/$name.finalized-meta" "$m"
+  if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask $name --prompt followup") > "$TMP/failedturn-ask.log" 2>&1; then cat "$TMP/failedturn-ask.log" >&2; bad 'same-session fresh ask proceeds through the ordinary provider path'; return; fi
+  check 'same-session ask uses a distinct new invocation and preserves the failure receipt' "test \"\$(wc -l < '$calls')\" -eq $((calls_before+1)) && jq -e '.status==\"active\" and .session_id==\"ses_new\" and .retained_turn.original_invocation_id!=\"'$event'\" and (.failed_turn_receipts|length)==1' '$m' && test -s \"\$(jq -r .last_report '$m')\" && test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before'"
+  list_output="$(cd "$REPO" && eval "$ENV '$SCRIPT' list")"
+  list_rows="$(printf '%s\n' "$list_output" | awk -v n="$name" '$1==n{count++} END{print count+0}')"
+  check 'list stays singular after fresh ask creates a metadata archive' "test '$list_rows' -eq 1"
+  name=failedturn-keyfailure
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-keyfailure-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"
+  (cd "$REPO" && eval "$ENV '$SCRIPT' finalize-failed-turn $name") > "$TMP/failedturn-keyfailure-finalize.log" 2>&1 || { bad 'key-failure fixture finalizes its permission-denied turn'; return; }
+  meta_before="$(sha256sum "$m")"; events_before="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"; report_before="$(sha256sum "$(jq -r .last_failure_report "$m")")"; calls_before="$(wc -l < "$calls")"
+  out="$(find "$REPO/.ai/reviews" -type f -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)"
+  (cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$TMP/missing-key-store' '$SCRIPT' ask $name --prompt followup") > "$TMP/failedturn-keyfailure-ask.log" 2>&1 && rc=0 || rc=$?
+  check 'local key failure preserves failed-turn bytes and does not call the provider' "test '$rc' -ne 0 && grep -q 'protected Muse key store is unavailable' '$TMP/failedturn-keyfailure-ask.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test \"\$(sha256sum \"\$(jq -r .last_failure_report '$m')\")\" = '$report_before'"
+  events_after="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"; latest_run="$(jq -s -r '[.[]|select(.event=="started")]|last.run_id' "$event_file")"; reports_after="$(find "$REPO/.ai/reviews" -type f -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)"
+  check 'local key failure keeps original invocation receipt and does not create a report' "test '$events_after' = '$events_before' && test '$reports_after' = '$out' && test '$latest_run' != '$event'"
+  name=failedturn-binding
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-binding-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; cp "$m" "$TMP/failedturn-binding-original.json"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"; calls_before="$(wc -l < "$calls")"
+  for field in model runtime_version; do
+    jq --arg field "$field" '.retained_turn[$field]="mismatched"' "$TMP/failedturn-binding-original.json" > "$m"
+    meta_before="$(sha256sum "$m")"
+    check "failed-turn refuses mismatched retained $field without mutation or provider call" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-$field.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-$field.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  done
+  jq 'del(.retained_turn.model)' "$TMP/failedturn-binding-original.json" > "$m"; meta_before="$(sha256sum "$m")"
+  check 'failed-turn refuses missing retained model without mutation or provider call' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-missing-model.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-missing-model.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  cp "$TMP/failedturn-binding-original.json" "$m"; meta_before="$(sha256sum "$m")"; events_before="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"
+  if (cd "$REPO" && eval "$ENV AI_MUSE_ENGINE=muse-code '$SCRIPT' finalize-failed-turn $name --dry-run") > "$TMP/failedturn-binding-engine.log" 2>&1; then engine_rc=0; else engine_rc=$?; fi
+  events_after="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"
+  check 'failed-turn refuses the other engine without mutation or provider call' "test '$engine_rc' -ne 0 && grep -q 'remains fenced' '$TMP/failedturn-binding-engine.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test '$events_after' = '$events_before'"
+  name=failedturn-generic
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=generic-tool-calls '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-generic-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+  check 'generic tool-calls error is not eligible' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-generic-check.log' && grep -q 'remains fenced' '$TMP/failedturn-generic-check.log' && jq -e '.status==\"provider_outcome_uncertain\"' '$m'"
+  name=failedturn-verdict
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-verdict-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"; raw="$(jq -r '.retained_turn.stream' "$m")"
+  jq -c 'if .type=="text" then .part.text="VERDICT: APPROVE" else . end' "$raw" > "$raw.tmp" && mv "$raw.tmp" "$raw"
+  jq --arg sha "$(sha256sum "$raw" | cut -d' ' -f1)" '.retained_turn.stream_sha256=$sha' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+  check 'assistant verdict text is not treated as a failed permission-only turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-verdict-check.log' && grep -q 'remains fenced' '$TMP/failedturn-verdict-check.log'"
+  name=failedturn-late-text
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-late-text-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; raw="$(jq -r '.retained_turn.stream' "$m")"; sid="$(jq -r .session_id "$m")"
+  jq -s -c --arg sid "$sid" '.[0:-1]+[{type:"text",sessionID:$sid,part:{type:"text",text:"late assistant output"}},.[-1]]|.[]' "$raw" > "$raw.tmp" && mv "$raw.tmp" "$raw"
+  jq --arg sha "$(sha256sum "$raw" | cut -d' ' -f1)" '.retained_turn.stream_sha256=$sha' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+  check 'assistant output after the denied tool remains fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-late-text-check.log' && grep -q 'remains fenced' '$TMP/failedturn-late-text-check.log'"
+  name=failedturn-multiple-errors
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-multiple-errors-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; raw="$(jq -r '.retained_turn.stream' "$m")"
+  jq -s -c '.[0:-1]+[.[-2],.[-2],.[-1]]|.[]' "$raw" > "$raw.tmp" && mv "$raw.tmp" "$raw"
+  jq --arg sha "$(sha256sum "$raw" | cut -d' ' -f1)" '.retained_turn.stream_sha256=$sha' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+  check 'multiple native tool errors remain fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-multiple-errors-check.log' && grep -q 'remains fenced' '$TMP/failedturn-multiple-errors-check.log'"
+  name=failedturn-signal
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-signal-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"
+  jq -c --arg id "$event" 'if .run_id==$id and .event=="finished" then .provenance.signal="TERM" else . end' "$event_file" > "$event_file.tmp" && mv "$event_file.tmp" "$event_file"
+  check 'signaled wrapper receipt is not treated as a completed failed turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-signal-check.log' && grep -q 'remains fenced' '$TMP/failedturn-signal-check.log'"
+  name=failedturn-time-order
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-time-order-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"
+  jq -c --arg id "$event" 'if .run_id==$id and .event=="finished" then .timestamp="2000-01-01T00:00:00Z" else . end' "$event_file" > "$event_file.tmp" && mv "$event_file.tmp" "$event_file"
+  check 'finish receipt earlier than invocation start remains fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-time-order-check.log' && grep -q 'remains fenced' '$TMP/failedturn-time-order-check.log'"
+  name=failedturn-no-finish
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-no-finish-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"
+  jq -c --arg id "$event" 'select(.run_id!=$id or .event!="finished")' "$event_file" > "$event_file.tmp" && mv "$event_file.tmp" "$event_file"
+  check 'missing terminal receipt is not eligible' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-no-finish-check.log' && grep -q 'remains fenced' '$TMP/failedturn-no-finish-check.log'"
+  name=failedturn-source
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-source-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; oldhead="$(jq -r .head "$m")"
+  jq '.head="0000000000000000000000000000000000000000"' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+  check 'mismatched original head and invocation source remain fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-source-check.log' && grep -q 'remains fenced' '$TMP/failedturn-source-check.log' && test '$oldhead' != \"\$(jq -r .head '$m')\""
+  name=failedturn-stop
+  if ! (cd "$REPO" && eval "$ENV '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-stop-new.log" 2>&1; then bad 'stop-plus-text fixture succeeds as a normal turn'; return; fi
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+  check 'a completed stop-plus-text turn cannot enter failure finalization' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-stop-check.log' && grep -q 'requires provider_outcome_uncertain' '$TMP/failedturn-stop-check.log' && jq -e '.status==\"active\"' '$m'"
+}
 failure_phase_cases(){
   local calls="$TMP/phase-calls" mode rc count m raw digest lock metadata_digest command
   local management_calls="$TMP/phase-management-calls"
@@ -275,12 +423,21 @@ failure_phase_cases(){
   if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
   if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
 }
+if [ "${AI_MUSE_IDENTITY_TESTS_ONLY:-0}" = 1 ]; then
+  muse_turn_identity_cases
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
+if [ "${AI_MUSE_FAILED_TURN_TESTS_ONLY:-0}" = 1 ]; then
+  muse_failed_turn_cases
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 if ai_test_part_active; then failure_phase_cases; fi
 if [ "${AI_MUSE_PHASE_TESTS_ONLY:-0}" = 1 ]; then
   printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
+  muse_turn_identity_cases
   printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 # Windows CI runs the main flow below as three parts (tests/test-ai-muse-part2.sh,
@@ -617,7 +774,9 @@ if ! command -v cygpath >/dev/null 2>&1; then
 fi
 check 'the key probe sends the key from a header file, never argv' "grep -q 'curl .*-H @\"\$hdr\"' '$SCRIPT' && ! grep -q 'Bearer \$MODEL_API_KEY' '$SCRIPT'"
 check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"
+muse_failed_turn_cases
 muse_recovery_cases
+muse_turn_identity_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then
   fake_op_dir="$TMP/la/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"; mkdir -p "$fake_op_dir"

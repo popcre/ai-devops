@@ -147,6 +147,44 @@ def invocation(directory, provider, run_id, active=False):
     return starts[0]
 
 
+def verify_failed_invocation(directory, provider, run_id, repo, head, caller):
+    """Read-only proof of one exact, terminal unsignaled wrapper failure."""
+    require(re.fullmatch(r"[0-9a-f]{32}", run_id), "invalid invocation identity")
+    _, data = snapshot(directory / "events.jsonl", "jsonl")
+    rows = [json.loads(line) for line in data.splitlines()]
+    require(all(isinstance(row, dict) for row in rows), "invalid event ledger")
+    starts = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "started"]
+    finishes = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "finished"]
+    require(len(starts) == 1 and len(finishes) == 1, "invocation lacks one exact start and finish")
+    start, finish = starts[0], finishes[0]
+    def event_time(row):
+        value = row.get("timestamp")
+        require(isinstance(value, str) and value, "invocation lacks a timestamped process receipt")
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise Blocked("invocation has an invalid process-receipt timestamp") from exc
+        require(parsed.tzinfo is not None and parsed.utcoffset() is not None,
+                "invocation timestamp is not timezone-aware")
+        return parsed
+    started_at, finished_at = event_time(start), event_time(finish)
+    require(finished_at >= started_at, "wrapper finish precedes the original invocation start")
+    require(start.get("provider") == provider and finish.get("provider") == provider and
+            start.get("operation") == "invocation", "invocation is not an original provider call")
+    require(finish.get("exit_code") == 1 and finish.get("wrapper_exit_code") == 1 and
+            finish.get("evidence_state") == "verified", "invocation is not a verified wrapper failure")
+    facts = finish.get("provenance")
+    require(isinstance(facts, dict) and facts.get("phase") == "wrapper-exit" and
+            facts.get("signal") is None, "invocation termination is not a completed unsignaled wrapper exit")
+    require(all(finish.get(key) == start.get(key) for key in
+                ("run_id", "provider", "operation", "repo", "head", "caller")),
+            "finished invocation identity differs from its start")
+    require(physical(start.get("repo", "")) == physical(repo) and
+            start.get("head") == head and start.get("caller") == caller,
+            "failed invocation does not match the retained Muse source and caller")
+    return {"started": start, "finished": finish}
+
+
 def provenance(value=None):
     result = {"source": "unknown", "actor_class": "unknown", "phase": "unknown",
               "last_proven_provider_state": "unknown", "paid_work_may_exist": None, "signal": None}
@@ -1520,6 +1558,12 @@ def main():
     if sys.argv[1] == "verify-sandbox":
         require(len(sys.argv) == 3, "invalid sandbox evidence verification")
         print(json.dumps({"references": verify_sandbox(location(), sys.argv[2])}))
+        return
+    if sys.argv[1] == "verify-failed-invocation":
+        require(len(sys.argv) == 7, "failed-invocation verification requires provider, run_id, repo, head and caller")
+        provider = sys.argv[2]
+        require(provider == "muse", "failed-invocation verifier is restricted to Muse")
+        print(json.dumps(verify_failed_invocation(location(), provider, *sys.argv[3:])))
         return
     operation, provider = sys.argv[1:3]
     require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen", "stepfun"},

@@ -380,12 +380,30 @@ fi
 TESTS_RESULT=""
 if [ -n "$TESTS_COMMAND" ]; then
   TMP_TESTS="$(mktemp "$REPORT_DIR/.pool-tests.XXXXXX")"
-  if ( cd "$REVIEW_DIR" && bash -c "$TESTS_COMMAND" ) > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed in the review snapshot before dispatch'; else
+  # Run caller-supplied tests as an offline child. In particular, do not pass
+  # the source-packet receipt path or the active door/lifecycle custody into a
+  # command that may create files in the disposable snapshot.
+  TESTS_SCRUB=()
+  while IFS= read -r TESTS_NAME; do
+    case "$TESTS_NAME" in
+      AI_REVIEW_SOURCE_RECEIPT_FILE|DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+        TESTS_SCRUB+=(-u "$TESTS_NAME");;
+    esac
+  done < <(compgen -e)
+  if ( cd "$REVIEW_DIR" && env "${TESTS_SCRUB[@]}" bash -c "$TESTS_COMMAND" ) > "$TMP_TESTS" 2>&1; then
+    TESTS_SHA="$(sha256sum "$TMP_TESTS" | cut -d' ' -f1)"
+    if ! "$LIFECYCLE" record-tests --state "$STATE" --command "$TESTS_COMMAND" --exit 0 --output-sha256 "$TESTS_SHA" >/dev/null; then
+      "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure tests-evidence-recording-failed >/dev/null 2>&1 || true
+      die 'could not record the tests evidence in the review record; no review was dispatched.'
+    fi
+    TESTS_RESULT="exit 0 - passed in the review snapshot before dispatch (output sha256 $TESTS_SHA)"
+  else
     rm -f "$TMP_TESTS"
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure tests-command-failed >/dev/null 2>&1 || true
     die 'tests command failed; no review was dispatched.'
   fi
 fi
+unset TESTS_SCRUB TESTS_NAME TESTS_SHA
 # Cache-stable layout (#1430): every fixed instruction, the decision text and
 # the verdict format come first so briefs for different heads share one byte
 # prefix; run facts that change per review come last in a labeled block.

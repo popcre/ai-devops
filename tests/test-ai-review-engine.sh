@@ -561,14 +561,95 @@ exit 0
 EOF
 chmod +x "$SCOREBOARD_STUB"
 
+# GLM remains on the legacy pool route until it has a registered engine door.
+# Exercise that route offline: lifecycle record-tests must persist the exact
+# test command/output digest before the fake GLM runner can start, and the
+# child test command must not receive the caller's source-receipt path.
+POOL_LIFECYCLE_WRAPPER="$TMP/pool-lifecycle-wrapper"
+cat > "$POOL_LIFECYCLE_WRAPPER" <<'EOF'
+#!/usr/bin/env bash
+set -e
+command_name="${1:-}"
+state=""
+shift || true
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [ "${args[$i]}" = --state ] && [ $((i+1)) -lt ${#args[@]} ]; then state="${args[$((i+1))]}"; fi
+done
+if [ "$command_name" = record-tests ] && [ "${AI_POOL_FAIL_RECORD:-0}" = 1 ]; then
+  printf '%s\n' "$state" > "$AI_POOL_TEST_STATE_FILE"
+  exit 1
+fi
+"$AI_POOL_REAL_LIFECYCLE" "$command_name" "${args[@]}"
+if [ "$command_name" = record-tests ]; then
+  printf '%s\n' "$state" > "$AI_POOL_TEST_STATE_FILE"
+  printf 'record-tests\n' >> "$AI_POOL_ORDER_FILE"
+fi
+EOF
+chmod +x "$POOL_LIFECYCLE_WRAPPER"
+POOL_GLM_STUB="$TMP/pool-glm-stub"
+cat > "$POOL_GLM_STUB" <<'EOF'
+#!/usr/bin/env bash
+printf 'runner\n' >> "$AI_POOL_ORDER_FILE"
+state="$(cat "$AI_POOL_TEST_STATE_FILE")"
+jq -e --arg cmd "$AI_POOL_TEST_COMMAND" '.tests.exit==0 and .tests.command==$cmd and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$state" >/dev/null || exit 88
+exit 99
+EOF
+chmod +x "$POOL_GLM_STUB"
+POOL_TEST_COMMAND="printf '%s' \"\${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}\" > '$TMP/pool-tests-receipt'; printf 'pool-test-evidence\\n'"
+POOL_ORDER_FILE="$TMP/pool-order"
+POOL_TEST_STATE_FILE="$TMP/pool-test-state"
+rm -f "$POOL_ORDER_FILE" "$POOL_TEST_STATE_FILE" "$TMP/pool-tests-receipt"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_GLM="$POOL_GLM_STUB" \
+    AI_POOL_CALLER=codex AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" \
+    AI_POOL_ORDER_FILE="$POOL_ORDER_FILE" AI_POOL_TEST_STATE_FILE="$POOL_TEST_STATE_FILE" \
+    AI_POOL_TEST_COMMAND="$POOL_TEST_COMMAND" AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" \
+    AI_REVIEW_LIFECYCLE_DIR="$TMP/pool-glm-lifecycle" AI_REVIEW_SANDBOX_DIR="$TMP/pool-glm-sandboxes" \
+    AI_REVIEW_SCOREBOARD_DIR="$TMP/pool-glm-scoreboard" AI_REVIEW_SCOREBOARD_FILE="$TMP/pool-glm-scoreboard/reviews.jsonl" \
+    AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json" \
+    AI_REVIEW_EVENT_DIR="$TMP/pool-glm-events" AI_REVIEW_PRIVACY_BASE="$TMP/pool-glm-privacy" \
+    AI_DEVOPS_MODELS_ENV="$TMP/no-models-env" \
+    bash "$POOL" glm diff-review --tests "$POOL_TEST_COMMAND" ) >"$TMP/pool-glm-tests.out" 2>"$TMP/pool-glm-tests.err"
+POOL_GLM_TESTS_RC=$?
+set -e
+check "legacy_glm_records_passing_tests_before_dispatch" \
+  "test '$POOL_GLM_TESTS_RC' -ne 0 && [ \"\$(cat '$POOL_ORDER_FILE')\" = \"\$(printf 'record-tests\\nrunner')\" ] && jq -e '.tests.exit==0 and (.tests.output_sha256|test(\"^[0-9a-f]{64}$\"))' \"\$(cat '$POOL_TEST_STATE_FILE')\" >/dev/null"
+check "legacy_glm_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$TMP/pool-tests-receipt')\" = unset ]"
+check "legacy_glm_test_failure_does_not_claim_provider_success" "grep -q 'glm runner exited nonzero (99)' '$TMP/pool-glm-tests.err'"
+POOL_FAIL_ORDER_FILE="$TMP/pool-fail-order"
+POOL_FAIL_STATE_FILE="$TMP/pool-fail-test-state"
+POOL_FAIL_RUNNER_FILE="$TMP/pool-fail-runner"
+rm -f "$POOL_FAIL_ORDER_FILE" "$POOL_FAIL_STATE_FILE" "$POOL_FAIL_RUNNER_FILE"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_GLM="$POOL_GLM_STUB" \
+    AI_POOL_CALLER=codex AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" \
+    AI_POOL_ORDER_FILE="$POOL_FAIL_ORDER_FILE" AI_POOL_TEST_STATE_FILE="$POOL_FAIL_STATE_FILE" \
+    AI_POOL_TEST_COMMAND="$POOL_TEST_COMMAND" AI_POOL_FAIL_RECORD=1 AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" \
+    AI_REVIEW_LIFECYCLE_DIR="$TMP/pool-glm-failed-record-lifecycle" AI_REVIEW_SANDBOX_DIR="$TMP/pool-glm-failed-record-sandboxes" \
+    AI_REVIEW_SCOREBOARD_DIR="$TMP/pool-glm-failed-record-scoreboard" AI_REVIEW_SCOREBOARD_FILE="$TMP/pool-glm-failed-record-scoreboard/reviews.jsonl" \
+    AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json" \
+    AI_REVIEW_EVENT_DIR="$TMP/pool-glm-failed-record-events" AI_REVIEW_PRIVACY_BASE="$TMP/pool-glm-failed-record-privacy" \
+    AI_DEVOPS_MODELS_ENV="$TMP/no-models-env" \
+    bash "$POOL" glm diff-review --tests "$POOL_TEST_COMMAND" ) >"$TMP/pool-glm-record-fail.out" 2>"$TMP/pool-glm-record-fail.err"
+POOL_GLM_RECORD_FAIL_RC=$?
+set -e
+check "legacy_glm_record_failure_is_terminal_without_dispatch" \
+  "test '$POOL_GLM_RECORD_FAIL_RC' -ne 0 && grep -q 'no review was dispatched' '$TMP/pool-glm-record-fail.err' && test ! -s '$POOL_FAIL_ORDER_FILE' && jq -e '.status==\"failed\" and .failure_class==\"tests-evidence-recording-failed\"' \"\$(cat '$POOL_FAIL_STATE_FILE')\" >/dev/null"
+
 export AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB"
 export AI_REVIEW_SCOREBOARD_BIN="$SCOREBOARD_STUB"
 export AI_REVIEW_DOOR_GROK="$MOCK_DOOR"
 export AI_REVIEW_RUNNER_DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json"
+CORE_TEST_MARKER="$TMP/core-tests-receipt"
+CORE_TEST_COMMAND="printf '%s' \"\${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}\" > '$CORE_TEST_MARKER'; printf 'native-core-test-output\\n'"
+export AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json"
 
 set +e
 ( cd "$MREPO" && timeout 90 "$ENGINE" review --provider grok --name engine-e2e --repo "$MREPO" \
-    --mode diff-review --caller codex ) >"$TMP/e2e.out" 2>"$TMP/e2e.err"
+    --mode diff-review --caller codex --tests "$CORE_TEST_COMMAND" ) >"$TMP/e2e.out" 2>"$TMP/e2e.err"
 E2E_RC=$?
 set -e
 check "review_contract_succeeds_through_runner" "test '$E2E_RC' -eq 0"
@@ -578,6 +659,42 @@ check "report_records_runner_stamp" "grep -q 'review-lifecycle-core/1' '$REPORT_
 check "report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$REPORT_PATH'"
 check "review_contract_leaves_durable_packet" "test -d '$AI_REVIEW_PACKET_STORE' && find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 check "cleanup_removed_working_sandbox_after_store" "! find '${TMP}' -maxdepth 2 -type d -name '*engine-e2e*' 2>/dev/null | grep -v packet-store | grep -q ."
+CORE_TEST_STATE=""
+while IFS= read -r _core_state; do
+  if jq -e '.tests.exit==0 and (.tests.command|contains("core-tests-receipt")) and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$_core_state" >/dev/null 2>&1; then CORE_TEST_STATE="$_core_state"; break; fi
+done < <(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' -print 2>/dev/null)
+check "core_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$CORE_TEST_MARKER')\" = unset ] && [ \"\$AI_REVIEW_SOURCE_RECEIPT_FILE\" = '$TMP/private-source-receipt.json' ]"
+check "core_tests_are_recorded_with_output_hash" "test -n '$CORE_TEST_STATE' && jq -e '.tests.exit==0 and (.tests.command|contains(\"core-tests-receipt\")) and (.tests.output_sha256|test(\"^[0-9a-f]{64}$\"))' '$CORE_TEST_STATE' >/dev/null"
+unset AI_REVIEW_SOURCE_RECEIPT_FILE
+CORE_NEVER_DOOR="$TMP/core-never-door"
+cat > "$CORE_NEVER_DOOR" <<'EOF'
+#!/usr/bin/env bash
+printf 'called\n' >> "$CORE_DOOR_CALLS"
+exit 99
+EOF
+chmod +x "$CORE_NEVER_DOOR"
+CORE_FAIL_STATE_FILE="$TMP/core-fail-test-state"
+CORE_FAIL_DOOR_CALLS="$TMP/core-fail-door-calls"
+rm -f "$CORE_FAIL_STATE_FILE" "$CORE_FAIL_DOOR_CALLS"
+set +e
+( cd "$MREPO" && env AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" AI_POOL_FAIL_RECORD=1 \
+    AI_POOL_TEST_STATE_FILE="$CORE_FAIL_STATE_FILE" AI_POOL_ORDER_FILE="$TMP/core-fail-order" \
+    AI_REVIEW_DOOR_GROK="$CORE_NEVER_DOOR" CORE_DOOR_CALLS="$CORE_FAIL_DOOR_CALLS" \
+    AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" AI_REVIEW_LIFECYCLE_DIR="$TMP/core-record-fail-lifecycle" \
+    AI_REVIEW_SANDBOX_DIR="$TMP/core-record-fail-sandboxes" \
+    AI_REVIEW_SCOREBOARD_BIN="$SCOREBOARD_STUB" AI_REVIEW_SCOREBOARD_DIR="$TMP/core-record-fail-scoreboard" \
+    AI_REVIEW_SCOREBOARD_FILE="$TMP/core-record-fail-scoreboard/reviews.jsonl" \
+    AI_REVIEW_EVENT_DIR="$TMP/core-record-fail-events" AI_REVIEW_PRIVACY_BASE="$TMP/core-record-fail-privacy" \
+    AI_REVIEW_RUNNER_DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json" \
+    AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none \
+    "$ENGINE" review --provider grok --name core-record-failure --repo "$MREPO" \
+      --mode diff-review --caller codex --tests "printf 'core failure test\\n'" ) \
+    >"$TMP/core-record-fail.out" 2>"$TMP/core-record-fail.err"
+CORE_RECORD_FAIL_RC=$?
+set -e
+check "core_test_recording_failure_is_terminal_without_door_dispatch" \
+  "test '$CORE_RECORD_FAIL_RC' -ne 0 && grep -q 'no review was dispatched' '$TMP/core-record-fail.err' && test ! -e '$CORE_FAIL_DOOR_CALLS' && jq -e '.status==\"failed\" and .failure_class==\"tests-evidence-recording-failed\"' \"\$(cat '$CORE_FAIL_STATE_FILE')\" >/dev/null"
 
 # Lifecycle terminal carries packet identity (Phase A contract, used by the runner).
 STATE_FILE="$(grep -Rsl '"status": "completed"' "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"

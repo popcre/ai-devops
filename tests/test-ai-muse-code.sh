@@ -250,14 +250,17 @@ phase_c_check 'empty reasoning omits the flag and retains the effective high def
 phase_c_check 'explicit catalog reasoning is sent once and retained' phase_c_turn effort-explicit medium medium
 phase_c_invalid_ask(){
   cd "$REPO" || return 1
-  local before after
-  before="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
+  local meta before after archives_before archives_after
+  meta="$(find "$TMP/state" -name '*effort-explicit.json' -type f -print -quit)"; [ -n "$meta" ] || return 1
+  before="$(sha256sum "$meta")" || return 1
+  archives_before="$(find "$TMP/state" -name '*.metadata.json' -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum)"
   rm -f "$TMP/provider-args"
   ! eval "$ENV AI_MUSE_REASONING_EFFORT=bogus '$SCRIPT' ask effort-explicit --prompt test" >"$TMP/effort-refusal.log" 2>&1 || return 1
-  after="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
-  [ "$before" = "$after" ] && test ! -e "$TMP/provider-args" && grep -q start_failed "$TMP/effort-refusal.log"
+  after="$(sha256sum "$meta")" || return 1
+  archives_after="$(find "$TMP/state" -name '*.metadata.json' -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum)"
+  [ "$before" = "$after" ] && [ "$archives_before" = "$archives_after" ] && test ! -e "$TMP/provider-args" && grep -q start_failed "$TMP/effort-refusal.log"
 }
-phase_c_check 'invalid follow-up reasoning preserves the complete active session unchanged' phase_c_invalid_ask
+phase_c_check 'invalid follow-up reasoning preserves metadata and archive bytes before provider contact' phase_c_invalid_ask
 phase_c_check 'ask can override the preceding reasoning choice' phase_c_turn effort-explicit low low ask
 phase_c_check 'ask without an override restores the effective high default' phase_c_turn effort-explicit UNSET high ask
 phase_c_check 'invalid reasoning refuses before provider contact' phase_c_refusal effort-invalid bogus
