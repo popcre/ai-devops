@@ -9,19 +9,22 @@ function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { thr
 
 $payload = [Text.Encoding]::ASCII.GetBytes('pinned muse binary')
 $sha = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($payload)).Replace('-', '').ToLowerInvariant()
+$installerPayload = [Text.Encoding]::ASCII.GetBytes('pinned installer script')
+$installerSha = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($installerPayload)).Replace('-', '').ToLowerInvariant()
 
 function New-Case([string]$Name) {
     $repo = Join-Path $temp "$Name\repo"
     New-Item -ItemType Directory -Force -Path (Join-Path $repo 'config\muse-code') | Out-Null
     "9.9.9-R1.1`n" | Set-Content -NoNewline -LiteralPath (Join-Path $repo 'config\muse-code\version')
     "$sha`n" | Set-Content -NoNewline -LiteralPath (Join-Path $repo 'config\muse-code\sha256')
+    "$installerSha`n" | Set-Content -NoNewline -LiteralPath (Join-Path $repo 'config\muse-code\windows-installer-sha256')
     $dir = Join-Path $temp "$Name\muse"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     return @{ Repo = $repo; Dir = $dir; Bin = (Join-Path $dir 'muse-bin-9.9.9-R1.1.exe') }
 }
 
 $script:fetched = @()
-$fetch = { param($Uri, $Destination) $script:fetched += $Uri; 'fake installer' | Set-Content -LiteralPath $Destination }
+$fetch = { param($Uri, $Destination) $script:fetched += $Uri; [IO.File]::WriteAllBytes($Destination, [Text.Encoding]::ASCII.GetBytes('pinned installer script')) }
 
 try {
     # Absent -> runs Meta's installer, then verifies.
@@ -31,6 +34,13 @@ try {
     $msg = Install-AiDevOpsMuseCode -RepoPath $c.Repo -InstallDir $c.Dir -Fetch $fetch -RunInstaller $run
     Assert ($script:fetched.Count -eq 1 -and $script:fetched[0] -eq 'https://dev.meta.ai/install.ps1') "absent case did not fetch Meta's official installer: $($script:fetched -join ',')"
     Assert ($msg -like 'installed and verified*') "absent case message: $msg"
+
+    # Downloaded installer mismatch -> fails before running any script.
+    $c = New-Case 'installerhashmismatch'
+    $badFetch = { param($Uri, $Destination) [IO.File]::WriteAllText($Destination, 'tampered') }
+    $failed = $null
+    try { Install-AiDevOpsMuseCode -RepoPath $c.Repo -InstallDir $c.Dir -Fetch $badFetch -RunInstaller { throw 'must not run' } | Out-Null } catch { $failed = $_.Exception.Message }
+    Assert ($failed -like "Meta's Muse Code installer failed*does not match the pinned SHA-256*") "installer hash mismatch did not fail before execution: $failed"
 
     # Present and matching -> skips the installer.
     $c = New-Case 'present'
@@ -74,7 +84,11 @@ try {
     # Default runner: native stderr from the installer must not fail the stage
     # when it exits 0 (Windows PowerShell 5.1 under 'Stop').
     $c = New-Case 'stderr'
-    $fetchNoisy = { param($Uri, $Destination) "[Console]::Error.WriteLine('noise'); New-Item -ItemType File -Force -Path '$($c.Bin)' | Out-Null; [IO.File]::WriteAllBytes('$($c.Bin)', [Text.Encoding]::ASCII.GetBytes('pinned muse binary')); exit 0" | Set-Content -LiteralPath $Destination }.GetNewClosure()
+    $installerText = "[Console]::Error.WriteLine('noise'); New-Item -ItemType File -Force -Path '$($c.Bin)' | Out-Null; [IO.File]::WriteAllBytes('$($c.Bin)', [Text.Encoding]::ASCII.GetBytes('pinned muse binary')); exit 0"
+    $installerBytes = [Text.Encoding]::ASCII.GetBytes($installerText)
+    $stderrPin = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($installerBytes)).Replace('-', '').ToLowerInvariant()
+    "$stderrPin`n" | Set-Content -NoNewline -LiteralPath (Join-Path $c.Repo 'config\muse-code\windows-installer-sha256')
+    $fetchNoisy = { param($Uri, $Destination) [IO.File]::WriteAllBytes($Destination, $installerBytes) }.GetNewClosure()
     $msg = Install-AiDevOpsMuseCode -RepoPath $c.Repo -InstallDir $c.Dir -Fetch $fetchNoisy
     Assert ($msg -like 'installed and verified*') "default runner with stderr noise: $msg"
 

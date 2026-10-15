@@ -4,6 +4,12 @@ set -euo pipefail
 
 die() { printf 'az-mail: %s\n' "$1" >&2; exit 1; }
 
+[[ "$#" == 5 && "$1" == rest && "$2" == --method && "$3" == GET && "$4" == --url ]] ||
+  die 'usage: az-mail rest --method GET --url https://graph.microsoft.com/v1.0/users/<mailbox>/(messages|mailFolders...)'
+mail_url="$5"
+[[ "$mail_url" =~ ^https://graph\.microsoft\.com/v1\.0/users/[^/?#]+/(messages|mailFolders(/[A-Za-z0-9%._~-]+(/messages)?)?)(\?[^#]*)?$ ]] ||
+  die 'only read-only Graph mail requests for the configured mailbox are allowed.'
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     command -v cygpath >/dev/null 2>&1 || die 'Git for Windows path conversion is unavailable.'
@@ -24,6 +30,15 @@ if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGW
   config_mode="$(stat -c '%a' -- "$config_file" 2>/dev/null)" || die 'cannot verify credential file permissions.'
   certificate_mode="$(stat -c '%a' -- "$certificate" 2>/dev/null)" || die 'cannot verify credential file permissions.'
   [[ "$dir_mode" == 700 && "$config_mode" == 600 && "$certificate_mode" == 600 ]] || die 'credential files must be private to this user; rerun the ai-devops machine setup.'
+else
+  command -v powershell.exe >/dev/null 2>&1 || die 'cannot verify private credential access on Windows.'
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+  acl_helper="$(cygpath -aw "$script_dir/az-mail-windows-acl.ps1")"
+  acl_root="$(cygpath -aw "$config_dir")"
+  [[ -f "$script_dir/az-mail-windows-acl.ps1" ]] || die 'Windows credential access checker is missing.'
+  if ! powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$acl_helper" -Root "$acl_root" >/dev/null; then
+    die 'credential files must be private to this user; rerun the ai-devops machine setup.'
+  fi
 fi
 
 client_id="$(jq -er '.application_id' "$config_file")" || die 'mailbox profile is invalid.'
@@ -64,4 +79,4 @@ if ! az login --service-principal --username "$client_id" --tenant "$tenant_id" 
   die 'mailbox sign-in failed; no Graph request was sent.'
 fi
 
-az "$@"
+az rest --method GET --url "$mail_url"

@@ -64,7 +64,16 @@ env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_
   bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages >/dev/null || fail 'mail command failed'
 grep -q -- "--service-principal --username $test_application_id --tenant $test_tenant_id" "$TMP/calls" || fail 'service-principal sign-in was not isolated through az-mail'
 grep -q 'rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' "$TMP/calls" || fail 'Azure CLI arguments were not forwarded'
-pass 'command signs in with the scoped app and forwards Azure CLI arguments'
+pass 'command signs in with the scoped app and sends only a read-only mail request'
+for denied in \
+  'rest --method POST --url https://graph.microsoft.com/v1.0/users/fixture@example.test/messages' \
+  'rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/drive' \
+  'account show'; do
+  if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" AZ_MAIL_TEST_CALLS="$TMP/denied-calls" PATH="$TMP/stubs:$PATH" \
+    bash "$ROOT/bin/az-mail" $denied >/dev/null 2>&1; then fail "unsafe command was accepted: $denied"; fi
+done
+[[ ! -e "$TMP/denied-calls" ]] || fail 'Azure CLI ran for a denied command'
+pass 'command rejects writes and non-mail Azure CLI requests before sign-in'
 
 mkdir -p "$TMP/windows-stubs"
 cat > "$TMP/windows-stubs/uname" <<'EOF'
@@ -80,14 +89,24 @@ case "$1" in
 esac
 EOF
 chmod +x "$TMP/windows-stubs/uname" "$TMP/windows-stubs/cygpath"
+cat > "$TMP/windows-stubs/powershell.exe" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AZ_MAIL_TEST_ACL_CALLS"
+exit 0
+EOF
+chmod +x "$TMP/windows-stubs/powershell.exe"
 env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
   XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
   AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" \
   bash "$ROOT/tools/setup-az-mail.sh" >/dev/null || fail 'allowlisted Windows setup failed'
-env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-calls" \
-  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" account show >/dev/null || fail 'Windows path handling failed'
+env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-calls" AZ_MAIL_TEST_ACL_CALLS="$TMP/windows-acl-calls" \
+  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" rest --method GET --url https://graph.microsoft.com/v1.0/users/fixture@example.test/mailFolders/inbox/messages >/dev/null || fail 'Windows path handling failed'
 grep -q '^AZURE_CONFIG_DIR=C:/fixture/azure$' "$TMP/windows-calls" || fail 'Windows Azure CLI config path was not converted'
 grep -q -- '--certificate C:/fixture/certificate.pem' "$TMP/windows-calls" || fail 'Windows certificate path was not converted'
+grep -q 'az-mail-windows-acl.ps1' "$TMP/windows-acl-calls" || fail 'Windows use-time ACL check was not run'
+if env XDG_CONFIG_HOME="$TMP/config" USERPROFILE='C:\\Users\\fixture' AZ_MAIL_WINDOWS_HOME="$TMP/windows-profile" AZ_MAIL_TEST_CALLS="$TMP/windows-denied-calls" \
+  PATH="$TMP/windows-stubs:$TMP/stubs:$PATH" bash "$ROOT/bin/az-mail" account show >/dev/null 2>&1; then fail 'Windows accepted a non-mail command'; fi
+[[ ! -e "$TMP/windows-denied-calls" ]] || fail 'Azure CLI ran for a denied Windows command'
 [[ ! -e "$TMP/windows-profile/.config/ai-devops/az-mail/op-refresh.lock.d" ]] || fail 'Windows setup left its 1Password lock behind'
 pass 'Windows setup and Azure CLI paths use the Windows profile paths'
 
