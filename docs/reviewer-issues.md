@@ -9,6 +9,40 @@ work; it does not replace this incident lifecycle or authorize closing unexplain
 
 Before recording a reviewer as missing or not on PATH, run `ai-review-preflight usable <provider>`; its output names the exact resolved wrapper (`wrapper_command`, e.g. grok -> `ai-grok-review`). Never hand-type a guessed wrapper name: a 2026-09 report of "ai-grok not on PATH" was wrong because the real wrapper is `ai-grok-review`.
 
+## Shared fleet archive and installed-skill verification
+
+The shared destination is the private
+[`u2giants/ai-devops-reviewer-logs`](https://github.com/u2giants/ai-devops-reviewer-logs)
+repository. The [reporting skill](../skills/shared/log-reviewer-issue/SKILL.md)
+records the incident locally, then runs `ai-reviewer-logs-sync sync` to upload
+encrypted evidence immediately. The hourly schedule is a fallback. The recorder
+alone does not upload; a failed upload leaves the original incident intact and
+must be reported as pending without recording a duplicate.
+
+A merged skill change does not prove fleet installation. Compare the installed
+Claude and Codex copies against merged source on each development machine. Use
+the [scoped skill refresh](deployment.md#install) (`ai-install-skills --only
+log-reviewer-issue --dry-run`, then the same selection without `--dry-run`) from
+a dedicated worktree of merged source. Do not advance an installed checkout by
+pulling it merely to refresh one skill.
+
+To verify a specific incident, locate its original machine and exact incident
+ID, read the published archive, decrypt its bundle using the existing protected
+key procedure, and compare every incident file's hash with the original. A recent
+archive commit, a successful upload from another machine, or `nothing new` alone
+does not prove that incident is present. Inspect collection notes and
+`LAST-SYNC.txt`: oversized files and read failures can make a collection partial.
+Do not describe a partial collection as complete historical coverage.
+
+On 2026-10-15, the current reporting skill was verified installed for both
+clients on edge-dev3 and refreshed from merged source on hetz, edge-dev, and
+916-alien. Upload checks succeeded on all four machines. One reported hetz
+incident was decrypted from the published archive and all seven package files
+matched the originals. This verifies that incident's delivery and the installed
+skill rollout; it does not certify every historical raw log or prove a future
+incident's immediate upload before it happens. Private incident content and the
+decryption key remain outside this public repository.
+
 ## Repair-round checkpoints
 
 Begin a maintenance sweep with `ai-reviewer-issue maintenance show`, then
