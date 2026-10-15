@@ -110,14 +110,32 @@ else
 fi
 mv "$TMP/private/manifest.next" "$TMP/private/manifest.json"
 rm -rf "$profile_root/ai-devops/az-mail"
-env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
+unsupported_output="$(env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
   XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
   AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/stubs:$PATH" \
-  bash "$ROOT/tools/setup-az-mail.sh" >/dev/null || fail 'unsupported host was not skipped cleanly'
+  bash "$ROOT/tools/setup-az-mail.sh" 2>&1)" || fail 'unsupported host was not skipped cleanly'
+[[ "$unsupported_output" == *"AI_DEVOPS_AZ_MAIL_SETUP=SKIPPED"* ]] || fail 'unsupported host did not emit the setup skip marker'
 [[ ! -e "$profile_root/ai-devops/az-mail/certificate.pem" ]] || fail 'unsupported host received a certificate'
 pass 'unsupported hosts receive no mailbox certificate'
+
+if [ "$actual_windows" -eq 1 ]; then
+  jq 'del(.values.azure_cli_mail_windows_hosts)' "$TMP/private/manifest.json" > "$TMP/private/manifest.next"
+else
+  jq 'del(.values.azure_cli_mail_linux_hosts)' "$TMP/private/manifest.json" > "$TMP/private/manifest.next"
+fi
+mv "$TMP/private/manifest.next" "$TMP/private/manifest.json"
+if missing_allowlist_output="$(env AI_PRIVATE_CONFIG_HOME="$TMP/private" AI_PRIVATE_CONFIG_ALLOW_FIXTURE=1 \
+  XDG_CONFIG_HOME="$TMP/config" USERPROFILE="$test_user_profile" OP_SERVICE_ACCOUNT_TOKEN=fixture-token \
+  AZ_MAIL_TEST_CERT="$TMP/certificate.pem" PATH="$TMP/stubs:$PATH" \
+  bash "$ROOT/tools/setup-az-mail.sh" 2>&1)"; then
+  fail 'missing host allowlist was accepted'
+fi
+grep -Fq 'private host allowlist' <<<"$missing_allowlist_output" || fail 'missing host allowlist had no diagnostic'
+grep -Fq 'is missing or unavailable' <<<"$missing_allowlist_output" || fail 'missing host allowlist diagnostic was incomplete'
+pass 'missing private host allowlists fail with an explicit diagnostic'
 
 grep -Fq "Protect-AiDevOpsPrivatePath -Path \$azMailDirectory -Directory" "$ROOT/bin/setup-machine.ps1" || fail 'Windows setup does not protect the mailbox profile directory'
 grep -Fq "Protect-AiDevOpsPrivatePath -Path \$azMailAzureDirectory -Directory" "$ROOT/bin/setup-machine.ps1" || fail 'Windows setup does not protect the Azure CLI token directory'
 grep -Fq "Set-AiDevOpsPrivateFileAtomic -Path \$azMailCertificate" "$ROOT/bin/setup-machine.ps1" || fail 'Windows setup does not protect the mailbox certificate file'
+grep -Fq '$azMailSetupOutput -contains "AI_DEVOPS_AZ_MAIL_SETUP=SKIPPED"' "$ROOT/bin/setup-machine.ps1" || fail 'Windows setup does not preserve an unsupported-host skip'
 pass 'Windows machine setup protects both profile directories and credential files'
