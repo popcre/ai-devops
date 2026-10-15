@@ -16,14 +16,22 @@ esac
 
 if [ "$on_windows" -eq 1 ]; then
   host="$(hostname | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
-  allowed_hosts=",$(private_value azure_cli_mail_windows_hosts | tr '[:upper:]' '[:lower:]'),"
+  host_allowlist_key=azure_cli_mail_windows_hosts
 else
   host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
-  allowed_hosts=",$(private_value azure_cli_mail_linux_hosts | tr '[:upper:]' '[:lower:]'),"
+  host_allowlist_key=azure_cli_mail_linux_hosts
 fi
+if ! host_allowlist="$(private_value "$host_allowlist_key" 2>/dev/null)" || [ -z "$host_allowlist" ]; then
+  die "private host allowlist '$host_allowlist_key' is missing or unavailable; cannot determine whether this host is enabled."
+fi
+allowed_hosts=",$(printf '%s' "$host_allowlist" | tr '[:upper:]' '[:lower:]'),"
 case "$allowed_hosts" in
   *,"$host",*) ;;
-  *) info "not enabled for this development host ($host); no mailbox credential was copied."; exit 0 ;;
+  *)
+    info "not enabled for this development host ($host); no mailbox credential was copied."
+    printf 'AI_DEVOPS_AZ_MAIL_SETUP=SKIPPED\n'
+    exit 0
+    ;;
 esac
 
 for tool in jq openssl op az; do
