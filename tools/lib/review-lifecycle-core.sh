@@ -612,7 +612,10 @@ Executed test output (last ${tests_tail} lines, captured by the runner in the re
 \`\`\`
 $(tail -n "$tests_tail" "$tests_out")
 \`\`\`"
+      tests_sha="$(sha256sum "$tests_out" | cut -d' ' -f1)"
       rm -f "$tests_out"
+      "$RLC_LIFECYCLE" record-tests --state "$state" --command "$tests_cmd" --exit 0 --output-sha256 "$tests_sha" >/dev/null \
+        || rlc_die 'could not record the tests evidence in the review record.'
     else
       rm -f "$tests_out"
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-command-failed

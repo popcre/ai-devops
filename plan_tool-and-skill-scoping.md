@@ -5,7 +5,7 @@ Phase issues: [#703](https://github.com/popcre/ai-devops/issues/703),
 [#704](https://github.com/popcre/ai-devops/issues/704),
 [#705](https://github.com/popcre/ai-devops/issues/705),
 [#706](https://github.com/popcre/ai-devops/issues/706).
-Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-plan.md`](HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-plan.md).
+Session record: `HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-plan.md` (retired; recoverable from git history).
 
 ## STATUS (read this first — do not re-derive or re-plan)
 
