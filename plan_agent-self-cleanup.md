@@ -12,7 +12,7 @@
 
 **Where a fresh session starts:** all five phases are done (row 5 closed by the PR #1029 live re-proof). What remains lives in its own issues: #1018 (extend the release to grok/qwen/gemini) and the 14-day AI-Debris-Housekeeping observation ending ~2026-10-12, after which the owner answers the keep-or-retire question (§13; recommendation: keep it).
 
-Related handoff: [HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md](HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
+Related handoff: `HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md` (retired; recoverable from git history) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 
 ---
 

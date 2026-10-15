@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — StepFun harness token efficiency (2026-10-06)
 
-Companion handoff: [`HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md`](HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md)
+Companion handoff: `HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md` (retired; recoverable from git history)
 (That write-once handoff describes the 2026-10-06 pre-implementation state;
 this STATUS and issue #1336 carry the current outcome. Root `HANDOFF.md` stays
 the static pointer.)

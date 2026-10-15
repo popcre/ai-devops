@@ -2,7 +2,7 @@
 
 Issue: [#1563](https://github.com/popcre/ai-devops/issues/1563) (filed 2026-10-11).
 Related umbrella: [#650](https://github.com/popcre/ai-devops/issues/650) (delivery time / scoped verification). This plan is one bounded piece of it; it does not replace it.
-Handoff registration: [HANDOFF.d/2026-10-11T1500Z-edge-dev3-claude-reviewer-scoped-ci-plan.md](HANDOFF.d/2026-10-11T1500Z-edge-dev3-claude-reviewer-scoped-ci-plan.md)
+Handoff registration: `HANDOFF.d/2026-10-11T1500Z-edge-dev3-claude-reviewer-scoped-ci-plan.md` (retired; recoverable from git history)
 
 ## STATUS (read first)
 
