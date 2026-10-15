@@ -41,6 +41,7 @@ cat > "$TMP/runner" <<'EOF'
 set -eu
 printf '%s\n' "$PWD" > "$GLM_FIXTURE/runner-pwd"
 printf '%s\n' "$@" > "$GLM_FIXTURE/runner-args"
+printf %s "${AI_REVIEW_SOURCE_ROOT:-}" > "$GLM_FIXTURE/runner-source-root"
 [ "$1" = new ] && [[ "$2" == pool-glm-* ]] && [ "$3" = --prompt-file ]
 [ "$5" = --base ] && [ "$6" = "$GLM_TEST_BASE" ] && [ "$7" = --assert-head ] && [ "$8" = "$GLM_TEST_HEAD" ]
 head="$GLM_TEST_HEAD"
@@ -64,6 +65,13 @@ REPORT="$(tail -1 "$TMP/out")"
 ! grep -q 'GLM progress chrome' "$REPORT"
 [ "$(cat "$TMP/runner-pwd")" != "$TMP/repo" ]
 [ "$(cat "$TMP/repo/file")" = changed ]
+# Without a governed receipt request GLM resolves its own identity (unchanged).
+[ ! -s "$TMP/runner-source-root" ]
+# With one, GLM is told the ORIGINAL checkout (it snapshots that, not the pool's),
+# so its receipt binds the source the caller trusts (shared-db#4308).
+mkdir -p "$TMP/repo/.ai/reviews"
+(cd "$TMP/repo" && AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/repo/.ai/reviews/governed-source-test.json" bash "$ROOT/bin/ai-review-pool" glm final-check --base "$BASE" --assert-head "$HEAD") > "$TMP/out" 2>&1
+[ "$(cd "$(cat "$TMP/runner-source-root")" && pwd -P)" = "$(cd "$TMP/repo" && pwd -P)" ]
 for mode in wronghead tiny malformed drift chrome; do
   export GLM_REPORT_MODE="$mode"
   if run; then printf 'FAIL: %s accepted\n' "$mode" >&2; exit 1; fi
@@ -79,4 +87,4 @@ if (cd "$TMP/repo" && AI_POOL_TEST_HOOKS=0 bash "$ROOT/bin/ai-review-pool" glm f
   printf 'FAIL: unguarded runner substitution accepted\n' >&2; exit 1
 fi
 grep -q 'test hook' "$TMP/out"
-printf 'GLM pool: 9 dispatch/refusal checks passed\n'
+printf 'GLM pool: 10 dispatch/refusal checks passed\n'

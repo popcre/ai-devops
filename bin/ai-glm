@@ -274,6 +274,18 @@ release_boundary() { # release_boundary ROOT NAME
   "$SANDBOX_BIN" remove-copy "$1" "glm-$2"
 }
 
+GLM_BOUNDARY_ROOT=""
+governed_source_root() { # governed_source_root CWD_ROOT -> directory to snapshot
+  local cwd_root="$1" source receipt_parent
+  if [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || [ -z "${AI_REVIEW_SOURCE_ROOT:-}" ]; then printf '%s' "$cwd_root"; return 0; fi
+  [ -d "$AI_REVIEW_SOURCE_ROOT" ] && [ ! -L "$AI_REVIEW_SOURCE_ROOT" ] || die "governed source root is not a directory."
+  source="$(cd "$AI_REVIEW_SOURCE_ROOT" && pwd -P)" || die "governed source root is unreadable."
+  [ "$(git -C "$source" rev-parse --show-toplevel 2>/dev/null)" = "$source" ] || die "governed source root is not a repository top level."
+  receipt_parent="$(cd "$(dirname "$AI_REVIEW_SOURCE_RECEIPT_FILE")" 2>/dev/null && pwd -P)" || die "governed source receipt directory is unavailable."
+  [ "$receipt_parent" = "$source/.ai/reviews" ] || die "governed source receipt is not inside the governed source root's .ai/reviews."
+  printf '%s' "$source"
+}
+
 # --- evidence packet ----------------------------------------------------------
 # The glm-review agent profile sets `bash: false`, so GLM cannot run `git diff`
 # and cannot work out what changed. Without a packet it spends its budget
@@ -295,6 +307,13 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # would be computed in a subshell and lost.
 prepare_review() { # prepare_review ROOT NAME [RECORDED_BOUNDARY]
   local root="$1" name="$2" recorded="${3:-}" pkt want refreshed identity
+  # A governed pool dispatch launches this wrapper inside the pool's own
+  # disposable snapshot but requests a source receipt bound to the ORIGINAL
+  # checkout. The pool names that checkout; snapshot and resolve IT, exactly
+  # one level deep, so the sealed packet and receipt bind the source the caller
+  # trusts (shared-db#4308). Anything else keeps the ordinary cwd root.
+  root="$(governed_source_root "$root")"
+  GLM_BOUNDARY_ROOT="$root"
   identity="$(mktemp)" || die "could not reserve source identity"
   "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
     || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
@@ -1633,7 +1652,7 @@ cmd_new() {
   prepare_review "$root" "$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   boundary="$REVIEW_DIR"
   prefix_packet_preamble "$pf"
-  if ! capacity_gate; then release_boundary "$root" "$name"; rm -f "$pf"; lock_release "$lock"; return 1; fi
+  if ! capacity_gate; then release_boundary "${GLM_BOUNDARY_ROOT:-$root}" "$name"; rm -f "$pf"; lock_release "$lock"; return 1; fi
   record_diagnostic preflight capacity-checked --local-health healthy
   sid="$(create_session "$name" glm-review "$boundary")"
   if ! write_meta "$mp" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \

@@ -386,7 +386,7 @@ if [ -n "$TESTS_COMMAND" ]; then
   TESTS_SCRUB=()
   while IFS= read -r TESTS_NAME; do
     case "$TESTS_NAME" in
-      AI_REVIEW_SOURCE_RECEIPT_FILE|DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+      AI_REVIEW_SOURCE_RECEIPT_FILE|AI_REVIEW_SOURCE_ROOT|DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
         TESTS_SCRUB+=(-u "$TESTS_NAME");;
     esac
   done < <(compgen -e)
@@ -455,7 +455,13 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF")
 # MODEL's run can move it. The wait budget is raised because snapshot-bound
 # reviews read a full tree copy and can outgrow the runner's 900s default.
 SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
-set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+# A governed receipt must bind the ORIGINAL checkout, not this snapshot. GLM
+# builds its own packet from its own snapshot, so name the original checkout:
+# ai-glm resolves and snapshots that, one level deep (shared-db#4308). Other
+# runners consume the receipt themselves and take no external source root.
+RUNNER_ENV=()
+if [ "$provider" = glm ] && [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ]; then RUNNER_ENV=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT"); fi
+set +e; ( cd "$REVIEW_DIR" && exec env "${RUNNER_ENV[@]}" AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -ne 0 ]; then
   # Provider diagnostics can quote credential-shaped errors (codex's wrapper
