@@ -1,7 +1,7 @@
 ---
 issue: none
 status: BLOCKED
-owner: codex/az-mail-credential-boundary-note
+owner: codex/az-mail-credential-boundary-handoff
 ---
 
 Tracking reason: the existing delivery card is [PR #1763](https://github.com/popcre/ai-devops/pull/1763); its comments retain remaining host-proof checkboxes. No parallel issue was created.
@@ -73,6 +73,8 @@ The source repair, merge, Linux installation, Windows 4837 installation, and liv
 10. No successful live read, ping, clean status, remote-tracking name, or unrelated source review authorizes overwriting 916's divergent source or claiming t16 is installed.
 
 11. A later broad credential-permission audit initially applied the mailbox-only user/SYSTEM rule too broadly to GitHub settings. Source intentionally grants CodexSandboxUsers read-only access to default non-secret settings. The audit also found that group on the separate SSH credential copy, contrary to the SSH helper's private-store policy. The SSH grant was removed with the canonical private-path helper, and the approved default-settings grant was restored narrowly. Non-secret settings inheritance was restored; token-containing files were kept private. A subsequent GitHub API call succeeded as u2giants, the SSH tree again passed user/SYSTEM-only checks, and mailbox ACL checks still passed. Original ACL descriptors and the assessment remain private.
+
+12. Late-note publication from the older handoff worktree was blocked because its retained baseline also covered unrelated reviewer-safety changes already merged on main. That worktree was not shipped. A separate fresh-upstream worktree carried only the owned prose amendment, with its own current base and declaration. No protected class was downgraded or reset, no refusal was overridden, and no code changes were republished.
 
 ## 5. Root causes and policy boundaries
 
