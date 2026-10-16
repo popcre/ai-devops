@@ -3,7 +3,7 @@
 ## STATUS — read first; do not re-derive completed programmes
 
 Owner: [issue #1783](https://github.com/popcre/ai-devops/issues/1783), planning coordinator Codex chat `01a1423a-787d-7601-8ac5-49b0a42afbed` on edge-dev3.
-Planning snapshot: October 15, 2026, 9:09 PM EDT; installation-gap addendum and closeout recorded later that evening. Implementation has **not started**. Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
+Planning snapshot: October 15, 2026, 9:09 PM EDT. Implementation **started October 16, 2026** (steps 1–7 executed; coordinator Claude chat 05d44eb1 on edge-dev3). Current brief: [step-8 handoff](HANDOFF.d/2026-10-16T1806Z-edge-dev3-claude-reviewer-recurrence-step8.md). Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
 Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-recurrence-plan.md).
 
 | Step | Work | State / date | Evidence required to advance |
@@ -11,13 +11,13 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-r
 | 1 | Freeze incident inventory, current versions and ownership | done — 2026-10-16 ([inventory](tests/verification/reviewer-recurrence/step1-inventory-2026-10-16.md)) | Private exact-ID inventory with digest; sanitized mapping and version manifest |
 | 2 | Reproduce receipt conflict and evidence-recovery interference | done — 2026-10-16: cause was preparatory verify publishing the receipt early; repaired by PR1799 with fixture; sweep cannot refuse a review | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
 | 3 | Repair Muse Linux installation pin, completion and interruption recovery | pin: no re-pin needed, Muse Code (Linux) PASS at 1aefa959 (2026-10-16); completion/interruption stays with #674 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
-| 4 | Repair StepFun report contract and large-input/runtime residuals | report contract done — PR1812 (2026-10-16); live proof blocked by StepFun out-of-credit hold | Single-decision contract tests plus complete-context live review |
-| 5 | Finish demonstrated DeepSeek/GLM readiness and recovery gaps | open — 2026-10-15 | Current-source reproductions and owner-linked fixes or verified existing repair |
+| 4 | Repair StepFun report contract and large-input/runtime residuals | ✅ done — PR1812 (2026-10-16); live StepFun APPROVE on installed 1aefa959 after credit recharge; planted-defect REJECT proven | Single-decision contract tests plus complete-context live review |
+| 5 | Finish demonstrated DeepSeek/GLM readiness and recovery gaps | ✅ no new defect reproduced — 2026-10-16: live DeepSeek and GLM cold/follow-up/fresh reviews all correct; GLM consumer proof by 01a14221 lane | Current-source reproductions and owner-linked fixes or verified existing repair |
 | 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | housekeeping PR1810 and hook-test isolation PR1811 done (2026-10-16); Grok suite already non-gating (PR1778) | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
-| 7 | Review, merge, install and prove original capabilities | partial — installed 1aefa959 on edge-dev3 2026-10-16; cold reviews Muse/DeepSeek/GLM APPROVE; follow-up/fresh-process matrix and StepFun open | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
+| 7 | Review, merge, install and prove original capabilities | 🟡 partial — installed 1aefa959 2026-10-16; all four providers passed cold/follow-up/fresh matrix with planted-defect REJECT (issue comment 6221299618). Open: shared-db consumer acceptance for Muse, DeepSeek, StepFun | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
 | 8 | Sustained acceptance, incident reconciliation and retirement | observing — window opened 2026-10-16 1:00 PM EDT, closes no earlier than 2026-10-17 1:00 PM EDT | Real >=24-hour interval, per-provider samples, failure accounting, issue checklist |
 
-Fresh session starts at **step 1**, taking ownership on #1783 after checking for a current coordinator. Steps 2–6 are proposals until discriminating fixtures establish the defect. This plan covers a new recurrence after #1562; it does not undo that programme's verified delivery. All rows describe repair work, not completion of this document.
+Fresh session starts at **step 8** (window close and reconciliation) and step 7's open consumer-acceptance item; do not redo steps 1–6. Steps 2–6 are proposals until discriminating fixtures establish the defect. This plan covers a new recurrence after #1562; it does not undo that programme's verified delivery. All rows describe repair work, not completion of this document.
 
 ## 1. Ultimate goal
 
