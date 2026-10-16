@@ -89,7 +89,7 @@ project=lithe-breaker-323913, region=us-east4 entries:
 | popcre/designflow-frontend | popcre-albert-frontend-sandbox |
 | popcre/designflow-item-master | popcre-albert-item-sandbox |
 
-Consumer scope nuance: fresh-fetch and merge actual current develop before release; classify against its true
+NEW-THREE consumer scope nuance: fresh-fetch and merge actual current develop before release; classify against its true
 current merge-base. Item Master inherited a shared-db subtree already byte-identical in upstream develop;
 classification is the complete base-to-HEAD path delta plus staged/unstaged/untracked/deleted/rename
 sides/submodule changes, never all historical files merely present in the tree. Excluding unchanged
@@ -97,9 +97,11 @@ already-upstream bytes through that honest comparison is legitimate, while reset
 changes is forbidden. Any actual shared-db or stronger contributor keeps the native path refused. New
 manifest/consumer declarations are deployment wiring; no generalized protected-class bypass.
 
-LOCKED honest-base addition selected by coordinator after first design review: admission natively verifies
-remote current develop, recorded declaration base and ancestry for all four consumers (including backend).
-This conscious compatibility tightening is not a generic base reset.
+LOCKED final coordinator decision supersedes earlier tightening proposals: preserve backend
+source-release semantics/platforms EXACTLY as installed b20, including accepted local branch/base behavior.
+Only the THREE newly admitted consumers receive fresh managed-ref, honest-base, local-context and Linux
+executable-provenance proofs. No new backend network dependency or platform restriction. This preserves
+existing protection; it is not a waiver of an existing guard.
 
 All use .ai-devops/application-release-target.json and consumer required gate cloud-build-release-review.
 Backend exact accepted target stays identical. OPEN: minimal factoring of shared validation without changing
@@ -119,50 +121,85 @@ Retain sanitized tuple evidence on issue1796. Then change config/task-gates.json
 config/task-gates.schema.json to exactly those four required properties with additionalProperties:false
 throughout. Preserve reviewer_release.deploy.deployment == null. Gate: tools/ci/validate-task-gates.py
 succeeds and rejects missing/extra/foreign target fixtures.
-3. Audit tools/lib/task-gates.sh repository identity and bin/ai-task-gates
-resolve_repo/resolve_base/change_set together. Keep helper changes minimal and source-release-specific; no
-global weakening. In bin/ai-task-gates replace singleton expected target with CLOSED exact identity resolution
-validated against fixed four-entry policy. Validate policy's complete exact key set and exact per-repo tuples,
-not merely lookup existence; central policy cannot introduce fifth authority. Derive canonical-origin accepted
-forms from validated identity, retaining the currently accepted HTTPS/SCP/SSH forms only. Require effective
-deployment exactly, actual branch sandbox-albert (admission must run in serialized landing/owned source clone
-actually on that branch, not the review branch), same committed manifest, clean contained nonsymlink ordinary
-blobs, consumer deployment-required cloud-build-release-review. Native confinement MUST run for the explicit
-source-release path before repository resolution/classification or any Git network command. Reject nonempty
-GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
-GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_SSH, GIT_SSH_COMMAND, GIT_PROXY_COMMAND, GIT_CONFIG,
-GIT_CONFIG_SYSTEM, GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM, GIT_CONFIG_COUNT, GIT_CONFIG_PARAMETERS and every
-GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* environment override, plus ancestry overrides below. Capture/validate
-real worktree top-level and resolved git-common-dir against the selected source context and recheck both at
-finish. Use existing installed trusted Git resolution, with -C exact validated source root for every command;
-reject config rewrite/transport overrides url.*.insteadOf, url.*.pushInsteadOf, core.sshCommand,
-core.gitProxy, remote.origin.uploadpack, remote.origin.vcs, remote.origin.proxy, remote.origin.receivepack and
-ambiguous multiple origin URLs. Check raw configured origin as well as effective get-url against existing
-exact canonical accepted forms. Preserve normal existing credential helpers and SSH authentication/host
-verification; never resolve secrets in review or disable host/TLS checks. No new remote/transport program
-selected by manifest. Bound the new read-only network calls to30 seconds using existing supported bounded
-process mechanics; capture stdout/stderr privately, require exact single expected develop ref, and report only
-sanitized failure. Re-read relevant config/context before finish; if stronger confinement is technically
-unsupported, stop and report rather than claim verified freshness. Same-user arbitrary mutation of trusted
-installed Git/runtime is outside this existing gate threat model; source/config movement remains in scope.
+3. Audit `tools/lib/task-gates.sh` identity and `bin/ai-task-gates` repository/base/change-set resolution.
+   Audit `tools/review_action_profile.py` and `config/review-action-profiles.json` backend-only references:
+   these belong to the separate fixed #770 private rehearsal authority and MUST remain unchanged. Do not
+   widen them. Audit task-router/context/architecture references; only correct source-release documentation.
 
-Before release admission, normal `git fetch origin develop` updates the canonical tracking ref without
-changing task state or owned changes. Native admission validates exact canonical origin first; runs read-only
-`git ls-remote --exit-code origin refs/heads/develop` with output captured privately, refuses failure/nonexact
-single ref, and requires returned SHA equal `git rev-parse refs/remotes/origin/develop`. Refuse `git rev-parse
---is-shallow-repository` true, any `git replace -l` entry, nonempty git-common-dir info/grafts, or nonempty
-GIT_REPLACE_REF_BASE or GIT_GRAFT_FILE ancestry overrides; use canonical Git graph without replace objects.
-Require `git merge-base --all HEAD refs/remotes/origin/develop` yield exactly one commit, recorded declaration
-base equals it, and `git merge-base --is-ancestor refs/remotes/origin/develop HEAD` succeeds. Captured remote
-metadata and failures must not expose credentials/remote secret-bearing arguments. Revalidate fresh remote
-SHA, recorded base, actual branch, HEAD, refs and ancestry before atomically publishing final receipt; network
-failure or movement refuses without receipt. Do not add a runtime bypass environment variable. Preserve full
-source/contributor classification, mandatory tests, native independent final-check/security-review exact
-repository/head/source/deploy seal, before/after checks and atomic receipt. Receipt includes identity and
-exact target in addition to existing head/manifest_blob/consumer_blob/approval binding; preserve existing
-backend receipt keys. Gate: tests below show only intended four source pushes can be admitted, generic deploy
-still refused.
-4. Expand tests/test-ai-task-gates.sh and existing schema-validator tests; no new parallel gate
+   3a. Replace singleton target resolution with the closed four-entry central exact map in §8. Validate
+   complete fixed policy keys and tuples, not mere lookup existence. Canonical raw AND effective origin must
+   match the existing HTTPS/SCP/SSH forms for that validated repository. Preserve legitimate Git transport,
+   proxy, credential helper and SSH settings: no NEW Git network calls inside admission. Backend
+   dispatches its existing unchanged proof path and keeps original accepted branch/base/platform behavior.
+   For new three, normal fetch
+   remains outside admission. Manifest/consumer regular committed clean blob checks remain mandatory.
+
+   A non-authorizing strict manifest discriminator can select NEW-THREE pre-Git confinement before
+   discovery; final central target/origin/source binding remains mandatory. A manifest claiming backend
+   never authorizes another repository's release. New-three module returns supplemental proof only; it
+   cannot generate approval, publish receipts, execute source code or initiate deployments. Before/after
+   bound source/manifest checks prevent target switching. Test forged backend manifest in each new repo; release-forged-backend-target-refused MUST prove no new-three identity/target/source receipt can result.
+
+   3b. NEW THREE ONLY: before EVERY Git invocation, including initial discovery, refuse nonempty GIT_DIR,
+GIT_WORK_TREE,
+   GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE,
+   GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_CONFIG, GIT_CONFIG_SYSTEM, GIT_CONFIG_GLOBAL,
+   GIT_CONFIG_NOSYSTEM, GIT_CONFIG_COUNT, GIT_CONFIG_PARAMETERS and every GIT_CONFIG_KEY_*/GIT_CONFIG_VALUE_*
+   override, plus GIT_REPLACE_REF_BASE/GIT_GRAFT_FILE. Do not blanket refuse GIT_SSH/SSH_COMMAND/PROXY_COMMAND
+   or existing proxy/auth settings: these are not used by local ancestry commands. Validate the physical
+   source root and common directory; use -C that exact root for local commands; recheck both at finish.
+   Refuse shallow repository, replacement refs and nonempty common-dir info/grafts. Trusted Git resolution
+   follows existing native installed runtime policy; no caller-selected program or unverified PATH shim.
+
+   3c. NEW THREE ONLY: root explicitly supersedes the first ls-remote design: reuse installed `bin/ai-gh`, the
+existing
+   managed authenticated GitHub helper. Exact fixed-host request is `api --hostname github.com --method GET
+   repos/<validated-four-repository-identity>/git/ref/heads/develop`, no cache/pagination/template or caller
+   endpoint. Capture response and errors privately and bound each helper process to30 seconds, including
+   its existing quota admission. Reject timeout, HTTP/admission/auth error, duplicate JSON keys, malformed
+   response or noncommit. Require exact ref refs/heads/develop, object.type commit and 40-hex object.sha;
+   validate response URL identity if present, never follow a caller-supplied URL. Compare SHA with local
+   refs/remotes/origin/develop before approval and again immediately before receipt. Remote movement or
+   network failure refuses without successful receipt. No cached preflight assertion is accepted.
+
+   3d. NEW THREE ONLY: installed ai-gh must come from the validated current toolkit root and unchanged trusted
+source
+   closure. Validate/pin real gh before supplying its path to helper; arbitrary AI_GH_REAL_GH/PATH override
+   cannot authorize release. Preserve legitimate GH_CONFIG_DIR, credential helpers, supported proxies and
+   existing authentication. Do not resolve secrets through 1Password. Source audit confirms ai-gh,
+   telemetry.sh and pr-status-context contain no task-gate/review/1Password calls; helper only manages
+   authenticated quota reads and local protected accounting, so no recursive gate/admission cycle.
+   Initial new-three qualification is Linux only; unsupported platforms refuse ONLY the new entries.
+   Pin /usr/bin/gh after root-owned regular nonwritable executable and ancestor checks, following the
+   existing tools/oracle_native_alternate_runtime.py public_origin verification pattern without importing
+   Oracle operational authority. Reject arbitrary AI_GH_REAL_GH; validated module supplies the proven path
+   internally to existing ai-gh. Validate the installed toolkit helper's exact closure/provenance against
+   current trusted installation; no arbitrary PATH executable. Preserve existing backend Windows support.
+   Implement these supplemental NEW-THREE-only proofs in tools/application_source_release.py with
+   tests/test_application_source_release.py using unittest.mock subprocess boundaries; no production test
+   override. Coordinator approved this module boundary; no alternate auth implementation. Native Bash
+   route retains central target, manifest/consumer, approval/local-test and atomic receipt machinery.
+
+   3e. NEW THREE ONLY: normal `git fetch origin develop` happens before admission. Require its local ref SHA
+   equal the managed fresh API result. Require UNIQUE `git merge-base --all HEAD refs/remotes/origin/develop`, the
+   recorded declaration base equals that commit, and develop is ancestor of HEAD. Classification is the
+   entire base-to-HEAD path delta plus staged/unstaged/untracked/deleted/rename sides/submodules, never
+   historical whole-tree paths. An unchanged mirror already in develop is excluded; any actual owned
+   structural delta is not. For new-three admission explicitly refuse ANY shared-db contributor despite
+   its rank50 being below deployment60, and retain infrastructure/production/private seals. Eligible reviewer/UI contributors
+   retain all merged required proofs. Require deployment intent and actual branch sandbox-albert; admission
+   runs in a serialized landing/owned clone on that branch with identical reviewed HEAD/digest, not the
+   local review branch. Revalidate context/config/refs/base/branch/source/approval before finish.
+
+   3f. Preserve native independent final-check/security-review exact repository/head/source/deploy seal,
+   mandatory passing snapshot tests and atomic receipt. Preserve backend receipt behavior exactly; add exact
+   repository/target provenance for new-three proof receipts only; backend record semantics stay unchanged.
+   For new-three receipts, old or backend receipt is historical audit only, never current
+   authorization: every admission revalidates fresh proof and creates a new bound receipt. No new action,
+   generic reviewer_release, runtime test bypass or manual cloud permission. Gate: all positive and hostile
+   cases in §10 pass; no forbidden contributor slips through deployment rank.
+
+4. Expand tests/test-ai-task-gates.sh and tests/test_application_source_release.py; no new parallel gate
 implementation. Update docs/context-spec.md and help/error strings from singleton to fixed-four.
 tools/ci/validate-task-gates.py is schema-generic and should need no logic changes; prove this with existing
 validator tests. Confirm AGENTS plan link is reachable under .doc-reachability.json roots, with
@@ -180,12 +217,17 @@ never replacing other keys. Central deployment class rank60/protected=true and d
 required/forbidden posture continue unchanged; consumer gate union adds proof and never removes restrictions.
 Preserve schema_version and existing paths/gates. This is the exact deployment.required addition, preserving
 existing fields and stricter gates verbatim, specifically central no-self-merge, sandbox-branch-pr-to-develop
-and route-to-shared-db-repository requirements and their forbidden actions (config/task-gates.json:503-531).
-Do not replace those arrays with the new gate. Re-run meaningful consumer tests/native exact-head review since
+and route-to-shared-db-repository requirements and their forbidden actions (config/task-gates.json:503-531); deployment proof union/default posture is separately at280-291.
+Do not replace those arrays with the new gate. Keep backend existing acceptance fixtures unchanged and
+perform read-only serving-health proof; no new backend source push/redeploy/HTS retry is authorized. Immediately before each of the THREE newly supported source
+pushes re-inventory
+the same exact Cloud Build tuples from step2; drift/missing/duplicate mapping stops before push. Re-run
+meaningful consumer tests/native exact-head review since
 consumer commits move approved heads. Gate: explicit check --before deploy --application-release-target
 .ai-devops/application-release-target.json --reviewer-approval REPORT admits exact final source. Then ordinary
 sandbox branch push and automated deploy readback/live smoke. PR remains sandbox-albert→develop with existing
-no-self-merge authority unchanged. Same issue retains live proof until all three verified.
+no-self-merge authority unchanged. Same issue retains live proof until three new consumer admission/deploy/
+live proofs plus unchanged backend acceptance fixtures and read-only serving health pass.
 
 ### Adversarial inputs and required named tests
 
@@ -199,10 +241,10 @@ no-self-merge authority unchanged. Same issue retains live proof until all three
 | Approval | Missing, REJECT, plan-only, stale/head/digest/repo/action/provider/implementer mismatch | release-native-exact-proof retains existing adversarial approval fixtures |
 | Tests | Missing/failed/no SHA snapshot test evidence | release-tests-required refuses each |
 | Concurrent movement | HEAD/blob/source/approval changes during verification | release-race-refusal retains double validation |
-| Receipt write | Atomic persistence failure | release-receipt-failure refuses no successful admission |
-| Git context/transport | Directory, SSH/proxy/config env redirection, URL rewrite, multiple origin URLs, changed worktree/config, network timeout | release-git-context-confined refuses each exact listed hostile input before network and verifies source root twice; no runtime bypass env |
+| Receipt write/replay | Atomic persistence failure or old backend receipt without new fields | release-receipt-failure and release-old-receipt-non-authorizing refuse admission without fresh full proof |
+| Git context/API | Directory/config/discovery/ancestry injection, real-gh override, wrong API host/repo/SHA/type, duplicate JSON, timeout, moved ref | release-git-context-confined and release-managed-ref-proof reject each; release-auth-capability-preserved accepts supported proxy/SSH/auth settings without using Git network |
 | Base provenance | Recorded HEAD/arbitrary reset, stale local develop, remote failure/moved ref, shallow history, replace/graft or multiple bases | release-honest-merge-base-admitted accepts exact inherited upstream mirror; release-base-reset-refused rejects hidden owned delta; release-fresh-develop-required refuses stale/missing/network and finish-race; release-ancestry-clean-required rejects shallow/replace/graft/multiple bases |
-| Backend branch | Original sandbox positive and off-branch invocation | release-backend-preserved-positive and release-backend-offbranch-refusal |
+| Existing backend compatibility | New-three proofs accidentally affect backend local branch/base/Windows or force network | release-backend-b20-semantics-preserved keeps existing fixtures unchanged; no new-three helper invocation for backend |
 | Consumer gates | New gate overwrites old security/merge requirements | release-consumer-gates-additive preserves existing arrays and forbids weaker declaration |
 | CLI route | Generic deploy, wrong action, explicit base, acknowledgement/install/target-head combos | release-cli-no-alternate-route retains all existing refusals |
 
@@ -213,17 +255,23 @@ acceptance/refusal cases at tests/test-ai-task-gates.sh:1309-1350 (same existing
 suite guessed); native review records these passing in isolated snapshot. Run bin/ai-test-local
 --check-collision before repository full-required suites and follow docs/development.md current suite, not
 guessed old commands. Four positive fixtures must independently record correct identities/targets and reject
-manifests from each of the other three. Existing backend tests remain passing after fixtures truthfully
-provide canonical target refs and actual sandbox branch. The fixture may use the suite's existing isolated
-command boundary to supply deterministic Git network responses, never a production runtime bypass. New tests
-prove native ls-remote actually runs before and after approval, failure publishes no receipt, and correct
-upstream mirror exclusion does not hide a fresh owned shared-db contributor. Preserve backend sandbox
-positive; reject backend off-branch and forged recorded base. Exact external command boundary isolation must
-be inspected before implementation; if no legitimate fixture route exists, stop and report rather than add a
-runtime environment bypass. Verify all negative rows above; verify generic ship cannot be treated as deploy
-admission. Recheck consumer branch and source identity immediately before normal push; source receipt is not
-live deployment proof. The root architecture explicitly accepts fail-closed Git network dependency; no cached
-“preflight done” assertion substitutes for native freshness.
+manifests from each of the other three. Existing backend fixtures remain UNCHANGED and passing, with NO new
+network/platform/branch/base requirement. Actual schema tests are in
+ tests/test-ai-task-gates.sh:1309-1350. No Git network mocks are needed in production. Deterministic helper
+ proof tests must use unit-level subprocess mocking in a source-release-specific proof module, not a
+ production environment bypass. Existing Bash fake-gh fixture at1565 uses AI_GH_REAL_GH and CANNOT stand in
+ for trusted real-gh qualification; reject that injection at runtime. Existing lib-test-harness.sh and
+ lib-reviewer-approval.sh remain the suite's offline reporting/native approval fixture infrastructure.
+ Name pure boundary tests release-forged-backend-target-refused, release-managed-ref-proof, release-git-context-confined, release-old-receipt-
+ non-authorizing, release-auth-capability-preserved plus all table cases; integration asserts validated
+ helper is invoked twice and errors cannot produce a receipt. Coordinator selected the small proof module
+boundary and Linux provenance for NEW THREE ONLY. No implementation until final technical APPROVE plus
+coordinator GO.
+ Verify inherited mirror exclusion AND actual structural delta refusal, backend original fixtures unchanged,
+and NEW-THREE off-branch/base refusal, generic ship not deploy. Run bin/ai-doc-reachability with supported CLI
+plus an explicit file-existence/relative-link check for both plan/handoff links; HANDOFF.d exclusion from the docs
+ graph is intentional, not a reason to remove the required backlink. Require retained backend existing
+acceptance fixtures and read-only serving health; do not redeploy it or replay spent HTS authority.
 
 ## 11. Constraints
 
@@ -248,15 +296,17 @@ needs strict implementation/tests; final native exact-head review; normal PR/que
 merged-source install; three committed consumer declarations and refreshed exact-head reviews; successful
 native admissions; automated sandbox deploy identity and live proof on same1796 card. Main risk is broadening
 authority through a data-driven target lookup or lost contributor gates: exact-four runtime+schema validation
-and refusal tests address it. Branch validation tightens existing backend behavior only to its already-locked
-declared branch; do not claim backend behavior unchanged for an off-branch invocation. Rollback uses normal
+and refusal tests address it. Backend branch/base/platform/receipt semantics remain exactly b20; new-three
+strict checks must not leak into backend dispatch. Verify backend existing fixtures unchanged and only
+read-only serving health, never a new backend source push or spent HTS replay. Rollback uses normal
 reviewed toolkit source release retaining original backend path; never remove consumer functionality or
 overwrite installed tools by hand. No production authority is created. Actual production stage-catalog
 delivery remains coordinator-owned separate work.
 
 Prior native design review REJECT report is retained unchanged outside tracked source at this worktree's
 ignored .ai/reviews/muse-plan-review-20261016T041946-3667877-13993.md; the revised review also remains at
-.ai/reviews/muse-plan-review-20261016T042256-4061545-25028.md. They are private local review artifacts, not
+.ai/reviews/muse-plan-review-20261016T042256-4061545-25028.md and third REJECT
+.ai/reviews/muse-plan-review-20261016T042609-338138-13715.md. They are private local review artifacts, not
 present in disposable source snapshots; coordinator has exact paths/hashes. Public issue1796 records verdict
 summaries only. This revision addresses its findings prospectively; no verdict or test result is inferred from
 the revision.

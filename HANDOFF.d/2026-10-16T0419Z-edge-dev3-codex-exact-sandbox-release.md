@@ -21,4 +21,4 @@ Native independent Muse plan-review of committed design; report explicit technic
 No secret needed. No cloud/database mutation, replay, production scope or other-chat messages. Preserve all failed admission evidence. No installed checkout edits. Only owned paths staged. Recover via ordinary Git commits; no destructive reset. Root retains architecture, merge, installation and production decisions.
 
 ## Acceptance and remaining work
-All three sandbox source-release admissions and automated live deploy proofs on issue1796; plan itself is preparation, not delivered capability. Issue stays open until actual full acceptance. No timing/approval evidence invented. Fresh session reads linked plan STATUS first.
+All three new sandbox source-release admissions/automated live proofs plus unchanged backend acceptance fixtures/read-only serving health on issue1796; plan itself is preparation, not delivered capability. Issue stays open until actual full acceptance. No timing/approval evidence invented. Fresh session reads linked plan STATUS first.
