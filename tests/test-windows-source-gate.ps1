@@ -13,7 +13,14 @@ function Write-Receipt($Fixture) {
   $hash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
   $sourceBash='/' + (($source -replace '\\','/' -replace '^([A-Za-z]):','$1'))
   $homeBash='/' + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-  $gitBash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+  $gitBash=@(
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe' }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe' }),
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe'
+  ) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  if (-not $gitBash) { throw 'Git Bash is required for the source-gate fixture.' }
   @('#!/usr/bin/env bash','# Managed by ai-devops install-machine-tools.ps1.',"# source-sha=$sha","# source-hash=$hash",('export HOME="' + $homeBash + '"'),('exec "' + $sourceBash + '" "$@"')) | Set-Content -LiteralPath $Fixture.Launcher -Encoding ASCII
   @('@echo off','rem Managed by ai-devops install-machine-tools.ps1.',"rem source-sha=$sha","rem source-hash=$hash",('set "HOME=' + $env:USERPROFILE + '"'),('"' + $gitBash + '" "' + $sourceBash + '" %*')) | Set-Content -LiteralPath "$($Fixture.Launcher).cmd" -Encoding ASCII
 }
@@ -27,7 +34,14 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $reviewDir=Join-Path $reviewRoot '.ai\reviews'
   New-Item -ItemType Directory -Path $reviewDir -Force | Out-Null
   Add-Content -LiteralPath (Join-Path $Fixture.Repo '.git\info\exclude') -Value '.ai/reviews/'
-  $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+  $bash=@(
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe' }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe' }),
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe'
+  ) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  if (-not $bash) { throw 'Git Bash is required for the source-gate fixture.' }
   $sourceDigest=(& $bash (Join-Path $root 'bin\ai-review-sandbox') digest $reviewRoot).Trim()
   $identity=((& $bash (Join-Path $root 'bin\ai-review-lifecycle') identity $reviewRoot) -join "`n") | ConvertFrom-Json
   Assert ($identity.source_digest -ceq $sourceDigest) 'fixture review source identity differs'
