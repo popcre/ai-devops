@@ -47,3 +47,22 @@ PR1798 currently owns GLM pool/packet work; this lane core/tests only, no overla
 ## 9. Open questions and risks
 
 On October16 design drafting: disposition requires independent assessment of real consumer accounting and exact private proof; plan is not proof that6603 qualifies or a paid round remains. Missing evidence/ownership/remaining budget blocks recovery, never prospective source repair. Parent separately owns PR1797 CI failure and release/install; no full-suite success is inferred. Current design and gates are the sole next authority; no runtime work has started.
+
+## Prospective core implementation checkpoint
+
+After genuine native design APPROVE ac535, root authorized A–C implementation ONLY in this worktree;
+consumer D–G remains held and its revised design lives separately in muse-disposition-design/ai-devops.
+Runtime delta is only tools/lib/review-lifecycle-core.sh: after qualified report/source checks and durable
+store, requested Muse receipt publication verifies original consumed seal against retained marker line4,
+verifies retained custody and uses unchanged live packet verifier/immutable writer. Original retained seal
+is deliberately different after custody marker re-seal; no hashes are invented. Failure preserves actual
+completed provider report/packet and refuses success; late source drift remains stale-source by existing
+lifecycle accounting. Pool/packet/door/preparatory/test scrubs and other providers remain unchanged.
+
+Meaningful offline pool→core→mockprovider→REAL packet pipeline has13 scenarios: APPROVE, REJECT,
+identical publication, conflicting/linked/outside path, store failure, working/retained packet drift,
+source drift before/after final precheck, receipt race and provider failure. Final source suites:
+engine250PASS, packet187PASS, lifecycle120PASS, zero failures/skips; CI-path/shellsyntax/diff checks PASS.
+Prior failed test expectations are retained in scratch only; actual late-source refusal was correct.
+Fresh native exact-head source review remains required before coordinator chooses PR/merge/install.
+No old receipt, shared-db code, lease or provider attempt was touched.

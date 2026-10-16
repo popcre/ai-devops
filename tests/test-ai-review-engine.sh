@@ -1033,6 +1033,103 @@ check "store_failure_message_is_visible" "grep -qi 'store' '$TMP/storefail.err'"
 check "store_before_delete_skips_delete_when_store_fails" \
   "grep -qi 'retaining sandbox\|durable store failed\|durable packet store failed' '$TMP/storefail.err'"
 
+# --- governed native Muse final source receipt (real pool/core/packet) --------
+echo '== native Muse final source receipt'
+RF_DOOR="$TMP/receipt-door"
+cat > "$RF_DOOR" <<'DOOR'
+#!/usr/bin/env bash
+set -euo pipefail
+# The provider consumes the same packet later verified by the core. It must
+# never receive an already-published receipt from preparatory verification.
+jq -n --arg snapshot "$DOOR_WORKDIR" --arg packet "$DOOR_PACKET_DIR" \
+  --arg hash "$(cat "$DOOR_PACKET_DIR/MANIFEST.sha256")" \
+  --argjson early "$([ -e "$RF_RECEIPT" ] && printf true || printf false)" \
+  '{snapshot:$snapshot,packet:$packet,hash:$hash,early:$early}' > "$RF_FACTS"
+case "$RF_CASE" in
+  provider-fail) exit 19 ;;
+  packet-drift) printf '\nchanged after provider read\n' >> "$DOOR_PACKET_DIR/MANIFEST.md" ;;
+  source-drift) printf '\nsource moved\n' >> "$RF_SOURCE/a.txt" ;;
+esac
+bash "$RF_MOCK_DOOR" "$@"
+if [ "$RF_CASE" = reject ]; then sed 's/^APPROVE$/REJECT/' "$DOOR_REPORT_OUT" > "$DOOR_REPORT_OUT.new"; mv "$DOOR_REPORT_OUT.new" "$DOOR_REPORT_OUT"; fi
+DOOR
+chmod +x "$RF_DOOR"
+RF_PACKET_WRAPPER="$TMP/receipt-packet-wrapper"
+cat > "$RF_PACKET_WRAPPER" <<'PACKET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" != retain ]; then exec "$RF_REAL_PACKET" "$@"; fi
+stored="$("$RF_REAL_PACKET" "$@")" || exit $?
+case "$RF_CASE" in
+  post-store-source-drift) printf '\nlate source change\n' >> "$RF_SOURCE/a.txt" ;;
+  receipt-race) printf 'late conflicting receipt\n' > "$RF_RECEIPT" ;;
+  retained-drift) printf '\nretained evidence changed\n' >> "$stored/MANIFEST.md" ;;
+  post-store-identical) "$RF_REAL_PACKET" verify "$2" >/dev/null ;;
+esac
+printf '%s\n' "$stored"
+PACKET
+chmod +x "$RF_PACKET_WRAPPER"
+rf_run() {
+  local scenario="$1" dir="$TMP/receipt-$1" source receipt store rc=0 state expected
+  mkdir -p "$dir"
+  git clone --quiet --no-hardlinks "$MREPO" "$dir/source" || return 1
+  source="$(cd "$dir/source" && pwd -P)"
+  mkdir -p "$source/.ai/reviews"
+  receipt="$source/.ai/reviews/governed.json"; store="$dir/store"
+  case "$scenario" in
+    conflict) printf 'original conflicting receipt\n' > "$receipt" ;;
+    linked) printf 'protected original\n' > "$dir/protected"; ln -s "$dir/protected" "$receipt" || return 1 ;;
+    outside) receipt="$dir/outside.json" ;;
+    store-fail) printf 'not a store\n' > "$dir/store-file"; store="$dir/store-file" ;;
+  esac
+  expected="$("$REPO_ROOT/bin/ai-review-packet" resolve "$source" --base HEAD~1 --assert-head "$HEAD_SHA")" || return 1
+  ( cd "$source" && env AI_POOL_CALLER=codex AI_REVIEW_DOOR_MUSE="$RF_DOOR" \
+      RF_SOURCE="$source" RF_RECEIPT="$receipt" RF_FACTS="$dir/facts.json" RF_CASE="$scenario" RF_MOCK_DOOR="$MOCK_DOOR" \
+      RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
+      AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt" AI_REVIEW_PACKET_STORE="$store" \
+      AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
+      bash "$POOL" muse final-check --base HEAD~1 --assert-head "$HEAD_SHA" \
+      --tests "test -z \"\${AI_REVIEW_SOURCE_RECEIPT_FILE+x}\" && test ! -e '$dir/facts.json'"
+  ) > "$dir/stdout" 2> "$dir/stderr" || rc=$?
+  state="$(find "$dir/lifecycle/runs" -type f -name '*.json' -print 2>/dev/null | head -1)"
+  [ -n "$state" ] || return 1
+  case "$scenario" in
+    approve|reject|post-store-identical)
+      [ "$rc" = 0 ] && [ -s "$receipt" ] || return 1
+      jq -e --argjson expected "$expected" --slurpfile facts "$dir/facts.json" \
+        '.identity==$expected and .packet_sha256==$facts[0].hash and $facts[0].early==false and .identity.repository!=$facts[0].snapshot' "$receipt" >/dev/null || return 1
+      jq -e --arg verdict "$([ "$scenario" = reject ] && printf REJECT || printf APPROVE)" \
+        '.status=="completed" and .verdict==$verdict and (.tests.output_sha256|length==64)' "$state" >/dev/null || return 1
+      local packet; packet="$(jq -r .packet_dir "$state")"
+      [ "$(jq -r .packet_sha256 "$receipt")" = "$(sed -n '4p' "$packet/.ai-review-packet")" ] || return 1
+      "$REPO_ROOT/bin/ai-review-packet" verify-retained "$packet" >/dev/null || return 1
+      ;;
+    *)
+      [ "$rc" != 0 ] || return 1
+      case "$scenario" in
+        conflict) grep -qx 'original conflicting receipt' "$receipt" || return 1 ;;
+        linked) [ -L "$receipt" ] && grep -qx 'protected original' "$dir/protected" || return 1 ;;
+        receipt-race) grep -qx 'late conflicting receipt' "$receipt" || return 1 ;;
+        *) [ ! -e "$receipt" ] || return 1 ;;
+      esac
+      jq -e '.status!="completed"' "$state" >/dev/null || return 1
+      if [ "$scenario" != provider-fail ] && [ "$scenario" != source-drift ]; then
+        if [ "$scenario" = post-store-source-drift ]; then
+          jq -e '.failure_class=="stale-source" and .stale==true' "$state" >/dev/null || return 1
+        else
+          jq -e '.failure_class=="source-receipt-publication-failed"' "$state" >/dev/null || return 1
+        fi
+        local report; report="$(find "$source/.ai/reviews" -maxdepth 1 -name 'muse-final-check-*.md' -print | head -1)"
+        [ -s "$report" ] && grep -q '^APPROVE$' "$report" || return 1
+        [ -d "$(jq -r .packet "$dir/facts.json")" ] || return 1
+      fi
+      ;;
+  esac
+}
+for rf_case in approve reject post-store-identical conflict linked outside store-fail packet-drift retained-drift source-drift post-store-source-drift receipt-race provider-fail; do
+  check "native_muse_final_receipt_${rf_case}" "rf_run '$rf_case'"
+done
+
 # --- implement contract: worktree + recovery --------------------------------
 echo '== implement contract'
 IMPL_DOOR_FAIL="$TMP/impl-door-fail.sh"
