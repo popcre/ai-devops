@@ -235,7 +235,7 @@ application_release_contributor_gates
             release.public_binary(fake)
         self.assertEqual(release.public_binary(release.GH), str(Path(release.GH).resolve()))
 
-    def test_installed_helper_receipt_and_real_closure_refuse_tampering(self):
+    def installed_fixture(self):
         toolkit = Path(self.temp.name) / "toolkit"
         (toolkit / "bin").mkdir(parents=True)
         (toolkit / "tools/github-requests").mkdir(parents=True)
@@ -260,6 +260,10 @@ application_release_contributor_gates
             return {"/usr/local/bin/ai-gh": launcher,
                     "/etc/ai-devops/install-manifest.tsv": receipt}.get(str(value), real_path(value))
 
+        return toolkit, source, filesystem
+
+    def test_installed_helper_receipt_and_real_closure_refuse_tampering(self):
+        toolkit, source, filesystem = self.installed_fixture()
         with patch.object(release, "Path", side_effect=filesystem):
             helper, proof = release.installed_helper(self.root, self.env)
             self.assertEqual(helper, toolkit / "bin/ai-gh")
@@ -267,6 +271,33 @@ application_release_contributor_gates
             (toolkit / "tools/github-requests/telemetry.sh").write_text("# tampered\n")
             with self.assertRaises(ValueError):
                 release.installed_helper(self.root, self.env)
+
+    def test_installed_helper_fixed_source_cannot_be_replaced(self):
+        toolkit, source, filesystem = self.installed_fixture()
+        relative = "tools/github-requests/telemetry.sh"
+        original = (toolkit / relative).read_bytes()
+        forged = b"# replacement-backed forged helper\n"
+        (toolkit / relative).write_bytes(forged)
+        def tg(*args):
+            return subprocess.check_output([release.GIT, "-C", str(toolkit), *args],
+                                           env=self.env, stderr=subprocess.DEVNULL)
+        tg("add", relative)
+        tg("commit", "-qm", "synthetic replacement")
+        substitute = tg("rev-parse", "HEAD").decode().strip()
+        tg("update-ref", "HEAD", source)
+        tg("replace", source, substitute)
+        # Prove the actual Git substitution, not merely a mocked argv.
+        self.assertEqual(tg("show", f"{source}:{relative}"), forged)
+        raw = subprocess.check_output([release.GIT, "--no-replace-objects", "-C",
+                                       str(toolkit), "show", f"{source}:{relative}"], env=self.env)
+        self.assertEqual(raw, original)
+        with patch.object(release, "Path", side_effect=filesystem):
+            with self.assertRaises(ValueError):
+                release.installed_helper(self.root, self.env)
+            # Replacement metadata is not authority over receipt-pinned bytes.
+            (toolkit / relative).write_bytes(original)
+            _, proof = release.installed_helper(self.root, self.env)
+            self.assertEqual(proof["closure"][relative], release.digest(original))
 
 
 class PlatformBoundary(unittest.TestCase):

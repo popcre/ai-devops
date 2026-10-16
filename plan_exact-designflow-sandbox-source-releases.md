@@ -342,3 +342,19 @@ and unrelated-path negatives. This is registration of real dependencies, not bro
 Gate: unchanged transitive completeness test passes, targeted source-release16 tests pass, all own diff
 checks pass and a FRESH native exact-head Muse final review APPROVEs before coordinator authorizes push.
 Do not rerun unchanged439 focused assertions merely to repeat prior proof; fresh CI supplies full suite.
+
+### Prospective installed-helper raw object correction — October16
+
+Before runtime edits: root identified that installed helper closure `ls-tree/show` calls use fixed receipt
+SHA but Git replacement refs can still substitute another commit's tree. Reproduce against the REAL module
+using an owned synthetic toolkit repository, unchanged receipt+launcher, rewritten telemetry, fixed original
+HEAD and refs/replace mapping original→different tree. No installed repository mutation or live helper call.
+If reproduced, root authorizes NEW-THREE-only raw committed-object provenance reads: use native Git's
+`--no-replace-objects` for every installed-toolkit source HEAD/tree/blob query so replacement refs cannot
+change receipt-pinned expected bytes, including a ref added after initial checking. Existing application
+context/ancestry rejection and backend dispatch remain unchanged. Graft ancestry is not used for these
+fixed-SHA tree/blob reads. Do not alter global Git config, authentication, installed files or backend policy.
+Gate: regression fails before fix and passes after; forged replacement bytes refuse while original bytes
+still qualify despite irrelevant replacement metadata; existing backend/new3 tests and CI-path checks pass;
+fresh exact-head native Muse review before coordinator authorizes push/install. Prior06e approval stays
+historical, not reused for changed source.

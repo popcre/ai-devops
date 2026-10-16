@@ -37,3 +37,14 @@ completeness walker follows ai-gh honestly, explicit closure sentinels and unrel
 Focused CI-path test PASS101 dependencies;16 source-release module tests PASS; diff/shellsyntax PASS.
 Earlier439 remain runtime-identical proof; no unchanged full rerun or invented full-suite PASS. Fresh exact-head
 native Muse review and root diff/report inspection must precede updated PR push. Earlier eac APPROVE retained.
+
+## Installed-helper replacement correction
+
+Root reproduced fixed-SHA Git object replacement in an isolated fixture. The REAL module regression then
+failed17-test run with `AssertionError: ValueError not raised`: unchanged receipt/launcher plus a replaced
+commit tree let forged telemetry qualify. Prospective plan correction preceded runtime edit. Installed-only
+HEAD/tree/blob reads now pass native `--no-replace-objects`; source/context/backend behavior is untouched.
+The genuine fixture proves normal Git returns forged bytes while raw lookup returns original, forged local
+closure refuses, and original local bytes still qualify with irrelevant replacement metadata. Focused17
+module tests and CI-path101dependencies pass. Prior06e review is retained; new exact-head native review,
+root inspection and fresh ship gate are required before push. No installed files/refs were mutated.

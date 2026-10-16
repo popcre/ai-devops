@@ -161,13 +161,17 @@ def installed_helper(root, env):
     sources = [row[2] for row in rows if len(row) == 4 and row[:2] == ["meta", "source_sha"]]
     require(len(sources) == 1 and SHA.fullmatch(sources[0]), "installed source receipt invalid")
     source = sources[0]
-    require(git(toolkit, env, "rev-parse", "HEAD") == source, "installed source moved")
+    def pinned_git(*args):
+        # A fixed commit SHA still follows refs/replace unless explicitly
+        # disabled. Read receipt-pinned objects, never substituted tree bytes.
+        return run([GIT, "--no-replace-objects", "-C", str(toolkit), *args], root, env)
+    require(pinned_git("rev-parse", "HEAD").decode().strip() == source, "installed source moved")
     identity = [row for row in rows if len(row) == 4 and row[:2] == ["symlink", str(launcher)]]
     require(len(identity) == 1 and identity[0][2] == str(helper)
             and identity[0][3] == digest(helper.read_bytes()), "installed helper receipt differs")
     closure = {}
-    paths = git(toolkit, env, "ls-tree", "-r", "--name-only", source, "--",
-                "bin/ai-gh", "tools/github-requests").splitlines()
+    paths = pinned_git("ls-tree", "-r", "--name-only", source, "--",
+                       "bin/ai-gh", "tools/github-requests").decode().splitlines()
     require("bin/ai-gh" in paths and "tools/github-requests/telemetry.sh" in paths
             and "tools/github-requests/pr-status-context" in paths, "helper closure incomplete")
     for relative in paths:
@@ -179,7 +183,7 @@ def installed_helper(root, env):
         path = toolkit / relative
         require(path.is_file() and not path.is_symlink(), "helper closure file unavailable")
         raw = path.read_bytes()
-        expected = run([GIT, "-C", str(toolkit), "show", f"{source}:{relative}"], root, env)
+        expected = pinned_git("show", f"{source}:{relative}")
         require(raw == expected, "installed helper closure differs")
         closure[relative] = digest(raw)
     public_binary(GH)
