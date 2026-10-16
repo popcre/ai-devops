@@ -298,6 +298,24 @@ rlc_packet_store() { # rlc_packet_store PACKET_DIR -> prints durable path; nonze
   printf '%s\n' "$dest"
 }
 
+# A native Muse door consumes the core packet itself, rather than building a
+# second provider packet. Only qualified final completion may publish the
+# governed caller's original-source receipt. Preparation and tests stay isolated.
+rlc_publish_muse_source_receipt() { # PROVIDER PACKET IDENTITY SHA STORED_PACKET
+  local provider="$1" pkt="$2" identity="$3" expected="$4" stored="$5" current durable
+  [ "$provider" = muse ] && [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
+  [ -n "$stored" ] && [ -d "$stored" ] || return 1
+  current="$(rlc_packet_sha "$pkt")" || return 1
+  # Retain re-seals its changed custody marker; line four preserves the
+  # ORIGINAL consumed seal. Do not confuse that chain with the retained seal.
+  durable="$(sed -n '4p' "$stored/.ai-review-packet")" || return 1
+  [ "$current" = "$expected" ] && [ "$durable" = "$expected" ] || return 1
+  ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" verify-retained "$stored" ) >/dev/null || return 1
+  # Reuse full source/snapshot/patch validation and the immutable receipt writer.
+  # Never reconstruct the identity or rebuild evidence after the provider ran.
+  "$RLC_PACKET" verify "$pkt" --identity "$identity" >/dev/null
+}
+
 # Cleanup AFTER store. If the store did not succeed, skip deletion and warn —
 # the working copy is then the only evidence left.
 rlc_cleanup_after_store() { # rlc_cleanup_after_store STORED_OK REPO TAG PACKET_DIR
@@ -739,6 +757,13 @@ $operation_evidence"
     rlc_note "durable packet store: $stored"
   else
     rlc_note 'durable packet store failed; retaining working packet and sandbox.'
+  fi
+
+  if ! rlc_publish_muse_source_receipt "$provider" "$packet_dir" "$identity_file" "$packet_sha" "$stored"; then
+    rlc_lifecycle_fail "$state" "$elapsed" source-receipt-publication-failed "$report" "${stored:-$packet_dir}" "$packet_sha"
+    rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+    rm -f "$brief" "$body_file" "$identity_file"
+    rlc_die 'final source receipt could not be published; completed provider report and packet retained.'
   fi
 
   rlc_note "step lifecycle-finish"
