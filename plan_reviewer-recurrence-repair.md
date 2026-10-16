@@ -8,7 +8,7 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-r
 
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|
-| 1 | Freeze incident inventory, current versions and ownership | open — 2026-10-15 | Private exact-ID inventory with digest; sanitized mapping and version manifest |
+| 1 | Freeze incident inventory, current versions and ownership | done — 2026-10-16 ([inventory](tests/verification/reviewer-recurrence/step1-inventory-2026-10-16.md)) | Private exact-ID inventory with digest; sanitized mapping and version manifest |
 | 2 | Reproduce receipt conflict and evidence-recovery interference | open — 2026-10-15 | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
 | 3 | Repair Muse Linux installation pin, completion and interruption recovery | open — 2026-10-15 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
 | 4 | Repair StepFun report contract and large-input/runtime residuals | open — 2026-10-15 | Single-decision contract tests plus complete-context live review |
