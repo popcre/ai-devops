@@ -603,8 +603,9 @@ jobs:
         id: proof
         shell: pwsh
         run: |
-          # Preferred proves the gating Codex suite only. Grok is frozen
-          # best-effort (#1714) and runs solely in its non-gating hosted job.
+          # Preferred stays serial on one host (same-host exclusion). The one
+          # remaining Windows reviewer-safety suite writes its result so the
+          # hosted fallback only runs when the preferred host did not prove it.
           $bash = 'C:\Program Files\Git\bin\bash.exe'
           $resultFile = Join-Path $env:RUNNER_TEMP 'preferred-suite-results.txt'
           $scriptFile = Join-Path $env:RUNNER_TEMP 'preferred-reviewer-suites.sh'
@@ -699,7 +700,8 @@ jobs:
             core.info(`Reviewer host available=${available} proof=${proofResult} codex=${codexStatus}; fallback_codex=${fallbackCodex}.`);
 
   # Hosted Codex proof runs only when the preferred host did not prove it.
-  # Timeouts stay bounded at the existing 60-minute ceiling.
+  # Timeouts stay bounded at the existing 60-minute ceiling. Grok is frozen
+  # per popcre/ai-devops#1714 and no longer runs here.
   windows-reviewer-fallback-codex:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
     if: >-
