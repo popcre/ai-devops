@@ -89,25 +89,29 @@ incomplete, and so is a session that ends holding an unreleased claim.
 
 ### Ownership fallback — verify before ending
 
-Do not treat a handoff note, a closed chat, or `capacity_state: relinquished`
-alone as successful closeout. After `shared-db-handover`, freshly enumerate this
-session's author claims and exclusive stages. Every owned item must be either
-natively released after proven delivery, transferred to the verified successor,
-or preserved with an owner-issued handoff-ready receipt that a successor can
-accept immediately. Verify the actual claim and receipt readbacks. Never leave
-an hours-long reservation requiring a stopped chat to wake up, and never fake
-expiry or delete object/version protection to make a report look complete.
+Do not treat a handoff note, a stopped chat, `capacity_state: relinquished`,
+lease expiry, or an owner-issued handoff-ready receipt as successful closeout.
+They can leave exact-object reservations held and prevent other sessions working.
 
-For unfinished clean source work, run merged shared-db `--stop-author` as this
-session's actual owner; it preserves the work and publishes handoff-ready consent.
-If the successor is known, that actual session accepts the exact ready receipt
-through `--handoff-claim-author`; verify its identity, claim, source and bounded
-permission. No impersonated session IDs. Preserve dirty or remote work through
-the governed recovery route before claiming readiness. Release only this session's
-finished exclusive stages through their supported owned-release operations; a
-still-running stage must finish or be explicitly handed over, never be deleted
-blindly. A refused or unreadable release is an unfinished closeout with exact
-evidence on the same issue, not a successful wrap-up.
+Before ending, verify the following. Every owned item must be either natively
+released or **actually accepted by a verified successor**. If there is no accepted successor, preserve
+and publish source/evidence, park the open PRs without deleting branches, and
+execute native ordinary `--release-claim` as the exact owner. Use the merged
+`--park` option where available; otherwise close preserved PRs with resume notes
+before the ordinary release. Never retire unfinished source, reuse a version,
+remove protection by hand, fake expiry, or claim the application outcome complete.
+For a known successor, that actual session accepts the exact ready receipt.
+Preserve dirty or remote work through the governed recovery route before release.
+`--stop-author` is only an intermediate step during an actual transfer; do not
+end the session with its reservation idle.
+
+After the last ownership operation, run installed
+`ai-shared-db-closeout-check` using this session's actual UUID. Save its JSON
+receipt and require success: zero owned open claims and zero owned preview,
+merge or production stages. The checker rejects relinquished/expired/ready claims
+and fails closed on unreadable data; foreign sessions' reservations are not ours
+to remove. Missing tooling requires supported reviewed installation, not a
+self-written substitute. No successful wrap-up statement before this final check.
 
 While structural work is active, use owner-bound `--check-in-author` every ten
 minutes and before a protected write. Fresh author permission is at most thirty

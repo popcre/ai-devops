@@ -34,6 +34,7 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Component | File(s) | Responsibility |
 |---|---|---|
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
+| Shared-db closeout | `bin/ai-shared-db-closeout-check` | Read-only, fail-closed final ownership check; open relinquished claims still fail until released or actually transferred |
 | Workspace safety | `bin/ai-workspace-status` | Read-only git/branch/PR/dirty snapshot + warnings |
 | Manual verification | `bin/ai-verify-run` | Provenance-bearing dispatch, duplicate refusal, status, and separately confirmed cancellation |
 | Approval review | `bin/ai-review`, `bin/ai-review-pool`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted approval from a registered pool reviewer (default Muse) or the Codex gate |
