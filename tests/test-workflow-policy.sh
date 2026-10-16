@@ -129,6 +129,7 @@ reviewer_jobs_select_reviewer_ok() {
   job_has reviewer-safety-start-deadline windows-reviewer-fallback-codex "outputs.reviewer != 'false'" || return 1
   job_has windows-reviewer-fallback-codex windows-reviewer-fallback-grok "outputs.reviewer != 'false'" || return 1
   job_has windows-reviewer-fallback-grok windows-reviewer-safety "outputs.reviewer != 'false'" || return 1
+  job_has windows-reviewer-fallback-grok windows-reviewer-safety 'continue-on-error: true' || return 1
   job_has reviewer-runner-availability windows-reviewer-preferred "outputs.selection_result != 'success'" || return 1
   job_has windows-reviewer-preferred reviewer-safety-start-deadline "outputs.selection_result != 'success'" || return 1
 }
@@ -596,9 +597,7 @@ grep -Fq 'proof_result=cleanup_failure' "$workflow" &&
 grep -Fq "v === 'success' || v === 'cleanup_failure' ? 'false' : 'true'" "$workflow" &&
 grep -Fq "needs['reviewer-safety-start-deadline'].result != 'success'" "$workflow" &&
 grep -Fq "core.setOutput('fallback_codex', fallbackCodex)" "$workflow" &&
-grep -Fq "core.setOutput('fallback_grok', fallbackGrok)" "$workflow" &&
-grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true'" "$workflow" &&
-grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_grok == 'true'" "$workflow" || {
+grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true'" "$workflow" || {
   printf 'FAIL: a reviewer lane that does not start or succeed must release the hosted fallback\n' >&2
   exit 1
 }
@@ -618,13 +617,14 @@ printf '%s' "$reviewer_preferred" | grep -Fq "needs.manual-preflight.outputs.run
 grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
 grep -Fq "core.setOutput('preferred_available', 'false')" "$workflow" &&
 ! printf '%s' "$reviewer_fallback" | grep -Fq 'github.event.pull_request.head.repo.full_name == github.repository' &&
-printf '%s' "$reviewer_aggregate" | grep -Fq 'needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex, windows-reviewer-fallback-grok]' &&
+printf '%s' "$reviewer_aggregate" | grep -Fq 'needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex]' &&
+! printf '%s' "$reviewer_aggregate" | grep -Fq 'windows-reviewer-fallback-grok' &&
 ! printf '%s' "$reviewer_aggregate" | grep -Fq 'needs.windows-reviewer-preferred' || {
   printf 'FAIL: preferred reviewer failure or scheduling must not block the stable aggregate\n' >&2
   exit 1
 }
 printf '%s' "$reviewer_aggregate" | grep -Fq "suite_proved \"\$CODEX_PREFERRED\" \"\$CODEX_FALLBACK\"" &&
-printf '%s' "$reviewer_aggregate" | grep -Fq "suite_proved \"\$GROK_PREFERRED\" \"\$GROK_FALLBACK\"" &&
+! printf '%s' "$reviewer_aggregate" | grep -Fq 'GROK' &&
 printf '%s' "$reviewer_aggregate" | grep -Fq "no complete reviewer proof" || {
   printf 'FAIL: stable reviewer aggregate must accept per-suite proof and fail closed without complete proof\n' >&2
   exit 1
@@ -858,8 +858,8 @@ BOOTSTRAP
   assert_rejected full-windows-pr
   sed "/needs\['reviewer-safety-start-deadline'\].outputs.fallback_codex == 'true'/d" "$workflow" >"$mutation_dir/reviewer-gap.yml"
   assert_rejected reviewer-gap
-  sed "/needs\['reviewer-safety-start-deadline'\].outputs.fallback_grok == 'true'/d" "$workflow" >"$mutation_dir/reviewer-gap-grok.yml"
-  assert_rejected reviewer-gap-grok
+  sed 's/reviewer-safety-start-deadline, windows-reviewer-fallback-codex]/reviewer-safety-start-deadline, windows-reviewer-fallback-codex, windows-reviewer-fallback-grok]/' "$workflow" >"$mutation_dir/grok-gates-again.yml"
+  assert_rejected grok-gates-again
   sed "/needs\['reviewer-safety-start-deadline'\].result != 'success'/d" "$workflow" >"$mutation_dir/watchdog-error-gap.yml"
   assert_rejected watchdog-error-gap
   sed '/\$process\.WaitForExit(55 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
