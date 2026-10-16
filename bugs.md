@@ -1062,3 +1062,7 @@ current plan before acting; do not treat this list as the present work queue.
 - Muse: [`plan_muse_reviewer_availability_repair.md`](plan_muse_reviewer_availability_repair.md)
 - Qwen: [`plan_qwen_reviewer_evidence_repair.md`](plan_qwen_reviewer_evidence_repair.md)
 - GLM: [`plan_glm_reviewer_startup_repair.md`](plan_glm_reviewer_startup_repair.md)
+
+## 2026-10-16
+
+- Docs-only PRs (every changed file prose) merge around the merge queue after `bin/ai-doc-safety` passes, via `gh pr merge --squash --admin`. Code still uses the queue. Owner request 2026-10-16.
