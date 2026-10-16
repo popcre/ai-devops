@@ -128,3 +128,8 @@ tools/application_source_release.py
 tools/generated_definition_action.py
 config/review-action-profiles.json
 tests/test_generated_definition_action.py
+bin/ai-session-tmp-sweep
+bin/ai-session-tmp-hook
+tools/lib/session-tmp.sh
+tools/glm_output_recovery.py
+tools/glm_formal_profile.py

@@ -1960,7 +1960,7 @@ cmd_install_verify(){
       *) die "unknown option for install-verify: $1" ;;
     esac
   done
-  case "$phase" in preflight|resume|stages-complete|finalize) ;; *) die 'install-verify needs preflight, resume, stages-complete, or finalize.' ;; esac
+  case "$phase" in preflight|resume|stages-complete|finalize|activation) ;; *) die 'install-verify needs preflight, resume, stages-complete, finalize, or activation.' ;; esac
   [ "$(uname -s)" = Linux ] || blocked 'ai-task-gates: STOP. This install verification route is Linux-only.'
   [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die 'install-verify requires a full target SHA.'
   POLICY_FILE="$ROOT/config/task-gates.json"
@@ -1976,6 +1976,13 @@ cmd_install_verify(){
     case "$candidate_root" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux candidate is outside fixture root.' ;; esac
     case "$installed" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux installed checkout is outside fixture root.' ;; esac
     [ "$STATE_DIR" = "$fixture_root/state" ] || blocked 'ai-task-gates: STOP. Linux fixture state is outside fixture root.'
+    if [ "$launcher" = /usr/local/bin/ai-task-gates ]; then
+      # Only the private namespace fixture may alias its exact same launcher.
+      # Equal bytes, a foreign fixture or a different inode is insufficient.
+      [ "$(stat -Lc '%d:%i' "$launcher" 2>/dev/null)" = "$(stat -Lc '%d:%i' "$fixture_root/bin/ai-task-gates" 2>/dev/null)" ] &&
+        [ "$(readlink -f "$launcher")" = "$fixture_root/installed/bin/ai-task-gates" ] || blocked 'ai-task-gates: STOP. Canonical fixture launcher is not the exact fixture inode.'
+      launcher="$fixture_root/bin/ai-task-gates"
+    fi
     [ "$launcher" = "$fixture_root/bin/ai-task-gates" ] || blocked 'ai-task-gates: STOP. Linux fixture launcher is outside fixture root.'
     manifest="$fixture_root/etc/install-manifest.tsv"
     IDENTITY=popcre/ai-devops; IDENTITY_RESOLVED=true; fixture=1
@@ -2013,6 +2020,18 @@ cmd_install_verify(){
     if [ -n "$receipt" ] && [ "$receipt" != "$completed_head" ]; then
       [ "$receipt" = "$target" ] && { [ -e "$pending" ] || [ -e "$ordinary" ]; } || blocked 'ai-task-gates: STOP. Installed manifest diverges from the last completed release.'
     fi
+  fi
+  if [ "$phase" = activation ]; then
+    # Read-only admission of one already completed release. This path neither
+    # repairs partial installation nor consumes/recreates installation authority.
+    [ "$completed_head" = "$target" ] && [ "$installed_head" = "$target" ] && [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Activation requires exact completed installed release.'
+    [ ! -e "$issued" ] && [ ! -L "$issued" ] && [ ! -e "$pending" ] && [ ! -L "$pending" ] && [ ! -e "$ordinary" ] && [ ! -L "$ordinary" ] && [ ! -e "$stage_marker" ] && [ ! -L "$stage_marker" ] || blocked 'ai-task-gates: STOP. Activation cannot bypass an incomplete installation.'
+    [ "$(sha256sum "$manifest" | cut -d' ' -f1)" = "$(jq -r .manifest_sha256 "$completion")" ] &&
+      [ "$(sha256sum "$candidate_root/bin/ai-task-gates" | cut -d' ' -f1)" = "$(jq -r .source_sha256 "$completion")" ] || blocked 'ai-task-gates: STOP. Activation installed manifest/source changed.'
+    linux_stage_report_valid "$STATE_DIR/install-stage-reports/$target.tsv" "$STATE_DIR/install-stage-reports/$target.tsv" || blocked 'ai-task-gates: STOP. Activation completed stage report is invalid.'
+    [ "$(sha256sum "$STATE_DIR/install-stage-reports/$target.tsv" | cut -d' ' -f1)" = "$(jq -r .stage_report_sha256 "$completion")" ] || blocked 'ai-task-gates: STOP. Activation completed stage custody changed.'
+    printf 'ai-task-gates: completed installed release verified for explicit activation at %s.\n' "$target"
+    return 0
   fi
   # The completion receipt is the durable commit point. Finalization deletes
   # the one-use transaction and stage marker only after publishing it, so an
