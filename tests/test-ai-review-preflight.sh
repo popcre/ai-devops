@@ -530,6 +530,11 @@ check "dispatch_after_reset: a passed reset lifts the hold and the provider is c
 
 echo '== post-merge reviewer hook (#804)'
 HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
+# The real hook records plain pulls in the task-gates state log; keep that
+# record inside this fixture so live ai-task-gates never warns about it (#1783).
+LIVE_ADV_LOG="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/unprotected-advances.log"
+LIVE_ADV_BEFORE="$(cat "$LIVE_ADV_LOG" 2>/dev/null | sha256sum)"
+export AI_TASK_GATES_DIR="$HOOKTEST/task-gates"
 git init -q --bare -b main "$HOOK_ORIGIN"
 git clone -q "$HOOK_ORIGIN" "$HOOK_CLONE" 2>/dev/null
 git -C "$HOOK_CLONE" config user.name Test; git -C "$HOOK_CLONE" config user.email t@example.com
@@ -562,6 +567,9 @@ HOOK_SILENT="$(git -C "$HOOK_CLONE" pull -q --ff-only 2>&1)"; HOOK_RC=$?
 [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_SILENT" ] && ok "the hook stays silent when the toolkit command is absent" || bad "the hook stays silent when the toolkit command is absent"
 check "the shipped hook carries the managed marker" "grep -q '^# ai-devops-managed: reviewer auto-requalification' '$ROOT/hooks/post-merge'"
 check "the shipped hook fails hard when its exec target is missing" "grep -q '^set -euo pipefail' '$ROOT/hooks/post-merge'"
+
+check "synthetic hook pulls record only in the fixture state log" "grep -qF '$HOOK_CLONE' '$HOOKTEST/task-gates/unprotected-advances.log' && [ \"\$(cat '$LIVE_ADV_LOG' 2>/dev/null | sha256sum)\" = '$LIVE_ADV_BEFORE' ]"
+unset AI_TASK_GATES_DIR
 
 echo '== managed hook installer (#804)'
 HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
