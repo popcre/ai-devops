@@ -634,26 +634,35 @@ decide_local_tests_required(){
 # Every approval call site must be preceded by a decide_local_tests_required
 # in its function; the task-gates unit test enforces that source ordering.
 
-# Application source-release admission is intentionally one closed target.
+# Application source-release admission is a closed four-target map. Backend's
+# existing proof path is unchanged; only the three new targets get extra proofs.
 APP_RELEASE_MANIFEST_PATH='.ai-devops/application-release-target.json'
 APP_RELEASE_CONSUMER_GATE='cloud-build-release-review'
 APP_RELEASE_EXPECTED_TARGET='{"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"}'
 APP_RELEASE_MANIFEST_BLOB=''; APP_RELEASE_CONSUMER_BLOB=''; APP_RELEASE_HEAD=''
+APP_RELEASE_PREFLIGHT=''; APP_RELEASE_PROOF=''
+APP_RELEASE_SERVICES='{"popcre/designflow-backend":"popcre-albert-core-sandbox","popcre/designflow-frontend":"popcre-albert-frontend-sandbox","popcre/designflow-item-master":"popcre-albert-item-sandbox","popcre/designflow-tracking":"popcre-albert-tracking-sandbox"}'
+
+application_release_supplement(){
+  local py
+  py="$(command -v python3 || command -v python)" || return 1
+  "$py" "$ROOT/tools/application_source_release.py" "$@"
+}
 
 validate_application_release_policy(){
-  jq -e '
+  jq -e --argjson services "$APP_RELEASE_SERVICES" '
     .application_source_releases as $r
     | .reviewer_release as $rr
-    | ($r|type=="object" and keys==["popcre/designflow-backend"])
-    and ($r["popcre/designflow-backend"]
+    | ($r|type=="object") and (($r|keys)==($services|keys))
+    and all($services|to_entries[]; . as $entry | $r[$entry.key]
       | type=="object"
         and (keys==["manifest_path","required_consumer_gate","target"])
         and .manifest_path==".ai-devops/application-release-target.json"
         and .required_consumer_gate=="cloud-build-release-review"
-        and .target=={"schema_version":1,"repository":"popcre/designflow-backend","route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":"popcre-albert-core-sandbox"})
+        and .target=={"schema_version":1,"repository":$entry.key,"route":"cloud-build-branch-push","branch":"sandbox-albert","project":"lithe-breaker-323913","region":"us-east4","service":$entry.value})
     and ($rr.deploy.deployment == null)
   ' "$POLICY_FILE" >/dev/null 2>&1 \
-    || fail_closed 'application source-release policy is missing, open, or differs from its single approved sandbox target.'
+    || fail_closed 'application source-release policy is missing, open, or differs from its four exact approved sandbox targets.'
 }
 
 application_release_json_valid(){ # RELATIVE_PATH ROLE
@@ -721,18 +730,19 @@ application_release_file_blob(){ # REPOSITORY_RELATIVE_PATH
 }
 
 application_release_validate_target(){ # SUPPLIED_PATH EFFECTIVE_CLASS
-  local supplied="$1" effective="$2" origin consumer_relative="$CONSUMER_FILE_NAME"
+  local supplied="$1" effective="$2" origin contributor proof consumer_relative="$CONSUMER_FILE_NAME"
   validate_application_release_policy
   [ "$supplied" = "$APP_RELEASE_MANIFEST_PATH" ] \
     || blocked 'ai-task-gates: STOP. Application release manifest path differs from the centrally approved path.'
-  [ "$IDENTITY" = 'popcre/designflow-backend' ] && [ "$effective" = deployment ] \
-    || blocked 'ai-task-gates: STOP. Application source release is limited to canonical popcre/designflow-backend with effective class deployment.'
+  jq -e --arg id "$IDENTITY" 'has($id)' <<< "$APP_RELEASE_SERVICES" >/dev/null && [ "$effective" = deployment ] \
+    || blocked 'ai-task-gates: STOP. Application source release is limited to canonical popcre/designflow-backend or the three exact new sandbox targets with effective class deployment.'
+  APP_RELEASE_EXPECTED_TARGET="$(jq -c --arg id "$IDENTITY" '.application_source_releases[$id].target' "$POLICY_FILE")"
   origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
   case "$origin" in
-    https://github.com/popcre/designflow-backend|https://github.com/popcre/designflow-backend.git|\
-    git@github.com:popcre/designflow-backend|git@github.com:popcre/designflow-backend.git|\
-    ssh://git@github.com/popcre/designflow-backend|ssh://git@github.com/popcre/designflow-backend.git) ;;
-    *) blocked 'ai-task-gates: STOP. Application source release requires the canonical popcre/designflow-backend GitHub origin.' ;;
+    "https://github.com/$IDENTITY"|"https://github.com/$IDENTITY.git"|\
+    "git@github.com:$IDENTITY"|"git@github.com:$IDENTITY.git"|\
+    "ssh://git@github.com/$IDENTITY"|"ssh://git@github.com/$IDENTITY.git") ;;
+    *) blocked 'ai-task-gates: STOP. Application source release requires the exact canonical GitHub origin.' ;;
   esac
   application_release_json_valid "$consumer_relative" consumer \
     || blocked 'ai-task-gates: STOP. The committed consumer declaration must be a contained regular file and require cloud-build-release-review for deployment.'
@@ -744,6 +754,21 @@ application_release_validate_target(){ # SUPPLIED_PATH EFFECTIVE_CLASS
     || blocked 'ai-task-gates: STOP. The application release manifest must be a regular clean file committed at HEAD.'
   APP_RELEASE_HEAD="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
     || blocked 'ai-task-gates: STOP. Application release source HEAD is unavailable.'
+  if [ "$IDENTITY" != popcre/designflow-backend ]; then
+    [ "$APP_RELEASE_PREFLIGHT" = "$IDENTITY" ] \
+      || blocked 'ai-task-gates: STOP. New application release did not pass pre-discovery confinement.'
+    for contributor in "${CONTRIBUTORS[@]}"; do
+      case "$(printf '%b' "$contributor")" in
+        shared-db$'\t'*|infrastructure$'\t'*|production$'\t'*|private-evidence$'\t'*)
+          blocked 'ai-task-gates: STOP. New application source release cannot contain structural, infrastructure, production or private-evidence contributors.' ;;
+      esac
+    done
+    proof="$(application_release_supplement prove "$TOPLEVEL" "$IDENTITY" "$(state_field base)")" \
+      || blocked 'ai-task-gates: STOP. New application source-release proof refused.'
+    [ -z "$APP_RELEASE_PROOF" ] || [ "$APP_RELEASE_PROOF" = "$proof" ] \
+      || blocked 'ai-task-gates: STOP. Application context or fresh remote proof moved during admission.'
+    APP_RELEASE_PROOF="$proof"
+  fi
 }
 
 application_release_finish(){ # REPORT EFFECTIVE_CLASS
@@ -767,6 +792,9 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
   [ "$summary_after" = "$summary" ] \
     || blocked 'ai-task-gates: STOP. Application approval evidence changed during release proof validation.'
   reason="head=$head manifest_blob=$APP_RELEASE_MANIFEST_BLOB consumer_blob=$APP_RELEASE_CONSUMER_BLOB approval=$summary"
+  if [ "$IDENTITY" != popcre/designflow-backend ]; then
+    reason="$reason repository=$IDENTITY target=$APP_RELEASE_EXPECTED_TARGET proof=$APP_RELEASE_PROOF"
+  fi
   state_record_override application-source-release deploy "$reason" "$effective" \
     && state="$(state_path)" \
     && jq -e --arg r "$reason" --arg c "$effective" \
@@ -1287,6 +1315,11 @@ cmd_check(){
     [ -z "$acknowledge$small_entry$small_rows$small_quote$target_head$installed_checkout$installed_launcher" ] \
       && [ "$first_install" -eq 0 ] \
       || blocked 'ai-task-gates: STOP. --application-release-target cannot be combined with acknowledge, small-owner-entry, or toolkit installation arguments.'
+    # No Git invocation/discovery has happened yet. Backend stays on its
+    # original path; a new target must pass confinement before classification.
+    APP_RELEASE_PREFLIGHT="$(application_release_supplement preflight "$PWD")" \
+      || blocked 'ai-task-gates: STOP. New source-release pre-discovery confinement refused.'
+    APP_RELEASE_PROOF=''
   fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"

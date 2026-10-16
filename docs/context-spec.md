@@ -120,13 +120,28 @@ lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 row in the change set keeps the action sealed, and it opens no other action.
 
 The central `application_source_releases` map is a separate source-only route for
-the single reviewed DesignFlow backend sandbox target. `deploy` can reach its
+four exact DesignFlow sandbox targets: backend (core), tracking, frontend, and
+Item Master (item). `deploy` can reach each application's
 existing Cloud Build branch-source push only with the exact committed central
 manifest, a committed consumer declaration requiring `cloud-build-release-review`,
 and an independent lifecycle-recorded exact-head `final-check` or
 `security-review` APPROVE. It does not authorize manual cloud changes or weaken
 any other protected action; without the explicit target flag, generic refusal
 remains in force.
+
+Backend retains its original admission and platform behavior. The three new
+targets require qualified Linux, actual `sandbox-albert` branch, a recorded base
+equal to the unique merge-base with current `origin/develop`, complete ancestry,
+and no structural/infrastructure/production/private contributors. The native
+`tools/application_source_release.py` proof refuses Git context injection before
+discovery. It reads the canonical GitHub develop ref through the installed,
+provenance-verified `ai-gh` helper and `/usr/bin/gh`, twice around admission;
+network failure, ref drift, source/helper movement or malformed responses refuse
+without a receipt. Existing SSH/proxy/authentication settings remain usable;
+normal fetch is outside the gate. No runtime test override, production target,
+manual cloud mutation, or broader application-workflow is added. Source admission
+is not deployment/live acceptance; DesignFlow's existing no-self-merge and PR
+rules remain unchanged. See the [scoped plan](../plan_exact-designflow-sandbox-source-releases.md).
 
 The separate `application-workflow` action admits only the authenticated HTS
 Alsand sandbox workflow for backend issue94. It requires a clean committed

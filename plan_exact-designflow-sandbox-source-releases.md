@@ -7,12 +7,12 @@ codex/exact-sandbox-release.
 
 | Step | State (2026-10-16) | Evidence / next gate |
 |---|---|---|
-| Independent design review | open | This document; require explicit technical APPROVE and coordinator acceptance before implementation |
-| Strict implementation and tests | open | No implementation authorized yet |
+| Independent design review | done | Native Muse ca14d6abd4bfb6438939ba9ff3e5a2e4a540d22b APPROVE; coordinator accepted and authorized exact scope |
+| Strict implementation and tests | partial | tools/application_source_release.py, tests/test_application_source_release.py and tests/test-ai-task-gates.sh; final checks/review remain |
 | Final review, PR, queue, protected installation | open | No PR/push/install authorized yet |
 | Consumer adoption and live proof | open | Same issue retains live-proof checklist |
 
-Fresh session starts at independent design review. Registered handoff: [design
+Fresh session starts at final implementation checks/review. Registered handoff: [design
 handoff](HANDOFF.d/2026-10-16T0419Z-edge-dev3-codex-exact-sandbox-release.md).
 
 ## 1. Ultimate goal
@@ -155,7 +155,7 @@ GIT_WORK_TREE,
 existing
    managed authenticated GitHub helper. Exact fixed-host request is `api --hostname github.com --method GET
    repos/<validated-four-repository-identity>/git/ref/heads/develop`, no cache/pagination/template or caller
-   endpoint. Capture response and errors privately and bound each helper process to30 seconds, including
+   endpoint. Capture response and errors privately and bound each helper process to 30 seconds, including
    its existing quota admission. Reject timeout, HTTP/admission/auth error, duplicate JSON keys, malformed
    response or noncommit. Require exact ref refs/heads/develop, object.type commit and 40-hex object.sha;
    validate response URL identity if present, never follow a caller-supplied URL. Compare SHA with local

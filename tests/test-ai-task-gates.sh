@@ -1350,6 +1350,43 @@ check 'an action-gate naming an undeclared class fails closed' \
 
 # The application exception is an exact committed source target, not a generic
 # release of deployment actions or the reviewer-safety refusal.
+check 'new source-release proof module passes offline real-graph and mocked API tests' \
+  "'$PY_BIN' '$ROOT/tests/test_application_source_release.py'"
+
+for new_repo in designflow-tracking designflow-frontend designflow-item-master; do
+  NEW_APP="$TMP/$new_repo-release"
+  newrepo "$NEW_APP" "popcre/$new_repo"
+  NEW_BASE="$(git -C "$NEW_APP" rev-parse HEAD)"
+  mkdir -p "$NEW_APP/.ai-devops" "$NEW_APP/supabase"
+  jq --arg repo "popcre/$new_repo" '.application_source_releases[$repo].target' \
+    "$ROOT/config/task-gates.json" > "$NEW_APP/.ai-devops/application-release-target.json"
+  printf '%s\n' '{"schema_version":1,"gates":{"deployment":{"required":["cloud-build-release-review"]}}}' \
+    > "$NEW_APP/.ai-devops/task-gates.json"
+  printf '%s\n' '-- actual owned structural delta, not an inherited mirror' > "$NEW_APP/supabase/owned.sql"
+  git -C "$NEW_APP" add .ai-devops supabase && git -C "$NEW_APP" commit -qm 'new target structural refusal fixture'
+  ( cd "$NEW_APP" && "$GATES" start --class deployment --base "$NEW_BASE" >/dev/null 2>&1 )
+  check "$new_repo cannot hide an actual shared-db contributor behind deployment rank" \
+    "out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json 2>&1 | grep -q 'cannot contain structural'"
+  check "$new_repo no receipt is published by structural refusal" \
+    "! jq -e '.overrides | any(.kind==\"application-source-release\")' \"\$(state_file_for '$NEW_APP')\" >/dev/null"
+  NEW_STATE="$(state_file_for "$NEW_APP")"
+  jq '.overrides=[{kind:"application-source-release",action:"deploy",observed_class:"deployment",reason:"legacy backend receipt"}]' \
+    "$NEW_STATE" > "$NEW_STATE.fixture"
+  mv "$NEW_STATE.fixture" "$NEW_STATE"
+  cp "$NEW_STATE" "$NEW_STATE.before"
+  git -C "$NEW_APP" rm -q supabase/owned.sql && git -C "$NEW_APP" commit -qm 'no owned structural delta remains'
+  check "$new_repo old backend receipt cannot authorize an off-branch new-target release" \
+    "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json && cmp -s '$NEW_STATE' '$NEW_STATE.before'"
+  check "$new_repo Git directory injection is refused before discovery" \
+    "(cd '$NEW_APP' && GIT_DIR='/not/a/repository' '$GATES' check --before deploy --application-release-target .ai-devops/application-release-target.json 2>&1) | grep -q 'pre-discovery confinement refused'"
+  # A forged backend manifest cannot switch source identity to the old route.
+  jq '.application_source_releases["popcre/designflow-backend"].target' \
+    "$ROOT/config/task-gates.json" > "$NEW_APP/.ai-devops/application-release-target.json"
+  git -C "$NEW_APP" add .ai-devops/application-release-target.json && git -C "$NEW_APP" commit -qm 'forged backend target'
+  check "$new_repo forged backend manifest cannot acquire a new-target receipt" \
+    "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+done
+
 APP="$TMP/application-release"
 newrepo "$APP" popcre/designflow-backend
 APP_BASE="$(git -C "$APP" rev-parse HEAD)"
