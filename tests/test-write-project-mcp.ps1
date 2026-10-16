@@ -143,13 +143,24 @@ try {
   $rootE = Join-Path $testRoot "epsilon"
   New-Item -ItemType Directory -Force -Path $rootE | Out-Null
   git -C $rootE init -q 2>$null
-  $codex = [ordered]@{ "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 } }
-  $catalogE = @{ "trigger" = @{ command = "catA" }; "vercel" = @{ type = "http"; url = "https://mcp.vercel.com" } }
-  & $writer -Scope ([ordered]@{ "epsilon" = @("trigger", "vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
+  $codex = [ordered]@{
+    "recall-ai" = [ordered]@{
+      command = "cmd"
+      args = @("/c", 'C:\local\mcp-remote-launch.cmd', "https://us-east-1.recall.ai/mcp",
+        "op://vibe_coding/recall-ai MCP/password", "--transport", "http-first")
+      startup_timeout_sec = 20
+    }
+    "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 }
+  }
+  $catalogE = @{ "trigger" = @{ command = "catA" }; "recall-ai" = @{ command = "cmd"; args = @("r") }; "vercel" = @{ type = "http"; url = "https://mcp.vercel.com" } }
+  & $writer -Scope ([ordered]@{ "epsilon" = @("trigger", "recall-ai", "vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
     -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
   $toml = Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")
   Assert-True ($toml.Contains('[mcp_servers."vercel"]') -and $toml.Contains("url = 'https://mcp.vercel.com'") -and
     $toml.Contains("startup_timeout_sec = 20")) "E: Codex project config carries vercel natively"
+  Assert-True ($toml.Contains('[mcp_servers."recall-ai"]') -and
+    $toml.Contains("args = ['/c', 'C:\local\mcp-remote-launch.cmd', 'https://us-east-1.recall.ai/mcp', 'op://vibe_coding/recall-ai MCP/password', '--transport', 'http-first']")) `
+    "E: Codex project config keeps Recall's command arguments as an array"
   Assert-True (-not $toml.Contains("trigger")) "E: names without a Codex definition stay out of the Codex file"
   $e = Read-Json (Join-Path $rootE ".mcp.json")
   Assert-True ($e["mcpServers"]["vercel"]["type"] -eq "http") "E: Claude Code gets vercel as native http"
