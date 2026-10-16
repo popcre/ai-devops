@@ -9,13 +9,13 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-r
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|
 | 1 | Freeze incident inventory, current versions and ownership | done — 2026-10-16 ([inventory](tests/verification/reviewer-recurrence/step1-inventory-2026-10-16.md)) | Private exact-ID inventory with digest; sanitized mapping and version manifest |
-| 2 | Reproduce receipt conflict and evidence-recovery interference | open — 2026-10-15 | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
-| 3 | Repair Muse Linux installation pin, completion and interruption recovery | open — 2026-10-15 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
-| 4 | Repair StepFun report contract and large-input/runtime residuals | open — 2026-10-15 | Single-decision contract tests plus complete-context live review |
+| 2 | Reproduce receipt conflict and evidence-recovery interference | done — 2026-10-16: cause was preparatory verify publishing the receipt early; repaired by PR1799 with fixture; sweep cannot refuse a review | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
+| 3 | Repair Muse Linux installation pin, completion and interruption recovery | pin: no re-pin needed, Muse Code (Linux) PASS at 1aefa959 (2026-10-16); completion/interruption stays with #674 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
+| 4 | Repair StepFun report contract and large-input/runtime residuals | report contract done — PR1812 (2026-10-16); live proof blocked by StepFun out-of-credit hold | Single-decision contract tests plus complete-context live review |
 | 5 | Finish demonstrated DeepSeek/GLM readiness and recovery gaps | open — 2026-10-15 | Current-source reproductions and owner-linked fixes or verified existing repair |
-| 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | open — 2026-10-15 | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
-| 7 | Review, merge, install and prove original capabilities | open — 2026-10-15 | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
-| 8 | Sustained acceptance, incident reconciliation and retirement | open — 2026-10-15 | Real >=24-hour interval, per-provider samples, failure accounting, issue checklist |
+| 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | housekeeping PR1810 and hook-test isolation PR1811 done (2026-10-16); Grok suite already non-gating (PR1778) | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
+| 7 | Review, merge, install and prove original capabilities | partial — installed 1aefa959 on edge-dev3 2026-10-16; cold reviews Muse/DeepSeek/GLM APPROVE; follow-up/fresh-process matrix and StepFun open | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
+| 8 | Sustained acceptance, incident reconciliation and retirement | observing — window opened 2026-10-16 1:00 PM EDT, closes no earlier than 2026-10-17 1:00 PM EDT | Real >=24-hour interval, per-provider samples, failure accounting, issue checklist |
 
 Fresh session starts at **step 1**, taking ownership on #1783 after checking for a current coordinator. Steps 2–6 are proposals until discriminating fixtures establish the defect. This plan covers a new recurrence after #1562; it does not undo that programme's verified delivery. All rows describe repair work, not completion of this document.
 
