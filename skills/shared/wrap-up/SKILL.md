@@ -93,13 +93,15 @@ Do not treat a handoff note, a stopped chat, `capacity_state: relinquished`,
 lease expiry, or an owner-issued handoff-ready receipt as successful closeout.
 They can leave exact-object reservations held and prevent other sessions working.
 
-Before ending, every owned claim must be either natively released or **actually
-accepted by a verified successor**. If there is no accepted successor, preserve
+Before ending, verify the following. Every owned item must be either natively
+released or **actually accepted by a verified successor**. If there is no accepted successor, preserve
 and publish source/evidence, park the open PRs without deleting branches, and
 execute native ordinary `--release-claim` as the exact owner. Use the merged
 `--park` option where available; otherwise close preserved PRs with resume notes
 before the ordinary release. Never retire unfinished source, reuse a version,
 remove protection by hand, fake expiry, or claim the application outcome complete.
+For a known successor, that actual session accepts the exact ready receipt.
+Preserve dirty or remote work through the governed recovery route before release.
 `--stop-author` is only an intermediate step during an actual transfer; do not
 end the session with its reservation idle.
 

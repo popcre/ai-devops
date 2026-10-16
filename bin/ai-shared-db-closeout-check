@@ -2,6 +2,11 @@
 # Read-only final check: the current session must own no open shared-db claim or stage.
 set -uo pipefail
 
+SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd -P)"
+AI_SHARED_DB_CLOSEOUT_GH="$ROOT/bin/ai-gh"
+export AI_SHARED_DB_CLOSEOUT_GH
+
 python3 - "$@" <<'PY'
 import argparse
 import json
@@ -9,12 +14,13 @@ import os
 import re
 import subprocess
 import sys
+from urllib.parse import quote
 
 REPO = "popcre/shared-db"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-OWNER_CHAT = re.compile(r"^(?:Codex|Claude) chat ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) on [A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
-OWNER_AT_CHAT = re.compile(r"^(?:codex|claude)-chat-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
-OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$")
+OWNER_CHAT = re.compile(r"^(?:Codex|Claude) chat ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) on [A-Za-z0-9][A-Za-z0-9._-]{0,119}$", re.IGNORECASE)
+OWNER_AT_CHAT = re.compile(r"^(?:codex|claude)-chat-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@[A-Za-z0-9][A-Za-z0-9._-]{0,119}$", re.IGNORECASE)
+OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$", re.IGNORECASE)
 STAGES = {
     "preview": ("preview", "preview-recovery", "preview-rehearsal"),
     "merge": ("merge",),
@@ -35,10 +41,11 @@ def run_gh(args):
 
 def gh_call(args):
     try:
-        command = ["gh", *args]
+        command = [os.environ["AI_SHARED_DB_CLOSEOUT_GH"], *args]
         if len(args) >= 1 and args[0] == "api":
-            command = ["gh", "api", "--hostname", "github.com", *args[1:]]
-        return subprocess.run(command, text=True, capture_output=True, check=False, timeout=60)
+            command = [os.environ["AI_SHARED_DB_CLOSEOUT_GH"], "api", "--hostname", "github.com", *args[1:]]
+        return subprocess.run(command, text=True, capture_output=True, check=False, timeout=60,
+                              env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
     except subprocess.TimeoutExpired as exc:
         raise CheckError("GitHub request timed out") from exc
     except OSError as exc:
@@ -64,11 +71,15 @@ def resolve_session(explicit):
     return candidates[0]
 
 
-def owner_session(owner):
-    if UUID.fullmatch(owner):
-        return owner
+def owner_session(owner, actual_session):
+    if UUID.fullmatch(owner.lower()):
+        return owner.lower()
     match = OWNER_CHAT.fullmatch(owner) or OWNER_AT_CHAT.fullmatch(owner) or OWNER_ADOPTION.fullmatch(owner)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1).lower()
+    if re.search(rf"(?<![A-Za-z0-9]){re.escape(actual_session)}(?![A-Za-z0-9])", owner, re.IGNORECASE):
+        raise CheckError("owner label contains this session UUID in an unsupported format")
+    return None
 
 
 def parse_claim_owner(body):
@@ -131,24 +142,54 @@ def open_claim_pages():
     try:
         pages = json.loads(run_gh([
             "api", "--paginate", "--slurp",
-            f"repos/{REPO}/issues?state=open&per_page=100&labels=db-claim",
+            f"repos/{REPO}/issues?state=open&per_page=100",
         ]))
     except json.JSONDecodeError as exc:
         raise CheckError("GitHub returned malformed claim pages") from exc
     if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
         raise CheckError("GitHub claim pages have an invalid shape")
     claims = []
+    issue_count = 0
     for page in pages:
         for item in page:
             if not isinstance(item, dict):
                 raise CheckError("GitHub returned a malformed claim issue")
             if "pull_request" in item:
                 continue
-            if (not isinstance(item.get("number"), int) or item["number"] < 1
-                    or item.get("state") != "open" or not isinstance(item.get("body"), str)):
+            if (not isinstance(item.get("number"), int) or isinstance(item.get("number"), bool)
+                    or item["number"] < 1 or item.get("state") != "open"):
                 raise CheckError("GitHub returned a malformed claim issue")
-            claims.append(item)
-    return claims
+            labels = item.get("labels")
+            if not isinstance(labels, list) or any(
+                    not isinstance(label, dict) or not isinstance(label.get("name"), str)
+                    for label in labels):
+                raise CheckError("GitHub returned malformed issue labels")
+            issue_count += 1
+            is_claim = any(label["name"] == "db-claim" for label in labels)
+            if is_claim:
+                if not isinstance(item.get("body"), str):
+                    raise CheckError("GitHub returned a malformed claim issue")
+                claims.append(item)
+            elif isinstance(item.get("body"), str) and re.search(r"```db-author-lease\s*\n", item["body"]):
+                raise CheckError("an open issue has an author lease but is missing the db-claim label")
+    if issue_count == 0:
+        raise CheckError("open issue listing contained no issues; refusing to treat claims as empty")
+    if not claims:
+        query = "repo:popcre/shared-db is:issue is:open label:db-claim"
+        search_path = f"search/issues?q={quote(query, safe='')}&per_page=100"
+        search = api_json(search_path)
+        if (not isinstance(search, dict) or isinstance(search.get("total_count"), bool)
+                or not isinstance(search.get("total_count"), int) or search["total_count"] < 0
+                or search.get("incomplete_results") is not False
+                or not isinstance(search.get("items"), list)
+                or any(not isinstance(row, dict) or not isinstance(row.get("number"), int)
+                       or isinstance(row.get("number"), bool)
+                       for row in search["items"])
+                or (search["total_count"] == 0 and search["items"])):
+            raise CheckError("db-claim search cross-check was malformed")
+        if search["total_count"] != 0:
+            raise CheckError("open issue listing reports no db-claim labels but GitHub search found open db-claim issues")
+    return claims, issue_count
 
 
 def read_stage(stage, kinds):
@@ -189,22 +230,23 @@ def main():
         auth = gh_call(["auth", "status", "--hostname", "github.com"])
         if auth.returncode != 0:
             raise CheckError("GitHub authentication is unavailable")
-        claims = open_claim_pages()
+        claims, issue_count = open_claim_pages()
         matching_claims = []
         for item in claims:
             owner = parse_claim_owner(item["body"])
-            if owner_session(owner) == session:
+            if owner_session(owner, session) == session:
                 matching_claims.append({"issue": item["number"]})
         stages = []
         for stage, kinds in STAGES.items():
             holder = read_stage(stage, kinds)
-            if holder is not None and (owner_session(holder["holder_id"]) == session
-                                       or owner_session(holder["owner"]) == session):
+            if holder is not None and (owner_session(holder["holder_id"], session) == session
+                                       or owner_session(holder["owner"], session) == session):
                 stages.append({"stage": stage})
         summary = {
             "ok": not matching_claims and not stages,
             "session_id": session,
             "open_claims_checked": len(claims),
+            "open_issues_seen": issue_count,
             "stages_checked": len(STAGES),
             "blocking_claims": matching_claims,
             "blocking_stages": stages,

@@ -46,12 +46,14 @@ and exclusive stages, stop its writers, and verify each outcome:
   Otherwise, close (do not delete) the preserved branch's open PRs with a resume
   note, then perform the native ordinary release. Never add `--retire`, delete a
   branch, reuse a migration version, or imply the application work is complete.
-- Known, active successor: the actual recipient accepts native ownership and
-  verifies its identity, source, reservation, exact-object protection and bounded
-  permission. `--stop-author` plus a handoff-ready receipt may be an intermediate
+- Known successor: that actual recipient uses the native handoff operation and
+  accepts ownership, then verifies its identity, source, reservation,
+  exact-object protection and bounded
+  permission. During transfer, `--stop-author` publishes a
+  create-only owner-issued handoff-ready receipt. This is an intermediate
   transfer step; it is **not finished closeout**. If acceptance has not happened
   before this session ends, park and ordinarily release instead of retaining an
-  idle reservation. Never impersonate the predecessor or recipient.
+  idle reservation. Do not impersonate the predecessor or recipient.
 - Dirty, remote, legacy or ambiguous custody: preserve unique bytes through the
   governed route and record the precise refusal on the same issue. Never delete
   source/object/version protection or fake expiry. Release only finished stages

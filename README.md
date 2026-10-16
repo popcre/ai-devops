@@ -300,6 +300,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops paths` | Print the paths this toolkit uses |
 | `az-mail rest --method GET --url <Graph mail URL>` | Read Albert's mailbox through the separate profile on an enabled Dev computer |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
+| `ai-shared-db-closeout-check` | Refuses wrap-up while the current session still owns an open shared-db reservation or exclusive stage; read-only, fails closed on unreadable evidence. |
 | `ai-housekeeping` | Read-only inventory of housekeeping candidates (worktrees, branches, handoffs, plans, job records) |
 | `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |
 | `ai-review <provider> <mode>` | Start a gated review; the only supported front door (registry decides the pool) |

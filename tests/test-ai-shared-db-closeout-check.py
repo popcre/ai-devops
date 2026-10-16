@@ -19,10 +19,17 @@ def issue(number, owner, state="active", expires="2026-10-14T00:00:00Z", suffix=
     return {
         "number": number,
         "state": "open",
+        "labels": [{"name": "db-claim"}],
         "body": ("```db-claim\nversion: 20261015000000\nwrites:\n  - table core.widget\n```\n"
                  f"```db-author-lease\nowner: {owner}\nbranch: codex/test\nworktree: /tmp/test\n"
                  f"expires_at: {expires}\ncapacity_state: {state}\n```{suffix}"),
     }
+
+
+def nonclaim_issue(number, labels=None):
+    return {"number": number, "state": "open",
+            "labels": [{"name": label} for label in (labels if labels is not None else ["triage"])],
+            "body": "ordinary open issue"}
 
 
 def stage_message(holder="github-actions:555", kind="preview", owner="none"):
@@ -40,11 +47,14 @@ class CloseoutCheck(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        bindir = self.root / "bin"
-        bindir.mkdir()
+        self.repo = self.root / "repo"
+        bindir = self.repo / "bin"
+        bindir.mkdir(parents=True)
         self.calls = self.root / "calls.jsonl"
         self.data = self.root / "data.json"
-        gh = bindir / "gh"
+        self.checker = bindir / "ai-shared-db-closeout-check"
+        self.checker.write_bytes(CHECKER.read_bytes())
+        gh = bindir / "ai-gh"
         gh.write_text(r'''#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
@@ -60,7 +70,9 @@ for entry in data.get("failures", []):
     if entry["path"] == path:
         print(entry.get("stderr", "gh: API failure"), file=sys.stderr); sys.exit(entry.get("code", 1))
 if path.startswith("repos/popcre/shared-db/issues?"):
-    output = data.get("claim_pages", [[]])
+    output = data.get("open_pages", [[{"number": 900, "state": "open", "labels": [{"name": "triage"}], "body": "ordinary open issue"}]])
+elif path.startswith("search/issues?"):
+    output = data.get("search", {"total_count": 0, "incomplete_results": False, "items": []})
 elif "/git/ref/" in path:
     stage = path.rsplit("/", 1)[-1]
     record = data.get("stages", {}).get(stage)
@@ -79,6 +91,7 @@ for suffix, raw in malformed.items():
 print(json.dumps(output))
 ''', encoding="utf-8")
         gh.chmod(0o755)
+        self.checker.chmod(0o755)
         self.env = os.environ.copy()
         self.env.update({
             "PATH": f"{bindir}{os.pathsep}{self.env.get('PATH', '')}",
@@ -86,13 +99,14 @@ print(json.dumps(output))
             "FAKE_GH_DATA": str(self.data),
             "CODEX_THREAD_ID": SESSION,
         })
-        self.write_data({"claim_pages": [[]], "stages": {}, "messages": {}})
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
+                         "stages": {}, "messages": {}})
 
     def write_data(self, data):
         self.data.write_text(json.dumps(data), encoding="utf-8")
 
     def run_check(self, *args, env=None):
-        return subprocess.run([str(CHECKER), *args], capture_output=True, text=True,
+        return subprocess.run([str(self.checker), *args], capture_output=True, text=True,
                               env=self.env if env is None else env, check=False)
 
     def summary(self, result):
@@ -134,7 +148,7 @@ print(json.dumps(output))
         for label, capacity, expires in rows:
             with self.subTest(state=label):
                 self.calls.unlink(missing_ok=True)
-                self.write_data({"claim_pages": [[issue(17, f"Codex chat {SESSION} on edge-dev", capacity, expires)]],
+                self.write_data({"open_pages": [[issue(17, f"Codex chat {SESSION} on edge-dev", capacity, expires)]],
                                  "stages": {}, "messages": {}})
                 result = self.run_check()
                 self.assertEqual(result.returncode, 1, result.stderr)
@@ -143,21 +157,104 @@ print(json.dumps(output))
     def test_relinquished_handoff_ready_claim_still_blocks_until_owner_changes(self):
         ready = issue(18, f"codex/{SESSION}-4152", "relinquished",
                       suffix="\n\nOwner handoff-ready receipt was recorded.")
-        self.write_data({"claim_pages": [[ready]], "stages": {}, "messages": {}})
+        self.write_data({"open_pages": [[ready]], "stages": {}, "messages": {}})
         result = self.run_check()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 18}])
 
+    def test_raw_uppercase_session_uuid_owner_is_normalized_and_blocks(self):
+        self.write_data({"open_pages": [[issue(19, SESSION.upper())]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 19}])
+
+    def test_unsupported_owner_label_with_session_uuid_fails_closed(self):
+        self.write_data({"open_pages": [[issue(20, f"legacy-owner={SESSION};retained")]],
+                         "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsupported format", self.summary(result)["error"])
+
     def test_foreign_owner_and_uuid_in_unrelated_issue_text_do_not_block(self):
         row = issue(21, f"Claude chat {FOREIGN} on edge-dev")
         row["body"] += f"\nOld session note: {SESSION}"
-        self.write_data({"claim_pages": [[row]], "stages": {}, "messages": {}})
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.summary(result)["ok"])
 
+    def test_zero_claims_uses_search_crosscheck(self):
+        self.write_data({"open_pages": [[nonclaim_issue(50)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
+                         "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.summary(result)["open_issues_seen"], 1)
+        self.assertTrue(any(args[-1].startswith("search/issues?") for args in self.calls_made()))
+
+    def test_nonclaim_issue_with_null_body_is_valid(self):
+        row = nonclaim_issue(59)
+        row["body"] = None
+        self.write_data({"open_pages": [[row]], "search": {"total_count": 0, "incomplete_results": False,
+                                                               "items": []}, "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_empty_or_pr_only_issue_listing_fails_closed(self):
+        for pages in ([], [[]], [[{"number": 51, "pull_request": {"url": "https://api.github.com/pulls/51"}}]]):
+            with self.subTest(pages=pages):
+                self.calls.unlink(missing_ok=True)
+                self.write_data({"open_pages": pages, "stages": {}, "messages": {}})
+                result = self.run_check()
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("contained no issues", self.summary(result)["error"])
+                self.assertFalse(any(args[-1].startswith("search/issues?") for args in self.calls_made()))
+
+    def test_nonclaim_listing_must_agree_with_search(self):
+        self.write_data({"open_pages": [[nonclaim_issue(52)]],
+                         "search": {"total_count": 1, "incomplete_results": False, "items": [{"number": 53}]},
+                         "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("search found open db-claim", self.summary(result)["error"])
+
+    def test_unlabelled_claim_body_fails_closed(self):
+        row = nonclaim_issue(54)
+        row["body"] = "```db-author-lease\nowner: " + SESSION + "\n```"
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("missing the db-claim label", self.summary(result)["error"])
+
+    def test_malformed_issue_labels_fail_closed(self):
+        for labels in (None, "db-claim", ["db-claim"], [{"name": 17}]):
+            with self.subTest(labels=labels):
+                row = nonclaim_issue(55)
+                if labels is None:
+                    row.pop("labels")
+                else:
+                    row["labels"] = labels
+                self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+                result = self.run_check()
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("malformed issue labels", self.summary(result)["error"])
+
+    def test_wrong_label_does_not_match_db_claim(self):
+        self.write_data({"open_pages": [[nonclaim_issue(56, ["db-claim-extra"])]],
+                         "search": {"total_count": 0, "incomplete_results": False, "items": []}, "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.summary(result)["open_claims_checked"], 0)
+
+    def test_pull_requests_are_excluded_from_issue_label_validation(self):
+        pr = {"number": 57, "pull_request": {"url": "https://api.github.com/pulls/57"}}
+        self.write_data({"open_pages": [[pr, nonclaim_issue(58)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
+                         "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.summary(result)["open_issues_seen"], 1)
+
     def test_paginated_owned_claim_blocks(self):
-        self.write_data({"claim_pages": [[issue(31, f"codex-chat-{FOREIGN}@edge-dev")],
+        self.write_data({"open_pages": [[issue(31, f"codex-chat-{FOREIGN}@edge-dev")],
                                           [issue(32, f"codex/{SESSION}-4152", "relinquished")]],
                          "stages": {}, "messages": {}})
         result = self.run_check()
@@ -168,7 +265,7 @@ print(json.dumps(output))
 
     def test_owned_stage_holder_blocks(self):
         sha = "b" * 40
-        self.write_data({"claim_pages": [[]], "stages": {"preview": {"sha": sha}},
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {"preview": {"sha": sha}},
                          "messages": {sha: stage_message(SESSION)}})
         result = self.run_check()
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -176,7 +273,7 @@ print(json.dumps(output))
 
     def test_owned_stage_owner_label_blocks_with_foreign_workflow_holder(self):
         sha = "d" * 40
-        self.write_data({"claim_pages": [[]], "stages": {"preview": {"sha": sha}},
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {"preview": {"sha": sha}},
                          "messages": {sha: stage_message(owner=f"Claude chat {SESSION} on edge-dev")}})
         result = self.run_check()
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -184,18 +281,19 @@ print(json.dumps(output))
 
     def test_foreign_stage_owner_and_holder_substring_do_not_block(self):
         sha = "e" * 40
-        message = stage_message(holder=f"github-actions:{SESSION}",
+        message = stage_message(holder="github-actions:555",
                                 owner=f"Claude chat {FOREIGN} on edge-dev")
-        self.write_data({"claim_pages": [[]], "stages": {"preview": {"sha": sha}},
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {"preview": {"sha": sha}},
                          "messages": {sha: message}})
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.summary(result)["ok"])
 
     def test_authenticated_stage_404_is_absent(self):
-        self.write_data({"claim_pages": [[]], "stages": {}, "messages": {}})
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {}})
         env = self.env.copy()
         env["GH_HOST"] = "example.invalid"
+        env["AI_SHARED_DB_CLOSEOUT_GH"] = "/bin/false"
         result = self.run_check(env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.summary(result)["ok"])
@@ -205,13 +303,16 @@ print(json.dumps(output))
                 self.assertEqual(args[args.index("--hostname") + 1], "github.com")
 
     def test_api_failure_and_malformed_response_fail_closed(self):
-        endpoint = "repos/popcre/shared-db/issues?state=open&per_page=100&labels=db-claim"
+        endpoint = "repos/popcre/shared-db/issues?state=open&per_page=100"
         cases = [
-            ({"claim_pages": [[]], "stages": {}, "messages": {},
+            ({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {},
               "failures": [{"path": endpoint, "stderr": "gh: Forbidden (HTTP 403)"}]}, "GitHub request failed"),
-            ({"claim_pages": [[]], "stages": {}, "messages": {},
-              "malformed": {"issues?state=open&per_page=100&labels=db-claim": "{}"}},
+            ({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {},
+              "malformed": {"issues?state=open&per_page=100": "{}"}},
              "claim pages have an invalid shape"),
+            ({"open_pages": [[nonclaim_issue(900)]], "search": {"total_count": "0",
+              "incomplete_results": False, "items": []}, "stages": {}, "messages": {}},
+             "db-claim search cross-check was malformed"),
         ]
         for data, error in cases:
             with self.subTest(error=error):
@@ -223,7 +324,7 @@ print(json.dumps(output))
 
     def test_malformed_stage_commit_fails_closed(self):
         sha = "c" * 40
-        self.write_data({"claim_pages": [[]], "stages": {"preview": {"sha": sha}},
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {"preview": {"sha": sha}},
                          "messages": {sha: "unrecognized commit"}})
         result = self.run_check()
         self.assertEqual(result.returncode, 2)
