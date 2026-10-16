@@ -451,5 +451,96 @@ else
   bad "issue lookups not batched (list=$list_calls views=$view_calls) or classification wrong | $(grep -m1 'Handoffs (git-shared)' "$TMP/c15.out" || echo NO_SUMMARY) | calls: $(tr '\n' ';' < "$TMP/gh15-calls.log")"
 fi
 
+# ---------------------------------------------------------------------------
+# 16. Linux timer operations are idempotent and clean up temp files
+# ---------------------------------------------------------------------------
+if ! command -v schtasks.exe >/dev/null 2>&1; then
+case16="$TMP/timer"
+new_repo "$case16"
+cron_bin="$case16/cron-bin"
+cron_home="$case16/home"
+cron_tmp="$case16/tmp"
+cron_state="$case16/crontab.state"
+mkdir -p "$cron_bin" "$cron_home" "$cron_tmp"
+cat > "$cron_bin/crontab" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-l" ]]; then
+  [[ -f "$CRON_STATE" ]] && cat "$CRON_STATE" && exit 0
+  exit 1
+fi
+if [[ "${CRON_WRITE_FAIL:-0}" == 1 ]]; then
+  exit 7
+fi
+cat "$1" > "$CRON_STATE"
+STUB
+chmod +x "$cron_bin/crontab"
+cron_env=(PATH="$cron_bin:$PATH" HOME="$cron_home" TMPDIR="$cron_tmp"
+  AI_HOUSEKEEPING_LOG="$case16/housekeeping.log"
+  AI_HOUSEKEEPING_STATE_DIR="$case16/state" CRON_STATE="$cron_state")
+printf 'unrelated cron entry\n' > "$cron_state"
+set +e
+env "${cron_env[@]}" bash "$TOOL" schedule > "$TMP/c16-schedule-1.out" 2>&1
+c16s1=$?
+env "${cron_env[@]}" bash "$TOOL" schedule > "$TMP/c16-schedule-2.out" 2>&1
+c16s2=$?
+set -e
+managed_count="$(grep -cF '# ai-devops housekeeping' "$cron_state" || true)"
+if [[ "$c16s1" -eq 0 && "$c16s2" -eq 0 && "$managed_count" -eq 1 ]] &&
+   grep -qF 'unrelated cron entry' "$cron_state" &&
+   ! grep -qi 'unbound variable' "$TMP/c16-schedule-1.out" "$TMP/c16-schedule-2.out" &&
+   [[ -z "$(find "$cron_tmp" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  ok "schedule is idempotent, preserves unrelated cron, and cleans temporary files"
+else
+  bad "schedule regression (first=$c16s1 second=$c16s2 managed=$managed_count)"
+fi
+set +e
+env "${cron_env[@]}" bash "$TOOL" unschedule > "$TMP/c16-unschedule-1.out" 2>&1
+c16u1=$?
+env "${cron_env[@]}" bash "$TOOL" unschedule > "$TMP/c16-unschedule-2.out" 2>&1
+c16u2=$?
+set -e
+if [[ "$c16u1" -eq 0 && "$c16u2" -eq 0 ]] &&
+   grep -qF 'unrelated cron entry' "$cron_state" &&
+   ! grep -qF '# ai-devops housekeeping' "$cron_state" &&
+   ! grep -qi 'unbound variable' "$TMP/c16-unschedule-1.out" "$TMP/c16-unschedule-2.out" &&
+   [[ -z "$(find "$cron_tmp" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  ok "unschedule is repeatable, removes only the managed entry, and has no trap error"
+else
+  bad "unschedule regression (first=$c16u1 second=$c16u2)"
+fi
+printf 'unrelated cron entry\n' > "$cron_state"
+set +e
+env "${cron_env[@]}" CRON_WRITE_FAIL=1 bash "$TOOL" schedule > "$TMP/c16-schedule-write-fail.out" 2>&1
+c16sw=$?
+env "${cron_env[@]}" CRON_WRITE_FAIL=1 bash "$TOOL" unschedule > "$TMP/c16-unschedule-write-fail.out" 2>&1
+c16uw=$?
+set -e
+if [[ "$c16sw" -ne 0 && "$c16uw" -ne 0 ]] &&
+   ! grep -qi 'unbound variable' "$TMP/c16-schedule-write-fail.out" "$TMP/c16-unschedule-write-fail.out" &&
+   [[ -z "$(find "$cron_tmp" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  ok "crontab write failures return nonzero and clean temporary files"
+else
+  bad "crontab write failure regression (schedule=$c16sw unschedule=$c16uw)"
+fi
+mkdir -p "$case16/log-as-directory"
+cron_log_fail=(PATH="$cron_bin:$PATH" HOME="$cron_home" TMPDIR="$cron_tmp"
+  AI_HOUSEKEEPING_LOG="$case16/log-as-directory"
+  AI_HOUSEKEEPING_STATE_DIR="$case16/state" CRON_STATE="$cron_state")
+set +e
+env "${cron_log_fail[@]}" bash "$TOOL" schedule > "$TMP/c16-schedule-log-fail.out" 2>&1
+c16sl=$?
+env "${cron_log_fail[@]}" bash "$TOOL" unschedule > "$TMP/c16-unschedule-log-fail.out" 2>&1
+c16ul=$?
+set -e
+if [[ "$c16sl" -ne 0 && "$c16ul" -ne 0 ]] &&
+   ! grep -qi 'unbound variable' "$TMP/c16-schedule-log-fail.out" "$TMP/c16-unschedule-log-fail.out" &&
+   [[ -z "$(find "$cron_tmp" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  ok "log write failures return nonzero and clean temporary files"
+else
+  bad "log write failure regression (schedule=$c16sl unschedule=$c16ul)"
+fi
+
+fi # Linux/macOS cron branch; never register a real Windows Scheduled Task.
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

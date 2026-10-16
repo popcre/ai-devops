@@ -125,7 +125,8 @@ cron_job_line() {
     "$minute" "$hour" "$REPO_ROOT" "'$SELF'"
 }
 
-cmd_schedule() {
+# Run in a subshell so the EXIT cleanup trap can still see local tmp.
+cmd_schedule() (
   if command -v schtasks.exe >/dev/null 2>&1; then
     # Mirror bin/setup-machine.ps1 section 5d exactly: hidden VBS launcher,
     # 15-minute ExecutionTimeLimit, IgnoreNew, StartWhenAvailable, no wake.
@@ -181,9 +182,9 @@ cmd_schedule() {
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the housekeeping entry" >&2; return 2; }
   log "scheduled daily at $DAILY_AT in the user crontab"
-}
+)
 
-cmd_unschedule() {
+cmd_unschedule() (
   if command -v schtasks.exe >/dev/null 2>&1; then
     MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1
     local rc=$?
@@ -225,7 +226,7 @@ cmd_unschedule() {
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }
   log "removed the housekeeping crontab entry"
-}
+)
 
 # Timer subcommands never inventory and never touch repository artifacts.
 if [[ "$CMD" == "schedule" ]]; then
