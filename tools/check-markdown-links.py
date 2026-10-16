@@ -4,18 +4,29 @@ from __future__ import annotations
 import pathlib, re, subprocess, sys, urllib.parse
 
 root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-tracked = subprocess.run(
-    ["git", "-C", str(root), "ls-files", "*.md"], check=True,
-    text=True, capture_output=True,
-).stdout.splitlines()
+if not root.is_dir():
+    raise SystemExit("check-markdown-links: expected a repository directory")
+try:
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "*.md"], check=True,
+        text=True, capture_output=True,
+    ).stdout.splitlines()
+except (OSError, subprocess.CalledProcessError, UnicodeError):
+    raise SystemExit("check-markdown-links: cannot list tracked Markdown in that directory")
 pattern = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 failures: list[str] = []
 for relative in tracked:
     source = root / relative
-    text = source.read_text(encoding="utf-8", errors="strict")
+    try:
+        text = source.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError):
+        failures.append(f"{relative}: cannot read tracked Markdown as UTF-8")
+        continue
     for line_number, line in enumerate(text.splitlines(), 1):
         for raw in pattern.findall(line):
             target = raw.strip()
+            if not target:
+                continue
             if target.startswith("<") and ">" in target:
                 target = target[1:target.index(">")]
             else:

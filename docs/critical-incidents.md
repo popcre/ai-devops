@@ -584,3 +584,37 @@ MemorySwapMax=4G, and `systemd-oomd` is installed and enabled system-wide.
 run large-payload tests under `systemd-run --user --scope -p MemoryMax=2G`.
 Claude sessions cannot sudo (no_new_privs); a root step is launched through
 `systemd-run --user konsole -e <script>` so Albert types the password himself.
+
+## 2026-10-16 — edge-dev3 desktop and test crash separation
+
+**Owner:** [desktop crash repair #1816](https://github.com/popcre/ai-devops/issues/1816).
+Retained native cores and Python reports represent different failures, not a
+single Ubuntu failure. Keep raw reports, environments and cores private.
+
+**Source repairs:** invalid repository input and unreadable Markdown now fail
+the link checker normally; malformed or missing native usage input fails with
+no counters or provider bytes; the private SSH password helper exits nonzero
+when its no-follow open is refused. Secret-file checks and failure exit codes
+remain enforced. These are CLI input failures, not reasons to disable Apport.
+
+**Already repaired paths:** installed `ai-gh` selects packaged `gnutee` to avoid
+the Rust `tee.rs:188` pipe-capacity assertion. Installed diagnostic retention
+already preserves colliding evidence and fails closed. Current pinned GLM
+fixture reconstructs all nine own-output pages and denies a foreign session;
+that is offline source proof, not #1791 installation or provider acceptance.
+
+**Desktop evidence:** KRDP's retained core came from `krdpserver --help` and
+failed in Qt GUI initialization; the display query failed there too. Both
+commands succeed in the actual desktop environment, and the real KRDP service
+remains active. Preserve the desktop's real display/runtime environment when
+running graphical diagnostics; do not invent display identifiers or disable
+graphics. Basic `strace` succeeds; its older SIGILL report accompanied a traced
+OpenCode SIGILL and is not proof of a broken tracer.
+
+The old ChatGPT process aborted in native watcher completion during update
+shutdown at 11:22:51 AM EDT, October 16. The replacement app started two seconds
+later with a different bundled main chunk. Chrome and Claude also have newer
+installed builds than their retained crashes. Running newer builds does not
+prove those native defects fixed. Track shutdown/graphics causes and live
+acceptance on #1816; no vendor binary patch, disabled capability, deleted crash
+report, or privilege bypass is authorized by these findings.

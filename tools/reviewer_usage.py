@@ -327,8 +327,13 @@ def main():
     if args.adapter == 'muse-code':
         result = muse_code_read(args.input_file, args.version, args.run, args.model)
     else:
-        with open(args.input_file, encoding='utf-8-sig') as source:
-            data = json.load(source) if args.adapter == 'deepseek' else [json.loads(line) for line in source if line.strip()]
+        try:
+            with open(args.input_file, encoding='utf-8-sig') as source:
+                data = json.load(source) if args.adapter == 'deepseek' else [json.loads(line) for line in source if line.strip()]
+        except (OSError, ValueError):
+            # An absent/truncated native response is an input failure, not a
+            # formatter crash. Never emit counters or echo provider bytes.
+            raise SystemExit('reviewer-usage: native usage input is unreadable or invalid')
         result = deepseek(data) if args.adapter == 'deepseek' else opencode(data, args.version)
     result.update(schema_version=1, provider=args.provider, model=args.model,
                   runtime_version=args.version or None, session_id=args.session or None,

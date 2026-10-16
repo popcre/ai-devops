@@ -3,6 +3,9 @@ import copy
 import importlib.util
 import json
 import pathlib
+import subprocess
+import sys
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -13,6 +16,24 @@ FIXTURE = json.loads((pathlib.Path(__file__).parent / 'usage-1.18.12.json').read
 
 
 class UsageCases(unittest.TestCase):
+    def test_cli_invalid_native_input_refuses_without_counters_or_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'native'
+            for adapter in ('deepseek', 'opencode'):
+                for payload in (b'private-provider-value', b'{"usage":', b'\xff', None):
+                    if payload is None:
+                        path.unlink()
+                    else:
+                        path.write_bytes(payload)
+                    result = subprocess.run(
+                        [sys.executable, str(ROOT / 'tools/reviewer_usage.py'), adapter,
+                         str(path), '--provider', 'fixture', '--model', 'fixture',
+                         '--version', '1.18.12'], capture_output=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, b'')
+                    self.assertEqual(result.stderr,
+                                     b'reviewer-usage: native usage input is unreadable or invalid\n')
+
     def events(self):
         return copy.deepcopy(FIXTURE['events'])
 
