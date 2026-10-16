@@ -2,25 +2,30 @@
 
 ## STATUS — read first; do not re-derive completed programmes
 
+Step IDs below match §9 exactly. Do not invent parallel numbering.
+
 | Step | Status | Evidence / where a fresh session starts |
 |---|---|---|
 | 0. Register issue + this plan + handoff | ✅ done 2026-10-16 | [#1822](https://github.com/popcre/ai-devops/issues/1822); this file; [handoff](HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md) |
-| 1. Freeze requalification storms (install/update policy) | ⬜ open | Start here if you are implementing |
+| 1. Freeze requalification storms (pin-digest identity) | ⬜ open | Start here if implementing |
 | 2. Single terminal-verdict contract + parser proofs | ⬜ open | |
-| 3. Freeze provider CLIs (pins + digests) | ⬜ open | |
-| 4. Receipt/sandbox path identity repair | ⬜ open | Partially owned by [plan_reviewer-recurrence-repair.md](plan_reviewer-recurrence-repair.md) |
-| 5. Spawn/env + Windows host gate | ⬜ open | Partially owned by [plan_edge-dev-reviewer-repair-no-review.md](plan_edge-dev-reviewer-repair-no-review.md) |
-| 6. Timeout/hang owned-process recovery | ⬜ open | Do not cancel concurrent CI |
-| 7. Secrets/1Password out of review path | ⬜ open | |
-| 8. Incident backlog disposition by class (not by ID) | ⬜ open | |
-| 9. 24h live observation matrix on edge-dev3 + edge-dev smoke | ⬜ open | Live proof on the same issue |
-| 10. Closeout: docs, STATUS, checklist on #1822 | ⬜ open | |
+| 3. Wire contract into doors + registry | ⬜ open | |
+| 4. Receipt/sandbox path identity | ⬜ open | Shared with recurrence-repair — see §4.3 matrix |
+| 5. Freeze provider CLIs (pins + digests) | ⬜ open | Muse Linux re-pin stays with recurrence-repair |
+| 6. Windows spawn/env (edge-dev) | ⬜ open | Protected files only per §4.3; default is door/common |
+| 7. Timeout/hang owned-process recovery | ⬜ open | |
+| 8. Secrets/1Password out of review path | ⬜ open | |
+| 9. Incident backlog disposition by class | ⬜ open | |
+| 10. 24-hour live observation matrix | ⬜ open | Live proof checklist item on #1822 |
+| 11. Closeout | ⬜ open | |
 
-**Owner:** issue #1822. Coordinate with existing owners before touching shared lifecycle files.
+**Owner:** issue #1822. **First-writer rule:** §4.3. Do not edit a shared file until its row says you may.
 
-**Fresh session starts at** the first ⬜ row above, after re-reading §5–§8 of this plan and the two sibling plans' STATUS tables.
+**Fresh session starts at** the first ⬜ row, after reading §4.3 (ownership) and §5–§8.
 
 **Handoff:** [execution brief](HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md).
+
+**Muse critique (2026-10-16):** ACCEPT WITH CHANGES — those changes are integrated in this revision (numbering, ownership matrix, runnable gates, no temp-file evidence, concrete requal default).
 
 ---
 
@@ -32,7 +37,7 @@ If a step conflicts with this goal, **the goal wins** — stop and flag it. Do n
 
 ## 2. What this application is
 
-- **Repository:** `popcre/ai-devops` (public recovery toolkit for a multi-model AI workflow). It is **not** an app or service; "deployment" is `install.sh` / candidate-worktree `update.sh`.
+- **Repository:** `popcre/ai-devops` (public recovery toolkit for a multi-model AI workflow). Not an app or service; "deployment" is `install.sh` / candidate-worktree `update.sh`.
 - **What it does:** CLI tools in `bin/` orchestrate plan → review → implement → test → review across providers (Muse, DeepSeek, GLM, StepFun in rotation; others retained callable).
 - **Who uses it:** Albert and AI coding sessions on Windows (`edge-dev`) and Linux (`edge-dev3`).
 - **Related repos:** `popcre/shared-db` (consumes governed reviews); private `u2giants/ai-devops-transcripts`.
@@ -41,292 +46,335 @@ If a step conflicts with this goal, **the goal wins** — stop and flag it. Do n
 
 ## 3. What triggered this work
 
-Albert asked why reviewers still fail on edge-dev / edge-dev3 after ~8 months and why the system cannot stay working more than ~24 hours. A 2026-10-16 diagnosis over 93 `ai-reviewer-issue` packages (31 edge-dev, 92 edge-dev3), partial ScaleDown extract of last-8-day Codex rollouts, and the existing repair plans produced six failure classes (see §6). A bulk raw-transcript ScaleDown extract was **stopped** for cost (~210M+ tokens); **incident packages remain the source of truth**. This plan is the class-level programme to fix every class found.
+Albert asked why reviewers still fail on edge-dev / edge-dev3 after ~8 months and why the system cannot stay working more than ~24 hours. A 2026-10-16 diagnosis over **93 `ai-reviewer-issue` packages** (31 edge-dev, 92 edge-dev3) produced six failure classes (§6). A bulk raw-transcript ScaleDown extract was **stopped for cost** and is **not** evidence of record.
 
-**Reproduce the diagnosis evidence (read-only):**
+**Authoritative evidence (committed or host-local tooling — never session temp):**
 
 ```bash
-ai-reviewer-issue list
-# packages under the path from: ai-reviewer-issue path
+ai-reviewer-issue list          # per host
+ai-reviewer-issue path          # package root (private; do not commit bodies)
 ```
+
+Class counts in §6 are re-derivable by bucketing `issue.json` `summary` fields with the rules in §6.1. A planning-session `DIAGNOSIS.md` under temp is **not** required and must not be cited as a source.
 
 ## 4. Scope
 
-### In
+### 4.1 In
 
-- Class-level fixes for all six failure classes in §6.
-- Install/update **policy** that stops requalification storms (not a redesign of the whole installer).
-- Terminal-verdict contract and parser proof tests.
-- Provider CLI freeze (pins + digests) for the four maintained reviewers.
-- Receipt/sandbox path identity repairs only as needed for class 3 (reuse sibling plan ownership).
-- Windows spawn/env smoke for edge-dev; Linux pin/Muse smoke for edge-dev3.
-- Disposition of the **local** incident backlog by class on each host.
-- 24-hour live observation with honest denominators.
-- Process rule: **no bulk raw-transcript third-party extract** without an explicit token budget.
+- Class-level fixes for C1–C6 (§6).
+- Pin-digest requalification identity (Step 1 default design).
+- Terminal-verdict contract and parser proof tests (Steps 2–3).
+- Provider CLI freeze (pins + digests) for maintained reviewers (Step 5).
+- Receipt/sandbox path identity (Step 4) under the first-writer rule.
+- Windows spawn/env smoke for edge-dev (Step 6).
+- Disposition of the **local** incident backlog by class on each host (Step 9).
+- 24-hour live observation with the sample math in Step 10 (Step 10).
+- Process rule: **no bulk raw-transcript third-party extract** without an explicit token budget on #1822.
 
-### NOT in this plan
+### 4.2 NOT in this plan
 
 - Removing or disabling any reviewer to make metrics pass.
 - Weakening `reviewer-safety`, merge-queue checks, or exact-head independent review.
-- Rebuilding a second lifecycle/recorder (owned by [plan_reviewer-pipeline-core.md](plan_reviewer-pipeline-core.md)).
+- Rebuilding a second lifecycle/recorder ([plan_reviewer-pipeline-core.md](plan_reviewer-pipeline-core.md)).
 - Fleet-wide install on networking-only machines (`edge-alien`, `edge-runn-envy`, `edge-runn-xps`).
 - Provider credit purchases, paid-key policy changes, or model roster changes.
 - Shared-db structure changes.
-- Re-doing completed programmes named in sibling plans' STATUS tables.
-- Full transcript mining or ScaleDown history-compaction pilots (separate: [plan via SLM compaction handoff](HANDOFF.d/2026-10-14T1710Z-edge-dev-mimo-slm-compaction-pilot.md)).
+- Re-doing completed programmes named in sibling STATUS tables.
+- Muse Code Linux **re-pin PR** (owned by [plan_reviewer-recurrence-repair.md](plan_reviewer-recurrence-repair.md) steps 3–5) — this plan only consumes its result.
+- Full transcript mining or ScaleDown history-compaction pilots.
+
+### 4.3 Ownership and first-writer rule (LOCKED)
+
+Two open sibling programmes share infrastructure with this plan. **A file may be edited only by the owner named below until that owner marks the row transferred on #1822.** "Serialize" without this table is not sufficient.
+
+| Shared target | First writer | Follower rule | Notes |
+|---|---|---|---|
+| `bin/ai-review-packet`, `bin/ai-review-sandbox`, `tools/reviewer_events.py` (C3) | **recurrence-repair** Step 4 | This plan's Step 4 waits or adds only tests + evidence | Do not land two packet/sandbox patches |
+| `tools/lib/review-lifecycle-core.sh` terminal-verdict helper | **this plan** Step 2 | Sibling steps must call the helper, not fork the rule | Declare `reviewer-safety` |
+| `tools/lib/review-doors/*.sh` `extract_report` / credential load | **this plan** Steps 3, 7, 8 | recurrence-repair may fix provider-local bugs after | Declare `reviewer-safety` |
+| `install.sh`, `update.sh`, `bin/ai-review-preflight` requal identity | **this plan** Step 1 | recurrence-repair does not change requal triggers | Declare `reviewer-safety` |
+| `config/muse-code/*` Linux pins | **recurrence-repair** | This plan reads only | |
+| Windows spawn entrypoints `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`, `bin/ai-glm`, `bin/ai-muse`, `bin/ai-codex-review`, `bin/ai-review*`, `tools/reviewer_*.py`, `config/task-gates.json` | **edge-dev-no-review** for defect fixes that live only there | This plan Step 6 default is **door/common only** | If the defect exists only in these files, Step 6 stops and names it on #1822; do **not** edit under a "this plan may escalate" fiction |
+| `tests/test-ai-review-lifecycle.sh`, `tests/test-ai-review-engine.sh` | **this plan** | Siblings add cases via PR review, not parallel rewrites | |
+| `tests/verification/reviewer-stability-24h/` | **this plan** | Siblings keep `tests/verification/reviewer-recurrence/` and `tests/verification/edge-dev-reviewer-repair/` | Three ledgers stay separate |
+
+**edge-dev constraint (LOCKED, owner 2026-10-15):** implementation of edge-dev repairs must not use an AI reviewer as a gate. That constraint wins over any generic "escalate to reviewer-safety and get a review" sentence in other docs.
 
 ## 5. Current state of the code
 
 | Area | State | Where |
 |---|---|---|
-| Diagnosis | Written 2026-10-16 | Session artifact `DIAGNOSIS.md` under the planning session temp; class table is in §6 of this plan (authoritative for this programme) |
-| Incident store | 93 packages on the two hosts; many open | `ai-reviewer-issue path` on each host; do not copy raw bodies into this public repo |
-| Sibling plan edge-dev3 | Open programme | [plan_reviewer-recurrence-repair.md](plan_reviewer-recurrence-repair.md) STATUS first |
-| Sibling plan edge-dev | Open; **implementation must not need AI reviewers as a gate** | [plan_edge-dev-reviewer-repair-no-review.md](plan_edge-dev-reviewer-repair-no-review.md) STATUS first |
-| Shared lifecycle | Exists; wrappers still copy-paste some logic | `tools/lib/review-lifecycle-core.sh`, `tools/reviewer_events.py` |
-| Doors | Per-provider adapters with `extract_report` | `tools/lib/review-doors/*.sh` |
+| Incident store | 93 packages on the two hosts; many open | `ai-reviewer-issue path` per host |
+| Sibling edge-dev3 | Open | [plan_reviewer-recurrence-repair.md](plan_reviewer-recurrence-repair.md) STATUS first (updated 2026-10-16) |
+| Sibling edge-dev | Open; no AI-reviewer gate | [plan_edge-dev-reviewer-repair-no-review.md](plan_edge-dev-reviewer-repair-no-review.md) STATUS first |
+| Shared lifecycle | Exists; some per-wrapper forks remain | `tools/lib/review-lifecycle-core.sh`, `tools/reviewer_events.py` |
+| Doors | Per-provider `extract_report` | `tools/lib/review-doors/*.sh` |
 | Registry / doors table | Committed | `config/reviewer-registry.json`, `config/review-runner-doors.json` |
-| ScaleDown cost | Refilled after 402; bulk extract stopped | Do not resume raw-jsonl extract without a budget |
+| Test suites for this work | Exist on `origin/main` | Names in §10 — re-check they still exist before editing |
+| This plan | Merged | `plan_reviewer-stability-24h.md` on `main` |
 
-Nothing in this plan is implemented yet. Committed code on `origin/main` is the baseline; work uses **fresh worktrees** from `origin/main`, never the installed checkout.
+Nothing in Steps 1–11 is implemented yet. Work uses **fresh worktrees** from `origin/main`.
 
 ## 6. Key findings and root cause
 
-From 93 incident packages (all hosts) and diagnosis buckets:
+### 6.1 Class table (authoritative; re-derivable)
 
-| Class | Share of incidents | Representative evidence | Root cause |
+Bucket rule for `issue.json` `summary` (lowercase contains):  
+`requalification`→C1; `no verdict|without verdict|no valid|no response|empty response|ended without|tool-calls`→C2; `receipt|snapshot|sandbox|packet`→C3; `timeout|timed out|hang|poll|stall|sigterm`→C4; `spawn|e2big|command not found|shell`→C5; `1password|credential` or pin/self-update/drift→C6; else other.
+
+| Class | Share (93 pkgs) | Representative summary | Root cause |
 |---|---:|---|---|
-| **C1 Auto-requalification loop** | 47/93 (21/48 recent) | `automatic qwen/gemini requalification failed after a pulled wrapper, runtime, or preloader change` | Install/update of wrapper/runtime/preloader invalidates provider identity under live traffic; requal fails and every dependent review fails |
-| **C2 Missing/invalid terminal verdict** | 8/93 | `ended without verdict`, `empty response`, Muse `reason: tool-calls`, GLM provisional decision | Providers/wrappers can finish without exactly one APPROVE/REJECT/BLOCKED |
-| **C3 Receipt/sandbox/packet** | 6/93 | snapshot path resolution + access denied; receipt conflict on Muse and DeepSeek | Paths/heads/snapshots disagree across packet build, sandbox, and consumer |
-| **C4 Timeout/hang** | 5/93 | GLM 429 at 4s then wrapper polled 25m to SIGTERM; StepFun timed out; `windows-reviewer-fallback-grok` suite ran for hours | Error finish not terminal; unbounded poll; suite/process ownership unclear |
-| **C5 Spawn/env** | 4/93 + ScaleDown entities | `ChildProcess.spawn NotFound`, `spawn E2BIG`, `Codex command not found`, wscript `/c/...` path | Windows shell/path/ACL/env differences vs Linux |
-| **C6 Drift + parse + secrets** | 2+4+3 | agy 1.2.12→1.2.13 self-update; Muse pin 1.4.7-R6101.1 mismatch; BLOCKED appended; 1Password in review path | Mutating CLIs; fragile report extract; secrets reachable during review |
+| **C1 Auto-requalification loop** | 47 | `automatic qwen/gemini requalification failed after a pulled wrapper, runtime, or preloader change` | Install/update invalidates provider identity under live traffic |
+| **C2 Missing/invalid terminal verdict** | 8 | `ended without verdict`, Muse `reason: tool-calls`, GLM provisional | No guaranteed single APPROVE/REJECT/BLOCKED |
+| **C3 Receipt/sandbox/packet** | 6 | snapshot path resolution + access denied; receipt conflict | Paths/heads disagree across packet, sandbox, consumer |
+| **C4 Timeout/hang** | 5 | GLM 429 then 25m poll to SIGTERM; suite ran hours | Non-terminal errors; unbounded poll |
+| **C5 Spawn/env** | 4 | `ChildProcess.spawn NotFound`, `spawn E2BIG`, `Codex command not found` | Windows shell/path/ACL vs Linux |
+| **C6 Drift + secrets + parse** | 9 | agy self-update; Muse pin mismatch; BLOCKED appended; 1Password in review path | Mutating CLIs; fragile extract; secrets reachable |
 
 Provider mix: Qwen 49 · Gemini 12 · DeepSeek 10 · StepFun 7 · GLM 5 · Muse 5 · Grok 3 · Codex 2.
 
-**Why 24h of green is structurally hard:** live traffic + frequent installs + fail-closed multi-joint reviews (packet → receipt → sandbox → door → wrapper → parse → verdict) + mutating provider CLIs. Any joint can refuse; installs re-arm C1.
+**Why 24h of green is structurally hard:** live traffic + frequent installs + fail-closed multi-joint reviews (packet → receipt → sandbox → door → wrapper → parse → verdict) + mutating provider CLIs. Any joint can refuse; installs re-arm C1. (Live proof of this class: `ai-muse new` on a full checkout hangs in `ai-review-sandbox assert-public` → `ai-task-gates explain` on a 1500+ path inventory, 2026-10-16.)
 
 ## 7. Approaches considered and REJECTED
 
 | Approach | Why rejected |
 |---|---|
-| Remove/disable Qwen or any provider to stop requal noise | Locked: never remove capability to make metrics pass |
-| Shorter turn budgets / generic retry loops | Prior system-repair plan dropped short budgets; healthy reviews exceed them |
-| Second lifecycle/recorder | [plan_reviewer-pipeline-core.md](plan_reviewer-pipeline-core.md) / harness consolidation already own the common engine |
-| Broad host-wide process kills to stop a hang | Recorded DeepSeek broad stop hit concurrent CI; only exact owned-process ancestry |
-| Weaken `reviewer-safety` or skip exact-head review to land repairs | Protected class; honest path is redeclare and satisfy the class |
-| Bulk ScaleDown extract of all raw transcripts as the fix | **Tried 2026-10-16 and stopped** for cost (100M+ tokens); incident packages already enumerate failures. Never resume without a hard token budget |
-| Reuse this plan as a substitute for the two sibling plans | They own host-scoped execution and owner constraints; this plan owns **class** closure and the 24h gate |
-| Auto-update provider CLIs to "latest" to fix spawn/pin bugs | Turns official installer drift into unbounded motion; pins + provenance instead |
-| Close all historical incidents as "one cause" | Same loop is many IDs but each needs disposition; cannot reclassify to hide defects |
+| Remove/disable Qwen or any provider | Locked: never remove capability to make metrics pass |
+| Shorter turn budgets / generic retry loops | Dropped in prior system-repair plan; healthy reviews exceed them |
+| Second lifecycle/recorder | pipeline-core / harness consolidation own it |
+| Broad host-wide process kills | DeepSeek broad stop hit concurrent CI |
+| Weaken `reviewer-safety` or skip exact-head review | Protected class |
+| Bulk ScaleDown extract of all raw transcripts | **Tried 2026-10-16, stopped for cost**; incident packages already enumerate failures |
+| Reuse this plan as substitute for sibling plans | They own host-scoped execution; this plan owns class closure + 24h gate |
+| Auto-update provider CLIs to "latest" | Unbounded motion; pins + provenance instead |
+| Close all historical incidents as "one cause" | Many IDs, one loop — each needs disposition |
+| Step 6 edits protected Windows entrypoints "under this programme" | Contradicts edge-dev-no-review; use §4.3 transfer only |
+| Cite session-temp `DIAGNOSIS.md` | Not in a fresh checkout; §6 is the record |
 
 ## 8. Design decisions already made
 
-**Locked (do not relitigate):**
+**Locked:**
 
 | Decision | Reason |
 |---|---|
-| Four maintained reviewers: Muse, DeepSeek, GLM, StepFun | [docs/reviewer-rotation-rules.md](docs/reviewer-rotation-rules.md); others retained callable |
-| Exactly one terminal verdict per run: APPROVE / REJECT / BLOCKED | Empty, provisional, or duplicate decision text is a **failure**, never a silent success |
+| Four maintained reviewers: Muse, DeepSeek, GLM, StepFun | rotation rules; others retained callable |
+| Exactly one terminal verdict: APPROVE / REJECT / BLOCKED | Empty/provisional/duplicate = failure |
 | Immutable source/receipt binding; read-only formal review | Existing safety design |
-| edge-dev repairs must land **without AI reviewers as a gate** | Owner 2026-10-15: "knowing that the reviewers don't work, make sure implementing it doesn't need reviewers" |
-| No human approval requests for technical actions | Owner 2026-09-28: "never ask a human to approve" |
+| edge-dev repairs without AI reviewers as a gate | Owner 2026-10-15 |
+| No human approval for technical actions | Owner 2026-09-28 |
 | Database writes skip second-AI review; other gates stay | Owner 2026-10-14 |
-| ScaleDown extract is not a substitute for independent review | [docs/compression-and-process-fixes.md](docs/compression-and-process-fixes.md) |
-| Incidents resolve with evidence; resolved stay in place | `log-reviewer-issue` / [docs/reviewer-issues.md](docs/reviewer-issues.md) |
+| ScaleDown is not independent review | `docs/compression-and-process-fixes.md` |
+| Incidents resolve with evidence; resolved stay in place | `docs/reviewer-issues.md` |
+| **Requal trigger = pin-digest change** (Step 1 default) | Smallest identity rule that stops install storms; see Step 1 |
+| **§4.3 first-writer rule** | Prevents three programmes colliding |
+| **Step 10 sample math** (Step 10 gate) | Quiet 24h is not proof |
 
-**Open (implementer judgment):**
-
-- Exact mechanism to freeze requal (gate in `update.sh` vs registry hash vs maintenance window) — pick the smallest change that makes identity stable across ordinary installs.
-- Whether C3 fixes live mostly in packet/sandbox code or in door path normalization — prove with a failing fixture before choosing.
-- How to represent "provider outage" in the 24h matrix without inventing code-failure rates (explicit availability limit, not a fake green).
+**Open (bounded):** none for mechanism. Residual judgment only where a step says so (e.g. which door/common surface fixes C5 if not the protected entrypoints).
 
 ## 9. The plan — numbered, ordered, executable steps
 
-> Implementer: work in a **fresh worktree** from current `origin/main`. Declare `ai-task-gates start --class` per step (`reviewer-safety` where wrappers/doors/lifecycle/safety tests change). Never edit the installed checkout except via the documented candidate `update.sh` path.
+> Fresh worktree from `origin/main`. Declare `ai-task-gates start --class` per step. §4.3 says who may touch which file.
 
-### Phase A — Stop the bleeding (C1 + C2 contract)
+### Phase A — Stop the bleeding (C1 + C2)
 
-#### Step 1 — Freeze requalification storms (C1)
+#### Step 1 — Freeze requalification storms (C1) — pin-digest identity
 
-- **What:** Identify every install/update path that mutates wrapper, runtime, or preloader identity (`install.sh`, `update.sh`, `bin/ai-*` launcher resolution, Node/Python preloader pins, `config/reviewer-registry.json`). Add a **stable provider identity**: requalification runs only when a **deliberate** pin/registry change is declared (explicit file or env + gate), not on every wrapper copy. Ordinary `update.sh` must not invalidate a qualified provider unless its pin actually changed.
-- **Files:** `install.sh`, `update.sh`, `bin/ai-review-preflight`, `config/reviewer-registry.json`, matching tests under `tests/` (name from existing preflight/requal tests — verify they exist on current source before editing).
-- **Done behavior:** After an unrelated wrapper code update, Qwen/Gemini do **not** enter automatic requalification; after an intentional model/CLI pin bump, they do.
-- **Depends on:** none. **Parallel with:** Step 2.
-- **Verification gate:** Offline test that simulates two installs (same pins vs changed pin) and asserts requal is skipped vs required. Command: the new/extended suite name recorded in STATUS (e.g. `bash tests/test-ai-review-preflight.sh` or successor). Plus: `ai-review-preflight usable qwen` before/after an unrelated update on a candidate worktree shows the same resolved wrapper and no requal event.
+- **What (LOCKED default):** Provider identity for requalification is the digest of that provider's **declared pin set** (model/CLI pin files + `config/reviewer-registry.json` provider entry + resolved wrapper path). Ordinary `update.sh` that copies wrappers **without changing those digests** must **not** mark the provider unqualified. Requalification runs when and only when a pin-set digest changes (deliberate bump) or preflight cannot resolve the wrapper.
+- **Files:** `install.sh`, `update.sh`, `bin/ai-review-preflight`, `config/reviewer-registry.json`, `tests/test-ai-review-preflight.sh`, `tests/test-ai-preflight-pinbump.sh`.
+- **Done behavior:** Same pins → no requal event. Changed pin → requal required.
+- **Depends on:** §4.3 (this plan owns these files).
+- **Verification gate (runnable):**
+  1. `bash tests/test-ai-review-preflight.sh` — includes new cases `requal_skipped_when_pin_digest_unchanged`, `requal_required_when_pin_digest_changes`.
+  2. `bash tests/test-ai-preflight-pinbump.sh` — still green (deliberate bump still requals).
+  3. On a candidate worktree: `ai-review-preflight usable qwen` exits 0 before and after a no-pin `update.sh` with the same `wrapper_command` in output.
 
 #### Step 2 — Single terminal-verdict contract (C2)
 
-- **What:** In shared report extraction (`tools/lib/review-lifecycle-core.sh`, door `extract_report` functions), require **exactly one** terminal verdict token. Reject or force `BLOCKED` when: zero verdicts, >1 verdict, provisional-only text, or Muse-style `reason: tool-calls` without a decision. Do not invent APPROVE/REJECT.
-- **Files:** `tools/lib/review-lifecycle-core.sh`, `tools/lib/review-doors/{muse,stepfun,glm,deepseek,grok,gemini,qwen,codex,mimo}.sh` (only the extract/terminal paths), tests `tests/test-ai-review-lifecycle.sh`, `tests/test-ai-review-engine.sh`.
-- **Done behavior:** A provider stream with empty text, double decision, or `tool-calls` stop yields `BLOCKED` (or recorded failure) with a stable error code — never a silent success and never a spurious APPROVE.
-- **Depends on:** none.
-- **Verification gate:** New cases in `test-ai-review-lifecycle.sh` / `test-ai-review-engine.sh` named for: `no-verdict`, `duplicate-verdict`, `provisional-only`, `tool-calls-incomplete`. All green.
+- **What:** Shared helper in `tools/lib/review-lifecycle-core.sh` requires exactly one terminal verdict. Force `BLOCKED` (or recorded failure) on: zero verdicts, >1 verdict, provisional-only, `tool-calls` incomplete. Never invent APPROVE/REJECT.
+- **Files:** `tools/lib/review-lifecycle-core.sh`, `tests/test-ai-review-lifecycle.sh`, `tests/test-ai-review-engine.sh`.
+- **Depends on:** none (this plan first-writer).
+- **Verification gate (runnable):** `bash tests/test-ai-review-lifecycle.sh` all green, including cases: `no-verdict`, `duplicate-verdict`, `provisional-only`, `tool-calls-incomplete`, `verdict-in-log-noise`.
 
-**Adversarial cases (trust boundary — report text from outside the repo):**
+**Adversarial cases (trust boundary — provider stdout):**
 
-| External input | Hostile case | Test that proves it |
+| External input | Hostile case | Test name |
 |---|---|---|
-| Provider stdout | No verdict token | `test-ai-review-lifecycle.sh` `no-verdict` → BLOCKED |
-| Provider stdout | `APPROVE` then `REJECT` | `duplicate-verdict` → BLOCKED / failure, no mixed accept |
-| Provider stdout | "looks good" provisional without `VERDICT:` | `provisional-only` → BLOCKED |
+| Provider stdout | No verdict token | `no-verdict` → BLOCKED |
+| Provider stdout | APPROVE then REJECT | `duplicate-verdict` → BLOCKED, never mixed accept |
+| Provider stdout | "looks good" without `VERDICT:` | `provisional-only` → BLOCKED |
 | Provider stdout | Findings + `tool-calls` stop | `tool-calls-incomplete` → BLOCKED |
-| Provider stdout | Verdict in trailing garbage / log noise | Parser keeps only structured verdict line (existing extractor bug class; add regression) |
-| File path in report | `../` or absolute host path outside packet | Existing sandbox path tests must stay green |
-| Timestamp/head in report | Wrong head vs receipt | Receipt bind tests in `test-ai-review-packet.sh` stay green |
+| Provider stdout | Verdict buried in log noise | `verdict-in-log-noise` |
+| Report paths | `../` or absolute outside packet | existing `tests/test-ai-review-sandbox.sh` stays green |
+| Receipt head | Wrong head vs receipt | existing `tests/test-ai-review-packet.sh` stays green |
 
 #### Step 3 — Wire contract into doors + registry
 
-- **What:** Ensure every door uses the shared terminal-verdict helper (no per-wrapper fork of the rule). Registry may map providers to helper version.
-- **Files:** `tools/lib/review-doors/*.sh`, `config/reviewer-registry.json`, `tests/test-ai-review-engine.sh` adapter checks.
+- **What:** Every `tools/lib/review-doors/*.sh` `extract_report` calls the shared helper (no fork). Registry unchanged except if a helper version field is required.
+- **Files:** `tools/lib/review-doors/*.sh`, `tests/test-ai-review-engine.sh`.
 - **Depends on:** Step 2.
-- **Verification gate:** `tests/test-ai-review-engine.sh` adapter checks still require `extract_report` presence; add assertion that each door calls the shared terminal helper (grep/test as already done for `extract_report`).
+- **Verification gate:** `bash tests/test-ai-review-engine.sh` — keep existing `extract_report` adapter assertions; add `door_calls_shared_terminal_helper` (same style as `adapter_*_keeps_provider_bits`).
 
 ### Phase B — Identity and paths (C3 + C6 pins)
 
 #### Step 4 — Receipt/sandbox path identity (C3)
 
-- **What:** Fail a fixture where packet receipt, sandbox root, and consumer paths disagree; fix the **common** path normalization (not per-provider hacks). Reuse [plan_reviewer-recurrence-repair.md](plan_reviewer-recurrence-repair.md) step work if already implemented — add evidence, do not rewrite.
-- **Files:** `bin/ai-review-packet`, `bin/ai-review-sandbox`, `tools/reviewer_events.py`, `tests/test-ai-review-packet.sh`, `tests/test-ai-review-sandbox*.sh`.
-- **Depends on:** coordinate with recurrence-repair owner on shared files; serialize edits.
-- **Verification gate:** Failing-then-passing fixture for "receipt conflict" and "snapshot path resolution"; suites above green.
+- **What:** Add failing fixtures for receipt conflict and snapshot path resolution, then fix **common** path normalization. If recurrence-repair already landed the fix, add evidence rows only.
+- **Files (first-writer: recurrence-repair):** `bin/ai-review-packet`, `bin/ai-review-sandbox`, `tools/reviewer_events.py`, `tests/test-ai-review-packet.sh`, `tests/test-ai-review-sandbox.sh`.
+- **Depends on:** recurrence-repair ownership — transfer on #1822 before editing their files.
+- **Verification gate:** `bash tests/test-ai-review-packet.sh` and `bash tests/test-ai-review-sandbox.sh` green including new cases `receipt_conflict_fixture`, `snapshot_path_resolution_fixture`.
 
 #### Step 5 — Freeze provider CLIs (C6 drift)
 
-- **What:** Pins + SHA-256 for maintained provider runtimes (including Muse Code version pin files `config/muse-code/version`, `config/muse-code/sha256` and agy/gemini CLI). Document how to **deliberately** bump a pin (provenance + digest). Refuse review start on digest mismatch (already partially designed in recurrence-repair Muse re-pin steps — do not duplicate that PR; implement only what is missing).
-- **Files:** `config/*` pin files as present on current source; preflight; docs [`docs/configuration.md`](docs/configuration.md) or model-setup as applicable.
-- **Verification gate:** `ai-review-preflight` (or doctor) reports pin match; a tampered digest refuses with a clear error. For Muse Linux pin: coordinate with recurrence-repair Step 3–5 rather than a second re-pin PR.
+- **What:** Pins + SHA-256 for maintained runtimes (including `config/muse-code/version` and `config/muse-code/sha256` where present). Preflight refuses on digest mismatch. Deliberate bump = change pin file + requal (Step 1).
+- **Files:** pin files as on current source; `bin/ai-review-preflight`; docs `docs/configuration.md` / `docs/model-setup.md` if they document pins.
+- **Depends on:** Muse Linux re-pin PR from recurrence-repair (do not duplicate).
+- **Verification gate (runnable):**
+  1. `bash tests/test-ai-review-preflight.sh` case `pin_digest_mismatch_refuses`.
+  2. `bash tests/test-ai-preflight-pinbump.sh` green.
+  3. Command: `ai-review-preflight usable muse` exits 0 when digests match; exits non-zero with a message containing `pin` when `config/muse-code/sha256` (or provider equivalent) is corrupted in a test fixture.
 
-#### Step 6 — Windows spawn/env (C5)
+#### Step 6 — Windows spawn/env (C5) — door/common only by default
 
-- **What:** On edge-dev, fix shell spawn (`ChildProcess.spawn NotFound`, Git Bash path to wscript, `spawn E2BIG`, `Codex command not found` resolution). Prefer door/common fixes over per-provider patches. **Do not use an AI reviewer as a gate** for this host's repair (owner constraint on the sibling plan). Focused offline tests + CI + live smoke.
-- **Files:** `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`, `bin/ai-glm`, `bin/ai-muse`, `bin/ai-codex-review`, `bin/ai-review*`, `tools/reviewer_*.py`, `config/task-gates.json` — these are **protected `reviewer-safety`**; the sibling plan says do not edit them under *that* programme without escalating. This programme **may** edit them under a declared `reviewer-safety` class with the normal gates, or land door/common fixes only if the defect lives there.
-- **Depends on:** sibling plan ownership — reconcile on #1822 before overlapping.
-- **Verification gate:** `bash tests/test-ai-review-preflight.sh` (or successor) + a Windows smoke that `ai-stepfun` / `ai-glm` **start** and emit a structured error or a real review — not a spawn NotFound. Record on the issue checklist.
-
-### Phase C — Hangs, secrets, backlog
+- **What:** Fix spawn/env **only** in door/common surfaces (§4.3). Do **not** edit protected Windows entrypoints (`bin/ai-stepfun*`, `bin/ai-glm`, `bin/ai-muse`, `bin/ai-codex-review`, `bin/ai-review*`, `tools/reviewer_*.py`, `config/task-gates.json`) unless that row is transferred on #1822 from edge-dev-no-review. If the defect exists only in those files: record the exact file:line on #1822, leave the row to that programme, and mark Step 6 `blocked` on transfer — do not invent a parallel fix.
+- **Files (allowed now):** `tools/lib/review-doors/*.sh`, common env/shell helpers under `tools/lib/` if any, `tests/` focused cases.
+- **Depends on:** §4.3.
+- **Verification gate (runnable):**
+  1. New test `bash tests/test-ai-review-preflight.sh` case `windows_spawn_path_resolves` **or** a named door unit test in `tests/test-ai-review-engine.sh` if preflight cannot observe spawn — pick the surface that already owns spawn errors and name the case in STATUS.
+  2. On edge-dev (no AI-reviewer gate): command `ai-stepfun` / `ai-glm` **starts** and exits with a structured error or a real review — **not** `ChildProcess.spawn` NotFound / `command not found`. Record exit codes on #1822 checklist.
 
 #### Step 7 — Timeout/hang owned-process recovery (C4)
 
-- **What:** Provider `finish=error` / 429 must be terminal within a bounded window (not 25m SIGTERM). Cancel/reap **only** owned children. Suite `windows-reviewer-fallback-grok` must not run for hours; diagnose worker/run collision first (recurrence-repair step 6 owns diagnosis — do not duplicate).
-- **Files:** wrappers' wait/poll loops in `tools/lib/review-doors/*`, `tests/test-ai-review-engine.sh` timeout cases; CI suite selection `config/ci-suite-manifest.json` only if step 6 evidence says so.
-- **Verification gate:** Offline mock that returns `finish=error` and asserts bounded exit with specific code; concurrent fixture still alive after reap.
+- **What:** Provider `finish=error` / 429 is terminal within a bounded window (target ≤120s in offline tests; production budgets stay provider-real). Reap only owned children. Do not shorten real review budgets to hide latency.
+- **Files:** wait/poll in `tools/lib/review-doors/*.sh`, `tests/test-ai-review-engine.sh`.
+- **Verification gate:** `bash tests/test-ai-review-engine.sh` cases `provider_error_finish_is_terminal`, `reap_owned_children_only` (sibling mock remains alive).
 
 **Adversarial cases:**
 
 | External input | Hostile case | Test |
 |---|---|---|
-| Provider API | 429 then silence | Bounded exit; no SIGTERM-after-25m |
-| Child process | Hangs forever | Reap owned only; sibling mock still alive |
-| Shared machine | Concurrent CI on another job | No broad kill (regression named in recurrence-repair) |
+| Provider API | 429 then silence | `provider_error_finish_is_terminal` |
+| Child process | Hangs forever | `reap_owned_children_only` |
+| Shared machine | Concurrent CI | no broad kill (regression named in recurrence-repair; do not weaken) |
 
 #### Step 8 — Secrets/1Password out of review path (C6)
 
-- **What:** Formal review must not call 1Password (incidents: Muse/DeepSeek "would invoke 1Password"; Qwen key refresh lock). Credentials come from file/env preload only; refuse otherwise.
-- **Files:** door credential load (`require_credentials`), `tools/lib/review-doors/*`, tests for refusal.
-- **Verification gate:** Test that review start with only `op` available and no cred file **refuses** and does not spawn `op`.
+- **What:** Formal review must not invoke `op` / 1Password. Credentials from file/env preload only; otherwise refuse.
+- **Files:** credential load in `tools/lib/review-doors/*`, matching tests.
+- **Verification gate:** `bash tests/test-ai-review-engine.sh` (or door suite) case `review_refuses_without_cred_file_and_does_not_call_op` — assert `op` is not executed (PATH stub or counter).
+
+### Phase C — Hangs, backlog, proof
 
 #### Step 9 — Disposition backlog by class (C1–C6)
 
-- **What:** On each host, `ai-reviewer-issue list` + `show`; map every open ID to class C1–C6; resolve/partially-resolve with evidence when a class fix lands; carry-forward with owner when not. **One loop is not 47 bugs** — link duplicates to the class fix. Follow `log-reviewer-issue` maintenance rules (`maintenance show` first).
-- **Verification gate:** Each host has zero open maintained-provider incidents without class + owner + disposition row in `tests/verification/reviewer-stability-24h/README.md` (create dir).
+- **What:** Per host, `ai-reviewer-issue list` + `show`; map each open ID to C1–C6 using §6.1; resolve/partially-resolve with evidence when the class fix lands; else carry-forward with owner. Duplicates of one loop link to the class fix.
+- **Verification gate (runnable):**
+  1. Command on each host: `ai-reviewer-issue list` filtered to open maintained providers.
+  2. File `tests/verification/reviewer-stability-24h/backlog-<host>.md` lists every such ID with class + disposition + evidence pointer.
+  3. Pass when **zero** open maintained-provider IDs lack a row (not when the raw count is zero — unknown history stays explicit).
 
-#### Step 10 — 24-hour live observation
+#### Step 10 — 24-hour live observation matrix
 
-- **What:** After Phases A–C are installed on edge-dev3 (and edge-dev smoke for C5), observe **≥24 real hours** with at least three genuine reviews per maintained provider plus ordinary traffic. Record counts, failures, timeouts, refusals separately. Honest denominators. Provider outage is an availability limit, not invented code metrics.
-- **Verification gate:** `tests/verification/reviewer-stability-24h/README.md` with timestamps, sample matrix, and per-provider usable-review counts. Checklist item `- [ ] live proof` on **#1822** until this exists.
+- **What:** After Steps 1–8 are **installed** on edge-dev3 (and Step 6 smoke on edge-dev), observe **≥24 real hours** wall clock (EST timestamps in the ledger).
+- **Sample math (LOCKED):**
+  - ≥ **3** completed terminal-verdict reviews per maintained provider (Muse, DeepSeek, GLM, StepFun) through the supported entrypoint;
+  - plus ≥ **10** ordinary eligible review attempts (pass or fail) in the window;
+  - a window with fewer samples **fails** the gate (quiet ≠ green);
+  - provider outage / quota is an **availability** limitation with evidence, not a code-failure rate and not a silent pass.
+- **Verification gate (runnable):** `tests/verification/reviewer-stability-24h/observation-2026-10-XX.md` contains: start/end timestamps (EST), per-provider counts meeting the math, every failure with class C1–C6 or `provider-outage`, and the install SHA. Checklist `- [ ] live proof` on **#1822** until that file exists.
 
 #### Step 11 — Closeout
 
-- Update this STATUS table with artifacts (not bare counts). Finish #1822 checklist. Retire the handoff only when no carried obligation remains. Do not open a leftover-proof issue.
+- Update STATUS with artifacts (not bare counts). Finish #1822 checklist. Retire the handoff only when nothing is carried. No leftover-proof issue.
 
 ## 10. Tests required
 
-| Suite / test | Purpose |
+| Suite (exists on `origin/main` 2026-10-16) | Used for |
 |---|---|
-| `bash tests/test-ai-review-preflight.sh` (or current equivalent — verify on source) | Requal skip vs require; pin match |
-| `bash tests/test-ai-review-lifecycle.sh` | Terminal verdict contract cases (Step 2 adversarial table) |
-| `bash tests/test-ai-review-engine.sh` | Doors call shared helper; adapter bits preserved |
-| `bash tests/test-ai-review-packet.sh` / `test-ai-review-sandbox*.sh` | C3 path/receipt identity |
-| `bash tests/test-reviewer-events-isolation.sh` | Synthetic tests never write live incident outcomes |
-| `bash tests/test-ai-review-sandbox-delete-guard.sh` / `self-cleanup` | Stay green |
-| New: Windows spawn smoke (named in Step 6 STATUS) | C5 |
-| New: bounded-error hang test (Step 7) | C4 |
-| New: no-`op`-in-review test (Step 8) | C6 secrets |
+| `bash tests/test-ai-review-preflight.sh` | Steps 1, 5, 6 |
+| `bash tests/test-ai-preflight-pinbump.sh` | Steps 1, 5 |
+| `bash tests/test-ai-review-lifecycle.sh` | Step 2 adversarial table |
+| `bash tests/test-ai-review-engine.sh` | Steps 3, 7, 8 |
+| `bash tests/test-ai-review-packet.sh` | Step 4 |
+| `bash tests/test-ai-review-sandbox.sh` | Step 4 |
+| `bash tests/test-ai-review-sandbox-delete-guard.sh` | stay green |
+| `bash tests/test-ai-review-sandbox-self-cleanup.sh` | stay green |
+| `bash tests/test-reviewer-events-isolation.sh` | synthetic tests never write live outcomes |
 
-Never invent a pass for a missing suite — check existence on current source first. Use `bin/ai-test-local --check-collision` before full local series.
+Before editing, re-check the file exists. Run `bin/ai-test-local --check-collision` before a full local series. Never invent a pass for a missing suite.
 
 ## 11. Constraints, standing rules, and gotchas
 
-- **Branch:** feature branch + PR; never push `main`; merge queue. Installed checkout: **never** `git pull`/merge.
-- **Task class:** declare before work. Reviewer wrappers/doors/lifecycle/safety tests = `reviewer-safety` (protected). Ordinary docs = `prose`.
-- **edge-dev programme constraint:** no AI reviewer as a gate for that host's repair; this programme's shared-layer changes still need the gates their class requires.
-- **No capability removal**, no weakened CI, no silent failures, no band-aids on symptoms (e.g. do not hide requal by deleting the requal code path without identity design).
-- **Secrets:** 1Password vault `vibe_coding` only; never print values; review path must not call `op`.
-- **Incidents:** record with computer name; resolve with evidence; no Markdown archive of resolved IDs.
-- **Do not** restart bulk ScaleDown raw-transcript extract without an explicit token budget on #1822.
-- **Serialize** edits to shared lifecycle/packet with the sibling plans' owners.
-- **Times in EST (America/New_York)** in all human-facing notes.
+- **Branch:** feature branch + PR; never push `main`; merge queue. Installed checkout: never `git pull`/merge.
+- **Task class:** declare before work. Wrappers/doors/lifecycle/safety tests = `reviewer-safety`.
+- **edge-dev:** no AI reviewer as a gate (LOCKED).
+- **§4.3 first-writer** for every shared file.
+- **No capability removal**, no weakened CI, no silent failures, no symptom band-aids.
+- **Secrets:** vault `vibe_coding` by title only; review path must not call `op`.
+- **Incidents:** computer name in records; resolve with evidence; no Markdown archive of resolved IDs.
+- **No bulk ScaleDown raw-transcript extract** without a token budget on #1822.
+- **Times in EST (America/New_York)** in human-facing notes.
 - **Sign GitHub posts** with `Posted by MiMo chat <id> on <machine>`.
+- **`ai-task-gates explain` / `ai-review-sandbox assert-public` can hang** on large path inventories on Windows (observed 2026-10-16). Do not treat a multi-minute hang as progress; isolate with a tiny `--paths-from` file first.
 
 ## 12. Access and environment
 
 | Need | Where |
 |---|---|
 | Hosts | `edge-dev` (Windows, Git Bash), `edge-dev3` (Linux, SSH `edge-dev3`) |
-| Repo | `popcre/ai-devops`; worktrees from `origin/main`; canonical checkout landing-only |
+| Repo | `popcre/ai-devops`; worktrees from `origin/main` |
 | Issue | [#1822](https://github.com/popcre/ai-devops/issues/1822) |
-| Incident store | `ai-reviewer-issue path` on each host (private; do not commit bodies) |
-| Provider CLIs | Machine-local; pins in `config/` as on source |
-| Secrets | 1Password vault `vibe_coding` by **item title only** (e.g. `scaledown.ai API key for testing`) — never values |
-| GitHub | `bin/ai-gh` (not bare `gh` loops); `bin/ai-pr-wait` with explicit timeout |
-| Tests | `bash tests/<name>.sh` via Git Bash on Windows; `bin/ai-test-local --check-collision` first |
+| Incident store | `ai-reviewer-issue path` per host (private) |
+| Secrets | 1Password vault `vibe_coding` by item title only |
+| GitHub | `bin/ai-gh`; `bin/ai-pr-wait` with explicit timeout |
+| Tests | `bash tests/<name>.sh` via Git Bash on Windows |
+| Ledger dir | `tests/verification/reviewer-stability-24h/` (create when Step 9 runs) |
 
 ## 13. Definition of done + risks and open questions
 
 ### Definition of done
 
-- [ ] C1: Unrelated `update.sh` does not trigger provider requalification (test evidence).
-- [ ] C2: Terminal-verdict contract tests all green (adversarial table).
-- [ ] C3: Receipt/sandbox fixtures pass; no open receipt-conflict incidents without disposition.
-- [ ] C4: Bounded error exits; owned-process-only reap; no multi-hour fallback suite.
-- [ ] C5: edge-dev spawn smoke passes without reviewer gate; edge-dev3 pin/Muse path coordinated with recurrence-repair.
-- [ ] C6: No 1Password in review path; pin mismatch refuses.
-- [ ] Backlog: every open local incident has class + disposition row.
-- [ ] Live proof: ≥24h observation matrix on #1822 checklist; STATUS rows cite artifacts.
-- [ ] Tests named above green on the landed commit; PR merged via queue (or docs-only admin if truly prose-only).
-- [ ] Handoff retired only when nothing carried remains.
+- [ ] Step 1: pin-digest tests green; unrelated update does not requal.
+- [ ] Step 2: all named adversarial cases green.
+- [ ] Step 3: doors call shared helper (test name recorded).
+- [ ] Step 4: fixtures green or recurrence-repair evidence linked.
+- [ ] Step 5: pin mismatch refuses (test + command).
+- [ ] Step 6: spawn smoke on edge-dev without reviewer gate; protected-file work only if §4.3 transferred.
+- [ ] Step 7: bounded error + owned reap tests green.
+- [ ] Step 8: no-`op` test green.
+- [ ] Step 9: backlog ledgers complete per host.
+- [ ] Step 10: observation file meets sample math; live proof checked on #1822.
+- [ ] Step 11: STATUS cites artifacts; handoff retired; PR merged.
 
 ### Risks
 
 | Risk | Mitigation |
 |---|---|
-| Overlap with sibling plans on shared files | Serialize; reconcile ownership on #1822 first |
-| Requal freeze hides a real identity change | Deliberate pin bump path still requals |
-| Verdict contract too strict → false BLOCKED | Prefer honest BLOCKED over silent APPROVE; tune only with evidence |
-| 24h quiet window proves nothing | Require minimum review sample counts |
-| Token waste recurrence | Hard budget rule in §4 / §11 |
+| Sibling collision on shared files | §4.3 first-writer; transfer on #1822 |
+| Requal freeze hides real identity change | Pin-digest change still requals; pinbump suite |
+| Verdict contract → false BLOCKED stalls 24h clock | Prefer honest BLOCKED; Step 10 counts refusals separately |
+| Windows C5 only fixable in protected files | Step 6 stops and transfers; do not violate no-review plan |
+| Quiet 24h | Step 10 sample math (LOCKED) |
+| Token waste recurrence | §4.2 / §11 hard budget |
+| `ai-task-gates` hang on large inventories | §11 gotcha; tiny paths file first |
 
 ### Open questions
 
-- Exact requal trigger mechanism (§8 open) — decide at Step 1 with a failing test first.
-- Whether C3 is mostly packet or door work — decide at Step 4 with the fixture.
-- GLM `external_directory` permission failures (2 recent) — treat as C5/C6 adjacency if they block completion; otherwise leave to GLM-specific plans ([plan_glm_own_output_recovery.md](plan_glm_own_output_recovery.md), [plan_ai-glm-permission-failures.md](plan_ai-glm-permission-failures.md)).
+- None on mechanism (requal default is locked).  
+- If Step 6 hits protected files only, that is a **transfer request** on #1822, not a design debate.
 
 ---
 
-## Self-audit (mandatory — Mode A)
+## Self-audit (Mode A) — 2026-10-16 revision after Muse critique
 
-1. **Could a brand-new AI session with no project knowledge execute this plan without asking anything?**  
-   **Yes.** §2 defines the repo/hosts/stack; §5 states current state and where siblings own work; §9 names files, behavior, depends-on, and a verification gate per step; §12 lists access; §11 lists standing rules including edge-dev's no-reviewer gate. Gap found earlier: requal file list might be incomplete — §9 Step 1 tells the implementer to **discover** install/update/preflight paths rather than assuming a fixed list.
+1. **Fresh session, no questions?**  
+   **Yes.** §4.3 names first writers; §9 gates are named suites/commands; evidence is `ai-reviewer-issue` + committed §6, not temp files. Gap from Muse (suite names TBD) closed with the §10 table.
 
-2. **Does the plan carry background, nuance, and rejected approaches?**  
-   **Yes.** §3 trigger and diagnosis provenance; §6 class table with counts and examples; §7 rejected approaches including the failed ScaleDown bulk extract; §8 locked vs open decisions (including owner quotes referenced by date).
+2. **Background, nuance, rejected approaches?**  
+   **Yes.** §3 evidence rule; §6.1 bucket rule; §7 includes Muse’s rejected ownership/temp-evidence patterns; §8 locks requal default and sample math.
 
-3. **Is the ultimate goal clear enough for judgment calls?**  
-   **Yes.** §1 states stability ≥24h and "goal wins" override; §13 open questions name criteria (failing test first; honest BLOCKED; sample counts).
+3. **Goal clear for judgment calls?**  
+   **Yes.** §1 goal-wins; Step 6 transfer rule is the judgment path when a step is wrong.
 
-**Checklist:** 13 sections present · goal first · no-question implementability · rejected approaches · concrete files + gates · adversarial table in Step 2/7 · locked/open decisions · out-of-scope · named tests · terms defined · secrets by location · DoD includes merge/CI/live proof · handoff link above and reciprocal in `HANDOFF.d/`.
+**Muse findings addressed:** numbering (STATUS=§9) · protected-file contradiction (Step 6 + §4.3) · first-writer matrix (§4.3) · runnable gates (Steps 1, 5, 9, 10) · no temp DIAGNOSIS (§3, §7) · concrete requal default (§8, Step 1) · sample math (Step 10) · risks (§13).
 
-**Self-audit passed 2026-10-16.** Comprehensive because every diagnosis class maps to an owned step with a verification gate, and every already-owned programme is referenced instead of rewritten.
+**Self-audit passed.** Comprehensive because every class, ownership edge, and gate is named and testable without this chat.
