@@ -2,7 +2,8 @@
 
 ## STATUS
 
-Issue: https://github.com/popcre/ai-devops/issues/1796. Owner: coordinator with delegated design author codex/exact-sandbox-release.
+Issue: https://github.com/popcre/ai-devops/issues/1796. Owner: coordinator with delegated design author
+codex/exact-sandbox-release.
 
 | Step | State (2026-10-16) | Evidence / next gate |
 |---|---|---|
@@ -11,43 +12,75 @@ Issue: https://github.com/popcre/ai-devops/issues/1796. Owner: coordinator with 
 | Final review, PR, queue, protected installation | open | No PR/push/install authorized yet |
 | Consumer adoption and live proof | open | Same issue retains live-proof checklist |
 
-Fresh session starts at independent design review. Registered handoff: [design handoff](HANDOFF.d/2026-10-16T0419Z-edge-dev3-codex-exact-sandbox-release.md).
+Fresh session starts at independent design review. Registered handoff: [design
+handoff](HANDOFF.d/2026-10-16T0419Z-edge-dev3-codex-exact-sandbox-release.md).
 
 ## 1. Ultimate goal
 
-Allow reviewed DesignFlow changes to reach four sandbox applications in total: retain the existing backend capability and add tracking, frontend, and Item Master without weakening release protection. If any step below conflicts with this goal, the goal wins — stop and flag it.
+Allow reviewed DesignFlow changes to reach four sandbox applications in total: retain the existing backend
+capability and add tracking, frontend, and Item Master without weakening release protection. If any step below
+conflicts with this goal, the goal wins — stop and flag it.
 
 ## 2. Application
 
-popcre/ai-devops is the public Bash/Python/JSON recovery toolkit, not an application deployment platform. Installed source on edge-dev3 is /home/ahazan/repos/ai-devops, exact b20da460df6b3c18410723a50899a7ed7c586413. Source work belongs in a dedicated worktree, here /home/ahazan/.codex/worktrees/exact-sandbox-release/ai-devops. DesignFlow consumers use Cloud Build regional GitHub branch triggers and Cloud Run; this gate admits only their ordinary source push, never cloud API mutation.
+popcre/ai-devops is the public Bash/Python/JSON recovery toolkit, not an application deployment platform.
+Installed source on edge-dev3 is /home/ahazan/repos/ai-devops, exact b20da460df6b3c18410723a50899a7ed7c586413.
+Source work belongs in a dedicated worktree, here
+/home/ahazan/.codex/worktrees/exact-sandbox-release/ai-devops. DesignFlow consumers use Cloud Build regional
+GitHub branch triggers and Cloud Run; this gate admits only their ordinary source push, never cloud API
+mutation.
 
 ## 3. Trigger
 
-Coordinator's reviewed tracking change was refused by native deploy admission because its plan contributes reviewer-safety. Existing application-source-release path supports only backend. Reproduce with the ordinary deploy gate on the complete actual consumer change set; do not reset its base or split protected files away. This document records diagnosis, not a newly attempted deployment.
+Coordinator's reviewed tracking change was refused by native deploy admission because its plan contributes
+reviewer-safety. Existing application-source-release path supports only backend. Reproduce with the ordinary
+deploy gate on the complete actual consumer change set; do not reset its base or split protected files away.
+This document records diagnosis, not a newly attempted deployment.
 
 ## 4. Scope
 
-Extend the EXISTING source-release mechanism to exactly four central targets. Keep schema version 1, manifest path, consumer gate, CLI interface, deployment intent, protected contributor collection and exact-head proof semantics.
+Extend the EXISTING source-release mechanism to exactly four central targets. Keep schema version 1, manifest
+path, consumer gate, CLI interface, deployment intent, protected contributor collection and exact-head proof
+semantics.
 
-NOT included: production; BFF; data-sync; arbitrary repositories/targets; wildcard allowlists; manual cloud mutations; application-workflow expansion; SQL; secrets; credential rotation; replay; changes to DesignFlow merge authority; installation before normal review/merge. Preserve the separate private 4250 candidate unchanged.
+NOT included: production; BFF; data-sync; arbitrary repositories/targets; wildcard allowlists; manual cloud
+mutations; application-workflow expansion; SQL; secrets; credential rotation; replay; changes to DesignFlow
+merge authority; installation before normal review/merge. Preserve the separate private 4250 candidate
+unchanged.
 
 ## 5. Current source
 
-At b20: config/task-gates.json:67 central map has backend only; config/task-gates.schema.json:49 disallows other keys. bin/ai-task-gates:637-777 validates exact backend policy/manifest/origin and records the source-release receipt. Lines 1490-1514 retain reviewer-safety contributor requirements and generic deploy refusal; lines 1655-1658 finish the explicit route. docs/context-spec.md:122 describes a single backend target. tests/test-ai-task-gates.sh:1339-1460 contains closed-target admission/refusal/race coverage. No implementation files changed for this proposal.
+At b20: config/task-gates.json:67 central map has backend only; config/task-gates.schema.json:49 disallows
+other keys. bin/ai-task-gates:637-777 validates exact backend policy/manifest/origin and records the
+source-release receipt. Lines 1490-1514 retain reviewer-safety contributor requirements and generic deploy
+refusal; lines 1655-1658 finish the explicit route. docs/context-spec.md:122 describes a single backend
+target. tests/test-ai-task-gates.sh:1339-1460 contains closed-target admission/refusal/race coverage. No
+implementation files changed for this proposal.
 
 ## 6. Findings
 
-No equivalent route exists for the three consumers. application-workflow is separately limited to backend#94, not a release substitute. Central schema AND runtime validation must change together; consumer declarations alone cannot expand authority. Deployment rank60 exceeds reviewer-safety30/UI40, but strongest contributors' required gates remain additive: explicit deployment declaration is required; no contributor deletion/reclassification.
+No equivalent route exists for the three consumers. application-workflow is separately limited to backend#94,
+not a release substitute. Central schema AND runtime validation must change together; consumer declarations
+alone cannot expand authority. Deployment rank60 exceeds reviewer-safety30/UI40, but strongest contributors'
+required gates remain additive: explicit deployment declaration is required; no contributor
+deletion/reclassification.
 
-Read-only live Cloud Build trigger inventory on this date used project lithe-breaker-323913 / region us-east4. Each listed trigger's push branch is exactly ^sandbox-albert$ and _SERVICE_NAME matches service below. Repository connection leaves are pop-dflow-backend, pop-dflow-tracking, pop-dflow-frontend, pop-dflow-item-master respectively. Do not use older deployment-doc service guesses.
+Read-only live Cloud Build trigger inventory on this date used project lithe-breaker-323913 / region us-east4.
+Each listed trigger's push branch is exactly ^sandbox-albert$ and _SERVICE_NAME matches service below.
+Repository connection leaves are pop-dflow-backend, pop-dflow-tracking, pop-dflow-frontend,
+pop-dflow-item-master respectively. Do not use older deployment-doc service guesses.
 
 ## 7. Rejected approaches
 
-No generic reviewer_release.deploy exception: it would widen protected deployment beyond exact sandbox source pushes. No arbitrary consumer-selected central targets. No new application-workflow. No base reset, narrower successor to hide protected files, generic ship after refused deploy, manual cloud deploy, self-merge, or human technical permission. No duplication of existing approval parsers/receipt writers.
+No generic reviewer_release.deploy exception: it would widen protected deployment beyond exact sandbox source
+pushes. No arbitrary consumer-selected central targets. No new application-workflow. No base reset, narrower
+successor to hide protected files, generic ship after refused deploy, manual cloud deploy, self-merge, or
+human technical permission. No duplication of existing approval parsers/receipt writers.
 
 ## 8. Locked decisions (2026-10-16)
 
-Coordinator selects exactly these schema_version=1, route=cloud-build-branch-push, branch=sandbox-albert, project=lithe-breaker-323913, region=us-east4 entries:
+Coordinator selects exactly these schema_version=1, route=cloud-build-branch-push, branch=sandbox-albert,
+project=lithe-breaker-323913, region=us-east4 entries:
 
 | Repository | Service |
 |---|---|
@@ -56,20 +89,103 @@ Coordinator selects exactly these schema_version=1, route=cloud-build-branch-pus
 | popcre/designflow-frontend | popcre-albert-frontend-sandbox |
 | popcre/designflow-item-master | popcre-albert-item-sandbox |
 
-Consumer scope nuance: fresh-fetch and merge actual current develop before release; classify against its true current merge-base. Item Master inherited a shared-db subtree already byte-identical in upstream develop; excluding already-upstream bytes through that honest comparison is legitimate, while resetting a base to hide owned changes is forbidden. Any actual shared-db or stronger contributor keeps the native path refused. New manifest/consumer declarations are deployment wiring; no generalized protected-class bypass.
+Consumer scope nuance: fresh-fetch and merge actual current develop before release; classify against its true
+current merge-base. Item Master inherited a shared-db subtree already byte-identical in upstream develop;
+classification is the complete base-to-HEAD path delta plus staged/unstaged/untracked/deleted/rename
+sides/submodule changes, never all historical files merely present in the tree. Excluding unchanged
+already-upstream bytes through that honest comparison is legitimate, while resetting a base to hide owned
+changes is forbidden. Any actual shared-db or stronger contributor keeps the native path refused. New
+manifest/consumer declarations are deployment wiring; no generalized protected-class bypass.
 
-LOCKED honest-base addition selected by coordinator after first design review: admission natively verifies remote current develop, recorded declaration base and ancestry for all four consumers (including backend). This conscious compatibility tightening is not a generic base reset.
+LOCKED honest-base addition selected by coordinator after first design review: admission natively verifies
+remote current develop, recorded declaration base and ancestry for all four consumers (including backend).
+This conscious compatibility tightening is not a generic base reset.
 
-All use .ai-devops/application-release-target.json and consumer required gate cloud-build-release-review. Backend exact accepted target stays identical. OPEN: minimal factoring of shared validation without changing behavior; no open authority/scope choice.
+All use .ai-devops/application-release-target.json and consumer required gate cloud-build-release-review.
+Backend exact accepted target stays identical. OPEN: minimal factoring of shared validation without changing
+behavior; no open authority/scope choice.
 
 ## 9. Ordered implementation, gated
 
-1. PREWORK ONLY: publish signed issue1796 contract before code, commit this design/handoff/router registration, obtain genuinely independent native Muse plan-review with implementing engine Codex. Gate: explicit technical APPROVE bound to this design plus coordinator implementation authorization. A plan review never admits deploy/install. No retrospective evidence.
-2. AFTER authorization: immediately re-read live Cloud Build inventory using `gcloud builds triggers list --project=lithe-breaker-323913 --region=us-east4 --format=json`, selecting the four named repository connection leaves and exact ^sandbox-albert$ branch. Compare each _SERVICE_NAME, _REGION and project with §8; any missing/duplicate/mismatched trigger STOPS before editing central policy and returns to coordinator. Retain sanitized tuple evidence on issue1796. Then change config/task-gates.json to four exact entries, config/task-gates.schema.json to exactly those four required properties with additionalProperties:false throughout. Preserve reviewer_release.deploy.deployment == null. Gate: tools/ci/validate-task-gates.py succeeds and rejects missing/extra/foreign target fixtures.
-3. In bin/ai-task-gates replace singleton expected target with CLOSED exact identity resolution validated against fixed four-entry policy. Validate policy's complete exact key set and exact per-repo tuples, not merely lookup existence; central policy cannot introduce fifth authority. Derive canonical-origin accepted forms from validated identity, retaining the currently accepted HTTPS/SCP/SSH forms only. Require effective deployment exactly, actual branch sandbox-albert (admission must run in serialized landing/owned source clone actually on that branch, not the review branch), same committed manifest, clean contained nonsymlink ordinary blobs, consumer deployment-required cloud-build-release-review. Before release admission, normal `git fetch origin develop` updates the canonical tracking ref without changing task state or owned changes. Native admission validates exact canonical origin first; runs read-only `git ls-remote --exit-code origin refs/heads/develop` with output captured privately, refuses failure/nonexact single ref, and requires returned SHA equal `git rev-parse refs/remotes/origin/develop`. Refuse `git rev-parse --is-shallow-repository` true, any `git replace -l` entry, nonempty git-common-dir info/grafts, or nonempty GIT_REPLACE_REF_BASE or GIT_GRAFT_FILE ancestry overrides; use canonical Git graph without replace objects. Require `git merge-base --all HEAD refs/remotes/origin/develop` yield exactly one commit, recorded declaration base equals it, and `git merge-base --is-ancestor refs/remotes/origin/develop HEAD` succeeds. Captured remote metadata and failures must not expose credentials/remote secret-bearing arguments. Revalidate fresh remote SHA, recorded base, actual branch, HEAD, refs and ancestry before atomically publishing final receipt; network failure or movement refuses without receipt. Do not add a runtime bypass environment variable. Preserve full source/contributor classification, mandatory tests, native independent final-check/security-review exact repository/head/source/deploy seal, before/after checks and atomic receipt. Receipt includes identity and exact target in addition to existing head/manifest_blob/consumer_blob/approval binding; preserve existing backend receipt keys. Gate: tests below show only intended four source pushes can be admitted, generic deploy still refused.
-4. Expand tests/test-ai-task-gates.sh and existing schema-validator tests; no new parallel gate implementation. Update docs/context-spec.md and help/error strings from singleton to fixed-four. tools/ci/validate-task-gates.py is schema-generic and should need no logic changes; prove this with existing validator tests. Confirm AGENTS plan link is reachable under .doc-reachability.json roots, with bin/ai-doc-reachability using its supported CLI. AGENTS pointer owner is codex/exact-sandbox-release and retirement is tied to issue1796 closure, not an invented future date. Gate: focused tests and normal repository-required local suite pass, exact-head independent final review records snapshot tests. No paid repeat after unchanged success.
-5. Coordinator separately owns normal branch PR/queue, merged-head reconciliation and protected installation using reviewed exact merged toolkit source; never pull installed checkout. Gate: installation receipt/doctor prove installed release. Design approval alone supplies no install authority.
-6. AFTER installed repair: coordinator creates dedicated current-upstream worktrees for three consumers; commits exact manifests plus .ai-devops/task-gates.json deployment.required addition, preserving existing fields and stricter gates verbatim, specifically central no-self-merge, sandbox-branch-pr-to-develop and route-to-shared-db-repository requirements and their forbidden actions (config/task-gates.json:503-531). Do not replace those arrays with the new gate. Re-run meaningful consumer tests/native exact-head review since consumer commits move approved heads. Gate: explicit check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval REPORT admits exact final source. Then ordinary sandbox branch push and automated deploy readback/live smoke. PR remains sandbox-albert→develop with existing no-self-merge authority unchanged. Same issue retains live proof until all three verified.
+1. PREWORK ONLY: publish signed issue1796 contract before code, commit this design/handoff/router
+registration, obtain genuinely independent native Muse plan-review with implementing engine Codex. Gate:
+explicit technical APPROVE bound to this design plus coordinator implementation authorization. A plan review
+never admits deploy/install. No retrospective evidence.
+2. AFTER authorization: immediately re-read live Cloud Build inventory using `gcloud builds triggers list
+--project=lithe-breaker-323913 --region=us-east4 --format=json`, selecting the four named repository
+connection leaves and exact ^sandbox-albert$ branch. Compare each _SERVICE_NAME, _REGION and project with §8;
+any missing/duplicate/mismatched trigger STOPS before editing central policy and returns to coordinator.
+Retain sanitized tuple evidence on issue1796. Then change config/task-gates.json to four exact entries,
+config/task-gates.schema.json to exactly those four required properties with additionalProperties:false
+throughout. Preserve reviewer_release.deploy.deployment == null. Gate: tools/ci/validate-task-gates.py
+succeeds and rejects missing/extra/foreign target fixtures.
+3. Audit tools/lib/task-gates.sh repository identity and bin/ai-task-gates
+resolve_repo/resolve_base/change_set together. Keep helper changes minimal and source-release-specific; no
+global weakening. In bin/ai-task-gates replace singleton expected target with CLOSED exact identity resolution
+validated against fixed four-entry policy. Validate policy's complete exact key set and exact per-repo tuples,
+not merely lookup existence; central policy cannot introduce fifth authority. Derive canonical-origin accepted
+forms from validated identity, retaining the currently accepted HTTPS/SCP/SSH forms only. Require effective
+deployment exactly, actual branch sandbox-albert (admission must run in serialized landing/owned source clone
+actually on that branch, not the review branch), same committed manifest, clean contained nonsymlink ordinary
+blobs, consumer deployment-required cloud-build-release-review. Native confinement MUST run for the explicit
+source-release path before repository resolution/classification or any Git network command. Reject nonempty
+GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
+GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_SSH, GIT_SSH_COMMAND, GIT_PROXY_COMMAND, GIT_CONFIG,
+GIT_CONFIG_SYSTEM, GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM, GIT_CONFIG_COUNT, GIT_CONFIG_PARAMETERS and every
+GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* environment override, plus ancestry overrides below. Capture/validate
+real worktree top-level and resolved git-common-dir against the selected source context and recheck both at
+finish. Use existing installed trusted Git resolution, with -C exact validated source root for every command;
+reject config rewrite/transport overrides url.*.insteadOf, url.*.pushInsteadOf, core.sshCommand,
+core.gitProxy, remote.origin.uploadpack, remote.origin.vcs, remote.origin.proxy, remote.origin.receivepack and
+ambiguous multiple origin URLs. Check raw configured origin as well as effective get-url against existing
+exact canonical accepted forms. Preserve normal existing credential helpers and SSH authentication/host
+verification; never resolve secrets in review or disable host/TLS checks. No new remote/transport program
+selected by manifest. Bound the new read-only network calls to30 seconds using existing supported bounded
+process mechanics; capture stdout/stderr privately, require exact single expected develop ref, and report only
+sanitized failure. Re-read relevant config/context before finish; if stronger confinement is technically
+unsupported, stop and report rather than claim verified freshness. Same-user arbitrary mutation of trusted
+installed Git/runtime is outside this existing gate threat model; source/config movement remains in scope.
+
+Before release admission, normal `git fetch origin develop` updates the canonical tracking ref without
+changing task state or owned changes. Native admission validates exact canonical origin first; runs read-only
+`git ls-remote --exit-code origin refs/heads/develop` with output captured privately, refuses failure/nonexact
+single ref, and requires returned SHA equal `git rev-parse refs/remotes/origin/develop`. Refuse `git rev-parse
+--is-shallow-repository` true, any `git replace -l` entry, nonempty git-common-dir info/grafts, or nonempty
+GIT_REPLACE_REF_BASE or GIT_GRAFT_FILE ancestry overrides; use canonical Git graph without replace objects.
+Require `git merge-base --all HEAD refs/remotes/origin/develop` yield exactly one commit, recorded declaration
+base equals it, and `git merge-base --is-ancestor refs/remotes/origin/develop HEAD` succeeds. Captured remote
+metadata and failures must not expose credentials/remote secret-bearing arguments. Revalidate fresh remote
+SHA, recorded base, actual branch, HEAD, refs and ancestry before atomically publishing final receipt; network
+failure or movement refuses without receipt. Do not add a runtime bypass environment variable. Preserve full
+source/contributor classification, mandatory tests, native independent final-check/security-review exact
+repository/head/source/deploy seal, before/after checks and atomic receipt. Receipt includes identity and
+exact target in addition to existing head/manifest_blob/consumer_blob/approval binding; preserve existing
+backend receipt keys. Gate: tests below show only intended four source pushes can be admitted, generic deploy
+still refused.
+4. Expand tests/test-ai-task-gates.sh and existing schema-validator tests; no new parallel gate
+implementation. Update docs/context-spec.md and help/error strings from singleton to fixed-four.
+tools/ci/validate-task-gates.py is schema-generic and should need no logic changes; prove this with existing
+validator tests. Confirm AGENTS plan link is reachable under .doc-reachability.json roots, with
+bin/ai-doc-reachability using its supported CLI. AGENTS pointer owner is codex/exact-sandbox-release and
+retirement is tied to issue1796 closure, not an invented future date. Gate: focused tests and normal
+repository-required local suite pass, exact-head independent final review records snapshot tests. No paid
+repeat after unchanged success.
+5. Coordinator separately owns normal branch PR/queue, merged-head reconciliation and protected installation
+using reviewed exact merged toolkit source; never pull installed checkout. Gate: installation receipt/doctor
+prove installed release. Design approval alone supplies no install authority.
+6. AFTER installed repair: coordinator creates dedicated current-upstream worktrees for three consumers;
+commits exact manifests plus additive `.ai-devops/task-gates.json` JSON
+`{"gates":{"deployment":{"required":["cloud-build-release-review"]}}}` merged into the existing declaration,
+never replacing other keys. Central deployment class rank60/protected=true and default deployment
+required/forbidden posture continue unchanged; consumer gate union adds proof and never removes restrictions.
+Preserve schema_version and existing paths/gates. This is the exact deployment.required addition, preserving
+existing fields and stricter gates verbatim, specifically central no-self-merge, sandbox-branch-pr-to-develop
+and route-to-shared-db-repository requirements and their forbidden actions (config/task-gates.json:503-531).
+Do not replace those arrays with the new gate. Re-run meaningful consumer tests/native exact-head review since
+consumer commits move approved heads. Gate: explicit check --before deploy --application-release-target
+.ai-devops/application-release-target.json --reviewer-approval REPORT admits exact final source. Then ordinary
+sandbox branch push and automated deploy readback/live smoke. PR remains sandbox-albert→develop with existing
+no-self-merge authority unchanged. Same issue retains live proof until all three verified.
 
 ### Adversarial inputs and required named tests
 
@@ -84,6 +200,7 @@ All use .ai-devops/application-release-target.json and consumer required gate cl
 | Tests | Missing/failed/no SHA snapshot test evidence | release-tests-required refuses each |
 | Concurrent movement | HEAD/blob/source/approval changes during verification | release-race-refusal retains double validation |
 | Receipt write | Atomic persistence failure | release-receipt-failure refuses no successful admission |
+| Git context/transport | Directory, SSH/proxy/config env redirection, URL rewrite, multiple origin URLs, changed worktree/config, network timeout | release-git-context-confined refuses each exact listed hostile input before network and verifies source root twice; no runtime bypass env |
 | Base provenance | Recorded HEAD/arbitrary reset, stale local develop, remote failure/moved ref, shallow history, replace/graft or multiple bases | release-honest-merge-base-admitted accepts exact inherited upstream mirror; release-base-reset-refused rejects hidden owned delta; release-fresh-develop-required refuses stale/missing/network and finish-race; release-ancestry-clean-required rejects shallow/replace/graft/multiple bases |
 | Backend branch | Original sandbox positive and off-branch invocation | release-backend-preserved-positive and release-backend-offbranch-refusal |
 | Consumer gates | New gate overwrites old security/merge requirements | release-consumer-gates-additive preserves existing arrays and forbids weaker declaration |
@@ -91,20 +208,61 @@ All use .ai-devops/application-release-target.json and consumer required gate cl
 
 ## 10. Required tests
 
-Run python3 tools/ci/validate-task-gates.py config/task-gates.json; bash tests/test-ai-task-gates.sh; matching schema validation tests discovered via rg; native review records these passing in isolated snapshot. Run bin/ai-test-local --check-collision before repository full-required suites and follow docs/development.md current suite, not guessed old commands. Four positive fixtures must independently record correct identities/targets and reject manifests from each of the other three. Existing backend tests remain passing after fixtures truthfully provide canonical target refs and actual sandbox branch. The fixture may use the suite's existing isolated command boundary to supply deterministic Git network responses, never a production runtime bypass. New tests prove native ls-remote actually runs before and after approval, failure publishes no receipt, and correct upstream mirror exclusion does not hide a fresh owned shared-db contributor. Preserve backend sandbox positive; reject backend off-branch and forged recorded base. Exact external command boundary isolation must be inspected before implementation; if no legitimate fixture route exists, stop and report rather than add a runtime environment bypass. Verify all negative rows above; verify generic ship cannot be treated as deploy admission. Recheck consumer branch and source identity immediately before normal push; source receipt is not live deployment proof. The root architecture explicitly accepts fail-closed Git network dependency; no cached “preflight done” assertion substitutes for native freshness.
+Run python3 tools/ci/validate-task-gates.py config/task-gates.json; bash tests/test-ai-task-gates.sh; schema
+acceptance/refusal cases at tests/test-ai-task-gates.sh:1309-1350 (same existing suite, no separate schema
+suite guessed); native review records these passing in isolated snapshot. Run bin/ai-test-local
+--check-collision before repository full-required suites and follow docs/development.md current suite, not
+guessed old commands. Four positive fixtures must independently record correct identities/targets and reject
+manifests from each of the other three. Existing backend tests remain passing after fixtures truthfully
+provide canonical target refs and actual sandbox branch. The fixture may use the suite's existing isolated
+command boundary to supply deterministic Git network responses, never a production runtime bypass. New tests
+prove native ls-remote actually runs before and after approval, failure publishes no receipt, and correct
+upstream mirror exclusion does not hide a fresh owned shared-db contributor. Preserve backend sandbox
+positive; reject backend off-branch and forged recorded base. Exact external command boundary isolation must
+be inspected before implementation; if no legitimate fixture route exists, stop and report rather than add a
+runtime environment bypass. Verify all negative rows above; verify generic ship cannot be treated as deploy
+admission. Recheck consumer branch and source identity immediately before normal push; source receipt is not
+live deployment proof. The root architecture explicitly accepts fail-closed Git network dependency; no cached
+“preflight done” assertion substitutes for native freshness.
 
 ## 11. Constraints
 
-Actual class reviewer-safety for toolkit implementation; redeclare before any stronger gate. No implementation before design APPROVE+coordinator authorization. Current-upstream own worktree only, only owned staging; required Git identity Albert Hazan <u2giants@users.noreply.github.com>. No push/PR/install currently authorized. Review engine independent of implementer. Keep original failed refusals/evidence. No 1Password during review. No private records in public artifacts. All clocks in America/New_York; machine filenames may UTC. No DB work and no cloud writes. No removal of UI/role/security safeguards or recovery capabilities.
+Actual class reviewer-safety for toolkit implementation; redeclare before any stronger gate. No implementation
+before design APPROVE+coordinator authorization. Current-upstream own worktree only, only owned staging;
+required Git identity Albert Hazan <u2giants@users.noreply.github.com>. No push/PR/install currently
+authorized. Review engine independent of implementer. Keep original failed refusals/evidence. No 1Password
+during review. No private records in public artifacts. All clocks in America/New_York; machine filenames may
+UTC. No DB work and no cloud writes. No removal of UI/role/security safeguards or recovery capabilities.
 
 ## 12. Access/environment
 
-Existing authenticated gh and gcloud read-only metadata suffice. No new credentials or 1Password calls required. Current source and tests are local Bash/Python/jq. Read AGENTS.md, task-router task-classification row, docs/architecture.md and docs/development.md before implementation; docs/deployment.md/configuration.md before later installation. Actual cloud inventory is read-only and contains no credential values.
+Existing authenticated gh and gcloud read-only metadata suffice. No new credentials or 1Password calls
+required. Current source and tests are local Bash/Python/jq. Read AGENTS.md, task-router task-classification
+row, docs/architecture.md and docs/development.md before implementation; docs/deployment.md/configuration.md
+before later installation. Actual cloud inventory is read-only and contains no credential values.
 
 ## 13. Definition of done, risks and open gates
 
-Design completion is only independent technical APPROVE delivered to coordinator. Full capability completion needs strict implementation/tests; final native exact-head review; normal PR/queue merge; protected exact merged-source install; three committed consumer declarations and refreshed exact-head reviews; successful native admissions; automated sandbox deploy identity and live proof on same1796 card. Main risk is broadening authority through a data-driven target lookup or lost contributor gates: exact-four runtime+schema validation and refusal tests address it. Branch validation tightens existing backend behavior only to its already-locked declared branch; do not claim backend behavior unchanged for an off-branch invocation. Rollback uses normal reviewed toolkit source release retaining original backend path; never remove consumer functionality or overwrite installed tools by hand. No production authority is created. Actual production stage-catalog delivery remains coordinator-owned separate work.
+Design completion is only independent technical APPROVE delivered to coordinator. Full capability completion
+needs strict implementation/tests; final native exact-head review; normal PR/queue merge; protected exact
+merged-source install; three committed consumer declarations and refreshed exact-head reviews; successful
+native admissions; automated sandbox deploy identity and live proof on same1796 card. Main risk is broadening
+authority through a data-driven target lookup or lost contributor gates: exact-four runtime+schema validation
+and refusal tests address it. Branch validation tightens existing backend behavior only to its already-locked
+declared branch; do not claim backend behavior unchanged for an off-branch invocation. Rollback uses normal
+reviewed toolkit source release retaining original backend path; never remove consumer functionality or
+overwrite installed tools by hand. No production authority is created. Actual production stage-catalog
+delivery remains coordinator-owned separate work.
 
-Prior native design review REJECT report muse-plan-review-20261016T041946-3667877-13993.md is retained unchanged. This revision addresses its findings prospectively; no verdict or test result is inferred from the revision.
+Prior native design review REJECT report is retained unchanged outside tracked source at this worktree's
+ignored .ai/reviews/muse-plan-review-20261016T041946-3667877-13993.md; the revised review also remains at
+.ai/reviews/muse-plan-review-20261016T042256-4061545-25028.md. They are private local review artifacts, not
+present in disposable source snapshots; coordinator has exact paths/hashes. Public issue1796 records verdict
+summaries only. This revision addresses its findings prospectively; no verdict or test result is inferred from
+the revision.
 
-Self-audit: all13 sections, linked handoff, exact targets/files, ordered dependency gates, rejected approaches, adversarial named tests, closure and access are present. A fresh session can execute authorized phases without chat; it MUST stop at explicit coordinator/design gates because implementation has not been authorized. Goal and locked decisions govern deviations. This is a prospective prework contract; no evidence is backdated.
+Self-audit: all13 sections, linked handoff, exact targets/files, ordered dependency gates, rejected
+approaches, adversarial named tests, closure and access are present. A fresh session can execute authorized
+phases without chat; it MUST stop at explicit coordinator/design gates because implementation has not been
+authorized. Goal and locked decisions govern deviations. This is a prospective prework contract; no evidence
+is backdated.
