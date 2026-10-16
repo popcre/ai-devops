@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,6 +17,8 @@ release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux") and Path("/usr/bin/gh").is_file(),
+                     "new target positive proofs are qualified Linux only")
 class ReleaseProof(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -93,6 +96,19 @@ class ReleaseProof(unittest.TestCase):
                 self.assertNotIn("BASH_ENV", options["env"])
                 self.assertNotIn("BASH_FUNC_cat%%", options["env"])
                 self.assertEqual(options["timeout"], 30)
+
+    def test_native_additive_contributor_proofs_include_ui_and_code(self):
+        source = (Path(__file__).resolve().parents[1] / "bin/ai-task-gates").read_text()
+        body = source.split("application_release_contributor_gates(){", 1)[1].split("\n}", 1)[0]
+        script = "application_release_contributor_gates(){" + body + "\n}\n" + r'''
+merged_gate(){ printf 'required\t%s\n' "$2"; }
+IDENTITY=popcre/designflow-frontend
+CONTRIBUTORS=('code\tsrc/app.ts' 'ui-live-workflow\tsrc/page.ts' 'reviewer-safety\tsrc/auth.ts')
+application_release_contributor_gates
+'''
+        result = subprocess.check_output(["/bin/bash", "-c", script], env=self.env).decode().splitlines()
+        self.assertEqual(result, ["required\tcode", "required\tui-live-workflow",
+                                  "required\treviewer-safety"])
 
     def test_cross_repo_and_backend_manifest_cannot_prove_new_identity(self):
         for repo in ["popcre/designflow-frontend", "popcre/designflow-item-master",
@@ -217,6 +233,21 @@ class ReleaseProof(unittest.TestCase):
             (toolkit / "tools/github-requests/telemetry.sh").write_text("# tampered\n")
             with self.assertRaises(ValueError):
                 release.installed_helper(self.root, self.env)
+
+
+class PlatformBoundary(unittest.TestCase):
+    def test_backend_discriminator_preserves_nonlinux_without_git_or_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".ai-devops"
+            path.mkdir()
+            (path / "application-release-target.json").write_text(
+                '{"repository":"popcre/designflow-backend"}')
+            with patch.object(release.sys, "platform", "win32"), \
+                    patch.object(subprocess, "run") as command:
+                self.assertEqual(release.discriminator(directory), "")
+                with self.assertRaises(ValueError):
+                    release.confined_environment({})
+            command.assert_not_called()
 
 
 if __name__ == "__main__":

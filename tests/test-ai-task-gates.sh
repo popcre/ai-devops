@@ -1365,6 +1365,11 @@ for new_repo in designflow-tracking designflow-frontend designflow-item-master; 
   printf '%s\n' '-- actual owned structural delta, not an inherited mirror' > "$NEW_APP/supabase/owned.sql"
   git -C "$NEW_APP" add .ai-devops supabase && git -C "$NEW_APP" commit -qm 'new target structural refusal fixture'
   ( cd "$NEW_APP" && "$GATES" start --class deployment --base "$NEW_BASE" >/dev/null 2>&1 )
+  if [ "$("$PY_BIN" -c 'import sys; print(sys.platform)')" != linux ]; then
+    check "$new_repo new Linux-only target refuses unsupported platform without affecting backend" \
+      "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+    continue
+  fi
   check "$new_repo cannot hide an actual shared-db contributor behind deployment rank" \
     "out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json 2>&1 | grep -q 'cannot contain structural'"
   check "$new_repo no receipt is published by structural refusal" \
@@ -1385,6 +1390,17 @@ for new_repo in designflow-tracking designflow-frontend designflow-item-master; 
   git -C "$NEW_APP" add .ai-devops/application-release-target.json && git -C "$NEW_APP" commit -qm 'forged backend target'
   check "$new_repo forged backend manifest cannot acquire a new-target receipt" \
     "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+done
+
+for policy_case in missing fifth cross-target; do
+  case "$policy_case" in
+    missing) policy_filter='del(.application_source_releases["popcre/designflow-tracking"])' ;;
+    fifth) policy_filter='.application_source_releases["popcre/foreign"] = .application_source_releases["popcre/designflow-backend"]' ;;
+    cross-target) policy_filter='.application_source_releases["popcre/designflow-tracking"].target.service = "popcre-albert-item-sandbox"' ;;
+  esac
+  jq "$policy_filter" "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/release-$policy_case.json"
+  check "closed four-target source release schema rejects $policy_case policy" \
+    "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/release-$policy_case.json'"
 done
 
 APP="$TMP/application-release"

@@ -649,6 +649,15 @@ application_release_supplement(){
   "$py" "$ROOT/tools/application_source_release.py" "$@"
 }
 
+application_release_contributor_gates(){
+  local contributor cls
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    contributor="$(printf '%b' "$contributor")"
+    cls="${contributor%%$'\t'*}"
+    merged_gate "$IDENTITY" "$cls"
+  done
+}
+
 validate_application_release_policy(){
   jq -e --argjson services "$APP_RELEASE_SERVICES" '
     .application_source_releases as $r
@@ -1531,6 +1540,11 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
     [ "$reviewer_release" -eq 0 ] || merged_gate "$IDENTITY" reviewer-safety
+    if [ "$application_release_ready" -eq 1 ] && [ "$IDENTITY" != popcre/designflow-backend ]; then
+      # New entries retain every contributing UI/code/security proof even
+      # when explicit deployment intent outranks their source path classes.
+      application_release_contributor_gates
+    fi
   } | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
