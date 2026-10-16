@@ -288,8 +288,18 @@ sf_rpc_turn() {
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check 2>>"$out.err"
   }
-  sf_pid="$SF_RPC_PID"
-  local to_rpc="${SF_RPC[1]}" from_rpc="${SF_RPC[0]}"
+  sf_pid="${SF_RPC_PID:-}"
+  local rpc_in="${SF_RPC[1]:-}" rpc_out="${SF_RPC[0]:-}" to_rpc from_rpc
+  [ -n "$sf_pid" ] && [ -n "$rpc_in" ] && [ -n "$rpc_out" ] || return 1
+  # Bash closes a named coprocess's descriptors when that child exits. Own
+  # duplicates so a fast final response remains readable after process exit.
+  exec {to_rpc}>&"$rpc_in" || return 1
+  if ! exec {from_rpc}<&"$rpc_out"; then
+    exec {to_rpc}>&-
+    kill "$sf_pid" 2>/dev/null || true
+    wait "$sf_pid" 2>/dev/null || true
+    return 1
+  fi
   # --rawfile: a full review prompt can exceed the 128 KiB argv string limit.
   jq -cn --rawfile m "$prompt_file" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
   while IFS= read -r line <&"$from_rpc"; do
@@ -332,7 +342,8 @@ sf_rpc_turn() {
         esac ;;
     esac
   done
-  eval "exec ${to_rpc}>&-" 2>/dev/null || true
+  exec {to_rpc}>&-
+  exec {from_rpc}<&-
   kill "$sf_pid" 2>/dev/null || true
   wait "$sf_pid" 2>/dev/null || true
   [ -n "$text" ] || return 1

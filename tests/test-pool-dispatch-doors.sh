@@ -11,6 +11,7 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 export AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none
+unset AI_REVIEW_BRIEF_FILE
 POOLTMP="$(mktemp -d)"
 trap 'rm -rf "$POOLTMP"' EXIT
 
@@ -39,9 +40,20 @@ cat > "$POOLTMP/lifecycle" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-cat > "$POOLTMP/engine" <<EOF
+export TEST_POOL_FIXTURE="$POOLTMP"
+cat > "$POOLTMP/engine" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$POOLTMP/engine-args"
+printf '%s\n' "$*" >> "$TEST_POOL_FIXTURE/engine-args"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --prompt-file ]; then
+    [ "$2" != "${AI_REVIEW_BRIEF_FILE:-}" ] || exit 91
+    [ -z "${MUTATE_ORIGINAL_REQUEST:-}" ] || printf 'changed after capture\n' > "$AI_REVIEW_BRIEF_FILE"
+    cp "$2" "$TEST_POOL_FIXTURE/engine-brief"
+    stat -c '%a' "$2" > "$TEST_POOL_FIXTURE/engine-brief-mode"
+    break
+  fi
+  shift
+done
 exit 0
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/engine"
@@ -65,6 +77,23 @@ RC_MUSE=$?
 MUSE_TAG="$(engargs | tr ' ' '\n' | grep -A1 '^--name$' | tail -1)"
 check "pool_muse_session_name_fits_native_limit" "[ '$RC_MUSE' -eq 0 ] && [ -n '$MUSE_TAG' ] && [ '${#MUSE_TAG}' -le 40 ] && [[ '$MUSE_TAG' == pool-muse-* ]]"
 check "pool_muse_argv_omits_max_turns" "engargs | grep -q -- '--provider muse' && ! engargs | grep -q -- '--max-turns'"
+
+# Registered pool doors receive the existing carried question through the
+# engine's prompt-file contract, never a live pointer to the caller's file.
+printf '%s\n' 'CARRIED_QUESTION_1794: literal $(must_not_execute), with spaces.' > "$POOLTMP/expected-question"
+for provider in muse deepseek stepfun; do
+  cp "$POOLTMP/expected-question" "$POOLTMP/question with spaces.md"
+  rm -f "$POOLTMP/engine-args" "$POOLTMP/engine-brief" "$POOLTMP/engine-brief-mode"
+  (cd "$POOLTMP/fakerepo" && export_pool && export AI_REVIEW_BRIEF_FILE="$POOLTMP/question with spaces.md" MUTATE_ORIGINAL_REQUEST=1 && bash "$POOL" "$provider" final-check) > "$POOLTMP/out-carried-$provider" 2>&1
+  RC_CARRIED=$?
+  check "carried_question_reaches_$provider" "[ '$RC_CARRIED' -eq 0 ] && cmp -s '$POOLTMP/expected-question' '$POOLTMP/engine-brief'"
+  check "carried_question_snapshot_is_private_$provider" "[ \"\$(cat '$POOLTMP/engine-brief-mode')\" = 600 ]"
+  check "carried_question_survives_caller_mutation_$provider" "grep -q 'changed after capture' '$POOLTMP/question with spaces.md' && ! grep -q 'changed after capture' '$POOLTMP/engine-brief'"
+done
+rm -f "$POOLTMP/engine-args"
+(cd "$POOLTMP/fakerepo" && export_pool && export AI_REVIEW_BRIEF_FILE="$POOLTMP/missing-question" && bash "$POOL" muse final-check) > "$POOLTMP/out-carried-missing" 2>&1
+RC_CARRIED=$?
+check "missing_question_starts_no_managed_provider" "[ '$RC_CARRIED' -ne 0 ] && [ ! -e '$POOLTMP/engine-args' ]"
 
 rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1
