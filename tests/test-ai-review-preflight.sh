@@ -886,6 +886,10 @@ rm -f "$TMP/ph-pool-args"
 PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
 [ "$PH_RC" -eq 0 ] && same_path "$(printf '%s\n' "$PH_FRONT" | tail -1)" "$PH_REPORT" && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
   && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
+AI_REVIEW_SOURCE_RECEIPT_FILE="$REPO/.ai/reviews/governed-ph.json" ph_front > /dev/null 2>"$TMP/ph-governed.err"
+grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ! grep -q 'already passed' "$TMP/ph-governed.err" \
+  && ok "governed_caller_never_receives_another_reviewers_pass" || bad "governed_caller_never_receives_another_reviewers_pass"
+rm -f "$TMP/ph-pool-args"
 ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
 grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"

@@ -180,6 +180,10 @@ if [ "$_pool_force" = 1 ]; then
   printf 'ai-review-pool: --force given; passing-report reuse skipped.\n' >&2
 elif [ "$_pool_tests" = 1 ]; then
   printf 'ai-review-pool: --tests given; fresh test evidence requested, passing-report reuse skipped.\n' >&2
+elif [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ]; then
+  # A governed caller needs the source receipt that only a fresh qualified run
+  # publishes; a reused report leaves it missing (#1783).
+  printf 'ai-review-pool: governed source receipt requested; passing-report reuse skipped.\n' >&2
 elif [ -z "${AI_REVIEW_OPERATION:-}" ] && [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -z "$CARRIED_BRIEF_SNAPSHOT" ]; then
   _reuse_rc=0; pool_reuse_lookup || _reuse_rc=$?
   case "$_reuse_rc" in

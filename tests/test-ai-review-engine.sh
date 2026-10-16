@@ -657,7 +657,11 @@ export AI_REVIEW_DOOR_GROK="$MOCK_DOOR"
 export AI_REVIEW_RUNNER_DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json"
 CORE_TEST_MARKER="$TMP/core-tests-receipt"
 CORE_TEST_COMMAND="printf '%s' \"\${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}\" > '$CORE_TEST_MARKER'; printf 'native-core-test-output\\n'"
-export AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json"
+# A governed receipt must live in the source's ignored .ai/reviews; the core
+# publishes it after a qualified final for every core door (#1783).
+mkdir -p "$MREPO/.ai/reviews"
+CORE_RECEIPT="$(cd "$MREPO" && pwd -P)/.ai/reviews/private-source-receipt.json"
+export AI_REVIEW_SOURCE_RECEIPT_FILE="$CORE_RECEIPT"
 
 set +e
 ( cd "$MREPO" && timeout 90 "$ENGINE" review --provider grok --name engine-e2e --repo "$MREPO" \
@@ -675,7 +679,8 @@ CORE_TEST_STATE=""
 while IFS= read -r _core_state; do
   if jq -e '.tests.exit==0 and (.tests.command|contains("core-tests-receipt")) and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$_core_state" >/dev/null 2>&1; then CORE_TEST_STATE="$_core_state"; break; fi
 done < <(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' -print 2>/dev/null)
-check "core_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$CORE_TEST_MARKER')\" = unset ] && [ \"\$AI_REVIEW_SOURCE_RECEIPT_FILE\" = '$TMP/private-source-receipt.json' ]"
+check "core_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$CORE_TEST_MARKER')\" = unset ] && [ \"\$AI_REVIEW_SOURCE_RECEIPT_FILE\" = '$CORE_RECEIPT' ]"
+check "core_door_final_publishes_governed_receipt" "jq -e '.schema_version==1 and (.packet_sha256|test(\"^[0-9a-f]{64}$\"))' '$CORE_RECEIPT' >/dev/null"
 check "core_tests_are_recorded_with_output_hash" "test -n '$CORE_TEST_STATE' && jq -e '.tests.exit==0 and (.tests.command|contains(\"core-tests-receipt\")) and (.tests.output_sha256|test(\"^[0-9a-f]{64}$\"))' '$CORE_TEST_STATE' >/dev/null"
 unset AI_REVIEW_SOURCE_RECEIPT_FILE
 CORE_NEVER_DOOR="$TMP/core-never-door"
@@ -1070,7 +1075,7 @@ printf '%s\n' "$stored"
 PACKET
 chmod +x "$RF_PACKET_WRAPPER"
 rf_run() {
-  local scenario="$1" dir="$TMP/receipt-$1" source receipt store rc=0 state expected
+  local scenario="$1" provider="${2:-muse}" dir="$TMP/receipt-$1-${2:-muse}" source receipt store rc=0 state expected door_var
   mkdir -p "$dir"
   git clone --quiet --no-hardlinks "$MREPO" "$dir/source" || return 1
   source="$(cd "$dir/source" && pwd -P)"
@@ -1083,12 +1088,13 @@ rf_run() {
     store-fail) printf 'not a store\n' > "$dir/store-file"; store="$dir/store-file" ;;
   esac
   expected="$("$REPO_ROOT/bin/ai-review-packet" resolve "$source" --base HEAD~1 --assert-head "$HEAD_SHA")" || return 1
-  ( cd "$source" && env AI_POOL_CALLER=codex AI_REVIEW_DOOR_MUSE="$RF_DOOR" \
+  door_var="AI_REVIEW_DOOR_$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')"
+  ( cd "$source" && env AI_POOL_CALLER=codex "$door_var=$RF_DOOR" \
       RF_SOURCE="$source" RF_RECEIPT="$receipt" RF_FACTS="$dir/facts.json" RF_CASE="$scenario" RF_MOCK_DOOR="$MOCK_DOOR" \
       RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
       AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt" AI_REVIEW_PACKET_STORE="$store" \
       AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
-      bash "$POOL" muse final-check --base HEAD~1 --assert-head "$HEAD_SHA" \
+      bash "$POOL" "$provider" final-check --base HEAD~1 --assert-head "$HEAD_SHA" \
       --tests "test -z \"\${AI_REVIEW_SOURCE_RECEIPT_FILE+x}\" && test ! -e '$dir/facts.json'"
   ) > "$dir/stdout" 2> "$dir/stderr" || rc=$?
   state="$(find "$dir/lifecycle/runs" -type f -name '*.json' -print 2>/dev/null | head -1)"
@@ -1119,7 +1125,7 @@ rf_run() {
         else
           jq -e '.failure_class=="source-receipt-publication-failed"' "$state" >/dev/null || return 1
         fi
-        local report; report="$(find "$source/.ai/reviews" -maxdepth 1 -name 'muse-final-check-*.md' -print | head -1)"
+        local report; report="$(find "$source/.ai/reviews" -maxdepth 1 -name "$provider-final-check-*.md" -print | head -1)"
         [ -s "$report" ] && grep -q '^APPROVE$' "$report" || return 1
         [ -d "$(jq -r .packet "$dir/facts.json")" ] || return 1
       fi
@@ -1128,6 +1134,30 @@ rf_run() {
 }
 for rf_case in approve reject post-store-identical conflict linked outside store-fail packet-drift retained-drift source-drift post-store-source-drift receipt-race provider-fail; do
   check "native_muse_final_receipt_${rf_case}" "rf_run '$rf_case'"
+done
+# governed_call_skips_pool_reuse (#1783): after a passing review of this head,
+# a governed call (no --tests) must run fresh and publish its own receipt
+# instead of reusing the cached report.
+rf_reuse() {
+  local dir="$TMP/receipt-approve-muse" source receipt2 rc=0
+  source="$(cd "$dir/source" && pwd -P)"; receipt2="$source/.ai/reviews/governed-second.json"
+  ( cd "$source" && env AI_POOL_CALLER=codex AI_REVIEW_DOOR_MUSE="$RF_DOOR" \
+      RF_SOURCE="$source" RF_RECEIPT="$receipt2" RF_FACTS="$dir/facts2.json" RF_CASE=approve RF_MOCK_DOOR="$MOCK_DOOR" \
+      RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
+      AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt2" AI_REVIEW_PACKET_STORE="$dir/store" \
+      AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
+      bash "$POOL" muse final-check --base HEAD~1 --assert-head "$HEAD_SHA"
+  ) > "$dir/stdout2" 2> "$dir/stderr2" || rc=$?
+  [ "$rc" = 0 ] && grep -q 'governed source receipt requested; passing-report reuse skipped' "$dir/stderr2" \
+    && ! grep -q 'reusing passing' "$dir/stderr2" && [ -s "$receipt2" ] && [ -s "$dir/facts2.json" ]
+}
+check "governed_call_skips_pool_reuse" "rf_reuse"
+# governed_receipt_published_for_every_core_door (#1783): DeepSeek and StepFun
+# go through the same core and must publish, and still refuse on conflict.
+for rf_provider in deepseek stepfun; do
+  for rf_case in approve reject conflict; do
+    check "core_final_receipt_${rf_provider}_${rf_case}" "rf_run '$rf_case' '$rf_provider'"
+  done
 done
 
 # --- implement contract: worktree + recovery --------------------------------
