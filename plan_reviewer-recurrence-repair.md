@@ -3,7 +3,7 @@
 ## STATUS — read first; do not re-derive completed programmes
 
 Owner: [issue #1783](https://github.com/popcre/ai-devops/issues/1783), planning coordinator Codex chat `01a1423a-787d-7601-8ac5-49b0a42afbed` on edge-dev3.
-Planning snapshot: October 15, 2026, 9:09 PM EDT. Implementation has **not started**.
+Planning snapshot: October 15, 2026, 9:09 PM EDT; installation-gap addendum and closeout recorded later that evening. Implementation has **not started**. Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
 Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-recurrence-plan.md).
 
 | Step | Work | State / date | Evidence required to advance |
@@ -280,7 +280,7 @@ Planning-only validation: `git diff --check`, `bash tests/test-markdown-links.sh
 
 ## 12. Access and environment
 
-Verified during planning: Git access to current `origin/main`; `bin/ai-gh` authenticated read/create access to public popcre/ai-devops; local read access to installed scripts, private reviewer incident packages and shared-db consumer source. Source publication will verify push/PR/merge access separately. Paid provider/model access, SSH routes, administrator privilege, all install receipts and current balances were **not tested** by planning; do not mark them available from presence of a command.
+Verified during planning: Git access to current `origin/main`; `bin/ai-gh` authenticated read/create access to public popcre/ai-devops; local read access to installed scripts, private reviewer incident packages and shared-db consumer source. Source publication verified push/PR access and the original plan merge; current PR1786 readback determines addendum merge. No implementation or installation was performed. Paid provider/model access, SSH routes, administrator privilege, all install receipts and current balances were **not tested** by planning; do not mark them available from presence of a command.
 
 Start from a fresh `origin/main` worktree. Tools needed: git, Bash, Python3, jq, rg; Node and supported pinned provider CLIs for implementation/live checks. No web server to start. Follow `docs/configuration.md`, `docs/deployment.md`, `docs/reviewer-issues.md` and `docs/reviewer-rotation-rules.md` before changing their domains. Use the installed launcher to find private state (`ai-reviewer-issue path`); do not assume it lives in the planning worktree.
 
