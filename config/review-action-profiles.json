@@ -208,6 +208,63 @@
       },
       "public_contract_sha256": "0d4e301b9286347b3005b1c708407f55e90a74ffcbb639a2020073f75404616d",
       "required_gate": "oracle-native-alternate-v2-descriptor-only-admission"
+    },
+    "generated-definition-boundary-v1": {
+      "action": "database",
+      "repository": "popcre/designflow-backend",
+      "required_gate": "reviewed-generated-definition-fixture-only",
+      "source_paths": [
+        "package.json",
+        "scripts/cutover-synthetic/generated-definition-admission.cjs",
+        "scripts/cutover-synthetic/generated-definition-fixtures.cjs",
+        "scripts/cutover-synthetic/generated-definition-qualification.cjs",
+        "scripts/cutover-synthetic/private-profile.cjs",
+        "scripts/cutover-synthetic/reconcile.cjs",
+        "scripts/cutover-synthetic/run.cjs",
+        "scripts/lib/strict-json.cjs"
+      ],
+      "changed_paths": [
+        ".ai-devops/task-gates.json",
+        "docs/verification/cutover-synthetic/generated-definition-boundary-spec.md",
+        "plan_4250_generated_definition_qualification.md",
+        "scripts/cutover-synthetic/README.md",
+        "scripts/cutover-synthetic/generated-definition-admission.cjs",
+        "scripts/cutover-synthetic/generated-definition-fixtures.cjs",
+        "scripts/cutover-synthetic/generated-definition-qualification.cjs",
+        "scripts/cutover-synthetic/generated-definition-qualification.test.cjs",
+        "scripts/cutover-synthetic/run.cjs"
+      ],
+      "resources": {
+        "instances": 1,
+        "cpu": 2,
+        "memoryBytes": 2147483648,
+        "swapBytes": 2147483648,
+        "pids": 128,
+        "nodeHeapMiB": 2048,
+        "tmpBytes": 67108864
+      },
+      "limits": {
+        "wallMs": 120000,
+        "containerCommandMs": 30000,
+        "connectMs": 1000,
+        "statementMs": 5000,
+        "lockMs": 1000,
+        "stopSeconds": 10
+      },
+      "pins": {
+        "fixture_sha256": "076b4e15ec8059ff5635bc69c727d923ee37ef6b4e819faafc5785456d4d95e6",
+        "image": "sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b",
+        "node_version": "v24.22.0",
+        "node_sha256": "67ca5783febb8bf85736c79fcdd92c8d6d465a0eb2a082672bcdfa76a506751c",
+        "npm_version": "11.19.1",
+        "npm_inventory_sha256": "968a81f27ffaeab01a36ef0be979d4c0e908253cf775df088d7505344056064b",
+        "dependency_inventory_sha256": "3d9a1b784fb18bbc3245be6e0d46cbc55b81f2e1d8da960c349885aabea27917",
+        "package_sha256": "12d702f65e5aaa1e7397d5f3f3ef7f3ad6194e041f4395147198fcca7ab1ee91",
+        "pg_version": "8.23.1",
+        "pg_entry_sha256": "3fad6e6d3d976edbabe0cbc9e1d39f4340bcb719bbbb186a0d3a24f3dbd4a94c",
+        "fixture_module_sha256": "4fe943a0e7f7faad9061445a4f7b44b084d742c809f0e19fbc0bf516f07fa4ad"
+      },
+      "retirement": "Owned by ai-task-gates for fixed generated-only4250; retire opt-in when fixture qualification complete, consolidate only preserving closed refusals."
     }
   },
   "schema_version": 1

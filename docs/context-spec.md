@@ -182,3 +182,34 @@ refused; they are not a security boundary. Anyone who can set an environment
 variable in the session can already run the provider wrapper directly. Export
 neither by hand: an approval left set in a shell would re-authorize every later
 review in it, each one recorded as if newly approved.
+
+### Closed public generated-definition check
+
+`generated-definition-boundary-v1` is the sole public generated-only database
+exception for `popcre/designflow-backend` reviewer-safety tasks. Its consumer must
+add `reviewed-generated-definition-fixture-only` without changing any other
+policy. The strongest class and global forbidden defaults remain unchanged.
+`check --before database --action-manifest-stdin --reviewer-approval REPORT`
+accepts only its exact closed descriptor, reviewed nine-path contributor set,
+clean physical source/base, ordinary whole-source independent final review and
+passing test evidence. That review seals protected source; it does not add a
+second AI approval requirement for ordinary application row writes.
+
+The installed public-only validator reuses native no-follow IO and lifecycle
+proofs. It rehashes the exact eight source paths and every entry in the pinned
+OWN dependency and npm inventories, as well as Node, admission bytes and output
+absence. Initial inventories deliberately bind the qualified physical runtime;
+they are not generic portable dependency manifests. Source/runtime files must
+satisfy the existing native custody permission checks. Fixture/runtime pin
+changes require reviewed installed configuration and source qualification.
+Only fixed public generated definitions are in scope; no SQL, Docker, Node
+module, provider, private capture or application process is launched by this
+check. Existing #770 and Oracle routes retain their separate contracts.
+
+Every attempt needs a fresh observed check and coordinator decision. The
+existing task override records immutable source/input audit evidence; repeated
+valid checks may succeed after revalidation. No token, consumption state,
+execution lease or refund is created. Correlation IDs are not credentials and
+no cryptographic control of later same-UID execution is claimed. Existing
+result absence and exclusive output writing still prevent output reuse. A lost
+response requires inspection of actual evidence before execution is decided.

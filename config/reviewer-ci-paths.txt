@@ -123,3 +123,8 @@ bin/ai-oracle-native-alternate-v2
 bin/ai-gh
 tools/github-requests/**
 tools/application_source_release.py
+
+# Closed public generated-definition native gate (no execution).
+tools/generated_definition_action.py
+config/review-action-profiles.json
+tests/test_generated_definition_action.py

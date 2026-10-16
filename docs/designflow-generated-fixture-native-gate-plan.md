@@ -242,3 +242,18 @@ immutable evidence fidelity and both repository installation order; ordinary who
 action profile, avoiding circularity. No current action is unblocked by this document alone. Implementation
 remains held until genuine independent design APPROVE plus root GO; this is a technical review gate, not an
 unanswered owner/business question.
+
+
+### Prospective implementation refinement selected by coordinator
+
+After source inspection, coordinator approved one additional installed pin:
+`fixture_module_sha256=4fe943a0e7f7faad9061445a4f7b44b084d742c809f0e19fbc0bf516f07fa4ad`.
+The native validator compares actual tracked fixture-module bytes to that pin,
+while retaining the fixed exported fixture digest `076b4e15…`. It never imports
+application code or claims to reproduce the JavaScript serialization. A fixture
+change requires reviewed installed-profile/source qualification. Coordinator also
+confirmed explicit local reviewer-safety database prohibitions must refuse,
+even with opt-in; stronger effective classes never enter this route. These are
+prospective source-binding/prohibition tightenings within the selected boundary;
+the final native code review covers them. Original plan-review history remains
+unchanged. No execution, token or additional authority is introduced.

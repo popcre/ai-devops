@@ -61,7 +61,8 @@
   "reviewer_release": {
     "database": {
       "private-tooling": "reviewed-private-data-writer",
-      "private-evidence": "synthetic-fixtures-only"
+      "private-evidence": "synthetic-fixtures-only",
+      "reviewer-safety": "reviewed-generated-definition-fixture-only"
     }
   },
   "application_source_releases": {
@@ -517,6 +518,14 @@
         },
         {
           "glob": "bin/ai-oracle-native-alternate-v2",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/generated_definition_action.py",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test_generated_definition_action.py",
           "class": "reviewer-safety"
         }
       ],

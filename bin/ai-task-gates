@@ -155,6 +155,10 @@ validate_action_gates(){
       [ "$action" = database ] && [ "$gate" = synthetic-fixtures-only ] \
         || fail_closed "reviewer_release cannot broaden the closed private-evidence database boundary."
     fi
+    if [ "$class" = reviewer-safety ]; then
+      [ "$action" = database ] && [ "$gate" = reviewed-generated-definition-fixture-only ] \
+        || fail_closed 'reviewer_release cannot broaden the closed generated reviewer-safety boundary.'
+    fi
     [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
   done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
@@ -562,11 +566,15 @@ reviewer_approval_summary(){
   if [ "${LOCAL_TESTS_REQUIRED:-0}" = 1 ]; then
     jq -e '(.tests.exit==0) and (.tests.output_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$row" >/dev/null 2>&1 || return 2
   fi
-  local oracle_script=""
+  local oracle_script="" generated_binding=""
+  if [ "$action" = database ] && [ -n "$action_manifest_file" ] && python3 "$REAL_DIR/../tools/review_action_profile.py" generated-select < "$action_manifest_file" >/dev/null 2>&1; then
+    [ "$action_stage" = initial-forward ] || return 1
+    generated_binding="$(python3 "$REAL_DIR/../tools/review_action_profile.py" generated-preaction "$row" < "$action_manifest_file" 2>/dev/null)" || return 1
+  fi
   if [ "$action" = offline-private-capture-transform ]; then
     jq -e ' .evidence_scope=="selected-code" and .code_only!=null and .code_only_export!=null' "$row" >/dev/null || return 1
   fi
-  if jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
+  if [ -z "$generated_binding" ] && jq -e '.code_only!=null or .code_only_export!=null or .evidence_scope=="selected-code"' "$row" >/dev/null; then
     [ -n "$action_manifest_file" ] || return 1
     if [ "$action" = offline-private-capture-transform ]; then
       case "$(jq -r .action_profile_binding.profile "$row")" in
@@ -582,13 +590,13 @@ reviewer_approval_summary(){
       python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" < "$action_manifest_file" >/dev/null 2>&1 || return 1
     fi
   fi
-  [ -z "$action_manifest_file" ] || jq -e '.action_profile_binding!=null and .evidence_scope=="selected-code"' "$row" >/dev/null || return 1
+  [ -z "$action_manifest_file" ] || [ -n "$generated_binding" ] || jq -e '.action_profile_binding!=null and .evidence_scope=="selected-code"' "$row" >/dev/null || return 1
   mode="$(jq -r '.review_mode // ""' "$row")"
   case "$action" in
     review|pr-wait|code-only-review) case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) return 1 ;; esac ;;
     *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
   esac
-  if [ "$publish_admission" = 1 ]; then
+  if [ "$publish_admission" = 1 ] && [ -z "$generated_binding" ]; then
     [ -n "$action_manifest_file" ] || return 1
     if [ "$action" = offline-private-capture-transform ]; then
       python3 "$REAL_DIR/../tools/$oracle_script" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
@@ -596,6 +604,13 @@ reviewer_approval_summary(){
       [ "$action" = database ] || return 1
       python3 "$REAL_DIR/../tools/review_action_profile.py" preaction "$row" --stage "$action_stage" --admit < "$action_manifest_file" >/dev/null 2>&1 || return 1
     fi
+  fi
+  if [ -n "$generated_binding" ]; then
+    # Existing state_record_override stores this immutable input/source audit
+    # binding. Repeated checks freshly validate; no token or consumption state.
+    jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" --arg binding "$generated_binding" \
+      '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x) generated-audit:\($binding)"' "$row"
+    return 0
   fi
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
@@ -981,7 +996,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # Gates this tool actually checks. Anything else a policy lists is recorded
 # and printed under "not checked by this tool"; it is never claimed as satisfied
 # or enforced here. Keep this list in step with the enforcement code paths.
-GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
+GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission|reviewed-generated-definition-fixture-only)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 split_required_gates(){
   local all="$1" checked
@@ -1615,6 +1630,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         && [ "$IDENTITY" = popcre/designflow-backend ] \
         && [ "$action_manifest_stdin" -eq 1 ] && [ -z "$small_entry" ] \
         && [ -z "$acknowledge" ] \
+        || release_gate=""
+    fi
+    if [ "$effective" = reviewer-safety ] && [ -n "$release_gate" ]; then
+      [ "$action" = database ] && [ "$release_gate" = reviewed-generated-definition-fixture-only ] \
+        && [ "$IDENTITY" = popcre/designflow-backend ] && [ "$declared" = reviewer-safety ] \
+        && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
+        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] && [ "$first_install" -eq 0 ] \
+        && python3 "$REAL_DIR/../tools/review_action_profile.py" generated-select < "$action_manifest_file" >/dev/null 2>&1 \
         || release_gate=""
     fi
     if [ "$protected" = true ] && [ -z "$release_gate" ]; then
