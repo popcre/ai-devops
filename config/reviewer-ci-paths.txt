@@ -118,3 +118,8 @@ tools/oracle_native_alternate_guardian.py
 bin/ai-oracle-native-alternate
 tools/oracle_native_alternate_v2_profile.py
 bin/ai-oracle-native-alternate-v2
+
+# Native sandbox source-release proof consumes this managed helper closure.
+bin/ai-gh
+tools/github-requests/**
+tools/application_source_release.py

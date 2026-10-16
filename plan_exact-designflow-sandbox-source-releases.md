@@ -323,3 +323,22 @@ approaches, adversarial named tests, closure and access are present. A fresh ses
 phases without chat; it MUST stop at explicit coordinator/design gates because implementation has not been
 authorized. Goal and locked decisions govern deviations. This is a prospective prework contract; no evidence
 is backdated.
+
+### Prospective CI registration correction — October16, after PR1797 failure
+
+Root authorized this bounded correction after genuine CI `test-reviewer-ci-paths` refused three newly
+transitive dependencies: `tools/github-requests/telemetry.sh`, `tools/github-requests/pr-status-context`,
+and `tools/application_source_release.py`. No validator is disabled and no full-suite PASS is inferred.
+Fresh main90b52dffb0b01c69b3c9e6377b6108e744ce1500 was merged normally before these edits, preserving
+PR1790's frozen-provider CI changes and PR1795's carried questions. Earlier exacteac review remains
+historical, not reused for changed source.
+
+Before changing implementation: add `tools/application_source_release.py`, `bin/ai-gh` and the entire
+managed `tools/github-requests/**` closure to `config/reviewer-ci-paths.txt`. The supplemental release
+proof hashes that exact installed helper closure and invokes its launcher, so all of it now legitimately
+selects reviewer CI. Adjust `tests/test-reviewer-ci-paths.sh` to stop declaring ai-gh unrelated/mention-only,
+require these direct paths and verify a representative closure member; preserve actual transitive walking
+and unrelated-path negatives. This is registration of real dependencies, not broader release authority.
+Gate: unchanged transitive completeness test passes, targeted source-release16 tests pass, all own diff
+checks pass and a FRESH native exact-head Muse final review APPROVEs before coordinator authorizes push.
+Do not rerun unchanged439 focused assertions merely to repeat prior proof; fresh CI supplies full suite.

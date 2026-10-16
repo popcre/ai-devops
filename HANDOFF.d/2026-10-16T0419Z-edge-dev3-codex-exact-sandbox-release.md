@@ -26,3 +26,14 @@ All three new sandbox source-release admissions/automated live proofs plus uncha
 ## Prospective generic-route regression correction
 
 After native3c6 APPROVE, an additional offline future-release fixture reproduced generic deploy exit0 despite the upstream closed-gate opt-in and missing branch/ref proof. Root authorized the narrow NEW-THREE-only explicit-target guard and regression; backend/other actions unchanged. Source changed and needs fresh final native review; old APPROVE is retained, not transferred. No live action/provider fixture call/push occurred.
+
+## CI correction after publication
+
+PR1797 eac genuine CI failed only `test-reviewer-ci-paths` in Linux shard3: new transitive source-release
+module and telemetry/status helper paths were not registered. Root authorized bounded registration repair,
+not validator removal. Fresh main90b52dff merged normally preserving1790/1795. Prospective plan correction
+preceded implementation. Config now covers module, managed ai-gh launcher and entire hashed helper closure;
+completeness walker follows ai-gh honestly, explicit closure sentinels and unrelated-path negatives remain.
+Focused CI-path test PASS101 dependencies;16 source-release module tests PASS; diff/shellsyntax PASS.
+Earlier439 remain runtime-identical proof; no unchanged full rerun or invented full-suite PASS. Fresh exact-head
+native Muse review and root diff/report inspection must precede updated PR push. Earlier eac APPROVE retained.
