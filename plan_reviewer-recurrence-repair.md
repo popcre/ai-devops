@@ -181,7 +181,7 @@ Dependencies: step 1. **Gate:** exact repeated publication is idempotent; change
 
 This prerequisite is owned by the #1783 coordinator until an existing responsible repair owner is verified. Its verification remains unchecked until the exact build and real install are proved. The planning request authorizes documenting it, not claiming its execution. If access/provenance/privilege prevents safe delivery, record the exact technical blocker rather than asking Albert to approve a bypass.
 
-Bounded #674 follow-up design: [exact non-authorizing denied-read recovery](docs/muse-denied-read-recovery-design.md). Its one-to-three denied-read suffix requires independent design APPROVE before implementation; it does not change the other steps or claim their ownership.
+Bounded #674 follow-up design: [exact non-authorizing denied-read recovery](docs/muse-denied-read-recovery-design.md). Its one-to-three denied-read suffix requires independent design APPROVE before implementation; it does not change the other steps or claim their ownership. The additive provenance/navigation clarification also covers `bin/ai-review-packet`, Muse door text and their focused/shared packet tests, while preserving the existing original-checkout identity guardrail.
 
 Targets: `bin/ai-muse` `run_turn()`, `retain_turn()`, `parse_turn()`, `failed_turn_stream_check()`, `failed_turn_source_check()` and supported reconcile/follow-up handlers; `tools/lib/review-doors/muse.sh`; existing `config/opencode-muse` only if a demonstrated profile defect requires it. Reconcile owner #674 before overlapping writes.
 
