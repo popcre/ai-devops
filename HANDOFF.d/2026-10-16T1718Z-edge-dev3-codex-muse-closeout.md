@@ -55,13 +55,13 @@ The housekeeping cleanup trap referenced a function-local temporary variable aft
 
 ## 7. Constraints and custody
 
-No new fixes after wrap-up. Never pull/merge in the installed canonical toolkit checkout; it remains at the accepted protected release. Use bin/ai-gh for GitHub. Preserve unrelated Windows edits, foreign worktrees, and other handoffs. No new shared-db issue/claim or database write is needed. The original primary chat checkout is clean and protected.
+No new fixes after wrap-up. Never pull/merge in the installed canonical toolkit checkout; it remains at the accepted protected release. Use [ai-gh](https://github.com/popcre/ai-devops/blob/main/bin/ai-gh) for GitHub. Preserve unrelated Windows edits, foreign worktrees, and other handoffs. No new shared-db issue/claim or database write is needed. The original primary chat checkout is clean and protected.
 
 Three completed temporary worktrees were removed after verified private archives. The unmerged superseded housekeeping source branch is intentionally retained for recovery, not active work. Its bundle and 82 private custody files were independently hash-verified. The original installation-review candidate is intentionally retained because native lifecycle evidence references its exact report path. Do not remove that audit candidate. Reviewer evidence was uploaded using the existing encrypted private archive. Native installed completion/stage receipts and private machine proof/custody records remain authoritative. Discover them through the installed toolkit's existing state; do not publish raw private evidence. The remaining documentation workspace is intentionally retained until #1821 merges.
 
 ## 8. Access and environment
 
-GitHub reads/writes worked through bin/ai-gh under the existing authenticated account. Remote origin is popcre/ai-devops. Branch is codex/muse-housekeeping-closeout. No credentials are needed for continuation. Existing credential location is 1Password vault vibe_coding; never ask Albert to provide or run anything. All relevant installation authority is spent and must not be replayed.
+GitHub reads/writes worked through [ai-gh](https://github.com/popcre/ai-devops/blob/main/bin/ai-gh) under the existing authenticated account. Remote origin is popcre/ai-devops. Branch is codex/muse-housekeeping-closeout. No credentials are needed for continuation. Existing credential location is 1Password vault vibe_coding; never ask Albert to provide or run anything. All relevant installation authority is spent and must not be replayed.
 
 ## 9. Open questions and risks
 
