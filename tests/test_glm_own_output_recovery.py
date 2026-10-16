@@ -423,6 +423,45 @@ class FormalProfile(unittest.TestCase):
         with self.assertRaises(ValueError): profile.emit_readiness(self.home, self.repo, name, caller)
         self.assertFalse(p["readiness"].exists())
 
+    def test_publication_is_durable_before_optional_original_only_readiness(self):
+        meta=self.root/"published-meta.json";report=self.root/"published-report.md";calls=self.root/"calls"
+        meta.write_text(json.dumps({"remote_turn":{"state":"completed-unpublished"},"repository_root":str(self.repo),"name":"fixture"}))
+        report.write_text("Fixture completed: REJECT")
+        environment={**os.environ,"SOURCE":str(ROOT/"bin/ai-glm"),"META":str(meta),"REPORT":str(report),"CALLS":str(calls),"GLM_READINESS_ELIGIBLE":"1"}
+        script = r'''set -euo pipefail
+source "$SOURCE"
+test "$GLM_READINESS_ELIGIBLE" = 0
+original="$(cat "$META")"
+original_function="$(declare -f record_formal_readiness)"
+write_meta(){
+  printf '%s' "$2" > "$1"
+  if ! jq -e 'has("remote_turn")' "$1" >/dev/null; then printf 'clear\n' >> "$CALLS"
+  elif jq -e 'has("readiness_qualification")' "$1" >/dev/null; then printf 'diagnostic\n' >> "$CALLS"
+  else printf 'publication\n' >> "$CALLS"; fi
+}
+record_formal_readiness(){ jq -e '.last_completed_turn.report_sha256|length==64' "$META" >/dev/null; printf 'readiness\n' >> "$CALLS"; }
+GLM_READINESS_ELIGIBLE=1
+record_review_publication "$META" "$REPORT" && clear_remote_turn_pending "$META"
+test "$(cat "$CALLS")" = $'publication\nreadiness\nclear'
+printf '%s' "$original" > "$META"; : > "$CALLS"
+GLM_READINESS_ELIGIBLE=0
+record_review_publication "$META" "$REPORT" && clear_remote_turn_pending "$META"
+test "$(cat "$CALLS")" = $'publication\nclear'
+printf '%s' "$original" > "$META"; : > "$CALLS"
+eval "$original_function"
+GLM_PROFILE=formal-review; CALLER=codex; GLM_READINESS_ELIGIBLE=1
+python3(){ printf 'readiness-attempt\n' >> "$CALLS"; return 1; }
+record_review_publication "$META" "$REPORT" && clear_remote_turn_pending "$META"
+test "$(cat "$CALLS")" = $'publication\nreadiness-attempt\ndiagnostic\nclear'
+jq -e '.readiness_qualification.state=="unqualified" and (.last_completed_turn.report_sha256|length==64) and (has("remote_turn")|not)' "$META" >/dev/null
+printf '%s' "$original" > "$META"; : > "$CALLS"
+write_meta(){ return 1; }
+! record_review_publication "$META" "$REPORT"
+test ! -s "$CALLS"
+'''
+        result=subprocess.run(["bash","-c",script],env=environment,check=True,capture_output=True)
+        self.assertIn(b"pool activation remains closed",result.stderr)
+
     def test_native_lookup_is_exact_own_supported_endpoint(self):
         with mock.patch.object(profile, "_profile_get", return_value=({"origin":"invented"}, {"data":[{"id":"msg_new"}]})) as get:
             self.assertEqual(profile._native_completion(self.home, "ses_own"), ({"origin":"invented"},{"id":"msg_new"}))

@@ -121,6 +121,7 @@ WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
 REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
 CAPACITY_JSON=''
+GLM_READINESS_ELIGIBLE=0 # internal dynamic scope only; inherited environment is never authority
 ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''; ACTIVE_DIAG_STARTED_EPOCH=0
 
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
@@ -697,14 +698,21 @@ record_review_publication() { # META REPORT; clear fence only after this succeed
   local meta="$1" report="$2" digest
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
   digest="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
-  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")"
+  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")" || return 1
+  if [ "${GLM_READINESS_ELIGIBLE:-0}" = 1 ]; then
+    record_formal_readiness "$(jq -er .repository_root "$meta")" "$(jq -er .name "$meta")" "$meta"
+  fi
 }
 
 record_formal_readiness() { # original managed publication only; never recovery
   [ "$GLM_PROFILE" = formal-review ] || return 0
-  python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" emit-readiness \
-    --repo "$1" --name "$2" --caller "$CALLER" >/dev/null \
-    || warn 'Formal provider readiness was not qualified; the review is retained and pool activation remains closed.'
+  if ! python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" emit-readiness \
+    --repo "$1" --name "$2" --caller "$CALLER" >/dev/null; then
+    warn 'Formal provider readiness was not qualified; the review is retained and pool activation remains closed.'
+    write_meta "$3" "$(jq --arg at "$(date -u +%FT%TZ)" \
+      '.readiness_qualification={state:"unqualified",reason:"verification-failed",observed_at:$at}' "$3")" \
+      || warn 'The readiness failure diagnostic could not be saved; the published review remains retained.'
+  fi
 }
 
 implementation_terminal() {
@@ -1766,6 +1774,7 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
+  local GLM_READINESS_ELIGIBLE=1
   local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run previous_message
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   root="${REPO_OVERRIDE:-$(repo_root)}"
@@ -1815,14 +1824,13 @@ cmd_new() {
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
-  record_review_publication "$mp" "$report" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
-  record_formal_readiness "$root" "$name"
-  clear_remote_turn_pending "$mp" || die 'GLM final metadata could not be cleared; retain the original session.'
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
 cmd_recover() { # exact session only; never sends or resends a prompt
+  local GLM_READINESS_ELIGIBLE=0
   local GLM_RETAINED_ERROR_OBSERVATION=historical
   local GLM_OBSERVATIONAL_RECOVERY=1 own_phase own_claim
   local name="$1" root rid mp sid lock packet boundary expected state msg terminal digest report text tokens binding stale=0 observed
@@ -1910,6 +1918,7 @@ $text"
 }
 
 cmd_ask() {
+  local GLM_READINESS_ELIGIBLE=1
   local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run previous_message
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
@@ -1979,9 +1988,7 @@ $REVIEW_HEAD only."
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
-  record_review_publication "$mp" "$report" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
-  record_formal_readiness "$root" "$name"
-  clear_remote_turn_pending "$mp" || die 'GLM final metadata could not be cleared; retain the original session.'
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
