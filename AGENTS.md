@@ -323,7 +323,7 @@ Do not treat completed `plan_*.md` files as a backlog; they remain decision
 records. When adding rows here, mark them `done` or remove them as soon as they
 stale.
 
-Active scoped release repair: [exact sandbox source-release plan](plan_exact-designflow-sandbox-source-releases.md) — read STATUS first; design approval precedes implementation.
+Active scoped release repair: [exact sandbox source-release plan](plan_exact-designflow-sandbox-source-releases.md) — owner codex/exact-sandbox-release; retire pointer at issue1796 closure; read STATUS first; design approval precedes implementation.
 
 ## Repository contract
 
