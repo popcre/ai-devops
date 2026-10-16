@@ -1,8 +1,9 @@
-# Shared DB orchestrator operating manual
+# Shared DB structural work operating manual (reference only)
 
 > **Reference only. Claim-first is the default; no orchestrator chat or marker
 > is required.** The safety rules in this manual stay binding whenever shared-db
-> structural work runs.
+> structural work runs. Historical queue/dispatch wording below describes the
+> lane tooling's labels, not a live orchestrator role.
 
 ## Contents
 
@@ -31,7 +32,7 @@ Rebuild state from current `main`, open `db-work` and `db-claim` issues,
 open pull requests, GitHub coordination refs and local worktrees. Documents and
 local scratch registers are never authority.
 
-Run the coordination audit before dispatch:
+Run the coordination audit before starting work:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --audit
@@ -124,32 +125,32 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
-components form serial queues; every unrelated component is dispatched at once,
+components form serial queues; every unrelated component starts at once,
 with no count limit. Claims and permanent version reservations protect future
 work. A relinquished claim is not an active author but still blocks overlap.
 Report an author as working only when current worker evidence exists. After every
 claim release, run a live queue audit immediately, close stale issues whose
-outcome is already delivered, and dispatch every genuinely eligible issue in an
+outcome is already delivered, and start every genuinely eligible issue in an
 isolated worktree. Keep explicit successor queues, but say plainly
 when the audit proves no eligible successor exists. Do not ask Albert to approve
-dispatch.
+starting work.
 
-Undispatched ready work is justified only by a complete audit showing overlap or a blocker.
+Unstarted ready work is justified only by a complete audit showing overlap or a blocker.
 Unclassified or malformed issues make that proof impossible and the command
 fails. Blocked work releases its author lease only through the guarded
 relinquishment above; its claim remains protected. Owner-decision and every
-non-structural work type are reported and never block structural dispatch. `needs-albert` is not a route: after an answer, change
+non-structural work type are reported and never block structural claim-first starts. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
 
 ## Operational blocker recovery
 
-An orchestrator must never sit silently idle when blocked. The blocker repair is
-part of orchestration even when its implementation is repo maintenance,
+A claiming session must never sit silently idle when blocked. The blocker repair is
+part of structural claim-first work even when its implementation is repo maintenance,
 documentation, tooling, reviewer infrastructure, or another repository. Start a
 separate appropriately scoped task immediately; never absorb non-structural work
-into the orchestrator context. Continue independent structural work, disclose
+into the structural claim-first session. Continue independent structural work, disclose
 the blocker and business consequence immediately, and follow the repair task
 until the original capability is restored.
 
@@ -182,7 +183,7 @@ application-data, source-data, documentation, or repository-maintenance
 successor structural. Record the predecessor under ordinary issue context only;
 it is never routing evidence.
 
-When a successor is misrouted, stop before dispatch, preserve private artifacts
+When a successor is misrouted, stop before starting it, preserve private artifacts
 in their approved private repository, and hand off to the route named in its own
 scope block. Never paste a private artifact into a public shared-db issue.
 
