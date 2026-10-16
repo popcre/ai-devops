@@ -220,7 +220,7 @@ check "completed equivalent fallback avoids waiting for redundant running lane" 
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf '%s' "$FALLBACK_JOBS" | sed 's/cancelled\tcompleted/skipped\tcompleted/')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "code with a skipped original lane still requires complete equivalent fallback" "test '$RC' -eq 0"
-for mutation in fallback-failed fallback-missing fallback-grok-failed fallback-grok-missing other-failed other-pending original-failed original-missing missing-status select-missing validate-missing validate-failed legacy-classify-only; do
+for mutation in fallback-failed fallback-missing other-failed other-pending original-failed original-missing missing-status select-missing validate-missing validate-failed legacy-classify-only; do
   jobs="$FALLBACK_JOBS"
   case "$mutation" in
     fallback-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-reviewer-fallback-codex\tsuccess/windows-reviewer-fallback-codex\tfailure/')" ;;
@@ -244,6 +244,15 @@ done
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" "$FALLBACK_JOBS"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "a failed run is never overridden by a fallback" "test '$RC' -eq 1"
+for mutation in grok-failed grok-missing; do
+  case "$mutation" in
+    grok-failed) jobs="$(printf '%s' "$FALLBACK_JOBS" | sed 's/windows-reviewer-fallback-grok\tsuccess/windows-reviewer-fallback-grok\tfailure/')" ;;
+    grok-missing) jobs="$(printf '%s' "$FALLBACK_JOBS" | sed '/windows-reviewer-fallback-grok/d')" ;;
+  esac
+  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+  check "frozen grok job is advisory for $mutation" "test '$RC' -eq 0"
+done
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
 printf '%s|changed-group|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?

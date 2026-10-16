@@ -35,8 +35,9 @@ and scheduled verification remains hosted.
 
 For pull requests, `windows-offline-section` runs the Windows-sensitive Bash set
 and all PowerShell suites, divided into eight declared sections on eight
-independent hosted machines (issue #210), while `windows-reviewer-safety` requires hosted Codex and
-Grok proof. A qualified-pool diagnostic is available only on an explicit full
+independent hosted machines (issue #210), while `windows-reviewer-safety` requires hosted Codex
+proof. The frozen Grok suite (#1714) runs in the advisory
+`windows-reviewer-fallback-grok` job, which never gates a merge. A qualified-pool diagnostic is available only on an explicit full
 manual run. The section boundaries live
 in `config/ci-suite-manifest.json`, and `tests/test-all.sh` refuses to run a
 section unless the declared sections reconstitute the lane exactly. Scheduled
@@ -50,8 +51,8 @@ lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning both unchanged suites
 to `windows-reviewer-fallback-codex` and `windows-reviewer-fallback-grok` on
 independent Blacksmith `blacksmith-4vcpu-windows-2025` hosts (P6; owner
-2026-10-02: "use blacksmith to run your tests"). Together those jobs
-is the required pull-request and scheduled proof. The qualified self-hosted
+2026-10-02: "use blacksmith to run your tests"). The Codex job (or a
+preferred-host Codex pass) is the required pull-request and scheduled proof. The qualified self-hosted
 lane remains available on an explicit full manual run for host-bound diagnosis,
 but it cannot queue or fail a repository-wide verification run. Its 30-minute
 execution bound must prove the full process tree stopped before any independent
