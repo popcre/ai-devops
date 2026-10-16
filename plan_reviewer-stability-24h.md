@@ -312,7 +312,7 @@ Never invent a pass for a missing suite — check existence on current source fi
 
 - Exact requal trigger mechanism (§8 open) — decide at Step 1 with a failing test first.
 - Whether C3 is mostly packet or door work — decide at Step 4 with the fixture.
-- GLM `external_directory` permission failures (2 recent) — treat as C5/C6 adjacency if they block completion; otherwise leave to GLM-specific plans ([plan_glm_own_output_recovery.md](plan_glm_own_output_recovery.md), [plan_glm-permission-failures.md](plan_glm-permission-failures.md)).
+- GLM `external_directory` permission failures (2 recent) — treat as C5/C6 adjacency if they block completion; otherwise leave to GLM-specific plans ([plan_glm_own_output_recovery.md](plan_glm_own_output_recovery.md), [plan_ai-glm-permission-failures.md](plan_ai-glm-permission-failures.md)).
 
 ---
 
