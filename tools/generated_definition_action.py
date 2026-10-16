@@ -140,14 +140,74 @@ def registry():
     return profile
 
 
-def git(repo, *args):
-    require(not any(UNSAFE.match(k) for k in os.environ), 'redirected generated action context')
+SAFE_GIT_ENV={'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null','GIT_OPTIONAL_LOCKS':'0',
+              'GIT_NO_REPLACE_OBJECTS':'1','GIT_NO_LAZY_FETCH':'1','GIT_TERMINAL_PROMPT':'0',
+              'GIT_CONFIG_COUNT':'2','GIT_CONFIG_KEY_0':'core.fsmonitor','GIT_CONFIG_VALUE_0':'false',
+              'GIT_CONFIG_KEY_1':'core.hooksPath','GIT_CONFIG_VALUE_1':'/dev/null'}
+
+
+def safe_context_environment():
+    for k,v in os.environ.items():
+        if k in SAFE_GIT_ENV:
+            require(SAFE_GIT_ENV[k]==v,'redirected generated action context')
+        elif k in ('GIT_EXTERNAL_DIFF','GIT_EXEC_PATH'):
+            require(False,'redirected generated action context')
+        else:
+            require(not UNSAFE.match(k),'redirected generated action context')
+
+
+def constrained_env():
+    safe_context_environment()
     env={'PATH':'/usr/bin:/bin','HOME':os.path.expanduser('~'),'LANG':'C',
-         'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null','GIT_OPTIONAL_LOCKS':'0'}
-    p=subprocess.run(['/usr/bin/git','--no-replace-objects','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C',str(repo),*args],
-                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=20)
+         'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null','GIT_OPTIONAL_LOCKS':'0',
+         'GIT_NO_REPLACE_OBJECTS':'1','GIT_NO_LAZY_FETCH':'1','GIT_TERMINAL_PROMPT':'0',
+         'GIT_CONFIG_COUNT':'2','GIT_CONFIG_KEY_0':'core.fsmonitor','GIT_CONFIG_VALUE_0':'false',
+         'GIT_CONFIG_KEY_1':'core.hooksPath','GIT_CONFIG_VALUE_1':'/dev/null'}
+    if 'AI_TASK_GATES_DIR' in os.environ:
+        env['AI_TASK_GATES_DIR']=os.environ['AI_TASK_GATES_DIR']
+    if 'AI_REVIEW_LIFECYCLE_DIR' in os.environ:
+        env['AI_REVIEW_LIFECYCLE_DIR']=os.environ['AI_REVIEW_LIFECYCLE_DIR']
+    return env
+
+
+def raw_git(repo, *args):
+    p=subprocess.run(['/usr/bin/git','--no-replace-objects','-c','core.fsmonitor=false',
+                      '-c','core.hooksPath=/dev/null','-C',str(repo),*args],
+                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=constrained_env(),timeout=20)
     require(p.returncode==0,'generated source Git proof refused')
     return p.stdout
+
+
+def git_context(repo):
+    # Metadata-only checks precede every object/status/digest operation. Environment
+    # no-lazy-fetch is defense in depth; older Git must also refuse this source.
+    config=raw_git(repo,'config','--null','--list','--includes')
+    for row in config.split(b'\0'):
+        key=row.split(b'\n',1)[0].lower()
+        require(not (key==b'extensions.partialclone' or
+                     (key.startswith(b'remote.') and key.endswith((b'.promisor',b'.partialclonefilter'))) or
+                     key==b'diff.external' or
+                     (key.startswith(b'diff.') and key.endswith((b'.command',b'.textconv'))) or
+                     key.startswith(b'filter.')), 'executable or lazy Git configuration refused')
+    common=Path(raw_git(repo,'rev-parse','--path-format=absolute','--git-common-dir').decode().strip())
+    for name in ('shallow','info/grafts','objects/info/alternates','objects/info/http-alternates'):
+        require(not os.path.lexists(common/name),'nonlocal or rewritten Git objects refused')
+    require(not list((common/'objects/pack').glob('*.promisor')),'promisor object packs refused')
+    require(not raw_git(repo,'for-each-ref','--format=%(refname)','refs/replace'),'replacement Git objects refused')
+
+
+def git(repo, *args):
+    git_context(repo)
+    return raw_git(repo,*args)
+
+
+def source_digest(repo):
+    git_context(repo)
+    p=subprocess.run(['/bin/bash',str(ROOT/'bin/ai-review-sandbox'),'digest',str(repo)],
+                     env=constrained_env(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+    require(p.returncode==0,'generated native source digest refused')
+    value=p.stdout.decode().strip();require(HEX.fullmatch(value))
+    return value
 
 
 def source_identity(repo, state, profile):
@@ -164,7 +224,7 @@ def source_identity(repo, state, profile):
     require(not git(repo,'status','--porcelain','--untracked-files=all'))
     head=git(repo,'rev-parse','--verify','HEAD^{commit}').decode().strip()
     require(head==state['head'] and COMMIT.fullmatch(head))
-    env=IO.git_env(); env.pop('NODE_PATH',None)
+    env=constrained_env()
     probe=subprocess.run([str(ROOT/'bin/ai-task-gates'),'explain','--json'],cwd=repo,env=env,
                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
     require(probe.returncode==0)
@@ -293,7 +353,7 @@ def lifecycle(state, repo):
     require(not state.get('code_only') and not state.get('code_only_export') and not state.get('action_profile_binding') and state.get('evidence_scope')!='selected-code')
     require(state['tests']['exit']==0 and type(state['tests']['exit']) is int and HEX.fullmatch(state['tests']['output_sha256']))
     require(state['report_sha256']==sha(read(pathname(state['report_path']),16<<20,private=True)))
-    require(state['source_digest']==IO.source_digest(repo),'whole-source seal moved')
+    require(state['source_digest']==source_digest(repo),'whole-source seal moved')
 
 
 def installed_enforcement():
@@ -302,6 +362,8 @@ def installed_enforcement():
     spec = importlib.util.spec_from_file_location('generated_shared_profile', ROOT/'tools/review_action_profile.py')
     shared = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shared)
+    git_context(ROOT)
+    shared.git = git
     proof = shared.installed_enforcement()
     require(proof.get('kind') == 'VERIFIED_INSTALLED_SOURCE', 'generated route requires verified installed enforcement')
     head = proof['source_head']
@@ -311,14 +373,16 @@ def installed_enforcement():
     require(not git(ROOT,'for-each-ref','--format=%(refname)','refs/replace'))
     for name in ('tools/generated_definition_action.py','tools/review_action_profile.py',
                  'bin/ai-review-code-only.py','bin/ai-task-gates','config/task-gates.json',
-                 'config/review-action-profiles.json'):
+                 'config/review-action-profiles.json','bin/ai-review-sandbox','bin/ai-review-lifecycle',
+                 'tools/lib/task-gates.sh','bin/ai-repo-policy',
+                 'config/repository-policy.json','config/reviewer-ci-paths.txt'):
         require(read(ROOT/name,32<<20)==git(ROOT,'show',head+':'+name), 'installed generated enforcement moved')
     return proof
 
 
 def validate(envelope, state):
     require(sys.platform=='linux' and os.name=='posix')
-    require(not any(UNSAFE.match(k) for k in os.environ))
+    safe_context_environment()
     if os.environ.get('AI_TASK_GATES_FILE'):
         require(pathname(os.environ['AI_TASK_GATES_FILE'])==ROOT/'config/task-gates.json','foreign central policy override')
     keys(envelope,ENVELOPE)
@@ -335,7 +399,7 @@ def validate(envelope, state):
     result=admission(decode(raw),envelope,identity,profile)
     raw=read(pathname(envelope['runtime_receipt_path']),8192,private=True);require(sha(raw)==envelope['runtime_receipt_sha256'])
     runtime(decode(raw),repo,identity,profile)
-    require(source_identity(repo,state,profile)==identity and IO.source_digest(repo)==state['source_digest'])
+    require(source_identity(repo,state,profile)==identity and source_digest(repo)==state['source_digest'])
     require(result==output_identity(result['path']))
     lifecycle(state,repo)
     require(registry()==profile,'installed fixture profile moved')
@@ -348,6 +412,10 @@ def main(argv):
     try:
         if argv==['generated-select']:
             return 0 if select(sys.stdin.buffer.read(8193)) else 1
+        if len(argv)==2 and argv[0]=='generated-preflight':
+            safe_context_environment()
+            git_context(pathname(argv[1]));git_context(ROOT)
+            return 0
         require(len(argv)==2 and argv[0]=='generated-preaction')
         state_bytes=read(pathname(argv[1]),16<<20,private=True)
         state=decode(state_bytes,16<<20)
@@ -360,3 +428,7 @@ def main(argv):
     except Exception:
         print('generated-definition-action: bounded consistency refused',file=sys.stderr)
         return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

@@ -42,7 +42,7 @@ class GeneratedAction(unittest.TestCase):
         self.git('add','.');self.git('commit','-qm','selected opt in')
         self.head=self.git('rev-parse','HEAD').strip()
         self.report=self.top/'report.md';self.write(self.report,b'APPROVE protected source',0o600)
-        self.state={'repository_root':str(self.repo),'head':self.head,'source_digest':g.IO.source_digest(self.repo),
+        self.state={'repository_root':str(self.repo),'head':self.head,'source_digest':g.source_digest(self.repo),
             'status':'completed','verdict':'APPROVE','stale':False,'failure_class':None,'provider':'muse','implementer_engine':'codex',
             'review_mode':'final-check','tests':{'exit':0,'output_sha256':'a'*64},'report_path':str(self.report),'report_sha256':g.sha(self.report.read_bytes())}
         with mock.patch.object(g,'read',side_effect=lambda p,*a,**k:Path(p).read_bytes()):
@@ -104,6 +104,94 @@ class GeneratedAction(unittest.TestCase):
 
     def validate(self):return g.validate(self.envelope,self.state)
 
+    def test_native_digest_suppresses_included_monitor_and_shell_environment(self):
+        marker=self.top/'executed';script=self.top/'monitor'
+        self.write(script,('#!/bin/sh\ntouch '+str(marker)+'\n').encode(),0o755)
+        include=self.top/'included.config';include.write_text('[core]\n fsmonitor = '+str(script)+'\n')
+        self.git('config','include.path',str(include))
+        with mock.patch.dict(os.environ,{'BASH_ENV':str(script),'ENV':str(script),'PATH':'/not-trusted'}):
+            self.assertEqual(g.source_digest(self.repo),self.state['source_digest'])
+            g.git(self.repo,'status','--porcelain')
+        self.assertFalse(marker.exists())
+
+    def test_executable_diff_textconv_filters_refuse_before_digest(self):
+        marker=self.top/'executed';script=self.top/'diff-driver'
+        self.write(script,('#!/bin/sh\ntouch '+str(marker)+'\n').encode(),0o755)
+        self.write(self.repo/'.gitattributes',b'package.json diff=evil filter=evil\n')
+        self.write(self.repo/'package.json',b'dirty text needing a diff\n')
+        for key in ('diff.external','diff.evil.command','diff.evil.textconv','filter.evil.clean'):
+            with self.subTest(key=key):
+                self.git('config',key,str(script))
+                with self.assertRaisesRegex(ValueError,'executable or lazy'):
+                    g.source_digest(self.repo)
+                self.assertFalse(marker.exists());self.git('config','--unset',key)
+
+    def test_local_promisor_refuses_without_fetch_or_object_read(self):
+        remote=self.top/'local-remote.git'
+        subprocess.run(['/usr/bin/git','clone','--bare','-q',str(self.repo),str(remote)],check=True)
+        blob=self.git('rev-parse','HEAD:package.json').strip()
+        missing=self.repo/'.git/objects'/blob[:2]/blob[2:]
+        held=missing.read_bytes();missing.unlink()
+        self.git('remote','add','lazy',str(remote));self.git('config','remote.lazy.promisor','true')
+        self.git('config','extensions.partialClone','lazy')
+        try:
+            with self.assertRaisesRegex(ValueError,'executable or lazy'):
+                g.git(self.repo,'show','HEAD:package.json')
+            with self.assertRaisesRegex(ValueError,'executable or lazy'):
+                g.source_digest(self.repo)
+            self.assertFalse(missing.exists())
+            self.assertEqual(list((self.repo/'.git/objects/pack').glob('*')),[])
+        finally:
+            missing.write_bytes(held)
+
+    def test_alternates_and_promisor_packs_refuse_before_object_read(self):
+        common=self.repo/'.git'
+        for name in ('objects/info/alternates','objects/info/http-alternates','objects/pack/pack-fixture.promisor','info/grafts','shallow'):
+            with self.subTest(name=name):
+                p=common/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('')
+                with self.assertRaises(ValueError):g.git(self.repo,'show','HEAD:package.json')
+                p.unlink()
+
+    def outer_check(self):
+        return subprocess.run([str(ROOT/'bin/ai-task-gates'),'check','--before','database',
+            '--reviewer-approval',str(self.report),'--action-manifest-stdin'],cwd=self.repo,
+            input=json.dumps(self.envelope).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+
+    def test_outer_gate_confines_monitor_before_archive_scan_and_identity(self):
+        marker=self.top/'outer-marker';script=self.top/'outer-monitor'
+        self.write(script,('#!/bin/sh\ntouch '+str(marker)+'\n').encode(),0o755)
+        include=self.top/'outer.config';include.write_text('[core]\n fsmonitor = '+str(script)+'\n')
+        self.git('config','include.path',str(include))
+        result=self.outer_check()
+        self.assertNotEqual(result.returncode,0);self.assertFalse(marker.exists())
+        self.assertNotIn(b'pre-discovery confinement refused',result.stderr)
+
+    def test_outer_gate_refuses_executable_diff_before_discovery(self):
+        marker=self.top/'outer-diff-marker';script=self.top/'outer-diff'
+        self.write(script,('#!/bin/sh\ntouch '+str(marker)+'\n').encode(),0o755)
+        self.git('config','diff.external',str(script));self.write(self.repo/'package.json',b'dirty\n')
+        result=self.outer_check()
+        self.assertEqual(result.returncode,3);self.assertIn(b'pre-discovery confinement refused',result.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_outer_gate_promisor_missing_blob_does_not_fetch(self):
+        remote=self.top/'outer-local.git'
+        subprocess.run(['/usr/bin/git','clone','--bare','-q',str(self.repo),str(remote)],check=True)
+        blob=self.git('rev-parse','HEAD:package.json').strip();missing=self.repo/'.git/objects'/blob[:2]/blob[2:]
+        held=missing.read_bytes();missing.unlink()
+        self.git('remote','add','lazy',str(remote));self.git('config','remote.lazy.promisor','true')
+        try:
+            result=self.outer_check();self.assertEqual(result.returncode,3)
+            self.assertIn(b'pre-discovery confinement refused',result.stderr)
+            self.assertFalse(missing.exists());self.assertEqual(list((self.repo/'.git/objects/pack').glob('*')),[])
+        finally:missing.write_bytes(held)
+
+    def test_closed_safe_git_environment_is_not_authority(self):
+        with mock.patch.dict(os.environ,g.SAFE_GIT_ENV):
+            self.assertTrue(self.validate()['audit_only'])
+        with mock.patch.dict(os.environ,{'GIT_CONFIG_COUNT':'3'}):
+            with self.assertRaises(ValueError):self.validate()
+
     def test_exact_fixture_and_repeated_validation_are_audit_only(self):
         first=self.validate();self.assertEqual(first,self.validate());self.assertTrue(first['audit_only']);self.assertFalse(first['process_execution_authorized'])
         self.assertFalse(self.result.exists());self.assertNotIn('consumed',first)
@@ -133,7 +221,7 @@ class GeneratedAction(unittest.TestCase):
 
     def test_changed_unreviewed_and_deleted_contributors_refuse(self):
         self.write(self.repo/'AGENTS.md',b'unsafe extra');self.git('add','.');self.git('commit','-qm','unapproved rules')
-        self.state['head']=self.git('rev-parse','HEAD').strip();self.state['source_digest']=g.IO.source_digest(self.repo)
+        self.state['head']=self.git('rev-parse','HEAD').strip();self.state['source_digest']=g.source_digest(self.repo)
         with self.assertRaises(ValueError):g.source_identity(self.repo,self.state,self.profile)
         self.git('rm','package.json');self.git('commit','-qm','delete runtime source')
         self.state['head']=self.git('rev-parse','HEAD').strip()

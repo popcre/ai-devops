@@ -257,3 +257,27 @@ even with opt-in; stronger effective classes never enter this route. These are
 prospective source-binding/prohibition tightenings within the selected boundary;
 the final native code review covers them. Original plan-review history remains
 unchanged. No execution, token or additional authority is introduced.
+
+### Constrained native Git refinement
+
+The closed helper alone invokes the existing native digest with a minimal system
+PATH, no shell startup environment, no prompt/lazy fetch, and internal fsmonitor
+and hook overrides. Metadata validation rejects partial-clone/promisor settings,
+promisor packs, alternates, grafts, replacements, shallow history, and executable
+diff/textconv/filter configuration before object or digest reads. Legitimate
+included configuration remains accepted with monitor/hook overrides. The same
+local constrained Git primitive supplies the imported installed-enforcement proof;
+shared IO and existing private routes retain their behavior. Raw installed closure
+also binds the self-contained digest, task-gate library, repository-policy helper
+and its policy, and reviewer path classification data. Real local Git regression
+fixtures prove no monitor/shell marker and no missing-object fetch; no network,
+application, database, or provider execution is part of these tests.
+
+The selected database/fixture entry performs metadata preflight before the first
+archive scan/classification Git command, then exports only the closed safe Git
+settings for that invocation. Existing lifecycle identity inherits those settings;
+its native format and normal lifecycle directory remain unchanged. Shell startup
+environment is refused at this selected entry (without claiming to undo startup
+that preceded entry). The helper accepts only original nonredirected Git context
+or exact safe settings; supplying safe settings grants no authority. All source,
+review, consumer, runtime and admission proofs remain mandatory.

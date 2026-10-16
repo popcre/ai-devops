@@ -1333,6 +1333,18 @@ cmd_check(){
     head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
     [ "$(wc -c < "$action_manifest_file")" -le 16777216 ] || die 'action stdin exceeds native bound.'
   fi
+  # Only this explicit public fixture gets confined Git before discovery/status.
+  # Preflight is metadata validation, never action authority or a release token.
+  if [ "$action" = database ] && [ -n "$action_manifest_file" ] \
+     && /usr/bin/python3 "$ROOT/tools/generated_definition_action.py" generated-select < "$action_manifest_file" >/dev/null 2>&1; then
+    [ -z "${BASH_ENV+x}${ENV+x}" ] || blocked 'ai-task-gates: STOP. Generated fixture shell startup environment refused.'
+    /usr/bin/python3 "$ROOT/tools/generated_definition_action.py" generated-preflight "$PWD" \
+      || blocked 'ai-task-gates: STOP. Generated fixture pre-discovery confinement refused.'
+    export PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_OPTIONAL_LOCKS=0
+    export GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false
+    export GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null
+  fi
   if [ -n "$application_release_target" ]; then
     [ "$action" = deploy ] || blocked 'ai-task-gates: STOP. --application-release-target applies only to --before deploy.'
     [ "$base_explicit" -eq 0 ] || blocked 'ai-task-gates: STOP. --application-release-target cannot be combined with explicit --base.'
