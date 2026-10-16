@@ -1135,6 +1135,23 @@ rf_run() {
 for rf_case in approve reject post-store-identical conflict linked outside store-fail packet-drift retained-drift source-drift post-store-source-drift receipt-race provider-fail; do
   check "native_muse_final_receipt_${rf_case}" "rf_run '$rf_case'"
 done
+# governed_call_skips_pool_reuse (#1783): after a passing review of this head,
+# a governed call (no --tests) must run fresh and publish its own receipt
+# instead of reusing the cached report.
+rf_reuse() {
+  local dir="$TMP/receipt-approve-muse" source receipt2 rc=0
+  source="$(cd "$dir/source" && pwd -P)"; receipt2="$source/.ai/reviews/governed-second.json"
+  ( cd "$source" && env AI_POOL_CALLER=codex AI_REVIEW_DOOR_MUSE="$RF_DOOR" \
+      RF_SOURCE="$source" RF_RECEIPT="$receipt2" RF_FACTS="$dir/facts2.json" RF_CASE=approve RF_MOCK_DOOR="$MOCK_DOOR" \
+      RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
+      AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt2" AI_REVIEW_PACKET_STORE="$dir/store" \
+      AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
+      bash "$POOL" muse final-check --base HEAD~1 --assert-head "$HEAD_SHA"
+  ) > "$dir/stdout2" 2> "$dir/stderr2" || rc=$?
+  [ "$rc" = 0 ] && grep -q 'governed source receipt requested; passing-report reuse skipped' "$dir/stderr2" \
+    && ! grep -q 'reusing passing' "$dir/stderr2" && [ -s "$receipt2" ] && [ -s "$dir/facts2.json" ]
+}
+check "governed_call_skips_pool_reuse" "rf_reuse"
 # governed_receipt_published_for_every_core_door (#1783): DeepSeek and StepFun
 # go through the same core and must publish, and still refuse on conflict.
 for rf_provider in deepseek stepfun; do
