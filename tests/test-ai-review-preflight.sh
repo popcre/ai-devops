@@ -882,6 +882,10 @@ ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
 grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
 rm -f "$TMP/ph-pool-args"
+printf 'A specific review question.\n' > "$TMP/carried-question.md"
+AI_REVIEW_BRIEF_FILE="$TMP/carried-question.md" ph_front >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "carried_question_never_uses_a_generic_front_door_approval" || bad "carried_question_never_uses_a_generic_front_door_approval"
+rm -f "$TMP/ph-pool-args"
 jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 ph_front --implementer codex >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"

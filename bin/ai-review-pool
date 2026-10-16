@@ -89,6 +89,42 @@ for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_
   fi
 done
 unset _hook_var
+# ai-model-call and governed callers carry their actual review question here.
+# Capture it before cache lookup or provider/lifecycle startup: a generic passing
+# report cannot answer a new question, and later edits must not change the request.
+CARRIED_BRIEF_SNAPSHOT=""; CARRIED_BRIEF_SHA=""
+if [ -n "${AI_REVIEW_BRIEF_FILE:-}" ]; then
+  CARRIED_BRIEF_SNAPSHOT="$(python3 - "$AI_REVIEW_BRIEF_FILE" <<'PY'
+import os, stat, sys, tempfile
+try:
+    before = os.lstat(sys.argv[1])
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError('request must be a regular, non-linked file')
+    fd = os.open(sys.argv[1], os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+    with os.fdopen(fd, 'rb') as source:
+        opened = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError('request identity changed')
+        data = source.read(262145)
+        after = os.fstat(source.fileno())
+    if len(data) > 262144 or opened.st_size != len(data):
+        raise ValueError('request exceeds 256 KiB')
+    if (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise ValueError('request changed while being read')
+    if b'\0' in data or not data.decode('utf-8').strip():
+        raise ValueError('request must be nonempty UTF-8 text without NUL bytes')
+    out, path = tempfile.mkstemp(prefix='review-request-', suffix='.md')
+    with os.fdopen(out, 'wb') as snapshot:
+        snapshot.write(data)
+    print(path)
+except (OSError, ValueError, UnicodeError):
+    print('carried review request is unreadable, changed, non-regular, oversized, or invalid UTF-8 text', file=sys.stderr)
+    sys.exit(1)
+PY
+)" || die 'carried review request refused; no provider was started.'
+  CARRIED_BRIEF_SHA="$(sha256sum "$CARRIED_BRIEF_SNAPSHOT" | cut -d' ' -f1)"
+fi
+readonly CARRIED_BRIEF_SNAPSHOT CARRIED_BRIEF_SHA
 # ---------------------------------------------------------------------------
 # Passing-report reuse (#1428). The same reviewer re-reviewing the same exact
 # source in the same mode spends a full paid review to learn nothing new. When
@@ -144,7 +180,7 @@ if [ "$_pool_force" = 1 ]; then
   printf 'ai-review-pool: --force given; passing-report reuse skipped.\n' >&2
 elif [ "$_pool_tests" = 1 ]; then
   printf 'ai-review-pool: --tests given; fresh test evidence requested, passing-report reuse skipped.\n' >&2
-elif [ -z "${AI_REVIEW_OPERATION:-}" ] && [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ]; then
+elif [ -z "${AI_REVIEW_OPERATION:-}" ] && [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -z "$CARRIED_BRIEF_SNAPSHOT" ]; then
   _reuse_rc=0; pool_reuse_lookup || _reuse_rc=$?
   case "$_reuse_rc" in
     0) exit 0 ;;
@@ -217,6 +253,7 @@ if _runner_door_registered "$provider"; then
   # --operation (issue #658) rides the same brief contract through the engine;
   # the core enforces final-check and the exact approval line.
   [ -z "${AI_REVIEW_OPERATION:-}" ] || _engine_args+=(--operation "$AI_REVIEW_OPERATION")
+  [ -z "$CARRIED_BRIEF_SNAPSHOT" ] || _engine_args+=(--prompt-file "$CARRIED_BRIEF_SNAPSHOT")
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base|--assert-head|--tests)
@@ -426,6 +463,11 @@ The source digest is $REVIEW_DIGEST.
 BRIEF
 if [ -n "$CHANGED_FILES" ]; then printf 'Changed files (the change under review is exactly these):\n%s\n' "$CHANGED_FILES"; fi
 if [ -n "$TESTS_COMMAND" ]; then printf 'Tests command on record: %s (executed before dispatch; result: %s)\n' "$TESTS_COMMAND" "$TESTS_RESULT"; fi
+if [ -n "$CARRIED_BRIEF_SNAPSHOT" ]; then
+  printf '\n## Specific review request (sha256 %s)\n' "$CARRIED_BRIEF_SHA"
+  cat "$CARRIED_BRIEF_SNAPSHOT"
+  printf '\n'
+fi
 } > "$TMP_BRIEF"
 
 # The review runs inside the disposable snapshot (no live-checkout binding),
@@ -573,6 +615,7 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
 {
   printf '# %s pool review — %s\n\n| field | value |\n|---|---|\n' "$provider" "$mode"
   printf '| provider | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$provider" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_DIGEST"
+  [ -z "$CARRIED_BRIEF_SHA" ] || printf '| carried request sha256 | `%s` |\n' "$CARRIED_BRIEF_SHA"
   [ -z "${AI_REVIEW_OPERATION:-}" ] || printf '| operation | `%s` |\n' "$AI_REVIEW_OPERATION"
   [ -z "${OPERATION_EVIDENCE:-}" ] || printf '%s\n' "$OPERATION_EVIDENCE"
   printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | read-only session runner |\n\n## Result\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"

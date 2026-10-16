@@ -97,6 +97,22 @@ capacity truth. Unsupported interfaces return `unknown` without network access.
 `AI_REVIEW_CAPACITY_EXPECTED_PROFILE` and `AI_REVIEW_CAPACITY_EXPECTED_MODEL`
 make a supported adapter reject a result scoped to another account or model.
 
+## Carried review questions
+
+`AI_REVIEW_BRIEF_FILE` carries the caller's specific review question, including
+the stage request supplied by `ai-model-call`. The approval pool forwards it
+through the shared runner's existing prompt-file contract and includes it in
+native GLM requests. It supplements the standard review instructions; source
+identity, sandbox boundaries, accounting, and verdict checks remain mandatory.
+
+Use a readable regular file containing nonempty UTF-8 text, without NUL bytes,
+at most 256 KiB. The pool rejects missing, linked, non-regular, changing, or
+invalid inputs before lifecycle/provider startup and captures a private snapshot
+so later caller edits cannot change the question. Keep secrets and private or
+licensed data out of review questions. A supplied question always requests a
+fresh review; a generic passing report is never reused to answer it. Calls
+without a question retain normal passing-report reuse.
+
 ## Kimi wrapper settings
 
 These are process settings for `ai-kimi`, not entries to add to committed config:
