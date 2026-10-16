@@ -87,11 +87,17 @@ elif "/git/commits/" in path:
     output = {"message": data.get("messages", {}).get(sha, "")}
 else:
     print("gh: unexpected endpoint", file=sys.stderr); sys.exit(2)
+if "raw_stdout_bytes" in data:
+    sys.stdout.buffer.write(bytes(data["raw_stdout_bytes"]))
+    sys.exit(0)
 malformed = data.get("malformed", {})
 for suffix, raw in malformed.items():
     if path.endswith(suffix):
         print(raw); sys.exit(0)
-print(json.dumps(output))
+if data.get("raw_utf8_json"):
+    sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False).encode("utf-8") + b"\n")
+else:
+    print(json.dumps(output))
 ''', encoding="utf-8")
         gh = bindir / "ai-gh"
         gh.write_text('''#!/usr/bin/env bash
@@ -120,9 +126,13 @@ exit 127
     def write_data(self, data):
         self.data.write_text(json.dumps(data), encoding="utf-8")
 
-    def run_check(self, *args, env=None):
+    def run_check(self, *args, env=None, legacy_locale=False):
+        child_env = self.env.copy() if env is None else env.copy()
+        if legacy_locale:
+            child_env.update({"LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0",
+                              "PYTHONCOERCECLOCALE": "0"})
         return subprocess.run([self.bash, str(self.checker), *args], capture_output=True, text=True,
-                              env=self.env if env is None else env, check=False)
+                              env=child_env, check=False)
 
     def summary(self, result):
         self.assertTrue(result.stdout.strip(), result.stderr)
@@ -357,6 +367,35 @@ exit 127
                 result = self.run_check()
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(error, self.summary(result)["error"])
+
+    def test_utf8_issue_body_decodes_with_legacy_locale_and_foreign_owner_passes(self):
+        self.write_data({"open_pages": [[issue(41, f"codex-chat-{FOREIGN}@edge-dev",
+                                                 suffix="\u008f")]],
+                         "stages": {}, "messages": {}, "raw_utf8_json": True})
+        result = self.run_check(legacy_locale=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = self.summary(result)
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["open_claims_checked"], 1)
+
+    def test_utf8_issue_body_decodes_and_owned_claim_still_blocks(self):
+        self.write_data({"open_pages": [[issue(42, f"codex-chat-{SESSION}@edge-dev",
+                                                 suffix="\u008f")]],
+                         "stages": {}, "messages": {}, "raw_utf8_json": True})
+        result = self.run_check(legacy_locale=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        summary = self.summary(result)
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["blocking_claims"], [{"issue": 42}])
+
+    def test_invalid_utf8_fails_closed_with_structured_json(self):
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {},
+                         "raw_stdout_bytes": [0x8F]})
+        result = self.run_check(legacy_locale=True)
+        self.assertEqual(result.returncode, 2)
+        summary = self.summary(result)
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["error"], "GitHub response was not valid UTF-8")
 
     def test_malformed_stage_commit_fails_closed(self):
         sha = "c" * 40
