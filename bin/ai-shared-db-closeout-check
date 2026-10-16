@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# Read-only final check: the current session must own no open shared-db claim or stage.
+set -uo pipefail
+
+python3 - "$@" <<'PY'
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+REPO = "popcre/shared-db"
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+OWNER_CHAT = re.compile(r"^(?:Codex|Claude) chat ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) on [A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+OWNER_AT_CHAT = re.compile(r"^(?:codex|claude)-chat-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$")
+STAGES = {
+    "preview": ("preview", "preview-recovery", "preview-rehearsal"),
+    "merge": ("merge",),
+    "production": ("production",),
+}
+
+
+class CheckError(Exception):
+    pass
+
+
+def run_gh(args):
+    result = gh_call(args)
+    if result.returncode != 0:
+        raise CheckError("GitHub request failed")
+    return result.stdout
+
+
+def gh_call(args):
+    try:
+        command = ["gh", *args]
+        if len(args) >= 1 and args[0] == "api":
+            command = ["gh", "api", "--hostname", "github.com", *args[1:]]
+        return subprocess.run(command, text=True, capture_output=True, check=False, timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        raise CheckError("GitHub request timed out") from exc
+    except OSError as exc:
+        raise CheckError("could not run GitHub CLI") from exc
+
+
+def json_output(value):
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def resolve_session(explicit):
+    candidates = [value.strip().lower() for value in (
+        explicit,
+        os.environ.get("CODEX_THREAD_ID"),
+        os.environ.get("CLAUDE_CODE_SESSION_ID"),
+    ) if value is not None and value.strip()]
+    if not candidates:
+        raise CheckError("session identity is missing")
+    if any(not UUID.fullmatch(value) for value in candidates):
+        raise CheckError("session identity must be an exact UUID")
+    if len(set(candidates)) != 1:
+        raise CheckError("session identity sources disagree")
+    return candidates[0]
+
+
+def owner_session(owner):
+    if UUID.fullmatch(owner):
+        return owner
+    match = OWNER_CHAT.fullmatch(owner) or OWNER_AT_CHAT.fullmatch(owner) or OWNER_ADOPTION.fullmatch(owner)
+    return match.group(1) if match else None
+
+
+def parse_claim_owner(body):
+    if not isinstance(body, str):
+        raise CheckError("claim body is malformed")
+    fences = re.findall(r"```db-author-lease\s*\n([\s\S]*?)```", body)
+    if len(fences) != 1:
+        raise CheckError("claim must contain exactly one author lease")
+    owners = []
+    for line in fences[0].splitlines():
+        match = re.fullmatch(r"\s*owner:\s*(.+?)\s*", line)
+        if match:
+            owners.append(match.group(1))
+    if len(owners) != 1:
+        raise CheckError("claim lease owner is missing or ambiguous")
+    return owners[0]
+
+
+def parse_stage_message(message, expected_kinds):
+    if not isinstance(message, str) or not message:
+        raise CheckError("stage commit message is malformed")
+    first, _, remainder = message.partition("\n")
+    match = re.fullmatch(r"db-coordination ([a-z-]+) ([^\s]+) pr=([^\s]+) head=([^\s]+)", first)
+    if not match or match.group(1) not in expected_kinds:
+        raise CheckError("stage commit message does not match the canonical lease format")
+    fields = {}
+    for raw in remainder.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parsed = re.fullmatch(r"([a-z_]+):\s*(.*)", line)
+        if parsed:
+            key, value = parsed.groups()
+            if key in fields:
+                raise CheckError("stage lease metadata is ambiguous")
+            fields[key] = value.strip()
+    required = {"lease_version", "kind", "holder_id", "owner", "generation"}
+    if not required.issubset(fields):
+        raise CheckError("stage lease metadata is incomplete")
+    if fields["lease_version"] != "1" or fields["kind"] != match.group(1):
+        raise CheckError("stage lease metadata does not match the canonical lease format")
+    if not fields["generation"].isdigit() or int(fields["generation"]) < 1:
+        raise CheckError("stage lease generation is malformed")
+    if not fields["holder_id"]:
+        raise CheckError("stage lease holder identity is malformed")
+    return fields
+
+
+def api_json(path):
+    result = gh_call(["api", path])
+    if result.returncode != 0:
+        raise CheckError("GitHub request failed")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise CheckError("GitHub returned malformed JSON") from exc
+
+
+def open_claim_pages():
+    try:
+        pages = json.loads(run_gh([
+            "api", "--paginate", "--slurp",
+            f"repos/{REPO}/issues?state=open&per_page=100&labels=db-claim",
+        ]))
+    except json.JSONDecodeError as exc:
+        raise CheckError("GitHub returned malformed claim pages") from exc
+    if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+        raise CheckError("GitHub claim pages have an invalid shape")
+    claims = []
+    for page in pages:
+        for item in page:
+            if not isinstance(item, dict):
+                raise CheckError("GitHub returned a malformed claim issue")
+            if "pull_request" in item:
+                continue
+            if (not isinstance(item.get("number"), int) or item["number"] < 1
+                    or item.get("state") != "open" or not isinstance(item.get("body"), str)):
+                raise CheckError("GitHub returned a malformed claim issue")
+            claims.append(item)
+    return claims
+
+
+def read_stage(stage, kinds):
+    path = f"repos/{REPO}/git/ref/db-coordination/{stage}"
+    result = gh_call(["api", path])
+    if result.returncode != 0:
+        # A 404 is evidence of absence only after gh auth status succeeded.
+        # All other request failures fail closed.
+        if re.search(r"\bHTTP 404\b", result.stderr or ""):
+            return None
+        raise CheckError("GitHub request failed")
+    try:
+        ref = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise CheckError("GitHub returned malformed stage ref JSON") from exc
+    if not isinstance(ref, dict) or not isinstance(ref.get("object"), dict):
+        raise CheckError("GitHub returned a malformed stage ref")
+    sha = ref["object"].get("sha")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise CheckError("GitHub returned a malformed stage ref target")
+    commit = api_json(f"repos/{REPO}/git/commits/{sha}")
+    if not isinstance(commit, dict) or not isinstance(commit.get("message"), str):
+        raise CheckError("GitHub returned a malformed stage commit")
+    return parse_stage_message(commit["message"], kinds)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fail if this session still owns shared-db work.")
+    parser.add_argument("--session-id", help="Exact current Codex or Claude session UUID.")
+    args = parser.parse_args()
+    try:
+        session = resolve_session(args.session_id)
+    except CheckError as exc:
+        json_output({"ok": False, "error": str(exc), "blocking_claims": [], "blocking_stages": []})
+        return 2
+
+    try:
+        auth = gh_call(["auth", "status", "--hostname", "github.com"])
+        if auth.returncode != 0:
+            raise CheckError("GitHub authentication is unavailable")
+        claims = open_claim_pages()
+        matching_claims = []
+        for item in claims:
+            owner = parse_claim_owner(item["body"])
+            if owner_session(owner) == session:
+                matching_claims.append({"issue": item["number"]})
+        stages = []
+        for stage, kinds in STAGES.items():
+            holder = read_stage(stage, kinds)
+            if holder is not None and (owner_session(holder["holder_id"]) == session
+                                       or owner_session(holder["owner"]) == session):
+                stages.append({"stage": stage})
+        summary = {
+            "ok": not matching_claims and not stages,
+            "session_id": session,
+            "open_claims_checked": len(claims),
+            "stages_checked": len(STAGES),
+            "blocking_claims": matching_claims,
+            "blocking_stages": stages,
+        }
+        json_output(summary)
+        return 0 if summary["ok"] else 1
+    except CheckError as exc:
+        json_output({"ok": False, "session_id": session, "error": str(exc),
+                     "blocking_claims": [], "blocking_stages": []})
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PY
