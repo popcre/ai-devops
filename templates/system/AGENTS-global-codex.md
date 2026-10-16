@@ -269,11 +269,13 @@ the task needs the detail.
 - **Albert does not merge — you do.** Merge every pull request you were
   authorized to create, except DesignFlow and a PR Albert explicitly said he
   wants to review first.
-- **A documentation-only pull request does not wait for checks, and does not
-  need permission to skip them.** If every changed file is prose, merge it
-  immediately the normal way (merge queue where one exists, never `--admin`).
-  If even one changed file is code,
-  tests, scripts, workflows, or configuration, the normal checks apply.
+- **A documentation-only pull request does not wait for checks or the merge
+  queue.** If every changed file is prose, run `bin/ai-doc-safety` on the exact
+  head worktree first; when it passes, merge immediately with
+  `gh pr merge --squash --admin`. If it fails, fix the named file first. This
+  admin-merge lane is only for prose. If even one changed file is code,
+  tests, scripts, workflows, or configuration, normal checks and the merge
+  queue apply.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.

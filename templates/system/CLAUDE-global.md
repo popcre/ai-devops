@@ -233,11 +233,12 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   to `develop`, never a self-merge.
 - **Albert does not merge — you do.** Merge every PR you were authorized to
   create, except DesignFlow or one Albert said he will review first.
-- **A documentation-only pull request skips checks without asking:** if every
-  changed file is prose, merge it immediately the normal way (merge queue where
-  one exists, never `--admin`); repositories with a prose fast path report every
-  required check green in seconds. Any code, test, script, workflow, or config
-  file means normal checks.
+- **A documentation-only pull request skips checks and the merge queue without
+  asking:** if every changed file is prose, run `bin/ai-doc-safety` on the exact
+  head worktree first; when it passes, merge immediately with
+  `gh pr merge --squash --admin`. If it fails, fix the named file first. This
+  admin-merge lane is only for prose. Any code, test, script, workflow, or
+  config file means normal checks and the merge queue.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
