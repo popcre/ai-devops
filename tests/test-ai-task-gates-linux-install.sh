@@ -5,6 +5,7 @@
 set -uo pipefail
 [ "$(uname -s)" = Linux ] || { echo 'SKIP: install verification route is Linux-only'; exit 0; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib-reviewer-events-isolation.sh"
 TMP="$(mktemp -d /tmp/ai-task-gates-linux.XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 export AI_TASK_GATES_INSTALL_TEST_MODE=1 AI_TASK_GATES_TEST_ROOT="$TMP" AI_TASK_GATES_DIR="$TMP/state"
@@ -22,9 +23,21 @@ cp "$ROOT/bin/ai-task-gates" "$TMP/installed/bin/ai-task-gates"
 cp "$ROOT/bin/ai-review-sandbox" "$TMP/installed/bin/ai-review-sandbox"
 cp "$ROOT/bin/ai-review-lifecycle" "$TMP/installed/bin/ai-review-lifecycle"
 cp "$ROOT/install.sh" "$TMP/installed/install.sh"
+cp "$ROOT/update.sh" "$TMP/installed/update.sh"
+cp "$ROOT/tools/lib/opencode-maintenance-lock.sh" "$TMP/installed/tools/lib/opencode-maintenance-lock.sh"
 cp "$ROOT/tools/lib/task-gates.sh" "$TMP/installed/tools/lib/task-gates.sh"
 cp "$ROOT/config/task-gates.json" "$TMP/installed/config/task-gates.json"
 cp "$ROOT/.ai-devops/task-gates.json" "$TMP/installed/.ai-devops/task-gates.json"
+# The namespace activation proof uses genuine tracked dependency/source checks.
+python3 - "$ROOT" "$TMP/installed" <<'PYCOPY'
+import shutil,sys
+from pathlib import Path
+sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
+import glm_formal_profile as p
+for name in p.CRITICAL_FILES|{'bin/ai-review','bin/ai-review-pool'}:
+    target=Path(sys.argv[2])/name;target.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copy2(Path(sys.argv[1])/name,target)
+PYCOPY
 printf 'old\n' > "$TMP/installed/tools/helper.sh"
 git -C "$TMP/installed" add .
 git -C "$TMP/installed" commit -qm base
@@ -36,6 +49,10 @@ manifest(){
   local sha="$1" hash
   hash="$(git -C "$TMP/installed" show "$sha:bin/ai-task-gates" | sha256sum | cut -d' ' -f1)"
   printf 'meta\tsource_sha\t%s\t-\nsymlink\t%s\t%s\t%s\n' "$sha" "$TMP/bin/ai-task-gates" "$TMP/installed/bin/ai-task-gates" "$hash" > "$TMP/etc/install-manifest.tsv"
+  for name in ai-review ai-review-pool ai-glm ai-task-gates; do
+    hash="$(git -C "$TMP/installed" show "$sha:bin/$name" | sha256sum | cut -d' ' -f1)"
+    printf 'symlink\t/usr/local/bin/%s\t%s/bin/%s\t%s\n' "$name" "$TMP/installed" "$name" "$hash" >> "$TMP/etc/install-manifest.tsv"
+  done
 }
 stage_report(){
   local target="$1" name report="$TMP/state/install-stage-reports/$1.tsv"
@@ -48,7 +65,7 @@ stage_report(){
 }
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
-expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
+expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 20 "$TMP/last-output"; exit 1; fi; }
 appr(){ mint_reviewer_approval "$TMP" "${3:-$TMP/candidate}" final-check "$1" "${2:+.implementer_engine=\"$2\"}"; }
 expect_stop(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'FAIL: %s\n' "$name"; exit 1; else printf 'PASS: %s\n' "$name"; fi; }
 
@@ -192,6 +209,123 @@ for crash_point in completion authority marker; do
 done
 rm -rf -- "$TMP/state"
 cp -a "$TMP/state-after-protected-finalize" "$TMP/state"
+
+# Explicit activation validates a clean completed source without reopening any
+# install/recovery transaction or minting another provider readiness.
+completion_before="$(sha256sum "$TMP/state/install-completions/last.json")"
+expect_ok 'activation-only accepts exact completed installed source' gate activation "$TMP/candidate" "$protected"
+[ "$completion_before" = "$(sha256sum "$TMP/state/install-completions/last.json")" ] || { echo 'FAIL: activation changed completion custody'; exit 1; }
+[ ! -e "$auth" ] && [ ! -e "$auth.consuming" ] && [ ! -e "$auth.ordinary" ] && [ ! -e "$TMP/state/install-stages/$protected.json" ] || { echo 'FAIL: activation reopened installation'; exit 1; }
+mv "$TMP/state/install-completions/last.json" "$TMP/completion-backup"
+expect_stop 'activation-only refuses absent completion' gate activation "$TMP/candidate" "$protected"
+mv "$TMP/completion-backup" "$TMP/state/install-completions/last.json"
+printf '{}' > "$TMP/state/install-stages/$protected.json"
+expect_stop 'activation-only refuses incomplete stage custody' gate activation "$TMP/candidate" "$protected"
+rm "$TMP/state/install-stages/$protected.json"
+ln -s "$TMP/missing-stage" "$TMP/state/install-stages/$protected.json"
+expect_stop 'activation-only refuses dangling partial-state symlink' gate activation "$TMP/candidate" "$protected"
+rm "$TMP/state/install-stages/$protected.json"
+cp "$TMP/etc/install-manifest.tsv" "$TMP/manifest-backup"
+printf '# drift\n' >> "$TMP/etc/install-manifest.tsv"
+expect_stop 'activation-only refuses changed installed manifest' gate activation "$TMP/candidate" "$protected"
+cp "$TMP/manifest-backup" "$TMP/etc/install-manifest.tsv"
+expect_stop 'activation-only refuses foreign pinned source' gate activation "$TMP/candidate" "$old"
+cp "$TMP/state/install-stage-reports/$protected.tsv" "$TMP/report-backup"
+printf '# drift\n' >> "$TMP/state/install-stage-reports/$protected.tsv"
+expect_stop 'activation-only refuses changed completed stage report' gate activation "$TMP/candidate" "$protected"
+cp "$TMP/report-backup" "$TMP/state/install-stage-reports/$protected.tsv"
+expect_ok 'activation-only remains available after refused invalid inputs' gate activation "$TMP/candidate" "$protected"
+
+# Real updater lock collision refuses before action gates/fetch/install. The
+# temporary checkout is a fixture; no real installed path/profile is touched.
+mkdir -p "$TMP/activation-home/.local/state/ai-devops/task-gates"
+activation_lock="$TMP/activation-home/.local/state/ai-devops/task-gates/install-$(printf '%s' "$TMP/installed" | sha256sum | cut -c1-16).lock"
+activation_attempt(){
+  env HOME="$TMP/activation-home" bash "$TMP/candidate/update.sh" --installed-checkout "$TMP/installed" \
+    --expected-head "$1" --reviewer-approval "$report" --activate-glm-formal --activation-only \
+    > "$TMP/activation-output" 2>&1
+}
+(
+  flock -x 9
+  expect_stop 'activation-only updater refuses an existing installation lock' activation_attempt "$protected"
+  grep -F 'another installation is active' "$TMP/activation-output" >/dev/null || { echo 'FAIL: wrong lock refusal'; exit 1; }
+) 9>"$activation_lock"
+chmod 600 "$activation_lock"
+expect_stop 'activation-only rejects a different installed SHA before fetch' activation_attempt "$old"
+grep -F 'activation-only requires the exact already installed source' "$TMP/activation-output" >/dev/null || { echo 'FAIL: wrong source refusal'; exit 1; }
+! grep -F 'Fetching origin main' "$TMP/activation-output" >/dev/null || { echo 'FAIL: activation-only fetched'; exit 1; }
+[ "$completion_before" = "$(sha256sum "$TMP/state/install-completions/last.json")" ] || { echo 'FAIL: refused activation changed completion'; exit 1; }
+
+
+# Exercise the actual updater and publisher in a private canonical namespace.
+# Only external provider/origin readiness is invented; installer_owner, fd9,
+# managed manifest, completed source and activation publication remain real.
+mkdir -p "$TMP/canonical-bin" "$TMP/namespace-tmp" "$TMP/activation-home/.config/ai-devops/glm-formal"
+chmod 700 "$TMP/activation-home/.config/ai-devops/glm-formal"
+for name in ai-review ai-review-pool ai-glm ai-task-gates; do
+  ln -s "$TMP/installed/bin/$name" "$TMP/canonical-bin/$name"
+done
+cat > "$TMP/activation-native.py" <<'PYACT'
+import os,sys,json
+from pathlib import Path
+repo=Path(sys.argv[1]);sys.path.insert(0,str(repo/'tools'))
+import glm_formal_profile as p
+if sys.argv[2]=='setup':
+    version=(repo/'config/opencode/version').read_text().strip()
+    binary=Path.home()/f'.local/lib/ai-devops/opencode/{version}/node_modules/opencode-ai/bin/opencode.exe'
+    binary.parent.mkdir(parents=True);binary.write_text('#!/bin/sh\nexit 99\n');binary.chmod(0o700)
+    print(json.dumps(p.install(repo,Path.home(),4097)))
+else:
+    # No model call or production origin. Do not mock installer provenance,
+    # installed_state, critical inventory, source hashes or lock ownership.
+    p.profile_health=lambda home:{'fixture_external_only':True}
+    p.verify_readiness=lambda home,settings,ready:{'fixture_external_only':True}
+    sys.argv=['glm_formal_profile.py','activate','--repo',str(repo)]
+    p.main()
+PYACT
+cat > "$TMP/canonical-bin/python3" <<PYSH
+#!/bin/bash
+if [ "\${1:-}" = "$TMP/installed/tools/glm_formal_profile.py" ] && [ "\${2:-}" = activate ]; then
+  exec /usr/bin/python3 "$TMP/activation-native.py" "$TMP/installed" activate
+fi
+exec /usr/bin/python3 "\$@"
+PYSH
+chmod 700 "$TMP/canonical-bin/python3"
+namespace(){ bwrap --ro-bind / / --dev /dev --proc /proc --bind "$TMP" "$TMP" --bind "$TMP/canonical-bin" /usr/local/bin \
+  --bind "$TMP/etc" /etc/ai-devops --unshare-net --die-with-parent env PYTHONDONTWRITEBYTECODE=1 TMPDIR="$TMP/namespace-tmp" "$@"; }
+expect_ok 'namespace provision preserves genuine installed-source checks' namespace env HOME="$TMP/activation-home" \
+  /usr/bin/python3 "$TMP/activation-native.py" "$TMP/installed" setup
+alias_gate(){ namespace env HOME="$TMP/activation-home" "$TMP/candidate/bin/ai-task-gates" install-verify \
+  --phase activation --target-head "$protected" --installed-checkout "$TMP/installed" \
+  --installed-launcher /usr/local/bin/ai-task-gates; }
+mv "$TMP/canonical-bin/ai-task-gates" "$TMP/canonical-launcher-backup"
+cp "$TMP/installed/bin/ai-task-gates" "$TMP/canonical-bin/ai-task-gates"
+expect_stop 'canonical alias refuses equal bytes in a different inode' alias_gate
+rm "$TMP/canonical-bin/ai-task-gates"
+ln -s "$TMP/candidate/bin/ai-task-gates" "$TMP/canonical-bin/ai-task-gates"
+expect_stop 'canonical alias refuses a symlink outside installed fixture' alias_gate
+rm "$TMP/canonical-bin/ai-task-gates"
+mv "$TMP/canonical-launcher-backup" "$TMP/canonical-bin/ai-task-gates"
+expect_stop 'canonical alias refuses a different fixture root' namespace env AI_TASK_GATES_TEST_ROOT="$TMP/activation-home" \
+  "$TMP/candidate/bin/ai-task-gates" install-verify --phase activation --target-head "$protected" \
+  --installed-checkout "$TMP/installed" --installed-launcher /usr/local/bin/ai-task-gates
+git -C "$TMP/installed" remote set-url origin https://github.com/popcre/ai-devops.git
+expect_stop 'GitHub origin cannot use fixture alias normalization' alias_gate
+git -C "$TMP/installed" remote set-url origin "file://$TMP/origin.git"
+# Normal Git URL identity resolution, still raw file origin for fixture custody.
+# No network is reachable, and activation-only must never fetch.
+git -C "$TMP/installed" config 'url.https://github.com/popcre/ai-devops.git.insteadOf' "file://$TMP/origin.git"
+(cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
+activation_report="$(appr "$protected" codex "$TMP/candidate")"
+# This exact canonical alias is accepted only for the same fixture inode.
+expect_ok 'actual activation-only updater publishes through real installer ownership' namespace env HOME="$TMP/activation-home" \
+  bash "$TMP/candidate/update.sh" --installed-checkout "$TMP/installed" --expected-head "$protected" \
+  --reviewer-approval "$activation_report" --activate-glm-formal --activation-only
+[ -f "$TMP/activation-home/.config/ai-devops/glm-formal/activation.json" ] || { echo 'FAIL: updater did not publish activation'; exit 1; }
+! grep -E 'Fetching origin main|Running installer|Running installation' "$TMP/last-output" >/dev/null || { echo 'FAIL: activation-only fetched/installed'; exit 1; }
+[ "$completion_before" = "$(sha256sum "$TMP/state/install-completions/last.json")" ] || { echo 'FAIL: successful activation changed completion'; exit 1; }
+
+git -C "$TMP/installed" config --unset 'url.https://github.com/popcre/ai-devops.git.insteadOf'
 
 # A genuinely absent managed installation has its own reviewed first-install
 # operation. A foreign launcher cannot be swapped into that pending grant.

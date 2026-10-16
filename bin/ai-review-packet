@@ -1008,6 +1008,10 @@ EOF
     [ "$(jqr .head "$pkt/identity.json")" = "$head" ] || die "source-head-moved"
     validate_identity "$pkt/identity.json" "$root"
   fi
+  if [ "${AI_REVIEW_FORMAL_INSTRUCTIONS:-0}" = 1 ]; then
+    python3 "$SCRIPT_DIR/../tools/glm_formal_profile.py" instructions --snapshot "$root" --packet "$pkt" >/dev/null \
+      || { rm -rf "$pkt"; die "could not preserve formal repository instructions."; }
+  fi
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
   hash_packet "$pkt" > "$pkt/$HASHFILE"
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }

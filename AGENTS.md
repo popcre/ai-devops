@@ -310,6 +310,11 @@ Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_revie
 
 Edge-dev reviewer repair without AI-reviewer gates: read the [edge-dev no-review plan](plan_edge-dev-reviewer-repair-no-review.md) STATUS first (owner bootstrap: implementation must not need reviewers).
 
+For GLM access to its own truncated output, read
+[`plan_glm_own_output_recovery.md`](plan_glm_own_output_recovery.md) STATUS first
+([#1791](https://github.com/popcre/ai-devops/issues/1791)); preserve the shared
+service and repository instructions while qualifying the isolated formal profile.
+
 Live sources (always prefer these over this table when they disagree):
 
 | Status | Item | Owner / next action |

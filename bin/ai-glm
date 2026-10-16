@@ -9,7 +9,7 @@
 #   ai-glm recover <name>         recover exact pending work without resubmitting
 #   ai-glm ask <name> [...]                                    continue it
 #   ai-glm implement <name> [...]                              one-shot write job in a throwaway clone
-#   ai-glm list | show <name> | transcript <name> | diff <name>
+#   ai-glm list | show <name> | transcript <name> [--json] | diff <name>
 #   ai-glm abort <name> | delete <name>
 #   ai-glm prune                                               delete reviews idle past retention
 #   ai-glm doctor
@@ -30,8 +30,15 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   unset _AI_EVENT_SELF
 fi
 
+GLM_PROFILE="${AI_GLM_PROFILE:-general}"
+case "$GLM_PROFILE" in general|formal-review) ;; *) printf 'ai-glm: invalid fixed profile\n' >&2; exit 2 ;; esac
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+if [ "$GLM_PROFILE" = formal-review ]; then
+  [ "$(uname -s 2>/dev/null)" = Linux ] || { printf 'ai-glm: formal profile is Linux-only; general profile unchanged\n' >&2; exit 1; }
+  CFG_DIR="$HOME/.config/ai-devops/glm-formal"
+fi
 OC_HOME="$CFG_DIR/opencode"
+[ "$GLM_PROFILE" != formal-review ] || OC_HOME="$CFG_DIR"
 PW_FILE="$OC_HOME/server-password"
 
 # Attach to another user's already-running server rather than standing up a
@@ -49,7 +56,7 @@ PW_FILE="$OC_HOME/server-password"
 # any home directory by definition, and for a non-root user the read simply
 # fails and nothing changes. This grants no access anyone did not already have.
 # AI_GLM_SERVER_USER pins the owning user explicitly.
-if [ ! -s "$PW_FILE" ]; then
+if [ "$GLM_PROFILE" = general ] && [ ! -s "$PW_FILE" ]; then
   for _oc_user in ${AI_GLM_SERVER_USER:-ai}; do
     # Never "attach" to ourselves. Running as the owning user with a bare
     # AI_DEVOPS_CONFIG_DIR would otherwise resolve to that same user's real
@@ -73,9 +80,17 @@ if [ ! -s "$PW_FILE" ]; then
 fi
 STATE_DIR="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
 PORT="${AI_GLM_PORT:-4096}"
+if [ "$GLM_PROFILE" = formal-review ]; then
+  STATE_DIR="$HOME/.local/state/ai-devops/glm-formal"
+  PORT="$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/glm_formal_profile.py" settings | jq -er '.port|select(type=="number" and .>=1024 and .<=65535)')" || exit 1
+  export AI_REVIEW_FORMAL_INSTRUCTIONS=1
+fi
 BASE="http://127.0.0.1:$PORT"
 PROVIDER="zai-coding-plan"
 MODEL="${AI_GLM_MODEL:-glm-5.3}"
+if [ "$GLM_PROFILE" = formal-review ]; then
+  [ "$MODEL" = glm-5.3 ] || { printf 'ai-glm: formal model is fixed\n' >&2; exit 1; }
+fi
 # Caller identity: explicit AI_GLM_CALLER (or --caller) wins; otherwise the
 # harness is detected (mimo/claude/codex/zcode). Never default to a wrong
 # engine name — independence recording keys off this value. main() fails
@@ -106,6 +121,7 @@ WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
 REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
 CAPACITY_JSON=''
+GLM_READINESS_ELIGIBLE=0 # internal dynamic scope only; inherited environment is never authority
 ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''; ACTIVE_DIAG_STARTED_EPOCH=0
 
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
@@ -184,6 +200,10 @@ require_review_server() {
   if ! server_up "${AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT:-30}"; then
     record_diagnostic awaiting-local-service local-health-timeout --local-health timed-out --failure-class local-service-timeout
     local_service_fatal
+  fi
+  if [ "$GLM_PROFILE" = formal-review ]; then
+    python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin >/dev/null \
+      || die 'formal review origin is not current; no provider turn admitted.'
   fi
 }
 
@@ -372,7 +392,13 @@ prefix_packet_preamble() { # prefix_packet_preamble PROMPT_FILE
   local pf="$1" tmp
   [ -n "$PACKET_HASH" ] || return 0
   tmp="$(mktemp)"
-  { printf '%s' "${PACKET_PREAMBLE//.ai-review/$PACKET_REL}"; cat "$pf"; } > "$tmp"
+  { printf '%s' "${PACKET_PREAMBLE//.ai-review/$PACKET_REL}"; cat "$pf"
+    if [ "$GLM_PROFILE" = formal-review ]; then
+      [ -f "$REVIEW_DIR/$PACKET_REL/FORMAL-INSTRUCTIONS.txt" ] \
+        || die 'formal instruction packet is missing.'
+      printf '\n\n'; cat "$REVIEW_DIR/$PACKET_REL/FORMAL-INSTRUCTIONS.txt"
+    fi
+  } > "$tmp"
   mv "$tmp" "$pf"
 }
 # repo_id spawns git/sha256sum/cut; cache by repository root so N open records
@@ -465,10 +491,19 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
 # result clears it. This is deliberately narrower than Grok's cross-checkout
 # lock: GLM sessions are bound to one exact OpenCode session.
 mark_remote_turn_pending() { # META [PREVIOUS_ASSISTANT_ID]
-  local meta="$1" now previous="${2:-}"
+  local meta="$1" now previous="${2:-}" protocol=null origin instruction prompt_hash
   now="$(date -u +%FT%TZ)"
   GLM_REQUESTED_DEADLINE="$(glm_new_deadline)" || return 1
-  write_meta "$meta" "$(jq --arg now "$now" --argjson deadline "$GLM_REQUESTED_DEADLINE" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" '.remote_turn={state:"pending",started_at:$now,deadline_epoch:$deadline,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary}' "$meta")"
+  if [ "$GLM_PROFILE" = formal-review ]; then
+    origin="$(python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin)" || return 1
+    instruction="$(sha256sum "$REVIEW_DIR/$PACKET_REL/FORMAL-INSTRUCTIONS.txt" | cut -d' ' -f1)" || return 1
+    [ -n "${3:-}" ] && [ -f "$3" ] || return 1
+    prompt_hash="$(sha256sum "$3" | cut -d' ' -f1)" || return 1
+    protocol="$(jq -n --argjson origin "$origin" --arg instructions "$instruction" --arg prompt "$prompt_hash" \
+      --arg asset "$REVIEW_DIR/$PACKET_REL/FORMAL-INSTRUCTIONS.txt" --arg previous "$previous" \
+      '{version:1,maximum:1,origin:$origin,instruction_asset:$asset,instruction_sha256:$instructions,initial_prompt_sha256:$prompt,original_previous_message_id:$previous}')"
+  fi
+  write_meta "$meta" "$(jq --arg now "$now" --argjson deadline "$GLM_REQUESTED_DEADLINE" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" --argjson recovery "$protocol" '.remote_turn={state:"pending",started_at:$now,deadline_epoch:$deadline,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary} | if $recovery!=null then .remote_turn.own_output_recovery=$recovery else . end' "$meta")"
 }
 
 remote_turn_pending() { # META
@@ -663,7 +698,21 @@ record_review_publication() { # META REPORT; clear fence only after this succeed
   local meta="$1" report="$2" digest
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
   digest="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
-  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")"
+  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")" || return 1
+  if [ "${GLM_READINESS_ELIGIBLE:-0}" = 1 ]; then
+    record_formal_readiness "$(jq -er .repository_root "$meta")" "$(jq -er .name "$meta")" "$meta"
+  fi
+}
+
+record_formal_readiness() { # original managed publication only; never recovery
+  [ "$GLM_PROFILE" = formal-review ] || return 0
+  if ! python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" emit-readiness \
+    --repo "$1" --name "$2" --caller "$CALLER" >/dev/null; then
+    warn 'Formal provider readiness was not qualified; the review is retained and pool activation remains closed.'
+    write_meta "$3" "$(jq --arg at "$(date -u +%FT%TZ)" \
+      '.readiness_qualification={state:"unqualified",reason:"verification-failed",observed_at:$at}' "$3")" \
+      || warn 'The readiness failure diagnostic could not be saved; the published review remains retained.'
+  fi
 }
 
 implementation_terminal() {
@@ -1243,8 +1292,82 @@ APPROVED_PERMISSION_IDS=""
 # Meta file of the turn currently in flight, so await_turn can prove liveness while it
 # blocks. Empty when no turn is running. See touch_liveness().
 TURN_META=""
+own_output_command() { # OP SID NAME BOUNDARY; JSON stdin, bounded metadata stdout
+  local operation="$1" sid="$2" name="$3" boundary="$4" source head packet pkt
+  [ "$GLM_PROFILE" = formal-review ] && [ -n "$TURN_META" ] && [ -f "$TURN_META" ] || return 1
+  source="$(jq -r .repository_root "$TURN_META")"
+  head="$(git -C "$source" rev-parse HEAD)" || return 1
+  [ "$head" = "$(jq -r .remote_turn.head "$TURN_META")" ] || return 1
+  pkt="$("$PACKET_BIN" path "$boundary" "glm-$name")" || return 1
+  "$PACKET_BIN" verify "$pkt" >/dev/null || return 1
+  packet="$(cat "$pkt/MANIFEST.sha256")"
+  python3 "$WRAPPER_DIR/../tools/glm_output_recovery.py" "$operation" --meta "$TURN_META" \
+    --caller "$CALLER" --session "$sid" --boundary "$boundary" --head "$head" --packet "$packet"
+}
+
+try_own_output_recovery() { # SID NAME MODE BOUNDARY; no approval is ever sent
+  local sid="$1" name="$2" mode="$3" boundary="$4" messages payload claim permission mirror
+  [ "$mode" = review ] && [ "$GLM_PROFILE" = formal-review ] \
+    && [ "${GLM_OBSERVATIONAL_RECOVERY:-0}" = 0 ] && [ "$HTTP_STATUS" = 200 ] \
+    && [ -n "$TURN_META" ] || return 1
+  printf '%s' "$HTTP_BODY" | jq -e '.data|length==1 and .[0].action=="external_directory"' >/dev/null || return 1
+  messages="$(mktemp)"; payload="$(mktemp)"
+  if ! api GET "/api/session/$sid/message?limit=200" > "$messages"; then rm -f "$messages" "$payload"; return 1; fi
+  if ! printf '%s' "$HTTP_BODY" | jq --slurpfile messages "$messages" '{permissions:.,messages:$messages[0]}' > "$payload"; then
+    rm -f "$messages" "$payload"; return 1
+  fi
+  if ! claim="$(own_output_command qualify "$sid" "$name" "$boundary" < "$payload")"; then
+    rm -f "$messages" "$payload"; return 1
+  fi
+  rm -f "$messages" "$payload"
+  permission="$(printf '%s' "$claim" | jq -er .permission_id)" || return 1
+  write_meta "$TURN_META" "$(jq --argjson claim "$claim" '.remote_turn.own_output_state={phase:"reserved",claim:$claim}' "$TURN_META")" \
+    || die 'own-output reservation could not be retained; no permission reply sent.'
+  # A nonempty supported rejection message produces CorrectedError, which the
+  # builtin maps into a normal failed tool result rather than a fatal defect.
+  permission_http POST "/api/session/$sid/permission/$permission/reply" \
+    '{"reply":"reject","message":"External directory access is refused. This review remains inside its private evidence boundary."}'
+  [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
+  case "$HTTP_STATUS" in 2*) ;; *) die 'own-output permission rejection was not confirmed; recovery is fenced.' ;; esac
+  mirror="$(jq -n --arg id "$permission" '{permission_id:$id,rejected:true}' \
+    | own_output_command mirror "$sid" "$name" "$boundary")" || die 'safe own-output capture failed; recovery is fenced.'
+  write_meta "$TURN_META" "$(jq --argjson mirror "$mirror" '.remote_turn.own_output_state={phase:"mirrored",mirror:$mirror}' "$TURN_META")" \
+    || die 'own-output capture receipt could not be retained; recovery is fenced.'
+  record_diagnostic finalizing own-output-mirrored --local-health healthy
+}
+
+continue_own_output_review() { # SID NAME BOUNDARY INTERMEDIATE_JSON; never resets run/deadline
+  local sid="$1" name="$2" boundary="$3" message="$4" correction watermark prompt submitted
+  [ "${GLM_OBSERVATIONAL_RECOVERY:-0}" = 0 ] || die 'observational recover cannot submit an own-output correction.'
+  correction="$(printf '%s' "$message" | own_output_command intermediate "$sid" "$name" "$boundary")" \
+    || die 'intermediate own-output result could not be retained.'
+  watermark="$(printf '%s' "$correction" | jq -er .intermediate_id)"
+  write_meta "$TURN_META" "$(jq --arg previous "$watermark" --argjson correction "$correction" \
+    '.remote_turn.previous_message_id=$previous | .remote_turn.own_output_state.phase="intermediate-retained" | .remote_turn.own_output_state.correction=$correction' "$TURN_META")" \
+    || die 'intermediate watermark could not be retained.'
+  # Recheck the existing subscription/hold admission, not a new account or paid
+  # key. Mechanical repair has one reservation, model reasoning remains uncapped.
+  capacity_gate || die 'current subscription admission refused the corrective continuation.'
+  prompt="$(mktemp)"
+  printf '%s' "$correction" | jq -r .prompt > "$prompt"
+  submitted="$(printf '%s' "$correction" | jq '{prompt_sha256:.sha256,intermediate_id}' \
+    | own_output_command submission "$sid" "$name" "$boundary")" || { rm -f "$prompt"; die 'corrective submission reservation refused.'; }
+  write_meta "$TURN_META" "$(jq --argjson submitted "$submitted" \
+    '.remote_turn.own_output_state.phase="submitting" | .remote_turn.own_output_state.submission=$submitted' "$TURN_META")" \
+    || { rm -f "$prompt"; die 'corrective submission fence could not be retained.'; }
+  GLM_REQUESTED_DEADLINE="$(jq -er .remote_turn.deadline_epoch "$TURN_META")"
+  if ! send_prompt "$sid" "$prompt"; then
+    rm -f "$prompt"; die 'corrective submission outcome is unknown; do not resubmit.'
+  fi
+  rm -f "$prompt"
+  write_meta "$TURN_META" "$(jq '.remote_turn.own_output_state.phase="submitted"' "$TURN_META")" \
+    || die 'corrective acknowledgement could not be retained; do not resubmit.'
+  record_diagnostic launch own-output-correction-submitted --local-health healthy
+  printf '%s' "$watermark"
+}
+
 handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
-  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance own_rc
   guidance="$(permission_next_step "$name" "$impl_meta")"
   permission_http GET "/api/session/$sid/permission"
   [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
@@ -1270,6 +1393,11 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
         ;;
       *) return 0 ;;
     esac
+  fi
+  if [ -z "$impl_meta" ]; then
+    own_rc=0; try_own_output_recovery "$sid" "$name" "$mode" "$root" || own_rc=$?
+    [ "$own_rc" -ne 0 ] || return 0
+    [ "$own_rc" -ne 124 ] || return 124
   fi
   if ! rows="$(classify_permissions "$mode" "$root" "$HTTP_STATUS" "$HTTP_BODY" 2>"${TMPDIR:-/tmp}/ai-glm-perm-err-$$")"; then
     err="$(cat "${TMPDIR:-/tmp}/ai-glm-perm-err-$$" 2>/dev/null)"; rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
@@ -1459,6 +1587,10 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
       provider_turn_error "$msg" "$name" "$impl_meta"; return $?
     fi
     if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ] && { [ -z "$previous" ] || [ "$(printf '%s' "$msg" | jq -r '.id // empty')" != "$previous" ]; }; then
+      if [ -n "$TURN_META" ] && [ "$(jq -r '.remote_turn.own_output_state.phase // empty' "$TURN_META")" = mirrored ]; then
+        previous="$(continue_own_output_review "$sid" "$name" "$root" "$msg")" || return 1
+        idle=0; msg='{}'; continue
+      fi
       printf '%s' "$msg"; return 0
     fi
     if [ -n "$impl_meta" ] && implementation_abort_requested "$impl_meta" && [ "$idle" -ge 2 ]; then
@@ -1486,7 +1618,7 @@ msg_tokens() { printf '%s' "$1" | jq -c '.tokens // null'; }
 # --------------------------------------------------------------------------------
 # Reports
 # --------------------------------------------------------------------------------
-write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
+write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID [META]
   local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver tmp
   ts="${GLM_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)}"
   [ -z "${GLM_REPORT_KEY:-}" ] || [[ "$GLM_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -1514,7 +1646,15 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     else
       printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     fi
-    printf '| last step adapter tokens | `%s` |\n\n' "$tokens"
+    printf '| last step adapter tokens | `%s` |\n' "$tokens"
+    if [ -n "${7:-}" ] && [ -f "$7" ] && jq -e '.remote_turn.own_output_state.phase|IN("submitting","submitted")' "$7" >/dev/null 2>&1; then
+      printf '| own-output repair | one mechanical correction; original invocation/deadline preserved; full-run usage unavailable |\n'
+      printf '| own-output bytes / sha256 | %s / `%s` |\n' \
+        "$(jq -r .remote_turn.own_output_state.mirror.bytes "$7")" \
+        "$(jq -r .remote_turn.own_output_state.mirror.sha256 "$7")"
+      printf '| intermediate receipt | `%s` |\n' "$(jq -r .remote_turn.own_output_state.correction.receipt "$7")"
+    fi
+    printf '\n'
     printf -- '---\n\n%s\n' "$text"
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   if [ -e "$f" ] || [ -L "$f" ]; then
@@ -1634,6 +1774,7 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
+  local GLM_READINESS_ELIGIBLE=1
   local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run previous_message
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   root="${REPO_OVERRIDE:-$(repo_root)}"
@@ -1667,7 +1808,7 @@ cmd_new() {
   fi
   previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
   reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable review evidence; no provider call was made.'
-  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  mark_remote_turn_pending "$mp" "$previous_message" "$pf" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1681,7 +1822,7 @@ cmd_new() {
   persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
   record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
@@ -1689,7 +1830,9 @@ cmd_new() {
 }
 
 cmd_recover() { # exact session only; never sends or resends a prompt
+  local GLM_READINESS_ELIGIBLE=0
   local GLM_RETAINED_ERROR_OBSERVATION=historical
+  local GLM_OBSERVATIONAL_RECOVERY=1 own_phase own_claim
   local name="$1" root rid mp sid lock packet boundary expected state msg terminal digest report text tokens binding stale=0 observed
   valid_name "$name" || die 'invalid GLM session name.'
   [ -z "$PROMPT_TEXT$PROMPT_FILE$OPT_BASE$OPT_TESTS$OPT_DECISION$OPT_ASSERT_HEAD" ] || die 'recover cannot submit a prompt or change the original review evidence.'
@@ -1701,6 +1844,11 @@ cmd_recover() { # exact session only; never sends or resends a prompt
   sid="$(jq -r .opencode_session_id "$mp")"
   printf '%s' "$sid" | grep -Eq '^[A-Za-z0-9_-]+$' && [ "$sid" != null ] || die 'GLM session identity is malformed.'
   state="$(jq -r '.remote_turn.state // empty' "$mp")"
+  own_phase="$(jq -r '.remote_turn.own_output_state.phase // empty' "$mp")"
+  own_claim="$(jq -r '.remote_turn.original_invocation_id // empty' "$mp")"
+  if [[ "$own_claim" =~ ^[0-9a-f]{32}$ ]] && [ -f "$(dirname "$mp")/$own_claim.own-output.claim.json" ]; then
+    case "$own_phase" in submitting|submitted) ;; *) die 'own-output repair has no submitted corrective turn; observational recover cannot generate or publish its intermediate result.' ;; esac
+  fi
   binding=remote_turn; [ -n "$state" ] || binding=last_completed_turn
   jq -e --arg key "$binding" '.[$key] | (.head|type=="string" and test("^[0-9a-f]{40}$")) and (.packet_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$mp" >/dev/null || die 'GLM recovery source identity is malformed.'
   boundary="$(jq -r --arg key "$binding" '.[$key].boundary_root // empty' "$mp")"; expected="$(jq -r --arg key "$binding" '.[$key].head // empty' "$mp")"
@@ -1758,7 +1906,7 @@ cmd_recover() { # exact session only; never sends or resends a prompt
 
 $text"
   fi
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'GLM report publication failed; recover can finalize the retained completion without another provider call.'
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'GLM report publication failed; recover can finalize the retained completion without another provider call.'
   if [ "$stale" = 1 ]; then
     "$PACKET_BIN" verify-retained "$packet" >/dev/null || die 'retained packet changed during local recovery.'
   else
@@ -1770,6 +1918,7 @@ $text"
 }
 
 cmd_ask() {
+  local GLM_READINESS_ELIGIBLE=1
   local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run previous_message
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
@@ -1816,7 +1965,7 @@ $REVIEW_HEAD only."
   record_diagnostic preflight capacity-checked --local-health healthy
   previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
   reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable review evidence; no provider call was made.'
-  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  mark_remote_turn_pending "$mp" "$previous_message" "$pf" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1837,7 +1986,7 @@ $REVIEW_HEAD only."
   fi
   write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
   record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
@@ -2344,9 +2493,42 @@ cmd_diff() {
 }
 
 cmd_transcript() {
-  local mp sid; mp="$(find_meta "$1")"
+  local mp sid managed_dir; mp="$(find_meta "$1")"
   [ "$(jq -r '.type // empty' "$mp")" = review ] || die "implementation job '$1' is one-shot and its disposable server session is not a persistent transcript target."
   sid="$(jq -r .opencode_session_id "$mp")"
+  if [ "$JSON_OUT" = 1 ]; then
+    jq -e --arg name "$1" --arg caller "$CALLER" '
+      .type=="review" and .name==$name and .caller==$caller and
+      (.opencode_session_id|type=="string" and test("^[A-Za-z0-9_-]{1,160}$"))
+    ' "$mp" >/dev/null || die 'diagnostic session identity is malformed.'
+    require_server
+    managed_dir="$HOME/.local/share/ai-devops/opencode/opencode/tool-output/"
+    if [ "$GLM_PROFILE" = formal-review ]; then
+      managed_dir="$(python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin | jq -er '.managed_directory')/"
+    fi
+    # Diagnostic inventory only: never export prompt, model text, tool input or
+    # tool output. The session is resolved from this caller's repository record.
+    api GET "/api/session/$sid/message?limit=200" | jq --arg sid "$sid" \
+      --arg managed_dir "$managed_dir" '
+      def identifier: if type == "string" and test("^[A-Za-z0-9_.:-]{1,160}$") then . else null end;
+      def managed_path: select(type == "string") | select(startswith($managed_dir)) |
+        select(ltrimstr($managed_dir) | test("^tool_[A-Za-z0-9_-]{1,160}$"));
+      {schema_version:1, session_id:$sid, messages:[.data[]? |
+        {id:(.id | identifier), type:(.type | identifier),
+         tools:[.content[]? | select(.type == "tool") | .state as $state |
+           {type:(.type | identifier),
+            tool:(.tool // .name | identifier),
+            provider:(.provider | identifier),
+            call_id:(.callID // .toolCallID // .id | identifier),
+            status:(.state.status // .status | identifier),
+            output_paths:[.state.outputPaths[]? | managed_path],
+            input_managed_paths:[.state.input | objects | (.resource?, .filePath?, .path?) | managed_path],
+            input_fields:(["path","filePath","resource","offset","limit"] |
+              map(select(. as $key | $state.input | type == "object" and has($key)))),
+            state_fields:(["status","input","output","result","metadata","outputPaths"] |
+              map(select(. as $key | $state | type == "object" and has($key))))}]}]}'
+    return
+  fi
   require_server
   api GET "/api/session/$sid/message?limit=200" | jq -r '
     .data | reverse | .[] |
@@ -2927,6 +3109,24 @@ glm_probe_budget() { # start's pre-flight probe budget: never above 10s, never a
 
 cmd_server() {
   local action="${1:-status}" start_deadline=""
+  if [ "$GLM_PROFILE" = formal-review ]; then
+    case "$action" in
+      start)
+        systemctl --user daemon-reload || die 'could not load formal unit.'
+        systemctl --user start opencode-glm-formal.service || die 'could not start formal service.'
+        wait_for_server_health started "$(( $(date +%s) + SERVER_START_TIMEOUT ))"
+        python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin >/dev/null || die 'formal process origin did not qualify.' ;;
+      stop) systemctl --user stop opencode-glm-formal.service ;;
+      restart)
+        systemctl --user restart opencode-glm-formal.service || die 'could not restart formal service.'
+        wait_for_server_health restarted "$(( $(date +%s) + SERVER_START_TIMEOUT ))"
+        python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin >/dev/null || die 'formal process origin did not qualify.' ;;
+      status) systemctl --user status opencode-glm-formal.service --no-pager || true
+        python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" origin ;;
+      *) die 'usage: ai-glm server start|stop|restart|status' ;;
+    esac
+    return
+  fi
   if [ "$action" = start ]; then
     start_deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
     # A short probe: this only asks "is a server answering right now", and a
@@ -3396,7 +3596,8 @@ case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-glm ask <name> ..."; cmd_ask "$ARG" ;;
   recover)    [ -n "$ARG" ] || die 'usage: ai-glm recover <name>'; cmd_recover "$ARG" ;;
-  implement)  [ -n "$ARG" ] || die "usage: ai-glm implement <name> ..."; cmd_implement "$ARG" ;;
+  implement)  [ "$GLM_PROFILE" = general ] || die 'implementation uses the unchanged general profile.'
+              [ -n "$ARG" ] || die "usage: ai-glm implement <name> ..."; cmd_implement "$ARG" ;;
   list)       cmd_list ;;
   show)       cmd_show "$ARG" ;;
   transcript) cmd_transcript "$ARG" ;;
