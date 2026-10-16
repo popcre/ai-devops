@@ -14,6 +14,16 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "${1:-}" = --profile ]; then
+  [ "${2:-}" = formal-review ] && [ "$#" -eq 2 ] || {
+    echo 'usage: setup-opencode-glm.sh [--profile formal-review]' >&2; exit 2;
+  }
+  # Explicit, install-only route: no shared unit/config/state mutation and no
+  # implicit start/enable. Activation remains a separate protected operation.
+  exec python3 "$REPO_ROOT/tools/glm_formal_profile.py" install --repo "$REPO_ROOT" \
+    --port "${AI_GLM_FORMAL_PORT:-4097}"
+fi
+[ "$#" -eq 0 ] || { echo 'unknown setup option' >&2; exit 2; }
 source "$REPO_ROOT/tools/lib/opencode-curl-auth.sh"
 source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
