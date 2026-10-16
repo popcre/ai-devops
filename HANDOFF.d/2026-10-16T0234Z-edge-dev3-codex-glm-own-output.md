@@ -24,6 +24,10 @@ Source B–D is implemented locally in `/home/ahazan/.codex/worktrees/glm-own-ou
 
 ## 4. Failed/rejected routes
 
+Revision after first SECURITY review: afadf382 received DeepSeek REJECT (run20261016T034154-1906454-7882,235s), retained in private review evidence and signed #1791 comment. Moving base had advanced to sibling #1793; no authored Muse changes existed. Rebased to immutable b20da460df6b3c18410723a50899a7ed7c586413 before substantive activation repair. Unconditional formal routing was real: revised source now preserves legacy when activation is absent, rejects invalid activation without fallback, and selects only validated immutable runtime after explicit protected installer activation.28 focused fixtures pass during development; prior400/185 and pinned-nine-page proof belong to afad and must be rerun on final revised head. No revised APPROVE, publication or installed repair is claimed.
+
+Full tracked release archive contains1517 public blobs and records/excludes only the known transcripts gitlink, never its private contents. Runtime manifests/modes/hashes are externally sealed by profile settings; cache is verified against actual Git bytes, not self-certifying. Actual compatibility dependency list is CRITICAL_FILES in the profile helper; unrelated Muse/provider changes pass, GLM/shared safety movement is refused by updater BEFORE canonical advance. In-flight code remains pinned. Protected installer owns snapshot retention; no old runtime deletion without exact activation/session-reference/evidence and recoverable cleanup proof. Current normal front door continues current rotation/admission/global governance.
+
 Shared wildcard would expose other sessions. Exact ordinary read grant cannot bypass prior directory wildcard. Legacy plugin hook does not cover measured v2 store. Supported rejection feedback is lost by actual read error mapping. Global project-config-disable also removes repo instructions and affects implementation. Alternate config/port alone overwrites shared service paths. No old-run renewal, budget reset, step caps or account replacement. See plan§7 for evidence.
 
 ## 5. Root cause/evidence

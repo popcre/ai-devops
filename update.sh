@@ -24,6 +24,7 @@ same_path() {
 expected_head=""
 installed_checkout=""
 reviewer_approval=""
+activate_glm_formal=0
 install_args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -36,13 +37,15 @@ while [ "$#" -gt 0 ]; do
     --reviewer-approval)
       [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
       reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
+    --activate-glm-formal) activate_glm_formal=1; install_args+=("$1"); shift ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets] [--activate-glm-formal]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac
 done
+if [ "$activate_glm_formal" -eq 1 ]; then source "$SOURCE_ROOT/tools/lib/opencode-maintenance-lock.sh"; fi
 if [ -n "$expected_head" ] && ! [[ "$expected_head" =~ ^[0-9a-f]{40}$ ]]; then
   warn '--expected-head must be a full lowercase commit SHA'; exit 2
 fi
@@ -171,12 +174,21 @@ printf '%s\n' "$preflight_output"
 if [ "$preflight_output" = "AI_DEVOPS_INSTALL_RECOVERED=$target_head" ]; then
   git worktree remove --force "$candidate" >/dev/null || exit 1
   candidate_added=0
+  if [ "$activate_glm_formal" -eq 1 ]; then glm_formal_activation_publish "$REPO_ROOT" || exit 1; fi
   info "Prior installation of $target_head was already complete; finalization cleanup recovered"
   exit 0
 fi
 git worktree remove --force "$candidate" >/dev/null || exit 1
 candidate_added=0
 
+# Protect an existing immutable formal profile before any canonical advance.
+# Unrelated provider/app edits pass; changed GLM/shared safety code requires a
+# separately qualified exclusive profile upgrade, rather than breaking clients.
+if [ -e "$HOME/.config/ai-devops/glm-formal/activation.json" ] || [ -L "$HOME/.config/ai-devops/glm-formal/activation.json" ]; then
+  python3 "$REPO_ROOT/tools/glm_formal_profile.py" upgrade-check --repo "$REPO_ROOT" --target "$target_head" || {
+    warn 'active formal GLM profile needs qualified upgrade; installed checkout was not advanced'; exit 1;
+  }
+fi
 info "Advancing installed checkout to $target_head"
 if [ -n "$branch" ]; then
   git -c core.hooksPath="$hooks_dir" merge --ff-only "$target_head" || exit 1
@@ -223,6 +235,9 @@ fi
   warn 'installation finalization refused; authorization remains pending for safe retry'
   exit 1
 }
+if [ "$activate_glm_formal" -eq 1 ]; then
+  glm_formal_activation_publish "$REPO_ROOT" || { warn 'formal activation failed; explicit activation retry required'; exit 1; }
+fi
 # Acknowledge the protected advance so earlier unprotected records stop warning.
 { mkdir -p "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_ROOT" protected "$source_sha" >> "${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/unprotected-advances.log"; } 2>/dev/null || true
 info "update.sh installed source SHA $source_sha"

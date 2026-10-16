@@ -463,7 +463,16 @@ RUNNER_ENV=()
 if [ "$provider" = glm ]; then
   # Formal recovery is qualified first on Linux. Windows retains its existing
   # general reviewer route; it is never silently moved to an unsupported profile.
-  if [ "$(uname -s 2>/dev/null)" = Linux ]; then RUNNER_ENV=(AI_GLM_PROFILE=formal-review)
+  if [ "$(uname -s 2>/dev/null)" = Linux ]; then
+    formal_route="$(python3 "$ROOT/../tools/glm_formal_profile.py" route)" || die 'formal GLM activation is invalid; no legacy fallback.'
+    formal_profile="$(printf '%s' "$formal_route" | jq -er '.profile|select(.=="general" or .=="formal-review")')" || die 'invalid formal route.'
+    RUNNER_ENV=(AI_GLM_PROFILE="$formal_profile")
+    if [ "$formal_profile" = formal-review ]; then
+      RUNNER="$(printf '%s' "$formal_route" | jq -er '.runner')" || die 'activated pinned runner missing.'
+      # Current installed front door owns rotation/admission/global governance;
+      # only the immutable provider/evidence execution implementation is pinned.
+      RUNNER_ENV+=(AI_REVIEW_PREFLIGHT_BIN="$ROOT/ai-review-preflight" AI_REVIEW_LIFECYCLE_BIN="$ROOT/ai-review-lifecycle")
+    fi
   else RUNNER_ENV=(AI_GLM_PROFILE=general); fi
   if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ]; then RUNNER_ENV+=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT"); fi
 fi

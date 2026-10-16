@@ -114,20 +114,23 @@ fi
 REQUIRE_SECRETS=auto
 AUTHORIZATION_TEST_ONLY=0
 reviewer_approval=""
+ACTIVATE_GLM_FORMAL=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --require-secrets) REQUIRE_SECRETS=yes; shift ;;
     --skip-secrets) REQUIRE_SECRETS=no; shift ;;
+    --activate-glm-formal) ACTIVATE_GLM_FORMAL=1; shift ;;
     --reviewer-approval)
       [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
       reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
-      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--reviewer-approval REPORT]"
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--reviewer-approval REPORT] [--activate-glm-formal]"
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$ACTIVATE_GLM_FORMAL" -eq 1 ]; then source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"; fi
 if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ]; then
   fixture_root="$(realpath -e "$REPO_ROOT")" || exit 2
   fixture_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || exit 2
@@ -186,6 +189,7 @@ resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_arg
 }
 printf '%s\n' "$resume_output"
 if [ "$resume_output" = "AI_DEVOPS_INSTALL_RECOVERED=$target_head" ]; then
+  if [ "$ACTIVATE_GLM_FORMAL" -eq 1 ]; then glm_formal_activation_publish "$REPO_ROOT" || exit 1; fi
   info "Prior installation of $target_head was already complete; finalization cleanup recovered"
   exit 0
 fi
@@ -777,6 +781,17 @@ else
   info "  No 1Password service-account token yet — skipping. Run: setup-opencode-glm.sh"
 fi
 
+# Explicit opt-in only. The absent activation record preserves the existing
+# general review route during source installation. No caller JSON/env selects it.
+if [ "$ACTIVATE_GLM_FORMAL" -eq 1 ]; then
+  provision_glm_formal() {
+    [ "$(id -u)" -ne 0 ] || return 1
+    "$REPO_ROOT/bin/setup-opencode-glm.sh" --profile formal-review || return 1
+    AI_GLM_PROFILE=formal-review "$REPO_ROOT/bin/ai-glm" server start || return 1
+  }
+  run_stage required "Explicit formal GLM readiness (not activation)" provision_glm_formal
+fi
+
 # Muse key store: every machine gets the protected per-user copy of the Muse
 # key automatically, so review turns do not depend on 1Password. Idempotent:
 # a valid store is left alone. The key moves op -> ai-muse -> file inside one
@@ -925,5 +940,8 @@ if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
     warn 'installation finalization refused; target remains pending for direct retry'
     exit 1
   }
+fi
+if [ "$ACTIVATE_GLM_FORMAL" -eq 1 ] && [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
+  glm_formal_activation_publish "$REPO_ROOT" || { warn 'formal activation failed; explicit activation retry required'; exit 1; }
 fi
 info "install.sh complete. source=$target_head"

@@ -20,6 +20,18 @@ if [ "${1:-}" = --profile ]; then
   }
   # Explicit, install-only route: no shared unit/config/state mutation and no
   # implicit start/enable. Activation remains a separate protected operation.
+  source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
+  formal_home="$HOME/.config/ai-devops/glm-formal"
+  if [ -e "$formal_home/activation.json" ] || [ -L "$formal_home/activation.json" ]; then
+    # Exact ready activation may be verified as a read-only no-op. Any invalid
+    # or changed active profile refuses before a lock/config/runtime write.
+    exec python3 "$REPO_ROOT/tools/glm_formal_profile.py" install --repo "$REPO_ROOT" \
+      --port "${AI_GLM_FORMAL_PORT:-4097}"
+  fi
+  # Only bootstrap the lock's private parent, as the existing general setup
+  # does. No config/password/unit/runtime write occurs before exclusive drain.
+  if [ ! -e "$formal_home" ] && [ ! -L "$formal_home" ]; then (umask 077; mkdir -p -- "$formal_home"); fi
+  glm_maintenance_lock_acquire "$formal_home" exclusive "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" || exit 1
   exec python3 "$REPO_ROOT/tools/glm_formal_profile.py" install --repo "$REPO_ROOT" \
     --port "${AI_GLM_FORMAL_PORT:-4097}"
 fi

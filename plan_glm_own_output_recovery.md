@@ -2,12 +2,12 @@
 
 ## STATUS — read first
 
-Owner: Oracle parent #24 coordinator; source lane Codex /root/s03. Existing defect [#1791](https://github.com/popcre/ai-devops/issues/1791). Root approved bounded B–D source architecture. Implementation is prepared locally; no installation or real provider generation has occurred. Independent final SECURITY review, exact-head regression, shipment and admitted live proof remain open. This is source preparation, not accepted repair.
+Owner: Oracle parent #24 coordinator; source lane Codex /root/s03. Existing defect [#1791](https://github.com/popcre/ai-devops/issues/1791). Root approved bounded B–D source architecture and explicit activation with immutable reviewed runtime copy. First afadf382 SECURITY review REJECT is retained: declared moving base had advanced to sibling #1793; unconditional formal selection preceded installation readiness. Rebased onto immutable b20da460df6b3c18410723a50899a7ed7c586413, preserving sibling work, and substantively fixed activation. No installation or real GLM original-capability proof occurred. Fresh final-head verification/review/shipment remain open; source preparation is not accepted repair.
 
 | Step | State, October 15, 2026 EDT | Evidence |
 |---|---|---|
 | A diagnostic and causal proof | source prepared; final regression open | metadata-only exact caller/session diagnostic; prior 399-test run predates final edits |
-| B isolated formal profile and origin receipt | source prepared; independent review open | separate installer/launcher/profile, sealed files including pinned core-created .gitignore; 19 focused tests |
+| B isolated formal profile and origin receipt | revised source prepared; final independent review open | explicit protected activation; full tracked release snapshot; sealed private inventory/config/core .gitignore;28 focused tests |
 | C instruction preservation and new-run protocol | source prepared; final packet regression open | scoped instruction bytes/hashes; original deadline/account/run/head/packet retained; five wrapper-control cases pass |
 | D own-output recovery and pinned fixture | source prepared; final-head proof open | actual pinned isolated fixture reconstructs all nine pages byte-exact and denies another session; no provider or production origin |
 | E review, shipping, installation, original capability | open | #1791 live-proof checklist remains unchecked |
@@ -42,6 +42,8 @@ Bounded implementation estimate: three source groups B–D, approximately 8 exis
 
 `bin/setup-opencode-glm.sh` now accepts explicit formal-review installation through `tools/glm_formal_profile.py`; its no-argument general path remains unchanged. PowerShell and canonical agent/config/general unit are unchanged. Linux pool selects formal review only after protected installation/activation; Windows retains its current general route. `bin/ai-review-packet` incorporates exact scoped instruction assets into its existing hash/verification contract.
 
+Absent activation selects the existing general route. A present malformed/stale activation stops without fallback. Ready activation selects only the hash-validated pinned wrapper under the private SHA runtime directory. Provisioning/starting a profile alone never activates routing. The explicit `--activate-glm-formal` installer/updater option publishes activation only after protected finalization, current installed manifest/tool identity, actual fixed origin and authenticated health agree. It is not an environment toggle or caller-supplied JSON grant.
+
 The initial private prototype remains historical only. Candidate `tools/glm_output_recovery.py` is integrated with protected actual origin resolution and wrapper lifecycle. It preserves raw output plus a schema-specific lossless readable view inside the disposable remote-less clone's real `.git` directory, never a worktree pointer or original source metadata directory. No shared wildcard is granted.
 
 ## 6. Findings and root cause
@@ -64,6 +66,7 @@ Pinned source-expression fixture `/tmp/glm-pinned-feedback-ov9a86uh/fixture.cjs`
 - Alternate config/port with unchanged installer overwrites shared launcher/unit: collision.
 - Retry old run, rebuild/reset packet/deadline, spend another account/key, or change reviewer to hide failure: forbidden.
 - New reviewer step/turn caps contradict Albert's locked policy; no such caps are introduced.
+- First independent afadf382 SECURITY verdict was REJECT (run20261016T034154-1906454-7882,235s). No authored Muse change existed; the moving base introduced reverse sibling material into the packet. Rebase and immutable actual ancestor fix packet validity, never erase the rejection. Unconditional Linux pool routing was a real deployment defect, fixed through explicit activation. Low .git mirror digest exclusion remains an explicit intentional limit with private raw provenance.
 
 ## 8. Decisions
 
@@ -86,6 +89,20 @@ Create internal `tools/lib/glm-profile.sh` (or one equivalent owned helper) reso
 Formal launcher uses supported pinned `serve --hostname 127.0.0.1 --port <formalport>` and supported project-config-disabled environment only in that process, not global defaults. It emits an atomic private receipt after process launch/health verification binding PID/start identity, loopback endpoint, exact binary/version/hash, launcher/config/agent hashes, config/data roots and disabled project config. Receipt is protected launcher state, not a repository marker or caller JSON. `bin/ai-glm` verifies live process identity plus receipt/files/hashes and absence of MCP/custom-read overrides before creating any eligible new run. Unknown or mutable origin fails closed. Formal config installs fixed read-only builtin tools and no plugin/MCP custom tool providers; provider is same GLM coding-plan fixed model.
 
 Gate: mocked installer proves distinct paths/no shared writes; receipt mutation/stale PID/version/config/agent failures stop; general existing installer/server/implementation tests unchanged. No installed activation during source work.
+
+#### Reviewed release snapshot and activation contract
+
+Copy the complete Git archive of the clean, installed, merged release into fixed private `~/.config/ai-devops/glm-formal/runtimes/<full-SHA>`; compare archive entries with exact Git-tree inventory and bytes/modes. Never copy the working tree, `.git`, untracked/private overlays or arbitrary caller paths. The sole known `transcripts` gitlink is recorded by commit pointer and excluded without opening or initializing its private repository; unknown gitlinks and tracked symlinks/special entries refuse. The complete public code archive covers every actual WRAPPER_DIR dependency, including wrapper, packet, sandbox, reviewer events, policy/config and shared helpers. Do not guess a partial transitive subset.
+
+Each immutable runtime has a private manifest of source SHA, every tracked blob hash/mode, audited critical-code inventory and excluded pointer. Existing cache must match actual Git archive, not merely its own mutable manifest. Settings and live origin bind the runtime manifest hash; wrong source/head, inventory/file/permission drift or symlink refuses. Launcher and activated pool invoke this pinned code. A later canonical update cannot mutate an in-flight wrapper or its helper chain. Exact compatibility dependencies are the explicit `CRITICAL_FILES` set in `tools/glm_formal_profile.py`: GLM/capture/config plus actual evidence, accounting, policy and shared safety helpers; standalone Muse/other-provider/app implementations are excluded. Full copied inventory remains1517 blobs, not a partial dependency copy.
+
+Current installed front door still enforces current rotation/admission/global policy and supplies its fixed current preflight/lifecycle paths. Unrelated forward source/provider movement is allowed only after fresh installed-manifest validation, proven ancestry and identical audited GLM/shared-safety dependency inventory. A protected updater checks target Git blobs BEFORE canonical advance; an essential dependency change stops the installation while existing general and pinned formal capability remain intact. It requires a separately qualified exclusive profile upgrade, rather than silently advancing and leaving GLM broken. Source guard tests allow unrelated Muse code and deny changed GLM safety before head movement. An actual invalid/stale activation never falls back or renews the old review.
+
+Reuse existing profile-local `opencode-maintenance-lock.sh`: authenticated invocations retain their shared lock through the original/corrective turn; formal setup takes exclusive before configuration/runtime/password/unit changes (only safe private lock-parent bootstrap precedes it). General locks/service and existing general sessions are untouched. Exact ready active setup is a read-only no-op; changed active profile refuses before writes. Future critical profile upgrades require a separately reviewed explicit exclusive reprovision/version switch, never automatic overwrite.
+
+Only the existing protected installer/update process may publish activation: real inherited fd9 must identify its private checkout installation lock, exact parent script must match the installed reviewed code and repository, and explicit option must be present. Caller flags/environment/repo JSON alone do not establish issuer identity. After all required stages/finalization, take existing formal exclusive lock, validate actual installed manifest/tool hashes and complete pinned critical code, actual live origin and bounded authenticated loopback health without proxies, then atomically write0600 activation. Supported completed-install retry may publish a still-absent record; explicit same-code healthy re-attestation never rewrites an original review's protocol/deadline. No actual installer or production origin is invoked by tests.
+
+Snapshot retention owner is the protected formal-profile installer on #1791. Keep old version directories by default. Retirement needs exact activation/settings/session-reference reconciliation, no in-flight original/corrective invocation, retained incident/review evidence and a reviewed recoverable cleanup; then retire only that exact unreferenced release path. No age-based deletion, global scan cleanup, or automatic old-release removal is implemented.
 
 ### C. Preserve applicable repository instructions and issue new protocol
 
@@ -117,7 +134,7 @@ Gate: fixtures below, existing suites, actual pinned local fixture receipt with 
 
 ### E. Review and deliver actual repair
 
-Declare reviewer-safety, exact-head independent healthy non-GLM security/final review through `ai-review`, run required source suites, commit owned files only with correct identity, normal PR/checks and root merge decision. Review dissent stays recorded. Root then admits protected candidate installation only after current installed checkout/manifest mismatch is reconciled through deployment procedure. Verify installed receipt and both shared general and isolated formal services, all original required tools/instructions and general implementation capability.
+Declare reviewer-safety, exact-head independent healthy non-GLM security/final review through `ai-review` with literal immutable ancestor SHA (never a moving origin/main argument), run required source suites, commit owned files only with correct identity, normal PR/checks and root merge decision. Review dissent stays recorded. Root then admits protected candidate installation after fresh checkout/manifest reconciliation. First install leaves legacy pool routing intact until explicit post-finalization activation; no global hold or quota pause is used. Verify installed receipt and both shared general and isolated formal services, all original required tools/instructions and general implementation capability.
 
 Run one newly admitted actual formal GLM review under current source/packet/normal subscription authority; demonstrate actual own truncated-output retrieval and successful final review while other-session/sibling access is denied. Preserve original old incident, update it honestly resolved only after actual original capability proof; #1791 remains open until that. No paid call or installation follows merely from this plan.
 

@@ -13,7 +13,10 @@ import socket
 import sys
 import tempfile
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -235,12 +238,20 @@ class FormalProfile(unittest.TestCase):
         self.root = Path(self.tmp.name).resolve()
         self.repo, self.home = self.root / "repo", self.root / "fixture-home"
         self.home.mkdir(); self.repo.mkdir()
-        for name in ["config/opencode/version", "config/opencode/opencode.json",
+        for name in set(["config/opencode/version", "config/opencode/opencode.json",
                      "config/opencode/agent/glm-review.md", "tools/glm_formal_profile.py",
-                     "tools/glm_output_recovery.py", "bin/ai-glm", "bin/ai-review-packet"]:
+                     "tools/glm_output_recovery.py", "bin/ai-glm", "bin/ai-review-packet"]) | profile.CRITICAL_FILES:
             target = self.repo / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / name, target)
+            shutil.copy2(ROOT / name, target)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "invented runtime source"], check=True)
+        self.release = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True).strip()
+        self.installed = {"head": self.release, "manifest_sha256": "a" * 64}
+        patch = mock.patch.object(profile, "installed_state", return_value=self.installed)
+        patch.start(); self.addCleanup(patch.stop)
         version = (self.repo / "config/opencode/version").read_text().strip()
         binary = self.home / f".local/lib/ai-devops/opencode/{version}/node_modules/opencode-ai/bin/opencode.exe"
         binary.parent.mkdir(parents=True)
@@ -269,14 +280,158 @@ class FormalProfile(unittest.TestCase):
         settings = profile.private_read(p["settings"])
         self.assertIn(str(p["unit"]), profile.file_hashes(p, settings))
 
-    def test_config_custom_tool_and_installed_source_mutation_refuse(self):
+    def test_config_custom_tool_refuses_and_canonical_changes_do_not_mutate_runtime(self):
         profile.install(self.repo, self.home, self.port)
         p = profile.paths(self.home); settings = profile.private_read(p["settings"])
         (p["config"] / "plugins").mkdir()
         with self.assertRaises(ValueError): profile.file_hashes(p, settings)
         (p["config"] / "plugins").rmdir()
         (self.repo / "bin/ai-glm").write_text("changed source")
+        profile.file_hashes(p, settings)
+        self.assertNotEqual(Path(settings["repo"]), self.repo)
+        self.assertNotEqual((Path(settings["repo"]) / "bin/ai-glm").read_text(), "changed source")
+        (Path(settings["repo"]) / "bin/ai-glm").write_text("changed immutable snapshot")
         with self.assertRaises(ValueError): profile.file_hashes(p, settings)
+
+    def test_absent_activation_preserves_general_and_invalid_never_falls_back(self):
+        self.assertEqual(profile.route(self.home), {"profile": "general"})
+        profile.install(self.repo, self.home, self.port)
+        p = profile.paths(self.home)
+        profile.atomic(p["activation"], b'{"version":1}')
+        with self.assertRaises(ValueError): profile.route(self.home)
+        before = (p["config"] / "opencode.json").read_bytes()
+        with self.assertRaises(ValueError): profile.install(self.repo, self.home, self.port)
+        self.assertEqual(before, (p["config"] / "opencode.json").read_bytes())
+
+    def test_protected_activation_ready_pins_and_drift(self):
+        profile.install(self.repo, self.home, self.port)
+        p = profile.paths(self.home)
+        ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
+        with mock.patch.object(profile, "installer_owner") as issuer, \
+             mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "origin", return_value=ready):
+            self.assertTrue(profile.activate(self.repo, self.home)["activated"])
+            issuer.assert_called_once()
+            routed = profile.route(self.home)
+            settings = profile.private_read(p["settings"])
+            self.assertEqual(routed, {"profile": "formal-review", "runner": str(Path(settings["repo"]) / "bin/ai-glm")})
+            self.assertEqual(p["activation"].stat().st_mode & 0o777, 0o600)
+            before = p["settings"].stat().st_mtime_ns
+            self.assertTrue(profile.install(self.repo, self.home, self.port)["unchanged"])
+            self.assertEqual(p["settings"].stat().st_mtime_ns, before)
+            with mock.patch.object(profile, "origin", return_value={**ready, "sha256": "0" * 64}):
+                with self.assertRaises(ValueError): profile.route(self.home)
+            with mock.patch.object(profile, "installed_state", return_value={**self.installed, "head": "0" * 40}):
+                with self.assertRaises(ValueError): profile.route(self.home)
+            (self.repo / "bin/ai-glm").write_text("canonical changed")
+            with self.assertRaises(ValueError): profile.route(self.home)
+            profile.file_hashes(p, settings)  # In-flight pinned origin remains intact.
+
+    def test_activation_cannot_be_issued_by_environment_or_unprotected_caller(self):
+        profile.install(self.repo, self.home, self.port)
+        with self.assertRaises((ValueError, OSError)):
+            profile.activate(self.repo, self.home)
+        self.assertFalse(profile.paths(self.home)["activation"].exists())
+
+    def test_loopback_health_without_proxy_or_production_origin_and_unsafe_credential_denial(self):
+        profile.install(self.repo, self.home, self.port)
+        class Health(BaseHTTPRequestHandler):
+            calls = 0
+            def do_GET(self):
+                Health.calls += 1
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"healthy":true}')
+            def log_message(self, *args): pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            ready = {"port": server.server_port, "fixture": "not-a-production-origin"}
+            with mock.patch.object(profile, "origin", return_value=ready), \
+                 mock.patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1", "http_proxy": "http://127.0.0.1:1"}):
+                self.assertEqual(profile.profile_health(self.home), ready)
+                self.assertEqual(Health.calls, 1)
+                password = profile.paths(self.home)["password"]
+                password.unlink(); password.symlink_to(self.general / "AGENTS.md")
+                with self.assertRaises((ValueError, OSError)): profile.profile_health(self.home)
+                self.assertEqual(Health.calls, 1)
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=1)
+
+    def test_unrelated_forward_release_preserves_code_pin_and_critical_change_denies(self):
+        profile.install(self.repo, self.home, self.port)
+        ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
+        with mock.patch.object(profile, "installer_owner"), mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "origin", return_value=ready):
+            profile.activate(self.repo, self.home)
+            (self.repo / "README.md").write_text("unrelated public documentation")
+            subprocess.run(["git", "-C", str(self.repo), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                            "commit", "-qm", "unrelated docs"], check=True)
+            head = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True).strip()
+            with mock.patch.object(profile, "installed_state", return_value={"head": head, "manifest_sha256": "b" * 64}):
+                self.assertEqual(profile.route(self.home)["profile"], "formal-review")
+                (self.repo / "bin/ai-glm").write_text("critical code changed")
+                with self.assertRaises(ValueError): profile.route(self.home)
+
+    def test_upgrade_preflight_allows_unrelated_provider_and_denies_glm_safety_before_advance(self):
+        profile.install(self.repo, self.home, self.port)
+        ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
+        with mock.patch.object(profile, "installer_owner"), mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "origin", return_value=ready):
+            profile.activate(self.repo, self.home)
+            for name in ["bin/ai-muse", "bin/ai-glm"]:
+                (self.repo / name).write_text("changed provider implementation")
+                subprocess.run(["git", "-C", str(self.repo), "add", name], check=True)
+                subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                "commit", "-qm", name], check=True)
+                target = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True).strip()
+                subprocess.run(["git", "-C", str(self.repo), "checkout", "-q", "--detach", self.release], check=True)
+                if name == "bin/ai-muse":
+                    self.assertTrue(profile.upgrade_check(self.repo, self.home, target)["upgrade_allowed"])
+                else:
+                    with self.assertRaises(ValueError): profile.upgrade_check(self.repo, self.home, target)
+                self.assertEqual(subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True).strip(), self.release)
+                self.assertEqual(self.general_unit.read_text(), "ORIGINAL GENERAL UNIT")
+
+    def test_snapshot_contains_only_complete_committed_release(self):
+        (self.repo / "untracked-private.txt").write_text("invented private overlay")
+        profile.install(self.repo, self.home, self.port)
+        settings = profile.private_read(profile.paths(self.home)["settings"])
+        runtime = Path(settings["repo"])
+        self.assertFalse((runtime / "untracked-private.txt").exists())
+        self.assertEqual(profile.runtime_hashes(runtime)["source_sha"], self.release)
+
+    def test_actual_complete_release_snapshot_has_all_dependencies_and_no_git(self):
+        head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+        runtime = profile.release_snapshot(ROOT, self.home, head)
+        manifest = profile.runtime_hashes(runtime)
+        expected = {row.split(b"\t", 1)[1].decode() for row in subprocess.check_output(
+            ["git", "-C", str(ROOT), "ls-tree", "-r", "-z", head]).split(b"\0")
+                    if row and row.split(b"\t", 1)[0].split()[1] == b"blob"}
+        self.assertEqual(set(manifest["files"]), expected)
+        self.assertFalse((runtime / ".git").exists())
+        self.assertFalse((runtime / "transcripts").exists())
+        self.assertEqual(set(manifest["excluded_gitlinks"]), {"transcripts"})
+        for name in ["bin/ai-glm", "bin/ai-review-packet", "bin/ai-review-sandbox", "tools/reviewer_events.py",
+                     "tools/lib/provider-wrapper-common.sh", "tools/lib/opencode-maintenance-lock.sh"]:
+            self.assertIn(name, manifest["files"])
+
+    def test_runtime_permissions_wrong_head_and_self_consistent_forged_cache_refuse(self):
+        profile.install(self.repo, self.home, self.port)
+        p = profile.paths(self.home); settings = profile.private_read(p["settings"])
+        runtime = Path(settings["repo"]); runner = runtime / "bin/ai-glm"
+        runner.chmod(0o600)
+        with self.assertRaises(ValueError): profile.runtime_hashes(runtime)
+        runner.chmod(0o700)
+        manifest = profile.private_read(runtime / ".formal-runtime.json")
+        bad = {**manifest, "source_sha": "0" * 40}
+        profile.atomic(runtime / ".formal-runtime.json", json.dumps(bad).encode())
+        with self.assertRaises(ValueError): profile.runtime_hashes(runtime)
+        runner.write_text("forged immutable code")
+        manifest["files"]["bin/ai-glm"] = hashlib.sha256(runner.read_bytes()).hexdigest()
+        manifest["critical"]["bin/ai-glm"] = manifest["files"]["bin/ai-glm"]
+        profile.atomic(runtime / ".formal-runtime.json", json.dumps(manifest).encode())
+        with self.assertRaises(ValueError): profile.file_hashes(p, settings)
+        with self.assertRaises(ValueError): profile.release_snapshot(self.repo, self.home, self.release)
 
     def test_port_owner_and_shared_port_refuse_before_install(self):
         with self.assertRaises(ValueError): profile.install(self.repo, self.home, 4096)

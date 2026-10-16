@@ -2,6 +2,15 @@
 # Shared Linux mutex for authenticated ai-glm clients and server maintenance.
 # The lock file contains no data and is never removed: its inode is the mutex.
 
+# Called only by the protected install/update transaction after finalization.
+# Python independently validates the inherited real installer fd and source.
+glm_formal_activation_publish() (
+  local repo="$1"
+  glm_maintenance_lock_acquire "$HOME/.config/ai-devops/glm-formal" exclusive \
+    "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" || exit 1
+  python3 "$repo/tools/glm_formal_profile.py" activate --repo "$repo"
+)
+
 glm_maintenance_lock_acquire() {
   local directory="${1:-}" mode="${2:-}" timeout="${3:-${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}}"
   local canonical dir_info dir_uid dir_gid lock_path created=0 before fd_info after dir_after fd
