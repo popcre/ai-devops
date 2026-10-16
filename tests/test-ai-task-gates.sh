@@ -1852,4 +1852,29 @@ git -C "$WF" commit -qm 'local workflow prohibition'
 WF_APPROVAL="$(appr "$WF" application-workflow)"
 check 'workflow preserves consumer prohibition' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 
+# Public generated route keeps the class/forbidden union; no generic opening.
+GEN="$TMP/generated-public"
+newrepo "$GEN" popcre/designflow-backend
+mkdir -p "$GEN/.ai-devops"
+printf '%s\n' '{"schema_version":1,"paths":[{"glob":"plan_*.md","class":"reviewer-safety"}],"gates":{"reviewer-safety":{"required":["reviewed-generated-definition-fixture-only"],"forbidden_actions":[]}}}' > "$GEN/.ai-devops/task-gates.json"
+git -C "$GEN" add .ai-devops/task-gates.json
+git -C "$GEN" commit -qm 'fixture closed consumer gate'
+(cd "$GEN" && "$GATES" start --class reviewer-safety --base HEAD >/dev/null)
+printf '%s\n' 'fixed generated-only fixture' > "$GEN/plan_fixture.md"
+check 'generated opt-in never opens ordinary reviewer-safety database' "rc 3 '$GEN' check --before database"
+check 'generated opt-in never opens deploy, infrastructure, or production' \
+  "rc 3 '$GEN' check --before deploy && rc 3 '$GEN' check --before infrastructure && rc 3 '$GEN' check --before production"
+check 'generated opt-in cannot acknowledge protected database prohibition' \
+  "rc 3 '$GEN' check --before database --acknowledge fixture"
+GEN_APPROVAL="$(appr "$GEN" database)"
+check 'generated route refuses missing bounded stdin even with source approval' \
+  "rc 3 '$GEN' check --before database --reviewer-approval '$GEN_APPROVAL'"
+check 'generated selector cannot authorize missing runtime, malformed envelope or uninstalled helper' \
+  "printf '%s' '{\"fixture_id\":\"generated-definition-boundary-v1\"}' | rc 3 '$GEN' check --before database --action-manifest-stdin --reviewer-approval '$GEN_APPROVAL'"
+check 'generated route cannot borrow original restoration stage' \
+  "printf '%s' '{\"fixture_id\":\"generated-definition-boundary-v1\"}' | rc 3 '$GEN' check --before database --action-manifest-stdin --action-stage original-restoration --reviewer-approval '$GEN_APPROVAL'"
+jq '.reviewer_release.database["reviewer-safety"]="generic-database"' "$ROOT/config/task-gates.json" > "$TMP/bad-generated-policy.json"
+check 'central generated release refuses a broadened reviewer-safety gate name' \
+  "AI_TASK_GATES_FILE='$TMP/bad-generated-policy.json' rc 4 '$GEN' check --before database"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

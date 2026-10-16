@@ -356,6 +356,13 @@ def admit(state_path, state, binding, stage, publish):
 
 
 def main():
+    # Disjoint public-only selector. Never enter or relax private #770/Oracle
+    # profile, custody, 52-path closure, or code-only completion semantics.
+    if len(sys.argv) > 1 and sys.argv[1] in ("generated-select", "generated-preaction"):
+        spec = importlib.util.spec_from_file_location("generated_definition_action", ROOT / "tools/generated_definition_action.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.main(sys.argv[1:])
     # The existing foreign profile implementation and byte semantics stay intact.
     oracle = "oracle-native-alternate-serialization-v1"
     if "--profile" in sys.argv and (sys.argv.index("--profile")+1>=len(sys.argv) or sys.argv[sys.argv.index("--profile")+1].startswith("--")):
