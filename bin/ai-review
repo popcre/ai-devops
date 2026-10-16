@@ -199,6 +199,10 @@ fi
 # gate ran (plan reviews are never gated), so a pass is never bound to
 # another tree.
 return_existing_pass(){
+  # A governed caller (shared-db) needs THIS provider's own fresh decision and
+  # the source receipt only a fresh run publishes; handing it another
+  # reviewer's earlier pass left the receipt missing (#1783).
+  [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
   { [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] && [ "$additional_reviewer" = 0 ] && [ "$force_review" = 0 ] \
     && [ -z "$tests_command" ] && [ -z "$operation" ] && [ -z "$reviewer_approval" ] \
     && [ -z "${AI_REVIEW_BRIEF_FILE:-}" ]; } || return 0
@@ -222,6 +226,8 @@ return_existing_pass(){
 }
 # An explicit additional reviewer must also skip the pool's own reuse.
 [ "$additional_reviewer" = 0 ] || [ "$force_review" = 1 ] || wrapper_args+=(--force)
+[ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || [ -z "$pool_provider" ] || [ "$code_only" -ne 0 ] || [ "$force_review" = 1 ] \
+  || [ "$additional_reviewer" = 1 ] || wrapper_args+=(--force)
 if [ "$code_only" -eq 1 ]; then
   [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
   jq -e '.providers.deepseek.registry_state == "registered"' "$REAL_DIR/../config/reviewer-registry.json" >/dev/null 2>&1 || { printf 'ai-review: DeepSeek is not currently registered for review.\n' >&2; exit 3; }

@@ -298,12 +298,15 @@ rlc_packet_store() { # rlc_packet_store PACKET_DIR -> prints durable path; nonze
   printf '%s\n' "$dest"
 }
 
-# A native Muse door consumes the core packet itself, rather than building a
-# second provider packet. Only qualified final completion may publish the
-# governed caller's original-source receipt. Preparation and tests stay isolated.
-rlc_publish_muse_source_receipt() { # PROVIDER PACKET IDENTITY SHA STORED_PACKET
+# Every core door (Muse, DeepSeek, StepFun, ...) consumes the core packet
+# itself rather than building a second provider packet, so the core is the only
+# publisher of the governed caller's original-source receipt. Only qualified
+# final completion may publish it; preparation and tests stay isolated (#1799).
+# It was Muse-only until #1783: DeepSeek and StepFun governed reviews then
+# completed but could never be recorded (receipt ENOENT).
+rlc_publish_source_receipt() { # PROVIDER PACKET IDENTITY SHA STORED_PACKET
   local provider="$1" pkt="$2" identity="$3" expected="$4" stored="$5" current durable
-  [ "$provider" = muse ] && [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
+  [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
   [ -n "$stored" ] && [ -d "$stored" ] || return 1
   current="$(rlc_packet_sha "$pkt")" || return 1
   # Retain re-seals its changed custody marker; line four preserves the
@@ -759,7 +762,7 @@ $operation_evidence"
     rlc_note 'durable packet store failed; retaining working packet and sandbox.'
   fi
 
-  if ! rlc_publish_muse_source_receipt "$provider" "$packet_dir" "$identity_file" "$packet_sha" "$stored"; then
+  if ! rlc_publish_source_receipt "$provider" "$packet_dir" "$identity_file" "$packet_sha" "$stored"; then
     rlc_lifecycle_fail "$state" "$elapsed" source-receipt-publication-failed "$report" "${stored:-$packet_dir}" "$packet_sha"
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
     rm -f "$brief" "$body_file" "$identity_file"
