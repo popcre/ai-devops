@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -152,10 +153,43 @@ class GeneratedAction(unittest.TestCase):
                 with self.assertRaises(ValueError):g.git(self.repo,'show','HEAD:package.json')
                 p.unlink()
 
+    def toolkit_fixture(self):
+        # A real full-history toolkit fixture is independent of review snapshots,
+        # which are legitimately shallow. Copy actual trusted bytes, not guards
+        # replaced by mocks or environment exemptions.
+        toolkit=self.top/'full-toolkit'
+        if toolkit.exists():return toolkit
+        toolkit.mkdir()
+        paths=('bin/ai-task-gates','bin/ai-review-code-only.py','bin/ai-review-lifecycle',
+               'bin/ai-review-sandbox','bin/ai-repo-policy','tools/lib/task-gates.sh',
+               'tools/generated_definition_action.py','tools/review_action_profile.py',
+               'config/task-gates.json','config/review-action-profiles.json',
+               'config/repository-policy.json','config/reviewer-ci-paths.txt')
+        for name in paths:
+            source=ROOT/name;target=toolkit/name;target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(source,target);target.chmod(source.stat().st_mode & 0o777)
+            self.assertEqual(target.read_bytes(),source.read_bytes())
+        for args in [('init','-q'),('config','user.name','Fixture'),
+                     ('config','user.email','fixture@example.invalid'),('add','.'),
+                     ('commit','-qm','full trusted toolkit fixture')]:
+            subprocess.run(['/usr/bin/git','-C',str(toolkit),*args],check=True,
+                           stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        return toolkit
+
     def outer_check(self):
-        return subprocess.run([str(ROOT/'bin/ai-task-gates'),'check','--before','database',
-            '--reviewer-approval',str(self.report),'--action-manifest-stdin'],cwd=self.repo,
+        toolkit=self.toolkit_fixture()
+        env=os.environ.copy();env['AI_TASK_GATES_FILE']=str(toolkit/'config/task-gates.json')
+        return subprocess.run([str(toolkit/'bin/ai-task-gates'),'check','--before','database',
+            '--reviewer-approval',str(self.report),'--action-manifest-stdin'],cwd=self.repo,env=env,
             input=json.dumps(self.envelope).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+
+    def test_outer_gate_shallow_installed_root_refuses(self):
+        toolkit=self.toolkit_fixture()
+        head=subprocess.check_output(['/usr/bin/git','-C',str(toolkit),'rev-parse','HEAD'])
+        (toolkit/'.git/shallow').write_bytes(head)
+        result=self.outer_check()
+        self.assertEqual(result.returncode,3)
+        self.assertIn(b'pre-discovery confinement refused',result.stderr)
 
     def test_outer_gate_confines_monitor_before_archive_scan_and_identity(self):
         marker=self.top/'outer-marker';script=self.top/'outer-monitor'
