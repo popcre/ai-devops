@@ -77,6 +77,9 @@ Caveats that still hold:
 
 **Next:** one machine, one week, paired measurement — same work with and
 without SLM history compaction. Do not adopt fleet-wide before that number.
+Live numbers and the setup record live in the
+[SLM history-compaction pilot log](../tests/verification/compression/2026-10-14-slm-history-compaction-pilot.md)
+(issue 1751).
 
 ## Process fixes that landed (A–E)
 
