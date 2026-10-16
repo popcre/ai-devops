@@ -340,6 +340,10 @@ pipeline. The recovery procedure lives in
 - Work on a branch and pull request; never push to `main`. The protected branch
   uses a merge queue. GitHub is the source of truth, and finished work must be
   tested, merged, and verified on `origin/main`.
+- Documentation-only changes (every changed file is prose) merge **around** the
+  merge queue: run `bin/ai-doc-safety` on the exact head worktree first; when it
+  passes, `gh pr merge --squash --admin`. Any code, test, script, workflow, or
+  config change uses the merge queue. Never admin-merge a non-prose change.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
   `Albert Hazan <u2giants@users.noreply.github.com>`.
 - The canonical local checkout is landing-only. Every write-capable Codex or Claude task uses its own current-upstream worktree. Stage only task-owned
