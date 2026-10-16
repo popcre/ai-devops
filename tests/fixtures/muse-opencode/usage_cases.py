@@ -31,7 +31,7 @@ class UsageCases(unittest.TestCase):
                          '--version', '1.18.12'], capture_output=True)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout, b'')
-                    self.assertEqual(result.stderr,
+                    self.assertEqual(result.stderr.replace(b'\r\n', b'\n'),
                                      b'reviewer-usage: native usage input is unreadable or invalid\n')
 
     def events(self):

@@ -12,7 +12,7 @@
   "issued_at": 0,
   "known_hosts_sha256": "773442796bf56ecc624c89d180453e004d27245f21de3725dc37c7d109619b3a",
   "mode": "discover",
-  "operator_sha256": "502fe9d2b4f49af1aa7c6e77df1579063deac8e8db7f025584303e704cb32039",
+  "operator_sha256": "91ccaf0494a3bd332d3d35bbb06330d9615341ff6c538129d0687dacf9d63014",
   "platform_source": "f55efc859dfcbbf79274c4907b3df89f9767c11d",
   "port": 22,
   "remote_sha256": "39714e7850da26684bf987b74431bbd368020322c6f2b39c876decc2eab3f061",
@@ -28,6 +28,6 @@
     "route_table": null,
     "tags": null
   },
-  "transport_helper_sha256": "35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754",
+  "transport_helper_sha256": "c47c20405626ec19e44298ef02e6882d34ea4153e7bbdfbf931eb109fe833a15",
   "user": "ai"
 }

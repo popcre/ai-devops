@@ -43,7 +43,9 @@ create a helper; report that blocker rather than broaden scope.
 Both stages use the existing fixed ai@hetz:22/pinned-host/no-proxy SSH custody
 pattern. Existing regular-file/transport failure helpers are imported and pinned;
 the fixed SSH wrapper is copied so no arbitrary callback/remote command API is
-introduced into the old inspector. Old diagnosis source/contract is unchanged.
+introduced into the old inspector. Its askpass helper now returns a controlled
+refusal for a no-follow open error; the v5 source pins bind those exact bytes.
+Historical contracts remain unchanged and need their original source.
 Root injects ORACLE_HETZ_READ_PASSWORD and ORACLE_COOLIFY_READ_TOKEN only through
 serialized protected op_run. Both are removed before any lifecycle child.
 Password temporarily resides0600 under0700 custody, askpass uses nofollow reads,
