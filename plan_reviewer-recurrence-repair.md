@@ -3,21 +3,28 @@
 ## STATUS — read first; do not re-derive completed programmes
 
 Owner: [issue #1783](https://github.com/popcre/ai-devops/issues/1783), planning coordinator Codex chat `01a1423a-787d-7601-8ac5-49b0a42afbed` on edge-dev3.
-Planning snapshot: October 15, 2026, 9:09 PM EDT; installation-gap addendum and closeout recorded later that evening. Implementation has **not started**. Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
+Planning snapshot: October 15, 2026, 9:09 PM EDT; installation-gap addendum and closeout recorded later that evening. That planning-era statement predates the completed scoped installation repairs recorded below; it is not the current implementation status. Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
 Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-recurrence-plan.md).
 
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|
 | 1 | Freeze incident inventory, current versions and ownership | done — 2026-10-16 ([inventory](tests/verification/reviewer-recurrence/step1-inventory-2026-10-16.md)) | Private exact-ID inventory with digest; sanitized mapping and version manifest |
 | 2 | Reproduce receipt conflict and evidence-recovery interference | open — 2026-10-15 | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
-| 3 | Repair Muse Linux installation pin, completion and interruption recovery | open — 2026-10-15 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
+| 3 | Repair Muse Linux installation pin, completion and interruption recovery | partial — 2026-10-16; pin/install accepted, native workload/recovery remains | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
 | 4 | Repair StepFun report contract and large-input/runtime residuals | open — 2026-10-15 | Single-decision contract tests plus complete-context live review |
 | 5 | Finish demonstrated DeepSeek/GLM readiness and recovery gaps | open — 2026-10-15 | Current-source reproductions and owner-linked fixes or verified existing repair |
-| 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | open — 2026-10-15 | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
-| 7 | Review, merge, install and prove original capabilities | open — 2026-10-15 | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
+| 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | partial — 2026-10-16; housekeeping closed, diagnostics remain | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
+| 7 | Review, merge, install and prove original capabilities | partial — 2026-10-16; scoped pin/housekeeping release installed, broader proof remains | Exact-head approval, CI/queue, installed receipts, consumer review evidence |
 | 8 | Sustained acceptance, incident reconciliation and retirement | open — 2026-10-15 | Real >=24-hour interval, per-provider samples, failure accounting, issue checklist |
 
-Fresh session starts at **step 1**, taking ownership on #1783 after checking for a current coordinator. Steps 2–6 are proposals until discriminating fixtures establish the defect. This plan covers a new recurrence after #1562; it does not undo that programme's verified delivery. All rows describe repair work, not completion of this document.
+Fresh sessions reconcile the current owner and issue ledger on #1783, then continue its unfinished work; do not redo step 1 or the scoped installation/housekeeping acceptance below. Other steps require their own discriminating evidence. This plan covers a new recurrence after #1562; it does not undo that programme's verified delivery. All rows describe repair work, not completion of this document.
+
+
+### Scoped installation acceptance — October 16, 2026, 1:03 PM EDT
+
+The Linux/Windows Muse pins were corrected in [#1814](https://github.com/popcre/ai-devops/pull/1814) using Meta's published release manifest. The separate housekeeping trap repair landed in [#1810](https://github.com/popcre/ai-devops/pull/1810); [#1813](https://github.com/popcre/ai-devops/issues/1813) closed after installed live proof. Duplicate #1815 was closed without landing its alternative code. The exact merged release `f720f7e88ebc6cab2d6598b4aed10f59f28fa9b8` was independently reviewed with recorded passing tests, installed through the protected updater on edge-dev3, and verified against its manifest. Both actual optional stages passed, all 33 stages had zero failures, and scheduling twice plus the read-only report produced empty stderr while preserving unrelated cron entries. [Acceptance details](docs/verification/muse-code-repin-20261016.md#final-installed-acceptance--october-16-2026-103-pm-edt).
+
+Do not repeat these completed scoped repairs. Native Muse completion/interruption recovery, other diagnostics, fleet/consumer proof and sustained acceptance remain under the existing #1783 programme owners; these scoped results do not close that programme.
 
 ## 1. Ultimate goal
 
