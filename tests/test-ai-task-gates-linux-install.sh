@@ -291,9 +291,22 @@ fi
 exec /usr/bin/python3 "\$@"
 PYSH
 chmod 700 "$TMP/canonical-bin/python3"
+system_awk=$(readlink -f /usr/bin/awk)
+[ -f "$system_awk" ] && [ ! -L "$system_awk" ] && [ "$(stat -c %u "$system_awk")" = 0 ] \
+  || { echo 'FAIL: system awk executable is not root-owned'; exit 1; }
+awk_mode=$(stat -c %a "$system_awk")
+(( (8#$awk_mode & 8#022) == 0 )) || { echo 'FAIL: writable system awk executable'; exit 1; }
+awk_identity=$(stat -c '%d:%i:%a' "$system_awk")
+# The host need not have /etc/ai-devops. Never create it on the host or
+# require a writable real /etc; preserve only public NSS inputs in private /etc.
 namespace(){ bwrap --ro-bind / / --dev /dev --proc /proc --bind "$TMP" "$TMP" --bind "$TMP/canonical-bin" /usr/local/bin \
+  --tmpfs /etc --ro-bind /etc/passwd /etc/passwd --ro-bind /etc/group /etc/group \
+  --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf --dir /etc/alternatives \
+  --ro-bind "$system_awk" /etc/alternatives/awk --dir /etc/ai-devops \
   --bind "$TMP/etc" /etc/ai-devops --unshare-net --die-with-parent env PYTHONDONTWRITEBYTECODE=1 TMPDIR="$TMP/namespace-tmp" "$@"; }
-expect_ok 'namespace provision preserves genuine installed-source checks' namespace env HOME="$TMP/activation-home" \
+expect_ok 'private namespace retains exact root-owned system awk identity' namespace /bin/sh -c \
+  '[ "$(stat -Lc "%d:%i:%a" /usr/bin/awk)" = "$1" ]' sh "$awk_identity"
+expect_ok 'namespace provision preserves genuine installed-source checks'  namespace env HOME="$TMP/activation-home" \
   /usr/bin/python3 "$TMP/activation-native.py" "$TMP/installed" setup
 alias_gate(){ namespace env HOME="$TMP/activation-home" "$TMP/candidate/bin/ai-task-gates" install-verify \
   --phase activation --target-head "$protected" --installed-checkout "$TMP/installed" \
