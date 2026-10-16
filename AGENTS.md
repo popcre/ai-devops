@@ -308,6 +308,8 @@ intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_reviewer-recurrence-repair.md) STATUS first; reuse existing owners and completed programmes.
 
+Edge-dev reviewer repair without AI-reviewer gates: read the [edge-dev no-review plan](plan_edge-dev-reviewer-repair-no-review.md) STATUS first (owner bootstrap: implementation must not need reviewers).
+
 Live sources (always prefer these over this table when they disagree):
 
 | Status | Item | Owner / next action |
