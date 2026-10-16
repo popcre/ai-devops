@@ -147,7 +147,8 @@ def read_remote(contract, known_hosts):
         del password
         helper=Path(directory)/'askpass'
         helper_source=('#!'+sys.executable+'\nimport os,stat,sys\n'
-          'fd=os.open('+repr(str(secret))+',os.O_RDONLY|os.O_NOFOLLOW)\n'
+          'try:fd=os.open('+repr(str(secret))+',os.O_RDONLY|os.O_NOFOLLOW)\n'
+          'except OSError:sys.exit(3)\n'
           'st=os.fstat(fd)\n'
           'if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.getuid() or st.st_mode&0o777!=0o600 or st.st_size>65536:sys.exit(3)\n'
           'with os.fdopen(fd,\"rb\") as stream:sys.stdout.buffer.write(stream.read(65537))\n')
