@@ -451,5 +451,33 @@ else
   bad "issue lookups not batched (list=$list_calls views=$view_calls) or classification wrong | $(grep -m1 'Handoffs (git-shared)' "$TMP/c15.out" || echo NO_SUMMARY) | calls: $(tr '\n' ';' < "$TMP/gh15-calls.log")"
 fi
 
+# housekeeping_schedule_tmp_lifetime_is_safe (#1783): the EXIT trap must not
+# reference the function-local temp path after it goes out of scope, and a
+# crontab refusal must still fail the command (no false PASS).
+cron16="$TMP/cron16"; mkdir -p "$cron16/bin"
+cat > "$cron16/bin/crontab" <<CRON
+#!/bin/sh
+[ "\$1" = -l ] && exit 1
+[ -n "\${CRON16_REFUSE:-}" ] && exit 1
+cat "\$1" > "$cron16/installed"; exit 0
+CRON
+chmod +x "$cron16/bin/crontab"
+for sub in schedule unschedule; do
+  rc16=0
+  PATH="$cron16/bin:$PATH" HOME="$cron16" bash "$TOOL" "$sub" > "$TMP/c16-$sub.out" 2>&1 || rc16=$?
+  if [[ "$rc16" -eq 0 ]] && ! grep -q 'unbound variable' "$TMP/c16-$sub.out"; then
+    ok "$sub exits 0 with no unbound-variable trap error"
+  else
+    bad "$sub rc=$rc16 | $(tr '\n' ';' < "$TMP/c16-$sub.out")"
+  fi
+done
+rc16=0
+CRON16_REFUSE=1 PATH="$cron16/bin:$PATH" HOME="$cron16" bash "$TOOL" schedule > "$TMP/c16-refuse.out" 2>&1 || rc16=$?
+if [[ "$rc16" -ne 0 ]] && grep -q 'refused' "$TMP/c16-refuse.out" && ! grep -q 'unbound variable' "$TMP/c16-refuse.out"; then
+  ok "crontab refusal fails schedule truthfully"
+else
+  bad "crontab refusal rc=$rc16 | $(tr '\n' ';' < "$TMP/c16-refuse.out")"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
