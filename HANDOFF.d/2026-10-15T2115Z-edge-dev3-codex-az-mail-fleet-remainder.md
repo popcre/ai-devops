@@ -1,12 +1,12 @@
 ---
 issue: none
 status: BLOCKED
-owner: codex/az-mail-credential-boundary-handoff
+owner: codex/az-mail-wrap-up-hosts
 ---
 
 Tracking reason: the existing delivery card is [PR #1763](https://github.com/popcre/ai-devops/pull/1763); its comments retain remaining host-proof checkboxes. No parallel issue was created.
 
-# Global az-mail — installed proof and two blocked computers
+# Global az-mail — installed proof and remaining Windows computers
 
 ## 0. Business decisions only the owner can make
 
@@ -24,7 +24,7 @@ Already settled — do not re-ask: the predecessor records Albert's October 14 d
 
 Resume `codex/az-mail-install-health-order`, inspect the newest failing Windows check, explain why its ACL fixture did not log the unexpected identity, retain strict production permission checks, pass focused tests and exact-head review, complete CI and merge, install through the protected procedure, and prove real read-only mailbox access.
 
-The source repair, merge, Linux installation, Windows 4837 installation, and live reads are complete. Windows 916 and t16 remain blocked. This is not an all-computers rollout-complete claim.
+The source repair, merge, Linux installation, Windows 4837 installation, and live reads are complete. Windows 916 and t16 remain blocked; edge-dev Windows was omitted and remains unverified. This is not an all-computers rollout-complete claim.
 
 ## 3. Current state and decisive evidence
 
@@ -56,6 +56,7 @@ The source repair, merge, Linux installation, Windows 4837 installation, and liv
 
 ### Remaining machines — not installed or live-proved by this continuation
 
+- **edge-dev Windows:** a distinct Windows Dev-class peer, separate from Linux edge-dev3 and Windows 4837. The protected atlas and fresh Tailscale host/OS inventory confirm its identity. No authenticated source, installed receipt, command routing, or live mailbox request was checked during this continuation. Albert specifically asked about this omission before wrap-up. Do not claim it installed or blocked by a diagnosed fault: its actual state is UNKNOWN. Discover its supported route through the protected atlas, verify hostname/identity and existing work, then assess the native protected installation path.
 - **916 / 916-alien:** reachable; clean installed checkout remains on `mimo/1562-deepseek-windows-cygpath` at `5dc158e88a97c4e0133355f067fca6289122974f`, containing that commit plus `ba6133b8` outside the release. On October 15 at **4:42 PM EDT**, a fresh object fetch and ancestry check returned `1` for installed HEAD being an ancestor of the target, and the two commits were the only commits listed on the installed side. No checkout advancement, source edit, reset, or installation occurred. A fresh named-ref lookup did not advertise that branch on the public origin; do not assume a cached tracking name proves a remote backup. Those installed-side commits must be preserved before recovery; semantic incorporation elsewhere has not been established. Intended commit reference after governed publication: [5dc158e8](https://github.com/popcre/ai-devops/commit/5dc158e88a97c4e0133355f067fca6289122974f); publication of that local recovery head is not established here.
 - **t16:** the protected machine inventory resolves the device, but SSH timed out and the known RDP/WinRM management ports were unavailable at **4:40 PM EDT**. No authenticated management session or installation was obtained. Whether this is host state, networking, or service configuration is UNKNOWN. Tailscale presence is not management access.
 
@@ -82,7 +83,7 @@ The fixture failure was an ordering error. The [fixture now runs before the firs
 
 CI's actual initial credential root allowed Authenticated Users (`S-1-5-11`), Administrators (`S-1-5-32-544`), Users (`S-1-5-32-545`), and SYSTEM. After protection, each entry allowed only the runner identity NETWORK SERVICE (`S-1-5-20`) and SYSTEM (`S-1-5-18`). Production [ACL enforcement](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/bin/az-mail-windows-acl.ps1) remained strict throughout: unexpected Allow identities and reparse points still refuse access.
 
-The two remaining blockers are independent of that fixture: a divergent installed source on 916 and unavailable management access to t16. Neither is cured by loosening ACLs, mailbox boundaries, review, source ancestry, installation receipts, or machine eligibility.
+The 916 and t16 blockers are independent of that fixture: a divergent installed source on 916 and unavailable management access to t16. Neither is cured by loosening ACLs, mailbox boundaries, review, source ancestry, installation receipts, or machine eligibility.
 
 ### Late GitHub permission assessment — contained, historical access unproved
 
@@ -96,12 +97,12 @@ The assessment report is retained privately as `muse-az-mail-credential-assessme
 
 ## 6. Exact next steps and success gates
 
-1. Refresh this existing PR card, current main, protected host inventory, each target's actual source, receipts, dirty state, and access. Route the new session from its own work and task declaration. Do not inherit an old approval or reuse a consumed installation authorization. **Pass:** exact current target and host facts are recorded before any action.
+1. Start with the omitted edge-dev Windows host: use the protected inventory, establish authenticated hostname/identity, inspect current source, dirty state and receipts, then install only through fresh native protected admission if needed. **Pass:** real managed command, matching installed receipt/source, strict production credential ACL check and a live read-only mailbox request. If access fails, retain exact evidence and do not infer the cause. Then refresh this existing PR card, current main, protected host inventory, each target's actual source, receipts, dirty state, and access. Route the new session from its own work and task declaration. Do not inherit an old approval or reuse a consumed installation authorization. **Pass:** exact current target and host facts are recorded before any action.
 2. For 916, preserve both unique commits and all current work in a verified recoverable backup before considering any source change. Inspect the existing branch/workstream rather than taking ownership of unrelated reviewer changes or opening a duplicate application need. **Pass:** a self-contained verified recovery artifact plus fresh source/dirty-state evidence protects both commits; a cached remote-tracking ref alone does not pass.
 3. Identify a supported, independently reviewed recovery/integration route that satisfies the protected installer. Ordinary update cannot fast-forward the observed divergent head. A squash merge containing similar code does not by itself prove the original commit is an ancestor. Do not reset the installed checkout, alter receipts, weaken the gate, or relabel the action to get past it. **Pass:** the actual current gate admits the exact proposed route and inputs; otherwise retain BLOCKED with the missing admission named.
 4. For t16, restore supported authenticated management access through existing owned infrastructure and documented mechanisms. Do not infer access from discovery or ping, close an owner's applications, or invent a platform bypass. **Pass:** an authenticated identity/hostname read succeeds on the intended Dev computer.
-5. Once either host is genuinely ready, use fresh exact-target review, distinct installation/review candidates, and that host's native one-use installation procedure. Use [deployment guidance](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/docs/deployment.md) and [mailbox onboarding](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/docs/onboarding-secrets.md#azure-cli-mailbox-access). **Pass:** installed source and receipts agree, managed command routing is verified, health checks pass, real credential permissions pass the strict production checker, and a real read-only configured-mailbox request succeeds without publishing contents.
-6. Update the two host checkboxes on [PR #1763](https://github.com/popcre/ai-devops/pull/1763), preserving signatures. Complete any newly ready authorized host rather than stopping at one child. **Pass:** each claimed completed host has fresh source, installation, and live proof; retire this handoff only when its remaining obligations are satisfied or carried forward under the successor rule.
+5. Once any remaining host is genuinely ready, use fresh exact-target review, distinct installation/review candidates, and that host's native one-use installation procedure. Use [deployment guidance](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/docs/deployment.md) and [mailbox onboarding](https://github.com/popcre/ai-devops/blob/82a4051d5c6c96997f92bac378badf803655e9f2/docs/onboarding-secrets.md#azure-cli-mailbox-access). **Pass:** installed source and receipts agree, managed command routing is verified, health checks pass, real credential permissions pass the strict production checker, and a real read-only configured-mailbox request succeeds without publishing contents.
+6. Add the omitted edge-dev Windows checklist item and update all remaining host checkboxes on [PR #1763](https://github.com/popcre/ai-devops/pull/1763), preserving signatures. Complete any newly ready authorized host rather than stopping at one child. **Pass:** each claimed completed host has fresh source, installation, and live proof; retire this handoff only when its remaining obligations are satisfied or carried forward under the successor rule.
 
 ## 7. Constraints and gotchas
 
@@ -123,6 +124,9 @@ Linked installation/review worktrees and host-local review evidence were retaine
 
 ## 9. Open questions, risks, and retirement audit
 
+- Owner: next AI session using the resume prompt. **Pending, unverified:** edge-dev Windows installation and live mailbox proof. This was the missing host in the prior report; start with its read-only assessment, not a claim of an access failure.
+- Wrap-up publication: [PR #1774](https://github.com/popcre/ai-devops/pull/1774) merged October 15 at **6:22 PM EDT**. This own handoff is amended during the same session, not duplicated. Existing installation and review worktrees are deliberately retained with unique native authority/private evidence; no install receipt is manufactured or replayed. Secrets sweep found no newly exposed credential values to store; existing runtime credentials and private assessment remain protected. No plan file was executed or changed in this continuation. No new runtime work was begun after wrap-up; omitted-host assessment is recorded for the successor.
+
 - Owner: the next AI session taking this work. **Blocked:** 916 has no admitted update route from the observed divergent source; the two local commits must remain recoverable. Their remote backup status is not established by a tracking name.
 - Owner: the next AI session taking this work. **Blocked:** t16 lacks authenticated management access. Root cause is UNKNOWN; no source or live proof exists for it from this continuation.
 - Historical effective access to the temporarily group-readable GitHub SSH copy is UNKNOWN; its current permission policy is corrected and normal GitHub access was verified. No credential was rotated, and no actual unauthorized read or use was established. Future credential work must preserve the private assessment and obtain its own exact-plan approval.
@@ -133,5 +137,5 @@ Linked installation/review worktrees and host-local review evidence were retaine
 
 1. **Yes — a newcomer can continue:** §§1–3 define the tool, exact merged release, separate host results, proofs, and blockers; §6 gives ordered next actions and observable pass gates.
 2. **Yes — this session's relevant knowledge is retained:** §§4–5 retain rejected approaches, the ordering cause, exact CI identities, credential/environment repairs, and transport distinction; §§7–8 retain access, privacy, routing, and spent-authority limits.
-3. **Yes — execution details and uncertainty are explicit:** §§3–9 distinguish verified installed/live hosts, uninstalled hosts, unknown access causes, unchanged policies, unverified remote recovery provenance, and optional unaccepted features.
+3. **Yes — execution details and uncertainty are explicit:** §§3–9 distinguish verified installed/live hosts, the omitted unverified edge-dev Windows host, uninstalled hosts, unknown access causes, unchanged policies, unverified remote recovery provenance, and optional unaccepted features.
 4. **Yes — §0 is complete:** a line-by-line sweep of §§1–9 found no unresolved business-meaning choice. Source recovery, credentials, access, and technical approvals are assigned to the AI session/gates, never Albert. The already-settled mailbox/Graph Explorer distinction is recorded in §0.
