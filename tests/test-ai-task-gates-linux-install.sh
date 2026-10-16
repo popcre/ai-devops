@@ -5,6 +5,7 @@
 set -uo pipefail
 [ "$(uname -s)" = Linux ] || { echo 'SKIP: install verification route is Linux-only'; exit 0; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib-reviewer-events-isolation.sh"
 TMP="$(mktemp -d /tmp/ai-task-gates-linux.XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 export AI_TASK_GATES_INSTALL_TEST_MODE=1 AI_TASK_GATES_TEST_ROOT="$TMP" AI_TASK_GATES_DIR="$TMP/state"
