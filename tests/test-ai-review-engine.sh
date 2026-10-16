@@ -308,6 +308,16 @@ EOF
           else
             skip 'Pinned StepCode offline catalog proof requires the installed StepCode binary'
           fi
+          # The fixture exits immediately after its final RPC response. Delay
+          # the parent's next read so Bash has reaped the named coprocess: its
+          # original descriptors are gone, but the door must retain the reply.
+          jq() {
+            local jq_rc
+            command jq "$@"; jq_rc=$?
+            [[ "$*" != *get_last_assistant_text* ]] || sleep 0.1
+            return "$jq_rc"
+          }
+          export -f jq
           if AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_STEP_BIN="$TMP/stepfun-door/bin/step" \
             AI_STEPFUN_MODEL=step/step-3.7-flash AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 \
             DOOR_WORKDIR="$TMP/stepfun-door/work" DOOR_PACKET_DIR="$TMP/stepfun-door/packet" \
@@ -317,8 +327,10 @@ EOF
             check 'StepFun door catalog follows an explicit Step model override' \
               "jq -e '.providers.step.models | map(.id) == [\"step-3.7-flash\"]' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
           else
+            cat "$TMP/stepfun-door/override-door.out"
             bad 'StepFun door catalog follows an explicit Step model override'
           fi
+          unset -f jq
         else
           bad 'StepFun door uses supported writable approval and runs step --version'
         fi

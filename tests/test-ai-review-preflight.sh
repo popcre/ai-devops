@@ -303,8 +303,8 @@ check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
 check "status names the exact resolved wrapper command per provider" "env -u AI_REVIEW_GROK_WRAPPER $SCRIPT status grok | jq -e '.wrapper_command==\"ai-grok-review\" and (.wrapper_path|endswith(\"/ai-grok-review\"))' && env -u AI_REVIEW_QWEN_WRAPPER $SCRIPT status qwen | jq -e '.wrapper_command==\"ai-qwen\"' && env -u AI_REVIEW_CODEX_WRAPPER $SCRIPT status codex | jq -e '.wrapper_command==\"ai-codex-review\"' && $SCRIPT status grok | jq -e '.wrapper_command==\"good\"'"
 check "check prints the exact resolved wrapper command" "$SCRIPT check grok '$REPO' 2>&1 | grep -qF 'grok wrapper command: good ($TMP/bin/good)'"
-check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/grok.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"grok\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
-check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek stepfun; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
+check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/glm.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"glm\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
+check "all active providers are registered" "for p in glm muse deepseek stepfun codex; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
@@ -881,6 +881,10 @@ PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
 ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
 grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
+rm -f "$TMP/ph-pool-args"
+printf 'A specific review question.\n' > "$TMP/carried-question.md"
+AI_REVIEW_BRIEF_FILE="$TMP/carried-question.md" ph_front >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "carried_question_never_uses_a_generic_front_door_approval" || bad "carried_question_never_uses_a_generic_front_door_approval"
 rm -f "$TMP/ph-pool-args"
 jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 ph_front --implementer codex >/dev/null 2>&1

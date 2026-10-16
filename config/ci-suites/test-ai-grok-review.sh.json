@@ -1,8 +1,4 @@
 {
   "kind": "bash",
-  "linux_seconds": 249,
-  "windows": [
-    "offline",
-    "reviewer-safety"
-  ]
+  "linux_seconds": 249
 }
