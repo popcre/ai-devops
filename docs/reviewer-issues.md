@@ -1,5 +1,7 @@
 # Reviewer issue recording
 
+For the October 15 edge-dev3 recurrences, read the [repair plan](../plan_reviewer-recurrence-repair.md) STATUS first. It accounts for all local unresolved incidents and preserves existing repair ownership; incident collection alone is not a repair.
+
 For the current end-to-end repair and cache/session qualification work, read
 the STATUS in [the reviewer reliability and efficiency plan](../plan_reviewer-reliability-and-efficiency.md)
 first. It reuses the completed checkpoint/diagnostic tooling and existing provider

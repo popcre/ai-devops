@@ -306,6 +306,8 @@ intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 ## Pending work
 
+Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_reviewer-recurrence-repair.md) STATUS first; reuse existing owners and completed programmes.
+
 Live sources (always prefer these over this table when they disagree):
 
 | Status | Item | Owner / next action |
