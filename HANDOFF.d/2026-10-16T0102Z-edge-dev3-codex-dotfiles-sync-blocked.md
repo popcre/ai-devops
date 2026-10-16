@@ -61,3 +61,11 @@ Host edge-dev3 is a development machine. Git fetch and the guarded GitHub client
 Codex owns the blocked continuation on issue 335. Native maintenance capability is the external dependency; no background work is promised. New upstream movement may invalidate target-specific evidence. The older installer may expose further required-stage failures after privilege access is restored. Codex's local SQLite memory is not covered by the private Markdown-memory sync.
 
 Self-audit: all ten sections are present. Sections 2–3 define intent and verified state; 4–5 preserve failures and diagnosis; 6 specifies observable completion checks; 7–9 preserve authority, access and uncertainty. A successor can resume with the same knowledge. Section 0 contains every owner decision: none. No subagents were dispatched.
+
+### Final readback before publication — October 15, 2026, 9:05 PM EDT
+
+The state changed after the initial snapshot above: the prior f84085f installation manifest was repaired outside this session; no installer process was active at readback. Its owner/activity was not established. The installed source and manifest both attested f84085f before the next attempt.
+
+The separate installation candidate then ran the supported pinned updater with the second exact-head DeepSeek approval. Ordinary preflight accepted it and advanced the installed source to 24b038bc. Its installer again failed at administrator authentication before protected backup. The updater explicitly reported that the checkout remains at 24b038bc and its transaction remains pending; automatic rollback was not performed. FINAL state supersedes section 3: installed source 24b038bc, manifest f84085f, ordinary 24b038bc transaction pending, full sync incomplete. No bypass or manual source rollback occurred.
+
+Successor next action supersedes steps 2–3: after supported maintenance access returns, validate the retained ordinary transaction and run the supported installer at its pinned 24b038bc source. Its resume gate must accept the original transaction; success requires completed required stages and finalization with source and manifest both at 24b038bc. Do not replay the older f84085f authority. If a newer release is needed, finish this transaction first. The remaining sync checklist is unchanged.
