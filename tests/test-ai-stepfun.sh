@@ -354,6 +354,26 @@ STUB
     bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
   check "door implement mode writes into the runner's disposable copy" "[ '$drc' = 0 ] && [ -e '$RH/dw/written-by-model' ]"
   rm -f "$RH/dw/written-by-model"
+  # stepfun_extra_decision_never_authorizes (#1783): the prompt forbids any other
+  # decision-opening line, and a report that still carries one is classified by
+  # name with its bytes untouched.
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req; msg="$(jq -r .message <<<"$req")"
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+case "$msg" in *'No other line of the report may begin with APPROVE'*) rule=yes ;; *) rule=no ;; esac
+ans="$(printf 'rule=%s\n**APPROVE** stated before the fix\n- Earlier wording said approve\n\n## Verdict\nREJECT\n' "$rule")"
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "stepfun_prompt_forbids_extra_decision_lines" "[ '$drc' = 0 ] && grep -qx 'rule=yes' '$RH/dreport'"
+  check "stepfun_extra_decision_line_is_classified_not_rewritten" "grep -q 'report-extra-decision-line: 1 non-terminal' '$RH/dout' && grep -qx '\*\*APPROVE\*\* stated before the fix' '$RH/dreport'"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'
