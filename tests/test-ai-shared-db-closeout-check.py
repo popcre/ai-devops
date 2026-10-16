@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,8 +55,10 @@ class CloseoutCheck(unittest.TestCase):
         self.data = self.root / "data.json"
         self.checker = bindir / "ai-shared-db-closeout-check"
         self.checker.write_bytes(CHECKER.read_bytes())
-        gh = bindir / "ai-gh"
-        gh.write_text(r'''#!/usr/bin/env python3
+        self.bash = shutil.which("bash")
+        self.assertIsNotNone(self.bash, "Bash is required to run the checker")
+        gh_impl = self.root / "fake-ai-gh.py"
+        gh_impl.write_text(r'''#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_GH_CALLS"], "a", encoding="utf-8") as f:
@@ -90,13 +93,25 @@ for suffix, raw in malformed.items():
         print(raw); sys.exit(0)
 print(json.dumps(output))
 ''', encoding="utf-8")
-        gh.chmod(0o755)
+        gh = bindir / "ai-gh"
+        gh.write_text('''#!/usr/bin/env bash
+set -eu
+for candidate in python python3; do
+  path="$(command -v "$candidate" 2>/dev/null || true)"
+  if [ -n "$path" ] && "$path" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' >/dev/null 2>&1; then
+    exec "$path" "$FAKE_GH_IMPL" "$@"
+  fi
+done
+exit 127
+''', encoding="utf-8")
+        gh.chmod(0o644)
         self.checker.chmod(0o755)
         self.env = os.environ.copy()
         self.env.update({
             "PATH": f"{bindir}{os.pathsep}{self.env.get('PATH', '')}",
             "FAKE_GH_CALLS": str(self.calls),
             "FAKE_GH_DATA": str(self.data),
+            "FAKE_GH_IMPL": str(gh_impl),
             "CODEX_THREAD_ID": SESSION,
         })
         self.write_data({"open_pages": [[nonclaim_issue(900)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
@@ -106,7 +121,7 @@ print(json.dumps(output))
         self.data.write_text(json.dumps(data), encoding="utf-8")
 
     def run_check(self, *args, env=None):
-        return subprocess.run([str(self.checker), *args], capture_output=True, text=True,
+        return subprocess.run([self.bash, str(self.checker), *args], capture_output=True, text=True,
                               env=self.env if env is None else env, check=False)
 
     def summary(self, result):
@@ -293,7 +308,8 @@ print(json.dumps(output))
         self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {}})
         env = self.env.copy()
         env["GH_HOST"] = "example.invalid"
-        env["AI_SHARED_DB_CLOSEOUT_GH"] = "/bin/false"
+        env["AI_SHARED_DB_CLOSEOUT_BASH"] = "/bin/false"
+        env["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"] = "/bin/false"
         result = self.run_check(env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.summary(result)["ok"])
@@ -301,6 +317,26 @@ print(json.dumps(output))
             if args[:1] == ["api"]:
                 self.assertIn("--hostname", args)
                 self.assertEqual(args[args.index("--hostname") + 1], "github.com")
+
+    def test_cygpath_adaptation_and_python3_fallback(self):
+        cygpath_log = self.root / "cygpath.jsonl"
+        cygpath = self.repo / "bin/cygpath"
+        cygpath.write_text('#!/usr/bin/env python3\n'
+                           'import json, os, sys\n'
+                           'with open(os.environ["CYGPATH_LOG"], "a") as f: f.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                           'print(sys.argv[-1])\n', encoding="utf-8")
+        cygpath.chmod(0o755)
+        fake_python = self.repo / "bin/python"
+        fake_python.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+        fake_python.chmod(0o755)
+        env = self.env.copy()
+        env["CYGPATH_LOG"] = str(cygpath_log)
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in cygpath_log.read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(call[0] == "-m" for call in calls))
+        self.assertEqual(self.summary(result)["open_claims_checked"], 0)
 
     def test_api_failure_and_malformed_response_fail_closed(self):
         endpoint = "repos/popcre/shared-db/issues?state=open&per_page=100"

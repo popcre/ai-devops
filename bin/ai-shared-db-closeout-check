@@ -4,10 +4,36 @@ set -uo pipefail
 
 SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd -P)"
-AI_SHARED_DB_CLOSEOUT_GH="$ROOT/bin/ai-gh"
-export AI_SHARED_DB_CLOSEOUT_GH
+BASH_BIN="$(readlink -f "$(command -v bash 2>/dev/null)")"
+GH_SCRIPT="$ROOT/bin/ai-gh"
+PYTHON_BIN=""
+is_python3() { "$1" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' >/dev/null 2>&1; }
+if command -v cygpath >/dev/null 2>&1; then
+  for candidate in python python3; do
+    candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
+    if [ -n "$candidate_path" ] && is_python3 "$candidate_path"; then PYTHON_BIN="$candidate_path"; break; fi
+  done
+else
+  candidate_path="$(command -v python3 2>/dev/null || true)"
+  if [ -n "$candidate_path" ] && is_python3 "$candidate_path"; then PYTHON_BIN="$candidate_path"; fi
+fi
+if [ -z "$BASH_BIN" ] || [ -z "$PYTHON_BIN" ] || [ ! -f "$GH_SCRIPT" ]; then
+  printf '%s\n' '{"ok":false,"error":"Bash, Python 3, or the sibling ai-gh launcher is unavailable","blocking_claims":[],"blocking_stages":[]}'
+  exit 2
+fi
+if command -v cygpath >/dev/null 2>&1; then
+  BASH_BIN="$(cygpath -m "$BASH_BIN")" || exit 2
+  GH_SCRIPT="$(cygpath -m "$GH_SCRIPT")" || exit 2
+fi
+if [ -z "$BASH_BIN" ] || [ -z "$GH_SCRIPT" ]; then
+  printf '%s\n' '{"ok":false,"error":"could not resolve native launcher paths","blocking_claims":[],"blocking_stages":[]}'
+  exit 2
+fi
+AI_SHARED_DB_CLOSEOUT_BASH="$BASH_BIN"
+AI_SHARED_DB_CLOSEOUT_GH_SCRIPT="$GH_SCRIPT"
+export AI_SHARED_DB_CLOSEOUT_BASH AI_SHARED_DB_CLOSEOUT_GH_SCRIPT
 
-python3 - "$@" <<'PY'
+"$PYTHON_BIN" - "$@" <<'PY'
 import argparse
 import json
 import os
@@ -41,9 +67,10 @@ def run_gh(args):
 
 def gh_call(args):
     try:
-        command = [os.environ["AI_SHARED_DB_CLOSEOUT_GH"], *args]
+        command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"], *args]
         if len(args) >= 1 and args[0] == "api":
-            command = [os.environ["AI_SHARED_DB_CLOSEOUT_GH"], "api", "--hostname", "github.com", *args[1:]]
+            command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
+                       "api", "--hostname", "github.com", *args[1:]]
         return subprocess.run(command, text=True, capture_output=True, check=False, timeout=60,
                               env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
     except subprocess.TimeoutExpired as exc:
