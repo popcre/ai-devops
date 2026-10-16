@@ -77,6 +77,45 @@
         "region": "us-east4",
         "service": "popcre-albert-core-sandbox"
       }
+    },
+    "popcre/designflow-tracking": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox"
+      }
+    },
+    "popcre/designflow-frontend": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-frontend",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-frontend-sandbox"
+      }
+    },
+    "popcre/designflow-item-master": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-item-master",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-item-sandbox"
+      }
     }
   },
   "change_classes": {

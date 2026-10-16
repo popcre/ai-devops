@@ -1350,6 +1350,79 @@ check 'an action-gate naming an undeclared class fails closed' \
 
 # The application exception is an exact committed source target, not a generic
 # release of deployment actions or the reviewer-safety refusal.
+check 'new source-release proof module passes offline real-graph and mocked API tests' \
+  "'$PY_BIN' '$ROOT/tests/test_application_source_release.py'"
+
+for new_repo in designflow-tracking designflow-frontend designflow-item-master; do
+  NEW_APP="$TMP/$new_repo-release"
+  newrepo "$NEW_APP" "popcre/$new_repo"
+  NEW_BASE="$(git -C "$NEW_APP" rev-parse HEAD)"
+  mkdir -p "$NEW_APP/.ai-devops" "$NEW_APP/supabase"
+  jq --arg repo "popcre/$new_repo" '.application_source_releases[$repo].target' \
+    "$ROOT/config/task-gates.json" > "$NEW_APP/.ai-devops/application-release-target.json"
+  printf '%s\n' '{"schema_version":1,"gates":{"deployment":{"required":["cloud-build-release-review"]}}}' \
+    > "$NEW_APP/.ai-devops/task-gates.json"
+  printf '%s\n' '-- actual owned structural delta, not an inherited mirror' > "$NEW_APP/supabase/owned.sql"
+  git -C "$NEW_APP" add .ai-devops supabase && git -C "$NEW_APP" commit -qm 'new target structural refusal fixture'
+  ( cd "$NEW_APP" && "$GATES" start --class deployment --base "$NEW_BASE" >/dev/null 2>&1 )
+  if [ "$("$PY_BIN" -c 'import sys; print(sys.platform)')" != linux ]; then
+    check "$new_repo new Linux-only target refuses unsupported platform without affecting backend" \
+      "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+    continue
+  fi
+  # CI may put its own Git in /usr/local/bin. The admitted fixture must select
+  # the lane's pinned /usr/bin/git; an alternate PATH remains a runtime refusal.
+  mkdir -p "$TMP/new-app-shadow-git"
+  printf '#!/bin/sh\nexec /usr/bin/git "$@"\n' > "$TMP/new-app-shadow-git/git"
+  chmod +x "$TMP/new-app-shadow-git/git"
+  check "$new_repo alternate PATH Git still fails pre-discovery confinement" \
+    "got=\"\$(PATH='$TMP/new-app-shadow-git':\"\$PATH\" out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json)\"; status=\$?; [ \"\$status\" -eq 3 ] && printf '%s\\n' \"\$got\" | grep -q 'pre-discovery confinement refused'"
+  check "$new_repo cannot hide an actual shared-db contributor behind deployment rank" \
+    "got=\"\$(PATH='/usr/bin:/bin':\"\$PATH\" out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json)\"; status=\$?; [ \"\$status\" -eq 3 ] && printf '%s\\n' \"\$got\" | grep -q 'cannot contain structural'"
+  check "$new_repo no receipt is published by structural refusal" \
+    "! jq -e '.overrides | any(.kind==\"application-source-release\")' \"\$(state_file_for '$NEW_APP')\" >/dev/null"
+  NEW_STATE="$(state_file_for "$NEW_APP")"
+  jq '.overrides=[{kind:"application-source-release",action:"deploy",observed_class:"deployment",reason:"legacy backend receipt"}]' \
+    "$NEW_STATE" > "$NEW_STATE.fixture"
+  mv "$NEW_STATE.fixture" "$NEW_STATE"
+  cp "$NEW_STATE" "$NEW_STATE.before"
+  git -C "$NEW_APP" rm -q supabase/owned.sql && git -C "$NEW_APP" commit -qm 'no owned structural delta remains'
+  check "$new_repo old backend receipt cannot authorize an off-branch new-target release" \
+    "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json && cmp -s '$NEW_STATE' '$NEW_STATE.before'"
+  check "$new_repo Git directory injection is refused before discovery" \
+    "(cd '$NEW_APP' && GIT_DIR='/not/a/repository' '$GATES' check --before deploy --application-release-target .ai-devops/application-release-target.json 2>&1) | grep -q 'pre-discovery confinement refused'"
+  # The opt-in declaration is already upstream in this future-release case.
+  # Only ordinary app/pipeline files change, so no reviewer-safety delta can
+  # accidentally supply the generic-deploy refusal on behalf of this guard.
+  NEW_FUTURE_BASE="$(git -C "$NEW_APP" rev-parse HEAD)"
+  printf '%s\n' '// next ordinary app release fixture' > "$NEW_APP/app.js"
+  printf '%s\n' 'steps: []' > "$NEW_APP/cloudbuild.yaml"
+  git -C "$NEW_APP" add app.js cloudbuild.yaml && git -C "$NEW_APP" commit -qm 'future ordinary source release'
+  ( cd "$NEW_APP" && "$GATES" start --class deployment --base "$NEW_FUTURE_BASE" >/dev/null 2>&1 )
+  NEW_APPROVAL="$(appr "$NEW_APP" deploy "$(git -C "$NEW_APP" rev-parse HEAD)")"
+  check "$new_repo upstream closed-gate opt-in refuses future generic deploy even with exact approval" \
+    "rc 3 '$NEW_APP' check --before deploy --reviewer-approval '$NEW_APPROVAL' && out '$NEW_APP' check --before deploy --reviewer-approval '$NEW_APPROVAL' | grep -q 'requires explicit --application-release-target'"
+  check "$new_repo closed-gate opt-in leaves review action unchanged" \
+    "rc 0 '$NEW_APP' check --before review"
+  # A forged backend manifest cannot switch source identity to the old route.
+  jq '.application_source_releases["popcre/designflow-backend"].target' \
+    "$ROOT/config/task-gates.json" > "$NEW_APP/.ai-devops/application-release-target.json"
+  git -C "$NEW_APP" add .ai-devops/application-release-target.json && git -C "$NEW_APP" commit -qm 'forged backend target'
+  check "$new_repo forged backend manifest cannot acquire a new-target receipt" \
+    "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+done
+
+for policy_case in missing fifth cross-target; do
+  case "$policy_case" in
+    missing) policy_filter='del(.application_source_releases["popcre/designflow-tracking"])' ;;
+    fifth) policy_filter='.application_source_releases["popcre/foreign"] = .application_source_releases["popcre/designflow-backend"]' ;;
+    cross-target) policy_filter='.application_source_releases["popcre/designflow-tracking"].target.service = "popcre-albert-item-sandbox"' ;;
+  esac
+  jq "$policy_filter" "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/release-$policy_case.json"
+  check "closed four-target source release schema rejects $policy_case policy" \
+    "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/release-$policy_case.json'"
+done
+
 APP="$TMP/application-release"
 newrepo "$APP" popcre/designflow-backend
 APP_BASE="$(git -C "$APP" rev-parse HEAD)"
