@@ -440,9 +440,10 @@ harness requires. No live provider calls inside offline tests.
 
 - [x] 13 sections complete; STATUS table present; handoff reciprocal links.
 - [x] Self-audit answers recorded below.
-- [ ] Prose PR merged to `main`; AGENTS.md / task-router links live.
-- [ ] #1678 (or the named incident issue) notes plan publication; repair
-      checklist remains open.
+- [x] Prose PR merged to `main` as squash `1078ea63` (PR
+      [#1788](https://github.com/popcre/ai-devops/pull/1788), 2026-10-15
+      10:12 PM EDT); AGENTS.md / task-router links live.
+- [x] #1678 notes plan publication; repair checklist remains open.
 
 ### Repair deliverable (not done by publishing this plan)
 
