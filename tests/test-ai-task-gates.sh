@@ -1370,8 +1370,15 @@ for new_repo in designflow-tracking designflow-frontend designflow-item-master; 
       "rc 3 '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
     continue
   fi
+  # CI may put its own Git in /usr/local/bin. The admitted fixture must select
+  # the lane's pinned /usr/bin/git; an alternate PATH remains a runtime refusal.
+  mkdir -p "$TMP/new-app-shadow-git"
+  printf '#!/bin/sh\nexec /usr/bin/git "$@"\n' > "$TMP/new-app-shadow-git/git"
+  chmod +x "$TMP/new-app-shadow-git/git"
+  check "$new_repo alternate PATH Git still fails pre-discovery confinement" \
+    "got=\"\$(PATH='$TMP/new-app-shadow-git':\"\$PATH\" out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json)\"; status=\$?; [ \"\$status\" -eq 3 ] && printf '%s\\n' \"\$got\" | grep -q 'pre-discovery confinement refused'"
   check "$new_repo cannot hide an actual shared-db contributor behind deployment rank" \
-    "out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json 2>&1 | grep -q 'cannot contain structural'"
+    "got=\"\$(PATH='/usr/bin:/bin':\"\$PATH\" out '$NEW_APP' check --before deploy --application-release-target .ai-devops/application-release-target.json)\"; status=\$?; [ \"\$status\" -eq 3 ] && printf '%s\\n' \"\$got\" | grep -q 'cannot contain structural'"
   check "$new_repo no receipt is published by structural refusal" \
     "! jq -e '.overrides | any(.kind==\"application-source-release\")' \"\$(state_file_for '$NEW_APP')\" >/dev/null"
   NEW_STATE="$(state_file_for "$NEW_APP")"
