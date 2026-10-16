@@ -1,7 +1,7 @@
 ---
 issue: 1783
 status: OPEN
-owner: codex/reviewer-plan-install-gaps
+owner: codex/reviewer-repair-closeout
 ---
 
 # Handoff — recurring reviewer repair planning
@@ -22,7 +22,7 @@ Execution specification: [repair plan](../plan_reviewer-recurrence-repair.md), p
 
 ## 3. Current state and delivery
 
-The plan and this handoff are planning artifacts only. Implementation, installation and new reliability proof are not started. The original plan and handoff merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1ee565ecfc58a8bc66939e536fddee9954](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954). The installation-gap addendum and this closeout are published on `codex/reviewer-plan-install-gaps` in [PR1786](https://github.com/popcre/ai-devops/pull/1786); its current PR/issue readback determines final merged state. [Issue1783](https://github.com/popcre/ai-devops/issues/1783) remains the durable repair card, with repair and live-proof items open. The [addendum/acceptance note](https://github.com/popcre/ai-devops/issues/1783#issuecomment-6206152913) records publication and outstanding obligations. Do not infer installation from these documentation merges.
+The plan and this handoff are planning artifacts only. Implementation, installation and new reliability proof are not started. The original plan and handoff merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1ee565ecfc58a8bc66939e536fddee9954](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954). The installation-gap addendum is published on `codex/reviewer-plan-install-gaps` in [PR1786](https://github.com/popcre/ai-devops/pull/1786). GitHub refused further pushes because that PR was queued, so closeout notes are isolated on `codex/reviewer-repair-closeout`, retaining the complete addendum too. The issue1783 closing note identifies the final closeout PR and each current merge state; queued is not merged. [Issue1783](https://github.com/popcre/ai-devops/issues/1783) remains the durable repair card, with repair and live-proof items open. The [addendum/acceptance note](https://github.com/popcre/ai-devops/issues/1783#issuecomment-6206152913) records publication and outstanding obligations. Do not infer installation from these documentation merges.
 
 Source inspected: [24b038bc7f4a6efc304031b9ab0a2bfc7228965f](https://github.com/popcre/ai-devops/commit/24b038bc7f4a6efc304031b9ab0a2bfc7228965f). Installed checkout HEAD observed: [f84085f93b6c20752d798a9b3db76b78bedb3d2f](https://github.com/popcre/ai-devops/commit/f84085f93b6c20752d798a9b3db76b78bedb3d2f), an ancestor. Launcher resolves there; installed byte equality/receipt validity was not proved. Plan §5 contains source line anchors, limitations and ownership timestamps.
 
@@ -77,7 +77,7 @@ The wrap-up freezes implementation scope: no repairs were started. The original 
 
 Planning verification: `git diff --check`, `bash tests/test-markdown-links.sh`, and `bin/ai-doc-reachability --base origin/main` passed; the source paths and all13 sections/eight numbered steps were checked. Local tests were document checks only. Final publication and clean-workspace outcomes are recorded on issue1783, because this file must not pretend a future PR merge/install occurred. All eight repair rows remain open; the first next action is plan step1's ownership/inventory check. No implementing session was dispatched and no background execution is promised.
 
-Workspace cleanup is conservative: keep any unmerged branch/worktree and unique extra local commit until exact patch incorporation and managed ownership are proved. No foreign candidate is deleted from housekeeping output. This session has no ignored paid review evidence; temporary publication/check files are session-owned scratch, not project deliverables. The old original branch's extra addendum was transplanted onto the new branch; PR1784's merge alone is insufficient to delete that extra commit before PR1786 incorporation proof. The clean task worktree may be retained as the next session's starting point; its branch/readiness must be refreshed before implementation.
+Workspace cleanup is conservative: keep any unmerged branch/worktree and unique extra local commit until exact patch incorporation and managed ownership are proved. No foreign candidate is deleted from housekeeping output. This session has no ignored paid review evidence; temporary publication/check files are session-owned scratch, not project deliverables. The old original branch's extra addendum was transplanted onto the new branch; PR1784's merge alone is insufficient to delete that extra commit before PR1786 incorporation proof. The clean task worktree is retained as the next session's starting point while publication or repair handover remains open; its branch/readiness must be refreshed before implementation.
 
 ### Report-only housekeeping inventory
 
