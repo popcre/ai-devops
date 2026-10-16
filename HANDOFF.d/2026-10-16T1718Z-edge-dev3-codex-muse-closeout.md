@@ -38,6 +38,8 @@ Housekeeping #1815 was ejected for a merge conflict with the already-merged #181
 
 An op_run execution timeout was rejected before credential resolution. The supported alternative was a short protected 0600-file transfer, then read/unlink before an ordinary bounded PTY updater. The first approved update stopped before installation when a child sudo command prompted again. Native verification proved the same pending transaction resumable; a prompt-bound driver resumed it without renewing authority. Final update exited 0 and consumed authorization natively. Do not replay or recreate it.
 
+Publishing the required handoff initially hit GitHub GH006: a queued branch cannot be updated. The same owned PR was removed from the queue through the native dequeue operation before pushing the handoff, then returned to ordinary queue processing. No source reset, force push, admin merge or protection bypass was used.
+
 For this documentation-only closeout, `ai-task-gates check --before pr-wait` refuses the prose wait action. Do not redeclare as code, pay for an unnecessary review, use a different waiter to evade the refusal, or bypass branch protection. Ordinary merge was requested; GitHub confirmed already queued. There is no business approval to request. Leave the existing PR as the card until GitHub processes the queue.
 
 ## 5. Root causes and findings
