@@ -53,3 +53,5 @@ Live verification invoked the installed housekeeping scheduler twice. Both invoc
 The first protected update attempt stopped before installation because its first child sudo command requested authentication again. Its native pending transaction remained resumable; the corrected prompt-bound credential driver resumed that same authorization. The successful retry consumed/finalized it natively, leaving no pending authorization. No credential was exposed or retained in an input file.
 
 These two scoped outcomes are complete. This record does not claim completion of the broader reviewer-recurrence programme, a live Windows installation, native Muse workload qualification, or elapsed reliability acceptance.
+
+Documentation-only publication and final workspace disposition continue in [the closeout handoff](../../HANDOFF.d/2026-10-16T1718Z-edge-dev3-codex-muse-closeout.md).
