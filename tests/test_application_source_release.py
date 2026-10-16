@@ -110,6 +110,40 @@ application_release_contributor_gates
         self.assertEqual(result, ["required\tcode", "required\tui-live-workflow",
                                   "required\treviewer-safety"])
 
+    def test_real_native_future_release_requires_exact_lane_before_approval(self):
+        toolkit = Path(__file__).resolve().parents[1]
+        declaration = self.root / ".ai-devops"
+        declaration.mkdir()
+        (declaration / "task-gates.json").write_text(json.dumps({
+            "schema_version": 1, "gates": {"deployment": {
+                "required": ["cloud-build-release-review"]}}}))
+        policy = json.loads((toolkit / "config/task-gates.json").read_text())
+        (declaration / "application-release-target.json").write_text(json.dumps(
+            policy["application_source_releases"][self.repo]["target"]))
+        (self.root / "cloudbuild.yaml").write_text("steps: []\n")
+        self.g("add", ".ai-devops", "cloudbuild.yaml")
+        self.g("commit", "-qm", "closed lane already upstream")
+        upstream = self.g("rev-parse", "HEAD")
+        self.g("checkout", "-qb", "review-branch")
+        (self.root / "app.js").write_text("// next ordinary release\n")
+        (self.root / "cloudbuild.yaml").write_text("steps: []\n# next pipeline\n")
+        self.g("add", "app.js", "cloudbuild.yaml")
+        self.g("commit", "-qm", "ordinary next release delta")
+        env = {**self.env, "AI_TASK_GATES_FILE": str(toolkit / "config/task-gates.json"),
+               "AI_TASK_GATES_DIR": str(Path(self.temp.name) / "isolated-state"),
+               "AI_REVIEW_LIFECYCLE_DIR": str(Path(self.temp.name) / "isolated-lifecycle")}
+        command = ["/bin/bash", str(toolkit / "bin/ai-task-gates")]
+        declared = subprocess.run(command + ["start", "--class", "deployment", "--base", upstream],
+                                  cwd=self.root, env=env, capture_output=True)
+        self.assertEqual(declared.returncode, 0, declared.stderr.decode())
+        refused = subprocess.run(command + ["check", "--before", "deploy"], cwd=self.root,
+                                 env=env, capture_output=True)
+        self.assertEqual(refused.returncode, 3)
+        self.assertIn(b"requires explicit --application-release-target", refused.stderr)
+        review = subprocess.run(command + ["check", "--before", "review"], cwd=self.root,
+                                env=env, capture_output=True)
+        self.assertEqual(review.returncode, 0, review.stderr.decode())
+
     def test_cross_repo_and_backend_manifest_cannot_prove_new_identity(self):
         for repo in ["popcre/designflow-frontend", "popcre/designflow-item-master",
                      "popcre/designflow-backend", "foreign/repository"]:
