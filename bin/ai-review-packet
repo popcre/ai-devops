@@ -677,8 +677,8 @@ cmd_build() {
     else
       real_root="$(head -1 "$root/.ai-review-sandbox")"
       snapshot_note="
-- This directory is a **disposable snapshot** of that checkout, not the working
-  copy itself. Paths are identical; do not commit or push from here."
+- This directory is a **disposable snapshot** of the source checkout, not the working
+  copy itself. Repository-relative paths are identical; do not commit or push from here."
     fi
   fi
 
@@ -899,8 +899,10 @@ spend turns reconstructing the diff by hand — it is already in this packet (se
 
 ## 1. What is under review
 
-- Repository checkout: \`$real_root\`$snapshot_note
-- Directory you are reading: \`$root\`
+- Accessible repository root for tool reads: \`.\` (the actual current directory).
+- Repository checkout: \`$real_root\` (immutable provenance only; do not read this host path).$snapshot_note
+- Directory you are reading: \`$root\` (snapshot identity metadata only; tool root is the actual current directory \`.\`).
+- Read repository files using relative paths from \`.\`. Old host paths in conversation history are not accessible here; do not retry them.
 - Packet tag: \`$tag\`
 - Review class: \`$OPT_CLASS\`
 

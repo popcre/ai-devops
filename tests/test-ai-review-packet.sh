@@ -67,6 +67,8 @@ M="$PKT/MANIFEST.md"
 check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
 check "packet_lives_inside_the_review_dir"    "[ \"\$(cd \"\$(dirname '$PKT')\" && pwd -P)\" = \"\$(cd '$R' && pwd -P)\" ] && [ \"\$(basename '$PKT')\" = '.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
+check "reviewer_manifest_uses_accessible_relative_root" "grep -q 'Accessible repository root for tool reads:' '$M' && grep -q 'immutable provenance only; do not read this host path' '$M' && grep -q 'Old host paths in conversation history are not accessible' '$M'"
+check "original_identity_remains_sealed" "test \"\$(jq -r .repository '$PKT/identity.json')\" = '$R'"
 
 # A governed review brief can exceed the kernel's per-argument limit. Keep the
 # entire request in the sealed manifest without routing it through argv.

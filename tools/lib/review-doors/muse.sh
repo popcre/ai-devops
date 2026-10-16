@@ -214,6 +214,7 @@ main() {
     printf 'Your evidence packet'"'"'s MANIFEST.md path is given under RUN FACTS at the end. Read it first.\n'
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'Quote the full reviewed head SHA given under RUN FACTS in your report.\n\n'
+    printf 'Repository tool-read root is the actual current directory (.). Use repository-relative paths for source reads. Original checkout and snapshot host paths in the manifest or prior conversation are provenance metadata only; never read or retry those host paths.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
     printf '\n## RUN FACTS (muse door)\nEvidence packet: %s/MANIFEST.md\nReviewed head commit: %s\n' "$DOOR_PACKET_DIR" "$DOOR_HEAD"

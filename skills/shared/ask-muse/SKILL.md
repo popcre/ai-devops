@@ -63,7 +63,11 @@ path; Muse Code failures remain fenced. First run
 Proceed with the same command without `--dry-run` only when it reports a
 qualified non-authorizing failed turn. This requires exact retained packet and
 byte hashes, the original caller/repository/head, a verified unsignaled wrapper
-exit, and a complete native stream whose sole error is the exact denied read.
+exit, and a complete native stream whose only errors are one to three consecutive
+exact denied reads immediately before its final tool-calls finish. No text or
+successful tool may follow the first denial; malformed steps and verdict-like
+text remain fenced. The neutral preliminary phrase "approval evidence" is not
+a verdict.
 It archives the original descriptor; it does not publish an accepted review or
 verdict and says nothing about billing. Then use the normal `ask` flow for a
 fresh same-session turn. If dry-run refuses, leave the session fenced; do not
