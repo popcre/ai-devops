@@ -124,3 +124,8 @@ tools/oracle_native_alternate_guardian.py
 bin/ai-oracle-native-alternate
 tools/oracle_native_alternate_v2_profile.py
 bin/ai-oracle-native-alternate-v2
+bin/ai-session-tmp-sweep
+bin/ai-session-tmp-hook
+tools/lib/session-tmp.sh
+tools/glm_output_recovery.py
+tools/glm_formal_profile.py

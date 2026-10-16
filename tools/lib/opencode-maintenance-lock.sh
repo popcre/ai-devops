@@ -12,6 +12,7 @@ glm_formal_activation_publish() (
 )
 
 glm_maintenance_lock_acquire() {
+  local actual_pid="${BASHPID:-$$}"
   local directory="${1:-}" mode="${2:-}" timeout="${3:-${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}}"
   local canonical dir_info dir_uid dir_gid lock_path created=0 before fd_info after dir_after fd
   local _dir_dev _dir_ino _dir_mode _lock_dev _lock_ino _lock_uid _lock_gid _lock_mode _lock_links _lock_size _lock_type
@@ -72,7 +73,7 @@ glm_maintenance_lock_acquire() {
     printf 'ai-glm: maintenance lock file has unsafe type, mode, links, or content.\n' >&2; return 1;
   }
   exec {fd}<> "$lock_path" || return 1
-  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$$/fd/$fd" 2>/dev/null)" || { exec {fd}>&-; return 1; }
+  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$actual_pid/fd/$fd" 2>/dev/null)" || { exec {fd}>&-; return 1; }
   [[ "$fd_info" = "$before" ]] || { exec {fd}>&-; printf 'ai-glm: maintenance lock path changed while opening.\n' >&2; return 1; }
   if [[ "$created" = 1 ]]; then
     expected_uid="$_lock_uid"; expected_gid="$_lock_gid"
@@ -85,8 +86,8 @@ glm_maintenance_lock_acquire() {
       [[ "$dir_after" = "$dir_info" && "$after" = "$fd_info" && ! -L "$lock_path" ]] || {
         exec {fd}>&-; printf 'ai-glm: maintenance lock path changed before owner repair.\n' >&2; return 1;
       }
-      chown "$dir_uid:$dir_gid" "/proc/$$/fd/$fd" 2>/dev/null || { exec {fd}>&-; return 1; }
-      chmod 0600 "/proc/$$/fd/$fd" 2>/dev/null || { exec {fd}>&-; return 1; }
+      chown "$dir_uid:$dir_gid" "/proc/$actual_pid/fd/$fd" 2>/dev/null || { exec {fd}>&-; return 1; }
+      chmod 0600 "/proc/$actual_pid/fd/$fd" 2>/dev/null || { exec {fd}>&-; return 1; }
       expected_uid="$dir_uid"; expected_gid="$dir_gid"
     else
       [[ "$_lock_uid" = "$dir_uid" && "$_lock_gid" = "$dir_gid" ]] || {
@@ -100,7 +101,7 @@ glm_maintenance_lock_acquire() {
     expected_uid="$dir_uid"; expected_gid="$dir_gid"
   fi
 
-  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$$/fd/$fd" 2>/dev/null)" || { exec {fd}>&-; return 1; }
+  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$actual_pid/fd/$fd" 2>/dev/null)" || { exec {fd}>&-; return 1; }
   [[ "$_lock_dev:$_lock_ino:$expected_uid:$expected_gid:$_lock_mode:$_lock_links:$_lock_size:$_lock_type" = "$fd_info" ]] || {
     exec {fd}>&-; printf 'ai-glm: maintenance lock fd metadata changed during validation.\n' >&2; return 1;
   }
@@ -119,9 +120,9 @@ glm_maintenance_lock_acquire() {
 
   dir_after="$(stat -c '%d:%i:%u:%g:%a' -- "$directory" 2>/dev/null)" || dir_after=''
   after="$(stat -c '%d:%i:%u:%g:%a:%h:%s:%F' -- "$lock_path" 2>/dev/null)" || after=''
-  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$$/fd/$fd" 2>/dev/null)" || fd_info=''
+  fd_info="$(stat -Lc '%d:%i:%u:%g:%a:%h:%s:%F' -- "/proc/$actual_pid/fd/$fd" 2>/dev/null)" || fd_info=''
   if [[ "$dir_after" != "$dir_info" || "$after" != "$before" || "$after" != "$fd_info" || -L "$lock_path" || \
-        "$(stat -Lc '%u:%g:%a:%h:%s:%F' -- "/proc/$$/fd/$fd" 2>/dev/null)" != "$expected_uid:$expected_gid:600:1:0:regular empty file" ]]; then
+        "$(stat -Lc '%u:%g:%a:%h:%s:%F' -- "/proc/$actual_pid/fd/$fd" 2>/dev/null)" != "$expected_uid:$expected_gid:600:1:0:regular empty file" ]]; then
     flock -u "$fd" 2>/dev/null || true
     exec {fd}>&-
     printf 'ai-glm: maintenance lock path changed during acquisition.\n' >&2

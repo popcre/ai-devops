@@ -25,6 +25,7 @@ expected_head=""
 installed_checkout=""
 reviewer_approval=""
 activate_glm_formal=0
+activation_only=0
 install_args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -37,14 +38,21 @@ while [ "$#" -gt 0 ]; do
     --reviewer-approval)
       [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
       reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
+    --activation-only) activation_only=1; shift ;;
     --activate-glm-formal) activate_glm_formal=1; install_args+=("$1"); shift ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets] [--activate-glm-formal]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets] [--activate-glm-formal [--activation-only]]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac
 done
+if [ "$activation_only" -eq 1 ] && [ "$(uname -s)" != Linux ]; then
+  warn 'activation-only is a Linux formal-profile operation'; exit 2
+fi
+if [ "$activation_only" -eq 1 ] && { [ "$activate_glm_formal" -ne 1 ] || [ -z "$expected_head" ] || [ -z "$reviewer_approval" ]; }; then
+  warn '--activation-only requires --activate-glm-formal, --expected-head and --reviewer-approval'; exit 2
+fi
 if [ "$activate_glm_formal" -eq 1 ]; then source "$SOURCE_ROOT/tools/lib/opencode-maintenance-lock.sh"; fi
 if [ -n "$expected_head" ] && ! [[ "$expected_head" =~ ^[0-9a-f]{40}$ ]]; then
   warn '--expected-head must be a full lowercase commit SHA'; exit 2
@@ -108,6 +116,23 @@ if [ -n "$branch" ]; then
   [ -z "$configured_ref" ] || [ "$configured_ref" = refs/heads/main ] || {
     warn 'main tracks an unsupported branch'; exit 1;
   }
+fi
+
+# Explicit same-release transaction: no fetch, source advance, reinstall,
+# qualification turn, or recovery-marker manufacture. The original readiness
+# deadline is consumed unchanged while the real fd9 install lock remains held.
+if [ "$activation_only" -eq 1 ]; then
+  [ "$previous_head" = "$expected_head" ] && [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" = "$expected_head" ] || {
+    warn 'activation-only requires the exact already installed source'; exit 1;
+  }
+  (cd "$SOURCE_ROOT" && "$SOURCE_ROOT/bin/ai-task-gates" check --before infrastructure \
+    --reviewer-approval "$reviewer_approval") || exit 1
+  (cd "$SOURCE_ROOT" && "$SOURCE_ROOT/bin/ai-task-gates" install-verify --phase activation \
+    --target-head "$expected_head" --installed-checkout "$REPO_ROOT" \
+    --installed-launcher /usr/local/bin/ai-task-gates) || exit 1
+  glm_formal_activation_publish "$REPO_ROOT" || exit 1
+  info "Explicit activation completed at already installed source $expected_head"
+  exit 0
 fi
 
 # Fetching objects does not alter the installed checkout. The target code runs

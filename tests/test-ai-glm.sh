@@ -442,6 +442,12 @@ fi
 LOCK_SCRIPT
   chmod 0700 "$script"
 
+  mkdir -m 0700 "$root/subshell"
+  ( source "$helper"; glm_maintenance_lock_acquire "$root/subshell" exclusive 0 &&
+    ! flock -n -s "$root/subshell/maintenance.lock" true ) >"$root/subshell.log" 2>&1
+  local subshell_rc=$?
+  check 'maintenance lock validates the actual subshell fd and retains exclusion' "test '$subshell_rc' -eq 0"
+
   local dir="$root/parallel" pid1 pid2 acquired=0
   mkdir -p "$dir"; chmod 0700 "$dir"
   HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-1" HOLD_FILE="$root/release-1" bash "$script" >"$root/shared-1.log" 2>&1 & pid1=$!
