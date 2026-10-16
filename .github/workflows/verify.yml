@@ -691,7 +691,7 @@ jobs:
             // that left an unclean process tree) never overlaps a hosted twin.
             const needsFallback = (v) => (v === 'success' || v === 'cleanup_failure' ? 'false' : 'true');
             const fallbackCodex = needsFallback(codexStatus);
-            const fallback = fallbackCodex;
+            const fallback = fallbackCodex === 'true' ? 'true' : 'false';
             core.setOutput('fallback_required', fallback);
             core.setOutput('preferred_result', proofResult);
             core.setOutput('fallback_codex', fallbackCodex);
@@ -725,35 +725,10 @@ jobs:
         run: |
           & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-codex-review.sh
 
-  # Grok is frozen best-effort (owner 2026-10-13, #1714): its suite is
-  # advisory evidence only. It never gates windows-reviewer-safety,
-  # verification-closure, or merge-group evidence (incident
-  # 20261015T234815Z-edge-dev3-grok-3214228: 45-65 minute runs blocked merges).
-  windows-reviewer-fallback-grok:
-    needs: [fast-classifier, manual-preflight]
-    if: >-
-      always() && !cancelled() && github.event_name != 'merge_group' &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    runs-on: blacksmith-4vcpu-windows-2025
-    continue-on-error: true
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Grok reviewer safety suite
-        shell: pwsh
-        run: |
-          & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-grok-review.sh
-
   # Stable required result for reviewer safety. The qualified self-hosted lane
-  # remains preferred, but it is not a machine-wide stop: independent hosted
-  # fallback that runs the identical assertions is equally valid proof. Only
-  # the Codex suite gates; the frozen Grok suite is advisory (#1714).
+  # remains preferred, but it is not a machine-wide stop: the hosted Codex
+  # fallback is an equally valid proof of the only remaining Windows
+  # reviewer-safety suite (Grok is frozen per popcre/ai-devops#1714).
   windows-reviewer-safety:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex]
     if: >-

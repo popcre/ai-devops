@@ -1720,12 +1720,12 @@ case "$cmd" in
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
+    else providers=(glm muse deepseek stepfun codex); fi
     for provider in "${providers[@]}"; do emit_status "$provider" || true; done ;;
   usable)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
+    else providers=(glm muse deepseek stepfun codex); fi
     usable_rc=0
     for provider in "${providers[@]}"; do emit_status "$provider" || usable_rc=3; done
     exit "$usable_rc" ;;

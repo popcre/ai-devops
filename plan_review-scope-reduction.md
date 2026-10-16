@@ -11,10 +11,10 @@ Written 2026-10-13 by Claude chat `81cdf50d-ed3a-40d2-a846-988d73f7ae7e` on edge
 |---|---|---|
 | 0. Inventory every place that requires or routes review | ✅ done 2026-10-13 | Inventory on issue #1714 (GATED stays; DISCRETIONARY/MEMBERSHIP/FREEZE surfaces listed) |
 | 1. shared-db allocator: quarantine qwen + gemini | ✅ done 2026-10-13 | popcre/shared-db PR [#4272](https://github.com/popcre/shared-db/pull/4272) — `QUARANTINED_REVIEWERS=['grok-4.6','qwen-3.8-max','gemini-3.8-flash-high']`; `scripts/manage-migration-author-lanes.test.mjs` 849/849 |
-| 2. ai-devops registry mirror + drift check | 🟡 code landed | `config/reviewer-registry.json` gemini+qwen absent; `tests/test-ai-review-doctor.sh` asserts the four-name pool; drift green after #4272 merges |
-| 3. Review-required policy: discretionary review only for shared-db | 🟡 code landed | `AGENTS.md`, `docs/reviewer-rotation-rules.md` 13–14, `docs/model-setup.md`, `docs/task-router.md`, `docs/standing-rules-details.md` |
-| 4. Freeze non-pool reviewer tooling (CI suites, preflight, doctor) | 🟡 code landed | `config/ci-suite-manifest.json` suspends grok-implement/qwen/gemini/claude-review suites; `test-ai-grok-review.sh` and `test-ai-codex-review.sh` stay running (GLM debate contract + Codex approval gate) |
-| 5. Docs and skills updated in the same change | 🟡 code landed | rotation rules, model-setup, AGENTS.md, task-router, standing-rules, plan-index; qwen/grok/gemini/codex-reviewer skills FROZEN 2026-10-13 (frontmatter + body banner) |
+| 2. ai-devops registry mirror + drift check | ✅ done 2026-10-15 | `config/reviewer-registry.json` gemini+qwen absent; `tests/test-ai-review-doctor.sh` asserts the four-name pool; drift green after #4272 merges |
+| 3. Review-required policy: discretionary review only for shared-db | ✅ done 2026-10-15 | `AGENTS.md`, `docs/reviewer-rotation-rules.md` 13–14, `docs/model-setup.md`, `docs/task-router.md`, `docs/standing-rules-details.md` |
+| 4. Freeze non-pool reviewer tooling (CI suites, preflight, doctor) | ✅ done 2026-10-15 | grok-review also suspended; shared template checks in `tests/test-delegation-templates.sh`; windows-reviewer-safety runs Codex only; preflight default status is pool+codex |
+| 5. Docs and skills updated in the same change | ✅ done 2026-10-15 | rotation rules, model-setup, AGENTS.md, task-router, standing-rules, plan-index; qwen/grok/gemini/codex-reviewer skills FROZEN 2026-10-13 (frontmatter + body banner) |
 | 6. Live proof | ✅ done 2026-10-14 | Issue #1714 closed: shared-db#4272 MERGED, ai-devops#1728 MERGED; live proof posted on the issue |
 
 All six steps are complete (2026-10-14). Residual rows 🟡 above were accepted when #1714 closed.

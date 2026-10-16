@@ -3,8 +3,6 @@
 # scheduled and manual workflows still run the complete reviewer lane.
 .gitattributes
 bin/ai-codex-review*
-bin/ai-grok-review*
-bin/ai-grok-implement*
 bin/ai-muse*
 bin/ai-process-supervisor*
 bin/ai-provider-version*
@@ -26,16 +24,16 @@ config/repository-policy.json
 config/task-gates.schema.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
-skills/shared/grok-cli/**
 templates/delegation/debate-turn.md
 tests/lib-test-harness.sh
 tests/lib-test-part.sh
 tests/lib-test-timing.sh
 tests/lib-reviewer-events-isolation.sh
-tests/grok-auth-link-cases.sh
 tests/test-all.ps1
 tests/test-all.sh
 tests/test-ai-codex-review.sh
+tests/test-delegation-templates.sh
+tests/test-pool-dispatch-doors.sh
 tests/test-ai-grok-review.sh
 tests/test-ai-review-code-only.sh
 tests/test-ai-review-engine.sh
@@ -68,12 +66,9 @@ tests/test-ai-review-credit-watch.sh
 tests/test_review_credit_watch.py
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
-tools/lib/grok-paid-keys.sh
 tools/lib/provider-wrapper-common.sh
 tools/lib/opencode-curl-auth.sh
 tools/lib/opencode-maintenance-lock.sh
-tools/lib/gemini-review-contract.sh
-tools/lib/grok-runtime.sh
 tools/lib/deepseek-opencode.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*

@@ -45,7 +45,7 @@ fi
 # reviewer lane. The policy file itself stays required below.
 # bin/ai-gh: ai-task-gates calls it only for --small-owner-entry, which no
 # reviewer suite exercises (#1245).
-MENTION_ONLY=' bin/ai-gh bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun tests/lib-selection.sh config/reviewer-ci-paths.txt '
+MENTION_ONLY=' bin/ai-gh bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun bin/ai-grok-review bin/ai-grok-implement skills/shared/grok-cli tests/grok-auth-link-cases.sh tools/lib/grok-paid-keys.sh tools/lib/grok-runtime.sh tools/lib/gemini-review-contract.sh tests/test-ai-grok-review.sh tests/lib-selection.sh config/reviewer-ci-paths.txt '
 tracked() { [ -f "$1" ] && git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
 references() {
   local file="$1" dir r
@@ -63,7 +63,7 @@ references() {
   grep -oE '\b(lib-test-[a-z-]+|grok-auth-link-cases)\.sh\b' "$file" | sed 's#^#tests/#'
 }
 declare -A seen=()
-queue=(tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh)
+queue=(tests/test-ai-codex-review.sh tests/test-delegation-templates.sh tests/test-pool-dispatch-doors.sh)
 while [ "${#queue[@]}" -gt 0 ]; do
   file="${queue[0]}"; queue=("${queue[@]:1}")
   [ -z "${seen[$file]:-}" ] || continue
@@ -78,7 +78,7 @@ done
 for file in "${!seen[@]}"; do
   tg_reviewer_ci_path "$file" || fail "reviewer suite dependency is not a reviewer CI path: $file"
 done
-for file in bin/ai-codex-review bin/ai-grok-review bin/ai-grok-review.cmd bin/ai-muse \
+for file in bin/ai-codex-review templates/delegation/debate-turn.md bin/ai-muse \
   bin/ai-review-preflight bin/ai-review-lifecycle bin/ai-task-gates bin/ai-task-gates.cmd \
   config/task-gates.json config/reviewer-ci-paths.txt tests/test-reviewer-ci-paths.sh; do
   tg_reviewer_ci_path "$file" || fail "required reviewer CI path missing: $file"
