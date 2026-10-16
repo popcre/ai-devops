@@ -190,6 +190,14 @@ def isolated(args):
         pending = [tool for message in messages for tool in message.get("content", [])
                    if tool.get("id") == permission[0]["source"]["callID"]]
         assert len(pending) == 1 and pending[0]["state"]["input"]["path"] == output[0]
+        assert completed[0]["name"] == pending[0]["name"] == "read"
+        assert completed[0]["provider"]["executed"] is False and pending[0]["provider"]["executed"] is False
+        own_assistants = [message for message in messages if message.get("type") == "assistant"]
+        assert own_assistants and all(message["agent"] == "glm-review"
+                                     and message["model"]["id"] == "test"
+                                     and message["model"]["providerID"] == "fixture"
+                                     for message in own_assistants)
+        assert type(completed[0]["time"]["completed"]) is int and type(pending[0]["time"]["ran"]) is int
         print(json.dumps({"actual_tool_time_schema": {
             "completed": completed[0].get("time"), "pending": pending[0].get("time")}}, sort_keys=True))
         api("POST", f"/api/session/{session}/permission/{permission[0]['id']}/reply",
