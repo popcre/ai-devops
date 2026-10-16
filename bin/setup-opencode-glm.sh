@@ -14,6 +14,28 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "${1:-}" = --profile ]; then
+  [ "${2:-}" = formal-review ] && [ "$#" -eq 2 ] || {
+    echo 'usage: setup-opencode-glm.sh [--profile formal-review]' >&2; exit 2;
+  }
+  # Explicit, install-only route: no shared unit/config/state mutation and no
+  # implicit start/enable. Activation remains a separate protected operation.
+  source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
+  formal_home="$HOME/.config/ai-devops/glm-formal"
+  if [ -e "$formal_home/activation.json" ] || [ -L "$formal_home/activation.json" ]; then
+    # Exact ready activation may be verified as a read-only no-op. Any invalid
+    # or changed active profile refuses before a lock/config/runtime write.
+    exec python3 "$REPO_ROOT/tools/glm_formal_profile.py" install --repo "$REPO_ROOT" \
+      --port "${AI_GLM_FORMAL_PORT:-4097}"
+  fi
+  # Only bootstrap the lock's private parent, as the existing general setup
+  # does. No config/password/unit/runtime write occurs before exclusive drain.
+  if [ ! -e "$formal_home" ] && [ ! -L "$formal_home" ]; then (umask 077; mkdir -p -- "$formal_home"); fi
+  glm_maintenance_lock_acquire "$formal_home" exclusive "${AI_GLM_MAINTENANCE_LOCK_TIMEOUT:-300}" || exit 1
+  exec python3 "$REPO_ROOT/tools/glm_formal_profile.py" install --repo "$REPO_ROOT" \
+    --port "${AI_GLM_FORMAL_PORT:-4097}"
+fi
+[ "$#" -eq 0 ] || { echo 'unknown setup option' >&2; exit 2; }
 source "$REPO_ROOT/tools/lib/opencode-curl-auth.sh"
 source "$REPO_ROOT/tools/lib/opencode-maintenance-lock.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
