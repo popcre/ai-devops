@@ -355,6 +355,19 @@ SF_TEMP_PATHS=()
 sf_temp_cleanup() { [ "${#SF_TEMP_PATHS[@]}" -eq 0 ] || rm -rf -- "${SF_TEMP_PATHS[@]}" 2>/dev/null || true; }
 trap sf_temp_cleanup EXIT
 
+# Classify, never rewrite: a report with a non-terminal line that opens with a
+# decision word is refused by governed consumers. Name it here so the failure is
+# specific at its source; the report bytes stay exactly as the provider wrote them.
+extra_decision_warning() { # REPORT
+  local n
+  n="$(awk '{ l[NR]=$0 } NF { last=NR } END {
+      for (i = 1; i <= NR; i++) { if (i == last) continue
+        t = l[i]; sub(/^[[:space:]>*_#-]+/, "", t); sub(/^[Vv][Ee][Rr][Dd][Ii][Cc][Tt][[:space:]]*:[[:space:]]*/, "", t)
+        if (toupper(t) ~ /^(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) c++ }
+      print c + 0 }' "$1" 2>/dev/null)" || return 0
+  [ "${n:-0}" -eq 0 ] || printf 'stepfun door: report-extra-decision-line: %s non-terminal line(s) open with a decision word; governed consumers will refuse to record this report.\n' "$n" >&2
+}
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -375,6 +388,10 @@ main() {
     printf '\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: end with the literal heading ## Verdict on its own line, immediately followed on the next line by exactly one plain word: APPROVE, REJECT, or BLOCKED. Do not insert a blank line or Markdown styling between the heading and word. Do not give an earlier or provisional decision or a second verdict.\n'
+    # Governed consumers read ANY line that opens with a decision word (after
+    # leading > * _ # - punctuation and an optional VERDICT: label) as a second
+    # decision and refuse to record the review (#1783). Say so explicitly.
+    printf 'No other line of the report may begin with APPROVE, REJECT, REVISE or BLOCKED, including headings, bullets, bold or quoted text; when a finding must mention a decision, put other words first (for example: "Earlier wording said approve").\n'
   } > "$prompt_full"
   chmod 600 "$prompt_full" 2>/dev/null || true
 
@@ -522,6 +539,7 @@ main() {
     exit 1
   fi
   rm -f "$prompt_full"
+  extra_decision_warning "$DOOR_REPORT_OUT"
   SF_KEY=""
   exit 0
 }
