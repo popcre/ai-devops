@@ -56,6 +56,8 @@ Coordinator selects exactly these schema_version=1, route=cloud-build-branch-pus
 | popcre/designflow-frontend | popcre-albert-frontend-sandbox |
 | popcre/designflow-item-master | popcre-albert-item-sandbox |
 
+Consumer scope nuance: fresh-fetch and merge actual current develop before release; classify against its true current merge-base. Item Master inherited a shared-db subtree already byte-identical in upstream develop; excluding already-upstream bytes through that honest comparison is legitimate, while resetting a base to hide owned changes is forbidden. Any actual shared-db or stronger contributor keeps the native path refused. New manifest/consumer declarations are deployment wiring; no generalized protected-class bypass.
+
 All use .ai-devops/application-release-target.json and consumer required gate cloud-build-release-review. Backend exact accepted target stays identical. OPEN: minimal factoring of shared validation without changing behavior; no open authority/scope choice.
 
 ## 9. Ordered implementation, gated
