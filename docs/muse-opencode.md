@@ -150,3 +150,7 @@ Persistent conversation does not require a permanent process. OpenCode 1.18.12
 supports `run --session <exact-id>` in direct mode. This keeps the working Meta path,
 avoids another port, password, task, service, and crash-recovery loop, and still gives
 Codex the same everyday `new` then `ask` debate flow as GLM.
+
+The bounded denied-read recovery extension is designed in
+[Exact non-authorizing Muse denied-read recovery](muse-denied-read-recovery-design.md)
+(issue #674; recurrence parent #1783). Its multi-denial acceptance requires independent design review before implementation.
