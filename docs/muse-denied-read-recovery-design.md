@@ -8,7 +8,19 @@ Two original OpenCode Muse turns on edge-dev3 ended with process exit zero and c
 
 Current finalization permits one denied read only and rejects the noun “approval” even inside neutral preliminary text. The proposed receipt remains strictly non-authorizing: it archives exact failure evidence and opens only the existing normal same-session ask route. It creates no report or approval, replays no request, resets no accounting and asserts nothing about billing.
 
-## Proposed acceptance predicate (requires independent design APPROVE before implementation)
+## Technical decision requested
+
+Review the technical safety of the bounded recovery predicate below, not whether these documentation edits are mergeable. Return `DESIGN DECISION: APPROVE` only if this exact acceptance model is safe to implement on the verified original shapes; otherwise return `DESIGN DECISION: REVISE` with the failed invariant. This decision authorizes no installed command, original-state write or successful review acceptance. The normal report Verdict must agree with the technical decision. Coordinator retains go/no-go after reading it.
+
+## Original evidence qualified read-only before this design review
+
+Sanitized exact event ordering (the source paths, native IDs, text and raw streams remain private):
+
+- Three-denial specimen: `step_start, text, read:completed, step_finish:tool-calls, step_start, read:error, read:error, read:error, step_finish:tool-calls`.
+- Neutral-one-denial specimen: `step_start, text, read:completed, step_finish:tool-calls, step_start, read:error, step_finish:tool-calls`; preliminary text contains the exact neutral phrase `approval evidence`.
+- Independently checked on each ORIGINAL descriptor/stream/packet: all events match retained session = true; original stream SHA256 = true; original prompt SHA256 = true; all error tools/read/error strings match exactly = true; retained native process_exit=0 = true; source head matches retained head = true; installed read-only failed-invocation verifier confirms exact unsignaled original wrapper failure = true; installed read-only retained-packet verifier = true. These are observations of existing unchanged evidence, not a modified/synthetic replacement.
+
+## Proposed acceptance predicate (requires independent technical design APPROVE before implementation)
 
 Keep the original identity/binding checks for caller, repository, head, packet inventory hash, prompt hash, stream hash, invocation identity, unsignaled wrapper completion, process-exit-zero and original session byte-for-byte. Only the explicitly specified native-stream classifier below changes. Existing successful reconciliation is unchanged.
 
@@ -18,6 +30,8 @@ The native stream must satisfy all these conditions:
 2. Tool events must be complete native tool parts. Before the failure suffix, completed tool events are permitted exactly as today. Error count is bounded to one, two or three. Every error must be `read` with exact error text `The user rejected permission to use this specific tool call.`. Other tool errors, additional unknown errors and any fourth denial refuse.
 3. The error events must be consecutive, in the final open step, and occupy the entire suffix immediately before its final step_finish, which must be the last event in the stream. No text, completed tool, start/finish, successful tool output or other event may intervene after the first denial. Earlier steps may contain completed tools but no earlier errors.
 4. Preliminary text must remain non-verdict-like. Preserve the existing forbidden VERDICT/DECISION/APPROVE/APPROVED/APPROVAL/REJECT/REJECTED/REJECTION/STOP/STOPPED checks and additionally reject approving, LGTM and no-blockers verdict phrases. This remains a narrow textual denylist, not a complete natural-language meaning classifier; a failure receipt never promotes any text into approval. Permit only the precise neutral noun phrase `approval evidence` (case-insensitive, word-bounded) by removing that phrase for the existing forbidden-word check; any remaining standalone APPROVAL still refuses. In particular `VERDICT: APPROVE`, `I approve`, `Approved`, `approval granted`, `final approval`, `DECISION: ...`, rejection and stop tokens continue to refuse. No text follows the first denial regardless of wording.
+
+The observed-shape positive must include the prior successful read in its own completed step; the existing duplicate-event three-error fixture is additional coverage, not a replacement. Fourth denial, a completed tool after the final denial, any whitespace/empty text after any denial, and every malformed part/event are explicit negatives. New standalone shell suites require both the per-suite timing metadata and CI discovery registration verification.
 
 The denial boundary and tool permissions do not change. We do not make outside-copy reads available; the repair is truthful classification of an already-ended failure with exact retained proof.
 
