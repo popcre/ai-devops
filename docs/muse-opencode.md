@@ -70,7 +70,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
-  (x86_64: `1.4.7-R6101.1`). `install.sh` runs Meta's official installer when the
+  (x86_64: `1.4.9-R6297.1`). `install.sh` runs Meta's official installer when the
   pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
   SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
   ships a newer build, re-pin both files together. The model catalog appears
@@ -154,3 +154,5 @@ Codex the same everyday `new` then `ask` debate flow as GLM.
 The bounded denied-read recovery extension is designed in
 [Exact non-authorizing Muse denied-read recovery](muse-denied-read-recovery-design.md)
 (issue #674; recurrence parent #1783). Its multi-denial acceptance requires independent design review before implementation.
+
+Release provenance and live Linux stage result: [October 16 Muse Code pin verification](verification/muse-code-repin-20261016.md).
