@@ -700,6 +700,13 @@ record_review_publication() { # META REPORT; clear fence only after this succeed
   write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")"
 }
 
+record_formal_readiness() { # original managed publication only; never recovery
+  [ "$GLM_PROFILE" = formal-review ] || return 0
+  python3 "$WRAPPER_DIR/../tools/glm_formal_profile.py" emit-readiness \
+    --repo "$1" --name "$2" --caller "$CALLER" >/dev/null \
+    || warn 'Formal provider readiness was not qualified; the review is retained and pool activation remains closed.'
+}
+
 implementation_terminal() {
   case "$1" in completed|failed|aborted) return 0 ;; *) return 1 ;; esac
 }
@@ -1808,7 +1815,9 @@ cmd_new() {
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
-  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
+  record_review_publication "$mp" "$report" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
+  record_formal_readiness "$root" "$name"
+  clear_remote_turn_pending "$mp" || die 'GLM final metadata could not be cleared; retain the original session.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
@@ -1970,7 +1979,9 @@ $REVIEW_HEAD only."
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid" "$mp")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
-  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
+  record_review_publication "$mp" "$report" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
+  record_formal_readiness "$root" "$name"
+  clear_remote_turn_pending "$mp" || die 'GLM final metadata could not be cleared; retain the original session.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }

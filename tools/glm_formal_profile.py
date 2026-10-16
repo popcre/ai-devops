@@ -16,6 +16,8 @@ import sys
 import subprocess
 import io
 import tarfile
+import time
+from datetime import datetime, timezone
 
 # Audited actual formal wrapper, evidence boundary, accounting and shared
 # governance dependencies. Full release is copied, but unrelated provider/app
@@ -25,7 +27,7 @@ CRITICAL_FILES = frozenset({
     "bin/ai-glm", "bin/ai-review-packet", "bin/ai-review-sandbox",
     "bin/ai-review-preflight", "bin/ai-review-lifecycle", "bin/ai-review-scoreboard",
     "bin/ai-task-gates", "bin/ai-process-supervisor", "bin/ai-review-code-only.py",
-    "tools/glm_formal_profile.py", "tools/glm_output_recovery.py",
+    "tools/glm_formal_profile.py", "tools/glm_output_recovery.py", "tools/glm_credit.py",
     "tools/reviewer_event_guard.sh", "tools/reviewer_events.py", "tools/reviewer_maintenance.py",
     "tools/reviewer_admission.py", "tools/reviewer_credit_stream.py",
     "tools/review_action_profile.py", "tools/application_workflow_target.py",
@@ -65,6 +67,7 @@ def paths(home):
     return {"base": base, "config": base / "xdg/opencode",
             "password": base / "server-password", "receipt": base / "origin.json",
             "settings": base / "profile.json", "activation": base / "activation.json",
+            "readiness": base / "provider-readiness.json",
             "runtimes": base / "runtimes",
             "state": home / ".local/state/ai-devops/glm-formal",
             "data": home / ".local/share/ai-devops/opencode-formal",
@@ -424,6 +427,11 @@ def launch(home):
             and digest(p["launcher"]) == settings["launcher_sha256"], "formal launcher drift")
     require(bool(os.environ.get("ZAI_API_KEY")), "formal coding-plan credential missing")
     environment = dict(os.environ)
+    # Match the established general launcher: the pinned built-in
+    # zai-coding-plan provider reads ZHIPU_API_KEY, never ZAI_API_KEY.
+    environment["ZHIPU_API_KEY"] = environment.pop("ZAI_API_KEY")
+    from glm_credit import fingerprint
+    credential_profile = fingerprint(environment["ZHIPU_API_KEY"])
     environment.update({"XDG_CONFIG_HOME": str(p["config"].parent),
                         "XDG_DATA_HOME": str(p["data"]),
                         "XDG_STATE_HOME": str(p["state"] / "opencode"),
@@ -436,6 +444,7 @@ def launch(home):
     for key in ["OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR", "OPENCODE_PLUGIN_META_FILE"]:
         environment.pop(key, None)
     receipt = {"version": 1, "profile": "formal-review", "pid": os.getpid(),
+               "credential_profile_scope": credential_profile,
                "start": process_start(os.getpid()), "uid": os.getuid(),
                "binary": settings["binary"], "pin": settings["pin"], "port": settings["port"],
                "project_config_disabled": True, "default_plugins_disabled": True,
@@ -501,11 +510,13 @@ def installer_owner(repo, home):
     require(common(script.parent) == common(repo), "installer is outside the managed repository")
 
 
-def profile_health(home):
+def _profile_get(home, path, limit):
     import base64
     import urllib.request
     p = paths(home)
     before = origin(home)
+    require(path == "/global/health" or re.fullmatch(r"/api/session/ses_[A-Za-z0-9]+/message\?limit=1", path),
+            "unsupported formal readiness endpoint")
     with os.fdopen(os.open(p["password"], os.O_RDONLY | os.O_NOFOLLOW), "rb") as stream:
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
@@ -515,14 +526,197 @@ def profile_health(home):
                                  item.st_size, item.st_mtime_ns, item.st_ctime_ns)
         require(len(password) <= 4096 and identity(os.fstat(stream.fileno())) == identity(info)
                 and identity(p["password"].lstat()) == identity(info), "loopback credential changed")
-    request = urllib.request.Request(f"http://127.0.0.1:{before['port']}/global/health",
+    request = urllib.request.Request(f"http://127.0.0.1:{before['port']}" + path,
               headers={"Authorization": "Basic " + base64.b64encode(b"opencode:" + password).decode()})
     # No inherited HTTP proxy may receive the loopback credential.
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=3) as response:
-        require(response.status == 200 and json.loads(response.read(4096)).get("healthy") is True,
-                "formal profile is not healthy")
+        raw = response.read(limit + 1)
+        require(response.status == 200 and len(raw) <= limit, "formal readiness endpoint failed")
+        body = json.loads(raw)
     require(before == origin(home), "origin changed during health qualification")
+    return before, body
+
+
+def profile_health(home):
+    before, body = _profile_get(home, "/global/health", 4096)
+    require(body.get("healthy") is True, "formal profile is not healthy")
     return before
+
+
+def _native_completion(home, session):
+    require(type(session) is str and re.fullmatch(r"ses_[A-Za-z0-9]+", session), "invalid own native session")
+    before, body = _profile_get(home, f"/api/session/{session}/message?limit=1", 8 * 1024**2)
+    require(type(body) is dict and type(body.get("data")) is list and len(body["data"]) == 1,
+            "own native completed message unavailable")
+    return before, body["data"][0]
+
+
+def _readiness_owner(settings):
+    """Only the actual pinned managed wrapper may publish observed completion."""
+    argv = Path(f"/proc/{os.getppid()}/cmdline").read_bytes().split(b"\0")
+    wrapper = Path(settings["repo"]) / "bin/ai-glm"
+    require(len(argv) > 1 and b"-c" not in argv
+            and Path(os.fsdecode(argv[1])).resolve() == wrapper
+            and digest(wrapper) == settings["source_hashes"][str(wrapper)],
+            "readiness publisher is not the pinned managed wrapper")
+
+
+def _readiness_json(path):
+    require(path.parent.resolve() == path.parent, "noncanonical completion custody")
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as stream:
+        before = os.fstat(stream.fileno())
+        require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid() and before.st_nlink == 1
+                and before.st_mode & 0o077 == 0 and before.st_size <= 8 * 1024**2,
+                "unsafe completion custody")
+        raw = stream.read(8 * 1024**2 + 1)
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
+                                 info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        require(len(raw) <= 8 * 1024**2 and identity(before) == identity(os.fstat(stream.fileno()))
+                == identity(path.lstat()), "completion custody mutated")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "duplicate completion field")
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique,
+                      parse_constant=lambda _: require(False, "nonfinite completion"))
+
+
+def _readiness_evidence(home, repository, name, caller, *, now, publishing=True):
+    """Derive OWN metadata and verify existing native/report/event custody."""
+    import reviewer_events
+    require(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name or "")
+            and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", caller or ""), "invalid readiness identity")
+    repository = Path(repository).resolve()
+    remote = subprocess.run(["git", "-C", str(repository), "config", "--get", "remote.origin.url"],
+                            capture_output=True, text=True).stdout.strip()
+    rid = hashlib.sha256((str(repository) + "\n" + remote).encode()).hexdigest()[:12]
+    p = paths(home)
+    meta_path = p["state"] / "sessions" / rid / f"{caller}--{name}.json"
+    meta = _readiness_json(meta_path)
+    require(meta.get("schema_version") == 2 and meta.get("type") == "review"
+            and meta.get("name") == name and meta.get("caller") == caller
+            and meta.get("repository_root") == str(repository) and meta.get("repository_id") == rid
+            and meta.get("provider") == "zai-coding-plan" and meta.get("model") == "glm-5.3"
+            and meta.get("agent") == "glm-review", "wrong formal completion identity")
+    completed = meta.get("last_completed_turn", {})
+    turn = meta.get("remote_turn", {}) if publishing else {k: v for k, v in completed.items()
+                                                          if k not in ("report", "report_sha256")}
+    require({k: v for k, v in completed.items() if k not in ("report", "report_sha256")} == turn
+            and turn.get("state") == "completed-unpublished" and not turn.get("recovery_state"),
+            "completion is not freshly published original invocation")
+    deadline = turn.get("deadline_epoch")
+    require(type(deadline) is int and now < deadline, "original completion deadline expired")
+    started = datetime.fromisoformat(turn.get("started_at", "").replace("Z", "+00:00"))
+    require(started.tzinfo is not None and started.timestamp() <= now, "invalid original start")
+    run_id = turn.get("original_invocation_id", "")
+    require(re.fullmatch(r"[0-9a-f]{32}", run_id), "missing original invocation custody")
+    live = origin(home)
+    credential = private_read(p["receipt"]).get("credential_profile_scope", "")
+    quota_scope = meta.get("quota_result", {}).get("credential_profile_scope")
+    require(re.fullmatch(r"sha256:[0-9a-f]{64}", credential)
+            and (quota_scope is None or quota_scope == credential), "provider credential admission changed")
+    protocol = turn.get("own_output_recovery", {})
+    require(type(protocol.get("version")) is int and protocol["version"] == 1
+            and protocol.get("origin") == live, "completion origin/protocol changed")
+    require(turn.get("own_output_state", {}).get("phase") in (None, "submitted"),
+            "intermediate or unknown corrective submission cannot qualify readiness")
+    terminal_path = meta_path.with_suffix(".terminal.json")
+    require(turn.get("terminal_path") == str(terminal_path)
+            and digest(terminal_path) == turn.get("terminal_sha256"), "terminal custody changed")
+    terminal = _readiness_json(terminal_path)
+    model = terminal.get("model", {})
+    require(type(model) is dict and set(model) <= {"id", "providerID", "variant"}
+            and ("variant" not in model or (type(model["variant"]) is str
+                 and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", model["variant"]))),
+            "unexpected native model identity schema")
+    require(terminal.get("finish") == "stop" and not terminal.get("error")
+            and terminal.get("id") and terminal["id"] != turn.get("previous_message_id")
+            and terminal.get("model", {}).get("id") == "glm-5.3"
+            and terminal.get("model", {}).get("providerID") == "zai-coding-plan"
+            and terminal.get("agent") == "glm-review", "no successful native formal completion")
+    session = meta.get("opencode_session_id")
+    require(type(session) is str and re.fullmatch(r"ses_[A-Za-z0-9]+", session), "invalid own native session")
+    if publishing:
+        observed_origin, native = _native_completion(home, session)
+        require(observed_origin == live and native == terminal, "own-session native completion differs from custody")
+    head = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+    require(head == turn.get("head") == meta.get("head"), "completed source moved")
+    packet_dir = Path(protocol.get("instruction_asset", "")).parent
+    require(packet_dir.resolve() == packet_dir and packet_dir.is_dir()
+            and digest(protocol["instruction_asset"]) == protocol.get("instruction_sha256"),
+            "completed instructions moved")
+    settings = private_read(p["settings"])
+    subprocess.run([str(Path(settings["repo"]) / "bin/ai-review-packet"), "verify", str(packet_dir)],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    require((packet_dir / "MANIFEST.sha256").read_text().strip() == turn.get("packet_sha256"),
+            "completed packet changed")
+    report = Path(completed.get("report", ""))
+    require(report.resolve() == report and report.parent == repository / ".ai/reviews"
+            and digest(report) == completed.get("report_sha256"), "published report changed")
+    events = home / ".local/state/ai-devops/reviewer-events"
+    require(Path(reviewer_events.location()) == events, "alternate event custody cannot qualify activation")
+    invocation = reviewer_events.invocation(events, "glm", run_id, active=publishing)
+    require(invocation.get("caller") == caller and invocation.get("head") == head
+            and Path(invocation.get("repo", "")).resolve() == repository,
+            "original invocation event identity changed")
+    refs = reviewer_events.verify_reports(events, "glm", run_id)
+    require(refs and all(not ref.endswith("/evidence-lost") for ref in refs), "published event custody missing")
+    event_hashes = [digest(events / "evidence" / ref.split("/")[0] / (ref.split("/")[1] + ".report.json"))
+                    for ref in refs]
+    return {"repository": str(repository), "repository_id": rid, "name": name, "caller": caller,
+            "session_id": meta["opencode_session_id"], "run_id": run_id, "head": head,
+            "base": turn.get("base"), "packet_sha256": turn["packet_sha256"],
+            "instructions_sha256": protocol["instruction_sha256"], "started_at": turn["started_at"],
+            "deadline_epoch": deadline, "terminal_id": terminal["id"],
+            "terminal_sha256": turn["terminal_sha256"], "report_sha256": completed["report_sha256"],
+            "event_custody_sha256": event_hashes, "origin": live,
+            "credential_profile_scope": credential}
+
+
+def emit_readiness(home, repository, name, caller):
+    p = paths(home); settings = private_read(p["settings"])
+    _readiness_owner(settings)
+    now = int(time.time())
+    facts = _readiness_evidence(home, repository, name, caller, now=now)
+    credential = private_read(p["receipt"]).get("credential_profile_scope", "")
+    require(re.fullmatch(r"sha256:[0-9a-f]{64}", credential), "unbound provider credential profile")
+    record = {"version": 1, "profile": "formal-review", "provider": "zai-coding-plan", "model": "glm-5.3",
+              "runtime_source_sha": settings["release_sha"], "settings_sha256": digest(p["settings"]),
+              "credential_profile_scope": credential, "observed_at": now,
+              "expires_at": min(now + 300, facts["deadline_epoch"]), "facts": facts}
+    require(origin(home) == facts["origin"], "origin changed before readiness publication")
+    if p["readiness"].exists() or p["readiness"].is_symlink():
+        old = private_read(p["readiness"])
+        if old.get("facts", {}).get("run_id") == facts["run_id"]:
+            require(old.get("facts") == facts and old.get("credential_profile_scope") == credential,
+                    "same invocation cannot replace its provider-success evidence")
+            return {"provider_success_observed": True, "expires_at": old["expires_at"], "unchanged": True}
+    atomic(p["readiness"], json.dumps(record, sort_keys=True).encode())
+    return {"provider_success_observed": True, "expires_at": record["expires_at"]}
+
+
+def verify_readiness(home, settings, current):
+    p = paths(home); record = private_read(p["readiness"]); now = int(time.time())
+    require(set(record) == {"version", "profile", "provider", "model", "runtime_source_sha",
+            "settings_sha256", "credential_profile_scope", "observed_at", "expires_at", "facts"}
+            and type(record["version"]) is int and record["version"] == 1
+            and record["profile"] == "formal-review" and record["provider"] == "zai-coding-plan"
+            and record["model"] == "glm-5.3" and record["runtime_source_sha"] == settings["release_sha"]
+            and record["settings_sha256"] == digest(p["settings"]), "wrong provider readiness binding")
+    require(type(record["observed_at"]) is int and type(record["expires_at"]) is int
+            and record["observed_at"] <= now < record["expires_at"]
+            and record["expires_at"] <= record["observed_at"] + 300
+            and record["expires_at"] <= record["facts"]["deadline_epoch"], "provider readiness expired")
+    require(record["facts"]["origin"] == current
+            and record["credential_profile_scope"] == private_read(p["receipt"]).get("credential_profile_scope"),
+            "provider readiness origin/credential changed")
+    facts = record["facts"]
+    require(_readiness_evidence(home, facts["repository"], facts["name"], facts["caller"],
+                               now=now, publishing=False) == facts,
+            "provider completion custody changed since observation")
+    return record
 
 
 def activate(repo, home):
@@ -535,16 +729,18 @@ def activate(repo, home):
     require(os.access(Path(settings["repo"]) / "bin/ai-glm", os.X_OK), "pinned formal wrapper is not executable")
     require(runtime["critical"] == critical_inventory(repo), "profile code differs from installed release")
     ready = profile_health(home)
+    readiness = verify_readiness(home, settings, ready)
     record = {"version": 1, "profile": "formal-review", "installed": installed,
               "installed_checkout": str(repo), "runtime": settings["repo"],
               "runtime_source_sha": runtime["source_sha"], "settings_sha256": digest(p["settings"]),
-              "origin": ready, "runner_sha256": digest(Path(settings["repo"]) / "bin/ai-glm")}
+              "origin": ready, "provider_readiness": readiness,
+              "runner_sha256": digest(Path(settings["repo"]) / "bin/ai-glm")}
     if p["activation"].exists() or p["activation"].is_symlink():
         old = private_read(p["activation"])
         activation_identity(old, p, settings)
         installed_compatible(old, repo)
-        require({key: value for key, value in old.items() if key not in ("installed", "origin")}
-                == {key: value for key, value in record.items() if key not in ("installed", "origin")},
+        require({key: value for key, value in old.items() if key not in ("installed", "origin", "provider_readiness")}
+                == {key: value for key, value in record.items() if key not in ("installed", "origin", "provider_readiness")},
                 "active profile code/config cannot be overwritten; explicit protected upgrade required")
         if old == record:
             return {"activated": True, "unchanged": True}
@@ -556,7 +752,7 @@ def activate(repo, home):
 
 def activation_identity(record, p, settings):
     require(set(record) == {"version", "profile", "installed", "installed_checkout", "runtime",
-                           "runtime_source_sha", "settings_sha256", "origin", "runner_sha256"}
+                           "runtime_source_sha", "settings_sha256", "origin", "provider_readiness", "runner_sha256"}
             and type(record["version"]) is int and record["version"] == 1
             and record["profile"] == "formal-review", "invalid activation record")
     runtime = Path(record["runtime"])
@@ -620,12 +816,14 @@ def upgrade_check(repo, home, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["install", "launch", "origin", "settings", "instructions", "activate", "route", "upgrade-check"])
+    parser.add_argument("operation", choices=["install", "launch", "origin", "settings", "instructions", "activate", "route", "upgrade-check", "emit-readiness"])
     parser.add_argument("--repo")
     parser.add_argument("--port", type=int, default=4097)
     parser.add_argument("--snapshot")
     parser.add_argument("--packet")
     parser.add_argument("--target")
+    parser.add_argument("--name")
+    parser.add_argument("--caller")
     args = parser.parse_args()
     home = Path.home()
     if args.operation == "install":
@@ -643,6 +841,9 @@ def main():
     elif args.operation == "activate":
         require(bool(args.repo), "installed repository required")
         result = activate(args.repo, home)
+    elif args.operation == "emit-readiness":
+        require(bool(args.repo), "original repository required")
+        result = emit_readiness(home, args.repo, args.name, args.caller)
     elif args.operation == "upgrade-check":
         require(bool(args.repo), "installed repository required")
         result = upgrade_check(args.repo, home, args.target)

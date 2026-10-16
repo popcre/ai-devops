@@ -219,6 +219,20 @@ def isolated(args):
         wait(lambda: shared["phase"] >= 4 + page_count and next((message for message in api("GET", f"/api/session/{session}/message?limit=1")["data"]
                            if message.get("finish") == "stop"), None))
         final = api("GET", f"/api/session/{session}/message?limit=200")["data"]
+        native_stops = [message for message in final if message.get("finish") == "stop"]
+        print(json.dumps({"actual_native_completion_identity": [
+            {key: message.get(key) for key in ("id", "sessionID", "sessionId", "session_id", "agent", "model", "finish", "role")}
+            for message in native_stops]}, sort_keys=True))
+        assert native_stops and all(message.get("agent") == "glm-review"
+            and message.get("model", {}).get("providerID") == "fixture"
+            and message.get("model", {}).get("id") == "test"
+            and message.get("id") and not message.get("error") for message in native_stops), \
+            "native completion identity differs from readiness protocol"
+        own_latest = api("GET", f"/api/session/{session}/message?limit=1")["data"]
+        assert len(own_latest) == 1 and own_latest[0] == native_stops[0]
+        binary_bytes = Path(args.binary).read_bytes()
+        assert re.search(rb"zai-coding-plan.{0,500}ZHIPU_API_KEY", binary_bytes)
+        assert b"ZAI_API_KEY" not in binary_bytes, "pinned provider credential table changed"
         mirror_reads = [tool for message in final for tool in message.get("content", [])
                         if tool.get("type") == "tool" and tool.get("state", {}).get("input", {}).get("path") == shared["mirror"]]
         assert len(mirror_reads) == page_count and all(tool["state"]["status"] == "completed" for tool in mirror_reads)
@@ -241,6 +255,8 @@ def isolated(args):
         api("POST", f"/api/session/{probe}/prompt", {"prompt": {"text": "FOREIGN DENIAL PROBE invented only"}})
         denied = wait(lambda: (api("GET", f"/api/session/{probe}/permission") or {}).get("data"))
         assert len(denied) == 1 and denied[0]["action"] == "external_directory"
+        foreign_latest = api("GET", f"/api/session/{probe}/message?limit=1")["data"]
+        assert len(foreign_latest) == 1 and foreign_latest[0] != own_latest[0]
         probe_messages = api("GET", f"/api/session/{probe}/message?limit=200")["data"]
         assert not any(tool.get("state", {}).get("outputPaths") for message in probe_messages for tool in message.get("content", []))
         api("POST", f"/api/session/{probe}/permission/{denied[0]['id']}/reply",
@@ -255,7 +271,9 @@ def isolated(args):
                   "original_page_truncated": mirror["original_page_truncated"],
                   "sibling_other_session_permission_rejected": True, "production_origin_issued": False,
                   "config_generated_top_entries": sorted(path.name for path in config.iterdir()),
-                  "fake_transport_requests": len(calls)}
+                  "fake_transport_requests": len(calls), "native_completion_identity_verified": True,
+                  "pinned_coding_plan_credential_variable": "ZHIPU_API_KEY"}
+        result["native_own_endpoint_and_foreign_identity_distinct"] = True
         print(json.dumps(result, sort_keys=True))
     finally:
         process.terminate()

@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import glm_formal_profile as profile
 import glm_output_recovery as recovery
+original_readiness_owner = profile._readiness_owner
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "formal profile is explicitly Linux-only")
@@ -267,6 +268,190 @@ class FormalProfile(unittest.TestCase):
             probe.bind(("127.0.0.1", 0))
             self.port = probe.getsockname()[1]
 
+    def test_launch_uses_pinned_provider_credential_name_without_original_alias(self):
+        profile.install(self.repo, self.home, self.port)
+        previous_umask = os.umask(0o077)
+        try:
+            with mock.patch.dict(os.environ, {"ZAI_API_KEY": "public-invented-fixture-only",
+                                              "ZHIPU_API_KEY": "wrong-inherited-fixture-only"}, clear=True), \
+                 mock.patch.object(profile.os, "execve") as execute:
+                profile.launch(self.home)
+            environment = execute.call_args.args[2]
+            self.assertEqual(environment["ZHIPU_API_KEY"], "public-invented-fixture-only")
+            self.assertNotIn("ZAI_API_KEY", environment)
+            self.assertEqual(environment["OPENCODE_DISABLE_PROJECT_CONFIG"], "true")
+            profile.paths(self.home)["receipt"].unlink()
+            with mock.patch.dict(os.environ, {"ZHIPU_API_KEY": "unadmitted-alias-only"}, clear=True), \
+                 mock.patch.object(profile.os, "execve") as execute:
+                with self.assertRaises(ValueError): profile.launch(self.home)
+                execute.assert_not_called()
+            self.assertFalse(profile.paths(self.home)["receipt"].exists())
+        finally:
+            os.umask(previous_umask)
+
+    def readiness_fixture(self):
+        """Invented custody only; no native/production origin is issued."""
+        import reviewer_events
+        profile.install(self.repo, self.home, self.port)
+        p = profile.paths(self.home)
+        settings = profile.private_read(p["settings"])
+        now = int(time.time())
+        origin = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented"}
+        repository = self.repo
+        rid = hashlib.sha256((str(repository) + "\n").encode()).hexdigest()[:12]
+        name, caller, run = "invented-readiness", "codex", "e" * 32
+        metadata = p["state"] / "sessions" / rid / (caller + "--" + name + ".json")
+        metadata.parent.mkdir(parents=True, mode=0o700)
+        terminal = metadata.with_suffix(".terminal.json")
+        native = {"finish": "stop", "id": "msg_new", "agent": "glm-review",
+                  "model": {"id": "glm-5.3", "providerID": "zai-coding-plan"},
+                  "content": [{"type": "text", "text": "REJECT fixture review"}]}
+        profile.atomic(terminal, json.dumps(native).encode())
+        packet = repository / ".ai/reviews/packets/fixture"
+        packet.mkdir(parents=True)
+        instruction = packet / "FORMAL-INSTRUCTIONS.txt"
+        instruction.write_text("invented original instructions")
+        (packet / "MANIFEST.sha256").write_text("c" * 64 + "\n")
+        report = repository / ".ai/reviews/fixture-review.md"
+        report.write_text("Fixture completed review: REJECT")
+        turn = {"state": "completed-unpublished", "started_at": datetime.datetime.fromtimestamp(now-5, datetime.timezone.utc).isoformat(),
+                "deadline_epoch": now+600, "previous_message_id": "msg_old", "original_invocation_id": run,
+                "head": self.release, "base": self.release, "packet_sha256": "c"*64,
+                "terminal_path": str(terminal), "terminal_sha256": profile.digest(terminal),
+                "own_output_recovery": {"version": 1, "origin": origin, "instruction_asset": str(instruction),
+                                        "instruction_sha256": profile.digest(instruction)}}
+        meta = {"schema_version": 2, "type": "review", "name": name, "caller": caller,
+                "repository_root": str(repository), "repository_id": rid, "provider": "zai-coding-plan",
+                "model": "glm-5.3", "agent": "glm-review", "head": self.release,
+                "opencode_session_id": "ses_fixture", "remote_turn": turn,
+                "last_completed_turn": {**turn, "report": str(report), "report_sha256": profile.digest(report)}}
+        profile.atomic(metadata, json.dumps(meta).encode())
+        profile.atomic(p["receipt"], json.dumps({"credential_profile_scope": "sha256:"+"a"*64}).encode())
+        events = self.home / ".local/state/ai-devops/reviewer-events"
+        evidence = events / "evidence" / run / (("d"*64)+".report.json")
+        evidence.parent.mkdir(parents=True)
+        evidence.write_text('{"fixture_only":true}')
+        original_run = subprocess.run
+        def run_command(argv, **kwargs):
+            if str(argv[0]).endswith("/bin/ai-review-packet"):
+                return subprocess.CompletedProcess(argv, 0)
+            return original_run(argv, **kwargs)
+        patches = [mock.patch.object(profile, "origin", return_value=origin),
+                   mock.patch.object(profile, "_readiness_owner"),
+                   mock.patch.object(profile, "_native_completion", return_value=(origin, native)),
+                   mock.patch.object(profile.subprocess, "run", side_effect=run_command),
+                   mock.patch.object(reviewer_events, "location", return_value=events),
+                   mock.patch.object(reviewer_events, "invocation", return_value={"caller": caller, "head": self.release, "repo": str(repository)}),
+                   mock.patch.object(reviewer_events, "verify_reports", return_value=[run+"/"+"d"*64])]
+        for patcher in patches:
+            patcher.start(); self.addCleanup(patcher.stop)
+        return p, settings, origin, now, metadata, meta, terminal, native, instruction, report, name, caller
+
+    def test_fresh_native_reject_verdict_can_qualify_then_expiry_and_custody_deny(self):
+        p, settings, origin, now, metadata, meta, terminal, native, instruction, report, name, caller = self.readiness_fixture()
+        with mock.patch.object(profile.time, "time", return_value=now):
+            profile.emit_readiness(self.home, self.repo, name, caller)
+            first = p["readiness"].read_bytes()
+            proof = profile.verify_readiness(self.home, settings, origin)
+            self.assertEqual(proof["facts"]["terminal_id"], "msg_new")
+            self.assertEqual(proof["expires_at"], now+300)
+            with mock.patch.object(profile.time, "time", return_value=now+60):
+                repeated = profile.emit_readiness(self.home, self.repo, name, caller)
+                self.assertTrue(repeated["unchanged"])
+                self.assertEqual(repeated["expires_at"], now+300)
+                self.assertEqual(first, p["readiness"].read_bytes())
+            # Normal metadata cleanup does not manufacture or refresh success.
+            del meta["remote_turn"]; profile.atomic(metadata, json.dumps(meta).encode())
+            self.assertEqual(profile.verify_readiness(self.home, settings, origin), proof)
+            with self.assertRaises(ValueError): profile.emit_readiness(self.home, self.repo, name, caller)
+            self.assertEqual(first, p["readiness"].read_bytes())
+        with mock.patch.object(profile.time, "time", return_value=now+301):
+            with self.assertRaises(ValueError): profile.verify_readiness(self.home, settings, origin)
+        with mock.patch.object(profile.time, "time", return_value=now):
+            report.write_text("changed published report")
+            with self.assertRaises(ValueError): profile.verify_readiness(self.home, settings, origin)
+
+    def test_readiness_native_identity_and_intermediate_refusals(self):
+        fixture = self.readiness_fixture()
+        p, settings, origin, now, metadata, meta, terminal, native, instruction, report, name, caller = fixture
+        for key, value in [("finish", "error"), ("id", "msg_old"),
+                           ("agent", "implement"), ("error", {"type":"auth"}),
+                           ("model", {"id":"wrong", "providerID":"zai-coding-plan"})]:
+            changed = {**native, key:value}; profile.atomic(terminal, json.dumps(changed).encode())
+            candidate = copy.deepcopy(meta)
+            candidate["remote_turn"]["terminal_sha256"] = profile.digest(terminal)
+            candidate["last_completed_turn"]["terminal_sha256"] = profile.digest(terminal)
+            profile.atomic(metadata, json.dumps(candidate).encode())
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                profile._readiness_evidence(self.home, self.repo, name, caller, now=now)
+        profile.atomic(terminal, json.dumps(native).encode())
+        for phase in ["mirrored", "reserved", "intermediate-retained", "submitting"]:
+            candidate = copy.deepcopy(meta)
+            candidate["remote_turn"]["own_output_state"] = {"phase":phase}
+            candidate["last_completed_turn"]["own_output_state"] = {"phase":phase}
+            profile.atomic(metadata, json.dumps(candidate).encode())
+            with self.subTest(phase=phase), self.assertRaises(ValueError):
+                profile._readiness_evidence(self.home, self.repo, name, caller, now=now)
+        profile.atomic(metadata, json.dumps(meta).encode())
+        for observed in [{**native, "id":"msg_foreign"}, {"id":"msg_user", "content":[]}, {**native, "finish":"error"}]:
+            with mock.patch.object(profile, "_native_completion", return_value=(origin, observed)), self.assertRaises(ValueError):
+                profile._readiness_evidence(self.home, self.repo, name, caller, now=now)
+        with self.assertRaises(ValueError): profile._readiness_evidence(self.home, self.repo, name, caller, now=now+601)
+        with self.assertRaises(ValueError): profile._readiness_evidence(self.home, self.repo, "../forged", caller, now=now)
+        instruction.write_text("changed instruction bytes")
+        with self.assertRaises(ValueError): profile._readiness_evidence(self.home, self.repo, name, caller, now=now)
+
+    def test_readiness_wrong_custody_scope_replay_or_forged_publisher_denied(self):
+        import reviewer_events
+        p, settings, origin, now, metadata, meta, terminal, native, instruction, report, name, caller = self.readiness_fixture()
+        # The real parent is the unit-test runner, never an approved publisher.
+        with mock.patch.object(profile, "_readiness_owner", wraps=original_readiness_owner):
+            with self.assertRaises(ValueError): profile.emit_readiness(self.home, self.repo, name, caller)
+        for field, value in [("type", "implementation"), ("caller", "foreign"),
+                             ("provider", "fixture"), ("head", "0"*40),
+                             ("repository_id", "forged"), ("quota_result", {"credential_profile_scope":"sha256:"+"b"*64})]:
+            candidate = {**meta, field:value}; profile.atomic(metadata, json.dumps(candidate).encode())
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                profile._readiness_evidence(self.home, self.repo, name, caller, now=now)
+        profile.atomic(metadata, json.dumps(meta).encode())
+        with mock.patch.object(reviewer_events, "verify_reports", return_value=[]):
+            with self.assertRaises(ValueError): profile.emit_readiness(self.home, self.repo, name, caller)
+        profile.atomic(p["receipt"], json.dumps({"credential_profile_scope":"sha256:"+"b"*64}).encode())
+        changed = copy.deepcopy(meta)
+        changed["quota_result"]={"credential_profile_scope":"sha256:"+"a"*64}
+        profile.atomic(metadata, json.dumps(changed).encode())
+        with self.assertRaises(ValueError): profile.emit_readiness(self.home, self.repo, name, caller)
+        self.assertFalse(p["readiness"].exists())
+
+    def test_native_lookup_is_exact_own_supported_endpoint(self):
+        with mock.patch.object(profile, "_profile_get", return_value=({"origin":"invented"}, {"data":[{"id":"msg_new"}]})) as get:
+            self.assertEqual(profile._native_completion(self.home, "ses_own"), ({"origin":"invented"},{"id":"msg_new"}))
+            get.assert_called_once_with(self.home, "/api/session/ses_own/message?limit=1", 8*1024**2)
+            with self.assertRaises(ValueError): profile._native_completion(self.home, "ses_own/../foreign")
+            self.assertEqual(get.call_count,1)
+        with mock.patch.object(profile, "_profile_get", return_value=({}, {"data":[{},{}]})):
+            with self.assertRaises(ValueError): profile._native_completion(self.home, "ses_own")
+
+    def test_readiness_json_is_private_stable_and_strict(self):
+        target = self.root / "completion.json"
+        profile.atomic(target, b'{"id":1,"id":2}')
+        with self.assertRaises(ValueError): profile._readiness_json(target)
+        profile.atomic(target, b'{"id":NaN}')
+        with self.assertRaises(ValueError): profile._readiness_json(target)
+        profile.atomic(target, b'{}'); target.chmod(0o644)
+        with self.assertRaises(ValueError): profile._readiness_json(target)
+        target.chmod(0o600)
+        linked = self.root / "linked"; os.link(target, linked)
+        with self.assertRaises(ValueError): profile._readiness_json(target)
+        linked.unlink(); target.unlink(); target.symlink_to(self.root/"missing")
+        with self.assertRaises(OSError): profile._readiness_json(target)
+
+    def test_installer_activation_health_without_provider_success_refused(self):
+        profile.install(self.repo, self.home, self.port)
+        with mock.patch.object(profile, "installer_owner"), mock.patch.object(profile, "profile_health", return_value={}):
+            with self.assertRaises(FileNotFoundError): profile.activate(self.repo, self.home)
+        self.assertFalse(profile.paths(self.home)["activation"].exists())
+
     def test_isolated_install_preserves_general_and_never_activates(self):
         result = profile.install(self.repo, self.home, self.port)
         p = profile.paths(self.home)
@@ -309,6 +494,7 @@ class FormalProfile(unittest.TestCase):
         ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
         with mock.patch.object(profile, "installer_owner") as issuer, \
              mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "verify_readiness", return_value={"fixture_only": True}), \
              mock.patch.object(profile, "origin", return_value=ready):
             self.assertTrue(profile.activate(self.repo, self.home)["activated"])
             issuer.assert_called_once()
@@ -360,6 +546,7 @@ class FormalProfile(unittest.TestCase):
         profile.install(self.repo, self.home, self.port)
         ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
         with mock.patch.object(profile, "installer_owner"), mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "verify_readiness", return_value={"fixture_only": True}), \
              mock.patch.object(profile, "origin", return_value=ready):
             profile.activate(self.repo, self.home)
             (self.repo / "README.md").write_text("unrelated public documentation")
@@ -376,6 +563,7 @@ class FormalProfile(unittest.TestCase):
         profile.install(self.repo, self.home, self.port)
         ready = {"sha256": "f" * 64, "port": self.port, "pin": "1.18.12", "managed_directory": "invented-only"}
         with mock.patch.object(profile, "installer_owner"), mock.patch.object(profile, "profile_health", return_value=ready), \
+             mock.patch.object(profile, "verify_readiness", return_value={"fixture_only": True}), \
              mock.patch.object(profile, "origin", return_value=ready):
             profile.activate(self.repo, self.home)
             for name in ["bin/ai-muse", "bin/ai-glm"]:

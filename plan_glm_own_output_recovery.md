@@ -4,6 +4,8 @@
 
 Owner: Oracle parent #24 coordinator; source lane Codex /root/s03. Existing defect [#1791](https://github.com/popcre/ai-devops/issues/1791). Root approved bounded B–D source architecture and explicit activation with immutable reviewed runtime copy. First afadf382 SECURITY review REJECT is retained: declared moving base had advanced to sibling #1793; unconditional formal selection preceded installation readiness. Rebased onto immutable b20da460df6b3c18410723a50899a7ed7c586413, preserving sibling work, and substantively fixed activation. No installation or real GLM original-capability proof occurred. Fresh final-head verification/review/shipment remain open; source preparation is not accepted repair.
 
+Second SECURITY REJECT at509b63a2ba781454d69ac06da004fe8d722c773d is also preserved: DeepSeek20261016T041913-3614163-10286,347s, report SHA3ba65b4475b79ead77b791190e12f02c12e860ad77575d8ec25542890008135a, [issue receipt](https://github.com/popcre/ai-devops/issues/1791#issuecomment-6208059189). Real High was missing established ZAI_API_KEY→ZHIPU_API_KEY translation/unset; Medium was global health without actual formal provider-success readiness. Root approved substantive corrections below. Pre-freeze35 focused checks pass; actual pinned fixture measured native completion has no SID field and model.variant=default. Session binding uses only supported own-session GET, not a fabricated native field. No new paid/provider call or installed activation occurred.
+
 | Step | State, October 15, 2026 EDT | Evidence |
 |---|---|---|
 | A diagnostic and causal proof | source prepared; final regression open | metadata-only exact caller/session diagnostic; prior 399-test run predates final edits |
@@ -13,6 +15,16 @@ Owner: Oracle parent #24 coordinator; source lane Codex /root/s03. Existing defe
 | E review, shipping, installation, original capability | open | #1791 live-proof checklist remains unchecked |
 
 Next: freeze candidate, run final exact-head relevant suites when the same-host CI collision gate clears, then obtain assigned non-GLM SECURITY review. Existing shared service and old sessions remain untouched. [Coordination baton](HANDOFF.d/2026-10-16T0234Z-edge-dev3-codex-glm-own-output.md) links back here. Root HANDOFF.md stays unchanged.
+
+### Provider-success readiness before protected activation
+
+Formal provisioning stays inactive in the pool. A separately admitted ordinary explicit AI_GLM_PROFILE=formal-review managed review may run against that provisioned profile under the same account/quota/event/deadline rules; no automatic probe. Its native successful provider completion qualifies credential wiring regardless the review verdict. This is not a new review APPROVE or installation authority.
+
+The pinned managed wrapper alone invokes emit-readiness after actual terminal retention, fixed provider/model verification, source/packet verification and durable report/event publication, before original pending metadata is cleared. Parent script/hash must equal the pinned wrapper. Helper derives own protected repository/caller/name/session metadata, never accepts arbitrary metadata path or caller JSON as authority. It checks native finish=stop/new watermark/agent/provider/model, optional typed model.variant, current source/head/packet/instructions/origin, original deadline and actual report/event/terminal custody hashes. At emission a bounded GET to the exact validated own /api/session/<sid>/message?limit=1 on the attested authenticated loopback profile must equal the retained native object. Actual1.18.12 native rows contain no sessionID; session identity comes from protected own metadata plus the measured own endpoint. No global/session enumeration or model POST. At activation immutable saved custody is rechecked without regeneration.
+
+Launcher uses established ZHIPU_API_KEY mapping and removes ZAI_API_KEY alias. Existing pure glm_credit.fingerprint on the already admitted inherited credential binds credential_profile_scope in origin; it is not an invented account ID or a new key read. A known quota profile must match, unknown quota stays existing policy. No raw key in receipts/logs.
+
+Fixed private provider-readiness.json binds profile/provider/model/pinned source/settings/credential scope, actual own session/event/head/packet/instructions/terminal/report/custody hashes and original deadline. Maximum age300seconds capped by that deadline. Original turn must complete within deadline. The same original invocation cannot replace evidence or refresh observed time; observational recovery/general/error/intermediate/unknown submission cannot emit. Protected installer fd9/exclusive activation consumes the recent genuine receipt plus live origin/installed manifest/critical code and loopback health. Absent/stale/changed/malformed proof leaves pool activation closed and legacy general route intact. Same-UID trust remains the existing protected-wrapper/installer boundary, not a new signer/registry. Future explicit activation-only transaction may be needed if a real protected installer round trip cannot fit300seconds; never renew a receipt to hide that.
 
 ## 1. Ultimate goal
 
