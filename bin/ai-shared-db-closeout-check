@@ -71,8 +71,14 @@ def gh_call(args):
         if len(args) >= 1 and args[0] == "api":
             command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
                        "api", "--hostname", "github.com", *args[1:]]
-        return subprocess.run(command, text=True, capture_output=True, check=False, timeout=60,
-                              env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
+        result = subprocess.run(command, capture_output=True, check=False, timeout=60,
+                                env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
+        try:
+            result.stdout = result.stdout.decode("utf-8", errors="strict")
+            result.stderr = result.stderr.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise CheckError("GitHub response was not valid UTF-8") from exc
+        return result
     except subprocess.TimeoutExpired as exc:
         raise CheckError("GitHub request timed out") from exc
     except OSError as exc:
