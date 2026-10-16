@@ -31,3 +31,9 @@ Read-only diffs of the top-level version/hash files across edge-dev's registered
 ## Separate follow-up
 
 The reported `bin/ai-housekeeping: line 1: tmp: unbound variable` during Housekeeping schedule remains outside this repair. Investigate its erroneous PASS separately; no housekeeping files are changed here. Owner: ai-devops maintenance, tracked in this PR follow-up.
+
+## Live Linux stage result
+
+On edge-dev3, executed the unchanged `run_stage` and `install_muse_code_linux` definitions extracted from this candidate's `install.sh`, with `REPO_ROOT` pointing at the candidate. The existing binary was present, so this was the stage's idempotent verification path: no installer download, profile changes, or full toolkit update.
+
+Result: `PASS optional Muse Code (Linux)` (exit 0). This proves the corrected stage against the real installed binary; it does not claim a full toolkit installation or reviewer workload qualification.
