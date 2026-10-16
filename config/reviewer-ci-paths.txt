@@ -1,4 +1,4 @@
-# Paths whose pull-request changes require the Windows Codex/Grok reviewer lane.
+# Paths whose pull-request changes require the Windows Codex reviewer lane.
 # One repository-relative shell glob per line. Keep this list conservative: the
 # scheduled and manual workflows still run the complete reviewer lane.
 .gitattributes

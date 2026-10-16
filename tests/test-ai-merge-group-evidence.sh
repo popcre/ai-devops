@@ -242,15 +242,8 @@ done
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" "$FALLBACK_JOBS"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "a failed run is never overridden by a fallback" "test '$RC' -eq 1"
-for mutation in grok-failed grok-missing; do
-  case "$mutation" in
-    grok-failed) jobs="$(printf '%s' "$FALLBACK_JOBS" | sed 's/windows-reviewer-fallback-grok\tsuccess/windows-reviewer-fallback-grok\tfailure/')" ;;
-    grok-missing) jobs="$(printf '%s' "$FALLBACK_JOBS" | sed '/windows-reviewer-fallback-grok/d')" ;;
-  esac
-  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-  check "frozen grok job is advisory for $mutation" "test '$RC' -eq 0"
-done
+# Grok is fully frozen (#1714): no job in FALLBACK_JOBS. Advisory-skip
+# behavior for a leftover grok row is covered by GROK_PENDING_JOBS below.
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
 printf '%s|changed-group|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
