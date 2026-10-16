@@ -91,6 +91,8 @@ Read the current shared-db consumer's `scripts/run-governed-review.mjs`, `reserv
 
 The installed checkout HEAD observed was **`f84085f93b6c20752d798a9b3db76b78bedb3d2f`**, an ancestor of the fetched source baseline ([commit](https://github.com/popcre/ai-devops/commit/f84085f93b6c20752d798a9b3db76b78bedb3d2f)). This proves checkout ancestry and launcher location, **not** a valid install receipt or wrapper-byte equality. Verify those in step 1. Do not assert that source/version drift caused these failures without comparing the relevant bytes and receipts.
 
+Subsequent upstream movement during publication: `origin/main` advanced to [e9d0db64](https://github.com/popcre/ai-devops/commit/e9d0db64) via [PR1778](https://github.com/popcre/ai-devops/pull/1778), whose title is “ci: make frozen Grok reviewer suite non-gating.” This is source movement, not proof that the recorded long-running worker ended or that its root cause is repaired. Step 6 must inspect that landed change and current run state before duplicating it; preserve remaining required common/debate/approval-gate coverage. The pinned baseline above remains the investigation snapshot.
+
 Fresh GitHub readback corrected stale memory: [#1562](https://github.com/popcre/ai-devops/issues/1562) is **CLOSED**, its acceptance checklist checked; [PR1565](https://github.com/popcre/ai-devops/pull/1565) is **MERGED**, commit [d6b787aad8f380f4436897f364dc75ca9e7c7993](https://github.com/popcre/ai-devops/commit/d6b787aad8f380f4436897f364dc75ca9e7c7993). Do not repeat the October11 claim that its merge failed and work remained wholly uninstalled.
 
 Existing ownership/dependencies, read October15; activity is **unverified**, not claimed running:
@@ -300,8 +302,8 @@ No secret item was read; there is no newly required credential or test-user logi
 
 ### Planning deliverable
 
-- [ ] This 13-section plan, router/topic links and its own reciprocal handoff pass the self-audit below.
-- [ ] Markdown/whitespace/reachability checks pass; only owned prose is committed and pushed.
+- [x] This 13-section plan, router/topic links and its own reciprocal handoff pass the self-audit below; all 13 sections and 8 steps verified, referenced existing test paths checked.
+- [x] Markdown/whitespace/reachability checks pass; only owned prose is committed and pushed. Re-run the three planning checks in §10; initial publication commit `90cf3a8d` contains only the five owned Markdown files.
 - [ ] Documentation PR is merged normally; merged source contains the plan. #1783 records plan publication and leaves repair/live proof unchecked.
 
 ### Repair deliverable (not completed by publishing this plan)
@@ -317,7 +319,7 @@ No secret item was read; there is no newly required credential or test-user logi
 
 Main risks: mistaking a valid fail-closed refusal for the defect; stale session or receipt replay; destructive cleanup; CI killing a concurrent session; changing shared core while another owner edits it; source installation drift; provider outage masking code behavior; overclaiming from few samples. Gates above mitigate each. If a repair regresses live capability, retain evidence/session descriptors and use the protected installer to restore the last reviewed compatible version; never erase the incident or edit live installed files. Document rollback hashes and rerun original capability checks before resuming the observation window.
 
-Open technical questions are deliberately explicit, not requests to Albert: exact Muse premature-stop cause, first receipt-digest divergence, whether #1370/#1349 source is already landed but unaccepted, exact hanging Windows test/child, and which unresolved historical records already have repaired source but lack resolution entries. Step1 assigns each, the relevant reproductions decide the answer, and step 8 blocks closure where a maintained capability still fails. There are no unresolved business-meaning choices.
+Open technical questions are deliberately explicit, not requests to Albert: exact Muse premature-stop cause, first receipt-digest divergence, whether #1370/#1349 source is already landed but unaccepted, exact hanging Windows test/child, and which unresolved historical records already have repaired source but lack resolution entries. Step 1 assigns each, the relevant reproductions decide the answer, and step 8 blocks closure where a maintained capability still fails. There are no unresolved business-meaning choices.
 
 ## Mandatory self-audit — completed before publication
 
