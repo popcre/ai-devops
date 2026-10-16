@@ -454,6 +454,8 @@ fi
 # housekeeping_schedule_tmp_lifetime_is_safe (#1783): the EXIT trap must not
 # reference the function-local temp path after it goes out of scope, and a
 # crontab refusal must still fail the command (no false PASS).
+# Windows schedules through schtasks.exe, not crontab; never touch a real task.
+if ! command -v schtasks.exe >/dev/null 2>&1; then
 cron16="$TMP/cron16"; mkdir -p "$cron16/bin"
 cat > "$cron16/bin/crontab" <<CRON
 #!/bin/sh
@@ -477,6 +479,7 @@ if [[ "$rc16" -ne 0 ]] && grep -q 'refused' "$TMP/c16-refuse.out" && ! grep -q '
   ok "crontab refusal fails schedule truthfully"
 else
   bad "crontab refusal rc=$rc16 | $(tr '\n' ';' < "$TMP/c16-refuse.out")"
+fi
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
