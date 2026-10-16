@@ -176,10 +176,17 @@ case "${1:-}" in
     [ "${MUSE_STUB_MODE:-}" = wrongsid ] && sid=ses_wrong
     if [ "${MUSE_STUB_MODE:-}" = permission-denied ] || [ "${MUSE_STUB_MODE:-}" = generic-tool-calls ]; then
       printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
-      printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"partial, non-authorizing output"}}\n' "$sid"
+      printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "${MUSE_STUB_FAILED_PREAMBLE:-partial, non-authorizing output}"
+      if [ "${MUSE_STUB_PRIOR_READ:-}" = 1 ]; then
+        printf '{"type":"tool_use","sessionID":"%s","part":{"type":"tool","tool":"read","state":{"status":"completed"}}}\n' "$sid"
+        printf '{"type":"step_finish","sessionID":"%s","part":{"type":"step-finish","reason":"tool-calls","tokens":{"total":3}}}\n' "$sid"
+        printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
+      fi
       error='The user rejected permission to use this specific tool call.'
       [ "${MUSE_STUB_MODE:-}" != generic-tool-calls ] || error='The read tool returned an unrelated error.'
-      printf '{"type":"tool_use","sessionID":"%s","part":{"type":"tool","tool":"read","state":{"status":"error","error":"%s"}}}\n' "$sid" "$error"
+      for ((denial=0;denial<${MUSE_STUB_DENIED_COUNT:-1};denial++)); do
+        printf '{"type":"tool_use","sessionID":"%s","part":{"type":"tool","tool":"read","state":{"status":"error","error":"%s"}}}\n' "$sid" "$error"
+      done
       printf '{"type":"step_finish","sessionID":"%s","part":{"type":"step-finish","reason":"tool-calls","tokens":{"total":3}}}\n' "$sid"
       exit 0
     fi
@@ -321,6 +328,17 @@ muse_failed_turn_cases(){
   list_output="$(cd "$REPO" && eval "$ENV '$SCRIPT' list")"
   list_rows="$(printf '%s\n' "$list_output" | awk -v n="$name" '$1==n{count++} END{print count+0}')"
   check 'list stays singular after fresh ask creates a metadata archive' "test '$list_rows' -eq 1"
+  # The observed sequence has a successful read in an earlier completed step,
+  # then a final consecutive denied-read burst. Every retained byte stays sealed.
+  local count preamble current_before
+  for count in 1 2 3; do
+    name="failedturn-observed-$count"; preamble='Reading approval evidence before inspecting source.'
+    (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_PRIOR_READ=1 MUSE_STUB_DENIED_COUNT=$count MUSE_STUB_FAILED_PREAMBLE='$preamble' MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/$name-new.log" 2>&1 || :
+    m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; current_before="$(sha256sum "$m")"
+    check "observed $count denied read sequence qualifies without mutation" "cd '$REPO' && eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" > '$TMP/$name-check.log' && test \"\$(sha256sum '$m')\" = '$current_before'"
+    check "observed $count denied read sequence finalizes only nonauthorizingly" "cd '$REPO' && eval \"$ENV '$SCRIPT' finalize-failed-turn $name\" > '$TMP/$name-final.log' && jq -e '.status==\"failed_turn_finalized\" and .last_report==null' '$m'"
+    check "observed $count denied read sequence supports genuine fresh same-session followup" "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask $name --prompt followup\" > '$TMP/$name-ask.log' && jq -e '.status==\"active\" and .session_id==\"ses_new\"' '$m'"
+  done
   name=failedturn-keyfailure
   (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-keyfailure-new.log" 2>&1 || :
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"
@@ -364,9 +382,9 @@ muse_failed_turn_cases(){
   name=failedturn-multiple-errors
   (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-multiple-errors-new.log" 2>&1 || :
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; raw="$(jq -r '.retained_turn.stream' "$m")"
-  jq -s -c '.[0:-1]+[.[-2],.[-2],.[-1]]|.[]' "$raw" > "$raw.tmp" && mv "$raw.tmp" "$raw"
+  jq -s -c '.[0:-1]+[.[-2],.[-2],.[-2],.[-1]]|.[]' "$raw" > "$raw.tmp" && mv "$raw.tmp" "$raw"
   jq --arg sha "$(sha256sum "$raw" | cut -d' ' -f1)" '.retained_turn.stream_sha256=$sha' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
-  check 'multiple native tool errors remain fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-multiple-errors-check.log' && grep -q 'remains fenced' '$TMP/failedturn-multiple-errors-check.log'"
+  check 'four native tool errors remain fenced' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-multiple-errors-check.log' && grep -q 'remains fenced' '$TMP/failedturn-multiple-errors-check.log'"
   name=failedturn-signal
   (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-signal-new.log" 2>&1 || :
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"

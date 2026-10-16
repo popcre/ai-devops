@@ -1647,10 +1647,15 @@ for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIG
 done
 /usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
 case "$1" in
-  exec) [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
+  exec) prior=''; prompt_file=''; for arg in "$@"; do [ "$prior" != --prompt-file ] || prompt_file="$arg"; prior="$arg"; done
+    grep -qF 'Repository tool-read root is the actual current directory (.)' "$prompt_file" || exit 79
+    grep -qF 'provenance metadata only; never read or retry those host paths' "$prompt_file" || exit 79
+    [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
     printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
   run) [ "${MODEL_API_KEY:-}" = fake-native-provider ] && [ -z "${META_API_KEY+x}" ] || exit 75
-    cat >/dev/null
+    prompt_text="$(cat)"
+    printf '%s' "$prompt_text" | grep -qF 'Repository tool-read root is the actual current directory (.)' || exit 79
+    printf '%s' "$prompt_text" | grep -qF 'provenance metadata only; never read or retry those host paths' || exit 79
     printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}';;
   *) exit 76;;
 esac

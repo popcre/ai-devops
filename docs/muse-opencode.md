@@ -30,9 +30,9 @@ retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
 For the narrowly recognized OpenCode case where the original turn ended only
-because a read tool was denied permission, use `ai-muse finalize-failed-turn <name>
+because one to three consecutive read calls were denied permission in the final step, use `ai-muse finalize-failed-turn <name>
 --dry-run` first. It qualifies the original packet, retained bytes, native event
-start/finish, and exact permission-denial stream without changing session state.
+start/finish, and exact bounded denied-read suffix without changing session state. No text or successful tool may follow the first denial.
 Only a qualified result permits `ai-muse finalize-failed-turn <name>`; this
 archives the original descriptor and records a non-authorizing failure receipt.
 It creates no accepted review, verdict, refund, or billing conclusion. A fresh

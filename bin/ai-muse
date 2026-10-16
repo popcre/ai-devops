@@ -421,7 +421,7 @@ prepare(){
   rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
   # Muse reads the sealed evidence but keeps its own verdict contract.
-  printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. You work in a disposable, remote-less copy of the repository: you may run commands, builds and tests and edit files there to check your findings, but never edit the %s evidence directory. Your edits are discarded after this turn and are not part of the change under review.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
+  printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. You work in a disposable, remote-less copy of the repository: you may run commands, builds and tests and edit files there to check your findings, but never edit the %s evidence directory. Your edits are discarded after this turn and are not part of the change under review. Use only repository-relative paths from the current directory. Original host paths in identity metadata or earlier conversation turns are not readable tool targets; do not follow or retry them.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
 muse_credential_owner_alive(){
   local pid="$1" winpid="$2"
@@ -1089,16 +1089,22 @@ failed_turn_stream_check(){
     all(.[]; type=="object" and .sessionID==$sid and
       (.type=="step_start" or .type=="step_finish" or .type=="text" or .type=="tool_use")) and
     ([.[]|select(.type=="step_start")]|length)>0 and
-    ([.[]|select(.type=="step_start")]|length)==([.[]|select(.type=="step_finish")]|length) and
     all(.[]|select(.type=="step_start"); .part.type=="step-start") and
     all(.[]|select(.type=="step_finish"); .part.type=="step-finish" and .part.reason=="tool-calls") and
+    (reduce .[] as $event ({open:false,valid:true};
+      if $event.type=="step_start" then .valid=(.valid and (.open|not)) | .open=true
+      elif $event.type=="step_finish" then .valid=(.valid and .open) | .open=false
+      else .valid=(.valid and .open) end) | .valid and (.open|not)) and
     all(.[]|select(.type=="tool_use"); .part.type=="tool" and (.part.state.status=="completed" or .part.state.status=="error")) and
-    all(.[]|select(.type=="text"); .part.type=="text" and ((.part.text//"")|test("(?i)(VERDICT\\s*:|\\bAPPROV(ED|AL|E)\\b|\\bREJECT(ED|ION)?\\b|\\bSTOP(PED)?\\b|DECISION\\s*:)" )|not)) and
-    ([.[]|select(.type=="tool_use" and .part.state.status=="error")]|length)==1 and
-    (([.[]|select(.type=="tool_use" and .part.state.status=="error")][0]) as $denied |
-      $denied.part.tool=="read" and $denied.part.state.error=="The user rejected permission to use this specific tool call." and
-      (index($denied)==length-2) and
-      ([range(0;length) as $i|select(.[ $i ].type=="text" and $i>index($denied))]|length)==0 and
+    all(.[]|select(.type=="text"); .part.type=="text" and
+      ((.part.text//"")|gsub("(?i)\\bapproval evidence\\b";"")|
+        test("(?i)(VERDICT\\s*:|\\bAPPROV(ED|AL|E|ING)\\b|\\bREJECT(ED|ION)?\\b|\\bSTOP(PED)?\\b|DECISION\\s*:|\\bLGTM\\b|\\bno blockers\\b)" )|not)) and
+    (. as $events |
+      [range(0;length) as $i | select(.[ $i ].type=="tool_use" and .[ $i ].part.state.status=="error") | $i] as $errors |
+      ($errors|length)>=1 and ($errors|length)<=3 and
+      all($errors[]; $events[.] as $denied |
+        $denied.part.tool=="read" and $denied.part.state.error=="The user rejected permission to use this specific tool call.") and
+      $errors[-1]==(length-2) and ($errors[-1]-$errors[0]+1)==($errors|length) and
       last.type=="step_finish" and last.part.reason=="tool-calls")
   ' "$stream" >/dev/null 2>&1
 }
@@ -1176,7 +1182,7 @@ cmd_finalize_failed_turn(){
   [ "$mode" != --dry-run ] || before="$(sha256sum "$meta")"
   [ "$mode" = --dry-run ] || lock_session "$rid" "$name"
   status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = provider_outcome_uncertain ] || die "failed-turn finalization requires provider_outcome_uncertain (found $status)."
-  failed_turn_source_check "$meta" "$name" "$root" "$rid" || die 'the retained turn does not prove the exact completed permission-denied read failure; it remains fenced.'
+  failed_turn_source_check "$meta" "$name" "$root" "$rid" || die 'the retained turn does not prove the exact completed bounded denied-read-only failure; it remains fenced.'
   event="$(jq -r '.retained_turn.original_invocation_id' "$meta")"; sid="$(jq -r '.session_id' "$meta")"; head="$(jq -r '.head' "$meta")"; packet="$(jq -r '.packet_sha256' "$meta")"
   archive="${meta%.json}.$event.failed-turn.json"
   if [ "$mode" = --dry-run ]; then
