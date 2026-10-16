@@ -189,6 +189,7 @@ advisory_only_pending() {
   done
   while IFS="$(printf '\t')" read -r job conclusion status; do
     [ -n "$job" ] || continue
+    [ "$job" = windows-reviewer-fallback-grok ] && continue
     case "$job" in "$ADVISORY_JOB_PREFIX"*) continue ;; esac
     [ "$status" = completed ] || return 1
     case "$conclusion" in success|skipped) ;; *) return 1 ;; esac

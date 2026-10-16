@@ -262,6 +262,14 @@ ADV_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$ADV_JOBS"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
 check "queued advisory WarpBuild proof does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
+GROK_PENDING_JOBS="$(printf '%s' "$ADV_JOBS" | sed '/windows-offline-warpbuild-proof (3)/a windows-reviewer-fallback-grok\tpending\tqueued')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$GROK_PENDING_JOBS"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+check "queued advisory Grok review does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
+GROK_IN_PROGRESS_JOBS="$(printf '%s' "$ADV_JOBS" | sed '/windows-offline-warpbuild-proof (3)/a windows-reviewer-fallback-grok\tpending\tin_progress')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$GROK_IN_PROGRESS_JOBS"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+check "in-progress advisory Grok review does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
 for mutation in closure-pending closure-missing required-pending required-failed core-missing; do
   jobs="$ADV_JOBS"
   case "$mutation" in
@@ -274,6 +282,16 @@ for mutation in closure-pending closure-missing required-pending required-failed
   set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$jobs"
   OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
   check "advisory allowance remains fail-closed for $mutation" "test '$RC' -eq 1"
+done
+for mutation in required-pending required-failed; do
+  jobs="$GROK_PENDING_JOBS"
+  case "$mutation" in
+    required-pending) jobs="$(printf '%s' "$jobs" | sed 's/linux-offline\tsuccess\tcompleted/linux-offline\tpending\tin_progress/')" ;;
+    required-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-offline\tsuccess\tcompleted/windows-offline\tfailure\tcompleted/')" ;;
+  esac
+  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "pending Grok does not weaken required-job rejection for $mutation" "test '$RC' -eq 1"
 done
 
 # Real helper/cache/pager against exact same-run GitHub response fixtures.
