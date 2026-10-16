@@ -45,6 +45,8 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Prompts | `templates/prompts/01..07` | One Markdown prompt per workflow stage |
 | Config seed | `config/*.env.example` | Seeds `/etc/ai-devops/*.env` on install |
 
+The shared-db closeout checker captures `ai-gh` output as bytes and strictly decodes stdout and stderr as UTF-8 on the main thread. Invalid UTF-8 becomes a structured fail-closed result; keep this explicit byte-to-text boundary so subprocess reader threads cannot turn decode errors into missing output.
+
 ## The staged workflow
 
 Seven stages, mapped to models via `/etc/ai-devops/models.env`:
