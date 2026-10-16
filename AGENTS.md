@@ -308,6 +308,8 @@ intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_reviewer-recurrence-repair.md) STATUS first; reuse existing owners and completed programmes.
 
+Class-level reviewer stability (≥24h green): read the [reviewer stability plan](plan_reviewer-stability-24h.md) STATUS first ([#1822](https://github.com/popcre/ai-devops/issues/1822)); do not re-derive the sibling host programmes; no bulk raw-transcript third-party extract without a token budget.
+
 Edge-dev reviewer repair without AI-reviewer gates: read the [edge-dev no-review plan](plan_edge-dev-reviewer-repair-no-review.md) STATUS first (owner bootstrap: implementation must not need reviewers).
 
 For GLM access to its own truncated output, read
