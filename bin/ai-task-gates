@@ -1359,6 +1359,17 @@ cmd_check(){
     fi
   fi
   prepare "$base" ""
+  if [ "$action" = deploy ] && [ -z "$application_release_target" ]; then
+    case "$IDENTITY" in
+      popcre/designflow-tracking|popcre/designflow-frontend|popcre/designflow-item-master)
+        # Opt-in persists after its declaration becomes upstream. A later
+        # ordinary app/pipeline delta cannot fall back to generic deploy and
+        # omit the exact-target/fresh-context proof. Backend stays unchanged.
+        if merged_gate "$IDENTITY" deployment | grep -Fqx "$(printf 'required\t%s' "$APP_RELEASE_CONSUMER_GATE")"; then
+          blocked 'ai-task-gates: STOP. This application requires explicit --application-release-target for its closed source-release lane; generic deploy is refused.'
+        fi ;;
+    esac
+  fi
   # The classified change set must carry no raw transcript archive either.
   # This runs before any full-inventory reclassification below, so the check
   # always judges the original change-set paths — historical files that merely

@@ -70,6 +70,13 @@ Each listed trigger's push branch is exactly ^sandbox-albert$ and _SERVICE_NAME 
 Repository connection leaves are pop-dflow-backend, pop-dflow-tracking, pop-dflow-frontend,
 pop-dflow-item-master respectively. Do not use older deployment-doc service guesses.
 
+Prospective final-check correction: offline next-release fixture reproduced generic deploy returning0
+with an exact synthetic approval, an upstream closed-gate declaration, ordinary app/pipeline delta,
+review-branch and absent origin/develop. Thus the generic path could omit the new proof after initial
+adoption. Root authorized NEW-THREE-only refusal of generic deploy whenever the deployment consumer gate
+requires cloud-build-release-review; every deploy must supply the exact target flag. Backend and other
+actions remain unchanged. The approved3c6 review is retained as historical, not authority for changed code.
+
 ## 7. Rejected approaches
 
 No generic reviewer_release.deploy exception: it would widen protected deployment beyond exact sandbox source
@@ -246,7 +253,7 @@ live proofs plus unchanged backend acceptance fixtures and read-only serving hea
 | Base provenance | Recorded HEAD/arbitrary reset, stale local develop, remote failure/moved ref, shallow history, replace/graft or multiple bases | release-honest-merge-base-admitted accepts exact inherited upstream mirror; release-base-reset-refused rejects hidden owned delta; release-fresh-develop-required refuses stale/missing/network and finish-race; release-ancestry-clean-required rejects shallow/replace/graft/multiple bases |
 | Existing backend compatibility | New-three proofs accidentally affect backend local branch/base/Windows or force network | release-backend-b20-semantics-preserved keeps existing fixtures unchanged; no new-three helper invocation for backend |
 | Consumer gates | New gate overwrites old security/merge requirements | release-consumer-gates-additive preserves existing arrays and forbids weaker declaration |
-| CLI route | Generic deploy, wrong action, explicit base, acknowledgement/install/target-head combos | release-cli-no-alternate-route retains all existing refusals |
+| CLI route | Future generic deploy with opted-in declaration already upstream and exact approval; wrong action, explicit base, acknowledgement/install/target-head combos | release-cli-no-alternate-route retains all existing refusals |
 
 ## 10. Required tests
 

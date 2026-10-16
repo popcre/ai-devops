@@ -142,6 +142,10 @@ normal fetch is outside the gate. No runtime test override, production target,
 manual cloud mutation, or broader application-workflow is added. Source admission
 is not deployment/live acceptance; DesignFlow's existing no-self-merge and PR
 rules remain unchanged. See the [scoped plan](../plan_exact-designflow-sandbox-source-releases.md).
+For the three new repositories, a consumer requiring `cloud-build-release-review`
+must supply the exact target flag on every deploy, including future releases
+after the declaration is upstream. Generic deploy cannot omit the closed proof;
+other actions and backend's original route remain unchanged.
 
 The separate `application-workflow` action admits only the authenticated HTS
 Alsand sandbox workflow for backend issue94. It requires a clean committed

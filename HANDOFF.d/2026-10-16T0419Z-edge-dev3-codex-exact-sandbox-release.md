@@ -22,3 +22,7 @@ No secret needed. No cloud/database mutation, replay, production scope or other-
 
 ## Acceptance and remaining work
 All three new sandbox source-release admissions/automated live proofs plus unchanged backend acceptance fixtures/read-only serving health on issue1796; plan itself is preparation, not delivered capability. Issue stays open until actual full acceptance. No timing/approval evidence invented. Fresh session reads linked plan STATUS first.
+
+## Prospective generic-route regression correction
+
+After native3c6 APPROVE, an additional offline future-release fixture reproduced generic deploy exit0 despite the upstream closed-gate opt-in and missing branch/ref proof. Root authorized the narrow NEW-THREE-only explicit-target guard and regression; backend/other actions unchanged. Source changed and needs fresh final native review; old APPROVE is retained, not transferred. No live action/provider fixture call/push occurred.
