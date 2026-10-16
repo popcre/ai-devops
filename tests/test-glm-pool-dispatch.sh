@@ -45,9 +45,22 @@ set -eu
 printf '%s\n' "$PWD" > "$GLM_FIXTURE/runner-pwd"
 printf '%s\n' "$@" > "$GLM_FIXTURE/runner-args"
 printf %s "${AI_REVIEW_SOURCE_ROOT:-}" > "$GLM_FIXTURE/runner-source-root"
-[ "$1" = new ] && [[ "$2" == pool-glm-* ]] && [ "$3" = --prompt-file ]
-cp "$4" "$GLM_FIXTURE/runner-brief"
-[ "$5" = --base ] && [ "$6" = "$GLM_TEST_BASE" ] && [ "$7" = --assert-head ] && [ "$8" = "$GLM_TEST_HEAD" ]
+cmd="${1:-}"; name="${2:-}"
+case "$cmd" in new|ask) ;; *) echo "unexpected runner cmd: $cmd" >&2; exit 1 ;; esac
+[[ "$name" == pool-glm-* ]] || { echo "unexpected session name: $name" >&2; exit 1; }
+brief=""; base=""; ahead=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prompt-file) brief="$2"; shift 2 ;;
+    --base) base="$2"; shift 2 ;;
+    --assert-head) ahead="$2"; shift 2 ;;
+    --repo|--caller) shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$brief" ] && [ -f "$brief" ]
+cp "$brief" "$GLM_FIXTURE/runner-brief"
+[ "$base" = "$GLM_TEST_BASE" ] && [ "$ahead" = "$GLM_TEST_HEAD" ]
 head="$GLM_TEST_HEAD"
 case "${GLM_REPORT_MODE:-good}" in
  wronghead) head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
@@ -55,6 +68,7 @@ case "${GLM_REPORT_MODE:-good}" in
  malformed) printf 'No terminal verdict\n'; exit ;;
  drift) printf 'model write\n' > file ;;
  chrome) printf 'Head %s and %0600d\n' "$head" 0 >&2; printf '## Verdict\nAPPROVE\n'; exit ;;
+ revise) printf 'Head %s\n## Verdict\nREVISE\n' "$head"; exit ;;
 esac
 printf 'Reviewed head %s.\n' "$head"
 printf 'The immutable source packet, changed files, protected snapshot boundary, exact source identity, lifecycle terminal handling, refusal conditions and tests were inspected. The change retains fail-closed validation and all existing guarantees. No findings were identified after checking relevant siblings, invalid inputs, source changes and failure paths. The exact reviewed commit remains bound throughout this report, and the model report is distinct from runtime progress chrome.\n\n## Verdict\nAPPROVE\n'

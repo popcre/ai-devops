@@ -486,6 +486,58 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF")
 [ -z "$RUNNER_MAX_TURNS" ] || RUNNER_ARGS+=(--max-turns "$RUNNER_MAX_TURNS")
 [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
 [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
+# GLM REVISE follow-up (issue #1678 step 3): a REVISE verdict is a request to
+# fix and re-review, not a cold new conversation. Session identity must bind
+# the ORIGINAL checkout (--repo), and the same thread continues with `ask` so
+# paid context is kept. REJECT/APPROVE stay cold (new unique name): a rejection
+# re-review stays independent, and APPROVE is already covered by passing-report
+# reuse. Probe is local metadata only — never a provider call.
+glm_repo_id() { # glm_repo_id ROOT -> 12-char ai-glm repo id
+  local root="$1" remote
+  root="$(cd "$1" && pwd -P)" || return 1
+  remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
+  printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12
+}
+glm_report_verdict() { # glm_report_verdict REPORT -> APPROVE|REVISE|REJECT|BLOCKED|empty
+  local file="$1" line
+  [ -f "$file" ] || return 0
+  line="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$file" 2>/dev/null || echo 0)"
+  awk -v n="$line" 'NR>n && NF {print; exit}' "$file" 2>/dev/null | tr -d '\r' | awk '{print $1}'
+}
+glm_revise_followup_name() { # prints session name when a REVISE turn is continuable
+  local state root rid cand meta report verdict name
+  state="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
+  root="$REPO_ROOT"
+  rid="$(glm_repo_id "$root")" || return 1
+  [ -d "$state/sessions/$rid" ] || return 1
+  for cand in "$state/sessions/$rid/${CALLER}"--*.json; do
+    [ -f "$cand" ] || continue
+    meta="$cand"
+    [ "$(jq -r '.type // empty' "$meta" 2>/dev/null)" = review ] || continue
+    report="$(jq -r '.last_completed_turn.report // empty' "$meta" 2>/dev/null || true)"
+    [ -n "$report" ] && [ -f "$report" ] || continue
+    verdict="$(glm_report_verdict "$report")"
+    [ "$verdict" = REVISE ] || continue
+    name="$(jq -r '.name // empty' "$meta" 2>/dev/null || true)"
+    [ -n "$name" ] || continue
+    printf '%s\n' "$name"
+    return 0
+  done
+  return 1
+}
+if [ "$provider" = glm ]; then
+  glm_followup="$(glm_revise_followup_name || true)"
+  if [ -n "${glm_followup:-}" ]; then
+    printf 'ai-review-pool: GLM REVISE follow-up on session %s (same conversation, corrected head); no cold re-review.\n' "$glm_followup" >&2
+    RUNNER_ARGS=(ask "$glm_followup" --repo "$REPO_ROOT" --caller "$CALLER" --prompt-file "$TMP_BRIEF")
+    [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
+    [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
+  else
+    RUNNER_ARGS=(new "$TAG" --repo "$REPO_ROOT" --caller "$CALLER" --prompt-file "$TMP_BRIEF")
+    [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
+    [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
+  fi
+fi
 # The session runners emit the model's final answer on STDOUT (ai-gemini only
 # under its pool contract AI_GEMINI_BODY_STDOUT=1, set below; issue #821) and all
 # progress/usage chrome on STDERR (ai-grok-review: note() writes >&2,
