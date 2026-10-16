@@ -15,7 +15,7 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|
 | 0 | Enforce the no-review landing contract | ⬜ open — 2026-10-15 | Every PR shows `ai-task-gates explain` effective class `prose` or `code` only |
-| 1 | Freeze edge-dev incident inventory and class map | ⬜ open — 2026-10-15 | Sanitized inventory under `tests/verification/edge-dev-reviewer-repair/` |
+| 1 | Freeze edge-dev incident inventory and class map | ⬜ open — 2026-10-15 | Sanitized inventory under [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (disposition rows + class map) |
 | 2 | Repair StepFun Windows shell spawn | ⬜ open — 2026-10-15 | Offline fixture + live `ai-stepfun` ask/review starts a shell |
 | 3 | Repair GLM REVISE re-review waste | ⬜ open — 2026-10-15 | Fixture proves one follow-up, not a forced full re-review |
 | 4 | Repair durable report publish and sandbox non-interference | ⬜ open — 2026-10-15 | Completed review yields a durable report path; foreign orphans intact |
@@ -252,7 +252,7 @@ Never “just ship” a protected path.
   `edge-dev`, and (read-only) installed launcher paths/hashes if readable
   without secrets. Refresh #1678 / #1467 / #1701 / #1370 ownership; claim only
   unowned bounded work on the existing issue.
-- Files: `tests/verification/edge-dev-reviewer-repair/README.md` (new).
+- Files: [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (new).
 - Done when: every open edge-dev incident has a planned disposition row
   (repair in this plan / defer to sibling / already fixed / evidence-unavailable).
 - Depends on: step 0.
