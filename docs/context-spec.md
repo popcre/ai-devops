@@ -185,6 +185,8 @@ review in it, each one recorded as if newly approved.
 
 ### Closed public generated-definition check
 
+The [DesignFlow generated-fixture gate plan](designflow-generated-fixture-native-gate-plan.md) records the closed scope, qualification gates and retirement conditions.
+
 `generated-definition-boundary-v1` is the sole public generated-only database
 exception for `popcre/designflow-backend` reviewer-safety tasks. Its consumer must
 add `reviewed-generated-definition-fixture-only` without changing any other
