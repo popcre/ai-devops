@@ -648,6 +648,7 @@ export MOCK_PREFLIGHT_SANDBOX="$ROOT/bin/ai-review-sandbox"
 cat > "$TMP/bin/packet-observer" <<'EOF'
 #!/usr/bin/env bash
 printf 'packet %s\n' "$1" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"
+if [ "$1" = verify ]; then printf 'receipt=%s\n' "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"; fi
 if [ "${MOCK_PREFLIGHT_VERIFY_FAIL:-0}" = 1 ] && [ "$1" = verify ]; then exit 79; fi
 exec "$MOCK_PREFLIGHT_PACKET" "$@"
 EOF
@@ -698,8 +699,10 @@ check "plain check still refuses a persistent capacity hold" "! AI_REVIEW_KIMI_W
 check "successful live probe clears a persistent capacity hold" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | grep -q installed-healthy"
 $SCRIPT clear kimi >/dev/null
 
-OUT="$(AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
-[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && ok "healthy provider retains complete isolated evidence checks and cleanup" || bad "healthy provider retains complete isolated evidence checks and cleanup"
+mkdir -p "$REPO/.ai/reviews"
+MOCK_RECEIPT="$REPO/.ai/reviews/final-review.json"
+OUT="$(AI_REVIEW_SOURCE_RECEIPT_FILE="$MOCK_RECEIPT" AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'receipt=' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && [ ! -e "$MOCK_RECEIPT" ] && ok "healthy preflight verifies isolated evidence without publishing the final review receipt" || bad "healthy preflight verifies isolated evidence without publishing the final review receipt"
 OUT="$(MOCK_PREFLIGHT_VERIFY_FAIL=1 AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
 [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep -q 'health=ok' && ok "healthy doctor cannot bypass failed packet verification" || bad "healthy doctor cannot bypass failed packet verification"
 

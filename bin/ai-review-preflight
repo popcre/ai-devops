@@ -1144,7 +1144,12 @@ check_provider() { # PROVIDER REPO LIVE BASE
   PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
-  "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  # This packet is only a health preflight. The final reviewer wrapper owns
+  # publication of the governed source receipt; letting this preparatory packet
+  # publish it would bind the receipt to a different packet/tag than the review.
+  ( unset AI_REVIEW_SOURCE_RECEIPT_FILE
+    "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  )
   if [ "$credit_probe" = 1 ]; then
     if [ "$(admission_store clear-credit "$provider" --expect-record "$credit_global" --run-id "$credit_hold_id" | jq -r '.cleared // false')" = credit ]; then
       note "ai-review-preflight: $provider live probe succeeded; cleared its credit/allowance hold (scoped backoffs kept)."
