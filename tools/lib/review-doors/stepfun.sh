@@ -368,6 +368,23 @@ extra_decision_warning() { # REPORT
   [ "${n:-0}" -eq 0 ] || printf 'stepfun door: report-extra-decision-line: %s non-terminal line(s) open with a decision word; governed consumers will refuse to record this report.\n' "$n" >&2
 }
 
+# Windows OpenCode bash tool: Node's child_process.spawn looks up `bash` /
+# `bash.exe` on PATH (PATHEXT ignores an extensionless name). Without PATH
+# shims that exec the folder gate, OpenCode reports ChildProcess.spawn NotFound
+# (incident 20261014T203826Z-edge-dev-stepfun-2686842). Same shim shape as
+# bin/ai-stepfun; the gate binary itself is not edited here.
+sf_install_windows_shell_shims() { # sf_install_windows_shell_shims SHIM_DIR GATE
+  local shim_dir="$1" gate="$2" v
+  [ -n "$gate" ] && [ -x "$gate" ] || return 1
+  mkdir -p "$shim_dir" || return 1
+  for v in bash sh; do
+    printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gate" > "$shim_dir/$v"
+    chmod +x "$shim_dir/$v"
+    cp "$shim_dir/$v" "$shim_dir/$v.exe"
+    printf '@echo off\r\nbash "%%~dp0%s" %%*\r\n' "$v" > "$shim_dir/$v.cmd"
+  done
+}
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -419,6 +436,20 @@ main() {
     # writable clone must not be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    # Windows: OpenCode's bash tool spawns `bash`/`bash.exe` from PATH. Install
+    # shims that exec the folder gate (bin/ai-stepfun-windows-shell) and put
+    # them first on PATH, or the turn dies with ChildProcess.spawn NotFound.
+    local win_shim="" win_gate="" win_gate_path=""
+    if [ "$SF_IS_WINDOWS" = 1 ]; then
+      win_gate="$SF_ROOT/bin/ai-stepfun-windows-shell"
+      win_gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin"
+      win_shim="$(mktemp -d)"; SF_TEMP_PATHS+=("$win_shim")
+      sf_install_windows_shell_shims "$win_shim" "$win_gate" || {
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: Windows shell gate is missing or not executable: %s\n' "$win_gate" >&2
+        exit 127
+      }
+    fi
     while :; do
       stepfun_pace_wait
       (
@@ -427,6 +458,14 @@ main() {
                XDG_STATE_HOME="$(native_path "$xdg/state")" \
                XDG_CACHE_HOME="$(native_path "$xdg/cache")"
         if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
+        if [ "$SF_IS_WINDOWS" = 1 ]; then
+          # Shims first so Node's spawn of bash/bash.exe hits the gate; keep
+          # the rest of PATH so stubs and jq still resolve in offline tests.
+          # GATE_PATH stays closed (Git GNU tools only) for the gate's children.
+          export PATH="$win_shim:$PATH" \
+                 GATE_PATH="$win_gate_path" \
+                 AI_STEPFUN_REVIEW_DIR="$oc_dir"
+        fi
         printf '%s' "$(cat "$prompt_full")" \
           | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
               --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
