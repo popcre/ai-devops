@@ -117,6 +117,7 @@ done
 # Invalid inputs fail before lifecycle/provider start and never print their text.
 mkdir "$TMP/request-directory"
 ln -s "$AI_REVIEW_BRIEF_FILE" "$TMP/request-link"
+[ -L "$TMP/request-link" ] || rm -f "$TMP/request-link" # Git Bash without symlink rights copies; then it is a missing-file case
 mkfifo "$TMP/request-fifo"
 : > "$TMP/request-empty"
 printf '   \n' > "$TMP/request-whitespace"
