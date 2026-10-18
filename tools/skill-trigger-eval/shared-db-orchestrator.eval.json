@@ -1,7 +1,7 @@
 [
-  {"query":"open the single shared-db orchestrator","should_trigger":true},
-  {"query":"coordinate parallel agents for these database migrations","should_trigger":true},
-  {"query":"route this schema change through the governed shared-db issues","should_trigger":true},
+  {"query":"show the optional claim-first shared-db safety reference","should_trigger":true},
+  {"query":"explain exact-object safety when authoring database migrations","should_trigger":true},
+  {"query":"show the claim-first safety checklist for governed shared-db work","should_trigger":true},
   {"query":"promote the shared database changes through preview and production","should_trigger":true},
   {"query":"coordinate a curated Master Data bulk load","should_trigger":true},
   {"query":"inspect the shared schema read-only","should_trigger":false},

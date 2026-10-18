@@ -1,4 +1,4 @@
-# Shared DB orchestrator operating manual
+# Shared DB structural-work operating manual
 
 > **Reference only. Claim-first is the default; no orchestrator chat or marker
 > is required.** The safety rules in this manual stay binding whenever shared-db
@@ -11,7 +11,7 @@
 3. Preview and merge locks
 4. Release and recovery
 5. Review and production
-6. Dynamic queues and automatic refill
+6. Independent work and collision queues
 7. External review rotation
 8. Operational blocker recovery
 
@@ -31,7 +31,7 @@ Rebuild state from current `main`, open `db-work` and `db-claim` issues,
 open pull requests, GitHub coordination refs and local worktrees. Documents and
 local scratch registers are never authority.
 
-Run the coordination audit before dispatch:
+Run the coordination audit before claiming work:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --audit
@@ -81,7 +81,7 @@ node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
 Do not create migration files before acquisition succeeds. Do not choose a
 version manually. Do not edit fenced claim blocks.
 
-## Dynamic queues and automatic refill
+## Independent work and collision queues
 
 Every open `db-work` issue must carry this machine-readable block:
 
@@ -89,7 +89,7 @@ Every open `db-work` issue must carry this machine-readable block:
 ```db-work-scope
 status: ready
 work_type: structural
-route: shared-db-orchestrator
+route: claim-first
 priority: 100
 depends_on:
 objects:
@@ -100,7 +100,7 @@ objects:
 Allowed statuses are `ready`, `blocked`, and `owner-decision`. Allowed work types
 are `structural`, `curated-master-data`, `application-data`, `source-data`,
 `repo-maintenance`, `documentation`, and `security-settings`. Routes are explicit
-and have no default: `shared-db-orchestrator`, `curated-master-data-governance`,
+and have no default: `claim-first`, `curated-master-data-governance`,
 `application-session`, `source-data-session`, `owner-only`, or `repo-maintenance`.
 
 `depends_on:` is one inline comma-separated field of same-repo issue numbers
@@ -115,7 +115,9 @@ session/owner in the issue —
 never to "a future session." Deferring to an unnamed future owner left the
 #3180 follow-through unregistered for ~15 hours until Albert asked.
 
-Only `ready + structural + shared-db-orchestrator` is eligible for an author lane.
+Only ready structural work with `route: claim-first` and exact objects starts a new author claim.
+The repository may accept the old route as a compatibility alias; it creates no
+orchestrator role, marker, or mandatory subagent dispatch.
 It must use exact normalized objects, including every whole-body function or
 trigger the implementation replaces. Non-structural work must not claim database
 objects. Outside-sourced writes into curated `core.*` Master Data keep the
@@ -124,32 +126,32 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
-components form serial queues; every unrelated component is dispatched at once,
+components form serial queues; unrelated authorized components may proceed independently,
 with no count limit. Claims and permanent version reservations protect future
 work. A relinquished claim is not an active author but still blocks overlap.
 Report an author as working only when current worker evidence exists. After every
 claim release, run a live queue audit immediately, close stale issues whose
-outcome is already delivered, and dispatch every genuinely eligible issue in an
-isolated worktree. Keep explicit successor queues, but say plainly
+outcome is already delivered, and continue authorized genuinely eligible work in an
+isolated worktree. Delegation is optional. Keep explicit successor queues, but say plainly
 when the audit proves no eligible successor exists. Do not ask Albert to approve
-dispatch.
+technical execution.
 
-Undispatched ready work is justified only by a complete audit showing overlap or a blocker.
+Do not leave authorized ready work idle without an actual dependency or collision.
 Unclassified or malformed issues make that proof impossible and the command
 fails. Blocked work releases its author lease only through the guarded
 relinquishment above; its claim remains protected. Owner-decision and every
-non-structural work type are reported and never block structural dispatch. `needs-albert` is not a route: after an answer, change
+non-structural work type are reported and never block structural technical execution. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
 
 ## Operational blocker recovery
 
-An orchestrator must never sit silently idle when blocked. The blocker repair is
-part of orchestration even when its implementation is repo maintenance,
+The owning session must never sit silently idle when blocked. The blocker repair is
+part of delivery even when its implementation is repo maintenance,
 documentation, tooling, reviewer infrastructure, or another repository. Start a
 separate appropriately scoped task immediately; never absorb non-structural work
-into the orchestrator context. Continue independent structural work, disclose
+into a structural claim. Continue independent structural work, disclose
 the blocker and business consequence immediately, and follow the repair task
 until the original capability is restored.
 
@@ -161,19 +163,12 @@ and report the provider reset time in Eastern Time, and do not repeatedly invoke
 a path already known to be unsafe. The reviewer-allocator redesign blocker is
 [popcre/shared-db#1767](https://github.com/popcre/shared-db/issues/1767).
 
-### Close what you supersede, in the same turn
+### Keep the existing outcome issue
 
-Opening a new HANDOVER/tracker issue that restates or carries forward the scope
-of an older open issue is normal — but the old issue must be closed in that same
-session, with a one-line "superseded by #NNNN" comment, not left for a future
-triage pass. This is not optional housekeeping: a 2026-08-18 audit of this
-repo's `db-work` queue found ~90 open issues, of which only one was genuinely
-live structural work — the rest were stale HANDOVER notes nobody had closed.
-Before opening a new issue that continues or restates prior scope, check whether
-an older issue already covers it; if so, close the older one instead of leaving
-both open. When you file a HANDOVER note as a status record rather than a live
-ask, say so explicitly in the issue body so a future triage pass can tell the
-difference between "still needed" and "recorded for the log."
+Record handover, ownership changes, blockers and missing live proof on the same
+application-need issue. Do not create a HANDOVER/tracker or leftover-proof issue
+for the same scope. Close an issue only when its actual outcome is verified, or
+when a durable supported transfer preserves the unresolved need and owner.
 
 Every successor issue must write this block from scratch after classifying its
 own requested work. It must not copy the predecessor's `work_type`, `route`, or
@@ -206,39 +201,27 @@ Re-derive the later body from the newly merged main.
 
 ## External review rotation
 
-After an issue reaches its exact final head, run:
+First read the target repository's current exact-head approval policy, including
+`popcre/shared-db`'s committed `config/owner-no-reviewer-policy.json`.
+That file belongs to the target shared-db repository, not ai-devops; an absent,
+inactive or invalid policy never grants an exemption. The scoped
+`owner_no_reviewer` path applies only where the repository enforces that active
+policy; never export the exception to another repository. All claim, collision,
+version, CI, preview, guarded-merge and production checks remain required.
+When external review is required and the issue reaches its exact final head, run:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the six preferred reviewers -- GLM 5.3
-(restored 2026-09-30), Qwen 3.8 Max, Muse Spark 1.3 Contributor, Gemini 3.8
-Flash, DeepSeek V4.1 Flash (re-entered 2026-09-23 with read-only repository
-tools), and StepFun Step 5 (shared-db#3657; skipped where preflight reports it
-unusable). Grok 4.6 stays active but is drawn only when none of those can take
-the exact review, including slot 2 and failed-reviewer replacement (owner
-preference 2026-09-27, shared-db#3592; shared-db#3593, merge 907758e3) -- then repeats across
-machines and restarts. Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
-(owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
-`config/reviewer-registry.json`): never route a review to them and never wait
-for one of them. GLM never reviews GLM-orchestrated (ZCode) work.
-Gemini is eligible only where `ai-review-preflight usable gemini` exits zero;
-otherwise the selector skips it. `usable` is the only command that reconciles
-install health, quarantine, live qualification, and reviewer-registry
-membership. A provider can be `installed-healthy` and still unusable because
-the registry does not carry it. That was Gemini's state until 2026-09-06: it was
-kept out after one run that returned no parseable verdict and one that returned a
-bare `PASS` with an empty report, and it re-entered only after a recorded live
-safety qualification and a live review that returned a well-formed verdict
-carrying the head SHA above a substantive report. Registry re-entry is always a
-reviewed shared-db change backed by that evidence; it is never an edit made to
-unblock an allocation. Retrying the same
-issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-muse`, `ai-grok-review`, `ai-glm`, `ai-qwen`, `ai-gemini`, `ai-stepfun`, or
-`ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`. Never override its model or
-reasoning pin, and never call `agy` directly.
+The GitHub-backed allocator and its current roster are authoritative. The
+maintained pool is Muse, DeepSeek, GLM and StepFun, excluding the implementing
+engine; GLM never reviews GLM-authored ZCode work. A provider must pass
+`ai-review-preflight usable <provider>` before allocation. Installed health alone
+is insufficient; never change registry membership to make an assignment succeed.
+Retrying the same issue/PR/head returns the same assignment. Use only its
+returned wrapper and pinned model, never a retired or frozen provider as overflow.
 
 The rotation wrappers are **persistent**: they hold named sessions, so the
 same session can be reused for rebuttals. `ai-codex-review` is **not**. It
@@ -246,39 +229,14 @@ exposes five one-shot modes only — `plan-review`, `diff-review`,
 `security-review`, `visual-review`, `final-check` — with no session, resume, or
 continuation of any kind, and `bin/ai-review` whitelists exactly those five.
 
-**Codex is retired, not overflow.** `codex-gpt-5.6-sol` has been in
-`RETIRED_REVIEWERS` since 2026-09-06 and receives no assignments; the text below
-about Codex verdicts applies only to reading historical evidence. A rotation provider that is already running
-other reviews is not busy: it takes the new review concurrently in its own
-session (decision 21). It never takes an
-ordinary turn. An unreadable GitHub keeps the ordinary rotation rather than
-diverting reviews to a provider that costs real money per run.
-
-**A Codex verdict cannot be debated, and that constrains when to spend one.**
-Because the wrapper is one-shot, the rebuttal rule below has no compliant path
-for Codex: there is no named session to reuse and nothing to continue. Do not
-invent one, and do not treat a fresh one-shot run as a continuation of an
-earlier verdict — it is a new review of whatever the repository looks like now.
-
-So when a Codex overflow verdict is disputed on the merits, the debate moves to
-a persistent reviewer immediately (reviewers take concurrent reviews), and that reviewer reviews the
-exact head from scratch rather than arbitrating a transcript it never saw. A
-Codex `REVISE` whose findings the author accepts needs no debate at all; fix the
-code, and re-review at the new exact head under the ordinary rotation.
-
-Never spend an overflow review on work you expect to argue about. Overflow exists
-only for the case where every rotation provider has genuinely refused, not to
-review contentious work.
-
-**The retired `glm-5.2` label receives no new work.** `glm-5.3` is active again
-(owner instruction 2026-09-30). Qwen 3.8 Max is no longer retired (owner instruction,
-2026-09-04); it is gated only by its own preflight qualification. Historical
-assignments, failures, and replacement evidence stay readable and must be
-recovered through `scripts/manage-migration-author-lanes.mjs`, never
-hand-edited.
+**No retired or frozen provider is overflow.** Use the current roster and
+supported allocator replacement after a real refusal. Historical assignments,
+failures and replacement evidence remain readable; recover them through the
+repository manager, never by hand-editing evidence. A one-shot historical Codex
+verdict has no persistent session to continue; do not import it as a new approval.
 
 **No reviewer review ever blocks another independent review.** Every reviewer
-wrapper (`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`) locks only the exact review session or submission, never the
+wrapper (`ai-muse`, `ai-glm`, `ai-deepseek-agent`, `ai-stepfun`) locks only the exact review session or submission, never the
 repository or the provider, so any number of reviews by one provider run at once
 in the same or different repositories (plan Step 7A, decision 21). Never skip a
 provider because it is already reviewing, and never read a provider running other
@@ -287,8 +245,7 @@ reviews as an outage. Only the same named session is serialized.
 Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
 session for rebuttals and relay them with `templates/delegation/debate-turn.md`
-— this applies to the five persistent rotation wrappers; see the Codex exception
-above.
+— this applies to the maintained persistent rotation wrappers.
 Stop at evidence-backed agreement or after the initial review plus three
 rebuttals. If a material disagreement remains, the merge stays stopped and the
 dispute goes to a THIRD independent reviewer, or to an engineer. Do NOT ask
@@ -374,7 +331,8 @@ owner-verified recovery command. Never delete refs by hand.
 
 ## Review and production
 
-Require independent review with no unresolved Critical or High finding. Merge
+Satisfy current repository-enforced exact-head approval policy; external reviews,
+when required, must have no unresolved Critical or High finding. Merge
 one pull request at a time, close its claim, update the next branch from newly
 merged main and repeat.
 

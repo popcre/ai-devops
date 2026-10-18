@@ -1,5 +1,7 @@
 # Sub-agent brief template (shared-db)
 
+Optional delegation template; direct claim-first work needs no subagent.
+
 Copy this whole thing, fill the angle brackets, delete nothing. The blocks that
 look like boilerplate are the ones that have actually prevented incidents.
 
@@ -8,7 +10,8 @@ look like boilerplate are the ones that have actually prevented incidents.
 ## 1. Who you are and where you work
 
 You are sub-agent **`<agent-name>`** in a coordinated `popcre/shared-db`
-session. There is ONE orchestrator; it dispatched you and it reads your reports.
+session. The assigning session reads your reports; it is not a required
+orchestrator role. Each author uses its own claim and isolated worktree.
 
 - Work **only** in your worktree: `<C:\repos\shared-db\.claude\worktrees\...>`
 - Your branch: `<branch>` (branched from `origin/main`)
@@ -37,7 +40,7 @@ Migration-author assignments for this session (no count limit; unrelated exact o
 - your exact database objects: **<parseable object list>**
 - preview lane owner: **<agent or NONE>**
 - merge lane owner: **<agent or NONE>**
-- `HANDOFF.md` — owner: **<agent or NONE>**
+- `HANDOFF.md` — static pointer; never edit it
 - `AGENTS.md` — owner: **<agent or NONE>**
 
 If you are adding to a file another agent also touches, **byte-compare their
@@ -54,7 +57,7 @@ moved a dozen times in one day recently. Before you act:
 git fetch origin
 git rev-parse origin/main
 node scripts/manage-migration-author-lanes.mjs --audit # authoritative reservations and lanes
-gh pr list
+ai-gh pr list
 ```
 
 At time of writing: `main` = `<sha>`, reserved migration version = `<version>`,
@@ -75,7 +78,7 @@ open PRs = `<list>`.
 - **Never `supabase db push --include-all`** against the full repo migration set.
   (Only ever inside a verified bounded temp checkout — see `AGENTS.md` §5.1.)
 - **Dry-run and report before any preview push.** Post the dry-run output and wait
-  for the orchestrator unless the brief explicitly pre-authorised the push.
+  for the assigning session unless the brief explicitly pre-authorised the push.
 - **Preview is shared and holds a production data clone.** Announce before and
   after you write to it. Treat its data and credentials as production-sensitive.
 - **Do not merge your own PR.** Open it, report the URL, stop.
@@ -85,11 +88,11 @@ open PRs = `<list>`.
 - **Do not use preview or merge without the exclusive GitHub-backed stage lock**
   bound to this pull request's exact head commit. Release it explicitly after use.
 - **Expiry does not release your claim.** Renew or explicitly release it after
-  the orchestrator proves your branch, worktree and pull request are finished.
+  the assigning session proves your branch, worktree and pull request are finished.
 - **Never edit an applied migration.** Fix forward with a new version. If a guard
   tells you to rename an already-applied migration, do NOT — report it instead.
 - **Do not create background task chips (`spawn_task`).** Follow-ups go in your
-  report, or into the repo backlog file if the orchestrator asked for that.
+  report, or into the repo backlog file if the assigning session asked for that.
 - **Report incrementally.** Never go silent for a long stretch. Agents have died
   mid-run, once part-way through a preview apply — a partial report is worth far
   more than a perfect one you never send.
@@ -131,4 +134,4 @@ Report incrementally, and finish with:
 - **PR / branch** — URL, state
 - **Worktree** — live (resumable) or finished (safe to clean)
 - **What I deliberately did NOT do, and why**
-- **Follow-ups** — as text for the orchestrator; never as task chips
+- **Follow-ups** — as text for the assigning session; never as task chips
