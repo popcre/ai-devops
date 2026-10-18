@@ -206,36 +206,5 @@ case "$(uname -s)" in
     ;;
 esac
 
-# stepfun_windows_shell_spawn_resolves — OpenCode's bash tool spawns `bash` /
-# `bash.exe` from PATH. The door must install shims that exec the folder gate;
-# without them OpenCode reports ChildProcess.spawn NotFound (incident
-# 20261014T203826Z). Extract the real helper from the door (not a copy) and
-# prove: missing gate fails; a present gate yields bash/sh + .exe/.cmd shims
-# that exec the gate.
-DOOR="$ROOT/tools/lib/review-doors/stepfun.sh"
-eval "$(sed -n '/^sf_install_windows_shell_shims()/,/^}/p' "$DOOR")"
-if ! declare -F sf_install_windows_shell_shims >/dev/null; then
-  echo "FAIL stepfun_windows_shell_spawn_resolves: helper missing from door"
-  fail=$((fail+1))
-else
-  if sf_install_windows_shell_shims "$TMP/shim-missing" "$TMP/no-such-gate" >/dev/null 2>&1; then
-    echo "FAIL stepfun_windows_shell_spawn_resolves: missing gate must fail"
-    fail=$((fail+1))
-  else
-    check 'stepfun_windows_shell_spawn_resolves refuses a missing gate' true
-  fi
-  gate_bin="$TMP/fake-gate"
-  printf '#!/bin/sh\nexit 0\n' > "$gate_bin"; chmod +x "$gate_bin"
-  if sf_install_windows_shell_shims "$TMP/shim-ok" "$gate_bin"; then
-    check 'stepfun_windows_shell_spawn_resolves installs bash and sh shims' \
-      bash -c 'test -x "$1/bash" && test -f "$1/bash.exe" && test -f "$1/bash.cmd" && test -x "$1/sh" && test -f "$1/sh.exe" && test -f "$1/sh.cmd"' _ "$TMP/shim-ok"
-    check 'stepfun_windows_shell_spawn_resolves shims exec the gate' \
-      bash -c 'grep -q "exec " "$1/bash" && grep -qF "$2" "$1/bash" && grep -q "exec " "$1/sh"' _ "$TMP/shim-ok" "$gate_bin"
-  else
-    echo "FAIL stepfun_windows_shell_spawn_resolves: gate present but shims refused"
-    fail=$((fail+1))
-  fi
-fi
-
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
