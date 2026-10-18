@@ -845,14 +845,9 @@ jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REP
   '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
   > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 # Native Windows jq/Python may record and print C:/ paths (CRLF-terminated) for
-# a Git Bash /tmp path; elsewhere the comparison stays exact.
-same_path(){
-  local a="${1%$'\r'}" b="${2%$'\r'}"
-  [ -n "$a" ] && [ -n "$b" ] || return 1
-  if command -v cygpath >/dev/null 2>&1; then
-    a="$(cygpath -m "$a")" && b="$(cygpath -m "$b")" && [ -n "$a" ] && [ "$a" = "$b" ]
-  else [ "$a" = "$b" ]; fi
-}
+# a Git Bash /tmp path; the shared helper compares them as one place (#1835).
+source "$ROOT/tools/lib/path-identity.sh"
+same_path(){ ai_same_path "$@"; }
 ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
 PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
 [ "$PH_RC" -eq 0 ] && same_path "$(jq -r .report <<<"$PH_OUT")" "$PH_REPORT" && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \

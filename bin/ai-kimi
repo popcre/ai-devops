@@ -2091,7 +2091,8 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
   reviewer_event_verify_owner kimi "$owner" || { warn 'implementation evidence cleanup refused; exact owner and worktree preserved.'; return 1; }
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
-  if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
+  # Native Windows Git lists C:/ paths; compare each entry as a place (#1835).
+  if git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r listed; do same_path "$listed" "$wt" && exit 0; done; then
     warn "the throwaway worktree $wt is STILL registered — remove it before continuing."
     return 1
   fi

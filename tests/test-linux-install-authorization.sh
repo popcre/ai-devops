@@ -64,10 +64,11 @@ fi
 GATE
 chmod +x "$TMP/src/bin/ai-task-gates"
 cp "$ROOT/install.sh" "$ROOT/update.sh" "$TMP/src/"
+mkdir -p "$TMP/src/tools/lib" && cp "$ROOT/tools/lib/path-identity.sh" "$TMP/src/tools/lib/"
 git -C "$TMP/src" init -q -b main
 git -C "$TMP/src" config user.name Fixture
 git -C "$TMP/src" config user.email fixture@example.invalid
-git -C "$TMP/src" add install.sh update.sh bin/ai-task-gates
+git -C "$TMP/src" add install.sh update.sh bin/ai-task-gates tools/lib/path-identity.sh
 git -C "$TMP/src" commit -qm baseline
 git init -q --bare "$TMP/remote.git"
 git -C "$TMP/src" remote add origin "$TMP/remote.git"

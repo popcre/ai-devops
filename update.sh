@@ -8,18 +8,9 @@ SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export AI_DEVOPS_PROTECTED_UPDATE=1
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
-normalized_path() {
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -am -- "$1" | tr '[:upper:]' '[:lower:]'
-  else
-    realpath -- "$1"
-  fi
-}
-same_path() {
-  local left right
-  left="$(normalized_path "$1")" && right="$(normalized_path "$2")" || return 1
-  [ -n "$left" ] && [ -n "$right" ] && [ "$left" = "$right" ]
-}
+# Path identity (#1835): one shared helper, CR-safe and Windows-aware.
+source "$SOURCE_ROOT/tools/lib/path-identity.sh"
+same_path() { ai_same_path "$@"; }
 
 expected_head=""
 installed_checkout=""
