@@ -20,10 +20,11 @@ if [ "${1:-}" = aborted ]; then
   # git updates the index and files before the ref; put them back so a
   # refused pull does not leave the old HEAD over new files (#1836).
   if [ -n "$marker_dir" ] && [ -f "$marker" ]; then
-    read -r to < "$marker" || :
+    read -r to owner < "$marker" || :
     rm -f "$marker"
     from="$(git rev-parse -q --verify HEAD 2>/dev/null)" || from=""
-    if [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
+    # Only the git process that was refused (same parent) restores.
+    if [ "${owner:-}" = "$PPID" ] && [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
       git read-tree -m -u "$to" "$from" 2>/dev/null \
         && echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2 \
         || echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
@@ -61,7 +62,16 @@ while read -r old new ref; do
 done
 
 [ -z "$refused" ] && exit 0
-case "$primary$to" in 1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;; *) [ -z "$marker_dir" ] || printf '%s\n' "$to" > "$marker" ;; esac
+# Restore files only when git itself rewrote them toward a commit that
+# already exists elsewhere (pull/merge/reset/checkout of fetched or older
+# history). A new local commit or amend is reachable from no other ref; its
+# files are the user's own work and stay untouched (#1836).
+restore=0
+case "$primary$to" in
+  1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;;
+  *) if git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null | grep -qv '^refs/heads/main$'; then restore=1; fi ;;
+esac
+[ "$restore" -eq 0 ] || [ -z "$marker_dir" ] || printf '%s %s\n' "$to" "$PPID" > "$marker"
 cat >&2 <<MSG
 ai-devops: refusing to move $refused in the installed toolkit checkout.
 Only the protected installer may advance it: on Linux run update.sh from a

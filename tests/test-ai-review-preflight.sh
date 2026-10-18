@@ -574,7 +574,8 @@ unset AI_TASK_GATES_DIR
 echo '== managed hook installer (#804)'
 HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
 # #1836: the installed main guard refuses a plain pull (and a detached move)
-# in the primary checkout and restores its files, allows fetch and other-branch work in a linked
+# in the primary checkout and restores its files (never a refused commit's own
+# work), allows fetch and other-branch work in a linked
 # worktree, and lets the installers' empty core.hooksPath advance main.
 GUARD="$TMP/guard"; git init -q --bare -b main "$GUARD/origin.git"
 git clone -q "$GUARD/origin.git" "$GUARD/c" 2>/dev/null
@@ -591,6 +592,9 @@ if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/
    [ -z "$(git -C "$GUARD/c" status --porcelain --untracked-files=no)" ] && [ "$(cat "$GUARD/c/f")" = 1 ] &&
    ! git -C "$GUARD/c" checkout -q --detach origin/main 2>/dev/null &&
    [ -z "$(git -C "$GUARD/c" status --porcelain --untracked-files=no)" ] &&
+   echo own > "$GUARD/c/own" && git -C "$GUARD/c" add own && ! git -C "$GUARD/c" commit -qm own 2>/dev/null &&
+   [ "$(cat "$GUARD/c/own")" = own ] && git -C "$GUARD/c" diff --cached --quiet HEAD -- own; [ $? -eq 1 ] &&
+   git -C "$GUARD/c" rm -q --cached own && rm -f "$GUARD/c/own" &&
    git -C "$GUARD/c" fetch -q origin &&
    echo w > "$GUARD/wt/w" && git -C "$GUARD/wt" add w && git -C "$GUARD/wt" commit -qm wt &&
    git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" merge -q --ff-only origin/main &&
