@@ -34,7 +34,12 @@ case "$1" in
    "$REAL_PACKET" resolve "$PWD" --base "$GLM_TEST_BASE" --assert-head "$GLM_TEST_HEAD" > "$GLM_FIXTURE/identity"
    jq '{head,source_digest,stale:false,verdict:null}' "$GLM_FIXTURE/identity" > "$GLM_FIXTURE/state"
    printf '%s\n' "$GLM_FIXTURE/state" ;;
- finish) printf '{"stale":false,"verdict":"APPROVE"}\n' ;;
+ finish)
+   v=APPROVE
+   while [ "$#" -gt 0 ]; do
+     case "$1" in --verdict) v="$2"; shift 2 ;; *) shift ;; esac
+   done
+   printf '{"stale":false,"verdict":"%s"}\n' "$v" ;;
  *) exit 0 ;;
 esac
 EOF
@@ -55,7 +60,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf 'Reviewed head %s.\n' "$GLM_TEST_HEAD"
-printf 'The immutable source packet, changed files, protected snapshot boundary, exact source identity, lifecycle terminal handling, refusal conditions and tests were inspected. The change retains fail-closed validation and all existing guarantees. No findings were identified after checking relevant siblings, invalid inputs, source changes and failure paths. The exact reviewed commit remains bound throughout this report, and the model report is distinct from runtime progress chrome.\n\n## Verdict\nAPPROVE\n'
+printf 'The immutable source packet, changed files, protected snapshot boundary, exact source identity, lifecycle terminal handling, refusal conditions and tests were inspected. The change retains fail-closed validation and all existing guarantees. Findings: one fix is required before this head can pass. The exact reviewed commit remains bound throughout this report, and the model report is distinct from runtime progress chrome.\n\n## Verdict\n'
+if [ "${GLM_POOL_VERDICT:-APPROVE}" = REVISE ]; then printf 'REVISE\n'; else printf 'APPROVE\n'; fi
 EOF
 chmod +x "$TMP/lifecycle" "$TMP/runner"
 export AI_REVIEW_LIFECYCLE_BIN="$TMP/lifecycle" AI_POOL_RUNNER_GLM="$TMP/runner"
@@ -120,6 +126,39 @@ rm -f "$TMP/runner-args"
 run_pool || true
 third="$(head -1 "$TMP/runner-args" 2>/dev/null || true)"
 if [ "$third" = new ]; then ok 'REJECT stays cold (independent re-review)'; else bad "REJECT stays cold (got $third)"; fi
+
+# A compliant REVISE from the runner is a completed outcome (not missing-verdict).
+export GLM_POOL_VERDICT=REVISE
+rm -f "$TMP/runner-args"
+if run_pool; then ok 'pool accepts REVISE as a completed verdict'
+else
+  bad 'pool accepts REVISE as a completed verdict'
+  tail -20 "$TMP/out" >&2 || true
+fi
+unset GLM_POOL_VERDICT
+
+# glm_followup_clear: after a successful warm turn the marker is gone and the
+# next REVISE can warm-follow again (not stuck cold forever).
+rm -f "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.json "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.followup-armed
+printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-thread2.md"
+cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-clear-thread.json" <<EOF
+{"schema_version":2,"name":"pool-glm-clear-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T13:00:00Z","last_completed_turn":{"report":"$TMP/revise-thread2.md"}}
+EOF
+rm -f "$TMP/runner-args"
+run_pool || true
+if [ "$(head -1 "$TMP/runner-args" 2>/dev/null)" = ask ] && [ ! -e "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-clear-thread.json.followup-armed" ]; then
+  ok 'glm_followup_clear removes the arm marker after successful ask'
+else
+  bad 'glm_followup_clear removes the arm marker after successful ask'
+fi
+# Second REVISE after a cleared warm turn must warm-follow again.
+rm -f "$TMP/runner-args"
+run_pool || true
+if [ "$(head -1 "$TMP/runner-args" 2>/dev/null)" = ask ]; then
+  ok 'cleared follow-up can warm-follow again on a later REVISE'
+else
+  bad "cleared follow-up can warm-follow again on a later REVISE (got $(head -1 "$TMP/runner-args" 2>/dev/null))"
+fi
 
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

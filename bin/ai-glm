@@ -1745,8 +1745,10 @@ provisional decision, opening summary, heading, or example verdict. Preserve
 your independent judgment, substantive findings, and the requested exact-head
 binding; this instruction changes presentation only. When the requested format
 is a "## Verdict" heading, the line after it holds exactly one plain word,
-APPROVE, REJECT, or BLOCKED, and nothing else: no dash, head SHA, reason,
+APPROVE, REVISE, REJECT, or BLOCKED, and nothing else: no dash, head SHA, reason,
 punctuation, or Markdown styling. State the exact-head binding on another line.
+Use REVISE only when the change needs fixes and a re-review of the corrected
+head in this same conversation; use REJECT when the approach itself is wrong.
 FORMAT
   fi
   printf '%s' "$f"

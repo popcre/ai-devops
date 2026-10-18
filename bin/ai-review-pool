@@ -468,7 +468,7 @@ $DECISION
 Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one allowed word exactly:
 
 ## Verdict
-APPROVE|REJECT|BLOCKED
+$(if [ "$provider" = glm ]; then printf 'APPROVE|REVISE|REJECT|BLOCKED'; else printf 'APPROVE|REJECT|BLOCKED'; fi)
 
 ## RUN FACTS (this review only)
 The reviewed head commit is $REVIEW_HEAD.
@@ -669,7 +669,7 @@ if [ "$LEADING_VERDICT" = 1 ]; then
       if ($0 ~ /^[[:space:]]*$/) next
       pending=0
       gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-      if ($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print
+      if ($0 ~ /^(APPROVE|REVISE|REJECT|BLOCKED)$/) print
     }
   ' "$TMP_TEXT")"
   UNIQUE_VERDICTS="$(printf '%s\n' "$ALL_VERDICTS" | sort -u)"
@@ -687,13 +687,13 @@ VERDICT_RECORD="$(awk -v n="$VERDICT_LINE" '
   pending {
     if ($0 ~ /^[[:space:]]*$/) next
     gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-    if ($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print NR "\t" $0
+    if ($0 ~ /^(APPROVE|REVISE|REJECT|BLOCKED)$/) print NR "\t" $0
     exit
   }
 ' "$TMP_TEXT")"
 VERDICT_TOKEN_LINE="${VERDICT_RECORD%%$'\t'*}"
 VERDICT="${VERDICT_RECORD#*$'\t'}"
-case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
+case "$VERDICT" in APPROVE|REVISE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome. The analysis is the
 # text on the far side of the verdict block: before a terminal `## Verdict`
