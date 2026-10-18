@@ -17,14 +17,15 @@ description: Optional reference for shared-db structural work safety rules (clai
 **Not required. Claim-first is the default. This document is reference only.**
 New structural work starts when a session claims exact objects on the existing
 issue and begins — no orchestrator chat and no marker. The safety rules below
-(claims, versions, stage leases, independent review, live proof) stay binding
+(claims, versions, stage leases, repository-enforced approval, live proof) stay binding
 whenever shared-db structural work runs.
 
 **Reporting to Albert.** Every status, queue, audit and delegation record
 in this skill is written into GitHub issues, plans and handoffs — never into the
-chat reply. Replies to Albert obey the global 120-word limit, and any business-meaning question only he can answer, and every issue, agent, check or merge this session is
-waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
-status roll-up into chat.
+chat reply. Replies to Albert obey the global 120-word limit. Business-meaning
+questions only he can answer and every pending issue, agent, check or merge
+appear only in the closing `**Still open**` block. Never paste a queue listing,
+marker block, audit result or per-agent status roll-up into chat.
 
 ## Scope
 
@@ -64,6 +65,9 @@ publications, storage policies, or migrations shipping them)?
 - Application data and source-data work stays with its owning application or
   private repository. Repository maintenance, docs and security settings use
   their appropriate non-structural session and gates, without database claims.
+  Security-settings work must stop if the installed lane tool still returns it
+  to an owner-only gate; preserve that refusal until the supported repair
+  (popcre/shared-db#3675) is verified, and never ask Albert for technical approval.
 - Classify each successor from its own work; never inherit a predecessor issue's
   work type, route or objects. Read-only inspection needs no claim or dispatch.
 
@@ -126,7 +130,8 @@ Albert approved concurrent migration authoring on 2026-08-14.
   external reviewer is required, use its durable allocator, excluding the
   implementing engine. The current pool is Muse, DeepSeek, GLM and StepFun;
   membership and usable preflight must both pass. Never edit the registry to
-  unblock allocation. A documented `owner_no_reviewer` policy is scoped to the
+  unblock allocation. The committed `popcre/shared-db` policy
+  (`config/owner-no-reviewer-policy.json`) and its `owner_no_reviewer` path is scoped to the
   repository enforcing it and does not bypass any other delivery gate.
   Report an `OUT OF CREDIT:` refusal promptly and replace through the supported
   allocator rather than retrying an unavailable provider.
@@ -279,7 +284,7 @@ For each PR separately:
 4. Apply and prove the migration on preview.
 5. Satisfy current repository-enforced exact-head approval policy. Where external
    review is required, obtain it with no unresolved Critical or High finding.
-   The scoped `owner_no_reviewer` path is valid only when that repository
+   The scoped `popcre/shared-db` `owner_no_reviewer` path is valid only when that repository
    enforces its committed owner policy; it grants no preview or production bypass.
 6. Release preview, acquire the exclusive merge lock, revalidate the head/base,
    and merge one PR through the guarded path.

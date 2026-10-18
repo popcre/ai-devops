@@ -11,7 +11,7 @@
 3. Preview and merge locks
 4. Release and recovery
 5. Review and production
-6. Dynamic queues and automatic refill
+6. Independent work and collision queues
 7. External review rotation
 8. Operational blocker recovery
 
@@ -81,7 +81,7 @@ node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
 Do not create migration files before acquisition succeeds. Do not choose a
 version manually. Do not edit fenced claim blocks.
 
-## Dynamic queues and automatic refill
+## Independent work and collision queues
 
 Every open `db-work` issue must carry this machine-readable block:
 
@@ -202,7 +202,9 @@ Re-derive the later body from the newly merged main.
 ## External review rotation
 
 First read the target repository's current exact-head approval policy, including
-its committed `config/owner-no-reviewer-policy.json`. The scoped
+`popcre/shared-db`'s committed `config/owner-no-reviewer-policy.json`.
+That file belongs to the target shared-db repository, not ai-devops; an absent,
+inactive or invalid policy never grants an exemption. The scoped
 `owner_no_reviewer` path applies only where the repository enforces that active
 policy; never export the exception to another repository. All claim, collision,
 version, CI, preview, guarded-merge and production checks remain required.
@@ -227,39 +229,14 @@ exposes five one-shot modes only — `plan-review`, `diff-review`,
 `security-review`, `visual-review`, `final-check` — with no session, resume, or
 continuation of any kind, and `bin/ai-review` whitelists exactly those five.
 
-**Codex is retired, not overflow.** `codex-gpt-5.6-sol` has been in
-`RETIRED_REVIEWERS` since 2026-09-06 and receives no assignments; the text below
-about Codex verdicts applies only to reading historical evidence. A rotation provider that is already running
-other reviews is not busy: it takes the new review concurrently in its own
-session (decision 21). It never takes an
-ordinary turn. An unreadable GitHub keeps the ordinary rotation rather than
-diverting reviews to a provider that costs real money per run.
-
-**A Codex verdict cannot be debated, and that constrains when to spend one.**
-Because the wrapper is one-shot, the rebuttal rule below has no compliant path
-for Codex: there is no named session to reuse and nothing to continue. Do not
-invent one, and do not treat a fresh one-shot run as a continuation of an
-earlier verdict — it is a new review of whatever the repository looks like now.
-
-So when a Codex overflow verdict is disputed on the merits, the debate moves to
-a persistent reviewer immediately (reviewers take concurrent reviews), and that reviewer reviews the
-exact head from scratch rather than arbitrating a transcript it never saw. A
-Codex `REVISE` whose findings the author accepts needs no debate at all; fix the
-code, and re-review at the new exact head under the ordinary rotation.
-
-Never spend an overflow review on work you expect to argue about. Overflow exists
-only for the case where every rotation provider has genuinely refused, not to
-review contentious work.
-
-**The retired `glm-5.2` label receives no new work.** `glm-5.3` is active again
-(owner instruction 2026-09-30). Qwen 3.8 Max is no longer retired (owner instruction,
-2026-09-04); it is gated only by its own preflight qualification. Historical
-assignments, failures, and replacement evidence stay readable and must be
-recovered through `scripts/manage-migration-author-lanes.mjs`, never
-hand-edited.
+**No retired or frozen provider is overflow.** Use the current roster and
+supported allocator replacement after a real refusal. Historical assignments,
+failures and replacement evidence remain readable; recover them through the
+repository manager, never by hand-editing evidence. A one-shot historical Codex
+verdict has no persistent session to continue; do not import it as a new approval.
 
 **No reviewer review ever blocks another independent review.** Every reviewer
-wrapper (`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`) locks only the exact review session or submission, never the
+wrapper (`ai-muse`, `ai-glm`, `ai-deepseek-agent`, `ai-stepfun`) locks only the exact review session or submission, never the
 repository or the provider, so any number of reviews by one provider run at once
 in the same or different repositories (plan Step 7A, decision 21). Never skip a
 provider because it is already reviewing, and never read a provider running other
@@ -268,8 +245,7 @@ reviews as an outage. Only the same named session is serialized.
 Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
 session for rebuttals and relay them with `templates/delegation/debate-turn.md`
-— this applies to the five persistent rotation wrappers; see the Codex exception
-above.
+— this applies to the maintained persistent rotation wrappers.
 Stop at evidence-backed agreement or after the initial review plus three
 rebuttals. If a material disagreement remains, the merge stays stopped and the
 dispute goes to a THIRD independent reviewer, or to an engineer. Do NOT ask
