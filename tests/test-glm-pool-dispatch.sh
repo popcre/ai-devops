@@ -161,7 +161,7 @@ export PATH="$TMP/mock-python:$PATH"
 rm -f "$TMP/runner-args" "$TMP/cache-lookup"
 run
 [ -e "$TMP/cache-lookup" ] && [ ! -e "$TMP/runner-args" ]
-[ "$(tail -1 "$TMP/out")" = "$TMP/generic-report.md" ]
+[ "$(tail -1 "$TMP/out" | sed 's#\\#/#g')" -ef "$TMP/generic-report.md" ] # -ef: same file, any path spelling (#1835)
 export AI_REVIEW_BRIEF_FILE="$TMP/question with spaces.md"
 rm -f "$TMP/cache-lookup"
 run
