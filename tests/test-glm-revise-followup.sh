@@ -176,5 +176,14 @@ else
   bad 'lifecycle finish accepts REVISE as a terminal verdict (begin failed)'
 fi
 
+# Probe branch guards (source contract; formal route is Linux-only at runtime).
+if grep -q "formal GLM activation is invalid; no legacy fallback" "$ROOT/bin/ai-review-pool" && \
+   grep -q "invalid formal route" "$ROOT/bin/ai-review-pool" && \
+   grep -q 'glm_state_root="${AI_GLM_STATE_DIR:-' "$ROOT/bin/ai-review-pool"; then
+  ok 'formal route stays fail-closed and probe honours AI_GLM_STATE_DIR'
+else
+  bad 'formal route stays fail-closed and probe honours AI_GLM_STATE_DIR'
+fi
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

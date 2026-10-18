@@ -567,15 +567,16 @@ glm_followup_clear() { # glm_followup_clear META — ask succeeded; allow a late
 }
 # Probe the same tree the runner will use: formal-review re-points STATE_DIR
 # to glm-formal (bin/ai-glm). Decide the profile before any follow-up lookup.
+# Fail closed: a corrupt/drifted formal activation must never silently fall
+# back to the general profile (DeepSeek 5th REJECT).
 glm_state_root="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
 if [ "$provider" = glm ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
-  _formal_route="$(python3 "$ROOT/../tools/glm_formal_profile.py" route 2>/dev/null || true)"
-  _formal_profile="$(printf '%s' "$_formal_route" | jq -er '.profile|select(.=="general" or .=="formal-review")' 2>/dev/null || echo general)"
+  _formal_route="$(python3 "$ROOT/../tools/glm_formal_profile.py" route)" || die 'formal GLM activation is invalid; no legacy fallback.'
+  _formal_profile="$(printf '%s' "$_formal_route" | jq -er '.profile|select(.=="general" or .=="formal-review")')" || die 'invalid formal route.'
   if [ "$_formal_profile" = formal-review ]; then
     glm_state_root="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm-formal}"
     RUNNER_ENV=(AI_GLM_PROFILE=formal-review AI_GLM_STATE_DIR="$glm_state_root")
-    RUNNER="$(printf '%s' "$_formal_route" | jq -er '.runner' 2>/dev/null || true)"
-    [ -n "$RUNNER" ] || die 'activated pinned GLM runner missing.'
+    RUNNER="$(printf '%s' "$_formal_route" | jq -er '.runner')" || die 'activated pinned GLM runner missing.'
     RUNNER_ENV+=(AI_REVIEW_PREFLIGHT_BIN="$ROOT/ai-review-preflight" AI_REVIEW_LIFECYCLE_BIN="$ROOT/ai-review-lifecycle")
   else
     RUNNER_ENV=(AI_GLM_PROFILE=general AI_GLM_STATE_DIR="$glm_state_root")
