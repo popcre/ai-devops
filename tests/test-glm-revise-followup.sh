@@ -9,6 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 export AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=codex
 export AI_REVIEW_EVENT_DIR="$TMP/events" AI_REVIEW_SANDBOX_HOME="$TMP/sandboxes"
 export GLM_FIXTURE="$TMP" REAL_PACKET="$ROOT/bin/ai-review-packet" AI_GLM_STATE_DIR="$TMP/glm-state"
+export RUN_ID_FIXTURE="$(printf '%032d' 99)"
 # Shared offline isolation (#1435, #1505): marker, cleared outer review session.
 . "$ROOT/tests/lib-reviewer-events-isolation.sh"
 mkdir -p "$TMP/repo" "$TMP/events" "$AI_GLM_STATE_DIR"
@@ -158,6 +159,21 @@ if [ "$(head -1 "$TMP/runner-args" 2>/dev/null)" = ask ]; then
   ok 'cleared follow-up can warm-follow again on a later REVISE'
 else
   bad "cleared follow-up can warm-follow again on a later REVISE (got $(head -1 "$TMP/runner-args" 2>/dev/null))"
+fi
+
+# Real lifecycle terminal contract: finish --verdict REVISE must complete
+# (stubs above cannot catch a REVISE terminal-contract gap).
+lc_dir="$TMP/lifecycle-real"; mkdir -p "$lc_dir"
+lc_state="$(bash "$ROOT/bin/ai-review-lifecycle" begin --provider glm --repo "$TMP/repo" --run-id "$RUN_ID_FIXTURE" --caller codex --preflight standard 2>/dev/null)" || lc_state=""
+if [ -n "$lc_state" ] && [ -f "$lc_state" ]; then
+  printf 'Reviewed head %s. The immutable source packet, changed files, protected snapshot boundary, exact source identity, lifecycle terminal handling, refusal conditions and tests were inspected. One fix is required before this head can pass; re-review the corrected head in this conversation. The exact reviewed commit remains bound throughout this report.\n\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/lc-revise.md"
+  if bash "$ROOT/bin/ai-review-lifecycle" finish --state "$lc_state" --verdict REVISE --report "$TMP/lc-revise.md" --elapsed 1 >/dev/null 2>&1; then
+    ok 'lifecycle finish accepts REVISE as a terminal verdict'
+  else
+    bad 'lifecycle finish accepts REVISE as a terminal verdict'
+  fi
+else
+  bad 'lifecycle finish accepts REVISE as a terminal verdict (begin failed)'
 fi
 
 printf 'passed=%s failed=%s\n' "$pass" "$fail"

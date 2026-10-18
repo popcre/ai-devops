@@ -519,7 +519,7 @@ glm_report_verdict() { # glm_report_verdict REPORT -> APPROVE|REVISE|REJECT|BLOC
   awk -v n="$line" 'NR>n && NF {print; exit}' "$file" 2>/dev/null | tr -d '\r' | awk '{print $1}'
 }
 glm_revise_followup_name() { # prints session name when a REVISE turn is continuable
-  local state root rid cand meta report verdict name activity best_meta="" best_name="" best_act=""
+  local state root rid cand meta report verdict name activity best_meta="" best_name="" best_act="" session_base=""
   state="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
   root="$REPO_ROOT"
   rid="$(glm_repo_id "$root")" || return 1
@@ -540,6 +540,14 @@ glm_revise_followup_name() { # prints session name when a REVISE turn is continu
     [ -n "$report" ] && [ -f "$report" ] || continue
     verdict="$(glm_report_verdict "$report")"
     [ "$verdict" = REVISE ] || continue
+    # Bind the follow-up to the requested comparison: a REVISE on a different
+    # base is a different question and must not steal this dispatch.
+    if [ -n "$OPT_BASE" ]; then
+      session_base="$(jq -r '.base // empty' "$meta" 2>/dev/null || true)"
+      if [ -n "$session_base" ] && [ "$session_base" != "$(git -C "$root" rev-parse --verify --quiet --end-of-options "$OPT_BASE^{commit}" 2>/dev/null || true)" ]; then
+        continue
+      fi
+    fi
     name="$(jq -r '.name // empty' "$meta" 2>/dev/null || true)"
     [ -n "$name" ] || continue
     activity="$(jq -r '.last_activity_at // .last_completed_turn.finished_at // empty' "$meta" 2>/dev/null || true)"
@@ -693,7 +701,15 @@ VERDICT_RECORD="$(awk -v n="$VERDICT_LINE" '
 ' "$TMP_TEXT")"
 VERDICT_TOKEN_LINE="${VERDICT_RECORD%%$'\t'*}"
 VERDICT="${VERDICT_RECORD#*$'\t'}"
-case "$VERDICT" in APPROVE|REVISE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
+case "$VERDICT" in
+  APPROVE|REJECT|BLOCKED) ;;
+  REVISE)
+    if [ "$provider" != glm ]; then
+      "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
+      die "$provider returned REVISE, which only the GLM follow-up path accepts."
+    fi ;;
+  *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";;
+esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome. The analysis is the
 # text on the far side of the verdict block: before a terminal `## Verdict`
