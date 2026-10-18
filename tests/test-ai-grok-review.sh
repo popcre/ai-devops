@@ -1629,6 +1629,8 @@ cat > "$DOORS_SHIPPED" <<'DOORS_EOF'
   "deepseek": {"door": "tools/lib/review-doors/deepseek.sh", "contract": ["review", "implement"]}
 }
 DOORS_EOF
+# Behaviour capabilities (#1834) are not door membership; keep them through the shrink.
+jq -s '.[0] + {capabilities: .[1].capabilities}' "$DOORS_SHIPPED" "$DOORS_BACKUP" > "$POOLTMP/doors-shrunk.json" && cp "$POOLTMP/doors-shrunk.json" "$DOORS_SHIPPED"
 # Re-export with the session-runner hooks the legacy adapter path needs.
 export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_QWEN="$POOLTMP/runner" AI_POOL_RUNNER_MUSE="$POOLTMP/runner" AI_POOL_RUNNER_GEMINI="$POOLTMP/runner" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session

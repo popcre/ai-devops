@@ -300,9 +300,13 @@ begin(){
   identity="$(identity_json "$repo")"; repo="$(jq -r .repository_root <<<"$identity")"
   preflight_repo="$repo"
   if [ -n "$export_root" ]; then
-    [ "$provider" = deepseek ] || die "code-only lifecycle requires DeepSeek."
+    # attachment_only_code_review (#1834): the registry names the provider that
+    # owns the private attachment-only route; never a provider-name branch.
+    # shellcheck source=../tools/lib/review-capabilities.sh
+    . "$REAL_DIR/../tools/lib/review-capabilities.sh" || die "cannot load the review capability reader."
+    review_capability "$REAL_DIR/../config/review-runner-doors.json" "$provider" attachment_only_code_review || die "code-only lifecycle requires DeepSeek."
     case "${AI_REVIEW_GATE_MODE:-}" in diff-review|security-review|final-check) ;; *) die "code-only lifecycle requires a supported explicit review mode.";; esac
-    [ -n "${AI_REVIEW_IMPLEMENTER:-}" ] && [ "${AI_REVIEW_IMPLEMENTER,,}" != deepseek ] || die "code-only lifecycle requires an independent named implementer."
+    [ -n "${AI_REVIEW_IMPLEMENTER:-}" ] && [ "${AI_REVIEW_IMPLEMENTER,,}" != "$provider" ] || die "code-only lifecycle requires an independent named implementer."
     export_root="$(canon "$export_root")"
     export_record="$(python3 "$REAL_DIR/ai-review-code-only.py" verify "$export_root" --assert-head "$(jq -r .head <<<"$identity")")" || die "code-only export binding refused."
     [ "$(jq -r .source_digest <<<"$export_record")" = "$(jq -r .source_digest <<<"$identity")" ] || die "code-only source digest differs."

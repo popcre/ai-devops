@@ -155,7 +155,16 @@ fi
 export AI_REVIEW_OPERATION="$operation"
 [ -z "$action_profile$action_manifest" ] || { [ "$code_only" -eq 1 ] && [ -n "$action_profile" ] && [ -f "$action_manifest" ] || { usage >&2; exit 2; }; }
 [ "$code_only" -eq 1 ] || { [ -z "$paths_file" ] || { usage >&2; exit 2; }; }
-if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
+# Behaviour capabilities (#1834) come from one registry field, never a name branch.
+CAP_LIB="$REAL_DIR/../tools/lib/review-capabilities.sh"; [ -f "$CAP_LIB" ] || CAP_LIB="$ROOT/../tools/lib/review-capabilities.sh"
+CAP_JSON="$(dirname "$CAP_LIB")/../../config/review-runner-doors.json"
+# shellcheck source=../tools/lib/review-capabilities.sh
+. "$CAP_LIB" 2>/dev/null && [ -f "$CAP_JSON" ] || { printf 'ai-review: cannot load the review capability registry.\n' >&2; exit 3; }
+# attachment_only_code_review: the provider owns the private --code-only
+# attachment route (product invariant), and its ordinary reviews go to the pool.
+attachment_route=0
+review_capability "$CAP_JSON" "$review_provider" attachment_only_code_review && attachment_route=1
+if [ "$attachment_route" = 1 ] && [ "$code_only" -ne 1 ]; then
   # Ordinary DeepSeek reviews dispatch through the shared review runner's
   # OpenCode door, the same pool path as the other rotation reviewers. The
   # --code-only attachment-only route stays below and is chosen only with
@@ -166,18 +175,18 @@ if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
   done
   [ -z "${AI_REVIEW_REGISTRY_FILE:-}" ] || REGISTRY="$AI_REVIEW_REGISTRY_FILE"
   registry_state=""
-  [ -z "$REGISTRY" ] || registry_state="$(jq -r --arg p deepseek '.providers[$p].registry_state // "absent"' "$REGISTRY" 2>/dev/null || true)"
+  [ -z "$REGISTRY" ] || registry_state="$(jq -r --arg p "$review_provider" '.providers[$p].registry_state // "absent"' "$REGISTRY" 2>/dev/null || true)"
   if [ "$registry_state" != "registered" ]; then
-    printf 'ai-review: error: deepseek is not a registered reviewer (registry state: %s). The registry decides the pool; never flip a state to make a review succeed.\n' "${registry_state:-registry-not-found}" >&2
+    printf 'ai-review: error: %s is not a registered reviewer (registry state: %s). The registry decides the pool; never flip a state to make a review succeed.\n' "$review_provider" "${registry_state:-registry-not-found}" >&2
     exit 2
   fi
   if [ -n "${AI_REVIEW_POOL_BIN:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     printf 'ai-review: error: AI_REVIEW_POOL_BIN is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute the pool adapter.\n' >&2
     exit 2
   fi
-  pool_provider="deepseek"
+  pool_provider="$review_provider"
   wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}"
-  wrapper_args=("deepseek" "${wrapper_args[@]}")
+  wrapper_args=("$review_provider" "${wrapper_args[@]}")
 fi
 # --force (#1428) only means something to the pool adapter: it bypasses the
 # reuse of an earlier passing report for the same reviewer, mode and source.
@@ -229,8 +238,8 @@ return_existing_pass(){
 [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || [ -z "$pool_provider" ] || [ "$code_only" -ne 0 ] || [ "$force_review" = 1 ] \
   || [ "$additional_reviewer" = 1 ] || wrapper_args+=(--force)
 if [ "$code_only" -eq 1 ]; then
-  [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
-  jq -e '.providers.deepseek.registry_state == "registered"' "$REAL_DIR/../config/reviewer-registry.json" >/dev/null 2>&1 || { printf 'ai-review: DeepSeek is not currently registered for review.\n' >&2; exit 3; }
+  [ "$attachment_route" = 1 ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
+  jq -e --arg p "$review_provider" '.providers[$p].registry_state == "registered"' "$REAL_DIR/../config/reviewer-registry.json" >/dev/null 2>&1 || { printf 'ai-review: DeepSeek is not currently registered for review.\n' >&2; exit 3; }
   case "$mode" in diff-review|security-review|final-check) ;; *) usage >&2; exit 2 ;; esac
   [ -n "$paths_file" ] && [ -f "$paths_file" ] && [ -z "$tests_command" ] || {
     printf 'ai-review: code-only review requires an exact JSON paths file and does not accept a tests command.\n' >&2
@@ -362,7 +371,7 @@ if [ "$code_only" -eq 1 ]; then
     exit 0
   fi
   lifecycle="$REAL_DIR/ai-review-lifecycle"
-  lifecycle_args=(begin --provider deepseek --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
+  lifecycle_args=(begin --provider "$review_provider" --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
   [ -z "$action_profile" ] || lifecycle_args+=(--action-profile "$action_profile" --action-manifest "$action_manifest")
   lifecycle_state="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$$ "$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
   if [ -n "$action_profile" ]; then

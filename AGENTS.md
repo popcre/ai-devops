@@ -389,6 +389,7 @@ pipeline. The recovery procedure lives in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
+- **One code path for every reviewer** (#1834): in shared review code, a step that decides whether evidence, a receipt, a record, cleanup or qualification happens never branches on a provider name — declare the exception as a capability in `config/review-runner-doors.json` (inventory: [`docs/reviewer-harness-consolidation.md`](docs/reviewer-harness-consolidation.md)).
 - **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
   Outside `popcre/shared-db`, dispatch a review only when the task class's gate
   already demands one (installation, reviewer-safety, deployment,
