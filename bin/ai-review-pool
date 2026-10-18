@@ -94,9 +94,11 @@ unset _hook_var
 # report cannot answer a new question, and later edits must not change the request.
 CARRIED_BRIEF_SNAPSHOT=""; CARRIED_BRIEF_SHA=""
 if [ -n "${AI_REVIEW_BRIEF_FILE:-}" ]; then
-  CARRIED_BRIEF_SNAPSHOT="$(python3 - "$AI_REVIEW_BRIEF_FILE" <<'PY'
+  MAX_CARRIED_BRIEF_BYTES=2097152
+  CARRIED_BRIEF_SNAPSHOT="$(python3 - "$AI_REVIEW_BRIEF_FILE" "$MAX_CARRIED_BRIEF_BYTES" <<'PY'
 import os, stat, sys, tempfile
 try:
+    limit = int(sys.argv[2])
     before = os.lstat(sys.argv[1])
     if not stat.S_ISREG(before.st_mode):
         raise ValueError('request must be a regular, non-linked file')
@@ -105,10 +107,10 @@ try:
         opened = os.fstat(source.fileno())
         if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
             raise ValueError('request identity changed')
-        data = source.read(262145)
+        data = source.read(limit + 1)
         after = os.fstat(source.fileno())
-    if len(data) > 262144 or opened.st_size != len(data):
-        raise ValueError('request exceeds 256 KiB')
+    if len(data) > limit or opened.st_size != len(data):
+        raise ValueError('request exceeds 2 MiB')
     if (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
         raise ValueError('request changed while being read')
     if b'\0' in data or not data.decode('utf-8').strip():
