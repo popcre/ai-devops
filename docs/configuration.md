@@ -106,7 +106,7 @@ native GLM requests. It supplements the standard review instructions; source
 identity, sandbox boundaries, accounting, and verdict checks remain mandatory.
 
 Use a readable regular file containing nonempty UTF-8 text, without NUL bytes,
-at most 256 KiB. The pool rejects missing, linked, non-regular, changing, or
+at most 2 MiB. The pool rejects missing, linked, non-regular, changing, or
 invalid inputs before lifecycle/provider startup and captures a private snapshot
 so later caller edits cannot change the question. Keep secrets and private or
 licensed data out of review questions. A supplied question always requests a
