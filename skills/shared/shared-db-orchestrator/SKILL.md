@@ -9,8 +9,8 @@ description: Optional reference for shared-db structural work safety rules (clai
 > No session is the orchestrator. Never route work to one, open a HANDOVER issue and
 > stop, resolve or open a marker, wait for dispatch, or label tickets orchestrator /
 > non-orchestrator. Structural work is claim-first: claim exact objects on the
-> existing issue and start, per `shared-db-change`. Below, read "the orchestrator" as
-> "the session doing the structural work"; marker and dispatch sections are historical.
+> existing issue and start, per `shared-db-change`. The session doing the structural work owns its claim and delivery;
+> optional delegation never creates a required orchestrator role.
 
 > Replacement work is planned in [`../../../plan_shared-db-complete-throughput-repair.md`](../../../plan_shared-db-complete-throughput-repair.md). Read its STATUS table before changing this skill or the lane model. The older 1+1 proposal is superseded. Until the replacement is implemented, the safety rules below remain binding; do not partially remove them.
 
@@ -20,9 +20,9 @@ issue and begins — no orchestrator chat and no marker. The safety rules below
 (claims, versions, stage leases, independent review, live proof) stay binding
 whenever shared-db structural work runs.
 
-**Reporting to Albert.** Every status, queue, audit, marker and dispatch record
+**Reporting to Albert.** Every status, queue, audit and delegation record
 in this skill is written into GitHub issues, plans and handoffs — never into the
-chat reply. Replies to Albert obey the global 150-word limit, and any business-meaning question only he can answer, and every issue, agent, check or merge this session is
+chat reply. Replies to Albert obey the global 120-word limit, and any business-meaning question only he can answer, and every issue, agent, check or merge this session is
 waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
 status roll-up into chat.
 
@@ -34,12 +34,12 @@ status roll-up into chat.
 - Gate outside-sourced writes into curated Master Data.
 - Use `shared-db-handover` to stop or close the session.
 
-## Operational blockers are orchestration work
+## Operational blockers remain owned
 
-Never sit silently idle behind a blocker. Resolving it is part of orchestration,
+Never sit silently idle behind a blocker. Resolving it is part of delivery,
 even when the repair belongs to repo maintenance, documentation, tooling, or
 another repository. Immediately start the appropriate separate task or session;
-do not perform non-structural work in the orchestrator context. Keep every
+classify non-structural repairs separately and use their repository workflow. Keep every
 independent structural stream moving, disclose the blocker and owner-facing
 consequence immediately, and follow the repair task until the capability is
 restored. Never request owner authorization for a technical step (owner ruling 2026-09-28): get an assigned AI reviewer's APPROVE instead, or report it `Blocked —`; never park it silently.
@@ -50,45 +50,32 @@ rate-limit status, and report the reset time in Eastern Time. Do not repeatedly
 invoke a path already known to be unsafe. The reviewer-allocator redesign is
 tracked in [popcre/shared-db#1767](https://github.com/popcre/shared-db/issues/1767).
 
-## The admission test — protect your own context window (AGENTS.md 0.0-C)
+## Admission and routing
 
-Before opening, accepting, or acting on ANY item, ask one question: **does this change the SHAPE
-of the database** (schema, table, column, type, view, function/RPC, trigger, RLS policy, grant,
-index, constraint, extension, publication, storage policy, or a migration shipping one of those)?
+Read the target shared-db checkout's current `AGENTS.md` before claiming work.
+Does the requested work change database SHAPE (schema, tables, columns, types,
+views, functions/RPCs, triggers, RLS, grants, indexes, constraints, extensions,
+publications, storage policies, or migrations shipping them)?
 
-- **Yes -> accept.** Queue it as `work_type: structural`, `route: shared-db-orchestrator`, and
-  dispatch it to a sub-agent in an isolated worktree.
-- **No -> FOUR exits, and `accept` is never one of them.** (Corrected 2026-08-26 to match the
-  owner ruling of 2026-08-21 now recorded in `AGENTS.md` §0.0-C, which **wins**. This skill still
-  taught the superseded three-exit model where repository maintenance, documentation and security
-  settings all exited by FORK — i.e. as orchestrator assignments. The ruling made them **not**
-  orchestrator work at all. Found by independent Codex GPT-5.6 review during shared-db #1605.)
-  - **REJECT** — `application-data`, `source-data`. The work belongs to another repository and
-    must leave this queue, forwarded to it (see below).
-  - **FORK** — **`curated-master-data` ONLY.** Genuinely this repo's work, dispatched to a FRESH
-    sub-agent with an empty context window, exactly as a migration is. It forks rather than leaves
-    because `AGENTS.md` §6.4 governs it inside this repo, and forks rather than being accepted
-    because it must not occupy a migration-author lane. Do not extend this exit to anything else.
-  - **REPO-SESSION** — `repo-maintenance`, `documentation`. **Not an orchestrator assignment.**
-    An independent repository session owns these; the orchestrator neither implements nor
-    dispatches them.
-  - **RETURN-TO-OWNER** — `security-settings`. The lane tool still routes it this way; report it
-    `Blocked —` until popcre/shared-db#3675 moves it to an AI session. Never ask Albert to approve it.
+- Structural work uses `work_type: structural`, `route: claim-first`, exact
+  objects, and an isolated current-upstream worktree. Claim and begin directly.
+- Outside-sourced curated Master Data loads keep their governed route and exact
+  claims. They do not become ordinary application row writes.
+- Application data and source-data work stays with its owning application or
+  private repository. Repository maintenance, docs and security settings use
+  their appropriate non-structural session and gates, without database claims.
+- Classify each successor from its own work; never inherit a predecessor issue's
+  work type, route or objects. Read-only inspection needs no claim or dispatch.
 
-**A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
-`return_to: owner/repo` in its scope block. Return it with
-`node scripts/manage-migration-author-lanes.mjs --return-issue <n>` — that files the issue in the
-owning repository FIRST, then comments the new URL here, then closes this one, so a failure at any
-step leaves the issue open rather than losing the task. Never close a rejected issue by hand. A
-reject with no `return_to` is reported as `NO RETURN ADDRESS` and makes `--queue-audit` exit 2.
-FORK items are not lost either: they stay open and dispatched until the work is done.
+A legacy `shared-db-orchestrator` route may remain parseable for compatibility;
+never write it into new scopes or interpret it as a required session or marker.
+For misrouted work preserve its existing issue and private artifacts, record the
+correct owner/route, and use supported forwarding only when work truly belongs
+in another repository. Never close an unresolved application need or create a
+second handover or live-proof ticket merely to change sessions.
 
-No fifth exit and no size exemption. `db-work` is an intake label, never proof that an item passed
-this test. Your own window is for triage, dispatch, review, merge and promotion — nothing else.
-`--queue-audit` prints a `NOT ORCHESTRATOR WORK` block listing every open issue that fails the
-test, stamped REJECT or FORK; clear it, do not carry it.
-
-Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rulebook. Read [references/operating-manual.md](references/operating-manual.md) only when startup recovery, incidents, credentials, promotion, or detailed exception handling is needed.
+Read [references/operating-manual.md](references/operating-manual.md) only when
+startup recovery, incidents, credentials, promotion, or exception handling is needed.
 
 ## Start (claim-first — no marker)
 
@@ -106,7 +93,7 @@ settings folder and does not expose or copy a token.
 2. Record every active workstream and exact claimed database objects.
 3. Warn if more than five open handoffs exist.
 
-## Dispatch structural work
+## Claim structural work; delegate only when useful
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
@@ -123,32 +110,26 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Run a live queue audit BEFORE every allocation, not only after one. An audit
   run afterwards describes a decision already taken; the audit is what the
   decision is supposed to be made from.
-- Dispatch every genuinely eligible, non-overlapping issue at once, each in an
-  isolated worktree; never wait for a lane or slot to free. Close stale
+- Continue authorized eligible, non-overlapping work in isolated worktrees;
+  optional subagents are not an admission prerequisite. Never wait for a lane or slot to free. Close stale
   already-delivered issues instead of duplicating them. Maintain explicit successor
   queues and report truthfully when no eligible successor exists. Never wait for
   Albert to request status or say start.
-- Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
+- Claim only issues whose machine block says `status: ready`, `work_type: structural`, and `route: claim-first` and lists exact objects. Existing compatible legacy scopes follow current repository admission rules.
 - Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
 - Classify every new or successor issue from its own requested work. Never
   inherit `work_type`, `route`, or database objects from a predecessor issue.
   A successor that performs offline analysis or application work remains
   non-structural even when its predecessor changed the database.
 - Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, and are admitted like any other non-overlapping work.
-- Assign each exact-head issue one external reviewer from the durable round robin after excluding
-  the live orchestrator engine: Codex never reviews a Codex-orchestrated issue, and Claude never
-  reviews a Claude-orchestrated issue. A provider may be assigned only when
-  `ai-review-preflight usable <provider>` exits zero. That is the single reconciled answer
-  across install health, quarantine, live qualification, and reviewer-registry membership;
-  a healthy local install alone is never enough, and `installed-healthy` does not mean
-  allocatable. Gemini re-entered the registry on 2026-09-06 after a recorded live
-  safety qualification and a live review that returned a well-formed verdict above a
-  substantive report; it is now gated by the same one command as every other provider.
-  Never add a provider to the registry to make an allocation succeed. Qwen is treated
-  like any other reviewer, gated by the same one command. A review refused with
-  replacement code `insufficient_quota` (wrapper exit 92, `OUT OF CREDIT:` line) means
-  that provider's account needs credits: quote the line to Albert in the same reply,
-  then replace the reviewer; never retry it or leave the news for another session.
+- Follow the current repository-enforced exact-head approval policy. When an
+  external reviewer is required, use its durable allocator, excluding the
+  implementing engine. The current pool is Muse, DeepSeek, GLM and StepFun;
+  membership and usable preflight must both pass. Never edit the registry to
+  unblock allocation. A documented `owner_no_reviewer` policy is scoped to the
+  repository enforcing it and does not bypass any other delivery gate.
+  Report an `OUT OF CREDIT:` refusal promptly and replace through the supported
+  allocator rather than retrying an unavailable provider.
 - One reviewer provider may run any number of independent reviews at once, each in
   its own session, worktree, and verdict record (decision 21). "Reviewer busy" is
   never a reason to wait or reroute; only a real provider refusal (quota, rate
@@ -192,23 +173,21 @@ exact claim, pull request, head and owner. Never delete a claim, a lock, a
 reservation or a ref to free a lane, and never relinquish on expiry alone. Open
 the abandonment-audit issue first, then run the guarded
 `--relinquish-author-lease` command the report prints, with the observed worktree
-state. The orchestrator may retire work only where the worktree is `clean` or
+state. The owning session may retire work only where the worktree is `clean` or
 proven `absent`; `dirty` or `remote` work is potentially recoverable: preserve a rescue branch or
 patch, leave the claim protective, and report it `Blocked —` until
 popcre/shared-db#3675 replaces the lane tool's `--owner-decision` with an assigned
 AI reviewer's APPROVE. Never bypass that gate and never ask Albert (owner ruling
 2026-09-28).
 
-`--queue-audit` must classify every open `db-work` issue across independent status,
-work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
-the admission test above, stamped REJECT or FORK — act on each one rather than leaving it parked.
-Dispatch every
-`REFILL REQUIRED NOW` result immediately. An empty lane is acceptable only when
-the complete audit proves no eligible work exists. See
-[references/operating-manual.md](references/operating-manual.md) for the issue
-block and refill rules.
+`--queue-audit` classifies every open `db-work` issue across independent status,
+work type, and route fields. Act on misrouting or malformed scope without
+assuming a central dispatcher. Continue authorized ready work when exact-object
+and dependency checks permit it. A session is working only with current worker
+evidence, not because its claim exists. See
+[references/operating-manual.md](references/operating-manual.md).
 
-Assign review with `--assign-reviewer --issue <n> --pr <n> --head-sha <sha>`.
+When current repository policy requires external review, assign it with `--assign-reviewer --issue <n> --pr <n> --head-sha <sha>`.
 Use the returned approved wrapper and one persistent named session. Read
 [references/operating-manual.md](references/operating-manual.md) for the bounded
 debate, evidence log, and production boundary.
@@ -258,7 +237,7 @@ anything closes. Where the work is potentially recoverable — a `dirty` or `rem
 preserve a rescue branch or patch, leave the claim protective, and report it
 `Blocked —` until popcre/shared-db#3675 lands; never bypass `--owner-decision` and
 never ask Albert; `clean` or proven
-`absent` work the orchestrator retires on its own authority. Close the pull
+`absent` work the owning session retires through the supported guarded operation. Close the pull
 request through the normal authenticated operator flow, never deleting its branch
 or refs, so the history survives the closure. Retire the claim with the
 tombstoning form:
@@ -288,7 +267,7 @@ and the investigation would block itself.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, re-audit live claims, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
+Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, re-audit live claims, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session under the current repository policy; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing.
 
 ## Before preview and merge
 
@@ -298,7 +277,10 @@ For each PR separately:
 2. Fetch `origin/main` and update the branch from the newly merged main tip.
 3. Re-run version, object-collision, SQL and contract checks.
 4. Apply and prove the migration on preview.
-5. Obtain an independent review. Merge only with no unresolved Critical or High finding.
+5. Satisfy current repository-enforced exact-head approval policy. Where external
+   review is required, obtain it with no unresolved Critical or High finding.
+   The scoped `owner_no_reviewer` path is valid only when that repository
+   enforces its committed owner policy; it grants no preview or production bypass.
 6. Release preview, acquire the exclusive merge lock, revalidate the head/base,
    and merge one PR through the guarded path.
 7. Release merge and the author claim, then repeat from the new main tip.
@@ -346,9 +328,9 @@ change status only; never promote or rewrite the work type or route automaticall
 For example, NBCU rights classification stays `source-data` routed to the
 `source-data-session` after its answer and can never become structural by status change.
 
-## Agent brief
+## Optional agent brief
 
-Start from [references/sub-agent-brief-template.md](references/sub-agent-brief-template.md). Include:
+When delegation is authorized and useful, start from [references/sub-agent-brief-template.md](references/sub-agent-brief-template.md). Include:
 
 - issue, outcome and exact object claim
 - reserved migration version
