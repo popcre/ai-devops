@@ -81,7 +81,9 @@ fi
 STATE_DIR="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
 PORT="${AI_GLM_PORT:-4096}"
 if [ "$GLM_PROFILE" = formal-review ]; then
-  STATE_DIR="$HOME/.local/state/ai-devops/glm-formal"
+  # Honour an explicit AI_GLM_STATE_DIR so callers (ai-review-pool follow-up
+  # probe) can pin one tree; otherwise the formal profile uses its own root.
+  STATE_DIR="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm-formal}"
   PORT="$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/glm_formal_profile.py" settings | jq -er '.port|select(type=="number" and .>=1024 and .<=65535)')" || exit 1
   export AI_REVIEW_FORMAL_INSTRUCTIONS=1
 fi
@@ -2587,7 +2589,7 @@ cmd_delete() {
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
   fi
   # Review snapshots are disposable and must not outlive their session.
-  rm -f "$mp"
+  rm -f "$mp" "${mp}.followup-armed"
   if [ -n "${DELETE_LOCK:-}" ]; then lock_release "$DELETE_LOCK"; DELETE_LOCK=""; trap - EXIT; fi
   note "deleted session: $1"
 }

@@ -54,7 +54,7 @@ These are the pieces that are copy-pasted and keep breaking:
 3. **Sandbox** — disposable snapshot so the model cannot dirty the live repo.  
 4. **Evidence packet** — sealed manifest + patch + identity + hash.  
 5. **Durable store** — copy the **whole** packet, then delete the working copy.  
-6. **Lifecycle** — begin → observe → terminal (`APPROVE|REJECT|BLOCKED` + failure class).  
+6. **Lifecycle** — begin → observe → terminal (`APPROVE|REVISE|REJECT|BLOCKED` + failure class).  
 7. **Report floor** — a real suggestion report, not a bare “PASS” (`MIN_REPORT_CHARS`).  
 8. **Cleanup order** — store first; only then remove sandbox/packet.
 

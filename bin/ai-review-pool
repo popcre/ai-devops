@@ -519,7 +519,7 @@ glm_report_verdict() { # glm_report_verdict REPORT -> APPROVE|REVISE|REJECT|BLOC
   awk -v n="$line" 'NR>n && NF {print; exit}' "$file" 2>/dev/null | tr -d '\r' | awk '{print $1}'
 }
 glm_revise_followup_name() { # prints session name when a REVISE turn is continuable
-  local state root rid cand meta report verdict name activity best_meta="" best_name="" best_act="" session_base=""
+  local state root rid cand meta report verdict name activity best_meta="" best_name="" best_act="" session_base="" rt=""
   state="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
   root="$REPO_ROOT"
   rid="$(glm_repo_id "$root")" || return 1
@@ -532,10 +532,10 @@ glm_revise_followup_name() { # prints session name when a REVISE turn is continu
     # A failed/orphaned ask must fall back to a cold review, not re-select forever.
     [ -f "${meta}.followup-armed" ] && continue
     [ "$(jq -r '.status // empty' "$meta" 2>/dev/null)" = failed ] && continue
-    case "$(jq -r '.remote_turn.state // empty' "$meta" 2>/dev/null)" in
-      submitting|submitted|pending|"") ;;
-      *) continue ;;
-    esac
+    # Only a completed turn is continuable: ask refuses remote_turn_pending
+    # (state pending or completed-unpublished). Anything else must fall cold.
+    rt="$(jq -r '.remote_turn.state // empty' "$meta" 2>/dev/null || true)"
+    [ -z "$rt" ] || continue
     report="$(jq -r '.last_completed_turn.report // empty' "$meta" 2>/dev/null || true)"
     [ -n "$report" ] && [ -f "$report" ] || continue
     verdict="$(glm_report_verdict "$report")"
@@ -565,11 +565,30 @@ glm_followup_arm() { # glm_followup_arm META — mark one warm attempt
 glm_followup_clear() { # glm_followup_clear META — ask succeeded; allow a later REVISE
   rm -f "${1}.followup-armed" 2>/dev/null || true
 }
+# Probe the same tree the runner will use: formal-review re-points STATE_DIR
+# to glm-formal (bin/ai-glm). Decide the profile before any follow-up lookup.
+glm_state_root="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
+if [ "$provider" = glm ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
+  _formal_route="$(python3 "$ROOT/../tools/glm_formal_profile.py" route 2>/dev/null || true)"
+  _formal_profile="$(printf '%s' "$_formal_route" | jq -er '.profile|select(.=="general" or .=="formal-review")' 2>/dev/null || echo general)"
+  if [ "$_formal_profile" = formal-review ]; then
+    glm_state_root="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm-formal}"
+    RUNNER_ENV=(AI_GLM_PROFILE=formal-review AI_GLM_STATE_DIR="$glm_state_root")
+    RUNNER="$(printf '%s' "$_formal_route" | jq -er '.runner' 2>/dev/null || true)"
+    [ -n "$RUNNER" ] || die 'activated pinned GLM runner missing.'
+    RUNNER_ENV+=(AI_REVIEW_PREFLIGHT_BIN="$ROOT/ai-review-preflight" AI_REVIEW_LIFECYCLE_BIN="$ROOT/ai-review-lifecycle")
+  else
+    RUNNER_ENV=(AI_GLM_PROFILE=general AI_GLM_STATE_DIR="$glm_state_root")
+  fi
+  unset _formal_route _formal_profile
+elif [ "$provider" = glm ]; then
+  RUNNER_ENV=(AI_GLM_PROFILE=general AI_GLM_STATE_DIR="$glm_state_root")
+fi
 if [ "$provider" = glm ]; then
-  glm_followup="$(glm_revise_followup_name || true)"
+  glm_followup="$(AI_GLM_STATE_DIR="$glm_state_root" glm_revise_followup_name || true)"
   glm_followup_meta=""
   if [ -n "${glm_followup:-}" ]; then
-    glm_followup_meta="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}/sessions/$(glm_repo_id "$REPO_ROOT")/${CALLER}--${glm_followup}.json"
+    glm_followup_meta="$glm_state_root/sessions/$(glm_repo_id "$REPO_ROOT")/${CALLER}--${glm_followup}.json"
     glm_followup_arm "$glm_followup_meta"
     printf 'ai-review-pool: GLM REVISE follow-up on session %s (same conversation, corrected head); no cold re-review.\n' "$glm_followup" >&2
     RUNNER_ARGS=(ask "$glm_followup" --repo "$REPO_ROOT" --caller "$CALLER" --prompt-file "$TMP_BRIEF")
@@ -592,28 +611,16 @@ fi
 # MODEL's run can move it. The wait budget is raised because snapshot-bound
 # reviews read a full tree copy and can outgrow the runner's 900s default.
 SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
-# A governed receipt must bind the ORIGINAL checkout, not this snapshot. GLM
-# builds its own packet from its own snapshot, so name the original checkout:
-# ai-glm resolves and snapshots that, one level deep (shared-db#4308). Other
-# runners consume the receipt themselves and take no external source root.
-RUNNER_ENV=()
+# GLM profile/state-dir was decided above (follow-up probe and runner must
+# share one tree). A governed receipt must bind the ORIGINAL checkout:
+# ai-glm resolves and snapshots that, one level deep (shared-db#4308).
 if [ "$provider" = glm ]; then
-  # Formal recovery is qualified first on Linux. Windows retains its existing
-  # general reviewer route; it is never silently moved to an unsupported profile.
-  if [ "$(uname -s 2>/dev/null)" = Linux ]; then
-    formal_route="$(python3 "$ROOT/../tools/glm_formal_profile.py" route)" || die 'formal GLM activation is invalid; no legacy fallback.'
-    formal_profile="$(printf '%s' "$formal_route" | jq -er '.profile|select(.=="general" or .=="formal-review")')" || die 'invalid formal route.'
-    RUNNER_ENV=(AI_GLM_PROFILE="$formal_profile")
-    if [ "$formal_profile" = formal-review ]; then
-      RUNNER="$(printf '%s' "$formal_route" | jq -er '.runner')" || die 'activated pinned runner missing.'
-      # Current installed front door owns rotation/admission/global governance;
-      # only the immutable provider/evidence execution implementation is pinned.
-      RUNNER_ENV+=(AI_REVIEW_PREFLIGHT_BIN="$ROOT/ai-review-preflight" AI_REVIEW_LIFECYCLE_BIN="$ROOT/ai-review-lifecycle")
-    fi
-  else RUNNER_ENV=(AI_GLM_PROFILE=general); fi
-fi
-if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] && review_capability "$CAP_JSON" "$provider" receipt_source_root; then
-  RUNNER_ENV+=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT")
+  [ -n "${RUNNER_ENV+x}" ] || RUNNER_ENV=()
+  if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] && review_capability "$CAP_JSON" "$provider" receipt_source_root; then
+    RUNNER_ENV+=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT")
+  fi
+else
+  RUNNER_ENV=()
 fi
 set +e; ( cd "$REVIEW_DIR" && exec env "${RUNNER_ENV[@]}" AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
