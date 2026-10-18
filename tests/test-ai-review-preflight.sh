@@ -595,6 +595,11 @@ if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/
    echo own > "$GUARD/c/own" && git -C "$GUARD/c" add own && ! git -C "$GUARD/c" commit -qm own 2>/dev/null &&
    [ "$(cat "$GUARD/c/own")" = own ] && ! git -C "$GUARD/c" diff --cached --quiet HEAD -- own &&
    git -C "$GUARD/c" rm -q --cached own && rm -f "$GUARD/c/own" &&
+   echo mine > "$GUARD/c/f" && git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" commit -qam mine &&
+   ! git -C "$GUARD/c" pull -q --no-rebase --no-edit -X ours 2>/dev/null &&
+   test -f "$GUARD/c/.git/MERGE_HEAD" && git -C "$GUARD/c" merge --abort &&
+   ! test -f "$GUARD/c/.git/MERGE_HEAD" && [ "$(cat "$GUARD/c/f")" = mine ] &&
+   git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" reset -q --hard "$GUARD_OLD" &&
    git -C "$GUARD/c" fetch -q origin &&
    echo w > "$GUARD/wt/w" && git -C "$GUARD/wt" add w && git -C "$GUARD/wt" commit -qm wt &&
    git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" merge -q --ff-only origin/main &&

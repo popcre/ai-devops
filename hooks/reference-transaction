@@ -56,6 +56,8 @@ fi
 
 refused=""; to=""
 while read -r old new ref; do
+  # A same-value update (merge --abort, reset --hard HEAD) moves nothing.
+  [ "$old" = "$new" ] && continue
   case "$ref" in
     refs/heads/main) refused="$ref"; to="$new" ;;
     HEAD)
@@ -69,7 +71,8 @@ while read -r old new ref; do
 done
 
 [ -z "$refused" ] && exit 0
-# Restore files only for a move to existing history (fetched or older:
+# Restore files only for a move to existing history (a commit some ref or
+# FETCH_HEAD already contains, or an ancestor of HEAD:
 # fast-forward pull/merge, reset, checkout). A new commit (local commit,
 # amend, cherry-pick, any merge commit) is never restored: its staged files
 # may be the user's own work. The message then says how to undo by hand.
@@ -77,7 +80,9 @@ restore=0
 case "$primary$to" in
   1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;;
   *) head_now="$(git rev-parse -q --verify HEAD 2>/dev/null)" || head_now=""
+     fetched="$(git rev-parse -q --verify FETCH_HEAD 2>/dev/null)" || fetched=""
      if [ -n "$(git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null)" ]; then restore=1
+     elif [ -n "$fetched" ] && git merge-base --is-ancestor "$to" "$fetched" 2>/dev/null; then restore=1
      elif [ -n "$head_now" ] && git merge-base --is-ancestor "$to" "$head_now" 2>/dev/null; then restore=1
      fi ;;
 esac
