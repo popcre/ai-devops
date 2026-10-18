@@ -568,7 +568,7 @@ HOOK_SILENT="$(git -C "$HOOK_CLONE" pull -q --ff-only 2>&1)"; HOOK_RC=$?
 check "the shipped hook carries the managed marker" "grep -q '^# ai-devops-managed: reviewer auto-requalification' '$ROOT/hooks/post-merge'"
 check "the shipped hook fails hard when its exec target is missing" "grep -q '^set -euo pipefail' '$ROOT/hooks/post-merge'"
 
-check "synthetic hook pulls record only in the fixture state log" "grep -qF '$HOOK_CLONE' '$HOOKTEST/task-gates/unprotected-advances.log' && [ \"\$(cat '$LIVE_ADV_LOG' 2>/dev/null | sha256sum)\" = '$LIVE_ADV_BEFORE' ]"
+check "synthetic hook pulls record only in the fixture state log" "grep -qF 'hooktest/clone' '$HOOKTEST/task-gates/unprotected-advances.log' && [ \"\$(cat '$LIVE_ADV_LOG' 2>/dev/null | sha256sum)\" = '$LIVE_ADV_BEFORE' ]"
 unset AI_TASK_GATES_DIR
 
 echo '== managed hook installer (#804)'
