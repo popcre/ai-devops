@@ -45,7 +45,10 @@ fi
 # reviewer lane. The policy file itself stays required below.
 # bin/ai-gh and its managed helper closure are real sandbox source-release
 # proof dependencies; keep them in the transitive walk and required lane.
-MENTION_ONLY=' bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun bin/ai-grok-review bin/ai-grok-implement skills/shared/grok-cli tests/grok-auth-link-cases.sh tools/lib/grok-paid-keys.sh tools/lib/grok-runtime.sh tools/lib/gemini-review-contract.sh tests/test-ai-grok-review.sh tests/lib-selection.sh config/reviewer-ci-paths.txt '
+# The scoped helper is called only for scoped-skills-install, a Linux-only
+# installation action none of these Windows reviewer suites invokes. Its
+# committed-integrity filename list is not a Windows runtime import closure.
+MENTION_ONLY=' tools/scoped_skills_install.py bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun bin/ai-grok-review bin/ai-grok-implement skills/shared/grok-cli tests/grok-auth-link-cases.sh tools/lib/grok-paid-keys.sh tools/lib/grok-runtime.sh tools/lib/gemini-review-contract.sh tests/test-ai-grok-review.sh tests/lib-selection.sh config/reviewer-ci-paths.txt '
 tracked() { [ -f "$1" ] && git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
 references() {
   local file="$1" dir r
@@ -62,6 +65,32 @@ references() {
     done
   grep -oE '\b(lib-test-[a-z-]+|grok-auth-link-cases)\.sh\b' "$file" | sed 's#^#tests/#'
 }
+# Classification glob strings declare task ownership, rather than loading the
+# files they name. Keep the policy itself required below, without following
+# those metadata names into unrelated installer/global dependency trees.
+runtime_references() {
+  [ "$1" != config/task-gates.json ] || return 0
+  local ref
+  while IFS= read -r ref; do
+    case "$MENTION_ONLY" in *" $ref "*) continue ;; esac
+    printf '%s\n' "$ref"
+  done < <(references "$1")
+}
+if [ -n "$(runtime_references config/task-gates.json)" ]; then
+  fail 'classification glob metadata must not become executable dependency edges'
+fi
+# An ordinary executable edge must still be discovered and require coverage.
+# This intentionally uncovered helper is only a synthetic extraction fixture.
+fixture="$(mktemp "${TMPDIR:-/tmp}/reviewer-ci-edge.XXXXXX")" || exit 1
+trap 'rm -f -- "$fixture"' EXIT
+printf 'source tools/not-covered-runtime-helper.sh\n' > "$fixture"
+if ! runtime_references "$fixture" | grep -x tools/not-covered-runtime-helper.sh >/dev/null; then
+  fail 'ordinary runtime helper edge disappeared from dependency traversal'
+fi
+if tg_reviewer_ci_path tools/not-covered-runtime-helper.sh; then
+  fail 'uncovered ordinary runtime helper must still require explicit lane coverage'
+fi
+
 declare -A seen=()
 queue=(tests/test-ai-codex-review.sh tests/test-delegation-templates.sh tests/test-pool-dispatch-doors.sh)
 while [ "${#queue[@]}" -gt 0 ]; do
@@ -72,7 +101,7 @@ while [ "${#queue[@]}" -gt 0 ]; do
     [ -n "$ref" ] && tracked "$ref" || continue
     case "$MENTION_ONLY" in *" $ref "*) continue ;; esac
     [ -n "${seen[$ref]:-}" ] || queue+=("$ref")
-  done < <(references "$file" | sort -u)
+  done < <(runtime_references "$file" | sort -u)
 done
 [ "${#seen[@]}" -ge 20 ] || fail "dependency walk found only ${#seen[@]} files"
 for file in "${!seen[@]}"; do
