@@ -260,10 +260,20 @@ trim_log() {
   [[ -f "$LOG_FILE" ]] || return 0
   local n; n="$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)"
   ((n > LOG_MAX_LINES)) || return 0
-  local trim_stage="$LOG_FILE.trim"
+  local trim_stage="$LOG_FILE.trim" trim_inode=""
   if [[ -n "$SCOPED_PLAN" ]]; then
     python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" paths "$CLAUDE_HOME" "$CODEX_HOME" || return 3
     trim_stage="$(mktemp "$(dirname "$LOG_FILE")/.scoped-log.XXXXXXXX")" || return 3
+    trim_inode="$(stat -Lc '%d:%i' "$trim_stage")" || return 3
+    if ! { tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$trim_stage" && mv "$trim_stage" "$LOG_FILE"; }; then
+      # Remove only the private stage this invocation created, never a
+      # substituted path or a legacy .trim file belonging to another run.
+      if [[ -f "$trim_stage" && ! -L "$trim_stage" && "$(stat -Lc '%d:%i' "$trim_stage" 2>/dev/null)" == "$trim_inode" ]]; then
+        rm -f -- "$trim_stage"
+      fi
+      echo "WARN: scoped audit trim failed; reconcile retained stage if present: $trim_stage" >&2
+    fi
+    return 0
   fi
   tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$trim_stage" 2>/dev/null &&
     mv "$trim_stage" "$LOG_FILE" 2>/dev/null || true

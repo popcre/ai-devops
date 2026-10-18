@@ -312,7 +312,9 @@ class ScopedInstall(unittest.TestCase):
         stage = self.home / '.cache/ai-devops/install-log.tsv.trim'
         stage.parent.mkdir(parents=True)
         stage.write_text('prior owner stage\n')
-        self.install(False)
+        run = self.install(False)
+        self.assertIn(str(stage), run.stdout)
+        self.assertIn('owning session', run.stdout)
         self.assertEqual(stage.read_text(), 'prior owner stage\n')
         self.assertFalse((self.home / '.claude/skills').exists())
 
@@ -391,7 +393,8 @@ class ScopedInstall(unittest.TestCase):
 
     def test_failed_final_revalidation_preserves_backup_without_receipt(self):
         path, plan = self.stage_finish(invalid_review=True)
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.assertIn('local-tests', run.stdout)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
         backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
         self.assertEqual((backup / 'SKILL.md').read_text(), 'preserve local edit\n')
@@ -481,6 +484,35 @@ class ScopedInstall(unittest.TestCase):
         finally:
             script.chmod(0o755)
             self.git('config', 'core.filemode', 'true')
+
+    def test_trim_failures_remove_only_the_stage_created_by_this_run(self):
+        text = (self.root / 'bin/ai-install-skills').read_text()
+        function = text[text.index('trim_log() {'):text.index('# What the skills are being installed FROM')]
+        log = self.home / '.cache/ai-devops/install-log.tsv'
+        log.parent.mkdir(parents=True)
+        import shlex
+        settings = '\n'.join([
+            'DRY_RUN=false', 'SCOPED_PLAN=fixture-only-function-test',
+            'SCOPED_SOURCE_ROOT=' + shlex.quote(str(self.root)),
+            'CLAUDE_HOME=' + shlex.quote(str(self.home / '.claude')),
+            'CODEX_HOME=' + shlex.quote(str(self.home / '.codex')),
+            'LOG_FILE=' + shlex.quote(str(log)), 'LOG_MAX_LINES=1'])
+        for failing_command in ['tail', 'mv']:
+            with self.subTest(command=failing_command):
+                log.write_text('first\nsecond\n')
+                script = function + settings + '\n' + failing_command + '() { return 31; }; trim_log'
+                run = self.run_cmd('bash', '-c', script)
+                self.assertIn('scoped audit trim failed', run.stdout)
+                self.assertEqual(log.read_text(), 'first\nsecond\n')
+                self.assertEqual(list(log.parent.glob('.scoped-log.*')), [])
+        victim = self.case / 'substituted-trim-target'
+        victim.write_text('untouched\n')
+        script = function + settings + '\nmv() { rm -f -- "$1"; ln -s ' + shlex.quote(str(victim)) + ' "$1"; return 31; }; trim_log'
+        self.run_cmd('bash', '-c', script)
+        stages = list(log.parent.glob('.scoped-log.*'))
+        self.assertEqual(len(stages), 1)
+        self.assertTrue(stages[0].is_symlink())
+        self.assertEqual(victim.read_text(), 'untouched\n')
 
     def test_alternate_gate_policy(self):
         self.declare()

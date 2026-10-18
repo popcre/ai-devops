@@ -103,7 +103,7 @@ def io_paths(client_homes):
         if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
             fail('bookkeeping file must be a private regular file without hardlinks')
         if name.endswith('.trim') and path.exists():
-            fail('existing audit trim stage requires its owner to reconcile it')
+            fail(f'existing audit trim stage {path}: its owning session must verify and recover or retire it before scoped installation; this operation removes nothing')
     return receipt_dir
 
 
@@ -280,7 +280,16 @@ def finish(path):
             fail('backup differs from original selected destination')
         entry['backup'] = str(backup) if backup.exists() else None
         entry['backup_files'] = backup_files
-    gate = subprocess.run([str(Path(plan['source_root']) / 'bin/ai-task-gates'), 'check', '--before', 'scoped-skills-install', '--scoped-skills-plan', str(path), '--reviewer-approval', plan['report']], cwd=plan['source_root'], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        gate = subprocess.run([str(Path(plan['source_root']) / 'bin/ai-task-gates'), 'check', '--before', 'scoped-skills-install', '--scoped-skills-plan', str(path), '--reviewer-approval', plan['report']], cwd=plan['source_root'], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as error:
+        # The selected files may already be copied. Preserve the exact final
+        # admission refusal so its owner can repair it without guessing.
+        if error.stdout:
+            print(error.stdout, file=sys.stderr, end='')
+        if error.stderr:
+            print(error.stderr, file=sys.stderr, end='')
+        raise
     receipt_dir = io_paths(plan['homes'])
     receipt_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     receipt = safe(receipt_dir / (plan['run_id'] + '.json'))

@@ -117,6 +117,8 @@ skills/shared/x/SKILL.md|code
 .github/workflows/verify.yml|code
 bin/ai-review-lifecycle|reviewer-safety
 bin/ai-task-gates|reviewer-safety
+bin/ai-install-skills|reviewer-safety
+tests/test-ai-install-skills.sh|reviewer-safety
 tools/lib/task-gates.sh|reviewer-safety
 tools/application_workflow_target.py|reviewer-safety
 config/task-gates.json|reviewer-safety
