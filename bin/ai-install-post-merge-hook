@@ -54,8 +54,9 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$REPO" ] || REPO="$REPO_ROOT"
 
-hook_source="$REPO_ROOT/hooks/post-merge"
-[ -f "$hook_source" ] || die "shipped hooks/post-merge is missing from $REPO_ROOT."
+for shipped in post-merge reference-transaction; do
+  [ -f "$REPO_ROOT/hooks/$shipped" ] || die "shipped hooks/$shipped is missing from $REPO_ROOT."
+done
 # --path-format=absolute returns a usable absolute path on every platform,
 # including Git-for-Windows drive letters and linked worktrees, whose
 # common dir otherwise needs joining and can be reported as C:/... .
@@ -68,13 +69,6 @@ if ! git_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir
   exit 0
 fi
 hooks_dir="$git_dir/hooks"
-hook_target="$hooks_dir/post-merge"
-marker='^# ai-devops-managed: reviewer auto-requalification'
-
-managed() {
-  [ -f "$hook_target" ] && grep -q "$marker" "$hook_target" 2>/dev/null
-}
-
 act() { # DESCRIPTION COMMAND...
   local description="$1"; shift
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -85,27 +79,40 @@ act() { # DESCRIPTION COMMAND...
   fi
 }
 
-case "$MODE" in
-  install)
-    if [ -e "$hook_target" ] && ! managed; then
-      note "leaving foreign post-merge hook untouched: $hook_target"
-      exit 0
-    fi
-    [ "$DRY_RUN" -eq 1 ] || mkdir -p "$hooks_dir"
-    act "installed post-merge reviewer auto-requalification hook: $hook_target" \
-      cp "$hook_source" "$hook_target"
-    [ "$DRY_RUN" -eq 1 ] || chmod +x "$hook_target"
-    ;;
-  remove)
-    if ! managed; then
-      note "no owned post-merge hook present at $hook_target"
-      exit 0
-    fi
-    if ! cmp -s "$hook_source" "$hook_target"; then
-      note "preserving drifted managed post-merge hook for review: $hook_target"
-      exit 0
-    fi
-    act "removed owned post-merge hook: $hook_target" \
-      rm -f -- "$hook_target"
-    ;;
-esac
+# Each managed hook follows the same ownership rules independently. The
+# reference-transaction hook (#1836) refuses plain moves of the installed
+# checkout's main; the protected installers are unaffected because they run
+# their own ref updates with core.hooksPath pointed at an empty directory.
+manage_hook() { # NAME MARKER DESCRIPTION
+  local name="$1" marker="$2" description="$3"
+  local hook_source="$REPO_ROOT/hooks/$name" hook_target="$hooks_dir/$name"
+  local owned=0
+  if [ -f "$hook_target" ] && grep -q "$marker" "$hook_target" 2>/dev/null; then owned=1; fi
+  case "$MODE" in
+    install)
+      if [ -e "$hook_target" ] && [ "$owned" -eq 0 ]; then
+        note "leaving foreign $name hook untouched: $hook_target"
+        return 0
+      fi
+      [ "$DRY_RUN" -eq 1 ] || mkdir -p "$hooks_dir"
+      act "installed $name $description hook: $hook_target" \
+        cp "$hook_source" "$hook_target"
+      [ "$DRY_RUN" -eq 1 ] || chmod +x "$hook_target"
+      ;;
+    remove)
+      if [ "$owned" -eq 0 ]; then
+        note "no owned $name hook present at $hook_target"
+        return 0
+      fi
+      if ! cmp -s "$hook_source" "$hook_target"; then
+        note "preserving drifted managed $name hook for review: $hook_target"
+        return 0
+      fi
+      act "removed owned $name hook: $hook_target" \
+        rm -f -- "$hook_target"
+      ;;
+  esac
+}
+
+manage_hook post-merge '^# ai-devops-managed: reviewer auto-requalification' 'reviewer auto-requalification'
+manage_hook reference-transaction '^# ai-devops-managed: installed-checkout main guard' 'installed-checkout main guard'
