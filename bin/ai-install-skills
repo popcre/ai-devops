@@ -82,6 +82,8 @@ ADOPT_GLOBALS=false
 ONLY_SKILLS=()
 SCOPED_REVIEWER_APPROVAL=""
 SCOPED_PLAN=""
+SCOPED_PLAN_SHA=""
+export -n SCOPED_PLAN_SHA
 SCOPED_SOURCE_ROOT="$REPO_ROOT"
 
 usage() {
@@ -190,15 +192,16 @@ if ! $DRY_RUN && ! $SHOW_LOG; then
   fi
 fi
 
-# The narrow lane always calls its own committed candidate gate; no environment
-# switch or alternative gate executable can waive installation admission.
+# The narrow lane always calls its own committed candidate gate and adds no
+# admission bypass. Existing lifecycle-store configuration still applies.
 if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
   SCOPED_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-scoped-skills.XXXXXX")"
   trap 'rm -rf -- "$SCOPED_TMP"' EXIT
-  SCOPED_PLAN="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
-  [[ "$SCOPED_PLAN" == "$SCOPED_TMP/plan.json" ]] || exit 3
+  SCOPED_PREPARED="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
+  IFS=$'\t' read -r SCOPED_PLAN SCOPED_PLAN_SHA <<< "$SCOPED_PREPARED"
+  [[ "$SCOPED_PLAN" == "$SCOPED_TMP/plan.json" && "$SCOPED_PLAN_SHA" =~ ^[a-f0-9]{64}$ ]] || exit 3
   ( cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" check --before scoped-skills-install --scoped-skills-plan "$SCOPED_PLAN" --reviewer-approval "$SCOPED_REVIEWER_APPROVAL" ) | tee "$(dirname "$SCOPED_PLAN")/gate-summary.txt"
-  python3 "$REPO_ROOT/tools/scoped_skills_install.py" validate "$SCOPED_PLAN" "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL"
+  python3 "$REPO_ROOT/tools/scoped_skills_install.py" validate "$SCOPED_PLAN" "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$SCOPED_PLAN_SHA"
   SCOPED_RUN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$SCOPED_PLAN")"
   REPO_ROOT="$(dirname "$SCOPED_PLAN")/source"
 fi
@@ -761,7 +764,7 @@ if ((${#ONLY_SKILLS[@]})); then
     done
   done
   if [[ -n "$SCOPED_PLAN" ]]; then
-    python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" finish "$SCOPED_PLAN"
+    python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" finish "$SCOPED_PLAN" "$SCOPED_PLAN_SHA"
   fi
   log_event run-end "completed --only skills=${ONLY_SKILLS[*]}"
   trim_log

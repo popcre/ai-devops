@@ -322,6 +322,11 @@ canonical client homes, exact names, and no audit destination override. The
 current scoped lane is qualified on Linux and requires `flock`; other platforms
 retain the existing full installation route, and unsupported scoped runs fail
 closed.
+The installer retains the prepared plan digest in a non-exported shell variable;
+it refuses changed plan metadata before copying and before issuing a receipt.
+The lane adds no admission bypass; existing lifecycle-store configuration remains
+part of the same-user trust boundary.
+
 It copies verified committed files from a private snapshot under the same
 writer lock used by full installs of this installer version; local changes get a unique recoverable
 backup. A verified scoped receipt under

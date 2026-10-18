@@ -88,7 +88,8 @@ class ScopedInstall(unittest.TestCase):
 
     def plan(self):
         run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one')
-        path = Path(run.stdout.strip())
+        prepared_path, self.plan_sha = run.stdout.strip().split("\t")
+        path = Path(prepared_path)
         self.plans.append(path)
         return path
 
@@ -123,6 +124,7 @@ class ScopedInstall(unittest.TestCase):
         receipt = json.loads(receipts[-1].read_text())
         self.assertEqual(receipt['head'], self.head)
         self.assertEqual(receipt['names'], ['one'])
+        self.assertRegex(receipt['prepared_plan_sha256'], r'^[0-9a-f]{64}$')
         self.assertIn('APPROVE by grok', receipt['approval_summary'])
         self.assertEqual(unrelated.read_text(), 'untouched\n')
         self.assertFalse((self.home / '.claude/CLAUDE.md').exists())
@@ -384,16 +386,34 @@ class ScopedInstall(unittest.TestCase):
         (path.parent / 'gate-summary.txt').write_text('FAKE SCRATCH APPROVAL')
         return path, plan
 
+    def test_expected_plan_digest_cannot_be_supplied_by_environment(self):
+        self.declare()
+        self.approve()
+        self.env['SCOPED_PLAN_SHA'] = 'forged'
+        self.install()
+        self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_bytes(), (self.root / 'skills/shared/one/SKILL.md').read_bytes())
+
+    def test_changed_initial_inventory_cannot_issue_receipt(self):
+        path, plan = self.stage_finish()
+        plan['initial_files'] = {}
+        path.write_text(json.dumps(plan, sort_keys=True))
+        with self.assertRaisesRegex(ValueError, 'prepared plan changed'):
+            scoped.validate(path, self.root, self.report, self.plan_sha)
+        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
+        self.assertIn('prepared plan changed', run.stdout)
+        self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
+
     def test_receipt_uses_live_gate_summary_not_mutable_scratch(self):
         path, plan = self.stage_finish()
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path))
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha)
         receipt = json.loads((self.home / '.local/state/ai-devops/scoped-skills' / (plan['run_id'] + '.json')).read_text())
+        self.assertEqual(receipt['prepared_plan_sha256'], self.plan_sha)
         self.assertIn('APPROVE by grok', receipt['approval_summary'])
         self.assertNotIn('FAKE', receipt['approval_summary'])
 
     def test_failed_final_revalidation_preserves_backup_without_receipt(self):
         path, plan = self.stage_finish(invalid_review=True)
-        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
         self.assertIn('local-tests', run.stdout)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
         backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
@@ -403,7 +423,7 @@ class ScopedInstall(unittest.TestCase):
         path, plan = self.stage_finish()
         backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
         (backup / 'SKILL.md').write_text('substituted backup\n')
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
 
     def test_receipt_target_substitution_cannot_overwrite_another_file(self):
@@ -413,7 +433,7 @@ class ScopedInstall(unittest.TestCase):
         receipt = self.home / '.local/state/ai-devops/scoped-skills' / (plan['run_id'] + '.json')
         receipt.parent.mkdir(parents=True)
         receipt.symlink_to(victim)
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
         self.assertEqual(victim.read_text(), 'untouched\n')
         self.assertTrue(receipt.is_symlink())
 
@@ -450,7 +470,7 @@ class ScopedInstall(unittest.TestCase):
         original = self.case / 'recoverable-original'
         backup.rename(original)
         backup.symlink_to(original)
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
         self.assertEqual((original / 'SKILL.md').read_text(), 'preserve local edit\n')
 

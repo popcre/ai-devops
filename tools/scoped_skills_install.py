@@ -215,17 +215,22 @@ def prepare(root, report, claude, codex, names, scratch=None):
                     report=str(report), report_sha256=sha(report.read_bytes()),
                     snapshot=str(snapshot), run_id=scratch.name)
         path = scratch / 'plan.json'
-        path.write_text(json.dumps(plan, sort_keys=True))
-        validate(path, root, report)
-        print(path)
+        serialized = json.dumps(plan, sort_keys=True).encode()
+        path.write_bytes(serialized)
+        digest = sha(serialized)
+        validate(path, root, report, digest)
+        print(str(path) + '\t' + digest)
     except BaseException:
         shutil.rmtree(scratch)
         raise
 
 
-def validate(path, root, report):
+def validate(path, root, report, expected_digest=None):
     path = safe(Path(path))
-    plan = json.loads(path.read_text())
+    serialized = path.read_bytes()
+    if expected_digest is not None and (len(expected_digest) != 64 or sha(serialized) != expected_digest):
+        fail("prepared plan changed")
+    plan = json.loads(serialized)
     if plan.get('schema_version') != 1:
         fail('unsupported snapshot plan')
     root, report = safe(Path(root)), safe(Path(report))
@@ -261,11 +266,14 @@ def validate(path, root, report):
     return plan
 
 
-def finish(path):
-    path = Path(path)
-    plan = json.loads(path.read_text())
+def finish(path, expected_digest):
+    path = safe(Path(path))
+    serialized = path.read_bytes()
+    if len(expected_digest) != 64 or sha(serialized) != expected_digest:
+        fail("prepared plan changed")
+    plan = json.loads(serialized)
     # Revalidate source and snapshot, then prove the actual copied bytes.
-    validate(path, plan['source_root'], plan['report'])
+    validate(path, plan['source_root'], plan['report'], expected_digest)
     for entry in plan['entries']:
         actual = tree(Path(entry['destination']))
         for rel, digest in entry['files'].items():
@@ -295,6 +303,7 @@ def finish(path):
     receipt = safe(receipt_dir / (plan['run_id'] + '.json'))
     if receipt.exists():
         fail('scoped receipt target already exists')
+    plan['prepared_plan_sha256'] = expected_digest
     plan['approval_summary'] = gate.stdout.strip()
     plan['status'] = 'verified'
     plan.pop('snapshot')
