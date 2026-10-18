@@ -323,13 +323,23 @@ current scoped lane is qualified on Linux and requires `flock`; other platforms
 retain the existing full installation route, and unsupported scoped runs fail
 closed.
 It copies verified committed files from a private snapshot under the same
-writer lock used by full installs; local changes get a unique recoverable
+writer lock used by full installs of this installer version; local changes get a unique recoverable
 backup. A verified scoped receipt under
 `~/.local/state/ai-devops/scoped-skills/` records the full candidate SHA, critical
 source hashes, exact names, absolute destinations, installed file hashes,
-approval identity and report hash, and backup hashes. This receipt does not
+approval identity and report hash, and backup hashes checked against pre-install
+content. Receipt publication re-runs the same exact-source approval gate and
+captures its validated result directly. Audit, lock, trim-stage, receipt and
+selected destination paths reject unsafe symlinks, hardlinks and wrong file
+kinds before scoped writes. Source skills carrying installer-owned managed
+markers are refused before copying. This receipt does not
 advance or attest the full toolkit installation: the primary checkout,
-launchers and full installation manifest stay unchanged. Repeat `--only` for each exact
+launchers and full installation manifest stay unchanged. The full route retains
+existing cache symlink support with a diagnostic. Nested first-sync adoption
+reuses an inherited descriptor only after canonical lock-inode validation, and
+every invocation still flocks it; inherited values never waive approval.
+Legacy installer versions do not acquire this lock, so a scoped host operation
+must be serialized against any active legacy installer. Repeat `--only` for each exact
 skill name; unknown names and selected shared/client collisions fail before any
 writes. `--dry-run` previews the same selection. Scoped refresh retains normal
 local-edit backups and the install audit log, but does not touch unrelated

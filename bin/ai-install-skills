@@ -149,21 +149,6 @@ if ((${#ONLY_SKILLS[@]})); then
   done
 fi
 
-# All real installs share the same per-user writer lock, including full installs.
-if ! $DRY_RUN && ! $SHOW_LOG; then
-  if command -v flock >/dev/null; then
-    [[ ! -L "$BASE_HOME/.cache" && ! -L "$BASE_HOME/.cache/ai-devops" ]] || exit 3
-    mkdir -p "$BASE_HOME/.cache/ai-devops"
-    [[ ! -L "$BASE_HOME/.cache/ai-devops/skills-install.lock" ]] || exit 3
-    exec {SCOPED_LOCK}>"$BASE_HOME/.cache/ai-devops/skills-install.lock"
-    flock -n "$SCOPED_LOCK" || { echo 'ERROR: another installation holds this client lock.' >&2; exit 3; }
-  elif ((${#ONLY_SKILLS[@]})); then
-    echo 'ERROR: scoped installation requires flock.' >&2; exit 3
-  fi
-fi
-
-# The narrow lane always calls its own committed candidate gate; no environment
-# switch or alternative gate executable can waive installation admission.
 if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
   [[ -n "$SCOPED_REVIEWER_APPROVAL" ]] || { echo 'ERROR: --only installation requires --reviewer-approval.' >&2; exit 3; }
   [[ "${AI_INSTALL_LOG:-$BASE_HOME/.cache/ai-devops/install-log.tsv}" == "$BASE_HOME/.cache/ai-devops/install-log.tsv" ]] || { echo 'ERROR: scoped audit destination override refused.' >&2; exit 3; }
@@ -173,6 +158,41 @@ if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
     actual="$(sha256sum < "$REPO_ROOT/$critical")"
     [[ "${expected%% *}" == "${actual%% *}" ]] || { echo 'ERROR: scoped entrypoint differs from committed source.' >&2; exit 3; }
   done
+  python3 "$REPO_ROOT/tools/scoped_skills_install.py" paths "$CLAUDE_HOME" "$CODEX_HOME"
+fi
+
+# All real installs of this version share a per-user writer lock. The first-sync
+# bridge may inherit the descriptor, but every invocation verifies its inode
+# and flocks it; an environment value cannot waive locking or scoped admission.
+if ! $DRY_RUN && ! $SHOW_LOG; then
+  if command -v flock >/dev/null; then
+    if [[ -L "$BASE_HOME/.cache" || -L "$BASE_HOME/.cache/ai-devops" ]]; then
+      echo 'NOTE: full install resolves the existing cache symlink for its writer lock.' >&2
+    fi
+    mkdir -p "$BASE_HOME/.cache/ai-devops"
+    SKILLS_LOCK_PATH="$(cd "$BASE_HOME/.cache/ai-devops" && pwd -P)/skills-install.lock"
+    [[ ! -L "$SKILLS_LOCK_PATH" ]] || { echo 'ERROR: writer lock is a symlink.' >&2; exit 3; }
+    if [[ -e "$SKILLS_LOCK_PATH" ]]; then
+      [[ -f "$SKILLS_LOCK_PATH" && "$(stat -c %h "$SKILLS_LOCK_PATH" 2>/dev/null)" == 1 ]] || { echo 'ERROR: writer lock must be a regular file without hardlinks.' >&2; exit 3; }
+    fi
+    if [[ -n "${AI_INSTALL_SKILLS_LOCK_FD:-}" ]]; then
+      [[ "$AI_INSTALL_SKILLS_LOCK_FD" =~ ^[0-9]+$ && -f "$SKILLS_LOCK_PATH" && -e "/proc/$$/fd/$AI_INSTALL_SKILLS_LOCK_FD" ]] \
+        && [[ "$(stat -Lc '%d:%i' "/proc/$$/fd/$AI_INSTALL_SKILLS_LOCK_FD" 2>/dev/null)" == "$(stat -Lc '%d:%i' "$SKILLS_LOCK_PATH" 2>/dev/null)" ]] \
+        || { echo 'ERROR: inherited skill writer descriptor does not match the canonical lock.' >&2; exit 3; }
+      SCOPED_LOCK="$AI_INSTALL_SKILLS_LOCK_FD"
+    else
+      exec {SCOPED_LOCK}>>"$SKILLS_LOCK_PATH"
+    fi
+    flock -n "$SCOPED_LOCK" || { echo 'ERROR: another installation holds this client lock.' >&2; exit 3; }
+    export AI_INSTALL_SKILLS_LOCK_FD="$SCOPED_LOCK"
+  elif ((${#ONLY_SKILLS[@]})); then
+    echo 'ERROR: scoped installation requires flock.' >&2; exit 3
+  fi
+fi
+
+# The narrow lane always calls its own committed candidate gate; no environment
+# switch or alternative gate executable can waive installation admission.
+if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
   SCOPED_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-scoped-skills.XXXXXX")"
   trap 'rm -rf -- "$SCOPED_TMP"' EXIT
   SCOPED_PLAN="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
@@ -240,8 +260,13 @@ trim_log() {
   [[ -f "$LOG_FILE" ]] || return 0
   local n; n="$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)"
   ((n > LOG_MAX_LINES)) || return 0
-  tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$LOG_FILE.trim" 2>/dev/null &&
-    mv "$LOG_FILE.trim" "$LOG_FILE" 2>/dev/null || true
+  local trim_stage="$LOG_FILE.trim"
+  if [[ -n "$SCOPED_PLAN" ]]; then
+    python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" paths "$CLAUDE_HOME" "$CODEX_HOME" || return 3
+    trim_stage="$(mktemp "$(dirname "$LOG_FILE")/.scoped-log.XXXXXXXX")" || return 3
+  fi
+  tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$trim_stage" 2>/dev/null &&
+    mv "$trim_stage" "$LOG_FILE" 2>/dev/null || true
 }
 
 # What the skills are being installed FROM, in one field.
@@ -400,7 +425,13 @@ classify_skill() {
     [[ "${DST_HASHES[$path]:-}" == "${RECORDS[$path]}" ]] || edited=1
   done
   for path in "${!SRC_HASHES[@]}"; do
-    [[ "${DST_HASHES[$path]:-}" == "${SRC_HASHES[$path]}" ]] || CHANGED+=("$path")
+    if [[ "${DST_HASHES[$path]:-}" != "${SRC_HASHES[$path]}" ]]; then
+      CHANGED+=("$path")
+    elif [[ -n "$SCOPED_PLAN" && -f "$dst/$path" ]] \
+      && [[ "$(stat -c %a "$src/$path")" != "$(stat -c %a "$dst/$path")" ]]; then
+      CHANGED+=("$path")
+      edited=1
+    fi
   done
   for path in "${!RECORDS[@]}"; do
     [[ -n "${SRC_HASHES[$path]:-}" ]] && continue

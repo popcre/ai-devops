@@ -37,13 +37,15 @@ def safe(path):
     return path
 
 
-def tree(path):
+def tree(path, mutable=False):
     result = {}
     if path.exists():
         for entry in sorted(path.rglob('*')):
             if entry.is_symlink() or not (entry.is_dir() or entry.is_file()):
                 fail('special file or symbolic link refused')
             if entry.is_file():
+                if mutable and entry.stat().st_nlink != 1:
+                    fail('hardlinked mutable skill file refused')
                 result[str(entry.relative_to(path))] = sha(entry.read_bytes())
     return result
 
@@ -63,7 +65,7 @@ def origin(root):
     for rel in critical:
         path = safe(root / rel)
         row = git(root, 'ls-tree', head, '--', rel).decode()
-        if not row.startswith('100') or not path.is_file():
+        if row.split(' ', 1)[0] not in {'100644', '100755'} or not path.is_file():
             fail('missing committed entrypoint')
         expected = git(root, 'show', f'{head}:{rel}')
         if path.read_bytes() != expected:
@@ -83,6 +85,40 @@ def homes(claude, codex):
     if got != expected:
         fail('scoped installation uses canonical client homes only')
     return dict(zip(['claude', 'codex'], map(str, got)))
+
+
+def io_paths(client_homes):
+    """Validate every mutable bookkeeping path before lock/audit/destination writes."""
+    base = Path(client_homes['claude']).parent
+    audit_dir = safe(base / '.cache/ai-devops')
+    receipt_dir = safe(base / '.local/state/ai-devops/scoped-skills')
+    for directory in [audit_dir, receipt_dir]:
+        for parent in [directory, *directory.parents]:
+            if parent.exists() and not parent.is_dir():
+                fail('bookkeeping directory is not a directory')
+            if parent == base:
+                break
+    for name in ['install-log.tsv', 'install-log.tsv.trim', 'skills-install.lock']:
+        path = safe(audit_dir / name)
+        if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
+            fail('bookkeeping file must be a private regular file without hardlinks')
+        if name.endswith('.trim') and path.exists():
+            fail('existing audit trim stage requires its owner to reconcile it')
+    return receipt_dir
+
+
+def committed_modes(root, source):
+    prefix = str(source.relative_to(root)) + '/'
+    result = {}
+    for row in git(root, 'ls-tree', '-rz', 'HEAD', '--', str(source.relative_to(root))).split(b'\0'):
+        if not row:
+            continue
+        metadata, path = row.decode().split('\t', 1)
+        mode = metadata.split(' ', 1)[0]
+        if mode not in {'100644', '100755'} or not path.startswith(prefix):
+            fail('selected source must contain committed regular files only')
+        result[path[len(prefix):]] = int(mode, 8) & 0o777
+    return result
 
 
 def entries(root, names, client_homes):
@@ -105,13 +141,18 @@ def entries(root, names, client_homes):
                 found = True
                 safe(source)
                 files = tree(source)
+                if '.ai-devops-managed' in files:
+                    fail('source skills cannot ship installer-owned markers')
+                modes = committed_modes(root, source)
+                if set(modes) != set(files):
+                    fail('selected source filenames differ from committed regular files')
                 for rel in files:
                     if rel.startswith('-') or any(c.isspace() for c in rel):
                         fail('unsupported source filename')
                 if client == 'codex' and not Path(client_homes[client]).is_dir():
                     continue
                 dest = safe(Path(client_homes[client]) / 'skills' / name)
-                tree(dest)  # Reject preexisting links before any reconciliation.
+                tree(dest, mutable=True)  # Reject links before reconciliation.
                 marker = dest / '.ai-devops-managed'
                 if marker.exists():
                     for line in marker.read_text().splitlines():
@@ -124,7 +165,7 @@ def entries(root, names, client_homes):
                         if rel.is_absolute() or '..' in rel.parts or str(rel).startswith('-'):
                             fail('unsafe installed marker path')
                 safe(Path(client_homes[client]) / 'skills-backup')
-                result.append(dict(client=client, name=name, source=str(source.relative_to(root)), destination=str(dest), files=files))
+                result.append(dict(client=client, name=name, source=str(source.relative_to(root)), destination=str(dest), files=files, modes=modes))
         if not found:
             fail('unknown selected name')
     if not result:
@@ -139,6 +180,7 @@ def prepare(root, report, claude, codex, names, scratch=None):
     report = safe(Path(report))
     head, critical = origin(root)
     client_homes = homes(claude, codex)
+    receipt_dir = io_paths(client_homes)
     names = sorted(set(names))
     selected = entries(root, names, client_homes)
     for home in client_homes.values():
@@ -157,14 +199,18 @@ def prepare(root, report, claude, codex, names, scratch=None):
                     dst = target / rel
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     dst.write_bytes(git(root, 'show', f"{head}:{entry['source']}/{rel}"))
-                    os.chmod(dst, (root / entry['source'] / rel).stat().st_mode & 0o777)
+                    os.chmod(dst, entry['modes'][rel])
         # Freeze scope metadata used by the existing Bash reconciler.
         (snapshot / 'config').mkdir(exist_ok=True)
         for name in ['skill-scope.json', 'skill-trigger-policy.json', 'repo-identities.tsv']:
             src = root / 'config' / name
             if src.is_file():
                 (snapshot / 'config' / name).write_bytes(git(root, 'show', f'{head}:config/{name}'))
-        plan = dict(schema_version=1, source_root=str(root), head=head, critical=critical,
+        receipt = safe(receipt_dir / (scratch.name + '.json'))
+        if receipt.exists():
+            fail('scoped receipt target already exists')
+        initial_files = {entry['destination']: tree(Path(entry['destination'])) for entry in selected}
+        plan = dict(initial_files=initial_files, schema_version=1, source_root=str(root), head=head, critical=critical,
                     names=names, homes=client_homes, entries=selected,
                     report=str(report), report_sha256=sha(report.read_bytes()),
                     snapshot=str(snapshot), run_id=scratch.name)
@@ -189,6 +235,10 @@ def validate(path, root, report):
     if plan['report'] != str(report) or plan['report_sha256'] != sha(report.read_bytes()):
         fail('review report changed')
     client_homes = homes(plan['homes']['claude'], plan['homes']['codex'])
+    receipt_dir = io_paths(client_homes)
+    receipt = safe(receipt_dir / (plan["run_id"] + ".json"))
+    if receipt.exists():
+        fail("scoped receipt target already exists")
     if plan['entries'] != entries(root, plan['names'], client_homes):
         fail('selection or destination changed')
     snapshot = safe(Path(plan['snapshot']))
@@ -198,6 +248,8 @@ def validate(path, root, report):
     for entry in plan['entries']:
         if tree(snapshot / entry['source']) != entry['files']:
             fail('snapshot differs from reviewed source')
+        if any((snapshot / entry['source'] / rel).stat().st_mode & 0o777 != mode for rel, mode in entry['modes'].items()):
+            fail('snapshot modes differ from committed source')
         for rel, digest in entry['files'].items():
             expected[entry['source'] + '/' + rel] = digest
     for name in ['skill-scope.json', 'skill-trigger-policy.json', 'repo-identities.tsv']:
@@ -219,13 +271,22 @@ def finish(path):
         for rel, digest in entry['files'].items():
             if actual.get(rel) != digest:
                 fail('installed bytes differ')
+            if (Path(entry['destination']) / rel).stat().st_mode & 0o777 != entry['modes'][rel]:
+                fail('installed mode differs from committed source')
         backup = Path(plan['homes'][entry['client']]) / 'skills-backup' / (entry['name'] + '.' + plan['run_id'])
+        safe(backup)
+        backup_files = tree(backup, mutable=True)
+        if backup.exists() and backup_files != plan['initial_files'][entry['destination']]:
+            fail('backup differs from original selected destination')
         entry['backup'] = str(backup) if backup.exists() else None
-        entry['backup_files'] = tree(backup)
-    receipt_dir = safe(Path(os.environ['HOME']) / '.local/state/ai-devops/scoped-skills')
+        entry['backup_files'] = backup_files
+    gate = subprocess.run([str(Path(plan['source_root']) / 'bin/ai-task-gates'), 'check', '--before', 'scoped-skills-install', '--scoped-skills-plan', str(path), '--reviewer-approval', plan['report']], cwd=plan['source_root'], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    receipt_dir = io_paths(plan['homes'])
     receipt_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    receipt = receipt_dir / (plan['run_id'] + '.json')
-    plan['approval_summary'] = (path.parent / 'gate-summary.txt').read_text().strip()
+    receipt = safe(receipt_dir / (plan['run_id'] + '.json'))
+    if receipt.exists():
+        fail('scoped receipt target already exists')
+    plan['approval_summary'] = gate.stdout.strip()
     plan['status'] = 'verified'
     plan.pop('snapshot')
     fd, stage = tempfile.mkstemp(dir=receipt_dir)
@@ -246,6 +307,8 @@ if __name__ == '__main__':
                 prepare(*args[:4], args[6:], scratch=args[5])
             else:
                 prepare(*args[:4], args[4:])
+        elif operation == 'paths':
+            io_paths(homes(*args))
         elif operation == 'validate':
             validate(*args)
         elif operation == 'finish':

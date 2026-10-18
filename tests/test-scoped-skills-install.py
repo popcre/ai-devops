@@ -28,6 +28,10 @@ class ScopedInstall(unittest.TestCase):
         (cls.root / 'templates/system').mkdir(parents=True)
         (cls.root / 'templates/system/CLAUDE-global.md').write_text('Fixture Claude global\n')
         (cls.root / 'templates/system/AGENTS-global-codex.md').write_text('Fixture Codex global\n')
+        (cls.root / 'templates/system/AGENTS-global-zcode.md').write_text('Fixture ZCode global\n')
+        (cls.root / 'templates/system/AGENTS-global-mimo.md').write_text('Fixture MiMo global\n')
+        (cls.root / 'skills/claude/sync-dotfiles').mkdir(parents=True)
+        (cls.root / 'skills/claude/sync-dotfiles/SKILL.md').write_text('Use bin/ai-adopt-globals for adoption\n')
         (cls.root / 'skills/shared/one').mkdir(parents=True)
         (cls.root / 'skills/shared/one/SKILL.md').write_text('one\n')
         (cls.root / 'skills/shared/one/run.sh').write_text('#!/bin/sh\nexit 0\n')
@@ -58,7 +62,7 @@ class ScopedInstall(unittest.TestCase):
         self.home.mkdir()
         (self.home / '.codex').mkdir()
         self.env = os.environ.copy()
-        for key in ['AI_INSTALL_LOG', 'AI_TASK_GATES_FILE', 'AI_REPO_POLICY_BIN', 'USERPROFILE', 'CLAUDE_HOME', 'CODEX_HOME', 'AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE']:
+        for key in ['AI_INSTALL_LOG', 'AI_TASK_GATES_FILE', 'AI_REPO_POLICY_BIN', 'USERPROFILE', 'CLAUDE_HOME', 'CODEX_HOME', 'AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE', 'AI_INSTALL_SKILLS_LOCK_FD']:
             self.env.pop(key, None)
         self.env.update(HOME=str(self.home), GIT_CONFIG_GLOBAL=str(self.home / '.gitconfig'), XDG_CONFIG_HOME=str(self.home / '.config'), AI_TASK_GATES_DIR=str(self.case / 'gates'), AI_REVIEW_LIFECYCLE_DIR=str(self.case / 'lifecycle'))
         self.old_home = os.environ.get('HOME')
@@ -263,7 +267,7 @@ class ScopedInstall(unittest.TestCase):
             self.assertIn('also exists', self.install(False).stdout)
             self.assertEqual(scoped.tree(self.home), before)
         finally:
-            shutil.rmtree(collision.parent)
+            shutil.rmtree(collision)
 
     def test_full_install_without_flock_is_preserved(self):
         self.env['AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE'] = '1'
@@ -272,6 +276,211 @@ class ScopedInstall(unittest.TestCase):
         command = 'command() { if [[ "$*" == "-v flock" ]]; then return 1; fi; builtin command "$@"; }; source "$1" --keep-orphans'
         self.run_cmd('bash', '-c', command, 'fixture', str(self.root / 'bin/ai-install-skills'))
         self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_text(), 'one\n')
+
+    def test_mutable_bookkeeping_refuses_symlinks_hardlinks_and_wrong_kinds(self):
+        victim = self.case / 'victim'
+        victim.write_text('untouched\n')
+        for name in ['install-log.tsv', 'install-log.tsv.trim', 'skills-install.lock']:
+            for kind in ['symlink', 'hardlink', 'directory']:
+                with self.subTest(name=name, kind=kind):
+                    path = self.home / '.cache/ai-devops' / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    if kind == 'symlink':
+                        path.symlink_to(victim)
+                    elif kind == 'hardlink':
+                        os.link(victim, path)
+                    else:
+                        path.mkdir()
+                    try:
+                        self.install(False)
+                        self.assertEqual(victim.read_text(), 'untouched\n')
+                        self.assertFalse((self.home / '.claude/skills').exists())
+                    finally:
+                        path.rmdir() if kind == 'directory' else path.unlink()
+
+    def test_receipt_directory_symlink_refused_before_selected_writes(self):
+        receipt = self.home / '.local/state/ai-devops/scoped-skills'
+        receipt.parent.mkdir(parents=True)
+        outside = self.case / 'outside-receipt'
+        outside.mkdir()
+        receipt.symlink_to(outside)
+        self.install(False)
+        self.assertFalse((self.home / '.claude/skills').exists())
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_existing_trim_stage_refused_without_overwrite(self):
+        stage = self.home / '.cache/ai-devops/install-log.tsv.trim'
+        stage.parent.mkdir(parents=True)
+        stage.write_text('prior owner stage\n')
+        self.install(False)
+        self.assertEqual(stage.read_text(), 'prior owner stage\n')
+        self.assertFalse((self.home / '.claude/skills').exists())
+
+    def test_selected_managed_file_hardlink_refused(self):
+        victim = self.case / 'outside-selected'
+        victim.write_text('old\n')
+        dest = self.home / '.claude/skills/one'
+        dest.mkdir(parents=True)
+        os.link(victim, dest / 'SKILL.md')
+        (dest / '.ai-devops-managed').write_text(scoped.sha(b'old\n') + '  SKILL.md\n')
+        self.declare()
+        self.approve()
+        self.install(False)
+        self.assertEqual(victim.read_text(), 'old\n')
+        self.assertFalse((dest / 'run.sh').exists())
+
+    def test_source_installer_marker_refused_before_writes(self):
+        marker = self.root / 'skills/shared/one/.ai-devops-managed'
+        marker.write_text('source marker')
+        try:
+            with self.assertRaisesRegex(ValueError, 'installer-owned markers'):
+                scoped.entries(self.root, ['one'], {'claude': str(self.home / '.claude'), 'codex': str(self.home / '.codex')})
+        finally:
+            marker.unlink()
+
+    def test_full_install_preserves_cache_symlink_capability(self):
+        outside = self.case / 'cache-target'
+        outside.mkdir()
+        (self.home / '.cache').symlink_to(outside)
+        self.env['AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE'] = '1'
+        run = self.run_cmd('bash', str(self.root / 'bin/ai-install-skills'))
+        self.assertIn('resolves the existing cache symlink', run.stdout)
+        self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_text(), 'one\n')
+
+    def test_first_sync_nested_globals_bridge_reuses_writer_lock(self):
+        old = self.home / '.claude/skills/sync-dotfiles/SKILL.md'
+        old.parent.mkdir(parents=True)
+        old.write_text('legacy sync skill without adoption command\n')
+        self.env['AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE'] = '1'
+        run = self.run_cmd('bash', str(self.root / 'bin/ai-install-skills'))
+        self.assertIn('bin/ai-adopt-globals', old.read_text())
+        self.assertNotIn('another installation holds', run.stdout)
+        self.assertEqual((self.home / '.claude/CLAUDE.md').read_text(), 'Fixture Claude global\n')
+
+    def test_forged_inherited_descriptor_refused(self):
+        self.declare()
+        self.approve()
+        self.env['AI_INSTALL_SKILLS_LOCK_FD'] = '999'
+        self.assertIn('descriptor does not match', self.install(False).stdout)
+        self.assertFalse((self.home / '.claude/skills').exists())
+
+    def stage_finish(self, invalid_review=False):
+        dest = self.home / '.claude/skills/one'
+        dest.mkdir(parents=True)
+        (dest / 'SKILL.md').write_text('preserve local edit\n')
+        self.declare()
+        self.approve('.tests=null' if invalid_review else '.')
+        path = self.plan()
+        plan = json.loads(path.read_text())
+        for entry in plan['entries']:
+            target = Path(entry['destination'])
+            if target.exists():
+                backup = self.home / ('.' + entry['client']) / 'skills-backup' / ('one.' + plan['run_id'])
+                backup.parent.mkdir(parents=True)
+                shutil.copytree(target, backup)
+            shutil.copytree(Path(plan['snapshot']) / entry['source'], target, dirs_exist_ok=True)
+        (path.parent / 'gate-summary.txt').write_text('FAKE SCRATCH APPROVAL')
+        return path, plan
+
+    def test_receipt_uses_live_gate_summary_not_mutable_scratch(self):
+        path, plan = self.stage_finish()
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path))
+        receipt = json.loads((self.home / '.local/state/ai-devops/scoped-skills' / (plan['run_id'] + '.json')).read_text())
+        self.assertIn('APPROVE by grok', receipt['approval_summary'])
+        self.assertNotIn('FAKE', receipt['approval_summary'])
+
+    def test_failed_final_revalidation_preserves_backup_without_receipt(self):
+        path, plan = self.stage_finish(invalid_review=True)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
+        backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
+        self.assertEqual((backup / 'SKILL.md').read_text(), 'preserve local edit\n')
+
+    def test_backup_substitution_cannot_issue_receipt(self):
+        path, plan = self.stage_finish()
+        backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
+        (backup / 'SKILL.md').write_text('substituted backup\n')
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
+
+    def test_receipt_target_substitution_cannot_overwrite_another_file(self):
+        path, plan = self.stage_finish()
+        victim = self.case / 'receipt-victim'
+        victim.write_text('untouched\n')
+        receipt = self.home / '.local/state/ai-devops/scoped-skills' / (plan['run_id'] + '.json')
+        receipt.parent.mkdir(parents=True)
+        receipt.symlink_to(victim)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.assertEqual(victim.read_text(), 'untouched\n')
+        self.assertTrue(receipt.is_symlink())
+
+    def test_inherited_descriptor_for_other_file_refused(self):
+        self.declare()
+        self.approve()
+        lock = self.home / '.cache/ai-devops/skills-install.lock'
+        lock.parent.mkdir(parents=True)
+        lock.write_text('')
+        other = self.case / 'other-lock'
+        with other.open('a') as descriptor:
+            self.env['AI_INSTALL_SKILLS_LOCK_FD'] = str(descriptor.fileno())
+            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', '--reviewer-approval', str(self.report)], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('descriptor does not match', run.stdout)
+        self.assertFalse((self.home / '.claude/skills').exists())
+
+    def test_inherited_real_lock_cannot_waive_approval(self):
+        import fcntl
+        self.declare()
+        lock = self.home / '.cache/ai-devops/skills-install.lock'
+        lock.parent.mkdir(parents=True)
+        with lock.open('a') as descriptor:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.env['AI_INSTALL_SKILLS_LOCK_FD'] = str(descriptor.fileno())
+            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', '--reviewer-approval', str(self.report)], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('APPROVE', run.stdout)
+        self.assertFalse((self.home / '.claude/skills').exists())
+
+    def test_backup_directory_substitution_cannot_issue_receipt(self):
+        path, plan = self.stage_finish()
+        backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
+        original = self.case / 'recoverable-original'
+        backup.rename(original)
+        backup.symlink_to(original)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), ok=False)
+        self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
+        self.assertEqual((original / 'SKILL.md').read_text(), 'preserve local edit\n')
+
+    def test_scoped_audit_trim_uses_private_stage(self):
+        self.declare()
+        self.approve()
+        self.env['AI_INSTALL_LOG_MAX_LINES'] = '1'
+        self.install()
+        self.install()
+        cache = self.home / '.cache/ai-devops'
+        self.assertEqual(len((cache / 'install-log.tsv').read_text().splitlines()), 1)
+        self.assertFalse((cache / 'install-log.tsv.trim').exists())
+        self.assertEqual(list(cache.glob('.scoped-log.*')), [])
+
+    def test_working_executable_mode_cannot_change_committed_install_mode(self):
+        script = self.root / 'skills/shared/one/run.sh'
+        self.git('config', 'core.filemode', 'false')
+        script.chmod(0o644)
+        try:
+            self.assertEqual(self.git('status', '--porcelain'), '')
+            self.declare()
+            self.approve()
+            self.install()
+            installed = self.home / '.claude/skills/one/run.sh'
+            self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+            installed.chmod(0o644)
+            self.install()
+            self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+            backup = next((self.home / '.claude/skills-backup').glob('one.*/run.sh'))
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o644)
+        finally:
+            script.chmod(0o755)
+            self.git('config', 'core.filemode', 'true')
 
     def test_alternate_gate_policy(self):
         self.declare()
