@@ -480,6 +480,8 @@ but will be reported as `UNPROVABLE`.
   tests before the required suites. Keep routine output compact without hiding
   errors. PowerShell must stay compatible; run Bash tests through Git Bash on
   Windows. This repository has no UI.
+- Never compare file-system paths as raw strings in code or tests: source
+  `tools/lib/path-identity.sh` and use `ai_same_path`, or match a fixed fixture suffix.
 - Never overlap a local full test series with a GitHub job on the same physical
   Windows host or a shared installed runtime. Check that boundary with
   `bin/ai-test-local --check-collision`; a busy remote self-hosted runner does
