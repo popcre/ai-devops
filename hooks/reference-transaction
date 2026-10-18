@@ -20,13 +20,21 @@ if [ "${1:-}" = aborted ]; then
   # git updates the index and files before the ref; put them back so a
   # refused pull does not leave the old HEAD over new files (#1836).
   if [ -n "$marker_dir" ] && [ -f "$marker" ]; then
-    read -r to < "$marker" || :
+    read -r to owner < "$marker" || :
+    # Only the git process that was refused (same parent) restores.
+    if [ "${owner:-}" != "$PPID" ]; then
+      # A marker whose refused process is gone is stale; drop it.
+      { [ -n "${owner:-}" ] && kill -0 "$owner" 2>/dev/null; } || rm -f "$marker"
+      exit 0
+    fi
     rm -f "$marker"
     from="$(git rev-parse -q --verify HEAD 2>/dev/null)" || from=""
     if [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
-      git read-tree -m -u "$to" "$from" 2>/dev/null \
-        && echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2 \
-        || echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+      if git read-tree -m -u "$to" "$from" 2>/dev/null; then
+        echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2
+      else
+        echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+      fi
     fi
   fi
   exit 0
@@ -48,6 +56,8 @@ fi
 
 refused=""; to=""
 while read -r old new ref; do
+  # A same-value update (merge --abort, reset --hard HEAD) moves nothing.
+  [ "$old" = "$new" ] && continue
   case "$ref" in
     refs/heads/main) refused="$ref"; to="$new" ;;
     HEAD)
@@ -61,11 +71,30 @@ while read -r old new ref; do
 done
 
 [ -z "$refused" ] && exit 0
-case "$primary$to" in 1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;; *) [ -z "$marker_dir" ] || printf '%s\n' "$to" > "$marker" ;; esac
+# Restore files only for a move to existing history (a commit some ref or
+# FETCH_HEAD already contains, or an ancestor of HEAD:
+# fast-forward pull/merge, reset, checkout). A new commit (local commit,
+# amend, cherry-pick, any merge commit) is never restored: its staged files
+# may be the user's own work. The message then says how to undo by hand.
+restore=0
+case "$primary$to" in
+  1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;;
+  *) head_now="$(git rev-parse -q --verify HEAD 2>/dev/null)" || head_now=""
+     fetched="$(git rev-parse -q --verify FETCH_HEAD 2>/dev/null)" || fetched=""
+     if [ -n "$(git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null)" ]; then restore=1
+     elif [ -n "$fetched" ] && git merge-base --is-ancestor "$to" "$fetched" 2>/dev/null; then restore=1
+     elif [ -n "$head_now" ] && git merge-base --is-ancestor "$to" "$head_now" 2>/dev/null; then restore=1
+     fi ;;
+esac
+[ "$restore" -eq 0 ] || [ -z "$marker_dir" ] || printf '%s %s\n' "$to" "$PPID" > "$marker"
 cat >&2 <<MSG
 ai-devops: refusing to move $refused in the installed toolkit checkout.
 Only the protected installer may advance it: on Linux run update.sh from a
 reviewed candidate; on Windows run bin/install-ai-devops-windows.ps1.
 See docs/deployment.md ("Installed checkout main guard").
+MSG
+[ "$restore" -eq 1 ] || cat >&2 <<'MSG'
+Files are not restored for a new commit. If this was a refused merge, undo it
+with 'git merge --abort'; staged work of your own stays as it is.
 MSG
 exit 1
