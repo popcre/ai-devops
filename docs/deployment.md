@@ -110,8 +110,9 @@ cd /worksp/ai-devops
    `git pull`, `merge`, `reset`, or detached `checkout` there fails with
    guidance naming `update.sh` / `bin/install-ai-devops-windows.ps1`.
    Git rewrites the index and files before the ref, so when the refused
-   target already exists elsewhere (a fetched or older commit: pull, merge,
-   reset, checkout) the same git process's `aborted` call puts them back
+   target is existing history (fetched, or older than HEAD: pull, merge,
+   reset, checkout) or a merge commit on HEAD (non-fast-forward pull), the
+   same git process's `aborted` call puts them back
    (`git read-tree -m -u <refused> HEAD`, keeping untracked files). A refused
    local commit or amend is never restored: its staged files are the user's
    own work and stay as they were.

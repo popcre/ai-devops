@@ -20,14 +20,18 @@ if [ "${1:-}" = aborted ]; then
   # git updates the index and files before the ref; put them back so a
   # refused pull does not leave the old HEAD over new files (#1836).
   if [ -n "$marker_dir" ] && [ -f "$marker" ]; then
-    read -r to owner < "$marker" || :
+    read -r to owner kind < "$marker" || :
+    # Only the git process that was refused (same parent) restores.
+    [ "${owner:-}" = "$PPID" ] || exit 0
     rm -f "$marker"
     from="$(git rev-parse -q --verify HEAD 2>/dev/null)" || from=""
-    # Only the git process that was refused (same parent) restores.
-    if [ "${owner:-}" = "$PPID" ] && [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
-      git read-tree -m -u "$to" "$from" 2>/dev/null \
-        && echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2 \
-        || echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+    if [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
+      if git read-tree -m -u "$to" "$from" 2>/dev/null; then
+        [ "${kind:-}" != merge ] || rm -f "$marker_dir/MERGE_HEAD" "$marker_dir/MERGE_MODE" "$marker_dir/MERGE_MSG"
+        echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2
+      else
+        echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+      fi
     fi
   fi
   exit 0
@@ -62,16 +66,21 @@ while read -r old new ref; do
 done
 
 [ -z "$refused" ] && exit 0
-# Restore files only when git itself rewrote them toward a commit that
-# already exists elsewhere (pull/merge/reset/checkout of fetched or older
-# history). A new local commit or amend is reachable from no other ref; its
-# files are the user's own work and stay untouched (#1836).
-restore=0
+# Restore files only when git itself rewrote them: toward a commit that
+# already exists (fetched or older history: pull, merge, reset, checkout) or
+# a merge commit on top of HEAD (non-fast-forward pull). A new local commit,
+# amend or cherry-pick keeps its staged files: they are the user's own work.
+restore=0; kind=move
 case "$primary$to" in
   1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;;
-  *) if git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null | grep -qv '^refs/heads/main$'; then restore=1; fi ;;
+  *) head_now="$(git rev-parse -q --verify HEAD 2>/dev/null)" || head_now=""
+     if git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null | grep -qv '^refs/heads/main$'; then restore=1
+     elif [ -n "$head_now" ] && git merge-base --is-ancestor "$to" "$head_now" 2>/dev/null; then restore=1
+     elif [ -n "$head_now" ] && [ "$(git rev-list --parents -n 1 "$to" 2>/dev/null | wc -w)" -gt 2 ] &&
+          git rev-list --parents -n 1 "$to" | tr ' ' '\n' | tail -n +2 | grep -qx "$head_now"; then restore=1; kind=merge
+     fi ;;
 esac
-[ "$restore" -eq 0 ] || [ -z "$marker_dir" ] || printf '%s %s\n' "$to" "$PPID" > "$marker"
+[ "$restore" -eq 0 ] || [ -z "$marker_dir" ] || printf '%s %s %s\n' "$to" "$PPID" "$kind" > "$marker"
 cat >&2 <<MSG
 ai-devops: refusing to move $refused in the installed toolkit checkout.
 Only the protected installer may advance it: on Linux run update.sh from a

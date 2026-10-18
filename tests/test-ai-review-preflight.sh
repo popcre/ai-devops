@@ -593,7 +593,7 @@ if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/
    ! git -C "$GUARD/c" checkout -q --detach origin/main 2>/dev/null &&
    [ -z "$(git -C "$GUARD/c" status --porcelain --untracked-files=no)" ] &&
    echo own > "$GUARD/c/own" && git -C "$GUARD/c" add own && ! git -C "$GUARD/c" commit -qm own 2>/dev/null &&
-   [ "$(cat "$GUARD/c/own")" = own ] && git -C "$GUARD/c" diff --cached --quiet HEAD -- own; [ $? -eq 1 ] &&
+   [ "$(cat "$GUARD/c/own")" = own ] && ! git -C "$GUARD/c" diff --cached --quiet HEAD -- own &&
    git -C "$GUARD/c" rm -q --cached own && rm -f "$GUARD/c/own" &&
    git -C "$GUARD/c" fetch -q origin &&
    echo w > "$GUARD/wt/w" && git -C "$GUARD/wt" add w && git -C "$GUARD/wt" commit -qm wt &&
