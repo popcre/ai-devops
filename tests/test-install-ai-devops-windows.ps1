@@ -42,6 +42,7 @@ function New-Fixture {
     $hooksDir = Join-Path $root "hooks"
     New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $RepoRoot "hooks\post-merge") -Destination (Join-Path $hooksDir "post-merge")
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "hooks\reference-transaction") -Destination (Join-Path $hooksDir "reference-transaction")
     $fixtureBin = Join-Path $root "bin"
     New-Item -ItemType Directory -Force -Path $fixtureBin | Out-Null
     Copy-Item -LiteralPath (Join-Path $RepoRoot "bin\ai-install-post-merge-hook") -Destination (Join-Path $fixtureBin "ai-install-post-merge-hook")
