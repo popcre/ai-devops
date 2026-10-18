@@ -371,7 +371,7 @@ if [ "$code_only" -eq 1 ]; then
     exit 0
   fi
   lifecycle="$REAL_DIR/ai-review-lifecycle"
-  lifecycle_args=(begin --provider deepseek --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
+  lifecycle_args=(begin --provider "$review_provider" --repo "$source_root" --run-id "$tag" --caller "$implementer" --code-only-export "$snapshot")
   [ -z "$action_profile" ] || lifecycle_args+=(--action-profile "$action_profile" --action-manifest "$action_manifest")
   lifecycle_state="$(AI_REVIEW_LIFECYCLE_OWNER_PID=$$ "$lifecycle" "${lifecycle_args[@]}")" || { printf 'ai-review: prospective original-source lifecycle refused; no reviewer was started.\n' >&2; exit 3; }
   if [ -n "$action_profile" ]; then
