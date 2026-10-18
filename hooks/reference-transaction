@@ -61,7 +61,7 @@ while read -r old new ref; do
 done
 
 [ -z "$refused" ] && exit 0
-case "$to" in *[!0-9a-f]*|'') ;; *) [ -z "$marker_dir" ] || printf '%s\n' "$to" > "$marker" ;; esac
+case "$primary$to" in 1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;; *) [ -z "$marker_dir" ] || printf '%s\n' "$to" > "$marker" ;; esac
 cat >&2 <<MSG
 ai-devops: refusing to move $refused in the installed toolkit checkout.
 Only the protected installer may advance it: on Linux run update.sh from a
