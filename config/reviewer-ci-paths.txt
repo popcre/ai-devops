@@ -7,6 +7,7 @@ bin/ai-muse*
 bin/ai-process-supervisor*
 bin/ai-provider-version*
 bin/ai-review*
+bin/ai-stepfun*
 bin/ai-deepseek*
 bin/windows-private-file.ps1
 config/ci-suite-manifest.json
