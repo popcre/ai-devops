@@ -117,6 +117,8 @@ skills/shared/x/SKILL.md|code
 .github/workflows/verify.yml|code
 bin/ai-review-lifecycle|reviewer-safety
 bin/ai-task-gates|reviewer-safety
+bin/ai-install-skills|reviewer-safety
+tests/test-ai-install-skills.sh|reviewer-safety
 tools/lib/task-gates.sh|reviewer-safety
 tools/application_workflow_target.py|reviewer-safety
 config/task-gates.json|reviewer-safety
@@ -1876,5 +1878,12 @@ check 'generated route cannot borrow original restoration stage' \
 jq '.reviewer_release.database["reviewer-safety"]="generic-database"' "$ROOT/config/task-gates.json" > "$TMP/bad-generated-policy.json"
 check 'central generated release refuses a broadened reviewer-safety gate name' \
   "AI_TASK_GATES_FILE='$TMP/bad-generated-policy.json' rc 4 '$GEN' check --before database"
+
+check 'scoped skill gate refuses missing plan and approval' \
+  "rc 3 '$TMP/rs' check --before scoped-skills-install"
+check 'scoped skill gate cannot bypass universal raw archive refusal' \
+  "out '$TMP/rawarchive' check --before scoped-skills-install | grep -q 'transcripts/session.jsonl'"
+check 'scoped skill plan cannot be supplied to a different action' \
+  "rc 1 '$TMP/rs' check --before ship --scoped-skills-plan '$TMP/not-a-plan'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

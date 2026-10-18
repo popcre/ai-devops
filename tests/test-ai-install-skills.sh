@@ -4,6 +4,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
+# Full-mode defaults (audit log and writer lock) must also stay in this fixture.
+export HOME="$TMP_ROOT/home"
+mkdir -p "$HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 assert_file() { [[ -f "$1" ]] || fail "missing file $1"; }
@@ -270,30 +273,15 @@ for invalid in missing '../shared-one' 'shared-*'; do
 done
 if run_installer "$fixture" "$claude" "$codex" --only >/dev/null 2>&1; then fail 'accepted missing name'; fi
 if run_installer "$fixture" "$claude" "$codex" --only shared-one --adopt-globals >/dev/null 2>&1; then fail 'accepted globals'; fi
-# Do not set the test bootstrap bypass: scoped mode must avoid that gate itself.
-CLAUDE_HOME="$claude" CODEX_HOME="$codex" bash "$fixture/bin/ai-install-skills" --only shared-one --only client-codex --only shared-one > "$TMP_ROOT/scoped.out"
-assert_file "$claude/skills/shared-one/SKILL.md"
-assert_file "$codex/skills/shared-one/SKILL.md"
-assert_file "$codex/skills/client-codex/SKILL.md"
-assert_absent "$claude/skills/client-codex"
-assert_absent "$claude/skills/client-claude"
-assert_absent "$codex/skills/synology-sharesync-triage"
-assert_absent "$claude/CLAUDE.md"
-assert_absent "$codex/AGENTS.md"
-assert_absent "$claude/skills-quarantine"
-assert_absent "$codex/skills-quarantine"
-grep -q 'identity' "$TMP_ROOT/scoped.out" && fail 'ran identity step'
-printf 'local edit\n' > "$claude/skills/shared-one/SKILL.md"
-unrelated_before="$(snapshot "$codex")"
-run_installer "$fixture" "$claude" "$codex" --only shared-one >/dev/null
-grep -q 'local edit' "$claude/skills-backup/shared-one/SKILL.md" || fail 'missing local edit backup'
-[[ "$unrelated_before" == "$(snapshot "$codex")" ]] || fail 'unchanged client mutated'
-[[ "$(find "$claude/skills-backup" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]] || fail 'unrelated backup created'
-mkdir -p "$fixture/skills/claude/shared-one"
-cp "$fixture/skills/shared/shared-one/SKILL.md" "$fixture/skills/claude/shared-one/SKILL.md"
-before="$(snapshot "$TMP_ROOT/scoped")"
-if run_installer "$fixture" "$claude" "$codex" --only shared-one >/dev/null 2>&1; then fail 'accepted selected collision'; fi
-[[ "$before" == "$(snapshot "$TMP_ROOT/scoped")" ]] || fail 'collision wrote files'
+# Unreviewed fixtures cannot enter the new scoped installation gate.
+if CLAUDE_HOME="$claude" CODEX_HOME="$codex" bash "$fixture/bin/ai-install-skills" --only shared-one > "$TMP_ROOT/scoped.out" 2>&1; then
+  fail 'unreviewed scoped installation succeeded'
+fi
+grep -q 'requires --reviewer-approval' "$TMP_ROOT/scoped.out" || fail 'missing scoped approval refusal'
+assert_absent "$claude/skills/shared-one"
+assert_absent "$codex/skills/shared-one"
+# Reviewed scoped behavior and adversarial gate cases use committed private
+# fixtures in test-scoped-skills-install.py; no production gate bypass exists.
 
 echo "10/13 repository-scoped skill lands only in the owning repo"
 fixture="$TMP_ROOT/reposcope/repo"; claude="$TMP_ROOT/reposcope/claude"; codex="$TMP_ROOT/reposcope/codex"
@@ -367,4 +355,8 @@ grep -Fq 'repo-only-skill' "$TMP_ROOT/repodry.out" || fail "scoped skill name mi
 assert_absent "$clones/demo-app/.claude/skills/repo-only-skill"
 assert_file "$claude/skills/repo-only-skill/SKILL.md"
 
+# The protected scoped host route is currently qualified on Linux with flock.
+if [[ "$(uname -s)" == Linux ]]; then
+  python3 "$REPO_ROOT/tests/test-scoped-skills-install.py" || exit 1
+fi
 echo "PASS: ai-install-skills"

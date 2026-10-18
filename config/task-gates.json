@@ -28,6 +28,7 @@
     "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
+    "scoped-skills-install",
     "application-workflow",
     "review",
     "code-only-review",
@@ -474,6 +475,21 @@
         },
         {
           "glob": "tools/lib/task-gates.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-install-skills",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-ai-install-skills.sh",
+          "class": "reviewer-safety"
+        },        {
+          "glob": "tools/scoped_skills_install.py",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-scoped-skills-install.py",
           "class": "reviewer-safety"
         },
         {

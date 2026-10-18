@@ -1295,12 +1295,14 @@ toolkit_source_receipt(){
 }
 
 cmd_check(){
+  local scoped_skills_plan=""
   local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
   local application_release_target="" application_workflow_target="" base_explicit=0 application_release_ready=0
   while [ $# -gt 0 ]; do
     case "$1" in
+      --scoped-skills-plan) need_value "$@"; scoped_skills_plan="$2"; shift 2 ;;
       --action-stage) need_value "$@"; action_stage="$2"; shift 2 ;;
       --action-manifest-stdin) action_manifest_stdin=1; shift ;;
       --before) need_value "$@"; action="$2"; shift 2 ;;
@@ -1367,6 +1369,24 @@ cmd_check(){
   # later archive check. A scan that cannot classify (no repository yet)
   # falls through to the same checks it would have mirrored in `prepare`.
   refuse_raw_archives "$action" "$(check_change_set "$action" "$base")"
+  if [ "$action" = scoped-skills-install ]; then
+    [ -n "$scoped_skills_plan" ] && [ -n "$reviewer_approval" ] \
+      && [ -z "$base$acknowledge$small_entry$small_rows$small_quote$target_head$installed_checkout$installed_launcher$application_release_target$application_workflow_target" ] \
+      && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
+      || blocked 'ai-task-gates: STOP. Scoped skill installation needs only its exact plan and independent approval.'
+    resolve_repo
+    [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] || blocked 'ai-task-gates: STOP. Scoped skill installation is ai-devops only.'
+    [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Scoped skill installation requires a declared installation task.'
+    [ "$ROOT" = "$TOPLEVEL" ] && [ "$POLICY_FILE" = "$ROOT/config/task-gates.json" ] || blocked 'ai-task-gates: STOP. Scoped installation requires its candidate gate and policy.'
+    python3 "$ROOT/tools/scoped_skills_install.py" validate "$scoped_skills_plan" "$TOPLEVEL" "$reviewer_approval" \
+      || blocked 'ai-task-gates: STOP. Scoped source, destinations or snapshot no longer match.'
+    decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+      || approval_refused deploy $? 'ai-task-gates: STOP. Scoped installation needs exact-source independent APPROVE with bound passing tests.'
+    printf 'ai-task-gates: scoped skill installation approved: %s\n' "$approval_summary"
+    return 0
+  fi
+  [ -z "$scoped_skills_plan" ] || die '--scoped-skills-plan requires scoped-skills-install.'
   if [ "$action" = application-workflow ] || [ -n "$application_workflow_target" ]; then
     [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] && [ -n "$reviewer_approval" ] \
       && [ -z "$base$acknowledge$small_entry$application_release_target$target_head$installed_checkout$installed_launcher" ] \
