@@ -4,6 +4,10 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Installer = Join-Path $RepoRoot "bin\install-ai-devops-windows.ps1"
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-skills-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $TempRoot | Out-Null
+# Fixture commits stand in for upstream changes; the installed main guard
+# (#1836) correctly refuses commits on main once the installer placed it.
+$NoHooks = Join-Path $TempRoot "no-hooks"
+New-Item -ItemType Directory -Path $NoHooks | Out-Null
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -133,7 +137,7 @@ try {
     $fixture = New-Fixture "collision"
     New-TestSkill $fixture "shared" "client-claude"
     git -C $fixture add .
-    git -C $fixture commit -m "add collision" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add collision" | Out-Null
     git -C $fixture push | Out-Null
     $claude = Join-Path $TempRoot "collision\claude"
     $codex = Join-Path $TempRoot "collision\codex"
@@ -145,7 +149,7 @@ try {
     $fixture = New-Fixture "collision-codex"
     New-TestSkill $fixture "shared" "client-codex"
     git -C $fixture add .
-    git -C $fixture commit -m "add Codex collision" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add Codex collision" | Out-Null
     git -C $fixture push | Out-Null
     $claude = Join-Path $TempRoot "collision-codex\claude"
     $codex = Join-Path $TempRoot "collision-codex\codex"
@@ -160,7 +164,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $fixture "config") -Force | Out-Null
     "synology-sharesync-stuck-triage" | Set-Content -LiteralPath (Join-Path $fixture "config\retired-skills.txt")
     git -C $fixture add config/retired-skills.txt
-    git -C $fixture commit -m "add retired skill fixture" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add retired skill fixture" | Out-Null
     git -C $fixture push | Out-Null
     $claude = Join-Path $TempRoot "migrate\claude"
     $codex = Join-Path $TempRoot "migrate\codex"
@@ -213,7 +217,7 @@ try {
     "local note" | Set-Content -LiteralPath (Join-Path $installed "LOCAL-NOTES.md")
     @("---", "name: client-claude", "description: test v2", "---") | Set-Content -LiteralPath $skill
     git -C $fixture add skills/claude/client-claude/SKILL.md
-    git -C $fixture commit -m "update fixture to v2" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "update fixture to v2" | Out-Null
     git -C $fixture push | Out-Null
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True ($output -match "~ client-claude \(Claude\) update") "source change not classified as update"
@@ -225,7 +229,7 @@ try {
     Add-Content -LiteralPath (Join-Path $installed "SKILL.md") -Value "hand edited"
     @("---", "name: client-claude", "description: test v3", "---") | Set-Content -LiteralPath $skill
     git -C $fixture add skills/claude/client-claude/SKILL.md
-    git -C $fixture commit -m "update fixture to v3" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "update fixture to v3" | Out-Null
     git -C $fixture push | Out-Null
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True ($output -match "LOCAL EDITS") "local edit not detected"
@@ -312,7 +316,7 @@ try {
     $fixture = New-Fixture "collision-zcode"
     New-TestSkill $fixture "shared" "client-zcode"
     git -C $fixture add .
-    git -C $fixture commit -m "add zcode collision" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add zcode collision" | Out-Null
     git -C $fixture push | Out-Null
     $claude = Join-Path $TempRoot "collision-zcode\claude"
     $codex = Join-Path $TempRoot "collision-zcode\codex"
@@ -372,7 +376,7 @@ printf ready > "$(dirname "$0")/deepseek-store-called"
 '@
     [IO.File]::WriteAllText($fixtureDeepSeek, $deepseekFixtureScript + "`n")
     git -C $fixture add bin/ai-qwen bin/ai-deepseek-agent
-    git -C $fixture commit -m "add reviewer key-store fixtures" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add reviewer key-store fixtures" | Out-Null
     git -C $fixture push | Out-Null
     $fakeBin = Join-Path $TempRoot "qwen-key-store\fake-bin"
     New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
@@ -400,7 +404,7 @@ printf ready > "$(dirname "$0")/muse-store-called"
 '@
     [IO.File]::WriteAllText($fixtureMuse, $museFixtureScript + "`n")
     git -C $fixture add bin/ai-muse
-    git -C $fixture commit -m "add Muse key-store fixture" | Out-Null
+    git -C $fixture -c "core.hooksPath=$NoHooks" commit -m "add Muse key-store fixture" | Out-Null
     git -C $fixture push | Out-Null
     Invoke-Installer $fixture (Join-Path $TempRoot "muse-key-store\dry-claude") (Join-Path $TempRoot "muse-key-store\dry-codex") -SkillsDryRun | Out-Null
     Assert-True (-not (Test-Path (Join-Path $fixture "bin\muse-store-called"))) "skills dry-run prepared the Muse key store"
