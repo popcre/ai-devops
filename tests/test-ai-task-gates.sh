@@ -1877,4 +1877,11 @@ jq '.reviewer_release.database["reviewer-safety"]="generic-database"' "$ROOT/con
 check 'central generated release refuses a broadened reviewer-safety gate name' \
   "AI_TASK_GATES_FILE='$TMP/bad-generated-policy.json' rc 4 '$GEN' check --before database"
 
+check 'scoped skill gate refuses missing plan and approval' \
+  "rc 3 '$TMP/rs' check --before scoped-skills-install"
+check 'scoped skill gate cannot bypass universal raw archive refusal' \
+  "out '$TMP/rawarchive' check --before scoped-skills-install | grep -q 'transcripts/session.jsonl'"
+check 'scoped skill plan cannot be supplied to a different action' \
+  "rc 1 '$TMP/rs' check --before ship --scoped-skills-plan '$TMP/not-a-plan'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
