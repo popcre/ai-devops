@@ -129,7 +129,7 @@ except (OSError, ValueError, UnicodeError):
     sys.exit(1)
 PY
 )" || die 'carried review request refused; no provider was started.'
-  CARRIED_BRIEF_SHA="$(sha256sum "$CARRIED_BRIEF_SNAPSHOT" | cut -d' ' -f1)"
+  CARRIED_BRIEF_SHA="$(sha256sum < "$CARRIED_BRIEF_SNAPSHOT" | cut -d' ' -f1)" # stdin: no Windows backslash-name escape prefix
 fi
 readonly CARRIED_BRIEF_SNAPSHOT CARRIED_BRIEF_SHA
 # ---------------------------------------------------------------------------
