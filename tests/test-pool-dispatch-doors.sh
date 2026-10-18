@@ -302,6 +302,11 @@ gemini_door AI_GEMINI_KEY=fake-aigem-1427 GEMINI_API_KEY=fake-gem-1427; GD_RC=$?
 check "gemini_door_unsets_ai_gemini_key" \
   "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-aigem-1427\|fake-gem-1427' '$POOLTMP/gd/agy-env'"
 
+# Installed hosts reach the pool through a /usr/local/bin symlink (#1834).
+mkdir -p "$POOLTMP/link" && ln -s "$POOL" "$POOLTMP/link/ai-review-pool"
+check "pool_loads_capabilities_through_symlink" \
+  "'$POOLTMP/link/ai-review-pool' --help 2>&1 | grep -q '^Usage: ai-review-pool'"
+
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
