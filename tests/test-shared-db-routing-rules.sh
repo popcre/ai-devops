@@ -13,7 +13,7 @@ CODEX="$ROOT/templates/system/AGENTS-global-codex.md"
 REPO_AGENTS="$ROOT/AGENTS.md"
 
 field(){ sed -n "s/^$1:[[:space:]]*//p" "$FIX" | head -1; }
-eligible(){ [ "$(field status)" = ready ] && [ "$(field work_type)" = structural ] && [ "$(field route)" = shared-db-orchestrator ] && grep -q '^  - ' "$FIX"; }
+eligible(){ [ "$(field status)" = ready ] && [ "$(field work_type)" = structural ] && [ "$(field route)" = claim-first ] && grep -q '^  - ' "$FIX"; }
 
 echo '== shared-db source routing'
 check "fixture names the predecessor" "grep -q '#1097' '$FIX'"

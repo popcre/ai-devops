@@ -12,7 +12,7 @@ description: Optional reference for shared-db structural work safety rules (clai
 > existing issue and start, per `shared-db-change`. The session doing the structural work owns its claim and delivery;
 > optional delegation never creates a required orchestrator role.
 
-> Replacement work is planned in [`../../../plan_shared-db-complete-throughput-repair.md`](../../../plan_shared-db-complete-throughput-repair.md). Read its STATUS table before changing this skill or the lane model. The older 1+1 proposal is superseded. Until the replacement is implemented, the safety rules below remain binding; do not partially remove them.
+> The completed [`shared-db throughput programme`](../../../plan_shared-db-complete-throughput-repair.md) is a decision record, not a restart plan. Its safety invariants remain binding; retiring a role never removes claims, version reservations, stage leases, or live proof.
 
 **Not required. Claim-first is the default. This document is reference only.**
 New structural work starts when a session claims exact objects on the existing
@@ -75,7 +75,11 @@ A legacy `shared-db-orchestrator` route may remain parseable for compatibility;
 never write it into new scopes or interpret it as a required session or marker.
 For misrouted work preserve its existing issue and private artifacts, record the
 correct owner/route, and use supported forwarding only when work truly belongs
-in another repository. Never close an unresolved application need or create a
+in another repository. Its scope must carry `return_to: owner/repo`; use
+`node scripts/manage-migration-author-lanes.mjs --return-issue <n>` to create the
+owning-repository issue first, comment its URL here, then close the original.
+A missing return address is `NO RETURN ADDRESS` and fails `--queue-audit` with
+exit 2. Never close an unresolved need manually or guess its destination. Never close an unresolved application need or create a
 second handover or live-proof ticket merely to change sessions.
 
 Read [references/operating-manual.md](references/operating-manual.md) only when
@@ -132,7 +136,8 @@ Albert approved concurrent migration authoring on 2026-08-14.
   membership and usable preflight must both pass. Never edit the registry to
   unblock allocation. The committed `popcre/shared-db` policy
   (`config/owner-no-reviewer-policy.json`) and its `owner_no_reviewer` path is scoped to the
-  repository enforcing it and does not bypass any other delivery gate.
+  repository enforcing it and does not bypass any other delivery gate. An absent,
+  inactive or invalid policy never grants an exemption.
   Report an `OUT OF CREDIT:` refusal promptly and replace through the supported
   allocator rather than retrying an unavailable provider.
 - One reviewer provider may run any number of independent reviews at once, each in

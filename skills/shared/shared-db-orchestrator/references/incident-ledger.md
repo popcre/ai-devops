@@ -1,5 +1,15 @@
 # Incident ledger — why each shared-db orchestration rule exists
 
+
+> **2026-10-18 supersession note:** The incident narratives below preserve their
+> historical wording. Albert retired the orchestrator role on 2026-10-02.
+> Any old rule requiring a marker, dispatch comment, central dispatcher or inert
+> backlog is superseded: follow claim-first admission in `../SKILL.md`, keep
+> follow-ups and handover on the existing outcome issue with a named owner, and
+> continue authorized work through exact-object claims and guarded stages.
+> This supersedes role/marker/dispatch requirements only; collision protection,
+> permanent versions, immutable evidence and preview/production safety remain.
+
 Read this when a rule seems to be getting in the way, or when you need to explain
 one to Albert or to another agent. Every rule below was written after something
 broke or nearly broke.
