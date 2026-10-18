@@ -446,16 +446,23 @@ main() {
     # on the OpenCode process, never on the door's own wrappers.
     local -a win_env=()
     if [ "$SF_IS_WINDOWS" = 1 ]; then
-      local win_tramp win_bash
+      local win_tramp win_bash win_tramp_native
       win_tramp="$(mktemp)"; SF_TEMP_PATHS+=("$win_tramp")
-      win_bash="$(cygpath -w "$(command -v bash)")"
+      win_bash="$(cygpath -w "$(command -v bash)" 2>/dev/null)" || win_bash=""
+      win_tramp_native="$(cygpath -m "$win_tramp" 2>/dev/null)" || win_tramp_native=""
+      if [ -z "$win_bash" ] || [ -z "$win_tramp_native" ]; then
+        # Without both, OpenCode would fall back to an ungated shell: refuse.
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: cannot resolve Git bash for the Windows shell gate; refusing an ungated shell.\n' >&2
+        exit 127
+      fi
       sf_write_windows_bash_env "$win_tramp" "$SF_ROOT/bin/ai-stepfun-windows-shell" \
           "$oc_dir" "/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin" || {
         rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
         printf 'stepfun door: Windows shell gate is missing: %s\n' "$SF_ROOT/bin/ai-stepfun-windows-shell" >&2
         exit 127
       }
-      win_env=(env "BASH_ENV=$(cygpath -m "$win_tramp")" \
+      win_env=(env "BASH_ENV=$win_tramp_native" \
                "SHELL=$win_bash" "OPENCODE_GIT_BASH_PATH=$win_bash")
     fi
     while :; do
