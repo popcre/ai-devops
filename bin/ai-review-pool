@@ -519,7 +519,7 @@ glm_report_verdict() { # glm_report_verdict REPORT -> APPROVE|REVISE|REJECT|BLOC
   awk -v n="$line" 'NR>n && NF {print; exit}' "$file" 2>/dev/null | tr -d '\r' | awk '{print $1}'
 }
 glm_revise_followup_name() { # prints session name when a REVISE turn is continuable
-  local state root rid cand meta report verdict name
+  local state root rid cand meta report verdict name activity best_meta="" best_name="" best_act=""
   state="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
   root="$REPO_ROOT"
   rid="$(glm_repo_id "$root")" || return 1
@@ -528,20 +528,41 @@ glm_revise_followup_name() { # prints session name when a REVISE turn is continu
     [ -f "$cand" ] || continue
     meta="$cand"
     [ "$(jq -r '.type // empty' "$meta" 2>/dev/null)" = review ] || continue
+    # One warm attempt per REVISE: armed at dispatch, cleared only on ask success.
+    # A failed/orphaned ask must fall back to a cold review, not re-select forever.
+    [ -f "${meta}.followup-armed" ] && continue
+    [ "$(jq -r '.status // empty' "$meta" 2>/dev/null)" = failed ] && continue
+    case "$(jq -r '.remote_turn.state // empty' "$meta" 2>/dev/null)" in
+      submitting|submitted|pending|"") ;;
+      *) continue ;;
+    esac
     report="$(jq -r '.last_completed_turn.report // empty' "$meta" 2>/dev/null || true)"
     [ -n "$report" ] && [ -f "$report" ] || continue
     verdict="$(glm_report_verdict "$report")"
     [ "$verdict" = REVISE ] || continue
     name="$(jq -r '.name // empty' "$meta" 2>/dev/null || true)"
     [ -n "$name" ] || continue
-    printf '%s\n' "$name"
-    return 0
+    activity="$(jq -r '.last_activity_at // .last_completed_turn.finished_at // empty' "$meta" 2>/dev/null || true)"
+    if [ -z "$best_act" ] || [[ "$activity" > "$best_act" ]]; then
+      best_meta="$meta"; best_name="$name"; best_act="$activity"
+    fi
   done
-  return 1
+  [ -n "$best_name" ] || return 1
+  printf '%s\n' "$best_name"
+  return 0
+}
+glm_followup_arm() { # glm_followup_arm META — mark one warm attempt
+  : > "${1}.followup-armed" 2>/dev/null || true
+}
+glm_followup_clear() { # glm_followup_clear META — ask succeeded; allow a later REVISE
+  rm -f "${1}.followup-armed" 2>/dev/null || true
 }
 if [ "$provider" = glm ]; then
   glm_followup="$(glm_revise_followup_name || true)"
+  glm_followup_meta=""
   if [ -n "${glm_followup:-}" ]; then
+    glm_followup_meta="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}/sessions/$(glm_repo_id "$REPO_ROOT")/${CALLER}--${glm_followup}.json"
+    glm_followup_arm "$glm_followup_meta"
     printf 'ai-review-pool: GLM REVISE follow-up on session %s (same conversation, corrected head); no cold re-review.\n' "$glm_followup" >&2
     RUNNER_ARGS=(ask "$glm_followup" --repo "$REPO_ROOT" --caller "$CALLER" --prompt-file "$TMP_BRIEF")
     [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
@@ -588,6 +609,9 @@ if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] && review_capability "$CAP_JSON" 
 fi
 set +e; ( cd "$REVIEW_DIR" && exec env "${RUNNER_ENV[@]}" AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
+if [ "$PROVIDER_RC" -eq 0 ] && [ -n "${glm_followup_meta:-}" ]; then
+  glm_followup_clear "$glm_followup_meta"
+fi
 if [ "$PROVIDER_RC" -ne 0 ]; then
   # Provider diagnostics can quote credential-shaped errors (codex's wrapper
   # redacts the same classes before retaining them); redact before echoing.

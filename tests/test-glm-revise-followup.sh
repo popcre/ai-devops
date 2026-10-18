@@ -70,12 +70,17 @@ run_pool() {
 run_pool || true
 first="$(head -1 "$TMP/runner-args" 2>/dev/null || true)"
 if [ "$first" = new ]; then ok 'first dispatch is cold new'; else bad "first dispatch is cold new (got $first)"; fi
+if grep -qx -- '--repo' "$TMP/runner-args" 2>/dev/null && grep -E '/repo$' "$TMP/runner-args" >/dev/null 2>&1; then
+  ok 'dispatch binds --repo to the original checkout'
+else
+  bad 'dispatch binds --repo to the original checkout'
+fi
 
 rid="$(printf '%s\n%s' "$(cd "$TMP/repo" && pwd -P)" "" | sha256sum | cut -c1-12)"
 mkdir -p "$AI_GLM_STATE_DIR/sessions/$rid"
 printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-report.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" <<EOF
-{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_completed_turn":{"report":"$TMP/revise-report.md"}}
+{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-report.md"}}
 EOF
 rm -f "$TMP/runner-args"
 run_pool || true
@@ -84,10 +89,33 @@ if [ "$second" = ask ]; then ok 'glm_revise_followup_reuses_bound_turn: REVISE c
 if grep -qx 'pool-glm-revise-thread' "$TMP/runner-args" 2>/dev/null; then ok 'follow-up reuses the bound session name'; else bad 'follow-up reuses the bound session name'; fi
 if grep -q 'REVISE follow-up' "$TMP/out" 2>/dev/null; then ok 'pool reports REVISE follow-up'; else bad 'pool reports REVISE follow-up'; fi
 
+# A failed warm attempt must fall back to cold new (no re-select forever).
+# ask was armed above and succeeded (rc 0), so clear happened; re-arm and fail.
+: > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json.followup-armed"
+rm -f "$TMP/runner-args"
+run_pool || true
+fallback="$(head -1 "$TMP/runner-args" 2>/dev/null || true)"
+if [ "$fallback" = new ]; then ok 'failed/armed follow-up falls back to cold new'; else bad "failed/armed follow-up falls back to cold new (got $fallback)"; fi
+
+# Recency: newest REVISE wins over an older one (not filename order).
+rm -f "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json.followup-armed"
+printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-old.md"
+cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json" <<EOF
+{"schema_version":2,"name":"pool-glm-aaaa-old","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2020-01-01T00:00:00Z","last_completed_turn":{"report":"$TMP/revise-old.md"}}
+EOF
+printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-new.md"
+cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json" <<EOF
+{"schema_version":2,"name":"pool-glm-zzzz-new","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-new.md"}}
+EOF
+rm -f "$TMP/runner-args" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json.followup-armed" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json.followup-armed"
+run_pool || true
+if grep -qx 'pool-glm-zzzz-new' "$TMP/runner-args" 2>/dev/null; then ok 'newest REVISE session is selected'; else bad "newest REVISE session is selected (got $(head -1 "$TMP/runner-args" 2>/dev/null))"; fi
+
 printf 'Head %s\n## Verdict\nREJECT\n' "$HEAD" > "$TMP/reject-report.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" <<EOF
-{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_completed_turn":{"report":"$TMP/reject-report.md"}}
+{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/reject-report.md"}}
 EOF
+rm -f "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json" "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.followup-armed
 rm -f "$TMP/runner-args"
 run_pool || true
 third="$(head -1 "$TMP/runner-args" 2>/dev/null || true)"
