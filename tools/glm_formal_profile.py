@@ -32,6 +32,7 @@ CRITICAL_FILES = frozenset({
     "tools/reviewer_admission.py", "tools/reviewer_credit_stream.py",
     "tools/review_action_profile.py", "tools/application_workflow_target.py",
     "tools/lib/provider-wrapper-common.sh", "tools/lib/session-tmp.sh", "tools/lib/task-gates.sh",
+    "tools/lib/review-capabilities.sh",
     "tools/lib/opencode-curl-auth.sh", "tools/lib/opencode-maintenance-lock.sh",
     "config/task-gates.json", "config/reviewer-ci-paths.txt", "config/repository-policy.json",
     "config/reviewer-registry.json", "config/reviewer-capacity.json", "config/review-runner-doors.json",

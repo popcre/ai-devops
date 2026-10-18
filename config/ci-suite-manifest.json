@@ -433,6 +433,12 @@
         "test-ai-review-engine.sh",
         "test-pool-dispatch-doors.sh"
       ],
+      "tools/lib/review-capabilities.sh": [
+        "test-pool-dispatch-doors.sh",
+        "test-ai-review-preflight.sh",
+        "test-ai-preflight-pinbump.sh",
+        "test-ai-review-code-only.sh"
+      ],
       "tools/lib/stepfun-pace.sh": [
         "test-ai-grok-review.sh",
         "test-ai-review-engine.sh",

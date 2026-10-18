@@ -17,6 +17,12 @@ trap 'rm -rf "$POOLTMP"' EXIT
 
 check "all_six_pool_providers_are_registered_doors" \
   "for p in grok muse qwen gemini deepseek stepfun; do jq -e --arg p \"\$p\" 'has(\$p)' '$DOORS_JSON' >/dev/null || exit 1; done"
+# #1834: behaviour gates read a named capability, never a provider-name branch.
+CAPLIB="$REPO_ROOT/tools/lib/review-capabilities.sh"
+check "capability_reader_answers_declared_and_absent_fields" \
+  ". '$CAPLIB' && review_capability '$DOORS_JSON' gemini leading_verdict_contract && review_capability '$DOORS_JSON' muse pool_session_release && review_capability '$DOORS_JSON' deepseek attachment_only_code_review && ! review_capability '$DOORS_JSON' grok pool_session_release && ! review_capability '$DOORS_JSON' muse no-such-field && ! review_capability '$POOLTMP/missing.json' gemini leading_verdict_contract && [ \"\$(review_capability_providers '$DOORS_JSON' live_qualification_required)\" = 'gemini qwen' ]"
+check "shared_review_layers_have_no_converted_name_gates" \
+  "! grep -nE '!= glm|provider\" = kimi|gemini\\|qwen\\)|gemini\\|deepseek\\|glm\\|stepfun\\)|claude\\|codex\\|deepseek\\|stepfun\\|muse\\)|review_provider\" = deepseek|provider\" = gemini \\] (&&|\\\\)|^    muse\\)\$' '$POOL' '$REPO_ROOT/bin/ai-review' '$REPO_ROOT/bin/ai-review-preflight' | grep -vE ':[0-9]+:[[:space:]]*#' | grep -q ."
 check "pool_usage_lists_stepfun" "grep -q 'stepfun' '$POOL' && grep -q 'AI_POOL_RUNNER_STEPFUN' '$POOL'"
 check "pool_keeps_legacy_fallback_for_future_unregistered_providers" \
   "grep -q 'Legacy session-runner fallback only' '$POOL'"

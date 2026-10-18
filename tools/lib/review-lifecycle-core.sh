@@ -61,6 +61,8 @@ rlc_capture() { # rlc_capture VAR FUNC [args...]
 # paths from here so a caller's argv or working directory cannot retarget the
 # review-critical binaries.
 RLC_CORE_FILE="${BASH_SOURCE[0]}"
+# shellcheck source=review-capabilities.sh
+. "$(dirname "$RLC_CORE_FILE")/review-capabilities.sh"
 if command -v readlink >/dev/null 2>&1; then
   _rlc_real="$(readlink -f "$RLC_CORE_FILE" 2>/dev/null || true)"
   [ -z "$_rlc_real" ] || RLC_CORE_FILE="$_rlc_real"
@@ -483,6 +485,8 @@ The reviewed head commit is ${head}.
 The source digest is ${digest}.
 BRIEF
   [ -z "$changed_files" ] || printf 'Changed files (the change under review is exactly these):\n%s\n' "$changed_files"
+  # #1834: shared review code must keep one code path for every reviewer.
+  review_shared_code_rule "$changed_files"
   [ -z "$tests_result" ] || printf 'tests command on record: %s\n' "$tests_result"
   } > "$dest"
 }

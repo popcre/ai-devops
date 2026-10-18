@@ -22,6 +22,11 @@
 set -euo pipefail
 _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap review-pool "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Behaviour capabilities (#1834): evidence, receipt, record and cleanup steps
+# read a named field from the shipped registry, never a provider-name branch.
+CAP_JSON="$ROOT/../config/review-runner-doors.json"
+# shellcheck source=../tools/lib/review-capabilities.sh
+. "$ROOT/../tools/lib/review-capabilities.sh" 2>/dev/null || { printf 'ai-review-pool: cannot load the review capability reader.\n' >&2; exit 3; }
 
 usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
@@ -468,6 +473,7 @@ The reviewed head commit is $REVIEW_HEAD.
 The source digest is $REVIEW_DIGEST.
 BRIEF
 if [ -n "$CHANGED_FILES" ]; then printf 'Changed files (the change under review is exactly these):\n%s\n' "$CHANGED_FILES"; fi
+review_shared_code_rule "$CHANGED_FILES"
 if [ -n "$TESTS_COMMAND" ]; then printf 'Tests command on record: %s (executed before dispatch; result: %s)\n' "$TESTS_COMMAND" "$TESTS_RESULT"; fi
 if [ -n "$CARRIED_BRIEF_SNAPSHOT" ]; then
   printf '\n## Specific review request (sha256 %s)\n' "$CARRIED_BRIEF_SHA"
@@ -522,7 +528,9 @@ if [ "$provider" = glm ]; then
       RUNNER_ENV+=(AI_REVIEW_PREFLIGHT_BIN="$ROOT/ai-review-preflight" AI_REVIEW_LIFECYCLE_BIN="$ROOT/ai-review-lifecycle")
     fi
   else RUNNER_ENV=(AI_GLM_PROFILE=general); fi
-  if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ]; then RUNNER_ENV+=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT"); fi
+fi
+if [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] && review_capability "$CAP_JSON" "$provider" receipt_source_root; then
+  RUNNER_ENV+=(AI_REVIEW_SOURCE_ROOT="$REPO_ROOT")
 fi
 set +e; ( cd "$REVIEW_DIR" && exec env "${RUNNER_ENV[@]}" AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
@@ -547,7 +555,7 @@ if [ "$PROVIDER_RC" -ne 0 ]; then
   # another provider can exit 81 for an unrelated failure — and neither is a
   # marker-shaped line in unrelated stderr (a diagnostic quoting the
   # contract). All three must hold or the turn stays provider-failed.
-  if [ "$PROVIDER_RC" -eq 81 ] && [ "$provider" = gemini ] \
+  if [ "$PROVIDER_RC" -eq 81 ] && review_capability "$CAP_JSON" "$provider" empty_verdict_exit_81 \
      && grep -q '^AI_REVIEW_EMPTY_VERDICT ' "$TMP_ERR" 2>/dev/null; then
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
     die "$provider returned an empty or blocked verdict; review-step failure, reroute (never a PASS)."
@@ -574,7 +582,9 @@ fi
 # would be recorded as approval while ai-gemini already accepted the REJECT.
 # For Gemini, contradictory verdicts are refused (fail closed).  For other
 # providers a provisional-then-final pair is expected; only the last counts.
-if [ "$provider" = gemini ]; then
+LEADING_VERDICT=0
+review_capability "$CAP_JSON" "$provider" leading_verdict_contract && LEADING_VERDICT=1
+if [ "$LEADING_VERDICT" = 1 ]; then
   ALL_VERDICTS="$(awk '
     /^## Verdict[[:space:]]*$/ { pending=1; next }
     pending {
@@ -617,7 +627,7 @@ case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STA
 # before the final heading. A footer-only body has no analysis on either
 # side and is still refused.
 FIRST_NONEMPTY="$(awk 'NF{print NR; exit}' "$TMP_TEXT")"
-if [ "$provider" = gemini ] && [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
+if [ "$LEADING_VERDICT" = 1 ] && [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
   ANALYSIS_START="$((VERDICT_TOKEN_LINE + 1))"  # skip the verdict even when blank lines precede it
   ANALYSIS_END=0                          # 0 = through end of body
 else
@@ -704,8 +714,7 @@ FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report 
 # muse runner is wired; the others keep their copy until the sweep (follow-up
 # issue: verify each runner's session-delete equivalent before wiring it).
 if [ "${AI_KEEP_SANDBOX:-0}" != 1 ]; then
-  case "$provider" in
-    muse)
+  if review_capability "$CAP_JSON" "$provider" pool_session_release; then
       # Everything from here on is post-accounting and best-effort: the review
       # is durable, so no step in this branch may abort (set -e), hang, or
       # otherwise cost the caller its exit 0 and report path. The delete is a
@@ -726,14 +735,12 @@ if [ "${AI_KEEP_SANDBOX:-0}" != 1 ]; then
           :
         else
           { [ -n "$TMP_DELETE" ] && [ -s "$TMP_DELETE" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_DELETE" | sed 's/^/  runner: /'; } >&2 || true
-          printf 'ai-review-pool: muse session release refused; session %s, runner copy muse-%s-%s-*, pool snapshot %s retained until sweep.\n' "$TAG" "$CALLER" "$TAG" "$REVIEW_DIR" >&2 || true
+          printf 'ai-review-pool: %s session release refused; session %s, runner copy %s-%s-%s-*, pool snapshot %s retained until sweep.\n' "$provider" "$TAG" "$provider" "$CALLER" "$TAG" "$REVIEW_DIR" >&2 || true
         fi
       fi
-      ;;
-    *)
+  else
       printf 'ai-review-pool: runner session cleanup not yet wired for %s; copy retained until sweep.\n' "$provider" >&2 || true
-      ;;
-  esac
+  fi
 fi
 # The report path stays the final stdout line: merged-output consumers read it
 # back-to-front, so the release note must precede it, never follow it.
