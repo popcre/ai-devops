@@ -109,6 +109,9 @@ cd /worksp/ai-devops
    the primary worktree while it is detached or on `main`, so a plain
    `git pull`, `merge`, `reset`, or detached `checkout` there fails with
    guidance naming `update.sh` / `bin/install-ai-devops-windows.ps1`.
+   Git rewrites the index and files before the ref, so in the `aborted`
+   state the hook puts them back (`git read-tree -m -u <refused> HEAD`,
+   keeping untracked files) and the checkout stays clean at its HEAD.
    Git resolves hooks through the common dir, so it also runs in linked
    worktrees; remote-tracking refs (`git fetch`), tags, other branches, and
    linked worktrees' own `HEAD` are always allowed. The protected installers

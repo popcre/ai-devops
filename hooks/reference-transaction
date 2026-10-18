@@ -13,6 +13,24 @@
 # worktree too. Only refs/heads/main, and an object-id move of HEAD in the
 # primary worktree, are refused; remote-tracking refs, tags, other branches,
 # and linked worktrees' own HEADs are always allowed.
+marker_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || marker_dir=""
+marker="$marker_dir/ai-devops-main-guard-refused"
+if [ "${1:-}" = aborted ]; then
+  cat >/dev/null
+  # git updates the index and files before the ref; put them back so a
+  # refused pull does not leave the old HEAD over new files (#1836).
+  if [ -n "$marker_dir" ] && [ -f "$marker" ]; then
+    read -r to < "$marker" || :
+    rm -f "$marker"
+    from="$(git rev-parse -q --verify HEAD 2>/dev/null)" || from=""
+    if [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
+      git read-tree -m -u "$to" "$from" 2>/dev/null \
+        && echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2 \
+        || echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+    fi
+  fi
+  exit 0
+fi
 if [ "${1:-}" != prepared ]; then
   cat >/dev/null
   exit 0
@@ -28,21 +46,22 @@ if [ -n "$git_dir" ] && [ "$git_dir" = "$common_dir" ]; then
   case "$head_ref" in ''|refs/heads/main) primary=1 ;; esac
 fi
 
-refused=""
+refused=""; to=""
 while read -r old new ref; do
   case "$ref" in
-    refs/heads/main) refused="$ref" ;;
+    refs/heads/main) refused="$ref"; to="$new" ;;
     HEAD)
       # A symbolic HEAD change (branch switch) arrives as "ref:..."; only a
       # detached move to a commit in the primary worktree is refused.
       case "$new" in
         ref:*) ;;
-        *) if [ "$primary" -eq 1 ]; then refused="HEAD"; fi ;;
+        *) if [ "$primary" -eq 1 ]; then refused="HEAD"; [ -n "$to" ] || to="$new"; fi ;;
       esac ;;
   esac
 done
 
 [ -z "$refused" ] && exit 0
+case "$to" in *[!0-9a-f]*|'') ;; *) [ -z "$marker_dir" ] || printf '%s\n' "$to" > "$marker" ;; esac
 cat >&2 <<MSG
 ai-devops: refusing to move $refused in the installed toolkit checkout.
 Only the protected installer may advance it: on Linux run update.sh from a
