@@ -89,6 +89,31 @@ export AI_REVIEW_BRIEF_FILE="$TMP/question with spaces.md"
 run
 grep -Fq "$QUESTION" "$TMP/runner-brief"
 grep -q 'carried request sha256' "$(tail -1 "$TMP/out")"
+# Real #2336 governed review requests exceed the old 256 KiB ceiling. Keep the
+# complete request byte-for-byte and bind its exact digest in the report.
+python3 - "$TMP" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+unit='Review #2336 evidence: preserve all source, tests, access limits and acceptance criteria. αβγ — no truncation.\n'.encode()
+for name,size in [('request-realistic',688714),('request-limit',2*1024*1024)]:
+    (p/name).write_bytes(unit*(size//len(unit)) + b'x'*(size%len(unit)))
+(p/'request-over-limit').write_bytes(b'x'*(2*1024*1024+1))
+PY
+for large in request-realistic request-limit; do
+  export AI_REVIEW_BRIEF_FILE="$TMP/$large"
+  expected_sha="$(sha256sum "$AI_REVIEW_BRIEF_FILE" | cut -d' ' -f1)"
+  if ! run; then printf 'FAIL: valid carried request rejected: %s\n' "$large" >&2; cat "$TMP/out" >&2; exit 1; fi
+  grep -Fq "$expected_sha" "$(tail -1 "$TMP/out")"
+  python3 - "$TMP" "$expected_sha" "$large" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+brief=(p/'runner-brief').read_bytes()
+marker=f'## Specific review request (sha256 {sys.argv[2]})\n'.encode()
+assert brief.rsplit(marker,1)[1] == (p/sys.argv[3]).read_bytes() + b'\n'
+PY
+done
 # Invalid inputs fail before lifecycle/provider start and never print their text.
 mkdir "$TMP/request-directory"
 ln -s "$AI_REVIEW_BRIEF_FILE" "$TMP/request-link"
@@ -99,11 +124,10 @@ python3 - "$TMP" <<'PY'
 from pathlib import Path
 import sys
 p=Path(sys.argv[1])
-(p/'request-oversized').write_bytes(b'x'*262145)
 (p/'request-invalid-utf8').write_bytes(b'\xff')
 (p/'request-nul').write_bytes(b'private-content-marker\0bad')
 PY
-for invalid in missing request-directory request-link request-fifo request-empty request-whitespace request-oversized request-invalid-utf8 request-nul; do
+for invalid in missing request-directory request-link request-fifo request-empty request-whitespace request-invalid-utf8 request-nul request-over-limit; do
   export AI_REVIEW_BRIEF_FILE="$TMP/$invalid"
   rm -f "$TMP/runner-args"
   before="$(wc -l < "$TMP/lifecycle-starts")"
