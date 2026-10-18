@@ -24,9 +24,11 @@ _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Behaviour capabilities (#1834): evidence, receipt, record and cleanup steps
 # read a named field from the shipped registry, never a provider-name branch.
-CAP_JSON="$ROOT/../config/review-runner-doors.json"
+# Resolve through the managed /usr/local/bin symlink to the shipped tree.
+CAP_ROOT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+CAP_JSON="$CAP_ROOT/../config/review-runner-doors.json"
 # shellcheck source=../tools/lib/review-capabilities.sh
-. "$ROOT/../tools/lib/review-capabilities.sh" 2>/dev/null || { printf 'ai-review-pool: cannot load the review capability reader.\n' >&2; exit 3; }
+. "$CAP_ROOT/../tools/lib/review-capabilities.sh" 2>/dev/null || { printf 'ai-review-pool: cannot load the review capability reader.\n' >&2; exit 3; }
 
 usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
