@@ -446,9 +446,12 @@ main() {
     # on the OpenCode process, never on the door's own wrappers.
     local -a win_env=()
     if [ "$SF_IS_WINDOWS" = 1 ]; then
-      local win_tramp win_bash win_tramp_native
+      local win_tramp win_bash win_bash_unix win_tramp_native
       win_tramp="$(mktemp)"; SF_TEMP_PATHS+=("$win_tramp")
-      win_bash="$(cygpath -w "$(command -v bash)" 2>/dev/null)" || win_bash=""
+      win_bash=""; win_bash_unix="$(command -v bash 2>/dev/null)" || win_bash_unix=""
+      [ -z "$win_bash_unix" ] || win_bash="$(cygpath -w "$win_bash_unix" 2>/dev/null)" || win_bash=""
+      # Only Git for Windows' own bash reads the native BASH_ENV trampoline.
+      case "$win_bash" in *\\Git\\usr\\bin\\bash.exe|*\\Git\\bin\\bash.exe) ;; *) win_bash="" ;; esac
       win_tramp_native="$(cygpath -m "$win_tramp" 2>/dev/null)" || win_tramp_native=""
       if [ -z "$win_bash" ] || [ -z "$win_tramp_native" ]; then
         # Without both, OpenCode would fall back to an ungated shell: refuse.
