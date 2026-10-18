@@ -101,7 +101,26 @@ cd /worksp/ai-devops
    installed wrapper, runtime, or preloader bytes is re-qualified
    automatically (`ai-review-preflight requalify`); a failed requalification
    is recorded with `ai-reviewer-issue record` and printed. A hook without
-   the managed marker is foreign and left untouched. The Windows installer
+   the managed marker is foreign and left untouched.
+
+   **Installed checkout main guard (#1836).** The same step installs the
+   managed `hooks/reference-transaction` hook. In the `prepared` state it
+   refuses any update of `refs/heads/main`, and a commit move of `HEAD` in
+   the primary worktree while it is detached or on `main`, so a plain
+   `git pull`, `merge`, `reset`, or detached `checkout` there fails with
+   guidance naming `update.sh` / `bin/install-ai-devops-windows.ps1`.
+   Git resolves hooks through the common dir, so it also runs in linked
+   worktrees; remote-tracking refs (`git fetch`), tags, other branches, and
+   linked worktrees' own `HEAD` are always allowed. The protected installers
+   are unaffected because they run every ref-moving git command with
+   `core.hooksPath` pointed at an empty temporary directory (update.sh's
+   candidate/advance/rollback commands; the Windows installer's
+   fast-forward), so no hook runs for them. This is an accident guardrail,
+   not enforcement: anyone can bypass it the same way (for example
+   `git -c core.hooksPath=<empty> pull`) or by removing the hook. The
+   `hooks/post-merge` unprotected-advance recorder and the `ai-task-gates`
+   warning stay in place as the second layer. Rollback is a protected
+   install of the prior release; `uninstall.sh` removes the owned hook. The Windows installer
    runs the same script (and its own end-of-run requalify) on its real
    (non-dry-run) path.
 6. Runs the canonical `ai-install-skills` installer so client-specific and shared

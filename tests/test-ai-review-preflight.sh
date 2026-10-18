@@ -573,6 +573,30 @@ unset AI_TASK_GATES_DIR
 
 echo '== managed hook installer (#804)'
 HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
+# #1836: the installed main guard refuses a plain pull (and a detached move)
+# in the primary checkout, allows fetch and other-branch work in a linked
+# worktree, and lets the installers' empty core.hooksPath advance main.
+GUARD="$TMP/guard"; git init -q --bare -b main "$GUARD/origin.git"
+git clone -q "$GUARD/origin.git" "$GUARD/c" 2>/dev/null
+git -C "$GUARD/c" config user.name Test; git -C "$GUARD/c" config user.email t@example.com
+git -C "$GUARD/c" config core.hooksPath "$GUARD/c/.git/hooks"
+for n in 1 2; do echo "$n" > "$GUARD/c/f"; git -C "$GUARD/c" add f; git -C "$GUARD/c" commit -qm "c$n"; git -C "$GUARD/c" push -q origin main; done
+git -C "$GUARD/c" reset -q --hard HEAD~1; GUARD_OLD="$(git -C "$GUARD/c" rev-parse HEAD)"
+git -C "$GUARD/c" worktree add -q -b dev "$GUARD/wt" 2>/dev/null
+mkdir -p "$GUARD/empty"
+if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/reference-transaction" &&
+   GUARD_ERR="$(git -C "$GUARD/c" pull -q --ff-only 2>&1)"; [ $? -ne 0 ] &&
+   printf '%s' "$GUARD_ERR" | grep -q 'protected installer' &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_OLD" ] &&
+   ! git -C "$GUARD/c" checkout -q --detach origin/main 2>/dev/null &&
+   git -C "$GUARD/c" fetch -q origin &&
+   echo w > "$GUARD/wt/w" && git -C "$GUARD/wt" add w && git -C "$GUARD/wt" commit -qm wt &&
+   git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" merge -q --ff-only origin/main &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$(git -C "$GUARD/c" rev-parse origin/main)" ]; then
+  ok "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
+else
+  bad "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
+fi
 check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
 check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
 FIXTURE="$TMP/hook-fixture"

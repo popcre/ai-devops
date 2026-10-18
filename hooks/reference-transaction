@@ -1,0 +1,52 @@
+#!/bin/sh
+# ai-devops-managed: installed-checkout main guard (#1836)
+#
+# Accident guardrail, not enforcement. Only the protected installers
+# (update.sh, bin/install-ai-devops-windows.ps1) may move the installed
+# checkout's main. They run every ref-moving git command with core.hooksPath
+# pointed at an empty directory, so this hook never runs for them; a plain
+# `git pull` / `git merge` / `git reset` here runs it and is refused.
+# Anyone can still bypass it (for example `git -c core.hooksPath=... pull`);
+# the post-merge recorder and the ai-task-gates warning remain the second layer.
+#
+# Git resolves hooks through the common dir, so this fires in every linked
+# worktree too. Only refs/heads/main, and an object-id move of HEAD in the
+# primary worktree, are refused; remote-tracking refs, tags, other branches,
+# and linked worktrees' own HEADs are always allowed.
+if [ "${1:-}" != prepared ]; then
+  cat >/dev/null
+  exit 0
+fi
+
+git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || git_dir=""
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
+primary=0
+if [ -n "$git_dir" ] && [ "$git_dir" = "$common_dir" ]; then
+  # HEAD is guarded only while it is detached or on main; a primary
+  # worktree working on another branch commits normally.
+  head_ref="$(git symbolic-ref -q HEAD 2>/dev/null)" || head_ref=""
+  case "$head_ref" in ''|refs/heads/main) primary=1 ;; esac
+fi
+
+refused=""
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/main) refused="$ref" ;;
+    HEAD)
+      # A symbolic HEAD change (branch switch) arrives as "ref:..."; only a
+      # detached move to a commit in the primary worktree is refused.
+      case "$new" in
+        ref:*) ;;
+        *) if [ "$primary" -eq 1 ]; then refused="HEAD"; fi ;;
+      esac ;;
+  esac
+done
+
+[ -z "$refused" ] && exit 0
+cat >&2 <<MSG
+ai-devops: refusing to move $refused in the installed toolkit checkout.
+Only the protected installer may advance it: on Linux run update.sh from a
+reviewed candidate; on Windows run bin/install-ai-devops-windows.ps1.
+See docs/deployment.md ("Installed checkout main guard").
+MSG
+exit 1
