@@ -3,7 +3,7 @@
 ## STATUS — read first; do not re-derive completed programmes
 
 Owner: [issue #1783](https://github.com/popcre/ai-devops/issues/1783), planning coordinator Codex chat `01a1423a-787d-7601-8ac5-49b0a42afbed` on edge-dev3.
-Planning snapshot: October 15, 2026, 9:09 PM EDT. Implementation **started October 16, 2026** (steps 1–7 executed; coordinator Claude chat 05d44eb1 on edge-dev3). Current brief: [step-8 handoff](HANDOFF.d/2026-10-16T1806Z-edge-dev3-claude-reviewer-recurrence-step8.md). Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
+Planning snapshot: October 15, 2026, 9:09 PM EDT. Implementation **started October 16, 2026** (steps 1–7 executed; coordinator Claude chat 05d44eb1 on edge-dev3). Current brief: [step-8 handoff](HANDOFF.d/2026-10-18T1524Z-edge-dev3-claude-reviewer-recurrence-fleet.md). Original plan merged in [PR1784](https://github.com/popcre/ai-devops/pull/1784) at [9acc9b1e](https://github.com/popcre/ai-devops/commit/9acc9b1ee565ecfc58a8bc66939e536fddee9954); addendum/closeout publication is [PR1786](https://github.com/popcre/ai-devops/pull/1786). Refresh its state before assuming merged delivery.
 Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-recurrence-plan.md).
 
 | Step | Work | State / date | Evidence required to advance |
