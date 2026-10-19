@@ -32,5 +32,5 @@ review_requests_risk_block() { # FILE -> 0 when a carried request asks for the s
   grep -q 'production-risk-assessment' "$1" 2>/dev/null
 }
 review_risk_block_count() { # REPORT -> number of production-risk-assessment fences
-  grep -cE '^[[:space:]]*```production-risk-assessment([[:space:]].*)?$' "$1" 2>/dev/null || true
+  grep -cE '^[[:space:]]*```production-risk-assessment[[:space:]]*$' "$1" 2>/dev/null || true # the fence shared-db accepts
 }
