@@ -69,7 +69,8 @@ plumbing, rebuild the output contract, shrink the roster.
 ### 4. Scope
 
 In: the report contract, one validator, its use in ai-devops and shared-db, a
-format-only repair turn, recording format outcomes, a data-backed roster cut.
+format-only repair turn, recording format outcomes, a data-backed roster cut —
+on Windows and Ubuntu (desktop and server) alike (§12a).
 
 NOT in this plan: packets, receipts, source digests, evidence capture, the
 allocator's draw algorithm, wrapper install/qualification, quota/credit
@@ -312,14 +313,54 @@ hetz (`/worksp/ai-devops`, `/worksp/shared-db`), `gh` authenticated as
 canonical checkout (a worktree's `ai-reviewer-issue path` points at its own empty
 store — run `list` from the canonical checkout). No secrets needed.
 
+### 12a. Platforms (owner requirement, 2026-10-19)
+
+Albert, in his chat: "will this plan account for the fact that the reviewer
+tooling is run on both windows and ubuntu (desktop and server)?" Every step
+must therefore work the same on all three:
+
+| Platform | Hosts | Review path | Install route |
+|---|---|---|---|
+| Ubuntu server | hetz, 916-alien | Bash lifecycle core + doors | `update.sh` protected install (`authorize-install`, see `docs/deployment.md`) |
+| Ubuntu desktop | edge-dev3, edge-dev | same as server | same as server |
+| Windows | 4837 (`C:\repos\ai-devops`) | Git Bash for Bash suites, PowerShell for PowerShell suites; OpenCode folder shell for StepFun review/ask | `bin/install-ai-devops-windows.ps1 -RepoPath <checkout> -ExpectedHead <SHA>` |
+
+EDGE-ALIEN and Envy are not review hosts; install nothing there.
+
+Acceptance criterion **P1 (parity):** the validator, the repair turn and the
+format-outcome events behave the same on all three platforms. A step is not done
+until its tests pass on Linux **and** on Windows (Git Bash plus PowerShell
+5.1 and 7), and Step 8's live proof includes one governed review on a Linux host
+and one on 4837.
+
+Known Windows traps the steps must handle:
+- Validator is Node (no `grep -P`/GNU-only flags); normalize CRLF before parsing,
+  and keep `.gitattributes` `eol=lf` for every new Bash script.
+- PowerShell 5.1 strips quotes from native arguments: pass report paths and
+  prompts as files, never as quoted argv text.
+- `gh` cannot read the keyring over Windows SSH; use gh file storage when
+  driving 4837 remotely.
+- StepFun `implement` is refused on Windows (review/ask only); the repair turn
+  uses the review route there.
+- Gemini fails over SSH on 4837; it is frozen anyway (#1714). Score it nowhere.
+- Windows reviewers run from the installed checkout; prove the installed hash,
+  not a worktree copy.
+
+Roster scoring (Step 7) is **per provider per platform**: a provider kept in
+rotation must meet the bar on every platform where it is drawn, or be marked
+platform-limited in `config/review-runner-doors.json` capabilities (no
+provider-name branches, rule #1834).
+
 ---
 
 ## Part 4 — Landing
 
 ### 13. Done, risks, open questions
 
-Done: Steps 1–8 merged with green CI in both repos, installed on hetz/edge-dev3/4837
-via the normal sync, live proof ticked on #1783, STATUS here updated with SHAs.
+Done: Steps 1–8 merged with green CI in both repos; installed on hetz, 916-alien,
+edge-dev3, edge-dev and 4837 by the §12a routes with installed hashes verified;
+criterion P1 met (Linux and Windows tests plus a live governed review on each
+platform); live proof ticked on #1783; STATUS here updated with SHAs.
 
 Risks: grammar change breaks in-flight reviews → land ai-devops accepting both
 grammars for one release, then remove `## Verdict`. Repair turn could launder a
