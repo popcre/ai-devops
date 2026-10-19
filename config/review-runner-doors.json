@@ -30,7 +30,8 @@
     "glm": {
       "receipt_source_root": true,
       "credit_watch_refresh": true,
-      "no_live_doctor": true
+      "no_live_doctor": true,
+      "revise_verdict": true
     },
     "claude": {
       "offline_doctor_probe": true

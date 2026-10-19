@@ -1492,9 +1492,9 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
                 row.get("provider") == path.parent.parent.name and
                 row.get("review_mode") == mode):
             continue
-        # A later REJECT (or BLOCKED) on the same source supersedes an older
-        # APPROVE: remember the newest real judgment of any kind.
-        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "BLOCKED"}:
+        # A later REJECT, REVISE, or BLOCKED on the same source supersedes an
+        # older APPROVE: remember the newest real judgment of any kind.
+        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "REVISE", "BLOCKED"}:
             latest_judgment = max(latest_judgment, row.get("finished_at") or "")
         if not (row.get("status") == "completed" and row.get("verdict") == "APPROVE" and
                 row.get("stale") is False and row.get("failure_class") is None):
