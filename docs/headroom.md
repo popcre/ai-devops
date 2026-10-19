@@ -312,7 +312,7 @@ ZCode does **not** read `ANTHROPIC_BASE_URL` (that variable is for Claude on
 `Client signing handshake requires HTTPS.` The working path is:
 
 ```text
-ZCode baseUrl https://100.66.37.58:8443/v1
+ZCode baseUrl https://$HEADROOM_HOST:8443/v1
   → zcode-headroom-tls.service :8443  (TLS; /api/paas/* → Z.ai handshake)
   → headroom-zcode.service :8788
   → https://api.z.ai/api/anthropic
@@ -332,7 +332,7 @@ The redirect is ZCode's **personal provider config**,
           "config": {
             "api": {
               "type": "anthropic-messages",
-              "baseUrl": "https://100.66.37.58:8443/v1"
+              "baseUrl": "https://$HEADROOM_HOST:8443/v1"
             }
           }
         }
@@ -530,7 +530,7 @@ retain the documented instant bypass for outages.
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
 | AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
-| **edge-dev ZCode** (Workflow C) | ✅ wired 2026-10-19, desktop live proof done | provider baseUrl `https://100.66.37.58:8443/v1` via TLS front; see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md) |
+| **edge-dev ZCode** (Workflow C) | ✅ wired 2026-10-19, desktop live proof done | provider baseUrl `https://$HEADROOM_HOST:8443/v1` via TLS front; see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md) |
 
 ### 6b. Dashboards and the daily savings monitor (added 2026-10-19)
 
@@ -699,3 +699,4 @@ traffic to one upstream (`--anthropic-api-url` /
 Clients that share a protocol but not a server — Claude (Anthropic) and
 ZCode (Z.ai) — need one process each (§2b). That is one process per lane,
 not a second installation.
+

@@ -7,6 +7,8 @@
 Read [`headroom.md`](headroom.md) for the Claude compression proxy itself.
 This file is only about the **Z-code / Z.ai** lane and why HTTPS was required.
 
+**Addresses.** `$HEADROOM_HOST` is the hetz VPS Tailscale address. Resolve it from protected config (`ai-private-config value headroom_proxy_url` and take the host part). Concrete topology is not stored in this public repository.
+
 ---
 
 ## 1. What went wrong
@@ -14,7 +16,7 @@ This file is only about the **Z-code / Z.ai** lane and why HTTPS was required.
 ### 1.1 The break
 
 Z-code was pointed at a new Headroom instance on the hetz VPS over **plain HTTP**
-(`http://100.66.37.58:8788`). Every model turn failed with:
+(`http://$HEADROOM_HOST:8788`). Every model turn failed with:
 
 ```text
 Model request failed
@@ -36,14 +38,14 @@ handshake on the provider baseURL origin:
   `Client signing handshake requires HTTPS.` when the scheme is `http:`.
 
 Claude’s Anthropic API has **no** such handshake. That is why the Claude lane
-can use `http://100.66.37.58:8787` and Z-code cannot use HTTP at all.
+can use `http://$HEADROOM_HOST:8787` and Z-code cannot use HTTP at all.
 
 ### 1.3 Timeline of the bad setup (2026-10-19)
 
 | Local time (EDT) | What happened |
 |---|---|
 | ~14:20 | `provider_config.json.bak-pre-headroom-20261019` saved (good baseline) |
-| ~15:30 | `headroom-zcode.service` started on hetz `:8788`, `--anthropic-api-url https://api.z.ai/api/anthropic`; Z-code `provider_config.json` rewritten to `baseUrl: http://100.66.37.58:8788` |
+| ~15:30 | `headroom-zcode.service` started on hetz `:8788`, `--anthropic-api-url https://api.z.ai/api/anthropic`; Z-code `provider_config.json` rewritten to `baseUrl: http://$HEADROOM_HOST:8788` |
 | 15:30+ | Every Z-code turn: `Client signing handshake requires HTTPS.` |
 
 Root cause of the product error: **HTTP baseURL + Z.ai client signing**.
@@ -57,15 +59,15 @@ TLS on its provider origin.
 
 ```text
 Z-code desktop (edge-dev)
-  provider baseUrl = https://100.66.37.58:8443/v1
+  provider baseUrl = https://$HEADROOM_HOST:8443/v1
         │  TLS (private CA)
         ▼
-zcode-headroom-tls.service  (hetz, 100.66.37.58:8443)
+zcode-headroom-tls.service  (hetz, $HEADROOM_HOST:8443)
   /api/paas/*  ──────────────► https://api.z.ai   (signing handshake, path kept)
-  everything else ──────────► http://100.66.37.58:8788
+  everything else ──────────► http://$HEADROOM_HOST:8788
         │
         ▼
-headroom-zcode.service  (hetz, 100.66.37.58:8788)
+headroom-zcode.service  (hetz, $HEADROOM_HOST:8788)
   --anthropic-api-url https://api.z.ai/api/anthropic
         │
         ▼
@@ -74,9 +76,9 @@ https://api.z.ai/api/anthropic   (real GLM-5.3)
 
 Why `/v1` on the Z-code baseUrl: Z-code’s anthropic-messages client calls
 `{baseUrl}/messages`. Headroom’s Anthropic route serves **`/v1/messages`**.
-With `baseUrl = https://100.66.37.58:8443/v1`, the model call is
-`https://100.66.37.58:8443/v1/messages`. The signing handshake still uses
-**origin only**, so it stays `https://100.66.37.58:8443/api/paas/...` and is
+With `baseUrl = https://$HEADROOM_HOST:8443/v1`, the model call is
+`https://$HEADROOM_HOST:8443/v1/messages`. The signing handshake still uses
+**origin only**, so it stays `https://$HEADROOM_HOST:8443/api/paas/...` and is
 routed straight to Z.ai.
 
 ### 2.1 Pieces that must all be true
@@ -84,12 +86,12 @@ routed straight to Z.ai.
 | Piece | Value |
 |---|---|
 | TLS front process | `/home/ai/zcode-headroom-tls/zcode_headroom_tls.py` via `zcode-headroom-tls.service` |
-| Listen | `100.66.37.58:8443` only (tailnet) — never `0.0.0.0` |
+| Listen | `$HEADROOM_HOST:8443` only (tailnet) — never `0.0.0.0` |
 | TLS material | `/etc/ai-zcode-headroom/tls/` (`ca.crt`, `server.key`, `server-chain.crt`) |
 | Chain served | `server-chain.crt` = leaf + CA |
-| Compression lane | `headroom-zcode.service` → `100.66.37.58:8788`, isolated `HOME=/home/ai/.headroom-zcode-home` |
+| Compression lane | `headroom-zcode.service` → `$HEADROOM_HOST:8788`, isolated `HOME=/home/ai/.headroom-zcode-home` |
 | Upstream | `--anthropic-api-url https://api.z.ai/api/anthropic` |
-| Z-code config | `~/.zcode/v2/provider_config.json` → `baseUrl: https://100.66.37.58:8443/v1` |
+| Z-code config | `~/.zcode/v2/provider_config.json` → `baseUrl: https://$HEADROOM_HOST:8443/v1` |
 | CA bundle on Windows | `C:\Users\<user>\.config\ai-devops\zcode-ca-bundle.crt` (**combined** — see §3.2) |
 | Trust for Z-code | `ZCODE_AGENT_CA_CERT`, `AGENT_CA_CERT`, `NODE_EXTRA_CA_CERTS` = combined bundle; `~/.zcode/cli/config.json` → `network.caCertFile` = same file |
 | Optional extra | CA in `Cert:\CurrentUser\Root` (`certutil -addstore -user Root`) |
@@ -150,13 +152,13 @@ the private CA alone.
 ```bash
 # On any tailnet machine
 curl -sS --cacert ~/.config/ai-devops/zcode-ca-bundle.crt \
-  https://100.66.37.58:8443/health
+  https://$HEADROOM_HOST:8443/health
 # Handshake path must reach Z.ai (auth error without credentials is OK)
 curl -sS --cacert ~/.config/ai-devops/zcode-ca-bundle.crt -o /dev/null -w '%{http_code}\n' \
-  -X POST https://100.66.37.58:8443/api/paas/c1f3a7e2/v2/client -d '{}'
+  -X POST https://$HEADROOM_HOST:8443/api/paas/c1f3a7e2/v2/client -d '{}'
 # Model path must reach Headroom then Z.ai (401 without auth is OK)
 curl -sS --cacert ~/.config/ai-devops/zcode-ca-bundle.crt -o /dev/null -w '%{http_code}\n' \
-  -X POST https://100.66.37.58:8443/v1/messages -H 'Content-Type: application/json' -d '{}'
+  -X POST https://$HEADROOM_HOST:8443/v1/messages -H 'Content-Type: application/json' -d '{}'
 ```
 
 On hetz:
@@ -273,7 +275,7 @@ sessions (`/home/ai/.headroom-zcode-home/.headroom/proxy_savings.json`).
    manages that; do not “fix” it in `settings.json`.
 
 Claude operational health today (2026-10-19): `headroom.service` active,
-bound `100.66.37.58:8787`, Windows `ANTHROPIC_BASE_URL` set, `ai-headroom
+bound `$HEADROOM_HOST:8787`, Windows `ANTHROPIC_BASE_URL` set, `ai-headroom
 status` reports healthy. **Do not change this to solve Z-code problems.**
 
 ---
@@ -384,11 +386,11 @@ base-URL override.
 
 | Goal | Action |
 |---|---|
-| Z-code through Headroom (current) | `provider_config.json` baseUrl `https://100.66.37.58:8443/v1` + combined CA + three env keys + restart Z-code |
+| Z-code through Headroom (current) | `provider_config.json` baseUrl `https://$HEADROOM_HOST:8443/v1` + combined CA + three env keys + restart Z-code |
 | Z-code native Z.ai | restore `provider_config.json.bak-pre-headroom-20261019` (empty `providerRules`) + restart Z-code |
 | Claude through Headroom | `ai-headroom on` + restart Claude |
 | Claude native Anthropic | `ai-headroom off` + restart Claude |
-| Health: Z-code lane | `https://100.66.37.58:8443/health` with combined CA |
+| Health: Z-code lane | `https://$HEADROOM_HOST:8443/health` with combined CA |
 | Health: Claude lane | `ai-headroom status` |
 | Logs: Z-code TLS front | hetz `/home/ai/.headroom-zcode-home/.headroom/logs/tls-front.log` |
 | Logs: Z-code Headroom | hetz `/home/ai/.headroom-zcode-home/.headroom/logs/proxy.log` |
@@ -400,8 +402,9 @@ base-URL override.
 ## 11. Incident sign-off
 
 Live proof 2026-10-19 (EDT): Z-code desktop turn completed through
-`https://100.66.37.58:8443/v1` → `headroom-zcode` → `https://api.z.ai/api/anthropic`
+`https://$HEADROOM_HOST:8443/v1` → `headroom-zcode` → `https://api.z.ai/api/anthropic`
 after the combined-CA fix. Owner confirmed: “that worked.”
 
 Related earlier session notes remain in the session scratchpad; this file is
 the durable project record.
+
