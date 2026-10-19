@@ -164,7 +164,7 @@ fi
 # Real lifecycle terminal contract: finish --verdict REVISE must complete
 # (stubs above cannot catch a REVISE terminal-contract gap).
 lc_dir="$TMP/lifecycle-real"; mkdir -p "$lc_dir"
-lc_state="$(bash "$ROOT/bin/ai-review-lifecycle" begin --provider glm --repo "$TMP/repo" --run-id "$RUN_ID_FIXTURE" --caller codex --preflight standard 2>/dev/null)" || lc_state=""
+lc_state="$(bash "$ROOT/bin/ai-review-lifecycle" begin --provider glm --repo "$TMP/repo" --run-id "$RUN_ID_FIXTURE" --caller codex --preflight none 2>"$TMP/lc-begin.err")" || lc_state=""
 if [ -n "$lc_state" ] && [ -f "$lc_state" ]; then
   printf 'Reviewed head %s. The immutable source packet, changed files, protected snapshot boundary, exact source identity, lifecycle terminal handling, refusal conditions and tests were inspected. One fix is required before this head can pass; re-review the corrected head in this conversation. The exact reviewed commit remains bound throughout this report.\n\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/lc-revise.md"
   if bash "$ROOT/bin/ai-review-lifecycle" finish --state "$lc_state" --verdict REVISE --report "$TMP/lc-revise.md" --elapsed 1 >/dev/null 2>&1; then
