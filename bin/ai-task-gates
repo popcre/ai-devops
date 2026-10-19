@@ -933,6 +933,11 @@ cmd_start(){
     '{schema_version:($v|tonumber),identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,start_head:$start_head,started_at:$at,overrides:[]}')"
   printf 'task class "%s" recorded for %s (%s)\n' "$class" "$IDENTITY" "$TOPLEVEL"
   [ -n "$BASE_REF" ] && printf 'base: %s\n' "${BASE_REF:0:12}"
+  # A repository that ships reviewer tooling states its platform obligations
+  # at task start, before any edit (#1783): fixes on one OS kept breaking the other.
+  if [ -f "$TOPLEVEL/config/reviewer-platform-brief.txt" ]; then
+    printf '\n'; cat "$TOPLEVEL/config/reviewer-platform-brief.txt"
+  fi
   return 0
 }
 

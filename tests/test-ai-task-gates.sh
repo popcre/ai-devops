@@ -209,6 +209,14 @@ check 'the ai-devops pilot protects its Windows source gate test' \
   "[ \"\$(class_of 'tests/test-windows-source-gate.ps1')\" = reviewer-safety ]"
 check 'the ai-devops pilot protects Linux installation routing and its tests' \
   "[ \"\$(class_of 'install.sh')\" = reviewer-safety ] && [ \"\$(class_of 'update.sh')\" = reviewer-safety ] && [ \"\$(class_of 'tests/test-linux-install-authorization.sh')\" = reviewer-safety ]"
+# Platform brief at task start (#1783), in its own scratch copy so the pilot's
+# recorded task state below is untouched.
+git clone -q "$TMP/class" "$TMP/brief" 2>/dev/null
+( cd "$TMP/brief" && "$GATES" start --class code ) > "$TMP/brief-start.out" 2>&1
+check 'start prints no platform brief where the repository ships none' "! grep -q 'PLATFORM CHECK' '$TMP/brief-start.out'"
+mkdir -p "$TMP/brief/config"; printf 'PLATFORM CHECK fixture\n' > "$TMP/brief/config/reviewer-platform-brief.txt"
+( cd "$TMP/brief" && "$GATES" start --class code ) > "$TMP/brief-start.out" 2>&1
+check 'start prints the shipped platform brief before any edit' "grep -q 'PLATFORM CHECK fixture' '$TMP/brief-start.out'"
 mkdir -p "$TMP/class/bin"
 printf '#!/bin/sh\n' > "$TMP/class/bin/ai-task-gates"
 git -C "$TMP/class" add .ai-devops/task-gates.json bin/ai-task-gates
