@@ -1,7 +1,7 @@
 PLATFORM CHECK (reviewer tooling runs on two operating systems):
   Ubuntu  - hetz, 916-alien (server); edge-dev3, edge-dev (desktop). Install: update.sh.
   Windows - 4837. Git Bash + PowerShell 5.1/7; StepFun via OpenCode folder shell.
-            Install: bin/install-ai-devops-windows.ps1.
+            Install: the Windows installer, install-ai-devops-windows.ps1.
 Before you change anything, write down (1) the OS the problem happened on and
 (2) every OS your change will run on. Shared review code runs on BOTH.
   - Do not assume a symptom on one OS exists on the other.
