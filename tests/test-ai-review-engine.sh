@@ -1950,6 +1950,38 @@ check 'attachment_api_preserves_credit_exit' \
 check 'attachment_api_refuses_unknown_engine_before_provider' \
   "! ds_api_case invented first-managed-install review approve && ! test -e '$DS_API_ROOT/args'"
 
+# --- closing report rules and the production-risk block (#1783) -----------
+echo '== closing report rules'
+RISK_DOOR="$TMP/risk-door.sh"
+cat > "$RISK_DOOR" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ] || exit 2
+cp "$DOOR_PROMPT_FILE" "$RISK_BRIEF_COPY"
+{
+  printf 'Reviewed head %s. ' "$DOOR_HEAD"
+  for i in $(seq 1 40); do printf 'The change is additive and every path was checked line by line. '; done
+  printf '\n'
+  if [ "${RISK_WITH_BLOCK:-0}" = 1 ]; then printf '```production-risk-assessment\n{"schema":"x"}\n```\n'; fi
+  printf '\n## Verdict\nAPPROVE\n'
+} > "$DOOR_REPORT_OUT"
+EOF
+chmod +x "$RISK_DOOR"
+printf 'Include exactly one fenced production-risk-assessment block if you approve.\n' > "$TMP/risk-request.md"
+risk_case() { # risk_case WITH_BLOCK TAG -> exit status of the review
+  rm -f "$AI_REVIEW_LIFECYCLE_DIR/runs"/* 2>/dev/null || true
+  ( cd "$MREPO" && timeout 90 env AI_REVIEW_DOOR_GROK="$RISK_DOOR" RISK_WITH_BLOCK="$1" RISK_BRIEF_COPY="$TMP/risk-brief-$2.md" \
+      "$ENGINE" review --provider grok --name "engine-risk-$2" --repo "$MREPO" --mode diff-review --caller codex \
+      --prompt-file "$TMP/risk-request.md" ) >"$TMP/risk-$2.out" 2>"$TMP/risk-$2.err"
+}
+set +e; risk_case 0 missing; RISK_MISSING_RC=$?; risk_case 1 present; RISK_PRESENT_RC=$?; set -e
+check "approval_without_requested_risk_block_is_refused" \
+  "test '$RISK_MISSING_RC' -ne 0 && grep -q 'production-risk-assessment block' '$TMP/risk-missing.err'"
+check "approval_with_requested_risk_block_is_accepted" "test '$RISK_PRESENT_RC' -eq 0"
+check "brief_ends_with_single_decision_rule" \
+  "grep -q 'Do not give an early, provisional or second decision' '$TMP/risk-brief-present.md' && test \"\$(grep -n 'Report rules' '$TMP/risk-brief-present.md' | cut -d: -f1)\" -gt \"\$(grep -n 'fenced production-risk-assessment block if you approve' '$TMP/risk-brief-present.md' | cut -d: -f1)\""
+check "brief_restates_risk_block_rule_when_requested" "grep -q 'MUST contain exactly one fenced block' '$TMP/risk-brief-present.md'"
+check "brief_says_missing_tool_is_not_blocked" "grep -q 'is not by itself grounds for BLOCKED' '$TMP/risk-brief-present.md'"
+
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'
 check "engine_doctor_reports_core_stamp" "'$ENGINE' doctor | grep -q 'review-lifecycle-core/1'"

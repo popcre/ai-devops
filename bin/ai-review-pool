@@ -482,6 +482,7 @@ if [ -n "$CARRIED_BRIEF_SNAPSHOT" ]; then
   cat "$CARRIED_BRIEF_SNAPSHOT"
   printf '\n'
 fi
+review_closing_contract "$CARRIED_BRIEF_SNAPSHOT"
 } > "$TMP_BRIEF"
 
 # The review runs inside the disposable snapshot (no live-checkout binding),
@@ -642,6 +643,12 @@ if ! awk -v h="$REVIEW_HEAD" -v s="$ANALYSIS_START" -v e="$ANALYSIS_END" 'NR<s{n
 fi
 BODY_BYTES="$(awk -v s="$ANALYSIS_START" -v e="$ANALYSIS_END" 'NR<s{next} e>0 && NR>=e{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
 [ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
+# An approval without the requested production-risk block is unrecordable downstream (#1783).
+if [ "$VERDICT" = APPROVE ] && [ -n "$CARRIED_BRIEF_SNAPSHOT" ] && review_requests_risk_block "$CARRIED_BRIEF_SNAPSHOT" \
+  && [ "$(review_risk_block_count "$TMP_TEXT")" != 1 ]; then
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure risk-block-missing --report "$TMP_TEXT" >/dev/null 2>&1 || true
+  die "$provider approval lacks exactly one requested production-risk-assessment block; refusing unrecordable approval."
+fi
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
 TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
