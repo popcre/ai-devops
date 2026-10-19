@@ -577,14 +577,15 @@ if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_D
 fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure empty-report >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
-# The prompt asks for an early provisional verdict and the final verdict LAST
-# under a literal heading, so only the last `## Verdict` heading counts for
+# The prompt asks for one final verdict LAST under a literal heading (an
+# early provisional verdict is no longer requested, #1783, but a stray one
+# must still never be read as final), so only the last `## Verdict` counts for
 # providers whose brief uses that shape.  Gemini is the exception: its runner
 # (ai-gemini:303) validates the FIRST `## Verdict` block, so the pool must
 # agree with that gate or a contradictory body (REJECT first, APPROVE last)
 # would be recorded as approval while ai-gemini already accepted the REJECT.
 # For Gemini, contradictory verdicts are refused (fail closed).  For other
-# providers a provisional-then-final pair is expected; only the last counts.
+# providers only the last counts.
 LEADING_VERDICT=0
 review_capability "$CAP_JSON" "$provider" leading_verdict_contract && LEADING_VERDICT=1
 if [ "$LEADING_VERDICT" = 1 ]; then
