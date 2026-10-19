@@ -14,6 +14,7 @@ config/ci-suite-manifest.json
 config/ci-suites/**
 tools/ci-suites/*
 config/provider-cli-versions.json
+config/reviewer-platform-brief.txt
 config/reviewer-capacity.json
 config/reviewer-registry.json
 config/review-runner-doors.json
