@@ -470,7 +470,17 @@ main() {
     # the folder gate (see sf_write_windows_bash_env). BASH_ENV is set only
     # on the OpenCode process, never on the door's own wrappers.
     local -a win_env=()
-    if [ "$SF_IS_WINDOWS" = 1 ]; then
+    # The gate wraps the resolved OpenCode. Only an explicit
+    # AI_STEPFUN_OPENCODE override that is a script (test/doctor stubs) runs
+    # without it: bash would source the trampoline for the stub itself.
+    if [ "$SF_IS_WINDOWS" = 1 ] && { [ "$bin" != "${AI_STEPFUN_OPENCODE:-}" ] || [ "$(head -c 2 "$bin" 2>/dev/null)" = MZ ]; }; then
+      # The wrapper below is OpenCode 1.18.12's exact bash form; another pin
+      # needs its wrapper re-verified before it may run gated.
+      if [ "$SF_OC_VERSION" != 1.18.12 ]; then
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: OpenCode pin %s has no verified Windows shell wrapper (1.18.12 only); refusing.\n' "${SF_OC_VERSION:-unknown}" >&2
+        exit 127
+      fi
       local win_tramp win_bash win_bash_unix win_tramp_native
       win_tramp="$(mktemp)"; SF_TEMP_PATHS+=("$win_tramp")
       win_bash=""; win_bash_unix="$(command -v bash 2>/dev/null)" || win_bash_unix=""
