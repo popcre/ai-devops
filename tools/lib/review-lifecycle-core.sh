@@ -658,6 +658,7 @@ $(tail -n "$tests_tail" "$tests_out")
   if [ -n "$prompt_file" ] && [ -f "$prompt_file" ]; then
     cat "$prompt_file" >> "$brief"
   fi
+  review_closing_contract "$prompt_file" >> "$brief"
 
   local door
   rlc_capture door rlc_door_path "$provider"
@@ -730,6 +731,15 @@ $(tail -n "$tests_tail" "$tests_out")
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
     rm -f "$brief" "$body_file" "$identity_file"
     rlc_die "provider analysis body is below the minimum analysis floor (${MIN_REPORT_CHARS} substantive chars)."
+  fi
+  # An approval that omits the requested production-risk block can never be
+  # recorded downstream (#1783); refuse it here, with the report retained.
+  if [ "$verdict" = APPROVE ] && [ -n "$prompt_file" ] && review_requests_risk_block "$prompt_file" \
+    && [ "$(review_risk_block_count "$body_file")" != 1 ]; then
+    rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" risk-block-missing "$body_file" "$packet_dir" "$packet_sha"
+    rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+    rm -f "$brief" "$body_file" "$identity_file"
+    rlc_die 'approval lacks exactly one requested production-risk-assessment block; refusing unrecordable approval.'
   fi
 
   elapsed="$(( $(date +%s)-started ))"

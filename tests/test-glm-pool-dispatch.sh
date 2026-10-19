@@ -111,7 +111,10 @@ import sys
 p=Path(sys.argv[1])
 brief=(p/'runner-brief').read_bytes()
 marker=f'## Specific review request (sha256 {sys.argv[2]})\n'.encode()
-assert brief.rsplit(marker,1)[1] == (p/sys.argv[3]).read_bytes() + b'\n'
+tail=brief.rsplit(marker,1)[1]
+request=(p/sys.argv[3]).read_bytes() + b'\n'
+# The carried request is intact, followed only by the shared closing report rules (#1783).
+assert tail.startswith(request) and tail[len(request):].startswith(b'\n## Report rules')
 PY
 done
 # Invalid inputs fail before lifecycle/provider start and never print their text.

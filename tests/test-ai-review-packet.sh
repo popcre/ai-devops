@@ -218,8 +218,8 @@ PKT="$("$SCRIPT" build "$R" verdict)"
 M="$PKT/MANIFEST.md"
 check "requires_the_literal_verdict_heading"  "grep -qF '## Verdict' '$M'"
 check "verdict_vocabulary_is_fixed"           "grep -q 'APPROVE' '$M' && grep -q 'BLOCKED' '$M'"
-check "provisional_verdict_is_requested"      "grep -q 'Provisional verdict' '$M'"
-check "provisional_cannot_approve"            "grep -q 'cannot approve a change' '$M'"
+check "provisional_verdict_not_requested"     "! grep -q 'Provisional verdict' '$M'"
+check "final_verdict_is_only_decision"        "grep -q 'give no early or provisional verdict' '$M'"
 
 # --- hashing ------------------------------------------------------------------
 check "hash_file_written"                     "[ -s '$PKT/MANIFEST.sha256' ]"

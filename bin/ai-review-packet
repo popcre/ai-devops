@@ -970,16 +970,14 @@ $pointer_block
 
 Structure your reply in this order:
 
-1. **Provisional verdict** — state one early, before you finish investigating.
-   If your run is cut short, this is what the orchestrator gets.
-   A provisional verdict cannot approve a change on its own; it exists so that
-   work can continue instead of waiting blind.
-2. **Findings** — report EVERY finding you can find in this single pass, not
+1. **Findings** — report EVERY finding you can find in this single pass, not
    just the first one: an exhaustive list grouped by severity, each with the
    file and line that evidences it. Before you return, look for sibling issues
    of the same class elsewhere in the change (for example other symlink or path
    escapes, other places that trust a binary or input) and report those too.
-3. **Final verdict** — last, under a literal \`## Verdict\` heading.
+2. **Final verdict** — last, under a literal \`## Verdict\` heading. It is
+   the only decision: give no early or provisional verdict, and begin no
+   other line with APPROVE, REJECT, REVISE or BLOCKED.
 
 Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
 Use BLOCKED when you could not reach a judgment; never approve by default.
