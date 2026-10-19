@@ -350,7 +350,9 @@ Windows trust: a **combined** CA bundle (private CA + public roots) at
 `~/.zcode/cli/config.json` `network.caCertFile`. Never point `SSL_CERT_FILE`
 at the private CA alone (it replaces the public trust store).
 
-Escape hatches live in `C:\Users\ahazan\headroom-zcode\` on edge-dev:
+Durable switch (toolkit, installed with every machine, **default OFF**):
+`ai-zcode-headroom status|on|off` (see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md)).
+Legacy bat wrappers live in `C:\Users\ahazan\headroom-zcode\` on edge-dev:
 `headroom-zcode-off.bat` (back to direct Z.ai) and `headroom-zcode-on.bat`
 (refuses unless the HTTPS lane answers `/health`), each followed by a full quit
 and reopen of ZCode. The same directory holds both config variants. Keep a
