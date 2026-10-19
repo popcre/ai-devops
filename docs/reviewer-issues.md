@@ -314,6 +314,24 @@ The command intentionally does not publish reports, create GitHub issues, retry
 the reviewer, select another provider, or alter the scoreboard. Those actions
 require a maintenance session to review the evidence first.
 
+### Platform: where it failed and where the fix runs
+
+Every incident records its machine and operating system (`machine` in `show`).
+Before diagnosing, name both: the OS the failure happened on, and every OS the
+fix will run on. The same toolkit runs two ways — Ubuntu (hetz, 916-alien,
+edge-dev3, edge-dev; desktop and server are identical) and Windows (4837:
+PowerShell installer, Git Bash, OpenCode folder shell). A shared-code fix
+(lifecycle core, pool, packet, validators, briefs) reaches both, so it is not
+done until its tests pass on Linux **and** on Windows (Git Bash plus PowerShell
+5.1 and 7) and it is installed by each platform's route
+([`docs/deployment.md`](deployment.md)): `update.sh` on Ubuntu,
+`bin/install-ai-devops-windows.ps1` on Windows. Do not assume a symptom seen on
+one OS exists on the other, or that a fix proven on one works on the other;
+record which platforms were proven in the resolution. Windows traps that fake or
+hide results: CRLF in Bash scripts, PowerShell 5.1 stripping native argument
+quotes, the gh keyring being unreadable over SSH. EDGE-ALIEN and Envy are not
+review hosts.
+
 ## Kimi issue #46 qualification record
 
 The 2026-08-19 Kimi evidence exposed report-persistence, partial-output, and
