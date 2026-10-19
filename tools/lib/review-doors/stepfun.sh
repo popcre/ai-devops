@@ -368,6 +368,28 @@ extra_decision_warning() { # REPORT
   [ "${n:-0}" -eq 0 ] || printf 'stepfun door: report-extra-decision-line: %s non-terminal line(s) open with a decision word; governed consumers will refuse to record this report.\n' "$n" >&2
 }
 
+# Windows OpenCode bash tool (incident 20261014T203826Z-edge-dev-stepfun-2686842).
+# OpenCode 1.18.12 resolves its shell from OPENCODE_GIT_BASH_PATH / SHELL and
+# Node spawns it as `<shell> -c CMD`, so the spawn target must be a real
+# executable: Git's own bash.exe. Confinement comes from BASH_ENV, which a
+# non-interactive bash sources before running CMD: this trampoline replaces
+# that bash with the folder gate (bin/ai-stepfun-windows-shell) on the same
+# command string, so CMD itself never runs outside the gate. A bash started
+# any other way is refused. The gate itself is not edited here.
+sf_write_windows_bash_env() { # sf_write_windows_bash_env FILE GATE REVIEW_DIR GATE_PATH
+  local file="$1" gate="$2" dir="$3" gate_path="$4"
+  [ -n "$gate" ] && [ -f "$gate" ] && [ -n "$dir" ] || return 1
+  {
+    printf '# StepFun BASH_ENV trampoline: every OpenCode bash goes through the folder gate.\n'
+    printf 'unset BASH_ENV\n'
+    printf 'export AI_STEPFUN_REVIEW_DIR=%q GATE_PATH=%q\n' "$dir" "$gate_path"
+    printf 'if [ -n "${BASH_EXECUTION_STRING+x}" ]; then exec "$BASH" %q bash -c "$BASH_EXECUTION_STRING"; fi\n' "$gate"
+    printf "printf 'stepfun-shell: refused (bash without -c)\\\\n' >&2\n"
+    printf 'exit 126\n'
+  } > "$file" || return 1
+  chmod 600 "$file" 2>/dev/null || true
+}
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -419,6 +441,33 @@ main() {
     # writable clone must not be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    # Windows: OpenCode's bash tool must spawn a real bash.exe that lands in
+    # the folder gate (see sf_write_windows_bash_env). BASH_ENV is set only
+    # on the OpenCode process, never on the door's own wrappers.
+    local -a win_env=()
+    if [ "$SF_IS_WINDOWS" = 1 ]; then
+      local win_tramp win_bash win_bash_unix win_tramp_native
+      win_tramp="$(mktemp)"; SF_TEMP_PATHS+=("$win_tramp")
+      win_bash=""; win_bash_unix="$(command -v bash 2>/dev/null)" || win_bash_unix=""
+      [ -z "$win_bash_unix" ] || win_bash="$(cygpath -w "$win_bash_unix" 2>/dev/null)" || win_bash=""
+      # Only Git for Windows' own bash reads the native BASH_ENV trampoline.
+      case "$win_bash" in *\\Git\\usr\\bin\\bash.exe|*\\Git\\bin\\bash.exe) ;; *) win_bash="" ;; esac
+      win_tramp_native="$(cygpath -m "$win_tramp" 2>/dev/null)" || win_tramp_native=""
+      if [ -z "$win_bash" ] || [ -z "$win_tramp_native" ]; then
+        # Without both, OpenCode would fall back to an ungated shell: refuse.
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: cannot resolve Git bash for the Windows shell gate; refusing an ungated shell.\n' >&2
+        exit 127
+      fi
+      sf_write_windows_bash_env "$win_tramp" "$SF_ROOT/bin/ai-stepfun-windows-shell" \
+          "$oc_dir" "/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin" || {
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: Windows shell gate is missing: %s\n' "$SF_ROOT/bin/ai-stepfun-windows-shell" >&2
+        exit 127
+      }
+      win_env=(env "BASH_ENV=$win_tramp_native" \
+               "SHELL=$win_bash" "OPENCODE_GIT_BASH_PATH=$win_bash")
+    fi
     while :; do
       stepfun_pace_wait
       (
@@ -428,7 +477,7 @@ main() {
                XDG_CACHE_HOME="$(native_path "$xdg/cache")"
         if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
         printf '%s' "$(cat "$prompt_full")" \
-          | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+          | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "${win_env[@]}" "$bin" run --agent "$agent" --auto \
               --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
               --dir "$(native_path "$oc_dir")" \
               > "$log" 2> "$out.err"

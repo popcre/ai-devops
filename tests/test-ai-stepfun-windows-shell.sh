@@ -206,5 +206,53 @@ case "$(uname -s)" in
     ;;
 esac
 
+# stepfun_windows_shell_spawn_resolves — OpenCode's bash tool is spawned by
+# Node as `<shell> -c CMD` (incident 20261014T203826Z: ChildProcess.spawn
+# NotFound). The door points OpenCode at Git's real bash and confines it with a
+# BASH_ENV trampoline into this gate. Extract the real helper from the door and
+# drive it through Node's own child_process.spawnSync, not a shell simulation.
+DOOR="$ROOT/tools/lib/review-doors/stepfun.sh"
+eval "$(sed -n '/^sf_write_windows_bash_env()/,/^}/p' "$DOOR")"
+spawn_name='stepfun_windows_shell_spawn_resolves'
+if ! declare -F sf_write_windows_bash_env >/dev/null; then
+  echo "FAIL $spawn_name: helper missing from door"; fail=$((fail+1))
+elif ! command -v node >/dev/null 2>&1; then
+  echo "FAIL $spawn_name: node is required to prove a real spawn"; fail=$((fail+1))
+else
+  if sf_write_windows_bash_env "$TMP/t-missing" "$TMP/no-such-gate" "$TMP/folder" /usr/bin; then
+    echo "FAIL $spawn_name: missing gate must fail"; fail=$((fail+1))
+  else
+    echo "ok   $spawn_name refuses a missing gate"; pass=$((pass+1))
+  fi
+  sf_write_windows_bash_env "$TMP/bash-env" "$GATE" "$TMP/folder" "/usr/bin:/bin"
+  spawn_bash="$(command -v bash)"; spawn_env="$TMP/bash-env"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) spawn_bash="$(cygpath -w "$spawn_bash")"; spawn_env="$(cygpath -m "$spawn_env")" ;;
+  esac
+  printf 'echo SCRIPT-RAN\n' > "$TMP/folder/side.sh"
+  # node_spawn OUT BASH_ENV ARGS... : real spawnSync of the shell OpenCode uses.
+  node_spawn(){
+    local out="$1" envf="$2"; shift 2
+    (cd "$TMP/folder" && AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_RUNNERS_JSON="$TMP/no-such-runners.json" SPAWN_BASH="$spawn_bash" SPAWN_ENV="$envf" node -e '
+      const env = { ...process.env };
+      if (process.env.SPAWN_ENV) env.BASH_ENV = process.env.SPAWN_ENV; else delete env.BASH_ENV;
+      const r = require("child_process").spawnSync(process.env.SPAWN_BASH, process.argv.slice(1), { env, encoding: "utf8" });
+      if (r.error) { console.log("SPAWN-ERROR " + r.error.code); process.exit(99); }
+      process.stdout.write(r.stdout + r.stderr); process.exit(r.status === null ? 98 : r.status);' -- "$@") > "$out" 2>&1
+  }
+  rc=0; node_spawn "$TMP/spawn-raw.out" '' -c 'echo UNGATED' || rc=$?
+  check "$spawn_name Node spawn resolves the real bash" \
+    bash -c '[ "$1" -eq 0 ] && grep -qx UNGATED "$2"' _ "$rc" "$TMP/spawn-raw.out"
+  rc=0; node_spawn "$TMP/spawn-ok.out" "$spawn_env" -c 'head -n 1 readme.md' || rc=$?
+  check "$spawn_name allowed command runs through the gate" \
+    bash -c '[ "$1" -eq 0 ] && grep -qx ok "$2"' _ "$rc" "$TMP/spawn-ok.out"
+  rc=0; node_spawn "$TMP/spawn-bad.out" "$spawn_env" -c 'cat /etc/passwd; echo PWNED' || rc=$?
+  check "$spawn_name gate refuses a disallowed command" \
+    bash -c '[ "$1" -eq 126 ] && grep -q "stepfun-shell: refused" "$2" && ! grep -q PWNED "$2"' _ "$rc" "$TMP/spawn-bad.out"
+  rc=0; node_spawn "$TMP/spawn-script.out" "$spawn_env" side.sh || rc=$?
+  check "$spawn_name bash without -c is refused" \
+    bash -c '[ "$1" -eq 126 ] && ! grep -q SCRIPT-RAN "$2"' _ "$rc" "$TMP/spawn-script.out"
+fi
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
