@@ -298,7 +298,10 @@ ZCode's GLM coding-plan provider speaks the **Anthropic Messages protocol**
 `ANTHROPIC_BASE_URL`: that variable is already set on every wired Windows
 box for Claude, and ZCode sessions ran fine while the 8787 counter stayed at
 zero. The redirect is ZCode's **personal provider config**,
-`~/.zcode/v2/provider_config.json`, read when the app starts:
+`~/.zcode/v2/provider_config.json`, read when the app starts. The address is
+protected like every other concrete endpoint: resolve
+`ai-private-config value headroom_proxy_url` and use the same host on port
+**8788** (shown as `$HEADROOM_ZCODE_URL` below):
 
 ```json
 {
@@ -311,7 +314,7 @@ zero. The redirect is ZCode's **personal provider config**,
           "config": {
             "api": {
               "type": "anthropic-messages",
-              "baseUrl": "http://100.66.37.58:8788"
+              "baseUrl": "$HEADROOM_ZCODE_URL"
             }
           }
         }
