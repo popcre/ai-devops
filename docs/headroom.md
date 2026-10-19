@@ -54,8 +54,9 @@ HEADROOM_HOST="${HEADROOM_URL#http://}"; HEADROOM_HOST="${HEADROOM_HOST%%:*}"
 | Install method | `pipx`, under Linux user **`ai`** |
 | Binary | `/home/ai/.local/bin/headroom` |
 | Data / logs dir | `/home/ai/.headroom/` |
-| systemd unit | `/etc/systemd/system/headroom.service` |
+| systemd unit | `/etc/systemd/system/headroom.service` (Claude lane) |
 | Listen address | **`$HEADROOM_HOST:8787`** — the **private Tailscale interface only** |
+| Second instance | `headroom-zcode.service` on **`$HEADROOM_HOST:8788`** — ZCode / Z.ai lane, own ledger under `/home/ai/.headroom-zcode-home/` (§2b) |
 
 ### The service
 
@@ -91,6 +92,41 @@ original posture from §3: bind is the tailnet address only, never
 `0.0.0.0`, never reachable from the public internet. Do not "fix" the error
 by binding `127.0.0.1` — that would break every remote client — or by adding
 `HEADROOM_PROXY_TOKEN`, which would require reconfiguring every client.
+
+### 2b. The second instance — the ZCode / Z.ai lane (added 2026-10-19)
+
+One headroom **process** forwards each wire protocol to exactly **one**
+upstream: `--anthropic-api-url` (env `ANTHROPIC_TARGET_API_URL`) sets the
+single Anthropic-protocol target. Claude and ZCode both speak the Anthropic
+protocol but to different servers (`api.anthropic.com` vs
+`api.z.ai/api/anthropic`), so the Claude-lane instance on 8787 cannot also
+serve ZCode. The same pipx installation runs a **second process** on 8788:
+
+```ini
+# /etc/systemd/system/headroom-zcode.service  (key lines)
+[Unit]
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+[Service]
+User=ai
+Environment=HOME=/home/ai/.headroom-zcode-home   # own ledger: two writers on
+                                                 # one proxy_savings.json
+                                                 # would corrupt it
+Environment=HEADROOM_ALLOW_UNAUTHENTICATED_BIND=1
+ExecStart=/home/ai/.local/bin/headroom proxy --port 8788 --host $HEADROOM_HOST --mode cache --anthropic-api-url https://api.z.ai/api/anthropic
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=append:/home/ai/.headroom-zcode-home/.headroom/logs/proxy.log
+StandardError=append:/home/ai/.headroom-zcode-home/.headroom/logs/proxy.log
+```
+
+Same security posture as §3: tailnet bind only, client auth passed through
+unchanged (the Z.ai coding-plan key is not stored on the VPS). Verified live
+before wiring: a request through 8788 with a dummy key returns a **Z.ai-format**
+error while 8787 returns an Anthropic-format error for the same probe —
+proof the two lanes target different upstreams.
 
 Health check (from any machine on the tailnet, or the VPS itself):
 
@@ -253,6 +289,57 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 > the protected SSH template's Headroom forward. If Tailscale-direct is ever undesirable,
 > a local Claude can instead use `http://localhost:8787` while an `ssh vps2`
 > session is open. This is a fallback, not the primary path.
+
+### Workflow C — ZCode running locally on a Windows machine (added 2026-10-19)
+
+ZCode's GLM coding-plan provider speaks the **Anthropic Messages protocol**
+(`api.type: anthropic-messages`, upstream `https://api.z.ai/api/anthropic`)
+— that is why the same proxy family can serve it. ZCode does **not** read
+`ANTHROPIC_BASE_URL`: that variable is already set on every wired Windows
+box for Claude, and ZCode sessions ran fine while the 8787 counter stayed at
+zero. The redirect is ZCode's **personal provider config**,
+`~/.zcode/v2/provider_config.json`, read when the app starts. The address is
+protected like every other concrete endpoint: resolve
+`ai-private-config value headroom_proxy_url` and use the same host on port
+**8788** (shown as `$HEADROOM_ZCODE_URL` below):
+
+```json
+{
+  "schemaVersion": 1,
+  "config": {
+    "providerConfigRules": {
+      "providerRules": [
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "config": {
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "$HEADROOM_ZCODE_URL"
+            }
+          }
+        }
+      ]
+    },
+    "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] },
+    "defaultModelSelection": { "providerId": "account:zai-individual-coding-plan", "modelId": "GLM-5.3" }
+  }
+}
+```
+
+Escape hatches live in `C:\Users\ahazan\headroom-zcode\` on edge-dev:
+`headroom-zcode-off.bat` (back to direct Z.ai) and `headroom-zcode-on.bat`
+(refuses unless 8788 answers `/health`), each followed by a full quit and
+reopen of ZCode. The same directory holds both config variants. Keep a
+pre-change backup next to the live file
+(`provider_config.json.bak-pre-headroom-20261019`).
+
+Known gap (2026-10-19): the headless ZCode CLI broke independently of this
+lane — the 3.15.3 app auto-update at 12:39 PM EST invalidated the
+project-token scope and every fresh `zcode -p` process dies at
+`project_token_login_failed` before any model call, while the desktop app
+itself recovered. Until that is fixed, `ai-zcode` cannot prove this lane;
+live proof is the first routed session appearing in 8788's counters, which
+the daily monitor (§6b) watches for.
 
 ### Which machines are actually wired (as of 2026-07-14)
 
@@ -422,6 +509,21 @@ retain the documented instant bypass for outages.
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
 | AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
+| **edge-dev ZCode** (Workflow C) | 🔜 wired 2026-10-19, live proof pending | personal provider config points at 8788; first routed session must appear in 8788 counters (§6b watches for it) |
+
+### 6b. Dashboards and the daily savings monitor (added 2026-10-19)
+
+Each proxy serves its own live dashboard on its own port, openable from any
+tailnet machine: `$HEADROOM_URL/dashboard` (Claude lane) and the 8788
+equivalent (ZCode lane). `/stats` on each port is machine-readable JSON.
+
+A daily scheduled automation (9:00 AM EST, ZCode workspace on edge-dev)
+reads both `/stats` endpoints, diffs them against
+`C:\Users\ahazan\.zcode\headroom-monitor\snapshot.json`, reports one line
+per lane, and alerts on: a proxy down, the 8788 total still at zero (silent
+disuse — the §6 warning), or totals decreasing (ledger reset). Gap: the
+hourly `perf.csv` recorder (§5c) parses only the 8787 log directory, so
+like-for-like CSV measurement does not yet cover the ZCode lane.
 
 ### What Headroom does NOT explain (measured 2026-08-27)
 
@@ -479,6 +581,10 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   it is the persistent USER environment variable. `ai-headroom` manages whichever
   applies, deletes any stale `settings.json` entry, and warns when the shell you
   are standing in has drifted from the persistent setting.
+- **ZCode has the same no-fallback exposure** (Workflow C): if the VPS, the
+  8788 lane, or Tailscale is down, ZCode cannot reach the model until
+  `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` restores the direct
+  config and ZCode is fully restarted.
 - **Extra hop / latency.** Local-Windows requests now go
   laptop → VPS → Anthropic instead of straight to Anthropic.
 - **Unofficial posture.** Routing a Claude *subscription* through a modifying
@@ -543,6 +649,8 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
 | Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
+| ZCode lane proxy | `headroom-zcode.service` on the tailnet IP port 8788 (§2b) |
+| ZCode off switch | `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` + fully restart ZCode |
 
 ---
 
@@ -562,3 +670,11 @@ Wiring Codex would mean pointing its API base at the proxy the same way Claude's
 is pointed. Treat it as a fresh experiment with its own measurement, not as
 something already known to work — and note that Codex sign-in flows are fussier
 about a rewritten base URL than Claude's are.
+
+**One upstream per protocol per instance.** A single proxy process forwards
+all Anthropic-protocol traffic to one upstream and all OpenAI-protocol
+traffic to one upstream (`--anthropic-api-url` /
+`ANTHROPIC_TARGET_API_URL`; `--openai-api-url` / `OPENAI_TARGET_API_URL`).
+Clients that share a protocol but not a server — Claude (Anthropic) and
+ZCode (Z.ai) — need one process each (§2b). That is one process per lane,
+not a second installation.
