@@ -98,6 +98,71 @@ Health check (from any machine on the tailnet, or the VPS itself):
 curl -s "$HEADROOM_URL/health"      # -> {"status":"healthy","ready":true,...}
 ```
 
+### Upgrade runbook (learned the hard way on 2026-10-19)
+
+The 0.37.0 → 0.41.0 upgrade took ~1.5 hours instead of minutes. The package
+itself installs in seconds; everything that went wrong was around it. Follow
+this order so it does not repeat.
+
+**1. Declare the task before doing anything** — `ai-task-gates start --class
+production` in the checkout you will actually run gate checks from. The gates
+evaluate the change set of the checkout where they are invoked: the canonical
+landing checkout carries other sessions' diffs (a ship check there demanded
+reviewer-safety for files this task never touched), so run ship checks in
+your own task worktree.
+
+**2. Get the reviewer approval before touching the VPS.** The gate
+(`check --before production`) needs an exact-head APPROVE plus passing local
+test evidence. What cost the time here:
+
+- **The brief must match what the packet actually contains.** The packet is
+  HEAD's diff against its base — whatever landed most recently (here: an
+  unrelated stepfun fix). A brief that claims "repo change set: none" gets an
+  automatic REJECT for prompt/packet mismatch. Say plainly that the tip
+  commit is unrelated, already merge-queue-reviewed, and its role is only to
+  bind the exact head; carry the resource, action, verification, rollback
+  and blast radius in the brief itself (`AI_REVIEW_BRIEF_FILE=<file>` — the
+  brief is the only carrier of the off-repo resource, see
+  `docs/configuration.md`).
+- **Use a fast focused suite for `--tests`:**
+  `bash tests/test-action-taxonomy.sh` (4 s, 29 checks).
+  `tests/test-ai-task-gates.sh` is a 1,889-line suite that ran 30+ minutes
+  on this Windows host and stalled two review attempts — it is a full suite,
+  not review evidence (see `docs/development.md` on the focused-suite
+  convention).
+- **A killed review does not die.** A tool timeout kills only the outer
+  wrapper; the pool, engine and test children keep running and the next
+  attempt queues behind them. Before retrying, kill the whole process tree
+  (`taskkill /PID <pid> /T /F` on the pool/engine/test PIDs).
+- Pick any in-rotation reviewer whose engine differs from yours; after a
+  REJECT caused by a bad brief, fix the brief first — do not just retry.
+
+**3. Upgrade on the VPS:** `ssh vps2-direct`, as user `ai`:
+`pipx upgrade headroom-ai`. Nothing under `/etc/systemd/system/` is touched
+by pipx.
+
+**4. Before restarting, confirm the bind drop-in exists** (see "The bind
+acknowledgment" above). Without it every 0.40+ start refuses to bind and the
+service crash-loops (`systemctl` shows `activating`, `proxy.log` fills with
+`Error: Refusing to bind ...`). That is exactly what happened here — about
+two minutes of Claude traffic failing — and the fix was adding the drop-in,
+`daemon-reload`, restart.
+
+**5. Verify from a client machine, not just on the VPS:**
+`curl -s "$HEADROOM_URL/health"` must return HTTP 200 with `"version":"<new>"`,
+and `ai-headroom status` must say healthy. Two false alarms to ignore: the
+`kompress` check reports `degraded` for ~10 s after start while the ONNX
+model warms (re-check before treating it as a fault), and `headroom --version`
+is not on PATH in a non-login ssh shell — call
+`/home/ai/.local/bin/headroom --version`.
+
+**6. Rollback if health does not come back:**
+`pipx install --force headroom-ai==0.37.0` as user `ai`, restart, re-verify.
+The savings ledger in `/home/ai/.headroom/` survives both directions.
+
+**7. Update this file** (the §1 version bullet and anything new learned),
+then ship the docs change prose-only through the doc-safety admin lane.
+
 ## 3. Security posture (important)
 
 - The proxy is bound to the **Tailscale IP only** — it is reachable from our own
