@@ -468,7 +468,7 @@ $DECISION
 Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one allowed word exactly:
 
 ## Verdict
-$(if [ "$provider" = glm ]; then printf 'APPROVE|REVISE|REJECT|BLOCKED'; else printf 'APPROVE|REJECT|BLOCKED'; fi)
+$(if review_capability "$CAP_JSON" "$provider" revise_verdict; then printf 'APPROVE|REVISE|REJECT|BLOCKED'; else printf 'APPROVE|REJECT|BLOCKED'; fi)
 
 ## RUN FACTS (this review only)
 The reviewed head commit is $REVIEW_HEAD.
@@ -541,12 +541,11 @@ glm_revise_followup_name() { # prints session name when a REVISE turn is continu
     verdict="$(glm_report_verdict "$report")"
     [ "$verdict" = REVISE ] || continue
     # Bind the follow-up to the requested comparison: a REVISE on a different
-    # base is a different question and must not steal this dispatch.
+    # (or unrecorded) base is a different question and must not steal this dispatch.
     if [ -n "$OPT_BASE" ]; then
       session_base="$(jq -r '.base // empty' "$meta" 2>/dev/null || true)"
-      if [ -n "$session_base" ] && [ "$session_base" != "$(git -C "$root" rev-parse --verify --quiet --end-of-options "$OPT_BASE^{commit}" 2>/dev/null || true)" ]; then
-        continue
-      fi
+      [ -n "$session_base" ] || continue
+      [ "$session_base" = "$(git -C "$root" rev-parse --verify --quiet --end-of-options "$OPT_BASE^{commit}" 2>/dev/null || true)" ] || continue
     fi
     name="$(jq -r '.name // empty' "$meta" 2>/dev/null || true)"
     [ -n "$name" ] || continue
@@ -585,7 +584,7 @@ if [ "$provider" = glm ] && [ "$(uname -s 2>/dev/null)" = Linux ]; then
 elif [ "$provider" = glm ]; then
   RUNNER_ENV=(AI_GLM_PROFILE=general AI_GLM_STATE_DIR="$glm_state_root")
 fi
-if [ "$provider" = glm ]; then
+if review_capability "$CAP_JSON" "$provider" revise_verdict; then
   glm_followup="$(AI_GLM_STATE_DIR="$glm_state_root" glm_revise_followup_name || true)"
   glm_followup_meta=""
   if [ -n "${glm_followup:-}" ]; then
@@ -712,7 +711,7 @@ VERDICT="${VERDICT_RECORD#*$'\t'}"
 case "$VERDICT" in
   APPROVE|REJECT|BLOCKED) ;;
   REVISE)
-    if [ "$provider" != glm ]; then
+    if ! review_capability "$CAP_JSON" "$provider" revise_verdict; then
       "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
       die "$provider returned REVISE, which only the GLM follow-up path accepts."
     fi ;;

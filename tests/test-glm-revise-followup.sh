@@ -87,7 +87,7 @@ rid="$(printf '%s\n%s' "$(cd "$TMP/repo" && pwd -P)" "" | sha256sum | cut -c1-12
 mkdir -p "$AI_GLM_STATE_DIR/sessions/$rid"
 printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-report.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" <<EOF
-{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-report.md"}}
+{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","base":"$BASE","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-report.md"}}
 EOF
 rm -f "$TMP/runner-args"
 run_pool || true
@@ -108,11 +108,11 @@ if [ "$fallback" = new ]; then ok 'failed/armed follow-up falls back to cold new
 rm -f "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json.followup-armed"
 printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-old.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json" <<EOF
-{"schema_version":2,"name":"pool-glm-aaaa-old","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2020-01-01T00:00:00Z","last_completed_turn":{"report":"$TMP/revise-old.md"}}
+{"schema_version":2,"name":"pool-glm-aaaa-old","type":"review","caller":"codex","repository_root":"$TMP/repo","base":"$BASE","last_activity_at":"2020-01-01T00:00:00Z","last_completed_turn":{"report":"$TMP/revise-old.md"}}
 EOF
 printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-new.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json" <<EOF
-{"schema_version":2,"name":"pool-glm-zzzz-new","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-new.md"}}
+{"schema_version":2,"name":"pool-glm-zzzz-new","type":"review","caller":"codex","repository_root":"$TMP/repo","base":"$BASE","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/revise-new.md"}}
 EOF
 rm -f "$TMP/runner-args" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json.followup-armed" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json.followup-armed"
 run_pool || true
@@ -120,7 +120,7 @@ if grep -qx 'pool-glm-zzzz-new' "$TMP/runner-args" 2>/dev/null; then ok 'newest 
 
 printf 'Head %s\n## Verdict\nREJECT\n' "$HEAD" > "$TMP/reject-report.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-revise-thread.json" <<EOF
-{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/reject-report.md"}}
+{"schema_version":2,"name":"pool-glm-revise-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","base":"$BASE","last_activity_at":"2026-10-18T12:00:00Z","last_completed_turn":{"report":"$TMP/reject-report.md"}}
 EOF
 rm -f "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-aaaa-old.json" "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-zzzz-new.json" "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.followup-armed
 rm -f "$TMP/runner-args"
@@ -143,7 +143,7 @@ unset GLM_POOL_VERDICT
 rm -f "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.json "$AI_GLM_STATE_DIR/sessions/$rid"/codex--*.followup-armed
 printf 'Head %s\n## Verdict\nREVISE\n' "$HEAD" > "$TMP/revise-thread2.md"
 cat > "$AI_GLM_STATE_DIR/sessions/$rid/codex--pool-glm-clear-thread.json" <<EOF
-{"schema_version":2,"name":"pool-glm-clear-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","last_activity_at":"2026-10-18T13:00:00Z","last_completed_turn":{"report":"$TMP/revise-thread2.md"}}
+{"schema_version":2,"name":"pool-glm-clear-thread","type":"review","caller":"codex","repository_root":"$TMP/repo","base":"$BASE","last_activity_at":"2026-10-18T13:00:00Z","last_completed_turn":{"report":"$TMP/revise-thread2.md"}}
 EOF
 rm -f "$TMP/runner-args"
 run_pool || true
