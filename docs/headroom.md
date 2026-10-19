@@ -128,6 +128,11 @@ before wiring: a request through 8788 with a dummy key returns a **Z.ai-format**
 error while 8787 returns an Anthropic-format error for the same probe —
 proof the two lanes target different upstreams.
 
+**Clients cannot talk to 8788 directly.** Z.ai signing requires HTTPS; 8788 is
+plain HTTP. In front of it sits `zcode-headroom-tls.service` on **8443**
+(path split: `/api/paas/*` → Z.ai handshake, else → 8788). Full procedure:
+[`zcode-headroom-runbook.md`](zcode-headroom-runbook.md).
+
 Health check (from any machine on the tailnet, or the VPS itself):
 
 ```bash
@@ -292,16 +297,29 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 
 ### Workflow C — ZCode running locally on a Windows machine (added 2026-10-19)
 
+**Full incident, architecture, and off-ramp:
+[`zcode-headroom-runbook.md`](zcode-headroom-runbook.md).** Read that before
+changing this lane.
+
 ZCode's GLM coding-plan provider speaks the **Anthropic Messages protocol**
-(`api.type: anthropic-messages`, upstream `https://api.z.ai/api/anthropic`)
-— that is why the same proxy family can serve it. ZCode does **not** read
-`ANTHROPIC_BASE_URL`: that variable is already set on every wired Windows
-box for Claude, and ZCode sessions ran fine while the 8787 counter stayed at
-zero. The redirect is ZCode's **personal provider config**,
-`~/.zcode/v2/provider_config.json`, read when the app starts. The address is
-protected like every other concrete endpoint: resolve
-`ai-private-config value headroom_proxy_url` and use the same host on port
-**8788** (shown as `$HEADROOM_ZCODE_URL` below):
+(`api.type: anthropic-messages`, vendor default
+`https://api.z.ai/api/anthropic`) — the same proxy family can serve it.
+ZCode does **not** read `ANTHROPIC_BASE_URL` (that variable is for Claude on
+8787).
+
+**Z.ai client signing requires `https://` on the provider baseUrl.** A plain
+`http://…:8788` address fails every turn with
+`Client signing handshake requires HTTPS.` The working path is:
+
+```text
+ZCode baseUrl https://$HEADROOM_HOST:8443/v1
+  → zcode-headroom-tls.service :8443  (TLS; /api/paas/* → Z.ai handshake)
+  → headroom-zcode.service :8788
+  → https://api.z.ai/api/anthropic
+```
+
+The redirect is ZCode's **personal provider config**,
+`~/.zcode/v2/provider_config.json`, read when the app starts:
 
 ```json
 {
@@ -314,7 +332,7 @@ protected like every other concrete endpoint: resolve
           "config": {
             "api": {
               "type": "anthropic-messages",
-              "baseUrl": "$HEADROOM_ZCODE_URL"
+              "baseUrl": "https://$HEADROOM_HOST:8443/v1"
             }
           }
         }
@@ -326,20 +344,23 @@ protected like every other concrete endpoint: resolve
 }
 ```
 
+Windows trust: a **combined** CA bundle (private CA + public roots) at
+`%USERPROFILE%\.config\ai-devops\zcode-ca-bundle.crt`, wired via
+`ZCODE_AGENT_CA_CERT` / `AGENT_CA_CERT` / `NODE_EXTRA_CA_CERTS` /
+`~/.zcode/cli/config.json` `network.caCertFile`. Never point `SSL_CERT_FILE`
+at the private CA alone (it replaces the public trust store).
+
 Escape hatches live in `C:\Users\ahazan\headroom-zcode\` on edge-dev:
 `headroom-zcode-off.bat` (back to direct Z.ai) and `headroom-zcode-on.bat`
-(refuses unless 8788 answers `/health`), each followed by a full quit and
-reopen of ZCode. The same directory holds both config variants. Keep a
+(refuses unless the HTTPS lane answers `/health`), each followed by a full quit
+and reopen of ZCode. The same directory holds both config variants. Keep a
 pre-change backup next to the live file
 (`provider_config.json.bak-pre-headroom-20261019`).
 
 Known gap (2026-10-19): the headless ZCode CLI broke independently of this
-lane — the 3.15.3 app auto-update at 12:39 PM EST invalidated the
-project-token scope and every fresh `zcode -p` process dies at
-`project_token_login_failed` before any model call, while the desktop app
-itself recovered. Until that is fixed, `ai-zcode` cannot prove this lane;
-live proof is the first routed session appearing in 8788's counters, which
-the daily monitor (§6b) watches for.
+lane — `project_token_login_failed` before any model call, while the desktop
+app works. Until that is fixed, `ai-zcode` cannot prove this lane; live proof
+is a desktop turn (confirmed 2026-10-19).
 
 ### Which machines are actually wired (as of 2026-07-14)
 
@@ -509,7 +530,7 @@ retain the documented instant bypass for outages.
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
 | AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
-| **edge-dev ZCode** (Workflow C) | 🔜 wired 2026-10-19, live proof pending | personal provider config points at 8788; first routed session must appear in 8788 counters (§6b watches for it) |
+| **edge-dev ZCode** (Workflow C) | ✅ wired 2026-10-19, desktop live proof done | provider baseUrl `https://$HEADROOM_HOST:8443/v1` via TLS front; see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md) |
 
 ### 6b. Dashboards and the daily savings monitor (added 2026-10-19)
 
@@ -649,7 +670,7 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
 | Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
-| ZCode lane proxy | `headroom-zcode.service` on the tailnet IP port 8788 (§2b) |
+| ZCode lane proxy | `headroom-zcode.service` :8788 behind `zcode-headroom-tls.service` :8443 (§2b, [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md)) |
 | ZCode off switch | `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` + fully restart ZCode |
 
 ---
@@ -678,3 +699,4 @@ traffic to one upstream (`--anthropic-api-url` /
 Clients that share a protocol but not a server — Claude (Anthropic) and
 ZCode (Z.ai) — need one process each (§2b). That is one process per lane,
 not a second installation.
+
