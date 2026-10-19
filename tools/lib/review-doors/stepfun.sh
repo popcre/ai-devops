@@ -383,9 +383,34 @@ sf_write_windows_bash_env() { # sf_write_windows_bash_env FILE GATE REVIEW_DIR G
     printf '# StepFun BASH_ENV trampoline: every OpenCode bash goes through the folder gate.\n'
     printf 'unset BASH_ENV\n'
     printf 'export AI_STEPFUN_REVIEW_DIR=%q GATE_PATH=%q\n' "$dir" "$gate_path"
-    printf 'if [ -n "${BASH_EXECUTION_STRING+x}" ]; then exec "$BASH" %q bash -c "$BASH_EXECUTION_STRING"; fi\n' "$gate"
-    printf "printf 'stepfun-shell: refused (bash without -c)\\\\n' >&2\n"
-    printf 'exit 126\n'
+    printf 'SF_GATE=%q\n' "$gate"
+    cat <<'TRAMPOLINE'
+sf_refuse(){ printf 'stepfun-shell: refused (%s)\n' "$1" >&2; exit 126; }
+[ -n "${BASH_EXECUTION_STRING+x}" ] || sf_refuse 'bash without -c'
+sf_s=$BASH_EXECUTION_STRING
+# OpenCode 1.18.12 (jG) runs every bash tool command as
+#   bash -l -c "<this exact wrapper>" opencode <cwd>
+# with the command JSON-encoded after eval. Accept that wrapper byte-for-byte
+# only, decode the one command, and gate that command alone.
+sf_pre=$'\n        shopt -s expand_aliases\n        [[ -f ~/.bashrc ]] && source ~/.bashrc >/dev/null 2>&1 || true\n        cd -- "$1"\n        eval '
+sf_suf=$'\n      '
+case "$sf_s" in
+  *$'\n'*|*$'\r'*)
+    [[ $sf_s == "$sf_pre"*"$sf_suf" ]] || sf_refuse 'unrecognised OpenCode wrapper'
+    [ "$0" = opencode ] && [ "$#" -eq 1 ] || sf_refuse 'unrecognised OpenCode wrapper arguments'
+    sf_j=${sf_s#"$sf_pre"}; sf_j=${sf_j%"$sf_suf"}
+    case "$sf_j" in '"'*'"') ;; *) sf_refuse 'wrapper payload is not one JSON string' ;; esac
+    sf_cmd=$(jq -jn --arg s "$sf_j" '$s | fromjson | if type == "string" then . else error("not a string") end' 2>/dev/null) \
+      || sf_refuse 'wrapper payload is not one JSON string'
+    sf_cwd=$(cd -- "$1" 2>/dev/null && pwd -P) || sf_refuse 'wrapper directory'
+    sf_root=$(cd -- "$AI_STEPFUN_REVIEW_DIR" 2>/dev/null && pwd -P) || sf_refuse 'review folder'
+    case "$sf_cwd/" in "$sf_root"/*) ;; *) sf_refuse 'wrapper directory outside the review folder' ;; esac
+    cd -- "$sf_cwd" || sf_refuse 'wrapper directory'
+    exec "$BASH" "$SF_GATE" bash -c "$sf_cmd"
+    ;;
+esac
+exec "$BASH" "$SF_GATE" bash -c "$sf_s"
+TRAMPOLINE
   } > "$file" || return 1
   chmod 600 "$file" 2>/dev/null || true
 }
