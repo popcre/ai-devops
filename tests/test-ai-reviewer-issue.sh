@@ -59,6 +59,7 @@ check "unrestricted details are captured" "grep -q 'returned empty output twice'
 check "exact command is recorded" "jq -e '.reported_command==\"ai-grok-review ask test\"' '$report/issue.json'"
 check "list finds the recorded issue" "$SCRIPT list | grep -q '$id'"
 check "show returns the recorded issue" "$SCRIPT show '$id' | jq -e '.id==\"$id\"'"
+check "show states the platform obligations on stderr only" "$SCRIPT show '$id' 2>&1 >/dev/null | grep -q 'This incident happened on:' && $SCRIPT show '$id' 2>/dev/null | jq -e . >/dev/null"
 check "new issues are listed as open" "$SCRIPT list | awk -F '\\t' '\$1==\"$id\" && \$4==\"open\" {found=1} END {exit !found}'"
 check "resolve requires a repair commit" "! $SCRIPT resolve '$id' --status resolved --summary repaired --evidence tests/test-ai-reviewer-issue.sh"
 check "resolve requires evidence" "! $SCRIPT resolve '$id' --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD'"
