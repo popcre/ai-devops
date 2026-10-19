@@ -25,8 +25,8 @@ Goal: **fewer input tokens per request → lower Claude token usage.**
   sessions, not a trend. The like-for-like historical `token`-mode baseline was
   4.22%; the current mode preserves slightly better provider-cache behaviour.
 - It does **not** break the prompt cache; that was measured, not assumed (§5b).
-- Installed version: **0.37.0** (pipx package `headroom-ai`, upgraded from
-  0.30.0 on 2026-08-31).
+- Installed version: **0.41.0** (pipx package `headroom-ai`, upgraded from
+  0.37.0 on 2026-10-19; see §2 for the bind acknowledgment that version needs).
 
 > ⚖️ **Standing decision: if it is not clearly worth it, we pull it.** This is a
 > trial. After real sessions run through it, read the savings (§6). If the token
@@ -72,6 +72,25 @@ RestartSec=5
 StandardOutput=append:/home/ai/.headroom/logs/proxy.log
 StandardError=append:/home/ai/.headroom/logs/proxy.log
 ```
+
+#### The bind acknowledgment (required since 0.41.0)
+
+0.41.0 refuses to bind a non-loopback address unless the operator explicitly
+acknowledges it, because tailnet peers get unauthenticated data-plane access.
+The acknowledgment lives in a drop-in
+(`/etc/systemd/system/headroom.service.d/unauth-bind.conf`):
+
+```ini
+[Service]
+Environment=HEADROOM_ALLOW_UNAUTHENTICATED_BIND=1
+```
+
+Without it the service crash-loops with
+`Error: Refusing to bind '<tailnet-ip>'` on every start. This preserves the
+original posture from §3: bind is the tailnet address only, never
+`0.0.0.0`, never reachable from the public internet. Do not "fix" the error
+by binding `127.0.0.1` — that would break every remote client — or by adding
+`HEADROOM_PROXY_TOKEN`, which would require reconfiguring every client.
 
 Health check (from any machine on the tailnet, or the VPS itself):
 
