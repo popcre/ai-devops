@@ -306,6 +306,8 @@ intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 ## Pending work
 
+Ruleset trim and enforcement: read the [ruleset plan](plan_ruleset-trim-and-enforce.md) STATUS first ([#1881](https://github.com/popcre/ai-devops/issues/1881)); evidence is private and stays out of Git.
+
 Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_reviewer-recurrence-repair.md) STATUS first; reuse existing owners and completed programmes. Current brief: [2026-10-18T1524Z-edge-dev3-claude-reviewer-recurrence-fleet.md](HANDOFF.d/2026-10-18T1524Z-edge-dev3-claude-reviewer-recurrence-fleet.md).
 
 Class-level reviewer stability (≥24h green): read the [reviewer stability plan](plan_reviewer-stability-24h.md) STATUS first ([#1822](https://github.com/popcre/ai-devops/issues/1822)); do not re-derive the sibling host programmes; no bulk raw-transcript third-party extract without a token budget.
