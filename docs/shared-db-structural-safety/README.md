@@ -11,7 +11,7 @@ exception handling; `shared-db-change` points here.
 > existing issue and start, per `shared-db-change`. The session doing the structural work owns its claim and delivery;
 > optional delegation never creates a required orchestrator role.
 
-> The completed [`shared-db throughput programme`](../../../plan_shared-db-complete-throughput-repair.md) is a decision record, not a restart plan. Its safety invariants remain binding; retiring a role never removes claims, version reservations, stage leases, or live proof.
+> The completed [`shared-db throughput programme`](../../plan_shared-db-complete-throughput-repair.md) is a decision record, not a restart plan. Its safety invariants remain binding; retiring a role never removes claims, version reservations, stage leases, or live proof.
 
 **Not required. Claim-first is the default. This document is reference only.**
 New structural work starts when a session claims exact objects on the existing
