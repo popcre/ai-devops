@@ -1358,9 +1358,15 @@ find_archived_prior(){
 validate_archived_prior(){
   local archive="$1" meta="$2" name="$3" rid="$4" root="$5" event stem item path expected
   [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
-  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" \
+  # The archived turn is historical evidence of a completed process. Recovery
+  # restores it so a new turn can run under the current pin; the Muse runtime
+  # may have been upgraded since that turn finished. Require a recorded
+  # runtime_version and the same model/conversation identity, but never demand
+  # that a pre-pin-bump archive match today's pin (#1876).
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" \
     '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and
-     .retained_turn.model==$model and .retained_turn.runtime_version==$version and
+     .retained_turn.model==$model and
+     (.retained_turn.runtime_version|type=="string" and length>0) and
      (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and
      .retained_turn.process_exit==0 and
      (.retained_turn.head|type=="string" and length>0) and
@@ -1411,7 +1417,13 @@ recover_preprovider_followup(){
   fi
   tmp="$(tmp_file)"
   cat "$archive" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$meta" || return 1
-  printf 'recovered pre-provider Muse follow-up for session %s; previous completion restored, no provider request\n' "$name"
+  local hist_ver
+  hist_ver="$(jq -r '.retained_turn.runtime_version // empty' "$archive")"
+  if [ -n "$hist_ver" ] && [ "$hist_ver" != "$VERSION" ]; then
+    printf 'recovered pre-provider Muse follow-up for session %s; previous completion restored (historical runtime %s), no provider request\n' "$name" "$hist_ver"
+  else
+    printf 'recovered pre-provider Muse follow-up for session %s; previous completion restored, no provider request\n' "$name"
+  fi
   return 0
 }
 cmd_reconcile(){
