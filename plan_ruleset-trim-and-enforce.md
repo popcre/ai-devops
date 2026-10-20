@@ -17,7 +17,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 3.2 Trim the Claude + Codex global rules to ~1,200 words | ⬜ open | — | — |
 | 3.3 Move dated owner rulings to `docs/owner-rulings.md` | ⬜ open | — | — |
 | 4.1 AGENTS.md down to a router under 2,000 words | ⬜ open | — | — |
-| 5.1 Minimal instruction profile for reviewer runs | ⬜ open | — | — |
+| 5.1 Minimal instruction profile for reviewer runs | ✅ done | 2026-10-20 | `tests/test-ai-codex-review.sh` reviewer_profile_* checks; live `codex debug prompt-input` with the reviewer home shows no owner rules and no plugin list |
 | 6.1 Live proof: re-run the transcript audit | ⬜ open | — | — |
 
 **Start here:** Phase 1, step 1.1. Each phase is one PR. Phases 1, 2 and 5 are
