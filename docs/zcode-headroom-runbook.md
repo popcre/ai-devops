@@ -282,7 +282,7 @@ status` reports healthy. **Do not change this to solve Z-code problems.**
 
 ## 7. Is this in standard ai-devops tooling?
 
-**No. The Z-code HTTPS lane is machine-local today.**
+**Yes for the Windows switch and rebuild assets; VPS services are still installed from the templates on first bring-up. Default state: OFF.**
 
 | Artifact | In `popcre/ai-devops`? | On hetz? | On edge-dev? |
 |---|---|---|---|
@@ -303,11 +303,39 @@ the TLS front. Until that lands, **rebuild using §4.2–4.3 on the new machine*
 
 ---
 
+## 7b. `ai-zcode-headroom` vs `headroom wrap` / `unwrap zcode`
+
+| | `ai-zcode-headroom on/off/status` (this toolkit) | `headroom wrap zcode` / `unwrap zcode` (vendor) |
+|---|---|---|
+| What it changes | Writes `~/.zcode/v2/provider_config.json` (durable) | Prints UI settings; **writes no Z-code config** |
+| Endpoint | Hetz HTTPS lane (satisfies Z.ai signing) | Local proxy URL printed for the settings UI |
+| Z.ai signing | Works (https:// baseUrl required) | Easy to mis-set http:// and hit the signing failure |
+| Off switch | `off` restores direct Z.ai (no network needed) | Stops the local proxy only |
+| Default after install | **OFF** | n/a (user runs wrap) |
+
+Use the toolkit tool for the persistent lane. Use vendor `wrap` only for a
+throwaway local proxy experiment.
+
+## 7c. Claude needs no HTTPS — why
+
+Claude talks to Anthropic with OAuth/API keys and **no client-signing
+handshake**. The Claude lane is allowed to use `http://$HEADROOM_HOST:8787`
+on the tailnet. Z-code is different: Z.ai signs every request and the client
+refuses a non-HTTPS provider origin. Do not “fix” Claude by adding the TLS
+front; do not “fix” Z-code by using HTTP.
+
 ## 8. Off-ramp — back to native Z.ai (if Headroom fails)
 
 Use this whenever Z-code is broken and you need it working **now**.
 
 ### 8.1 Fastest path (keeps Claude on Headroom)
+
+```text
+ai-zcode-headroom off
+```
+
+Then fully quit and reopen Z-code. Equivalent manual steps if the tool is
+not installed yet:
 
 1. On edge-dev, restore Z-code to the default HTTPS Z.ai provider:
 
