@@ -12,8 +12,8 @@ review_capability_providers() { # DOORS_JSON FIELD -> space-separated providers,
   [ -f "$1" ] || return 0
   jq -r --arg f "$2" '[.capabilities // {} | to_entries[] | select((.value|type)=="object" and .value[$f]==true) | .key] | join(" ")' "$1" 2>/dev/null
 }
-review_shared_code_paths_regex() { # the shared review code every provider runs, plus the release live-review gate and its check (#1834, #1783)
-  printf '%s\n' '^(bin/ai-review(-pool|-engine|-preflight|-packet|-sandbox|-lifecycle)?|bin/ai-(task-gates|muse|glm|reviewer-issue|release-live-check)(\.cmd)?|tools/lib/review-(lifecycle-core|capabilities)\.sh|config/review-runner-doors\.json)$'
+review_shared_code_paths_regex() { # the shared review code every provider runs, every maintained provider wrapper alike, plus the release live-review gate and its check (#1834, #1783)
+  printf '%s\n' '^(bin/ai-review(-pool|-engine|-preflight|-packet|-sandbox|-lifecycle)?|bin/ai-(task-gates|reviewer-issue|release-live-check|grok-review|muse|qwen|gemini|deepseek-agent|stepfun|glm)(\.cmd)?|tools/lib/review-(lifecycle-core|capabilities)\.sh|config/review-runner-doors\.json)$'
 }
 review_shared_code_changed() { # CHANGED_FILES (one per line) -> 0 when any is shared review code
   printf '%s\n' "$1" | grep -Eq "$(review_shared_code_paths_regex)"

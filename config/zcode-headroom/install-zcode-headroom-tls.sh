@@ -56,6 +56,8 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$TLS"
 chmod 700 "$TLS"
 chmod 600 "$TLS"/*.key
 chmod 644 "$TLS/ca.crt" "$TLS/server.crt" "$TLS/server-chain.crt"
+# The front never reads the CA signing key; keep it root-only.
+[[ -f "$TLS/ca.key" ]] && chown 0:0 "$TLS/ca.key"
 
 cp -f "$SCRIPT_SRC" "$SCRIPT_DST"
 chmod 755 "$SCRIPT_DST"
@@ -69,8 +71,8 @@ Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
-User=ai
-Group=ai
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
 Environment=ZCODE_HEADROOM_TLS_HOST=${HEADROOM_TAILNET_IP}
 Environment=ZCODE_HEADROOM_HTTP_HOST=${HEADROOM_TAILNET_IP}
 ExecStart=/usr/bin/python3 ${SCRIPT_DST#"$R"}
