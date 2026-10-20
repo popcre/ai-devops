@@ -279,11 +279,13 @@ Measured on hetz 2026-10-20: all 17 live `ccd-cli` processes had
 TLS connections to `api.anthropic.com`; a fresh `claude -p` from a shell routed
 through `:8787` in the same window.
 
-**The fix is a wrapper on the executable path the launcher execs.** `ai-headroom
-wrap-remote` (also run by `ai-headroom on`) moves each versioned binary to
-`<name>.headroom-real` and installs a tiny script that forces the proxy URL and
-execs the real one. Running workers keep their old inode — nothing live is
-killed. New spawns pick up the wrapper.
+**The fix is a wrapper on the executable path the launcher execs** — the same
+lever edge-dev3 used when Claude Desktop forced `api.anthropic.com` on its
+Claude Code children (Workflow B′ trap 4). `ai-headroom wrap-remote` (also run
+by `ai-headroom on`) moves each versioned binary to `<name>.headroom-real` and
+installs a tiny script that forces the proxy URL and execs the real one. Running
+workers keep their old inode — nothing live is killed. New spawns pick up the
+wrapper.
 
 ```bash
 ai-headroom wrap-remote    # or: ai-headroom on
@@ -294,6 +296,21 @@ Claude Code updates drop a **new** versioned binary next to the old ones. After
 any update, run `ai-headroom on` again (or `wrap-remote`) — `status` flags an
 unwrapped binary as a gap. Escape hatch: `ai-headroom unwrap-remote` (or
 `ai-headroom off`) restores the raw binaries.
+
+Also clear any inert `settings.json` `env.ANTHROPIC_BASE_URL` entry
+(`ai-headroom on`/`off` does this) — it is accepted and ignored (Workflow B)
+and only makes status displays lie.
+
+**Prove routing the edge-dev3 way (Workflow B′):** do not trust
+`/proc/<pid>/environ` alone. The decisive check is `proxy.log` on hetz
+(`grep path=/v1/messages /home/ai/.headroom/logs/proxy.log | tail`) — look for
+`status=200` and `client=claude-code` after a turn from the wrapped binary.
+Live proof 2026-10-20 10:55 AM / 11:00 AM EDT.
+
+Ubuntu notes from edge-dev3 that do **not** apply to this VPS lane (and why):
+no DietCode/Scaledown `claude` wrapper here (`~/.local/bin/claude` is a real
+ELF), and there is no KDE desktop — `environment.d` is for GUI apps, not
+`claude-ssh` workers.
 
 Offline tests: `tests/test-ai-headroom-remote-wrap.sh`.
 
