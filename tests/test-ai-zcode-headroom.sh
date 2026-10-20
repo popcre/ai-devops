@@ -89,5 +89,12 @@ else
   printf 'ok - installer behavioral checks skipped (not Linux)\n'
 fi
 
+ZCODE_HOME="$TMP/zcode" AI_ZCODE_HEADROOM_BASE_URL='https://127.0.0.1:8443/v1' "$TOOL" off >/dev/null
+chmod 600 "$TMP/zcode/v2/provider_config.json"
+ZCODE_HOME="$TMP/zcode" AI_ZCODE_HEADROOM_BASE_URL='https://127.0.0.1:8443/v1' "$TOOL" off >/dev/null
+check 'rewrite keeps a backup' test -f "$TMP/zcode/v2/provider_config.json.bak"
+check 'rewrite leaves no temp file' bash -c "! test -e '$TMP/zcode/v2/provider_config.json.tmp'"
+check 'rewrite keeps the file mode' bash -c "[ \"\$(stat -c %a '$TMP/zcode/v2/provider_config.json')\" = 600 ] || [ \"\$(uname -o)\" = Msys ]"
+
 printf 'ok - all ai-zcode-headroom checks\n'
 
