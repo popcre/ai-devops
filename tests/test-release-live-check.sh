@@ -17,7 +17,7 @@ check 'bin/ai-review-pool is shared review code' \
 check 'a docs change is not shared review code' \
   "! bash -c 'source \"$ROOT/tools/lib/review-capabilities.sh\"; review_shared_code_changed docs/x.md'"
 
-for f in bin/ai-task-gates bin/ai-muse bin/ai-glm bin/ai-reviewer-issue bin/ai-release-live-check bin/ai-release-live-check.cmd bin/ai-task-gates.cmd; do
+for f in bin/ai-task-gates bin/ai-muse bin/ai-glm bin/ai-grok-review bin/ai-qwen bin/ai-gemini bin/ai-deepseek-agent bin/ai-stepfun bin/ai-stepfun.cmd bin/ai-reviewer-issue bin/ai-release-live-check bin/ai-release-live-check.cmd bin/ai-task-gates.cmd; do
   check "$f is shared review code (release gate)" \
     "bash -c 'source \"$ROOT/tools/lib/review-capabilities.sh\"; review_shared_code_changed $f'"
 done
