@@ -301,6 +301,62 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 > a local Claude can instead use `http://localhost:8787` while an `ssh vps2`
 > session is open. This is a fallback, not the primary path.
 
+### Workflow B′ — Linux desktop (KDE) pointers (edge-dev3, 2026-10-19)
+
+Ubuntu + Claude Desktop + Claude Code. Same proxy (8787). Five traps that
+cost real time — read before wiring another Linux desktop.
+
+1. **`ai-headroom on` covers terminals only.** It writes
+   `export ANTHROPIC_BASE_URL=` in `~/.bashrc` **above** the non-interactive
+   `case $-` guard (Claude Code SSH sessions are non-interactive). GUI apps
+   started from KDE never read `.bashrc`.
+2. **Desktop apps need `~/.config/environment.d/50-headroom.conf`** with
+   `ANTHROPIC_BASE_URL=<proxy url>`, plus `systemctl --user set-environment`
+   for the current session. Confirm with
+   `systemctl --user show-environment | grep ANTHROPIC_BASE_URL`. Do **not**
+   use `/etc/environment` (machine-wide; hits the CI runner).
+3. **DietCode / Scaledown `claude` wrapper stomps the URL.** On edge-dev3
+   `~/.local/bin/claude` is a wrapper that rewrites `ANTHROPIC_BASE_URL` to
+   `http://127.0.0.1:8788` whenever `~/.scaledown/config.json` exists. Chain
+   it: `export SCALEDOWN_PROXY_UPSTREAM=<proxy url>` (also above the bashrc
+   guard and in `environment.d`), then restart the DietCode proxy. Otherwise
+   terminal Claude silently bypasses Headroom.
+4. **Claude Desktop forces `ANTHROPIC_BASE_URL=https://api.anthropic.com` on
+   Claude Code children**, overriding the session env. Wrap the desktop's
+   Claude Code binary (`…/claude-code/<ver>/<hash>/claude` → `claude-real`
+   plus a tiny script that re-exports the proxy URL and `exec`s the real
+   ELF). New chats pick it up; already-open Claude Code chats need a restart.
+5. **Electron clears `/proc/<pid>/environ`.** Do not use that to verify
+   routing. Check the systemd unit `Environment=`, child helper processes, or
+   — always decisive — Headroom `/stats` `proxy_inbound.by_path["/v1/messages"]`
+   and the `proxy.log` request lines on hetz (`ssh vps2`).
+
+**What Headroom covers on a desktop box:** Claude Code (terminal and
+desktop-spawned). **What it does not:** the Claude Desktop *chat UI*
+(claude.ai backend — different protocol). Albert uses only the desktop app on
+edge-dev3, so Headroom applies to its Claude Code sessions, not plain chats.
+
+**Subscription CLI auth:** `~/.claude/.credentials.json` (`claudeAiOauth`).
+The desktop holds a live `CLAUDE_CODE_OAUTH_TOKEN` in its Claude Code child
+`environ`; that token can seed the CLI credentials file (machine-local login
+state — never in this repo). Live proof used subscription OAuth
+(`authorization: [REDACTED]` in `proxy.log`), not an API key.
+
+Issue with acceptance evidence: [#1869](https://github.com/popcre/ai-devops/issues/1869).
+
+**How to tell traffic is really going through Headroom** (health alone is
+worthless — see §6):
+
+1. Note `/stats` `proxy_inbound.by_path["/v1/messages"]` (and `total`).
+2. Send one Claude Code message from the client you just wired.
+3. Read `/stats` again. The count must rise. If it does not, the client is
+   not using the proxy (wrapper stomped the URL, or desktop forced
+   `api.anthropic.com`).
+4. For a named request line: `ssh vps2` then
+   `grep path=/v1/messages /home/ai/.headroom/logs/proxy.log | tail`
+   — look for your tailnet client IP, `user-agent: claude-cli/…`, and
+   `status=200`. Live dashboard: `$HEADROOM_URL/dashboard`.
+
 ### Workflow C — ZCode running locally on a Windows machine (added 2026-10-19)
 
 **Full incident, architecture, and off-ramp:
@@ -580,6 +636,7 @@ retain the documented instant bypass for outages.
 | hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
+| **edge-dev3** (Workflow B′, Ubuntu KDE) | ✅ yes (2026-10-19) | `ai-headroom on` + `environment.d` + DietCode `SCALEDOWN_PROXY_UPSTREAM` chain + desktop Claude Code binary wrapper; subscription CLI and desktop Claude Code proven in `proxy.log` ([#1869](https://github.com/popcre/ai-devops/issues/1869)). Chat UI is out of scope. |
 | AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
 | **edge-dev ZCode** (Workflow C) | ✅ wired 2026-10-19, desktop live proof done | provider baseUrl `https://$HEADROOM_HOST:8443/v1` via TLS front; see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md) |
 
