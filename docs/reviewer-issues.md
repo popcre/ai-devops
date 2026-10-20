@@ -318,9 +318,9 @@ require a maintenance session to review the evidence first.
 
 Every incident records its machine and operating system (`machine` in `show`).
 Before diagnosing, name both: the OS the failure happened on, and every OS the
-fix will run on. The same toolkit runs two ways — Ubuntu (hetz, 916-alien,
-edge-dev3, edge-dev; desktop and server are identical) and Windows (4837:
-PowerShell installer, Git Bash, OpenCode folder shell). A shared-code fix
+fix will run on. The same toolkit runs two ways — Ubuntu (hetz server, edge-dev3 desktop) and
+Windows (4837/al8960ofc, 916 with its checkout on D:, edge-dev: PowerShell
+installer, Git Bash, OpenCode folder shell). A shared-code fix
 (lifecycle core, pool, packet, validators, briefs) reaches both, so it is not
 done until its tests pass on Linux **and** on Windows (Git Bash plus PowerShell
 5.1 and 7) and it is installed by each platform's route

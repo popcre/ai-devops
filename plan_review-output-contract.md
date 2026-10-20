@@ -321,9 +321,9 @@ must therefore work the same on all three:
 
 | Platform | Hosts | Review path | Install route |
 |---|---|---|---|
-| Ubuntu server | hetz, 916-alien | Bash lifecycle core + doors | `update.sh` protected install (`authorize-install`, see `docs/deployment.md`) |
-| Ubuntu desktop | edge-dev3, edge-dev | same as server | same as server |
-| Windows | 4837 (`C:\repos\ai-devops`) | Git Bash for Bash suites, PowerShell for PowerShell suites; OpenCode folder shell for StepFun review/ask | `bin/install-ai-devops-windows.ps1 -RepoPath <checkout> -ExpectedHead <SHA>` |
+| Ubuntu server | hetz | Bash lifecycle core + doors | `update.sh` protected install (`authorize-install`, see `docs/deployment.md`) |
+| Ubuntu desktop | edge-dev3 | same as server | same as server |
+| Windows | 4837/al8960ofc (`C:\repos\ai-devops`), 916 (`D:\repos\ai-devops`), edge-dev | Git Bash for Bash suites, PowerShell for PowerShell suites; OpenCode folder shell for StepFun review/ask | `bin/install-ai-devops-windows.ps1 -RepoPath <checkout> -ExpectedHead <SHA>` |
 
 EDGE-ALIEN and Envy are not review hosts; install nothing there.
 

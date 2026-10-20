@@ -394,7 +394,7 @@ pipeline. The recovery procedure lives in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
-- **Two operating systems, one toolkit** (#1783): reviewer tooling runs on Ubuntu (hetz, 916-alien, edge-dev3, edge-dev) and Windows (4837). Before changing it, write down the OS the problem happened on and every OS the change will run on; design for both, prove both, install on both by each OS's route. Brief: [`config/reviewer-platform-brief.txt`](config/reviewer-platform-brief.txt) (printed by `ai-task-gates start` and `ai-reviewer-issue show`).
+- **Two operating systems, one toolkit** (#1783): reviewer tooling runs on Ubuntu (hetz, edge-dev3) and Windows (4837/al8960ofc, 916, edge-dev). Before changing it, write down the OS the problem happened on and every OS the change will run on; design for both, prove both, install on both by each OS's route. Brief: [`config/reviewer-platform-brief.txt`](config/reviewer-platform-brief.txt) (printed by `ai-task-gates start` and `ai-reviewer-issue show`).
 - **One code path for every reviewer** (#1834): in shared review code, a step that decides whether evidence, a receipt, a record, cleanup or qualification happens never branches on a provider name — declare the exception as a capability in `config/review-runner-doors.json` (inventory: [`docs/reviewer-harness-consolidation.md`](docs/reviewer-harness-consolidation.md)).
 - **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
   Outside `popcre/shared-db`, dispatch a review only when the task class's gate
