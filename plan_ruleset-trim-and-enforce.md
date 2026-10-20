@@ -12,7 +12,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 1.2 Retire `shared-db-orchestrator` global mention and skill | ⬜ open | — | — |
 | 1.3 Installed-global drift check | ⬜ open | — | — |
 | 2.1 PR-wait polling hook (Claude PreToolUse) | ✅ done | 2026-10-20 | `6303e108`; `tests/test-ai-pr-poll-guard-hook.sh` 28/28 |
-| 2.2 `ai-pr-wait` single run fits a 10-minute tool call | ⬜ open | — | — |
+| 2.2 `ai-pr-wait` single run fits a 10-minute tool call | ✅ done | 2026-10-20 | `e2507f43` (`--fit-tool-call`); globals name it in this commit; `tests/test-ai-pr-wait.sh` |
 | 3.1 One source for the Codex/ZCode/MiMo globals | ⬜ open | — | — |
 | 3.2 Trim the Claude + Codex global rules to ~1,200 words | ⬜ open | — | — |
 | 3.3 Move dated owner rulings to `docs/owner-rulings.md` | ⬜ open | — | — |
