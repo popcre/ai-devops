@@ -242,11 +242,13 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   `templates/system/AGENTS-global-codex.md` → `~/.codex/AGENTS.md`;
   `templates/system/machine-atlas.md` → each machine's environment atlas section.
   Installed **only if absent** — never clobbers local edits.
-- **Claude hooks:** two, both installed into the user-level
+- **Claude hooks:** three, all installed into the user-level
   `~/.claude/settings.json` by their own idempotent, strictly additive scripts,
-  and both pointing at a stable copy under `~/.config/ai-devops/` rather than
+  and all pointing at a stable copy under `~/.config/ai-devops/` rather than
   into a repo checkout that might move.
   `bin/ai-install-memory-hook` registers the `PostToolUse` memory-index hook;
+  `bin/ai-install-pr-poll-guard-hook` registers the `PreToolUse` Bash hook
+  (`bin/ai-pr-poll-guard-hook`) that blocks hand-written PR polling loops;
   `bin/ai-install-completion-check-hook` registers the
   `UserPromptSubmit`, `PostToolUse`, and `Stop` closeout hooks
   (`bin/ai-completion-check-hook`). The first two record whether the current

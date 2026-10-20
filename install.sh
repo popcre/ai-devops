@@ -648,6 +648,7 @@ run_stage required "Claude tool permissions" "$REPO_ROOT/bin/ai-claude-permissio
 #     Idempotent and strictly additive to ~/.claude/settings.json.
 # --------------------------------------------------------------------------
 run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-check-hook" --client claude
+run_stage required "Claude PR-poll guard hook" "$REPO_ROOT/bin/ai-install-pr-poll-guard-hook"
 
 # --------------------------------------------------------------------------
 # 4.9 Session temp cleanup (plan_session-temp-cleanup.md). Each Claude Code
