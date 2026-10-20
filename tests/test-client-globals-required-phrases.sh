@@ -59,6 +59,16 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
 
+# Each global lists the valid task-gate classes; the list must match
+# config/task-gates.json change_classes exactly so it cannot go stale (#1881).
+expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | sort | tr '\n' ' ')"
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
+  listed_classes="$(tr '\n' ' ' < "$client_file" | grep -oP 'Classes: \K[^.]*' | head -n1 \
+    | sed 's/([^)]*)//g' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort | tr '\n' ' ')"
+  [[ "$listed_classes" == "$expected_classes" ]] \
+    || fail "$(basename "$client_file") task-gate class list '$listed_classes' does not match config/task-gates.json '$expected_classes'"
+done
+
 # Owner ruling 2026-09-28 ("never ask a human to approve"): the repository
 # guide, the secrets skill, and the details doc must keep the AI-reviewer gate
 # and must not return to asking Albert to approve.

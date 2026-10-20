@@ -923,7 +923,7 @@ cmd_start(){
   done
   [ -n "$class" ] || die 'start requires --class.'
   require_jq; load_policy; resolve_repo
-  valid_class "$class" || die "unknown change class: $class"
+  valid_class "$class" || die "unknown change class: $class (valid: $(jqr '.change_classes|keys_unsorted|join(", ")' "$POLICY_FILE"))"
   resolve_base "$base"
   state_write "$(jq -nc \
     --arg v 1 --arg identity "$IDENTITY" --arg worktree "$TOPLEVEL" \
