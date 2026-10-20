@@ -240,9 +240,6 @@ the task needs the detail.
   every other repository the session picks any in-rotation reviewer whose
   engine differs from its own via `ai-review`. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
-- **`shared-db-orchestrator` is optional reference only** — claim-first is the
-  default structural path. Its detailed safety rules stay binding whenever
-  shared-db structural work runs.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.

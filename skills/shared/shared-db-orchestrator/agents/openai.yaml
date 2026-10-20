@@ -1,4 +1,0 @@
-interface:
-  display_name: "Shared DB Safety Reference"
-  short_description: "Claim-first shared database safety guidance"
-  default_prompt: "Use $shared-db-orchestrator as an optional safety reference for claim-first shared-db structural work, exact-object protection, permanent migration reservations, and serialized preview, merge and production stages."

@@ -29,8 +29,8 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > immediately before every write. Database writes skip the second AI (owner
 > ruling 2026-10-14).
 > Read-only inspection is always allowed (Rule 0); your own application's rows are
-> not gated (Rule 0.5). `shared-db-orchestrator` is optional reference only for its
-> safety rules (claims, exact-object locks, review, live proof). To end or hand
+> not gated (Rule 0.5). The detailed safety reference
+> (`ai-devops/docs/shared-db-structural-safety/`, binding when structural work runs) covers (claims, exact-object locks, review, live proof). To end or hand
 > over a session, use **`shared-db-handover`** (notes on the same issue).
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.

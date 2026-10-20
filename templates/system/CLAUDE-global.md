@@ -206,8 +206,6 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   repository the session picks any in-rotation reviewer whose engine differs
   from its own via `ai-review`. Never retry one out of rotation. Details:
   `docs/standing-rules-details.md`.
-- **`shared-db-orchestrator` is optional reference only** — claim-first is the
-  default structural path; its safety rules stay binding when that work runs.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in their
   approved private repository.

@@ -570,7 +570,7 @@ silent skip and a clean result look identical, and only one of them is finished.
   WINS over this skill wherever the two disagree.** This file is a portable
   summary; §12 "Standing facts an incoming session must know" is the canonical
   version of the safety rules restated here.
-- `shared-db-orchestrator` — optional historical safety reference. Current
+- `ai-devops/docs/shared-db-structural-safety/` — detailed structural safety reference. Current
   structural work is claim-first; do not route requests to an orchestrator, wait
   for dispatch, create a marker, or use a marker as a lock.
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
