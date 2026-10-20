@@ -9,14 +9,20 @@ Written 2026-10-19 (8:10 PM EDT) on hetz by Claude Code. Base: `main` at `39073d
 | Step | State | Evidence |
 |---|---|---|
 | 0. Plan written and merged | ✅ done 2026-10-19 | this file on `main` |
-| 1. Shared-path detector in `tools/lib/review-capabilities.sh` | ⬜ open | — |
-| 2. `bin/ai-release-live-check` (run / fleet / verify) | ⬜ open | — |
-| 3. Install gate in `ai-task-gates authorize-install` | ⬜ open | — |
-| 4. Tests | ⬜ open | — |
-| 5. Docs (`docs/deployment.md`, router) | ⬜ open | — |
+| 1. Shared-path detector in `tools/lib/review-capabilities.sh` | ✅ landed (implementation PR) | `tests/test-release-live-check.sh` |
+| 2. `bin/ai-release-live-check` (run / fleet / verify) | ✅ landed (implementation PR) | `tests/test-release-live-check.sh` |
+| 3. Install gate in `ai-task-gates authorize-install` | ✅ landed (implementation PR) | `tests/test-ai-task-gates.sh` (shared review code release without passing live reviews is refused) |
+| 4. Tests | ✅ landed | `bash tests/test-release-live-check.sh` |
+| 5. Docs (`docs/deployment.md`, router) | ✅ landed | `docs/deployment.md` "Release live review check" |
 | 6. Live proof: hetz + 4837 statuses on a real merged SHA | ⬜ open | `- [ ] live proof` on #1783 |
 
-A fresh session starts at **Step 1**.
+A fresh session starts at **Step 6** (live proof) if it is still open.
+
+As built (2026-10-19): the status check is inlined in `ai-task-gates`
+(`require_release_live_review`), fails closed, and also triggers when
+`bin/ai-release-live-check` itself changes. Accepted risk: `fleet` runs merged
+`main` code on review hosts with their provider and `gh` credentials before
+install — the same trust as installing that commit, which is what follows.
 
 ---
 
