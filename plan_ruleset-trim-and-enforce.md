@@ -350,7 +350,7 @@ Done when:
   are loaded. A one-word final-check run with `codex debug` or a saved transcript
   shows the developer messages.
 - Then make those runs use a minimal instructions file,
-  `templates/system/REVIEWER-global.md` (~200 words: read-only, quote the head SHA,
+  [`templates/system/REVIEWER-global.md`](templates/system/REVIEWER-global.md) (~200 words: read-only, quote the head SHA,
   verdict format, no remote actions, no secrets), with plugins/connectors disabled.
   Use Codex's own config switches for this, never by deleting the user's config.
 - Done when: a fresh final-check transcript shows no owner reply-style rules and no
