@@ -1179,7 +1179,7 @@ rm -rf "$TMP/writer"
 
 printf 'infrastructure production reviewer release stays pinned, declared and reviewer-gated\n'
 infra_decl='{"schema_version":1,"paths":[{"glob":"**","class":"infrastructure"}],"gates":{"infrastructure":{"required":["reviewed-production-dispatch"],"forbidden_actions":["infrastructure","production"]}}}'
-infra_repo(){ # <dir> <identity> — declared, committed, clean, HEAD == origin/main
+infra_repo(){ # <dir> <identity> — declared, committed, clean; local origin/main forged to HEAD
   newrepo "$1" "$2"
   mkdir -p "$1/.ai-devops"; printf '%s\n' "$infra_decl" > "$1/.ai-devops/task-gates.json"
   git -C "$1" add -A && git -C "$1" commit -qm declare
@@ -1187,39 +1187,50 @@ infra_repo(){ # <dir> <identity> — declared, committed, clean, HEAD == origin/
   ( cd "$1" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
 }
 newrepo "$TMP/infra-undeclared" 'u2giants/ansible'
-git -C "$TMP/infra-undeclared" update-ref refs/remotes/origin/main HEAD
 ( cd "$TMP/infra-undeclared" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
 check 'an undeclared infrastructure repository keeps production sealed' \
   "out '$TMP/infra-undeclared' check --before production --reviewer-approval \"\$(appr '$TMP/infra-undeclared' production)\" | grep -Fq 'no reviewer-approval'"
 infra_repo "$TMP/infra" 'u2giants/ansible'
-check 'the declared ansible main reaches the reviewer-approval step for production' \
-  "out '$TMP/infra' check --before production | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
-check 'and is still refused without that approval' \
-  "rc 3 '$TMP/infra' check --before production"
-check 'and starts with an exact-head AI reviewer APPROVE' \
-  "rc 0 '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\""
+check 'a forged local origin/main never stands in for the real GitHub main' \
+  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
 check 'the release never opens the infrastructure action' \
   "out '$TMP/infra' check --before infrastructure --reviewer-approval \"\$(appr '$TMP/infra' infrastructure)\" | grep -Fq 'no reviewer-approval'"
-printf 'x\n' > "$TMP/infra/untracked.txt"
-check 'a dirty checkout keeps production sealed' \
-  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
-rm -f "$TMP/infra/untracked.txt"
-git -C "$TMP/infra" commit -q --allow-empty -m unpushed
-check 'a head that is not origin/main keeps production sealed' \
+git -C "$TMP/infra" config url."https://github.com/u2giants/ansible.git".insteadOf "file://$TMP/fake-origin.git"
+git -C "$TMP/infra" remote set-url origin "file://$TMP/fake-origin.git"
+check 'an insteadOf-rewritten origin cannot impersonate the ansible repository' \
   "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
 infra_repo "$TMP/infra-foreign" 'u2giants/hiclaw'
 check 'another repository with the same declaration keeps production sealed' \
   "out '$TMP/infra-foreign' check --before production --reviewer-approval \"\$(appr '$TMP/infra-foreign' production)\" | grep -Fq 'no reviewer-approval'"
-newrepo "$TMP/infra-uncommitted" 'u2giants/ansible'
-mkdir -p "$TMP/infra-uncommitted/.ai-devops"; printf '%s\n' "$infra_decl" > "$TMP/infra-uncommitted/.ai-devops/task-gates.json"
-git -C "$TMP/infra-uncommitted" update-ref refs/remotes/origin/main HEAD
-( cd "$TMP/infra-uncommitted" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
-check 'an uncommitted declaration keeps production sealed' \
-  "out '$TMP/infra-uncommitted' check --before production --reviewer-approval \"\$(appr '$TMP/infra-uncommitted' production)\" | grep -Fq 'no reviewer-approval'"
 jq '.reviewer_release.production.infrastructure="anything"' "$ROOT/config/task-gates.json" > "$TMP/broad-infra.json"
 check 'central policy cannot broaden the infrastructure production release' \
-  "AI_TASK_GATES_FILE='$TMP/broad-infra.json' out '$TMP/infra' check --before production | grep -Fq 'closed u2giants/ansible production boundary'"
-rm -rf "$TMP/infra" "$TMP/infra-undeclared" "$TMP/infra-foreign" "$TMP/infra-uncommitted" "$TMP/broad-infra.json"
+  "AI_TASK_GATES_FILE='$TMP/broad-infra.json' out '$TMP/infra-foreign' check --before production | grep -Fq 'closed u2giants/ansible production boundary'"
+rm -rf "$TMP/infra" "$TMP/infra-undeclared" "$TMP/infra-foreign" "$TMP/broad-infra.json"
+# The positive path needs the real repository: a clean clone of the current
+# u2giants/ansible main (which declares the gate) reaches the approval step,
+# then starts only with the exact-head APPROVE; a dirty or unpushed head and an
+# uncommitted declaration stay sealed. Skipped only when GitHub is unreachable.
+if git clone -q --depth 1 https://github.com/u2giants/ansible.git "$TMP/ansible-real" 2>/dev/null \
+  && grep -q reviewed-production-dispatch "$TMP/ansible-real/.ai-devops/task-gates.json"; then
+  git -C "$TMP/ansible-real" config user.name T; git -C "$TMP/ansible-real" config user.email t@e
+  ( cd "$TMP/ansible-real" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
+  check 'the real ansible main reaches the reviewer-approval step for production' \
+    "out '$TMP/ansible-real' check --before production | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
+  check 'and is still refused without that approval' \
+    "rc 3 '$TMP/ansible-real' check --before production"
+  check 'and starts with an exact-head AI reviewer APPROVE' \
+    "rc 0 '$TMP/ansible-real' check --before production --reviewer-approval \"\$(appr '$TMP/ansible-real' production)\""
+  printf 'x\n' > "$TMP/ansible-real/untracked.txt"
+  check 'a dirty checkout keeps production sealed' \
+    "out '$TMP/ansible-real' check --before production --reviewer-approval \"\$(appr '$TMP/ansible-real' production)\" | grep -Fq 'no reviewer-approval'"
+  rm -f "$TMP/ansible-real/untracked.txt"
+  git -C "$TMP/ansible-real" commit -q --allow-empty -m unpushed
+  check 'an unpushed head keeps production sealed' \
+    "out '$TMP/ansible-real' check --before production --reviewer-approval \"\$(appr '$TMP/ansible-real' production)\" | grep -Fq 'no reviewer-approval'"
+else
+  printf '  skip real ansible main positive path (GitHub unreachable or gate not yet declared)\n'
+fi
+rm -rf "$TMP/ansible-real"
 
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'

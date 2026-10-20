@@ -122,10 +122,13 @@ A further entry names `production` for `infrastructure`, released by the gate
 `reviewed-production-dispatch` (owner ruling 2026-10-20 in his chat: "yes, make
 the change and finish the install"). It is closed to exactly `u2giants/ansible`:
 the canonical origin, the gate declared in a clean consumer file committed at
-HEAD, a clean worktree, and HEAD equal to `origin/main` (the commit the apply
-workflow dispatches), so the exact-head lifecycle APPROVE names the dispatched
-resource. Any other repository, a dirty or unpushed head, an uncommitted
-declaration, or a broadened central entry stays sealed, and the `infrastructure`
+HEAD, a clean worktree (ignored files included), and HEAD equal to the real
+GitHub `main` read fresh from the fixed canonical URL with no system, global or
+repository Git config. That `main` is the commit the apply workflow dispatches,
+so the exact-head lifecycle APPROVE names the dispatched resource, and a local
+tracking ref or `insteadOf` rewrite cannot impersonate it. Any other repository,
+a dirty, stale or unpushed head, an uncommitted declaration, an unreachable
+GitHub, or a broadened central entry stays sealed, and the `infrastructure`
 action itself is never opened.
 
 The central `application_source_releases` map is a separate source-only route for
