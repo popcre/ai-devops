@@ -25,6 +25,8 @@ Goal: **fewer input tokens per request → lower Claude token usage.**
   sessions, not a trend. The like-for-like historical `token`-mode baseline was
   4.22%; the current mode preserves slightly better provider-cache behaviour.
 - It does **not** break the prompt cache; that was measured, not assumed (§5b).
+- Since 2026-10-19 both lanes also trim **output** tokens via the output
+  shaper, verbosity pinned at level 2 (§5d).
 - Installed version: **0.41.0** (pipx package `headroom-ai`, upgraded from
   0.37.0 on 2026-10-19; see §2 for the bind acknowledgment that version needs).
 
@@ -68,6 +70,8 @@ Wants=network-online.target tailscaled.service      # waits for Tailscale on boo
 [Service]
 User=ai
 ExecStart=/home/ai/.local/bin/headroom proxy --port 8787 --host $HEADROOM_HOST
+Environment=HEADROOM_OUTPUT_SHAPER=1                    # output trimming (§5d)
+Environment=HEADROOM_VERBOSITY_LEVEL=2
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/ai/.headroom/logs/proxy.log
@@ -113,6 +117,8 @@ Environment=HOME=/home/ai/.headroom-zcode-home   # own ledger: two writers on
                                                  # one proxy_savings.json
                                                  # would corrupt it
 Environment=HEADROOM_ALLOW_UNAUTHENTICATED_BIND=1
+Environment=HEADROOM_OUTPUT_SHAPER=1                    # output trimming (§5d)
+Environment=HEADROOM_VERBOSITY_LEVEL=2
 ExecStart=/home/ai/.local/bin/headroom proxy --port 8788 --host $HEADROOM_HOST --mode cache --anthropic-api-url https://api.z.ai/api/anthropic
 Restart=on-failure
 RestartSec=5
@@ -487,6 +493,49 @@ narrative figures in §6.
 > drops rows — the first version of this recorder lost a third of the data while
 > looking correct. The current parser anchors on a full regex.
 
+## 5d. Output trimming — the output shaper (enabled 2026-10-19)
+
+Headroom also reduces **output** tokens: an output shaper that (a) steers
+verbosity through a small block appended to the system-prompt tail and (b)
+routes effort / thinking budget through request parameters. It ships **off by
+default**. Albert asked for it on 2026-10-19 ("enable output trimming on
+headroom"); both lanes now carry in `[Service]`:
+
+```ini
+Environment=HEADROOM_OUTPUT_SHAPER=1
+Environment=HEADROOM_VERBOSITY_LEVEL=2
+```
+
+**Why the level is pinned.** Both lanes run `--mode cache`. Unpinned steering
+would move the system-prompt tail as the level changes — that rewrites the
+provider prefix-cache key, trading the ~90% prefix-cache discount for a small
+output saving — so headroom hard-disables *unpinned* steering in cache mode.
+A level **fixed before startup** is written into turn 1's prefix and never
+moves, so an explicitly pinned `HEADROOM_VERBOSITY_LEVEL` passes the gate by
+design. Level 2 "only forbids ceremony and restatement" (vendor measurement:
+−30% output tokens on a long explain-with-code turn, no visible content loss);
+level 3 starts dropping content and was deliberately not chosen. Effort
+routing and the thinking budget ride request parameters outside the cache key
+and keep saving in cache mode regardless.
+
+**Measure it** (output tokens are counterfactual — the proxy never sees what
+the model *would* have emitted unshaped):
+
+```bash
+sudo -u ai /home/ai/.local/bin/headroom output-savings
+```
+
+Without a holdout this reports the **estimated** (synthetic-control) figure
+with a 95% confidence band. An honest **measured** A/B needs
+`HEADROOM_OUTPUT_HOLDOUT>0` (a fraction of conversations left unshaped as
+control). We did **not** enable a holdout: every held-out conversation is
+savings deliberately forgone, and the point of the trial is to save. Revisit
+if the estimate is ever disputed.
+
+**Revert:** remove the two `Environment=` lines from both units,
+`systemctl daemon-reload`, restart both services. Unit backups sit next to
+the originals as `*.service.bak-2026-10-19-shaper`.
+
 ## 6. How to see whether it is actually helping
 
 On the VPS (`ssh hetzner`, or via the `devops-mcp` MCP):
@@ -643,6 +692,10 @@ systemctl stop headroom.service
 systemctl disable headroom.service     # also prevent it starting on boot
 ```
 
+**Turn off output trimming only (keep compression):** remove the two
+`Environment=` shaper lines from both units (§5d), `systemctl daemon-reload`,
+restart both services.
+
 **Remove it completely.** `/home/ai/.headroom` holds the entire savings ledger
 and proxy logs — the only record of whether this experiment paid off. Archive it
 before deleting, so a later "was Headroom worth it?" question is still answerable:
@@ -666,6 +719,7 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
 | Durable perf record | `/home/ai/headroom-perf/perf.csv` (hourly cron, §5c) |
 | Optimization mode | `cache` (prefix freeze strict) — set in the unit, §5b |
+| Output trimming | ON since 2026-10-19, both lanes — shaper + pinned level 2 (§5d) |
 | Unit backup | `/etc/systemd/system/headroom.service.bak-2026-08-31` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
