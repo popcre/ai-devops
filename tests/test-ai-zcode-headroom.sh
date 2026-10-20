@@ -57,6 +57,8 @@ printf 'ok - on refuses missing CA\n'
 INSTALLER="$ROOT/config/zcode-headroom/install-zcode-headroom-tls.sh"
 check 'installer has no /tmp proxy source' bash -c "! grep -q '/tmp/zcode_headroom_tls.py' '$INSTALLER'"
 check 'proxy loads server-chain.crt' grep -q 'server-chain.crt' "$ROOT/config/zcode-headroom/zcode_headroom_tls.py"
+# The installer is Linux-only (hetz, systemd); Git Bash mangles openssl -subj.
+if [ "$(uname -s)" = Linux ]; then
 STUB="$TMP/stub"; FAKE="$TMP/root"; mkdir -p "$STUB"
 for c in systemctl ss sleep; do printf '#!/bin/sh\nexit 0\n' > "$STUB/$c"; chmod +x "$STUB/$c"; done
 printf '#!/bin/sh\necho "$@" >> "%s/chown.log"\n' "$TMP" > "$STUB/chown"; chmod +x "$STUB/chown"
@@ -83,6 +85,9 @@ check 'unit log path matches created dir' grep -q '^StandardOutput=append:/home/
 rm -f "$T/server-chain.crt"
 check 'rerun on older install' run_installer
 check 'rerun builds missing chain' bash -c "cat '$T/server.crt' '$T/ca.crt' | cmp -s - '$T/server-chain.crt'"
+else
+  printf 'ok - installer behavioral checks skipped (not Linux)\n'
+fi
 
 printf 'ok - all ai-zcode-headroom checks\n'
 
