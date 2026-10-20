@@ -299,6 +299,18 @@ if ! { ln -s "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null
   ln "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null && [ "$user_codex_home/auth.json" -ef "$reviewer_home/auth.json" ] \
     || die 'could not link Codex auth into the reviewer home; refusing to review with the owner instructions.'
 fi
+# Windows keeps the elevated sandbox's one-time setup (sandbox users, runner
+# copies, setup marker) under CODEX_HOME. An empty per-run home redoes that
+# setup and every command then hangs, so the review returns BLOCKED (observed
+# 2026-10-20 on al8960ofc). Junction the existing state in; junctions need no
+# symlink rights, and the cleanup's rm unlinks them without touching the target.
+if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ]; then
+  for d in .sandbox .sandbox-bin .sandbox-secrets; do
+    [ -d "$user_codex_home/$d" ] || continue
+    MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$reviewer_home/$d")" "$(cygpath -w "$user_codex_home/$d")" >/dev/null \
+      || die "could not link the Windows sandbox state ($d) into the reviewer home."
+  done
+fi
 REVIEWER_HOME_ARGS=(CODEX_HOME="$reviewer_home")
 
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
