@@ -138,10 +138,11 @@ git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is
 ! git ls-files --error-unmatch -- "$OUT_REL" >/dev/null 2>&1 || die "exact report destination is tracked: $OUT_REL"
 [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || die "unique report collision: $OUT"
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
-STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
+STATE=""; REVIEWER_HOME_DIR=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
   reviewer_event_cleanup_allowed codex || return 1
   [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
+  [ -z "$REVIEWER_HOME_DIR" ] || rm -rf "$REVIEWER_HOME_DIR"
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
@@ -277,6 +278,28 @@ case "$(uname -s 2>/dev/null || true)" in
     WINDOWS_SANDBOX_ARGS=(-c "windows.sandbox=\"${AI_CODEX_WINDOWS_SANDBOX:-elevated}\"") ;;
 esac
 
+# Minimal instruction profile (popcre/ai-devops#1881 step 5.1). --ignore-user-config
+# skips config.toml but Codex still loads $CODEX_HOME/AGENTS.md (the owner's
+# reply-style rules) and the installed skill and plugin lists. A per-run home
+# holds only the reviewer rules plus a symlink to the user's auth.json, so token
+# refreshes write through to the real file; the user's home is never touched.
+# Where a symlink cannot be made (Windows without symlink rights) the review
+# keeps the user's home rather than copy credentials.
+REVIEWER_HOME_ARGS=()
+REVIEWER_PROFILE_ARGS=(--disable plugins --disable apps --disable memories --disable multi_agent -c skills.enabled=false -c include_skills_usage_instructions=false)
+reviewer_rules="$SCRIPT_DIR/../templates/system/REVIEWER-global.md"
+user_codex_home="${CODEX_HOME:-$HOME/.codex}"
+if [ -f "$reviewer_rules" ] && [ -f "$user_codex_home/auth.json" ]; then
+  reviewer_home="$(mktemp -d "${TMPDIR:-/tmp}/codex-reviewer-home.XXXXXX")" || die 'could not reserve the reviewer Codex home.'
+  REVIEWER_HOME_DIR="$reviewer_home"
+  cp "$reviewer_rules" "$reviewer_home/AGENTS.md" || die 'could not stage the reviewer instructions.'
+  if ln -s "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null && [ -L "$reviewer_home/auth.json" ]; then
+    REVIEWER_HOME_ARGS=(CODEX_HOME="$reviewer_home")
+  else
+    printf 'ai-codex-review: no auth symlink here; reviewing with the user Codex home.\n' >&2
+  fi
+fi
+
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
@@ -285,7 +308,7 @@ set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
-printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"

@@ -38,6 +38,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
   hang) sleep 3; printf '## Verdict\nAPPROVE\n';;
   signal) [ -z "${AI_CODEX_SIGNAL_READY:-}" ] || printf '%s\n' "$$" > "$AI_CODEX_SIGNAL_READY"; trap '[ -z "${AI_CODEX_SIGNAL_STOPPED:-}" ] || printf stopped > "$AI_CODEX_SIGNAL_STOPPED"; exit 143' HUP INT TERM; sleep 30;;
   slow) sleep 1; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
+  profilespy) { printf 'home=%s\n' "$CODEX_HOME"; cat "$CODEX_HOME/AGENTS.md"; [ -L "$CODEX_HOME/auth.json" ] && printf 'auth=symlink\n'; } > "$AI_CODEX_TEST_ARGS/profile-spy"; printf '%s\n' "$@" > "$AI_CODEX_TEST_ARGS/profile-args"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   envspy) env > "$AI_CODEX_TEST_ARGS/env-spy"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   *) printf 'review saw complete snapshot\n\n## Verdict\nAPPROVE\n\n'; printf 'codex diagnostic after response\n' >&2;;
 esac
@@ -80,6 +81,11 @@ check "source_identity_refusals_submit_zero_provider_calls" "[ '$IDENTITY_CALLS_
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
 # #1427: Codex reviews use the ChatGPT login only; API keys never reach it.
 check "codex_review_unsets_api_keys" "cd '$R' && OPENAI_API_KEY=fake-openai-1427 CODEX_API_KEY=fake-codex-1427 AI_CODEX_STUB_MODE=envspy '$SCRIPT' diff-review >/dev/null 2>&1 && test -s '$TMP/args/env-spy' && ! grep -q 'fake-.*-1427' '$TMP/args/env-spy'"
+# Step 5.1 (#1881): reviewer runs get only the reviewer rules, no owner globals, skills or plugins.
+UH="$TMP/user-codex-home"; mkdir -p "$UH"; printf 'Albert is a business owner\n' > "$UH/AGENTS.md"; printf '{}' > "$UH/auth.json"
+check "reviewer_profile_replaces_owner_globals" "cd '$R' && CODEX_HOME='$UH' AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -q 'auth=symlink' '$TMP/args/profile-spy' && ! grep -q 'business owner' '$TMP/args/profile-spy' && ! grep -qx 'home=$UH' '$TMP/args/profile-spy'"
+check "reviewer_profile_disables_plugins_and_skills" "grep -qx plugins '$TMP/args/profile-args' && grep -qx skills.enabled=false '$TMP/args/profile-args' && grep -qxe --ignore-user-config '$TMP/args/profile-args'"
+check "reviewer_profile_home_is_removed_and_user_home_kept" "home=\$(sed -n 's/^home=//p' '$TMP/args/profile-spy'); [ ! -e \"\$home\" ] && grep -q 'business owner' '$UH/AGENTS.md' && [ -f '$UH/auth.json' ]"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"
 check "review_runs_the_supplied_test_evidence_command" "cd '$R' && '$SCRIPT' diff-review --tests 'printf passed > \"\$AI_CODEX_TEST_MARKER\"' >/dev/null && grep -qx passed '$TMP/tests-ran'"
 check "review_rejects_a_missing_tests_command" "cd '$R' && ! '$SCRIPT' diff-review --tests >/dev/null 2>&1"
