@@ -267,16 +267,13 @@ runtime_env(){
     return 0
   fi
   # Minimal instruction profile (popcre/ai-devops#1881): a per-run config home
-  # holds the reviewer rules plus links to the managed Muse configuration, which
-  # is never edited. Without real links the turn refuses.
-  local entry
+  # holds the reviewer rules plus copies of the managed Muse profile (verified
+  # against the repository by require_runtime), which is never edited. Copies,
+  # not links: Windows Git Bash cannot link without symlink rights.
   export XDG_CONFIG_HOME="$RUN_TMP/reviewer-xdg"
-  mkdir -p "$XDG_CONFIG_HOME/opencode" && chmod 700 "$XDG_CONFIG_HOME" || die 'could not reserve the Muse reviewer config home.'
-  for entry in "$OC_CFG"/* "$OC_CFG"/.gitignore; do
-    [ -e "$entry" ] && [ "${entry##*/}" != AGENTS.md ] && [ ! -e "$XDG_CONFIG_HOME/opencode/${entry##*/}" ] || continue
-    ln -s "$entry" "$XDG_CONFIG_HOME/opencode/${entry##*/}" 2>/dev/null && [ -L "$XDG_CONFIG_HOME/opencode/${entry##*/}" ] \
-      || die 'could not link the Muse configuration into the reviewer config home; refusing to run with the owner instructions.'
-  done
+  mkdir -p "$XDG_CONFIG_HOME/opencode" && chmod 700 "$XDG_CONFIG_HOME" \
+    && cp "$OC_CFG/opencode.json" "$XDG_CONFIG_HOME/opencode/opencode.json" && cp -R "$OC_CFG/agent" "$XDG_CONFIG_HOME/opencode/agent" \
+    || die 'could not stage the Muse profile in the reviewer config home; refusing to run with the owner instructions.'
   reviewer_opencode_rules "$XDG_CONFIG_HOME/opencode" || die 'could not stage the reviewer instructions.'
   export "${REVIEWER_OPENCODE_ENV[@]}"
   export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/opencode-muse-direct"
