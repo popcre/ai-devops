@@ -283,22 +283,23 @@ esac
 # reply-style rules) and the installed skill and plugin lists. A per-run home
 # holds only the reviewer rules plus a symlink to the user's auth.json, so token
 # refreshes write through to the real file; the user's home is never touched.
-# Where a symlink cannot be made (Windows without symlink rights) the review
-# keeps the user's home rather than copy credentials.
+# Auth is linked (symbolic, else hard link for Windows without symlink rights),
+# never copied; with neither, or without the reviewer rules, the review refuses.
 REVIEWER_HOME_ARGS=()
 REVIEWER_PROFILE_ARGS=(--disable plugins --disable apps --disable memories --disable multi_agent -c skills.enabled=false -c include_skills_usage_instructions=false)
-reviewer_rules="$SCRIPT_DIR/../templates/system/REVIEWER-global.md"
+reviewer_rules="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../templates/system/REVIEWER-global.md"
 user_codex_home="${CODEX_HOME:-$HOME/.codex}"
-if [ -f "$reviewer_rules" ] && [ -f "$user_codex_home/auth.json" ]; then
-  reviewer_home="$(mktemp -d "${TMPDIR:-/tmp}/codex-reviewer-home.XXXXXX")" || die 'could not reserve the reviewer Codex home.'
-  REVIEWER_HOME_DIR="$reviewer_home"
-  cp "$reviewer_rules" "$reviewer_home/AGENTS.md" || die 'could not stage the reviewer instructions.'
-  if ln -s "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null && [ -L "$reviewer_home/auth.json" ]; then
-    REVIEWER_HOME_ARGS=(CODEX_HOME="$reviewer_home")
-  else
-    printf 'ai-codex-review: no auth symlink here; reviewing with the user Codex home.\n' >&2
-  fi
+[ -f "$reviewer_rules" ] || die "reviewer instructions are missing: $reviewer_rules"
+[ -f "$user_codex_home/auth.json" ] || die "Codex is not signed in: $user_codex_home/auth.json is missing."
+reviewer_home="$(mktemp -d "${TMPDIR:-/tmp}/codex-reviewer-home.XXXXXX")" || die 'could not reserve the reviewer Codex home.'
+REVIEWER_HOME_DIR="$reviewer_home"
+cp "$reviewer_rules" "$reviewer_home/AGENTS.md" || die 'could not stage the reviewer instructions.'
+if ! { ln -s "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null && [ -L "$reviewer_home/auth.json" ]; }; then
+  rm -f "$reviewer_home/auth.json"
+  ln "$user_codex_home/auth.json" "$reviewer_home/auth.json" 2>/dev/null && [ "$user_codex_home/auth.json" -ef "$reviewer_home/auth.json" ] \
+    || die 'could not link Codex auth into the reviewer home; refusing to review with the owner instructions.'
 fi
+REVIEWER_HOME_ARGS=(CODEX_HOME="$reviewer_home")
 
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"

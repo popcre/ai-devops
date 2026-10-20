@@ -7,6 +7,7 @@
     { "glob": "bin/ai-review-*", "class": "reviewer-safety" },
     { "glob": "bin/ai-*-review", "class": "reviewer-safety" },
     { "glob": "bin/ai-pr-wait", "class": "reviewer-safety" },
+    { "glob": "templates/system/REVIEWER-global.md", "class": "reviewer-safety" },
     { "glob": "bin/ai-task-gates", "class": "reviewer-safety" },
     { "glob": "install.sh", "class": "reviewer-safety" },
     { "glob": "update.sh", "class": "reviewer-safety" },
