@@ -8,7 +8,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1.1 List valid task-gate classes in every global | ⬜ open | — | — |
+| 1.1 List valid task-gate classes in every global | ✅ done | 2026-10-20 | b0c463d1; tests/test-client-globals-required-phrases.sh, tests/test-ai-task-gates.sh |
 | 1.2 Retire `shared-db-orchestrator` global mention and skill | ⬜ open | — | — |
 | 1.3 Installed-global drift check | ⬜ open | — | — |
 | 2.1 PR-wait polling hook (Claude PreToolUse) | ⬜ open | — | — |
