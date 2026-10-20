@@ -33,7 +33,10 @@ run_stage() {
   local classification="$1" name="$2"
   shift 2
   info "$name"
-  if "$@"; then
+  # 9>&-: a stage never gets the checkout lock. This shell keeps holding it,
+  # but anything a stage leaves running (an `op daemon`, a desktop waiter)
+  # must not keep the lock after the install ends (#1783, hetz 2026-10-20).
+  if "$@" 9>&-; then
     stage_results+=("PASS\t$classification\t$name")
     ok "$name"
   else

@@ -118,7 +118,9 @@ cd /worksp/ai-devops
    work; the message says to undo a refused merge with `git merge --abort`.
    Git resolves hooks through the common dir, so it also runs in linked
    worktrees; remote-tracking refs (`git fetch`), tags, other branches, and
-   linked worktrees' own `HEAD` are always allowed. The protected installers
+   linked worktrees' own `HEAD` are always allowed, including a new
+   linked worktree's first `HEAD` (git 2.53 writes it from the primary;
+   the hook tells it apart by which `HEAD.lock` git holds). The protected installers
    are unaffected because they run every ref-moving git command with
    `core.hooksPath` pointed at an empty temporary directory (update.sh's
    candidate/advance/rollback commands; the Windows installer's
@@ -544,6 +546,11 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
   old tip check gave (install only published, merged code) is unchanged.
 - Pass the review report at the path the review wrote it; a copy elsewhere is
   not accepted.
+- `another installation is active for this checkout` can also be an `op
+  daemon` that an earlier install's `op` call started: it inherited the lock
+  fd and outlived the install (hetz, 2026-10-20). Since #1783 `install.sh` runs every
+  stage with fd 9 closed, so nothing a stage leaves running keeps the lock; for
+  a daemon started before that, stopping it is safe.
 - `another installation is active for this checkout` can be a leftover
   `setup-desktop-apps.sh --claude-only --wait-for-desktop-exit` started by an
   earlier install that inherited the checkout lock and waits until the Claude
