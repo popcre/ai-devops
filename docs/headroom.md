@@ -314,6 +314,10 @@ ELF), and there is no KDE desktop — `environment.d` is for GUI apps, not
 
 Offline tests: `tests/test-ai-headroom-remote-wrap.sh`.
 
+**Full session record** (investigation, measurements, edge-dev3 lesson map, live
+proof, operator checklist):
+[`headroom-hetz-claude-remote-wrap.md`](headroom-hetz-claude-remote-wrap.md).
+
 ### Workflow B — Claude running **locally on a Windows machine** (clone-and-code mode)
 
 > **`settings.json` DOES NOT WORK for this, and never did.** Measured on Claude
