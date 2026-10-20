@@ -344,6 +344,26 @@ muse_preprovider_recovery_cases(){
   before="$(sha256sum "$m")"
   check "$name cannot recover a provider-uncertain turn from the archived prior" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-uncertain-recon.log' 2>&1 && grep -q 'no exact successful retained Muse process' '$TMP/preprovider-uncertain-recon.log' && test \"\$(sha256sum '$m')\" = '$before'"
   check "$name provider-uncertain archive remains intact and unused" "test -f '$archive' && cmp -s \"$archive\" '$TMP/$name.uncertain-before' && jq -e '.status==\"provider_outcome_uncertain\"' '$m'"
+  cat "$TMP/$name.uncertain-before" > "$m"
+  # #1876: a legacy failure (no recorded archive path) whose prior turn ran on
+  # an older runtime pin recovers only when the archive is the same completed
+  # provider session.
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  archive="${m%.json}.$prior.metadata.json"
+  check "$name legacy follow-up fails pre-provider again" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask $name --base missing-preprovider-target --prompt legacy\" > '$TMP/preprovider-legacy.log' 2>&1"
+  jq 'del(.archived_prior_invocation_id,.archived_prior_path)' "$m" > "$TMP/$name.legacy" && cat "$TMP/$name.legacy" > "$m"
+  jq '.retained_turn.runtime_version="0.0.1-old"' "$archive" > "$TMP/$name.oldpin" && cp "$TMP/$name.oldpin" "$TMP/$name.oldpin-good"
+  jq '.session_id="other-session"' "$TMP/$name.oldpin" > "$archive"
+  before="$(sha256sum "$m")"
+  check "$name older-pin archive from another provider session stays fenced" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-legacy-cross.log' 2>&1 && test \"\$(sha256sum '$m')\" = '$before'"
+  cat "$TMP/$name.oldpin-good" > "$archive"
+  # Like the hetz incident, earlier archives came from earlier source heads;
+  # two archives at one head stay ambiguous by design.
+  for other in "${m%.json}".*.metadata.json; do [ "$other" = "$archive" ] || { jq '.head="1111111111111111111111111111111111111111"' "$other" > "$TMP/$name.other" && cat "$TMP/$name.other" > "$other"; }; done
+  check "$name legacy older-pin completed prior recovers without provider calls" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-legacy-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-legacy-recover.log' && jq -e '.status==\"active\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.runtime_version==\"0.0.1-old\"' '$m'"
+  reask_rc=0
+  (cd "$REPO" && eval "$ENV '$SCRIPT' ask $name --prompt after-legacy") > "$TMP/preprovider-legacy-reask.log" 2>&1 || reask_rc=$?
+  check "$name same-session ask continues after legacy older-pin recovery" "test '$reask_rc' -eq 0 && jq -e '.status==\"active\" and .retained_turn.original_invocation_id!=\"'$prior'\"' '$m'"
 }
 muse_failed_turn_cases(){
   local name=failedturn.positive m event archive report_before meta_before events_before calls_before out rc oldhead list_output list_rows

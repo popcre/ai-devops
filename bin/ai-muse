@@ -1358,9 +1358,17 @@ find_archived_prior(){
 validate_archived_prior(){
   local archive="$1" meta="$2" name="$3" rid="$4" root="$5" event stem item path expected
   [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
+  # A runtime pin upgrade between the prior turn and the failed follow-up is
+  # allowed only for a completed (active) prior turn of the same provider
+  # session: restoring it replays nothing, and the next ask already resumes
+  # older-runtime sessions. Uncompleted or cross-session archives still refuse.
   jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" \
+    --arg sid "$(jq -r '.session_id // ""' "$meta" 2>/dev/null || true)" \
     '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and
-     .retained_turn.model==$model and .retained_turn.runtime_version==$version and
+     .retained_turn.model==$model and
+     (.retained_turn.runtime_version==$version or
+      (.status=="active" and (.retained_turn.runtime_version|type=="string" and length>0) and
+       $sid!="" and .session_id==$sid and .retained_turn.expected_session_id==$sid)) and
      (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and
      .retained_turn.process_exit==0 and
      (.retained_turn.head|type=="string" and length>0) and
