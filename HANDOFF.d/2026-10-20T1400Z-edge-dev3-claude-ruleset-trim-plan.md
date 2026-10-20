@@ -1,3 +1,8 @@
+---
+issue: 1881
+status: OPEN
+owner: claude/ruleset-trim
+---
 # Handoff — ruleset trim and enforcement plan (edge-dev3, Claude)
 
 Written 2026-10-20 10:00 AM EDT by Claude chat ed6aab4c-f27f-4ea4-a1d5-7f8ccb50a780 on edge-dev3.
