@@ -61,7 +61,7 @@ STUB="$TMP/stub"; FAKE="$TMP/root"; mkdir -p "$STUB"
 for c in systemctl ss sleep; do printf '#!/bin/sh\nexit 0\n' > "$STUB/$c"; chmod +x "$STUB/$c"; done
 printf '#!/bin/sh\necho "$@" >> "%s/chown.log"\n' "$TMP" > "$STUB/chown"; chmod +x "$STUB/chown"
 run_installer() {
-  PATH="$STUB:$PATH" ZCODE_HEADROOM_TEST_ROOT="$FAKE" HEADROOM_TAILNET_IP=100.64.0.9 \
+  PATH="$STUB:$PATH" ZCODE_HEADROOM_TEST_ROOT="$FAKE" HEADROOM_TAILNET_IP=192.0.2.10 \
     bash "$INSTALLER" >"$TMP/install.out" 2>&1 || { cat "$TMP/install.out" >&2; return 1; }
 }
 check 'installer runs offline' run_installer
