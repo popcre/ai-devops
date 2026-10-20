@@ -159,6 +159,10 @@ validate_action_gates(){
       [ "$action" = database ] && [ "$gate" = reviewed-generated-definition-fixture-only ] \
         || fail_closed 'reviewer_release cannot broaden the closed generated reviewer-safety boundary.'
     fi
+    if [ "$class" = infrastructure ]; then
+      [ "$action" = production ] && [ "$gate" = reviewed-production-dispatch ] \
+        || fail_closed 'reviewer_release cannot broaden the closed u2giants/ansible production boundary.'
+    fi
     [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
   done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
@@ -1667,6 +1671,37 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         && [ "$IDENTITY" = popcre/designflow-backend ] \
         && [ "$action_manifest_stdin" -eq 1 ] && [ -z "$small_entry" ] \
         && [ -z "$acknowledge" ] \
+        || release_gate=""
+    fi
+    # The infrastructure production release is pinned to the one repository
+    # whose owner ruling opened it (u2giants/ansible, 2026-10-20): canonical
+    # origin, a clean declaration committed at HEAD, and a clean HEAD equal to
+    # the real GitHub main the apply workflow dispatches. That main is read
+    # fresh from the fixed canonical URL with no system, global, or repository
+    # Git config (so no insteadOf rewrite or local ref can stand in for it);
+    # matching it binds the exact-head approval to the dispatched commit and
+    # to the real repository rather than to a self-asserted origin string.
+    if [ "$effective" = infrastructure ] && [ -n "$release_gate" ]; then
+      local infra_origin infra_head infra_main infra_status
+      infra_origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
+      infra_head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
+      infra_main="$(cd / && env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+        timeout 30 git ls-remote --exit-code https://github.com/u2giants/ansible.git refs/heads/main 2>/dev/null \
+        | awk 'NR==1 && $2=="refs/heads/main" {print $1}')" || infra_main=""
+      [ "$action" = production ] && [ "$release_gate" = reviewed-production-dispatch ] \
+        && [ "$IDENTITY" = u2giants/ansible ] \
+        && case "$infra_origin" in
+             https://github.com/u2giants/ansible|https://github.com/u2giants/ansible.git|\
+             git@github.com:u2giants/ansible|git@github.com:u2giants/ansible.git) true ;;
+             *) false ;;
+           esac \
+        && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
+        && infra_status="$(git -C "$TOPLEVEL" status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
+        && [ -z "$infra_status" ] \
+        && [ -n "$infra_head" ] && [ "$infra_head" = "$infra_main" ] \
+        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] \
+        && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
         || release_gate=""
     fi
     if [ "$effective" = reviewer-safety ] && [ -n "$release_gate" ]; then

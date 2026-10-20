@@ -60,6 +60,9 @@
     }
   },
   "reviewer_release": {
+    "production": {
+      "infrastructure": "reviewed-production-dispatch"
+    },
     "database": {
       "private-tooling": "reviewed-private-data-writer",
       "private-evidence": "synthetic-fixtures-only",

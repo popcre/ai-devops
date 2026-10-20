@@ -110,7 +110,7 @@ that class. Opening the route is therefore each private repository's own
 reviewed decision, made once in its own policy file rather than per review.
 
 A second, equally narrow exception is the central `reviewer_release` map
-(#1239). Today it names one entry: `database` for `private-tooling`, released
+(#1239). Its first entry is `database` for `private-tooling`, released
 by the gate `reviewed-private-data-writer`. When the effective class is
 `private-tooling` and the repository's own policy declares that gate, an
 owner-requested row write authored as writer code reaches the reviewer-approval
@@ -118,6 +118,18 @@ step instead of the protected stop: it still needs an assigned AI reviewer's
 lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 (`--reviewer-approval`). It never releases `private-evidence`, so one licensed
 row in the change set keeps the action sealed, and it opens no other action.
+A further entry names `production` for `infrastructure`, released by the gate
+`reviewed-production-dispatch` (owner ruling 2026-10-20 in his chat: "yes, make
+the change and finish the install"). It is closed to exactly `u2giants/ansible`:
+the canonical origin, the gate declared in a clean consumer file committed at
+HEAD, a clean worktree (ignored files included), and HEAD equal to the real
+GitHub `main` read fresh from the fixed canonical URL with no system, global or
+repository Git config. That `main` is the commit the apply workflow dispatches,
+so the exact-head lifecycle APPROVE names the dispatched resource, and a local
+tracking ref or `insteadOf` rewrite cannot impersonate it. Any other repository,
+a dirty, stale or unpushed head, an uncommitted declaration, an unreachable
+GitHub, or a broadened central entry stays sealed, and the `infrastructure`
+action itself is never opened.
 
 The central `application_source_releases` map is a separate source-only route for
 four exact DesignFlow sandbox targets: backend (core), tracking, frontend, and
