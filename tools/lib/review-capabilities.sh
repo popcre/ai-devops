@@ -12,8 +12,14 @@ review_capability_providers() { # DOORS_JSON FIELD -> space-separated providers,
   [ -f "$1" ] || return 0
   jq -r --arg f "$2" '[.capabilities // {} | to_entries[] | select((.value|type)=="object" and .value[$f]==true) | .key] | join(" ")' "$1" 2>/dev/null
 }
+review_shared_code_paths_regex() { # the shared review code every provider runs (#1834; release live check #1783)
+  printf '%s\n' '^(bin/ai-review(-pool|-engine|-preflight|-packet|-sandbox|-lifecycle)?|tools/lib/review-(lifecycle-core|capabilities)\.sh|config/review-runner-doors\.json)$'
+}
+review_shared_code_changed() { # CHANGED_FILES (one per line) -> 0 when any is shared review code
+  printf '%s\n' "$1" | grep -Eq "$(review_shared_code_paths_regex)"
+}
 review_shared_code_rule() { # CHANGED_FILES (one per line) -> the #1834 brief rule when shared review code changed
-  printf '%s\n' "$1" | grep -Eq '^(bin/ai-review(-pool|-engine|-preflight|-packet|-sandbox|-lifecycle)?|tools/lib/review-(lifecycle-core|capabilities)\.sh|config/review-runner-doors\.json)$' || return 0
+  review_shared_code_changed "$1" || return 0
   printf '%s\n' 'Shared review code rule (#1834): check every maintained provider (grok, muse, qwen, gemini, deepseek, stepfun, glm). A step that decides whether evidence, a receipt, a record, cleanup or qualification happens must apply to every provider unless a named capability in config/review-runner-doors.json declares the exception; a provider-name branch there is a finding. Provider policy data (timeouts, budgets, routes, platform guards) is allowed.'
 }
 review_closing_contract() { # REQUEST_FILE (may be empty) -> the closing report rules every brief ends with (#1783)
