@@ -11,7 +11,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 1.1 List valid task-gate classes in every global | ⬜ open | — | — |
 | 1.2 Retire `shared-db-orchestrator` global mention and skill | ⬜ open | — | — |
 | 1.3 Installed-global drift check | ⬜ open | — | — |
-| 2.1 PR-wait polling hook (Claude PreToolUse) | ⬜ open | — | — |
+| 2.1 PR-wait polling hook (Claude PreToolUse) | ✅ done | 2026-10-20 | `6303e108`; `tests/test-ai-pr-poll-guard-hook.sh` 28/28 |
 | 2.2 `ai-pr-wait` single run fits a 10-minute tool call | ⬜ open | — | — |
 | 3.1 One source for the Codex/ZCode/MiMo globals | ⬜ open | — | — |
 | 3.2 Trim the Claude + Codex global rules to ~1,200 words | ⬜ open | — | — |
