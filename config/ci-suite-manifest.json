@@ -451,6 +451,12 @@
         "test-ai-preflight-pinbump.sh",
         "test-ai-review-code-only.sh"
       ],
+      "tools/lib/reviewer-instructions.sh": [
+        "test-ai-glm.sh",
+        "test-ai-muse.sh",
+        "test-ai-review-engine.sh",
+        "test-ai-stepfun.sh"
+      ],
       "tools/lib/stepfun-pace.sh": [
         "test-ai-grok-review.sh",
         "test-ai-review-engine.sh",

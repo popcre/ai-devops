@@ -593,6 +593,7 @@ N='$OD/n'; MODE="\$(cat '$OD/mode')"
 STUB
 cat >> "$OD/bin/opencode" <<'STUB'
 cat >/dev/null; n=$(cat "$N" 2>/dev/null || echo 0); echo $((n+1)) > "$N"
+env | grep '^OPENCODE_DISABLE_' | sort > "$N.env"; cp "$XDG_CONFIG_HOME/opencode/AGENTS.md" "$N.rules" 2>/dev/null || rm -f "$N.rules"
 if [ "$n" -eq 0 ] && [ "$MODE" = jsonl429 ]; then printf '{"type":"error","error":{"data":{"message":"HTTP 429 Too Many Requests","status":429}}}\n'; exit 1; fi
 if [ "$n" -eq 0 ] && [ "$MODE" = err429 ]; then echo 'RATE_LIMITED: HTTP 429 Too Many Requests' >&2; exit 1; fi
 if [ "$MODE" = textfail ]; then printf '{"type":"text","part":{"text":"quotes HTTP 429 rate_limited"}}\n'; exit 1; fi
@@ -605,6 +606,8 @@ oc_door(){ printf '%s' "$1" > "$OD/mode"; rm -f "$OD/n" "$OD/report"; rm -rf "$O
   DOOR_REPORT_OUT="$OD/report" DOOR_HEAD=abc123 bash "$ROOT/tools/lib/review-doors/stepfun.sh" review > "$OD/out" 2>&1; }
 oc_door ok; drc=$?
 check "OpenCode door turn takes a slot from the shared pacer" "[ $drc = 0 ] && [ \"\$(wc -l < '$OD/state/pace/starts')\" = 1 ]"
+# #1881: a review never sees the owner's ~/.claude/CLAUDE.md or user skill lists.
+check "OpenCode door review loads only the reviewer rules" "cmp -s '$ROOT/templates/system/REVIEWER-global.md' '$OD/n.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\\n' | cmp -s - '$OD/n.env'"
 for m in jsonl429 err429; do
   oc_door "$m"; drc=$?
   check "OpenCode door reruns the turn after a $m rate limit, through the shared cooldown" "[ $drc = 0 ] && grep -q STEPFUN-OK '$OD/report' && grep -q 'rate limit reached' '$OD/out' && [ \"\$(cat '$OD/n')\" = 2 ]"

@@ -138,6 +138,10 @@ case "${1:-}" in
     fi
     [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
+    if [ -n "${MUSE_STUB_RULES_FILE:-}" ]; then
+      cp "$XDG_CONFIG_HOME/opencode/AGENTS.md" "$MUSE_STUB_RULES_FILE" 2>/dev/null || true
+      [ -L "$XDG_CONFIG_HOME/opencode/opencode.json" ] && [ -L "$XDG_CONFIG_HOME/opencode/agent" ] && printf linked > "$MUSE_STUB_RULES_FILE.links"
+    fi
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
@@ -577,6 +581,10 @@ check 'live doctor accepts provider progress before the exact final verdict' "cd
 export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
 check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
 check 'Muse provider keeps the PowerShell module cache out of the checkout (#754)' "grep -q '^PSModuleAnalysisCachePath=.*ai-muse-ps-module-cache$' '$TMP/provider-env'"
+# #1881: the owner's ~/.claude/CLAUDE.md and user skill lists never reach a
+# Muse turn; a per-run config home carries only the reviewer rules and links
+# to the managed configuration, which stays byte-identical.
+check 'Muse turn sees only the reviewer rules, never the owner instructions (#1881)' "cd '$REPO' && cfg_before=\"\$(sha256sum '$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json')\" && eval \"$ENV MUSE_STUB_RULES_FILE='$TMP/provider-rules' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && cmp -s '$ROOT/templates/system/REVIEWER-global.md' '$TMP/provider-rules' && grep -qx linked '$TMP/provider-rules.links' && grep -qx 'OPENCODE_DISABLE_CLAUDE_CODE=1' '$TMP/provider-env' && grep -qx 'OPENCODE_DISABLE_EXTERNAL_SKILLS=1' '$TMP/provider-env' && ! grep -q '^XDG_CONFIG_HOME=$HOME_FIX/.config/ai-devops-muse/opencode-xdg$' '$TMP/provider-env' && [ \"\$cfg_before\" = \"\$(sha256sum '$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json')\" ] && [ ! -e '$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/AGENTS.md' ]"
 check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"
 unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
 check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""

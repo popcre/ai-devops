@@ -1552,6 +1552,10 @@ cat > "$STUB_OC" <<EOF
 #!/usr/bin/env bash
 # Offline stub OpenCode: accepts the door's run contract and emits JSONL.
 . "$PATH_ID_SH" || exit 1
+if [ -n "\${DS_STUB_PROFILE_OUT:-}" ]; then
+  env | grep '^OPENCODE_DISABLE_' | sort > "\$DS_STUB_PROFILE_OUT"
+  cp "\$XDG_CONFIG_HOME/opencode/AGENTS.md" "\$DS_STUB_PROFILE_OUT.rules" 2>/dev/null || true
+fi
 out=''
 dir=''
 while [ \$# -gt 0 ]; do
@@ -1594,13 +1598,17 @@ chmod 0700 "$STUB_OC"
 DS_REPORT="$TMP/ds-stub-report.md"
 set +e
 AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
-  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 DS_STUB_PROFILE_OUT="$TMP/ds-stub-profile" \
   DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
   DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_REPORT" \
   DOOR_HEAD="$HEAD_SHA" \
   bash "$DS_DOOR" review >"$TMP/ds-stub-door.out" 2>"$TMP/ds-stub-door.err"
 DS_STUB_RC=$?
 set -e
+# #1881: a DeepSeek review sees only the reviewer rules, never the owner's
+# ~/.claude/CLAUDE.md or the ~/.claude and ~/.agents skill lists.
+check "deepseek_review_loads_only_reviewer_rules" \
+  "cmp -s '$REPO_ROOT/templates/system/REVIEWER-global.md' '$TMP/ds-stub-profile.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\n' | cmp -s - '$TMP/ds-stub-profile'"
 check "deepseek_door_parses_opencode_envelope_to_report_shape" \
   "test '$DS_STUB_RC' -eq 0 && grep -q '## Verdict' '$DS_REPORT'"
 check "deepseek_door_report_carries_opencode_metadata" \
@@ -1792,6 +1800,9 @@ case "$1" in
     [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
     printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
   run) [ "${MODEL_API_KEY:-}" = fake-native-provider ] && [ -z "${META_API_KEY+x}" ] || exit 75
+    # #1881: only the reviewer rules, never the owner's CLAUDE.md or user skills.
+    head -1 "$XDG_CONFIG_HOME/opencode/AGENTS.md" | grep -qx '# Reviewer instructions' || exit 80
+    [ "${OPENCODE_DISABLE_CLAUDE_CODE:-}" = 1 ] && [ "${OPENCODE_DISABLE_EXTERNAL_SKILLS:-}" = 1 ] || exit 80
     prompt_text="$(cat)"
     printf '%s' "$prompt_text" | grep -qF 'Repository tool-read root is the actual current directory (.)' || exit 79
     printf '%s' "$prompt_text" | grep -qF 'provenance metadata only; never read or retry those host paths' || exit 79
@@ -1885,6 +1896,7 @@ DS_API_ROOT="$TMP/ds-api"
 mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/config/opencode" "$DS_API_ROOT/config/opencode-deepseek"
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
 cp "$REPO_ROOT/tools/lib/deepseek-opencode.sh" "$DS_API_ROOT/tools/lib/deepseek-opencode.sh"
+cp "$REPO_ROOT/tools/lib/reviewer-instructions.sh" "$DS_API_ROOT/tools/lib/reviewer-instructions.sh"
 : > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
 printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
 sed -n '/^review_verdict() {/,/^take_governed_head()/p' "$REPO_ROOT/bin/ai-deepseek-agent" | sed '$d' > "$DS_API_ROOT/validator"

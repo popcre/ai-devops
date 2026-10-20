@@ -266,7 +266,19 @@ runtime_env(){
     chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" && protect_windows_dirs "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" || die 'could not make the Muse Code stores private.'
     return 0
   fi
-  export XDG_CONFIG_HOME="$CFG/opencode-xdg"
+  # Minimal instruction profile (popcre/ai-devops#1881): a per-run config home
+  # holds the reviewer rules plus links to the managed Muse configuration, which
+  # is never edited. Without real links the turn refuses.
+  local entry
+  export XDG_CONFIG_HOME="$RUN_TMP/reviewer-xdg"
+  mkdir -p "$XDG_CONFIG_HOME/opencode" && chmod 700 "$XDG_CONFIG_HOME" || die 'could not reserve the Muse reviewer config home.'
+  for entry in "$OC_CFG"/* "$OC_CFG"/.gitignore; do
+    [ -e "$entry" ] && [ "${entry##*/}" != AGENTS.md ] && [ ! -e "$XDG_CONFIG_HOME/opencode/${entry##*/}" ] || continue
+    ln -s "$entry" "$XDG_CONFIG_HOME/opencode/${entry##*/}" 2>/dev/null && [ -L "$XDG_CONFIG_HOME/opencode/${entry##*/}" ] \
+      || die 'could not link the Muse configuration into the reviewer config home; refusing to run with the owner instructions.'
+  done
+  reviewer_opencode_rules "$XDG_CONFIG_HOME/opencode" || die 'could not stage the reviewer instructions.'
+  export "${REVIEWER_OPENCODE_ENV[@]}"
   export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/opencode-muse-direct"
   export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-direct"
   export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/opencode-muse-direct"
@@ -703,6 +715,7 @@ heartbeat_meta(){
   jq --arg now "$(date -u +%FT%TZ)" --argjson pid "$pid" '.status="turn_in_progress"|.worker_pid=$pid|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 . "$ROOT/tools/lib/muse-credential-boundary.sh"
+. "$ROOT/tools/lib/reviewer-instructions.sh"
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
 }
