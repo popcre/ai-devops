@@ -167,13 +167,17 @@ tmp=dst+".tmp"
 with open(tmp,"w",encoding="utf-8") as f:
     json.dump(d,f,indent=2)
     f.write("\n")
+if os.path.exists(dst):
+    shutil.copymode(dst,tmp)
 os.replace(tmp,dst)
 PY
   elif [ "$src" = "$HEADROOM_TMPL" ]; then
     die "ai-zcode-headroom: python is required to write the HTTPS lane URL into the config"
   else
     [ -f "$PROVIDER_CONFIG" ] && cp -f "$PROVIDER_CONFIG" "$PROVIDER_CONFIG.bak"
-    cp -f "$src" "$PROVIDER_CONFIG.tmp" && mv -f "$PROVIDER_CONFIG.tmp" "$PROVIDER_CONFIG"
+    cp -f "$src" "$PROVIDER_CONFIG.tmp"
+    [ -f "$PROVIDER_CONFIG" ] && chmod --reference="$PROVIDER_CONFIG" "$PROVIDER_CONFIG.tmp" 2>/dev/null
+    mv -f "$PROVIDER_CONFIG.tmp" "$PROVIDER_CONFIG"
   fi
 }
 
