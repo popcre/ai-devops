@@ -118,6 +118,12 @@ step instead of the protected stop: it still needs an assigned AI reviewer's
 lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 (`--reviewer-approval`). It never releases `private-evidence`, so one licensed
 row in the change set keeps the action sealed, and it opens no other action.
+A third entry names `production` for `infrastructure`, released by the gate
+`reviewed-production-dispatch` (owner ruling 2026-10-20 in his chat: "yes, make
+the change and finish the install", for u2giants/ansible live toolkit
+dispatches). Only a repository whose own policy declares that gate reaches the
+reviewer-approval step; it still needs the exact-head lifecycle APPROVE and
+opens no `infrastructure` (Terraform-style) mutation or other action.
 
 The central `application_source_releases` map is a separate source-only route for
 four exact DesignFlow sandbox targets: backend (core), tracking, frontend, and

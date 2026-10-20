@@ -1177,6 +1177,26 @@ check 'one licensed row keeps database sealed despite the declaration' \
   "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
 rm -rf "$TMP/writer"
 
+printf 'infrastructure production reviewer release stays declared and reviewer-gated\n'
+newrepo "$TMP/infra" 'u2giants/ansible'
+mkdir -p "$TMP/infra/roles/x" "$TMP/infra/.ai-devops"
+( cd "$TMP/infra" && "$GATES" start --class infrastructure ) >/dev/null
+printf -- '---\n' > "$TMP/infra/roles/x/main.yml"
+check 'an undeclared infrastructure repository keeps production sealed' \
+  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
+rm -f "$TMP/infra/roles/x/main.yml"
+printf '%s\n' '{"schema_version":1,"paths":[{"glob":"**","class":"infrastructure"}],"gates":{"infrastructure":{"required":["reviewed-production-dispatch"],"forbidden_actions":["infrastructure","production"]}}}' > "$TMP/infra/.ai-devops/task-gates.json"
+git -C "$TMP/infra" add -A && git -C "$TMP/infra" commit -qm declare
+( cd "$TMP/infra" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
+printf -- '---\n' > "$TMP/infra/roles/x/main.yml"
+check 'a declared infrastructure repository reaches the reviewer-approval step for production' \
+  "out '$TMP/infra' check --before production | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
+check 'and is still refused without that approval' \
+  "rc 3 '$TMP/infra' check --before production"
+check 'the release never opens the infrastructure action' \
+  "out '$TMP/infra' check --before infrastructure --reviewer-approval \"\$(appr '$TMP/infra' infrastructure)\" | grep -Fq 'no reviewer-approval'"
+rm -rf "$TMP/infra"
+
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'
 mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
