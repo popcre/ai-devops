@@ -17,8 +17,16 @@ payload="$(cat 2>/dev/null || true)"
 
 cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [[ -n "$cmd" ]] || exit 0
+# Text is not a command: drop here-document bodies, then quoted strings (commit
+# messages, notes, echo), so a message that merely mentions polling is allowed.
+cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
+  end != "" { if ($0 == end) end = ""; next }
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) {
+    end = substr($0, RSTART, RLENGTH); sub(/^<<-?[ \t]*["'"'"']?/, "", end)
+  }
+  { print }')"
 # Loops are often written over several lines; judge the command as one line.
-cmd="$(printf '%s' "$cmd" | tr '\r\n' '  ')"
+cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
 reason=''
 if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then
