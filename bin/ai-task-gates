@@ -2317,6 +2317,13 @@ cmd_authorize_install(){
   # a raw transcript archive inside it is refused here, before any
   # authorization artifact is written.
   refuse_raw_archives 'authorize-install' "${RAW_ARCHIVE_PATHS:-}"
+  # A release touching shared review code installs only after one real review
+  # passed on Ubuntu and on Windows for this exact commit (#1783).
+  if (source "$ROOT/tools/lib/review-capabilities.sh" &&
+      review_shared_code_changed "$(git -C "$TOPLEVEL" diff --name-only "$start_head" "$target_head")"); then
+    "$ROOT/bin/ai-release-live-check" verify --target-head "$target_head" >&2 ||
+      blocked "ai-task-gates: STOP. This release changes shared review code and lacks passing Ubuntu and Windows live reviews. From an Ubuntu review host run: ai-release-live-check fleet --target-head $target_head"
+  fi
   if [ "$legacy_migration" -eq 1 ] && [ "$start_head" != "$target_head" ]; then
     local legacy_classes legacy_class legacy_protected
     legacy_classes="$(install_release_classes "$start_head" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify the legacy Windows release range.'
