@@ -331,11 +331,12 @@ muse_preprovider_recovery_cases(){
   # model identity bind the completed turn; the recorded runtime is historical
   # fact and must not be required to equal today's pin.
   prior="$(jq -r .retained_turn.original_invocation_id "$m")"
-  check "$name pin-drift follow-up fails pre-provider without provider contact" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask $name --base missing-preprovider-target --prompt pindrift\" > '$TMP/preprovider-pindrift.log' 2>&1"
+  check "$name pin-drift follow-up fails pre-provider without provider contact" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-pindrift-called' '$SCRIPT' ask $name --base missing-preprovider-target --prompt pindrift\" > '$TMP/preprovider-pindrift.log' 2>&1 && test ! -e '$TMP/preprovider-pindrift-called'"
   archive="${m%.json}.$prior.metadata.json"
   check "$name pin-drift leaves a preparation_failed turn with an archived prior" "test -f '$archive' && jq -e '(.status==\"preparation_failed\") and (has(\"retained_turn\")|not)' '$m' && jq -e '.retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$archive'"
   jq '.retained_turn.runtime_version="0.0.0-legacy-pin"' "$archive" > "$archive.pindrift" && chmod 600 "$archive.pindrift" && mv -f "$archive.pindrift" "$archive"
   check "$name reconcile recovers a pre-pin-bump archived prior" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-pindrift-recover.log' && grep -q 'historical runtime 0.0.0-legacy-pin' '$TMP/preprovider-pindrift-recover.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$m'"
+  check "$name repeat reconcile on a recovered legacy turn does not fence it" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recon2.log' 2>&1 && grep -q 'already recovered Muse session' '$TMP/preprovider-pindrift-recon2.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
   # Changed-head follow-up that fails pre-provider must restore the prior
   # descriptor, never bind the old completion to the new source.
   printf 'changed source for preprovider\n' >> "$REPO/a.txt"; git -C "$REPO" add a.txt; git -C "$REPO" commit -qm 'preprovider source change'
