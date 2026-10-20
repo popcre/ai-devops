@@ -34,6 +34,10 @@ blocks "timeout ai-pr-wait inside a loop" 'for i in 1 2 3; do timeout 600 bin/ai
 allows "a single gh pr view" 'gh pr view 12 --json state'
 allows "ai-pr-wait itself" 'ai-pr-wait 12 --timeout-minutes 9'
 allows "ai-pr-wait with --fit-tool-call" 'bin/ai-pr-wait 12 --timeout-minutes 30 --fit-tool-call'
+allows "a quoted commit message that mentions polling" "git commit -m 'stop sleep; gh pr checks loops'"
+allows "a double-quoted note that mentions polling" 'printf "sleep then gh pr view\n" >> notes.md'
+allows "a here-document that mentions polling" $'cat > notes.md <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF\nwc -l notes.md'
+blocks "a loop after a here-document" $'cat > x <<EOF\ntext\nEOF\nwhile :; do gh pr checks 1; done'
 allows "sleep alone" 'sleep 5'
 allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 
