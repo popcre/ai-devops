@@ -35,6 +35,7 @@ case "$MODE" in review|implement) ;; *) printf 'deepseek door: usage: deepseek.s
 DS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DS_ROOT/tools/reviewer_event_guard.sh"
 source "$DS_ROOT/tools/lib/deepseek-opencode.sh"
+source "$DS_ROOT/tools/lib/reviewer-instructions.sh"
 PROFILE_SRC="$DS_ROOT/config/opencode-deepseek"
 OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || true)"
 
@@ -115,6 +116,8 @@ install_profile() { # install_profile XDG_ROOT
   if [ -f "$PROFILE_SRC/agent/$DS_AGENT.md" ]; then
     cp "$PROFILE_SRC/agent/$DS_AGENT.md" "$xdg/agent/$DS_AGENT.md"
   fi
+  # A review sees only the reviewer rules, never the owner's (#1881).
+  [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
 
 # Parse the OpenCode JSONL envelope into OUR report shape: findings first,
@@ -276,7 +279,7 @@ main() {
     # Native plugins and inherited subprocesses must start in the same owned
     # scratch as the command broker, before any engine code can execute.
     cd "$oc_dir" || exit 127
-    export DOOR_MODE="$MODE"
+    export DOOR_MODE="$MODE" "${REVIEWER_OPENCODE_ENV[@]}"
     export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
            XDG_DATA_HOME="$(native_path "$xdg/data")" \
            XDG_STATE_HOME="$(native_path "$xdg/state")" \

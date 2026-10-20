@@ -41,6 +41,7 @@ SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
 # The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
 # shellcheck source=../stepfun-sandbox.sh
 source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+source "$SF_ROOT/tools/lib/reviewer-instructions.sh"
 # The shared request pacer, also used by bin/ai-stepfun (#1432).
 # shellcheck source=../stepfun-pace.sh
 source "$SF_ROOT/tools/lib/stepfun-pace.sh"
@@ -211,6 +212,8 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
     return 127
   }
   cp "$src" "$xdg/agent/${agent}.md"
+  # A review sees only the reviewer rules, never the owner's (#1881).
+  [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
 
 # StepCode 0.1.1 reads its custom catalog from ~/.stepcode/models.json. The
@@ -506,6 +509,7 @@ main() {
     while :; do
       stepfun_pace_wait
       (
+        export "${REVIEWER_OPENCODE_ENV[@]}"
         export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
                XDG_DATA_HOME="$(native_path "$xdg/data")" \
                XDG_STATE_HOME="$(native_path "$xdg/state")" \

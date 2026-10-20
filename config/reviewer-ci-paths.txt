@@ -99,6 +99,7 @@ tools/reviewer_credit_watch.py
 .github/workflows/verify.yml
 
 tools/lib/muse-credential-boundary.sh
+tools/lib/reviewer-instructions.sh
 config/reviewer-membership-scope.json
 tests/test-ai-reviewer-membership-drift.sh
 tests/test-ai-review-doctor.sh

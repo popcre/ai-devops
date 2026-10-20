@@ -439,7 +439,10 @@ def launch(home):
                         "XDG_CACHE_HOME": str(p["cache"]),
                         "OPENCODE_CONFIG": str(p["config"] / "opencode.json"),
                         "OPENCODE_DISABLE_PROJECT_CONFIG": "true",
-                        "OPENCODE_DISABLE_DEFAULT_PLUGINS": "true"})
+                        "OPENCODE_DISABLE_DEFAULT_PLUGINS": "true",
+                        # Never the owner's ~/.claude/CLAUDE.md or user skill lists (#1881).
+                        "OPENCODE_DISABLE_CLAUDE_CODE": "true",
+                        "OPENCODE_DISABLE_EXTERNAL_SKILLS": "true"})
     # No inherited alternate config/content, plugins, or provider selection can
     # redefine builtin tools under an attested fixed formal profile.
     for key in ["OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR", "OPENCODE_PLUGIN_META_FILE"]:

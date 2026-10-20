@@ -35,6 +35,7 @@ MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$MU_ROOT/tools/reviewer_event_guard.sh"
 
 . "$MU_ROOT/tools/lib/muse-credential-boundary.sh"
+. "$MU_ROOT/tools/lib/reviewer-instructions.sh"
 
 # Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode
 # harness (rollback). Sessions never cross engines: each engine records its
@@ -151,6 +152,8 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT
   if [ -f "$MU_PROFILE_SRC/agent/$MU_AGENT.md" ]; then
     cp "$MU_PROFILE_SRC/agent/$MU_AGENT.md" "$xdg/agent/$MU_AGENT.md"
   fi
+  # A review sees only the reviewer rules, never the owner's (#1881).
+  [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
 
 # Parse the provider envelope into OUR report shape: findings first, verdict
@@ -261,6 +264,7 @@ main() {
              XDG_DATA_HOME="$(native_path "$xdg/data")" \
              XDG_STATE_HOME="$(native_path "$xdg/state")" \
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
+      export "${REVIEWER_OPENCODE_ENV[@]}"
       muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
         | reviewer_credit_run muse "$log" "$out.err" --timeout-seconds "$MU_TIMEOUT" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
