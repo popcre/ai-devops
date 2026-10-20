@@ -10,7 +10,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 |---|---|---|---|
 | 1.1 List valid task-gate classes in every global | ✅ done | 2026-10-20 | b0c463d1; tests/test-client-globals-required-phrases.sh, tests/test-ai-task-gates.sh |
 | 1.2 Retire `shared-db-orchestrator` global mention and skill | ✅ done | 2026-10-20 | a07c0365 (content moved to docs/shared-db-structural-safety/; retired-skills.txt is pre-marker only, so unchanged); tests/test-shared-db-routing-rules.sh, tests/test-ai-install-skills.sh |
-| 1.3 Installed-global drift check | 🟡 built, live proof pending | 2026-10-20 | 7e6e0dc1; tests/test-ai-adopt-globals.sh case 11. edge-dev3 reports DRIFT on all four globals before reinstall; clean-after needs the protected install once merged |
+| 1.3 Installed-global drift check | ✅ done | 2026-10-20 | 7e6e0dc1; tests/test-ai-adopt-globals.sh case 11. Live proof edge-dev3: `ai-adopt-globals --check` DRIFT on all four globals before, CLEAN on all four after the 62007967 install + adopt |
 | 2.1 PR-wait polling hook (Claude PreToolUse) | ✅ done | 2026-10-20 | `6303e108`; `tests/test-ai-pr-poll-guard-hook.sh` 28/28 |
 | 2.2 `ai-pr-wait` single run fits a 10-minute tool call | ✅ done | 2026-10-20 | `6303e108` (merged in #1885); `tests/test-ai-pr-wait.sh` fit-tool-call cases; global wait bullet names the form in all four globals |
 | 3.1 One source for the Codex/ZCode/MiMo globals | ⬜ open | — | — |
