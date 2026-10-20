@@ -265,6 +265,55 @@ export ANTHROPIC_BASE_URL="$HEADROOM_URL"
 The VPS reaches its own Tailscale IP locally, so this needs no tunnel. This is
 the workflow that produced the only real savings we have so far (2026-07-07).
 
+### Workflow A′ — Claude Code remote workers on the VPS (`ccd-cli`)
+
+The `.bashrc` export covers CLIs started from a shell. It does **not** cover the
+Claude Code workers the `claude-ssh` / remote launcher spawns under
+`~/.claude/remote/ccd-cli/<version>`. Those are exec'd with
+`ANTHROPIC_BASE_URL=https://api.anthropic.com` baked into their environment, so
+every remote session on hetz talked straight to Anthropic while the shell CLI
+was proxied.
+
+Measured on hetz 2026-10-20: all 17 live `ccd-cli` processes had
+`ANTHROPIC_BASE_URL=https://api.anthropic.com` in `/proc/<pid>/environ` and held
+TLS connections to `api.anthropic.com`; a fresh `claude -p` from a shell routed
+through `:8787` in the same window.
+
+**The fix is a wrapper on the executable path the launcher execs** — the same
+lever edge-dev3 used when Claude Desktop forced `api.anthropic.com` on its
+Claude Code children (Workflow B′ trap 4). `ai-headroom wrap-remote` (also run
+by `ai-headroom on`) moves each versioned binary to `<name>.headroom-real` and
+installs a tiny script that forces the proxy URL and execs the real one. Running
+workers keep their old inode — nothing live is killed. New spawns pick up the
+wrapper.
+
+```bash
+ai-headroom wrap-remote    # or: ai-headroom on
+ai-headroom status         # must say "wrapped -> Headroom"
+```
+
+Claude Code updates drop a **new** versioned binary next to the old ones. After
+any update, run `ai-headroom on` again (or `wrap-remote`) — `status` flags an
+unwrapped binary as a gap. Escape hatch: `ai-headroom unwrap-remote` (or
+`ai-headroom off`) restores the raw binaries.
+
+Also clear any inert `settings.json` `env.ANTHROPIC_BASE_URL` entry
+(`ai-headroom on`/`off` does this) — it is accepted and ignored (Workflow B)
+and only makes status displays lie.
+
+**Prove routing the edge-dev3 way (Workflow B′):** do not trust
+`/proc/<pid>/environ` alone. The decisive check is `proxy.log` on hetz
+(`grep path=/v1/messages /home/ai/.headroom/logs/proxy.log | tail`) — look for
+`status=200` and `client=claude-code` after a turn from the wrapped binary.
+Live proof 2026-10-20 10:55 AM / 11:00 AM EDT.
+
+Ubuntu notes from edge-dev3 that do **not** apply to this VPS lane (and why):
+no DietCode/Scaledown `claude` wrapper here (`~/.local/bin/claude` is a real
+ELF), and there is no KDE desktop — `environment.d` is for GUI apps, not
+`claude-ssh` workers.
+
+Offline tests: `tests/test-ai-headroom-remote-wrap.sh`.
+
 ### Workflow B — Claude running **locally on a Windows machine** (clone-and-code mode)
 
 > **`settings.json` DOES NOT WORK for this, and never did.** Measured on Claude
@@ -661,6 +710,7 @@ retain the documented instant bypass for outages.
 | Machine | Wired? | Evidence |
 |---|---|---|
 | hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
+| hetz VPS Claude remote workers (Workflow A′) | ✅ wrapped 2026-10-20 | `ai-headroom wrap-remote` on `~/.claude/remote/ccd-cli/*`; new spawns forced through 8787. Live proof 2026-10-20 10:55 AM EDT. Re-wrap after a Claude Code update. |
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
 | **edge-dev3** (Workflow B′, Ubuntu KDE) | ✅ yes (2026-10-19) | `ai-headroom on` + `environment.d` + DietCode `SCALEDOWN_PROXY_UPSTREAM` chain + desktop Claude Code binary wrapper; subscription CLI and desktop Claude Code proven in `proxy.log` ([#1869](https://github.com/popcre/ai-devops/issues/1869)). Chat UI is out of scope. |
@@ -716,11 +766,13 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   ai-headroom status   # what am I using, and is the proxy answering?
   ai-headroom off      # go straight to Anthropic
   ai-headroom on       # route through the proxy again
+  ai-headroom wrap-remote    # Claude remote workers on this host (hetz)
   ```
 
   `off` takes about ten seconds, plus a full quit-and-reopen of Claude. `on`
   refuses to run if the proxy is not answering, so it cannot strand you. Every
   change backs up the file it touches first. Works on Windows (Git Bash) and Ubuntu.
+  `off` also unwraps the `ccd-cli` binaries (Workflow A′); `on` re-wraps them.
 
   **How it reaches every machine:** `bin/ai-headroom` is registered in
   `config/machine-tools.tsv`, so `bin/install-machine-tools.ps1` (Windows) /
@@ -811,6 +863,8 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Unit backup | `/etc/systemd/system/headroom.service.bak-2026-08-31` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
+| Claude remote workers on hetz | `ai-headroom wrap-remote` (Workflow A′); re-run after Claude Code updates |
+| Off switch for remote workers | `ai-headroom unwrap-remote` (or `off`) |
 | Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
 | ZCode lane proxy | `headroom-zcode.service` :8788 behind `zcode-headroom-tls.service` :8443 (§2b, [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md)) |
 | ZCode off switch | `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` + fully restart ZCode |
