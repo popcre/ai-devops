@@ -2277,8 +2277,7 @@ require_release_live_review(){ # START TARGET
   # shellcheck source=../tools/lib/review-capabilities.sh
   source "$ROOT/tools/lib/review-capabilities.sh" || blocked 'ai-task-gates: STOP. Cannot load the shared review code list.'
   review_shared_code_changed "$changed" || printf '%s\n' "$changed" | grep -Eq '^bin/ai-release-live-check(\.cmd)?$' || return 0
-  statuses="$(gh api "repos/popcre/ai-devops/commits/$2/statuses?per_page=100" 2>/dev/null ||
-    curl -fsSL "https://api.github.com/repos/popcre/ai-devops/commits/$2/statuses?per_page=100" 2>/dev/null)" || statuses=''
+  statuses="$("$ROOT/bin/ai-gh" api "repos/popcre/ai-devops/commits/$2/statuses?per_page=100" 2>/dev/null)" || statuses=''
   for os in linux windows; do
     state="$(printf '%s' "$statuses" | jq -r --arg c "ai-devops/live-review/$os" \
       '[.[]? | select(.context==$c and .creator.login=="u2giants")] | sort_by(.created_at) | last | .state // "missing"' 2>/dev/null)" || state=missing

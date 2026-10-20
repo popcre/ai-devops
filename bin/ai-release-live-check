@@ -109,7 +109,7 @@ post_status() { # OS JSON — success only for a well-formed result from that OS
     state=success
   else state=failure; fi
   desc="$(printf '%s' "$2" | jq -r '"\(.host // "?") \(.provider // "") \(.verdict // "") \(.elapsed // 0)s"' 2>/dev/null || echo 'no result') $(est_now)"
-  gh api -X POST "repos/$REPO_SLUG/statuses/$target" -f state="$state" -f context="$CONTEXT_PREFIX/$1" \
+  "$ROOT/bin/ai-gh" api -X POST "repos/$REPO_SLUG/statuses/$target" -f state="$state" -f context="$CONTEXT_PREFIX/$1" \
     -f description="${desc:0:140}" >/dev/null || { printf 'ai-release-live-check: could not post %s status\n' "$1" >&2; return 1; }
   printf '%s %s: %s\n' "$1" "$state" "$2"
   [ "$state" = success ]
@@ -119,7 +119,7 @@ cmd_fleet() {
   local linux_json windows_json fail=0
   [ "$(os_name)" = linux ] || die 'fleet runs from an Ubuntu review host'
   case "$(hostname | tr '[:upper:]' '[:lower:]')" in *edge-alien*|*envy*) die 'this host is not a review host' ;; esac
-  [ "$(gh api user -q .login 2>/dev/null)" = "$TRUSTED_LOGIN" ] || die "gh must be signed in as $TRUSTED_LOGIN to record the result"
+  [ "$("$ROOT/bin/ai-gh" api user -q .login 2>/dev/null)" = "$TRUSTED_LOGIN" ] || die "the GitHub CLI must be signed in as $TRUSTED_LOGIN to record the result"
   linux_json="$(leg_script "$ROOT" | timeout $((LEG_TIMEOUT + 300)) bash | tail -n 1)"
   windows_json="$(leg_script "$WINDOWS_CHECKOUT" | timeout $((LEG_TIMEOUT + 300)) ssh -o BatchMode=yes -o ConnectTimeout=20 "$WINDOWS_HOST" '"C:\Program Files\Git\bin\bash.exe" -l -s' 2>/dev/null | tr -d '\r' | tail -n 1)"
   [ -n "$windows_json" ] || windows_json='{"ok":false,"host":"4837","detail":"Windows host unreachable or no result"}'
@@ -129,8 +129,7 @@ cmd_fleet() {
 }
 
 fetch_statuses() {
-  gh api "repos/$REPO_SLUG/commits/$target/statuses?per_page=100" 2>/dev/null ||
-    curl -fsSL "https://api.github.com/repos/$REPO_SLUG/commits/$target/statuses?per_page=100"
+  "$ROOT/bin/ai-gh" api "repos/$REPO_SLUG/commits/$target/statuses?per_page=100" 2>/dev/null
 }
 
 cmd_verify() {
