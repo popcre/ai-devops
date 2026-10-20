@@ -195,7 +195,13 @@ function Get-InstalledSourceReceipt([string]$Path) {
     $sourceBash = '/' + (($source -replace '\\','/' -replace '^([A-Za-z]):','$1'))
     $homeBash = '/' + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
     $bashRoute = 'exec "' + $sourceBash + '" "$@"'
-    $gitBash = @((Join-Path $env:ProgramFiles 'Git\bin\bash.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe'))
+    $gitBash = @(
+        $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }),
+        $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe' }),
+        $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe' }),
+        'C:\Program Files\Git\bin\bash.exe',
+        'C:\Program Files (x86)\Git\bin\bash.exe'
+    ) | Where-Object { $_ -and $_ -notmatch '^[\\/]' }
     $validCmdRoutes = @($gitBash | ForEach-Object { '"' + $_ + '" "' + $sourceBash + '" %*' })
     if ($bash[0] -cne '#!/usr/bin/env bash' -or $bash[1] -cne '# Managed by ai-devops install-machine-tools.ps1.' -or
         $cmd[0] -cne '@echo off' -or $cmd[1] -cne 'rem Managed by ai-devops install-machine-tools.ps1.' -or
@@ -398,8 +404,14 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         [IO.Path]::GetFullPath($installedCommon.Trim()) -ine [IO.Path]::GetFullPath($reviewCommon.Trim())) {
         throw 'Reviewed checkout does not share installed Git ownership.'
     }
-    $bash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
-    if (-not (Test-Path -LiteralPath $bash)) { throw 'Git Bash is required to verify reviewed source.' }
+    $bash = @(
+        $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }),
+        $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe' }),
+        $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe' }),
+        'C:\Program Files\Git\bin\bash.exe',
+        'C:\Program Files (x86)\Git\bin\bash.exe'
+    ) | Where-Object { $_ -and $_ -notmatch '^[\\/]' -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    if (-not $bash) { throw 'Git Bash is required to verify reviewed source.' }
     $identity = Invoke-NativeProbe -Command $bash -Arguments @((Join-Path $PSScriptRoot 'ai-review-lifecycle'), 'identity', $reviewRoot)
     if ($identity.ExitCode -ne 0) { throw 'Could not independently verify review source identity.' }
     try { $source = ($identity.Output -join "`n") | ConvertFrom-Json } catch { throw 'Review source identity is malformed.' }

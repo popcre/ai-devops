@@ -1160,9 +1160,38 @@ windows_program_files(){
   fi
 }
 
+windows_program_files_x86(){
+  # bash cannot expand ${ProgramFiles(x86)} — the parentheses are a bad
+  # substitution — so read that Windows variable through printenv.
+  local pfx86="${PROGRAMFILESX86:-${ProgramFilesx86:-}}"
+  if [ -z "$pfx86" ] && command -v printenv >/dev/null 2>&1; then
+    pfx86="$(printenv 'ProgramFiles(x86)' 2>/dev/null || true)"
+  fi
+  if [ -n "$pfx86" ]; then
+    printf '%s\n' "$pfx86"
+  elif [ -f '/c/Program Files (x86)/Git/bin/bash.exe' ]; then
+    cygpath -aw '/c/Program Files (x86)'
+  fi
+}
+
+# Every Git Bash path an installed .cmd route may name. The installer walks the
+# same list (issue #1701), so the gate has to accept all of them — not only the
+# %ProgramFiles% and %LOCALAPPDATA% forms.
+windows_git_bash_candidates(){
+  local pf pfx86 la
+  pf="$(windows_program_files)"
+  pfx86="$(windows_program_files_x86)"
+  la="${LOCALAPPDATA:-${LocalAppData:-}}"
+  [ -n "$pf" ] && printf '%s\n' "${pf}\\Git\\bin\\bash.exe"
+  [ -n "$pfx86" ] && printf '%s\n' "${pfx86}\\Git\\bin\\bash.exe"
+  [ -n "$la" ] && printf '%s\n' "${la}\\Programs\\Git\\bin\\bash.exe"
+  printf '%s\n' 'C:\Program Files\Git\bin\bash.exe'
+  printf '%s\n' 'C:\Program Files (x86)\Git\bin\bash.exe'
+}
+
 windows_launcher_route(){
   local expected_source="$1" installed_launcher="$2" cmd_launcher="$2.cmd"
-  local launcher_target expected_target source_path cmd_route expected_programfiles expected_localappdata program_files local_app_data offset
+  local launcher_target expected_target source_path cmd_route offset
   local bash_home cmd_home expected_home
   local -a bash_lines=() cmd_lines=()
   [ -f "$installed_launcher" ] && [ -f "$cmd_launcher" ] || return 1
@@ -1200,14 +1229,15 @@ windows_launcher_route(){
   expected_target="$(cygpath -wa "$expected_source" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   [ -n "$launcher_target" ] && [ "$launcher_target" = "$expected_target" ] || return 1
   cmd_route="${cmd_lines[$((offset+1))]}"
-  program_files="$(windows_program_files)"
-  local_app_data="${LOCALAPPDATA:-${LocalAppData:-}}"
-  expected_programfiles="\"${program_files}\Git\bin\bash.exe\" \"$source_path\" %*"
-  expected_localappdata="\"${local_app_data}\Programs\Git\bin\bash.exe\" \"$source_path\" %*"
-  if [ -n "$program_files" ] && [ "$cmd_route" = "$expected_programfiles" ]; then :
-  elif [ -n "$local_app_data" ] && [ "$cmd_route" = "$expected_localappdata" ]; then :
-  else return 1
-  fi
+  local candidate route_ok=0
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if [ "$cmd_route" = "\"${candidate}\" \"$source_path\" %*" ]; then
+      route_ok=1
+      break
+    fi
+  done < <(windows_git_bash_candidates)
+  [ "$route_ok" -eq 1 ] || return 1
 }
 
 windows_partial_launcher_route(){
@@ -1247,10 +1277,12 @@ windows_partial_launcher_route(){
     cmd_exe="$(sed -n 's/^"\([^"]*\)" "[^"]*" %\*$/\1/p' <<< "$route")"
     source_path="$(sed -n 's/^"[^"]*" "\([^"]*\)" %\*$/\1/p' <<< "$route")"
     [ -n "$source_path" ] && [ "$(cygpath -wa "$source_path" 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "$expected_target" ] || return 1
-    local program_files
-    program_files="$(windows_program_files)"
-    [ -n "$program_files" ] && [ "$cmd_exe" = "${program_files}\\Git\\bin\\bash.exe" ] ||
-      { [ -n "${LOCALAPPDATA:-${LocalAppData:-}}" ] && [ "$cmd_exe" = "${LOCALAPPDATA:-${LocalAppData:-}}\\Programs\\Git\\bin\\bash.exe" ]; } || return 1
+    local candidate route_ok=0
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] || continue
+      if [ "$cmd_exe" = "$candidate" ]; then route_ok=1; break; fi
+    done < <(windows_git_bash_candidates)
+    [ "$route_ok" -eq 1 ] || return 1
   fi
 }
 

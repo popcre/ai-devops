@@ -564,6 +564,8 @@ check 'command-only recovery seals present and absent paths' \
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$first_target.json" "$class_launcher.cmd"
 partial_route="$TMP/partial-route.sh"
 sed -n '/^windows_program_files(){/,/^}/p' "$GATES" > "$partial_route"
+sed -n '/^windows_program_files_x86(){/,/^}/p' "$GATES" >> "$partial_route"
+sed -n '/^windows_git_bash_candidates(){/,/^}/p' "$GATES" >> "$partial_route"
 sed -n '/^windows_partial_launcher_route(){/,/^}/p' "$GATES" >> "$partial_route"
 cat >> "$partial_route" <<'EOF'
 cygpath(){ printf '%s\n' "${@: -1}"; }
