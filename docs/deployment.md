@@ -352,7 +352,7 @@ ai-install-skills --adopt-globals
 ```
 
 For a narrow refresh, preview with `ai-install-skills --dry-run --only
-shared-db-orchestrator --only shared-db-handover`. A real narrow install requires
+shared-db-change --only shared-db-handover`. A real narrow install requires
 an explicit `installation` task in the clean merged candidate worktree and
 `--reviewer-approval REPORT`: the candidate's `scoped-skills-install` action
 validates its own committed gate, installer and helper, exact-source independent

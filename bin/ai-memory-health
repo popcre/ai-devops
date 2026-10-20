@@ -238,6 +238,18 @@ else
   printf '  - no hub memory directory at %s/memory\n' "$repo_root" >> "$report"
 fi
 
+# Installed globals versus their templates, machine sections stripped (#1881).
+# A stale global means this machine runs older rules than every other one.
+if (( ! index_only && ! hub_only && ! ignore_sync_state )) && [[ -x "$repo_root/bin/ai-adopt-globals" ]]; then
+  head1 "Installed globals"
+  while IFS= read -r line; do
+    case "$line" in
+      *": DRIFT "*) note "STALE GLOBAL: ${line} — run ai-adopt-globals." ;;
+      *": CLEAN"|*": not installed.") printf '  - %s\n' "$line" >> "$report" ;;
+    esac
+  done < <(CLAUDE_HOME="$claude_home" bash "$repo_root/bin/ai-adopt-globals" --check 2>&1 || true)
+fi
+
 # Trend. One week's totals say nothing; the direction does. The 2026-08-27
 # consolidation found single memories forked into dozens of copies and 62
 # phantom projects, all of which had been growing for weeks - every weekly

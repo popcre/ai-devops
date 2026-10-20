@@ -174,6 +174,9 @@ the task needs the detail.
   wait, shipment, deployment, database or infrastructure change, or production
   action, run `ai-task-gates check --before <action>`. If the change set outgrew
   the declared class, redeclare it and say so; never work around a refusal.
+  Classes: code, prose, private-evidence (read-only analysis),
+  private-tooling, reviewer-safety, installation, deployment, infrastructure,
+  production, shared-db, ui-live-workflow.
 - **Quote every time in EST (New York City).** All human-facing clock times in
   replies, issues, comments, plans, handoffs, and status notes use EST/EDT
   (America/New_York) and name the zone — e.g. `3:45 PM EST`. Never leave a
@@ -237,9 +240,6 @@ the task needs the detail.
   every other repository the session picks any in-rotation reviewer whose
   engine differs from its own via `ai-review`. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
-- **`shared-db-orchestrator` is optional reference only** — claim-first is the
-  default structural path. Its detailed safety rules stay binding whenever
-  shared-db structural work runs.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.

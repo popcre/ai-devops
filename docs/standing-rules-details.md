@@ -110,7 +110,7 @@ need an independent production reviewer. remove that requirement"; popcre/shared
 #3656): no separately registered independent reviewer identity is required for
 shared-db manual production recovery; the allocator-assigned exact-head AI review
 APPROVE and every other evidence gate still apply. Workflow detail:
-its full checklist lives in `skills/shared/shared-db-orchestrator/` and
+its full checklist lives in the [shared-db structural safety reference](shared-db-structural-safety/README.md) and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
 

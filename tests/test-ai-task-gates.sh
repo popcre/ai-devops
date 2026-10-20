@@ -217,6 +217,9 @@ check 'start prints no platform brief where the repository ships none' "! grep -
 mkdir -p "$TMP/brief/config"; printf 'PLATFORM CHECK fixture\n' > "$TMP/brief/config/reviewer-platform-brief.txt"
 ( cd "$TMP/brief" && "$GATES" start --class code ) > "$TMP/brief-start.out" 2>&1
 check 'start prints the shipped platform brief before any edit' "grep -q 'PLATFORM CHECK fixture' '$TMP/brief-start.out'"
+! ( cd "$TMP/brief" && "$GATES" start --class bogus ) > "$TMP/bad-class.out" 2>&1
+check 'start rejects an unknown class and prints the valid class list (#1881)' \
+  "grep -q 'unknown change class: bogus (valid: .*ui-live-workflow' '$TMP/bad-class.out'"
 mkdir -p "$TMP/class/bin"
 printf '#!/bin/sh\n' > "$TMP/class/bin/ai-task-gates"
 git -C "$TMP/class" add .ai-devops/task-gates.json bin/ai-task-gates

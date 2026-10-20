@@ -146,6 +146,9 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   shipment, deployment, database, infrastructure, or production action, run
   `ai-task-gates check --before <action>`. If the work outgrew the class,
   redeclare and say so; never work around a refusal.
+  Classes: code, prose, private-evidence (read-only analysis),
+  private-tooling, reviewer-safety, installation, deployment, infrastructure,
+  production, shared-db, ui-live-workflow.
 - **Quote every time in EST (New York City).** All human-facing clock times in
   replies, issues, comments, plans, handoffs, and notes use EST/EDT
   (America/New_York) and name the zone, e.g. `3:45 PM EST`. Machine filenames
@@ -203,8 +206,6 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   repository the session picks any in-rotation reviewer whose engine differs
   from its own via `ai-review`. Never retry one out of rotation. Details:
   `docs/standing-rules-details.md`.
-- **`shared-db-orchestrator` is optional reference only** — claim-first is the
-  default structural path; its safety rules stay binding when that work runs.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in their
   approved private repository.

@@ -161,8 +161,7 @@ canonical repo `popcre/shared-db` — even when the code change was in an app
 repo. See DOC-SPEC.md for the required shared-db documentation shape.
 
 If the session ran inside `shared-db` with sub-agents, run the
-**`shared-db-handover`** skill as well (the session was opened under
-`shared-db-orchestrator`): that handoff has two halves, and the second — a
+**`shared-db-handover`** skill as well (a structural session): that handoff has two halves, and the second — a
 separate block for **each sub-agent's** work — is mandatory. The handoff
 completeness gate above does not pass without it.
 

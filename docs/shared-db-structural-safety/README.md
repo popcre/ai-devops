@@ -1,9 +1,8 @@
----
-name: shared-db-orchestrator
-description: Optional reference for shared-db structural work safety rules (claims, exact-object locks, stage leases, review, live proof). Claim-first is the default — no orchestrator chat or marker is required. Use when a structural session wants the detailed checklist, promotion rules, or exception handling.
----
+# Shared-db structural work safety rules (reference)
 
-# Shared DB Orchestrator (reference only — the orchestrator role is retired)
+Formerly the `shared-db-orchestrator` skill (retired 2026-10-20, #1881). Read
+when structural work needs the detailed checklist, promotion rules, or
+exception handling; `shared-db-change` points here.
 
 > **Owner ruling, Albert Hazan, 2026-10-02: "there is no longer an orchestrator."**
 > No session is the orchestrator. Never route work to one, open a HANDOVER issue and
@@ -12,7 +11,7 @@ description: Optional reference for shared-db structural work safety rules (clai
 > existing issue and start, per `shared-db-change`. The session doing the structural work owns its claim and delivery;
 > optional delegation never creates a required orchestrator role.
 
-> The completed [`shared-db throughput programme`](../../../plan_shared-db-complete-throughput-repair.md) is a decision record, not a restart plan. Its safety invariants remain binding; retiring a role never removes claims, version reservations, stage leases, or live proof.
+> The completed [`shared-db throughput programme`](../../plan_shared-db-complete-throughput-repair.md) is a decision record, not a restart plan. Its safety invariants remain binding; retiring a role never removes claims, version reservations, stage leases, or live proof.
 
 **Not required. Claim-first is the default. This document is reference only.**
 New structural work starts when a session claims exact objects on the existing

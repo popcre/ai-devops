@@ -59,6 +59,16 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
 
+# Each global lists the valid task-gate classes; the list must match
+# config/task-gates.json change_classes exactly so it cannot go stale (#1881).
+expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | sort | tr '\n' ' ')"
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
+  listed_classes="$(tr '\n' ' ' < "$client_file" | grep -oP 'Classes: \K[^.]*' | head -n1 \
+    | sed 's/([^)]*)//g' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort | tr '\n' ' ')"
+  [[ "$listed_classes" == "$expected_classes" ]] \
+    || fail "$(basename "$client_file") task-gate class list '$listed_classes' does not match config/task-gates.json '$expected_classes'"
+done
+
 # Owner ruling 2026-09-28 ("never ask a human to approve"): the repository
 # guide, the secrets skill, and the details doc must keep the AI-reviewer gate
 # and must not return to asking Albert to approve.
@@ -90,9 +100,9 @@ for never_ask in \
   "$REPO_ROOT"/plan_ai-devops-work-claims.md "$REPO_ROOT"/plan_grok_integration-review-access.md \
   "$REPO_ROOT"/docs/transcript-leak-audit-2026-07-19.md "$REPO_ROOT"/skills/claude/sync-dotfiles/SKILL.md \
   "$REPO_ROOT"/templates/repo-docs/docs-ai-branching.md "$REPO_ROOT"/plan_cross_repo_routing_and_gate_enforcement.md \
-  "$REPO_ROOT"/skills/shared/shared-db-orchestrator/references/operating-manual.md \
+  "$REPO_ROOT"/docs/shared-db-structural-safety/references/operating-manual.md \
   "$REPO_ROOT"/skills/shared/handoff-writer/SKILL.md "$REPO_ROOT"/templates/system/handoff-standard.md \
-  "$REPO_ROOT"/skills/codex/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/skills/shared/shared-db-orchestrator/SKILL.md \
+  "$REPO_ROOT"/skills/codex/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/docs/shared-db-structural-safety/README.md \
   "$REPO_ROOT"/plan_ast-grep-multi-machine-management.md "$REPO_ROOT"/plan_shared-db-finish-first-delivery.md \
   "$REPO_ROOT"/plan_shared-db-complete-throughput-repair.md "$REPO_ROOT"/plan_ai-muse-native-engine-parity.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
