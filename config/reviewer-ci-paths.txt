@@ -5,6 +5,7 @@
 bin/ai-codex-review*
 bin/ai-muse*
 bin/ai-process-supervisor*
+bin/ai-release-live-check*
 bin/ai-provider-version*
 bin/ai-review*
 bin/ai-stepfun*
