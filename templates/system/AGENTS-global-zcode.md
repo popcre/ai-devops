@@ -279,7 +279,8 @@ the task needs the detail.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N --fit-tool-call` for a pull request;
+  if it prints `STILL-WAITING`, run its rerun command again.
 - **One status probe per state change.** After a wait completes or a merge
   lands, record the answer and move on — do not re-check the same head
   "just to be sure". Reuse a passing result when head and digest are unchanged.
