@@ -38,7 +38,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
   hang) sleep 3; printf '## Verdict\nAPPROVE\n';;
   signal) [ -z "${AI_CODEX_SIGNAL_READY:-}" ] || printf '%s\n' "$$" > "$AI_CODEX_SIGNAL_READY"; trap '[ -z "${AI_CODEX_SIGNAL_STOPPED:-}" ] || printf stopped > "$AI_CODEX_SIGNAL_STOPPED"; exit 143' HUP INT TERM; sleep 30;;
   slow) sleep 1; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
-  profilespy) { printf 'home=%s\n' "$CODEX_HOME"; cat "$CODEX_HOME/AGENTS.md"; [ -L "$CODEX_HOME/auth.json" ] && printf 'auth=symlink\n'; } > "$AI_CODEX_TEST_ARGS/profile-spy"; printf '%s\n' "$@" > "$AI_CODEX_TEST_ARGS/profile-args"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
+  profilespy) { printf 'home=%s\n' "$CODEX_HOME"; cat "$CODEX_HOME/AGENTS.md"; if [ -L "$CODEX_HOME/auth.json" ]; then printf 'auth=symlink\n'; elif [ "$CODEX_HOME/auth.json" -ef "$AI_CODEX_TEST_USER_HOME/auth.json" ]; then printf 'auth=hardlink\n'; fi; } > "$AI_CODEX_TEST_ARGS/profile-spy"; printf '%s\n' "$@" > "$AI_CODEX_TEST_ARGS/profile-args"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   envspy) env > "$AI_CODEX_TEST_ARGS/env-spy"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   *) printf 'review saw complete snapshot\n\n## Verdict\nAPPROVE\n\n'; printf 'codex diagnostic after response\n' >&2;;
 esac
@@ -49,7 +49,7 @@ MODELS="$TMP/models.env"; printf "CODEX_CMD='%s exec -m gpt-5.6-sol --skip-git-r
 export AI_DEVOPS_MODELS_ENV="$MODELS"
 export AI_CODEX_REVIEW_TEST_DIR="$TMP"
 UH="$TMP/user-codex-home"; mkdir -p "$UH"; printf 'Albert is a business owner\n' > "$UH/AGENTS.md"; printf '{}' > "$UH/auth.json"
-export CODEX_HOME="$UH"
+export CODEX_HOME="$UH" AI_CODEX_TEST_USER_HOME="$UH"
 export AI_CODEX_TEST_ARGS="$TMP/args"
 export AI_CODEX_STUB_SOURCE="$R"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
@@ -84,12 +84,15 @@ check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
 # #1427: Codex reviews use the ChatGPT login only; API keys never reach it.
 check "codex_review_unsets_api_keys" "cd '$R' && OPENAI_API_KEY=fake-openai-1427 CODEX_API_KEY=fake-codex-1427 AI_CODEX_STUB_MODE=envspy '$SCRIPT' diff-review >/dev/null 2>&1 && test -s '$TMP/args/env-spy' && ! grep -q 'fake-.*-1427' '$TMP/args/env-spy'"
 # Step 5.1 (#1881): reviewer runs get only the reviewer rules, no owner globals, skills or plugins.
-check "reviewer_profile_replaces_owner_globals" "cd '$R' && AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -q 'auth=symlink' '$TMP/args/profile-spy' && ! grep -q 'business owner' '$TMP/args/profile-spy' && ! grep -qx 'home=$UH' '$TMP/args/profile-spy'"
+check "reviewer_profile_replaces_owner_globals" "cd '$R' && AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -qE 'auth=(symlink|hardlink)' '$TMP/args/profile-spy' && ! grep -q 'business owner' '$TMP/args/profile-spy' && ! grep -qx 'home=$UH' '$TMP/args/profile-spy'"
 check "reviewer_profile_disables_plugins_and_skills" "grep -qx plugins '$TMP/args/profile-args' && grep -qx skills.enabled=false '$TMP/args/profile-args' && grep -qxe --ignore-user-config '$TMP/args/profile-args'"
 LB="$TMP/launcher-bin"; mkdir -p "$LB"; ln -s "$SCRIPT" "$LB/ai-codex-review"
-check "reviewer_profile_found_through_installed_launcher_symlink" "rm -f '$TMP/args/profile-spy'; cd '$R' && AI_CODEX_STUB_MODE=profilespy '$LB/ai-codex-review' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy'"
+# Git Bash without symlink rights copies on ln -s; installed launchers there are .cmd shims, not symlinks.
+if [ -L "$LB/ai-codex-review" ]; then
+  check "reviewer_profile_found_through_installed_launcher_symlink" "rm -f '$TMP/args/profile-spy'; cd '$R' && AI_CODEX_STUB_MODE=profilespy '$LB/ai-codex-review' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy'"
+fi
 NOSYM="$TMP/no-symlink-bin"; mkdir -p "$NOSYM"; printf '#!/usr/bin/env bash\n[ "$1" = -s ] && exit 1\nexec "%s" "$@"\n' "$(command -v ln)" > "$NOSYM/ln"; chmod +x "$NOSYM/ln"
-check "reviewer_profile_hard_links_auth_without_symlink_rights" "rm -f '$TMP/args/profile-spy'; cd '$R' && PATH='$NOSYM':\"\$PATH\" AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && ! grep -q 'auth=symlink' '$TMP/args/profile-spy'"
+check "reviewer_profile_hard_links_auth_without_symlink_rights" "rm -f '$TMP/args/profile-spy'; cd '$R' && PATH='$NOSYM':\"\$PATH\" AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -q 'auth=hardlink' '$TMP/args/profile-spy'"
 check "reviewer_profile_refuses_without_codex_auth" "cd '$R' && ! CODEX_HOME='$TMP/no-auth-home' AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1"
 check "reviewer_profile_home_is_removed_and_user_home_kept" "home=\$(sed -n 's/^home=//p' '$TMP/args/profile-spy'); [ ! -e \"\$home\" ] && grep -q 'business owner' '$UH/AGENTS.md' && [ -f '$UH/auth.json' ]"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"
