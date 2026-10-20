@@ -17,6 +17,13 @@ check 'bin/ai-review-pool is shared review code' \
 check 'a docs change is not shared review code' \
   "! bash -c 'source \"$ROOT/tools/lib/review-capabilities.sh\"; review_shared_code_changed docs/x.md'"
 
+for f in bin/ai-task-gates bin/ai-muse bin/ai-glm bin/ai-reviewer-issue bin/ai-release-live-check bin/ai-release-live-check.cmd bin/ai-task-gates.cmd; do
+  check "$f is shared review code (release gate)" \
+    "bash -c 'source \"$ROOT/tools/lib/review-capabilities.sh\"; review_shared_code_changed $f'"
+done
+check 'a lookalike path is not shared review code' \
+  "! bash -c 'source \"$ROOT/tools/lib/review-capabilities.sh\"; review_shared_code_changed bin/ai-task-gates-extra'"
+
 # run: a fixture candidate whose bin/ai-review is a fake controlled by MODE.
 cand="$TMP/cand"; mkdir -p "$cand/bin"
 cp "$ROOT/bin/ai-release-live-check" "$cand/bin/"

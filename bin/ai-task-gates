@@ -2276,7 +2276,7 @@ require_release_live_review(){ # START TARGET
   changed="$(git -C "$TOPLEVEL" diff --name-only "$1" "$2")" || blocked 'ai-task-gates: STOP. Cannot list the release range for the live review check.'
   # shellcheck source=../tools/lib/review-capabilities.sh
   source "$ROOT/tools/lib/review-capabilities.sh" || blocked 'ai-task-gates: STOP. Cannot load the shared review code list.'
-  review_shared_code_changed "$changed" || printf '%s\n' "$changed" | grep -Eq '^bin/ai-release-live-check(\.cmd)?$' || return 0
+  review_shared_code_changed "$changed" || return 0
   statuses="$("$ROOT/bin/ai-gh" api "repos/popcre/ai-devops/commits/$2/statuses?per_page=100" 2>/dev/null)" || statuses=''
   for os in linux windows; do
     state="$(printf '%s' "$statuses" | jq -r --arg c "ai-devops/live-review/$os" \
