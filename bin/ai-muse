@@ -406,6 +406,18 @@ read_prompt(){
   esac
   [ -s "$f" ] || { rm -f "$f"; die 'prompt is empty.'; }; printf '%s' "$f"
 }
+validate_assert_head_preflight(){ # #674: never replace the active-turn descriptor for an assert-head that cannot match.
+  local root="$1" head
+  [ -n "$OPT_ASSERT_HEAD" ] || return 0
+  # An abbreviated object name fails the packet's exact comparison only after
+  # begin_turn has already archived and dropped the previous retained turn.
+  # Require the full form and an exact current-head match first.
+  [[ "$OPT_ASSERT_HEAD" =~ ^[0-9a-f]{40}$ || "$OPT_ASSERT_HEAD" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'assert-head must be a full 40- or 64-character lowercase hex object name; refusing before any Muse turn metadata changes.'
+  head="$(git -C "$root" rev-parse --verify HEAD^{commit} 2>/dev/null)" || die 'source has no HEAD; refusing before any Muse turn metadata changes.'
+  [ "$OPT_ASSERT_HEAD" = "$head" ] \
+    || die "source-head-mismatch: expected $OPT_ASSERT_HEAD; actual $head (refusing before any Muse turn metadata changes)"
+}
 prepare(){
   local root="$1" name="$2" prompt="$3" t identity; t="$(tag "$name")"
   identity="$(tmp_file)"
@@ -739,11 +751,25 @@ begin_turn(){ # Preserve the previous descriptor before any follow-up can replac
   if [ -n "$prior" ]; then
     [[ "$prior" =~ ^[0-9a-f]{32}$ ]] || die 'previous Muse invocation identity is invalid.'
     archive="${meta%.json}.$prior.metadata.json"
-    [ ! -e "$archive" ] && [ ! -L "$archive" ] || die 'previous Muse metadata archive already exists; preserve both turns for inspection.'
-    (set -C; cat "$meta" > "$archive") && chmod 600 "$archive" && protect_windows_path "$archive" file || die 'could not preserve previous Muse metadata.'
+    if [ -L "$archive" ]; then
+      die 'previous Muse metadata archive is a link; preserve both turns for inspection.'
+    fi
+    if [ -e "$archive" ]; then
+      # A pre-provider follow-up recovery may restore the archived descriptor
+      # and retry; the archive then already holds these exact prior bytes.
+      cmp -s "$meta" "$archive" || die 'previous Muse metadata archive already exists; preserve both turns for inspection.'
+    else
+      (set -C; cat "$meta" > "$archive") && chmod 600 "$archive" && protect_windows_path "$archive" file || die 'could not preserve previous Muse metadata.'
+    fi
+  else
+    archive=""
   fi
   tmp="$(tmp_file)"
-  jq --arg event "$event" 'del(.retained_turn)|.active_invocation_id=$event' "$meta" > "$tmp" && mv -f "$tmp" "$meta" || die 'could not bind the current Muse invocation.'
+  jq --arg event "$event" --arg prior "$prior" --arg archive "$archive" \
+    'del(.retained_turn)|.active_invocation_id=$event
+     | if $prior!="" then .archived_prior_invocation_id=$prior else . end
+     | if $archive!="" then .archived_prior_path=$archive else . end' \
+    "$meta" > "$tmp" && mv -f "$tmp" "$meta" || die 'could not bind the current Muse invocation.'
 }
 retain_turn(){ # retain exact bytes and optional observations in one metadata write
   local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item usage observed_sid
@@ -1008,6 +1034,7 @@ cmd_new(){
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   load_key
+  validate_assert_head_preflight "$root"
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
   begin_turn "$meta"
@@ -1043,6 +1070,7 @@ cmd_ask(){
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   load_key
+  validate_assert_head_preflight "$root"
   begin_turn "$meta"
   tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
@@ -1276,10 +1304,124 @@ muse_code_delete_session(){ # the CLI has no delete command; remove both exact p
     done
   )
 }
+# #674 pre-provider follow-up recovery: begin_turn archives the previous
+# successful descriptor, then source identity can refuse before any snapshot or
+# provider launch. That leaves preparation_failed with the old provider session
+# intact and no new retained process. Restore the exact archived descriptor so
+# the session returns to its last successful state. Never combine the old
+# completion with a newer source, and never treat this as provider uncertainty.
+find_archived_prior(){
+  local meta="$1" prior archive candidate meta_head best="" best_mtime=0 mtime
+  prior="$(jq -r '.archived_prior_invocation_id // empty' "$meta" 2>/dev/null || true)"
+  if [ -n "$prior" ]; then
+    archive="$(jq -r '.archived_prior_path // empty' "$meta" 2>/dev/null || true)"
+    if [ -n "$archive" ] && [ -f "$archive" ] && [ ! -L "$archive" ]; then
+      printf '%s' "$archive"; return 0
+    fi
+    archive="${meta%.json}.$prior.metadata.json"
+    if [ -f "$archive" ] && [ ! -L "$archive" ]; then
+      printf '%s' "$archive"; return 0
+    fi
+    return 1
+  fi
+  # Older incidents archived without recording the path. Prefer an archive
+  # whose retained source still matches the live descriptor's source bindings
+  # (the previous turn); otherwise the newest prior archive. Ambiguity refuses.
+  meta_head="$(jq -r '.head // empty' "$meta" 2>/dev/null || true)"
+  local candidates=() match_head=()
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    jq -e '(.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and .retained_turn.process_exit==0' "$candidate" >/dev/null 2>&1 || continue
+    candidates+=("$candidate")
+    if [ -n "$meta_head" ] && [ "$(jq -r '.head // empty' "$candidate" 2>/dev/null || true)" = "$meta_head" ]; then
+      match_head+=("$candidate")
+    fi
+  done < <(find "$(dirname "$meta")" -maxdepth 1 -type f -name "$(basename "${meta%.json}").*.metadata.json" 2>/dev/null | sort)
+  if [ "${#match_head[@]}" -eq 1 ]; then
+    printf '%s' "${match_head[0]}"; return 0
+  fi
+  [ "${#match_head[@]}" -eq 0 ] || return 1
+  [ "${#candidates[@]}" -ge 1 ] || return 1
+  for candidate in "${candidates[@]}"; do
+    mtime="$(stat -c '%Y' "$candidate" 2>/dev/null || echo 0)"
+    if [ "$mtime" -ge "$best_mtime" ]; then
+      if [ "$mtime" -eq "$best_mtime" ] && [ -n "$best" ]; then
+        best=""; break  # two equally new archives are ambiguous
+      fi
+      best="$candidate"; best_mtime="$mtime"
+    fi
+  done
+  [ -n "$best" ] || return 1
+  printf '%s' "$best"
+}
+validate_archived_prior(){
+  local archive="$1" meta="$2" name="$3" rid="$4" root="$5" event stem item path expected
+  [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" \
+    '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and
+     .retained_turn.model==$model and .retained_turn.runtime_version==$version and
+     (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and
+     .retained_turn.process_exit==0 and
+     (.retained_turn.head|type=="string" and length>0) and
+     (.retained_turn.packet_sha256|type=="string" and length>0) and
+     (.retained_turn.review_dir|type=="string" and length>0)' \
+    "$archive" >/dev/null || return 1
+  [ "$(cd "$(jq -r .repository_root "$archive")" && pwd -P)" = "$(cd "$root" && pwd -P)" ] || return 1
+  event="$(jq -r '.retained_turn.original_invocation_id' "$archive")"
+  [ "$event" != "$(jq -r '.active_invocation_id // empty' "$meta" 2>/dev/null || true)" ] || return 1
+  # Archive path is <meta-base>.<event>.metadata.json; evidence stem is <meta-base>.<event>.
+  stem="${archive%.metadata.json}"
+  for item in stream prompt; do
+    path="$(jq -r --arg key "$item" '.retained_turn[$key]' "$archive")"
+    expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
+    if command -v cygpath >/dev/null 2>&1; then
+      [ "$(cygpath -am "$path")" = "$(cygpath -am "$expected")" ] || return 1
+    else
+      [ "$(realpath -m "$path")" = "$(realpath -m "$expected")" ] || return 1
+    fi
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key]' "$archive")" ] || return 1
+  done
+  return 0
+}
+recover_preprovider_followup(){
+  local meta="$1" name="$2" rid="$3" root="$4" status archive failed_event failed_rec tmp
+  status="$(jq -r '.status//""' "$meta")"
+  [ "$status" = preparation_failed ] || return 1
+  # A retained process for the current invocation means the provider ran.
+  if jq -e '.retained_turn.original_invocation_id|type=="string"' "$meta" >/dev/null 2>&1; then
+    return 1
+  fi
+  # preparation_failed plus no retained process is pre-provider only when the
+  # current invocation never produced turn evidence files.
+  failed_event="$(jq -r '.active_invocation_id // empty' "$meta")"
+  if [ -n "$failed_event" ]; then
+    [ ! -e "${meta%.json}.$failed_event.jsonl" ] || return 1
+    [ ! -e "${meta%.json}.$failed_event.prompt" ] || return 1
+  fi
+  archive="$(find_archived_prior "$meta")" || return 1
+  validate_archived_prior "$archive" "$meta" "$name" "$rid" "$root" || return 1
+  # Preserve the failed follow-up descriptor before restoring the prior turn.
+  if [ -n "$failed_event" ]; then
+    failed_rec="${meta%.json}.$failed_event.preprovider-failed.json"
+    if [ ! -e "$failed_rec" ] && [ ! -L "$failed_rec" ]; then
+      (set -C; cat "$meta" > "$failed_rec") && chmod 600 "$failed_rec" 2>/dev/null || true
+    fi
+  fi
+  tmp="$(tmp_file)"
+  cat "$archive" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$meta" || return 1
+  printf 'recovered pre-provider Muse follow-up for session %s; previous completion restored, no provider request\n' "$name"
+  return 0
+}
 cmd_reconcile(){
   local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected
   m="$(find_meta "$name")"; root="$(repo_root)"; rid="$(repo_id "$root")"; lock_session "$rid" "$name"
-  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and .retained_turn.process_exit==0' "$m" >/dev/null || die 'no exact successful retained Muse process exists; keep uncertain work fenced, never replay it.'
+  if ! jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and .retained_turn.process_exit==0' "$m" >/dev/null; then
+    recover_preprovider_followup "$m" "$name" "$rid" "$root" || die 'no exact successful retained Muse process exists; keep uncertain work fenced, never replay it.'
+    unlock_session
+    return 0
+  fi
   [ "$(cd "$(jq -r .repository_root "$m")" && pwd -P)" = "$(cd "$root" && pwd -P)" ] || die 'retained Muse work belongs to a different repository.'
   status="$(jq -r .status "$m")"
   case "$status" in active|provider_outcome_uncertain|completed_pending_local_checks|turn_in_progress) ;; *) die "session cannot be reconciled from status: $status";; esac

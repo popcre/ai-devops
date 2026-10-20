@@ -13,6 +13,9 @@ PASS=0; FAIL=0
 ai_test_measure_spawn_baseline
 
 check 'wrapper parses' "bash -n '$SCRIPT'"
+check 'pre-provider follow-up recovery is gated on preparation_failed' "grep -q 'recover_preprovider_followup' '$SCRIPT' && grep -q 'preparation_failed' '$SCRIPT'"
+check 'assert-head preflight runs before any turn metadata change' "grep -q 'validate_assert_head_preflight' '$SCRIPT' && grep -q 'full 40- or 64-character lowercase hex' '$SCRIPT'"
+check 'begin_turn records the archived prior for later recovery' "grep -q 'archived_prior_invocation_id' '$SCRIPT' && grep -q 'archived_prior_path' '$SCRIPT'"
 check 'installed symlink resolution is implemented' "grep -q 'REAL_SELF=.*readlink -f' '$SCRIPT' && grep -q 'dirname \"\$SELF\"' '$SCRIPT'"
 check 'setup parses' "bash -n '$ROOT/bin/setup-opencode-muse.sh'"
 check 'setup resolves its installed symlink' "grep -q 'REAL_SELF=.*readlink -f' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'dirname \"\$SELF\"' '$ROOT/bin/setup-opencode-muse.sh'"
@@ -289,6 +292,59 @@ muse_turn_identity_cases(){
     check "$name refuses legacy stale completion before any metadata mutation" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-legacy.log' 2>&1 && grep -q 'could not reserve exact recovered Muse evidence' '$TMP/identity-legacy.log' && test \"\$(sha256sum '$m')\" = '$before'"
   done
 }
+muse_preprovider_recovery_cases(){
+  # #674: follow-up preparation must not replace the active-turn descriptor for
+  # an assert-head that cannot match, and a pre-provider follow-up failure must
+  # recover the archived previous completion without inventing provider work.
+  local name=preprovider.mixed m prior archive before calls="$TMP/preprovider-calls" head out rc reask_rc link_archive
+  : > "$calls"
+  check "$name creates a completed first turn" "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first\""
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+  check "$name retains its successful process" "test -n '$m' && jq -e '.status==\"active\" and .retained_turn.process_exit==0' '$m'"
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  head="$(jq -r .head "$m")"
+  cp "$m" "$TMP/$name.before"
+  before="$(sha256sum "$m")"
+  check "$name rejects abbreviated assert-head before any metadata change" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-abbr-called' '$SCRIPT' ask $name --assert-head ${head:0:8} --prompt followup\" > '$TMP/preprovider-abbr.log' 2>&1 && grep -q 'full 40- or 64-character' '$TMP/preprovider-abbr.log' && test \"\$(sha256sum '$m')\" = '$before' && test ! -e '$TMP/preprovider-abbr-called'"
+  link_archive="${m%.json}.$prior.metadata.json"
+  if ln -s "$m" "$link_archive" 2>/dev/null && [ -L "$link_archive" ]; then
+    check "$name rejects a symlinked prior archive before any turn change" "! eval \"$ENV '$SCRIPT' ask $name --prompt linktrap\" > '$TMP/preprovider-link.log' 2>&1 && grep -q 'archive is a link' '$TMP/preprovider-link.log' && rm -f '$link_archive' && test \"\$(sha256sum '$m')\" = '$before'"
+  else
+    rm -f "$link_archive" 2>/dev/null || true
+    ok "$name symlinked-archive refusal needs symlink support on this host"
+  fi
+  check "$name rejects a full mismatched assert-head before any metadata change" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-wrong-called' '$SCRIPT' ask $name --assert-head 0000000000000000000000000000000000000000 --prompt followup\" > '$TMP/preprovider-wrong.log' 2>&1 && grep -q 'refusing before any Muse turn metadata changes' '$TMP/preprovider-wrong.log' && test \"\$(sha256sum '$m')\" = '$before' && test ! -e '$TMP/preprovider-wrong-called'"
+  check "$name rejects a full mismatched assert-head on new before provider contact" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-new-called' '$SCRIPT' new $name.newhead --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/preprovider-new-called'"
+  # Pre-provider follow-up failure after begin_turn: a missing source base is
+  # refused by packet resolve before any snapshot or provider launch.
+  check "$name archives prior then fails pre-provider on a bad follow-up base" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-base-called' '$SCRIPT' ask $name --base missing-preprovider-target --prompt followup\" > '$TMP/preprovider-base.log' 2>&1"
+  archive="${m%.json}.$prior.metadata.json"
+  check "$name left a pre-provider preparation_failed turn with no new process" "test -f '$archive' && cmp -s '$TMP/$name.before' '$archive' && jq -e '(.status==\"preparation_failed\") and (has(\"retained_turn\")|not)' '$m' && jq -e --arg p \"$prior\" '.active_invocation_id!=\$p' '$m' && test ! -e '$TMP/preprovider-base-called'"
+  before="$(sha256sum "$m")"
+  check "$name reconcile recovers the archived previous completion without provider calls" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-recover.log' && jq -e '.status==\"active\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$m' && test \"\$(wc -l < '$calls')\" -eq 1"
+  check "$name recovery left a failed-follow-up record and kept the archive" "test -f '$archive' && ls \"${m%.json}\".*.preprovider-failed.json >/dev/null"
+  reask_rc=0
+  (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask $name --prompt again") > "$TMP/preprovider-reask.log" 2>&1 || reask_rc=$?
+  check "$name same-session ask continues after pre-provider recovery" "test '$reask_rc' -eq 0 && jq -e '.status==\"active\" and .retained_turn.original_invocation_id!=\"'$prior'\"' '$m'"
+  if [ "$reask_rc" -ne 0 ]; then printf 'reask rc=%s\n' "$reask_rc"; cat "$TMP/preprovider-reask.log"; fi
+  # Changed-head follow-up that fails pre-provider must restore the prior
+  # descriptor, never bind the old completion to the new source.
+  printf 'changed source for preprovider\n' >> "$REPO/a.txt"; git -C "$REPO" add a.txt; git -C "$REPO" commit -qm 'preprovider source change'
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  cp "$m" "$TMP/$name.changed-before"
+  check "$name changed-head follow-up fails pre-provider without provider contact" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask $name --base missing-preprovider-target --prompt changed\" > '$TMP/preprovider-changed.log' 2>&1"
+  check "$name changed-head pre-provider failure still recovers the prior descriptor" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-changed-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-changed-recover.log' && jq -e '.status==\"active\" and .retained_turn.original_invocation_id==\"'$prior'\"' '$m' && jq -e --arg h \"\$(jq -r .retained_turn.head '$m')\" '.head==\$h' '$m'"
+  # Provider-uncertain state must stay fenced even when an archived prior
+  # exists. Simulate the post-interrupt shape (uncertain, no new retained
+  # process) from metadata so the check does not need a live interrupt fixture.
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  archive="${m%.json}.$prior.metadata.json"
+  cp "$m" "$TMP/$name.uncertain-before"
+  jq 'del(.retained_turn)|.status="provider_outcome_uncertain"|.active_invocation_id="ffffffffffffffffffffffffffffffff"' "$TMP/$name.uncertain-before" > "$m"
+  before="$(sha256sum "$m")"
+  check "$name cannot recover a provider-uncertain turn from the archived prior" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-uncertain-recon.log' 2>&1 && grep -q 'no exact successful retained Muse process' '$TMP/preprovider-uncertain-recon.log' && test \"\$(sha256sum '$m')\" = '$before'"
+  check "$name provider-uncertain archive remains intact and unused" "test -f '$archive' && cmp -s \"$archive\" '$TMP/$name.uncertain-before' && jq -e '.status==\"provider_outcome_uncertain\"' '$m'"
+}
 muse_failed_turn_cases(){
   local name=failedturn.positive m event archive report_before meta_before events_before calls_before out rc oldhead list_output list_rows
   local calls="$TMP/failedturn-provider-calls" event_file="$AI_REVIEW_EVENT_DIR/events.jsonl"
@@ -441,8 +497,13 @@ failure_phase_cases(){
   if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
   if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
 }
+if [ "${AI_MUSE_PREPROVIDER_TESTS_ONLY:-0}" = 1 ]; then
+  muse_preprovider_recovery_cases
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 if [ "${AI_MUSE_IDENTITY_TESTS_ONLY:-0}" = 1 ]; then
   muse_turn_identity_cases
+  muse_preprovider_recovery_cases
   printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 if [ "${AI_MUSE_FAILED_TURN_TESTS_ONLY:-0}" = 1 ]; then
@@ -456,6 +517,7 @@ fi
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
   muse_turn_identity_cases
+  muse_preprovider_recovery_cases
   printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 # Windows CI runs the main flow below as three parts (tests/test-ai-muse-part2.sh,
@@ -795,6 +857,7 @@ check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"ht
 muse_failed_turn_cases
 muse_recovery_cases
 muse_turn_identity_cases
+muse_preprovider_recovery_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then
   fake_op_dir="$TMP/la/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"; mkdir -p "$fake_op_dir"
