@@ -548,9 +548,9 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
   not accepted.
 - `another installation is active for this checkout` can also be an `op
   daemon` that an earlier install's `op` call started: it inherited the lock
-  fd and outlived the install (hetz, 2026-10-20). Since #1783 both updaters
-  put an `op` shim first on `PATH` that closes fd 9 before running the real
-  `op`; for a daemon started before that, stopping it is safe.
+  fd and outlived the install (hetz, 2026-10-20). Since #1783 `install.sh` runs every
+  stage with fd 9 closed, so nothing a stage leaves running keeps the lock; for
+  a daemon started before that, stopping it is safe.
 - `another installation is active for this checkout` can be a leftover
   `setup-desktop-apps.sh --claude-only --wait-for-desktop-exit` started by an
   earlier install that inherited the checkout lock and waits until the Claude
