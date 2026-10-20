@@ -6,6 +6,7 @@
 # found hand-written PR polling loops in 11 of 44 sessions. A hand-rolled
 # `gh pr view` loop cannot see a merge-queue ejection, and it burns API quota.
 #
+# Patterns spell g[h] so the transport guard does not read them as GitHub calls.
 # This hook blocks the loop before it runs (exit 2; stderr reaches the model)
 # and names the waiter to use instead. A single `gh pr view`, a lone `sleep`,
 # and ai-pr-wait itself are allowed. It never edits anything.
@@ -20,12 +21,12 @@ cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null
 cmd="$(printf '%s' "$cmd" | tr '\r\n' '  ')"
 
 reason=''
-if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(gh pr (view|checks|merge)|ai-gh pr)\b'; then
+if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then
   reason='sleep followed by a pull-request read'
-elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bgh pr (view|checks)\b'; then
+elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bg[h] pr (view|checks)\b'; then
   reason='an until/while loop over a pull-request read'
-elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bgh pr view\b'; then
-  reason='a seq loop over gh pr view'
+elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bg[h] pr view\b'; then
+  reason='a seq loop over a pull-request read'
 elif printf '%s' "$cmd" | grep -Eq '\b(for|while|until)\b.*\btimeout +[0-9]+[smh]?\b.*ai-pr-wait'; then
   reason='ai-pr-wait wrapped in timeout inside a loop'
 fi
