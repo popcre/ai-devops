@@ -74,6 +74,7 @@ check 'chain verifies against CA' openssl verify -CAfile "$T/ca.crt" "$T/server.
 check 'chain+key load in python ssl' python3 -c "import ssl;ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain('$T/server-chain.crt','$T/server.key')"
 check 'key is 0600' test "$(stat -c %a "$T/server.key")" = 600
 check 'tls dir chowned to service user' grep -q "^-R ai:ai $T\$" "$TMP/chown.log"
+check 'CA signing key stays root-only' grep -q "^0:0 $T/ca.key$" "$TMP/chown.log"
 check 'log dir created' test -d "$FAKE/home/ai/.headroom-zcode-home/.headroom/logs"
 check 'log dir chowned to service user' grep -q "^-R ai:ai $FAKE/home/ai/.headroom-zcode-home/.headroom\$" "$TMP/chown.log"
 check 'proxy copied from repo' cmp -s "$ROOT/config/zcode-headroom/zcode_headroom_tls.py" "$FAKE/home/ai/zcode-headroom-tls/zcode_headroom_tls.py"

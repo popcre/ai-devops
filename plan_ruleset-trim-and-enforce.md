@@ -11,7 +11,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 1.1 List valid task-gate classes in every global | ✅ done | 2026-10-20 | b0c463d1; tests/test-client-globals-required-phrases.sh, tests/test-ai-task-gates.sh |
 | 1.2 Retire `shared-db-orchestrator` global mention and skill | ✅ done | 2026-10-20 | a07c0365 (content moved to docs/shared-db-structural-safety/; retired-skills.txt is pre-marker only, so unchanged); tests/test-shared-db-routing-rules.sh, tests/test-ai-install-skills.sh |
 | 1.3 Installed-global drift check | 🟡 built, live proof pending | 2026-10-20 | 7e6e0dc1; tests/test-ai-adopt-globals.sh case 11. edge-dev3 reports DRIFT on all four globals before reinstall; clean-after needs the protected install once merged |
-| 2.1 PR-wait polling hook (Claude PreToolUse) | ⬜ open | — | — |
+| 2.1 PR-wait polling hook (Claude PreToolUse) | ✅ done | 2026-10-20 | `6303e108`; `tests/test-ai-pr-poll-guard-hook.sh` 28/28 |
 | 2.2 `ai-pr-wait` single run fits a 10-minute tool call | ⬜ open | — | — |
 | 3.1 One source for the Codex/ZCode/MiMo globals | ⬜ open | — | — |
 | 3.2 Trim the Claude + Codex global rules to ~1,200 words | ⬜ open | — | — |

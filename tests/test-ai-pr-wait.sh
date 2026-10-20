@@ -190,6 +190,25 @@ OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/deadline-called" AI_PR_WAIT_TEST_CLOCK="$TMP
 check "deadline after a proven pending read is not mislabeled as an API failure" \
   "test '$RC' -eq 2 && test \"$(cat "$TMP/deadline-called")\" -eq 1 && printf '%s' \"$OUT\" | grep -q 'still in progress after 1m' && ! printf '%s' \"$OUT\" | grep -q 'could not read PR'"
 
+# Plan #1881 step 2.2: --fit-tool-call caps a long deadline at 9 minutes so one
+# run fits a 10-minute tool call, and its timeout names the exact rerun. The
+# clock jumps 9m30s: past a 9-minute cap, well short of the 30 minutes asked.
+mkdir -p "$TMP/fitbin"
+sed 's/1060/1570/' "$TMP/bin/date" > "$TMP/fitbin/date"; chmod +x "$TMP/fitbin/date"
+rm -f "$TMP/clock" "$TMP/fit-called"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/fit-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/fitbin:$TMP/bin:$PATH" timeout 120 bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 30 --fit-tool-call --interval 60 2>&1)"; RC=$?
+check "--fit-tool-call caps a 30-minute deadline at 9 minutes" \
+  "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'still in progress after 9m'"
+check "--fit-tool-call timeout prints one STILL-WAITING line with the same command" \
+  "test \"\$(printf '%s\n' \"$OUT\" | grep -c '^STILL-WAITING ')\" -eq 1 && printf '%s' \"$OUT\" | grep -qx 'STILL-WAITING pr=1 state=OPEN rerun: ai-pr-wait 1 --repo popcre/ai-devops --timeout-minutes 30 --fit-tool-call --interval 60'"
+rm -f "$TMP/clock" "$TMP/fit-called"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/fit-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+check "without --fit-tool-call there is no STILL-WAITING line" \
+  "test '$RC' -eq 2 && ! printf '%s' \"$OUT\" | grep -q STILL-WAITING"
+OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --fit-tool-call 2>&1)"; RC=$?
+check "--fit-tool-call still requires --timeout-minutes (#1183)" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'explicit deadline only'"
+
 check "it exits on an ejection instead of waiting" \
   "grep -q 'EJECTED from the merge queue' '$CMD'"
 check "it exits on a failing check instead of waiting" \
