@@ -1177,25 +1177,49 @@ check 'one licensed row keeps database sealed despite the declaration' \
   "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
 rm -rf "$TMP/writer"
 
-printf 'infrastructure production reviewer release stays declared and reviewer-gated\n'
-newrepo "$TMP/infra" 'u2giants/ansible'
-mkdir -p "$TMP/infra/roles/x" "$TMP/infra/.ai-devops"
-( cd "$TMP/infra" && "$GATES" start --class infrastructure ) >/dev/null
-printf -- '---\n' > "$TMP/infra/roles/x/main.yml"
+printf 'infrastructure production reviewer release stays pinned, declared and reviewer-gated\n'
+infra_decl='{"schema_version":1,"paths":[{"glob":"**","class":"infrastructure"}],"gates":{"infrastructure":{"required":["reviewed-production-dispatch"],"forbidden_actions":["infrastructure","production"]}}}'
+infra_repo(){ # <dir> <identity> — declared, committed, clean, HEAD == origin/main
+  newrepo "$1" "$2"
+  mkdir -p "$1/.ai-devops"; printf '%s\n' "$infra_decl" > "$1/.ai-devops/task-gates.json"
+  git -C "$1" add -A && git -C "$1" commit -qm declare
+  git -C "$1" update-ref refs/remotes/origin/main HEAD
+  ( cd "$1" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
+}
+newrepo "$TMP/infra-undeclared" 'u2giants/ansible'
+git -C "$TMP/infra-undeclared" update-ref refs/remotes/origin/main HEAD
+( cd "$TMP/infra-undeclared" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
 check 'an undeclared infrastructure repository keeps production sealed' \
-  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
-rm -f "$TMP/infra/roles/x/main.yml"
-printf '%s\n' '{"schema_version":1,"paths":[{"glob":"**","class":"infrastructure"}],"gates":{"infrastructure":{"required":["reviewed-production-dispatch"],"forbidden_actions":["infrastructure","production"]}}}' > "$TMP/infra/.ai-devops/task-gates.json"
-git -C "$TMP/infra" add -A && git -C "$TMP/infra" commit -qm declare
-( cd "$TMP/infra" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
-printf -- '---\n' > "$TMP/infra/roles/x/main.yml"
-check 'a declared infrastructure repository reaches the reviewer-approval step for production' \
+  "out '$TMP/infra-undeclared' check --before production --reviewer-approval \"\$(appr '$TMP/infra-undeclared' production)\" | grep -Fq 'no reviewer-approval'"
+infra_repo "$TMP/infra" 'u2giants/ansible'
+check 'the declared ansible main reaches the reviewer-approval step for production' \
   "out '$TMP/infra' check --before production | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
 check 'and is still refused without that approval' \
   "rc 3 '$TMP/infra' check --before production"
+check 'and starts with an exact-head AI reviewer APPROVE' \
+  "rc 0 '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\""
 check 'the release never opens the infrastructure action' \
   "out '$TMP/infra' check --before infrastructure --reviewer-approval \"\$(appr '$TMP/infra' infrastructure)\" | grep -Fq 'no reviewer-approval'"
-rm -rf "$TMP/infra"
+printf 'x\n' > "$TMP/infra/untracked.txt"
+check 'a dirty checkout keeps production sealed' \
+  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
+rm -f "$TMP/infra/untracked.txt"
+git -C "$TMP/infra" commit -q --allow-empty -m unpushed
+check 'a head that is not origin/main keeps production sealed' \
+  "out '$TMP/infra' check --before production --reviewer-approval \"\$(appr '$TMP/infra' production)\" | grep -Fq 'no reviewer-approval'"
+infra_repo "$TMP/infra-foreign" 'u2giants/hiclaw'
+check 'another repository with the same declaration keeps production sealed' \
+  "out '$TMP/infra-foreign' check --before production --reviewer-approval \"\$(appr '$TMP/infra-foreign' production)\" | grep -Fq 'no reviewer-approval'"
+newrepo "$TMP/infra-uncommitted" 'u2giants/ansible'
+mkdir -p "$TMP/infra-uncommitted/.ai-devops"; printf '%s\n' "$infra_decl" > "$TMP/infra-uncommitted/.ai-devops/task-gates.json"
+git -C "$TMP/infra-uncommitted" update-ref refs/remotes/origin/main HEAD
+( cd "$TMP/infra-uncommitted" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
+check 'an uncommitted declaration keeps production sealed' \
+  "out '$TMP/infra-uncommitted' check --before production --reviewer-approval \"\$(appr '$TMP/infra-uncommitted' production)\" | grep -Fq 'no reviewer-approval'"
+jq '.reviewer_release.production.infrastructure="anything"' "$ROOT/config/task-gates.json" > "$TMP/broad-infra.json"
+check 'central policy cannot broaden the infrastructure production release' \
+  "AI_TASK_GATES_FILE='$TMP/broad-infra.json' out '$TMP/infra' check --before production | grep -Fq 'closed u2giants/ansible production boundary'"
+rm -rf "$TMP/infra" "$TMP/infra-undeclared" "$TMP/infra-foreign" "$TMP/infra-uncommitted" "$TMP/broad-infra.json"
 
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'

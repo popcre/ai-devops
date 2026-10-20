@@ -110,7 +110,7 @@ that class. Opening the route is therefore each private repository's own
 reviewed decision, made once in its own policy file rather than per review.
 
 A second, equally narrow exception is the central `reviewer_release` map
-(#1239). Today it names one entry: `database` for `private-tooling`, released
+(#1239). Its first entry is `database` for `private-tooling`, released
 by the gate `reviewed-private-data-writer`. When the effective class is
 `private-tooling` and the repository's own policy declares that gate, an
 owner-requested row write authored as writer code reaches the reviewer-approval
@@ -118,12 +118,15 @@ step instead of the protected stop: it still needs an assigned AI reviewer's
 lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 (`--reviewer-approval`). It never releases `private-evidence`, so one licensed
 row in the change set keeps the action sealed, and it opens no other action.
-A third entry names `production` for `infrastructure`, released by the gate
+A further entry names `production` for `infrastructure`, released by the gate
 `reviewed-production-dispatch` (owner ruling 2026-10-20 in his chat: "yes, make
-the change and finish the install", for u2giants/ansible live toolkit
-dispatches). Only a repository whose own policy declares that gate reaches the
-reviewer-approval step; it still needs the exact-head lifecycle APPROVE and
-opens no `infrastructure` (Terraform-style) mutation or other action.
+the change and finish the install"). It is closed to exactly `u2giants/ansible`:
+the canonical origin, the gate declared in a clean consumer file committed at
+HEAD, a clean worktree, and HEAD equal to `origin/main` (the commit the apply
+workflow dispatches), so the exact-head lifecycle APPROVE names the dispatched
+resource. Any other repository, a dirty or unpushed head, an uncommitted
+declaration, or a broadened central entry stays sealed, and the `infrastructure`
+action itself is never opened.
 
 The central `application_source_releases` map is a separate source-only route for
 four exact DesignFlow sandbox targets: backend (core), tracking, frontend, and

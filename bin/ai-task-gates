@@ -159,6 +159,10 @@ validate_action_gates(){
       [ "$action" = database ] && [ "$gate" = reviewed-generated-definition-fixture-only ] \
         || fail_closed 'reviewer_release cannot broaden the closed generated reviewer-safety boundary.'
     fi
+    if [ "$class" = infrastructure ]; then
+      [ "$action" = production ] && [ "$gate" = reviewed-production-dispatch ] \
+        || fail_closed 'reviewer_release cannot broaden the closed u2giants/ansible production boundary.'
+    fi
     [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
   done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
@@ -1667,6 +1671,30 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         && [ "$IDENTITY" = popcre/designflow-backend ] \
         && [ "$action_manifest_stdin" -eq 1 ] && [ -z "$small_entry" ] \
         && [ -z "$acknowledge" ] \
+        || release_gate=""
+    fi
+    # The infrastructure production release is pinned to the one repository
+    # whose owner ruling opened it (u2giants/ansible, 2026-10-20): canonical
+    # origin, a clean declaration committed at HEAD, and a clean HEAD equal to
+    # the fetched origin/main that the dispatch runs, so the exact-head
+    # approval names the dispatched resource.
+    if [ "$effective" = infrastructure ] && [ -n "$release_gate" ]; then
+      local infra_origin infra_head infra_main
+      infra_origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
+      infra_head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
+      infra_main="$(git -C "$TOPLEVEL" rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)"
+      [ "$action" = production ] && [ "$release_gate" = reviewed-production-dispatch ] \
+        && [ "$IDENTITY" = u2giants/ansible ] \
+        && case "$infra_origin" in
+             https://github.com/u2giants/ansible|https://github.com/u2giants/ansible.git|\
+             git@github.com:u2giants/ansible|git@github.com:u2giants/ansible.git) true ;;
+             *) false ;;
+           esac \
+        && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
+        && [ -z "$(git -C "$TOPLEVEL" status --porcelain --untracked-files=all 2>/dev/null)" ] \
+        && [ -n "$infra_head" ] && [ "$infra_head" = "$infra_main" ] \
+        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] \
+        && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
         || release_gate=""
     fi
     if [ "$effective" = reviewer-safety ] && [ -n "$release_gate" ]; then
