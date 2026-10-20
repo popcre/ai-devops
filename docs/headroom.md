@@ -693,7 +693,7 @@ retain the documented instant bypass for outages.
 | Machine | Wired? | Evidence |
 |---|---|---|
 | hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
-| hetz VPS Claude remote workers (Workflow A′) | wrap-remote ready | `ai-headroom wrap-remote` wraps `~/.claude/remote/ccd-cli/*` so new spawns go through 8787. Re-wrap after a Claude Code update. |
+| hetz VPS Claude remote workers (Workflow A′) | ✅ wrapped 2026-10-20 | `ai-headroom wrap-remote` on `~/.claude/remote/ccd-cli/*`; new spawns forced through 8787. Live proof 2026-10-20 10:55 AM EDT. Re-wrap after a Claude Code update. |
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
 | **edge-dev3** (Workflow B′, Ubuntu KDE) | ✅ yes (2026-10-19) | `ai-headroom on` + `environment.d` + DietCode `SCALEDOWN_PROXY_UPSTREAM` chain + desktop Claude Code binary wrapper; subscription CLI and desktop Claude Code proven in `proxy.log` ([#1869](https://github.com/popcre/ai-devops/issues/1869)). Chat UI is out of scope. |
