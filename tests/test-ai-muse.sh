@@ -361,6 +361,28 @@ muse_preprovider_recovery_cases(){
   check "$name tampered stream with a drifted pin still refuses reconcile" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-tamper.log' 2>&1 && grep -q 'retained Muse evidence bytes changed' '$TMP/preprovider-pindrift-tamper.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
   cp "$TMP/pindrift-stream-original" "$raw"
   check "$name repeat reconcile on a recovered legacy turn completes without fencing" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recon2.log' 2>&1 && ! grep -q 'no exact successful retained Muse process' '$TMP/preprovider-pindrift-recon2.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
+  # #1876: a legacy failure (no recorded archive path) whose prior turn ran on
+  # an older runtime pin recovers only when the archive is the same completed
+  # provider session.
+  local lname="$name.legacy"
+  (cd "$REPO" && eval "$ENV '$SCRIPT' new $lname --prompt pre-legacy") > "$TMP/preprovider-prelegacy.log" 2>&1 || bad "$lname first turn completes"
+  m="$(find "$TMP/state" -name "codex--$lname.json" -type f -print -quit)"
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  archive="${m%.json}.$prior.metadata.json"
+  check "$lname legacy follow-up fails pre-provider again" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask $lname --base missing-preprovider-target --prompt legacy\" > '$TMP/preprovider-legacy.log' 2>&1"
+  jq 'del(.archived_prior_invocation_id,.archived_prior_path)' "$m" > "$TMP/$lname.legacy" && cat "$TMP/$lname.legacy" > "$m"
+  jq '.retained_turn.runtime_version="0.0.1-old"' "$archive" > "$TMP/$lname.oldpin" && cp "$TMP/$lname.oldpin" "$TMP/$lname.oldpin-good"
+  jq '.session_id="other-session"' "$TMP/$lname.oldpin" > "$archive"
+  before="$(sha256sum "$m")"
+  check "$lname older-pin archive from another provider session stays fenced" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $lname\" > '$TMP/preprovider-legacy-cross.log' 2>&1 && test \"\$(sha256sum '$m')\" = '$before'"
+  cat "$TMP/$lname.oldpin-good" > "$archive"
+  # Like the hetz incident, earlier archives came from earlier source heads;
+  # two archives at one head stay ambiguous by design.
+  for other in "${m%.json}".*.metadata.json; do [ "$other" = "$archive" ] || { jq '.head="1111111111111111111111111111111111111111"' "$other" > "$TMP/$lname.other" && cat "$TMP/$lname.other" > "$other"; }; done
+  check "$lname legacy older-pin completed prior recovers without provider calls" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $lname\" > '$TMP/preprovider-legacy-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-legacy-recover.log' && jq -e '.status==\"active\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.runtime_version==\"0.0.1-old\"' '$m'"
+  reask_rc=0
+  (cd "$REPO" && eval "$ENV '$SCRIPT' ask $lname --prompt after-legacy") > "$TMP/preprovider-legacy-reask.log" 2>&1 || reask_rc=$?
+  check "$lname same-session ask continues after legacy older-pin recovery" "test '$reask_rc' -eq 0 && jq -e '.status==\"active\" and .retained_turn.original_invocation_id!=\"'$prior'\"' '$m'"
 }
 muse_failed_turn_cases(){
   local name=failedturn.positive m event archive report_before meta_before events_before calls_before out rc oldhead list_output list_rows
