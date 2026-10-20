@@ -10,7 +10,7 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0111Z-edge-dev3-codex-reviewer-r
 |---|---|---|---|
 | 1 | Freeze incident inventory, current versions and ownership | done — 2026-10-16 ([inventory](tests/verification/reviewer-recurrence/step1-inventory-2026-10-16.md)) | Private exact-ID inventory with digest; sanitized mapping and version manifest |
 | 2 | Reproduce receipt conflict and evidence-recovery interference | done — 2026-10-16: cause was preparatory verify publishing the receipt early; repaired by PR1799 with fixture; sweep cannot refuse a review | Discriminating packet/sandbox/front-door fixtures; retained original evidence |
-| 3 | Repair Muse Linux installation pin, completion and interruption recovery | pin: no re-pin needed, Muse Code (Linux) PASS at 1aefa959 (2026-10-16); completion/interruption stays with #674 | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
+| 3 | Repair Muse Linux installation pin, completion and interruption recovery | ✅ done — 2026-10-19: pin PASS (1aefa959); #674 closed after PR #1866 (`112c0914`) restored pre-provider follow-up recovery and retained exact terminal evidence for both original paid turns | Native/OpenCode stream fixtures, no stale-turn replay, genuine terminal review |
 | 4 | Repair StepFun report contract and large-input/runtime residuals | ✅ done — PR1812 (2026-10-16); live StepFun APPROVE on installed 1aefa959 after credit recharge; planted-defect REJECT proven | Single-decision contract tests plus complete-context live review |
 | 5 | Finish demonstrated DeepSeek/GLM readiness and recovery gaps | ✅ no new defect reproduced — 2026-10-16: live DeepSeek and GLM cold/follow-up/fresh reviews all correct; GLM consumer proof by 01a14221 lane | Current-source reproductions and owner-linked fixes or verified existing repair |
 | 6 | Restore verification/diagnostics; separate housekeeping false-PASS follow-up | housekeeping PR1810 and hook-test isolation PR1811 done (2026-10-16); Grok suite already non-gating (PR1778) | Exact hanging-test diagnosis, isolation, owned-process cleanup, offline suites |
@@ -107,7 +107,7 @@ Existing ownership/dependencies, read October15; activity is **unverified**, not
 
 | Existing card | Recorded owner / last issue update (EDT) | Reuse boundary |
 |---|---|---|
-| [#674](https://github.com/popcre/ai-devops/issues/674) | Codex chat on 916-ALIEN; October15 12:56 PM EDT | Muse interrupted-follow-up recovery; old paid uncertain turn remains separate |
+| [#674](https://github.com/popcre/ai-devops/issues/674) | closed 2026-10-19 (PR #1866 `112c0914`) | Muse interrupted-follow-up recovery; both original paid turns have exact terminal evidence on 916-alien |
 | [#1349](https://github.com/popcre/ai-devops/issues/1349) | Codex chat on edge-dev3; October15 1:34 PM EDT | Registered GLM native pool dispatch; live proof still required |
 | [#1370](https://github.com/popcre/ai-devops/issues/1370) | Codex chat on edge-dev3; October6 10:51 PM EDT | StepFun complete-input/readonly-profile startup failures; checklist open |
 | [#1420](https://github.com/popcre/ai-devops/issues/1420) | MiMo on edge-dev; October7 3:46 PM EDT | Preserved legacy sandbox backlog; checklist checked but issue open. Edge-dev cleanup is not edge-dev3 proof. |
