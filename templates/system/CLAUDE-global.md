@@ -242,7 +242,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
+  Use `bin/ai-pr-wait <pr> --timeout-minutes 9 --fit-tool-call` for a pull
+  request; on `STILL-WAITING`, rerun the printed command.
 - **One status probe per state change.** After a wait completes or a merge
   lands, record the answer and move on — do not re-check the same head
   "just to be sure". Reuse a passing result when head and digest are unchanged.
