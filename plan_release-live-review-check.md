@@ -1,7 +1,7 @@
 # Plan — release live review check (Ubuntu + Windows, before fleet install)
 
 Issue: [popcre/ai-devops#1783](https://github.com/popcre/ai-devops/issues/1783) (section 12a of [plan_review-output-contract.md](plan_review-output-contract.md)).
-Handoff: [HANDOFF.d/2026-10-20T0010Z-hetz-claude-release-live-check.md](HANDOFF.d/2026-10-20T0010Z-hetz-claude-release-live-check.md).
+Handoff: closed 2026-10-19 (work complete).
 Written 2026-10-19 (8:10 PM EDT) on hetz by Claude Code. Base: `main` at `39073d5b`.
 
 ## STATUS (read first — do not re-derive or re-plan)
@@ -14,9 +14,9 @@ Written 2026-10-19 (8:10 PM EDT) on hetz by Claude Code. Base: `main` at `39073d
 | 3. Install gate in `ai-task-gates authorize-install` | ✅ landed (implementation PR) | `tests/test-ai-task-gates.sh` (shared review code release without passing live reviews is refused) |
 | 4. Tests | ✅ landed | `bash tests/test-release-live-check.sh` |
 | 5. Docs (`docs/deployment.md`, router) | ✅ landed | `docs/deployment.md` "Release live review check" |
-| 6. Live proof: hetz + 4837 statuses on a real merged SHA | ⬜ open | `- [ ] live proof` on #1783 |
+| 6. Live proof: hetz + 4837 statuses on a real merged SHA | ✅ done 2026-10-19 | `ai-release-live-check verify --target-head efea0922d826e793b25e623bcca5d30d312ef9de` (hetz 27 s, 4837 158 s, both APPROVE) |
 
-A fresh session starts at **Step 6** (live proof) if it is still open.
+All steps are done. Keep this file as the design record.
 
 As built (2026-10-19): the status check is inlined in `ai-task-gates`
 (`require_release_live_review`), fails closed, and also triggers when
