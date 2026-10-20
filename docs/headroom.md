@@ -590,6 +590,33 @@ control). We did **not** enable a holdout: every held-out conversation is
 savings deliberately forgone, and the point of the trial is to save. Revisit
 if the estimate is ever disputed.
 
+**Baseline seed (2026-10-20).** Until this day `output-savings` said
+"Baseline: 0 samples" — the shaper was writing treatment rows but never
+learned the per-stratum unshaped distribution, so every report was empty.
+Fixed on edge-dev3, where the real session history lives:
+
+```bash
+# headroom CLI on edge-dev3 (uv tool, Python 3.13)
+export PATH="$HOME/.local/bin:$PATH"
+cd /home/ahazan/repos/ai-devops
+headroom learn --verbosity --apply
+# → ~/.headroom/verbosity.json (level 2, high confidence)
+# → ~/.headroom/output_savings.json (baseline: 7609 samples, 13 strata)
+```
+
+Signals from 40 ai-devops sessions / 738 human turns: 0.3% interrupts, 20%
+fast-skips on long answers → **L2** (drop ceremony and echo). That matches
+the pinned `HEADROOM_VERBOSITY_LEVEL=2`. Merge the learned `baseline` object
+into the proxy's `/home/ai/.headroom/output_savings.json` on hetz (keep any
+existing `treatment`/`control` rows); `learn --apply` writes only the machine
+it runs on.
+
+**First working estimate (2026-10-20, after the seed):** 100 shaped
+requests, 39,975 output tokens expected unshaped, 9,439 saved —
+**23.6% reduction (95% CI 13.1% … 34.1%)**. Re-run `learn --verbosity`
+from the repo that carries the traffic if the work mix changes; do not
+overwrite a live treatment ledger with a fresh empty file.
+
 **Revert:** remove the two `Environment=` lines from both units,
 `systemctl daemon-reload`, restart both services. Unit backups sit next to
 the originals as `*.service.bak-2026-10-19-shaper`.
@@ -779,6 +806,8 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Durable perf record | `/home/ai/headroom-perf/perf.csv` (hourly cron, §5c) |
 | Optimization mode | `cache` (prefix freeze strict) — set in the unit, §5b |
 | Output trimming | ON since 2026-10-19, both lanes — shaper + pinned level 2 (§5d) |
+| Output savings | `headroom output-savings` — 23.6% estimated after 2026-10-20 baseline seed (§5d) |
+| Baseline re-learn | on edge-dev3: `headroom learn --verbosity --apply` in the traffic repo, then merge `baseline` into the proxy ledger (§5d) |
 | Unit backup | `/etc/systemd/system/headroom.service.bak-2026-08-31` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
