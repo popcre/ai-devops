@@ -296,7 +296,7 @@ muse_preprovider_recovery_cases(){
   # #674: follow-up preparation must not replace the active-turn descriptor for
   # an assert-head that cannot match, and a pre-provider follow-up failure must
   # recover the archived previous completion without inventing provider work.
-  local name=preprovider.mixed m prior archive before calls="$TMP/preprovider-calls" head out rc reask_rc
+  local name=preprovider.mixed m prior archive before calls="$TMP/preprovider-calls" head out rc reask_rc link_archive
   : > "$calls"
   check "$name creates a completed first turn" "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first\""
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
@@ -306,7 +306,13 @@ muse_preprovider_recovery_cases(){
   cp "$m" "$TMP/$name.before"
   before="$(sha256sum "$m")"
   check "$name rejects abbreviated assert-head before any metadata change" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-abbr-called' '$SCRIPT' ask $name --assert-head ${head:0:8} --prompt followup\" > '$TMP/preprovider-abbr.log' 2>&1 && grep -q 'full 40- or 64-character' '$TMP/preprovider-abbr.log' && test \"\$(sha256sum '$m')\" = '$before' && test ! -e '$TMP/preprovider-abbr-called'"
-  check "$name rejects a symlinked prior archive before any turn change" "ln -s '$m' \"${m%.json}.$prior.metadata.json\" && ! eval \"$ENV '$SCRIPT' ask $name --prompt linktrap\" > '$TMP/preprovider-link.log' 2>&1 && grep -q 'archive is a link' '$TMP/preprovider-link.log' && rm -f \"${m%.json}.$prior.metadata.json\" && test \"\$(sha256sum '$m')\" = '$before'"
+  link_archive="${m%.json}.$prior.metadata.json"
+  if ln -s "$m" "$link_archive" 2>/dev/null && [ -L "$link_archive" ]; then
+    check "$name rejects a symlinked prior archive before any turn change" "! eval \"$ENV '$SCRIPT' ask $name --prompt linktrap\" > '$TMP/preprovider-link.log' 2>&1 && grep -q 'archive is a link' '$TMP/preprovider-link.log' && rm -f '$link_archive' && test \"\$(sha256sum '$m')\" = '$before'"
+  else
+    rm -f "$link_archive" 2>/dev/null || true
+    ok "$name symlinked-archive refusal needs symlink support on this host"
+  fi
   check "$name rejects a full mismatched assert-head before any metadata change" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-wrong-called' '$SCRIPT' ask $name --assert-head 0000000000000000000000000000000000000000 --prompt followup\" > '$TMP/preprovider-wrong.log' 2>&1 && grep -q 'refusing before any Muse turn metadata changes' '$TMP/preprovider-wrong.log' && test \"\$(sha256sum '$m')\" = '$before' && test ! -e '$TMP/preprovider-wrong-called'"
   check "$name rejects a full mismatched assert-head on new before provider contact" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-new-called' '$SCRIPT' new $name.newhead --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/preprovider-new-called'"
   # Pre-provider follow-up failure after begin_turn: a missing source base is
