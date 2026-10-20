@@ -335,7 +335,7 @@ Done when:
   - "Intentional quirks" → `docs/design-decisions.md`, which already exists;
   - "Pending work" → a `docs/pending-work.md` index of plan links;
   - "Data model and external identifiers", "Credentials and environment", and
-    "Critical incidents" (already summarized in `docs/incident-log.md`) to their
+    "Critical incidents" (already summarized in `docs/critical-incidents.md`) to their
     topic docs.
 - Done when: `wc -w AGENTS.md` < 2,000, every moved heading is still reachable
   from the documentation map, and the repo's docs-reachability check passes (find it
