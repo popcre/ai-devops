@@ -3,6 +3,7 @@
 # detector (#1783, plan_release-live-review-check.md). Real reviews are the
 # live proof; here ai-review and gh are fakes on PATH or in a fixture candidate.
 set -uo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
