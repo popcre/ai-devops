@@ -229,6 +229,15 @@ cat > "$TMP/fake-os/uname" <<'EOF'
 printf 'MINGW64_NT\n'
 EOF
 chmod +x "$TMP/fake-os/uname"
+# Release live check (#1783): a fake gh answers commit-status reads from a
+# file, so a fixture release that changes shared review code sees the Ubuntu
+# and Windows live-review statuses the test chooses.
+live_status() { # STATE -> both live-review contexts at STATE by the trusted login
+  jq -n --arg s "$1" '[{context:"ai-devops/live-review/linux",state:$s,created_at:"2026-10-19T00:00:00Z",creator:{login:"u2giants"}},{context:"ai-devops/live-review/windows",state:$s,created_at:"2026-10-19T00:00:00Z",creator:{login:"u2giants"}}]' > "$TMP/live-statuses.json"
+}
+live_status success
+printf '#!/usr/bin/env bash\ncase "$*" in *commits/*/statuses*) cat %q ;; *) exit 1 ;; esac\n' "$TMP/live-statuses.json" > "$TMP/fake-os/gh"
+chmod +x "$TMP/fake-os/gh"
 class_saved_home="$HOME"; class_saved_path="$PATH"
 class_saved_profile="${USERPROFILE:-}"; class_saved_programfiles="${PROGRAMFILES:-}"
 export HOME="$TMP/class-home" PATH="$TMP/fake-os:$PATH" USERPROFILE="$TMP/class-home" PROGRAMFILES='C:\Program Files'
@@ -309,6 +318,10 @@ check 'authorize-install refuses an approval that carries no passing test eviden
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
 check 'authorize-install local-tests refusal names the missing test evidence' \
   "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" | grep -q 'local-tests'"
+live_status failure
+check 'a shared review code release without passing live reviews is refused' \
+  "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\" | grep -q 'ai-release-live-check fleet' && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
+live_status success
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \

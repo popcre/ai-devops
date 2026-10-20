@@ -2267,6 +2267,24 @@ cmd_install_verify(){
   printf 'ai-task-gates: Linux %s verified for %s from %s.\n' "$phase" "$target" "$old"
 }
 
+# A release touching shared review code (or the live check itself) installs
+# only after one real review passed on Ubuntu and on Windows for this exact
+# commit (#1783, plan_release-live-review-check.md). The status check lives
+# here, not in the candidate's ai-release-live-check, and fails closed.
+require_release_live_review(){ # START TARGET
+  local changed statuses os state
+  changed="$(git -C "$TOPLEVEL" diff --name-only "$1" "$2")" || blocked 'ai-task-gates: STOP. Cannot list the release range for the live review check.'
+  # shellcheck source=../tools/lib/review-capabilities.sh
+  source "$ROOT/tools/lib/review-capabilities.sh" || blocked 'ai-task-gates: STOP. Cannot load the shared review code list.'
+  review_shared_code_changed "$changed" || printf '%s\n' "$changed" | grep -Eq '^bin/ai-release-live-check(\.cmd)?$' || return 0
+  statuses="$("$ROOT/bin/ai-gh" api "repos/popcre/ai-devops/commits/$2/statuses?per_page=100" 2>/dev/null)" || statuses=''
+  for os in linux windows; do
+    state="$(printf '%s' "$statuses" | jq -r --arg c "ai-devops/live-review/$os" \
+      '[.[]? | select(.context==$c and .creator.login=="u2giants")] | sort_by(.created_at) | last | .state // "missing"' 2>/dev/null)" || state=missing
+    [ "$state" = success ] || blocked "ai-task-gates: STOP. This release changes shared review code and its $os live review is '${state:-missing}'. From an Ubuntu review host run: ai-release-live-check fleet --target-head $2"
+  done
+}
+
 cmd_authorize_install(){
   local target_head="" installed_checkout="" installed_launcher="" review_report="" reviewer_approval="" approval_summary="" legacy_migration=0 first_install=0 recover_launchers=0 stale_manifest_recovery=0
   while [ $# -gt 0 ]; do
@@ -2317,6 +2335,7 @@ cmd_authorize_install(){
   # a raw transcript archive inside it is refused here, before any
   # authorization artifact is written.
   refuse_raw_archives 'authorize-install' "${RAW_ARCHIVE_PATHS:-}"
+  require_release_live_review "$start_head" "$target_head"
   if [ "$legacy_migration" -eq 1 ] && [ "$start_head" != "$target_head" ]; then
     local legacy_classes legacy_class legacy_protected
     legacy_classes="$(install_release_classes "$start_head" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify the legacy Windows release range.'

@@ -203,6 +203,19 @@ reviewer wrappers and the reviewer-binary version pins (`config/muse-code/**`,
 pins choose which reviewer program runs. A release that only re-pins a reviewer
 binary therefore uses this same reviewed install route (#1650).
 
+**Release live review check (#1783).** When the release range changes shared
+review code (the paths in `review_shared_code_paths_regex`,
+`tools/lib/review-capabilities.sh`), `authorize-install` also requires commit
+statuses `ai-devops/live-review/linux` and `ai-devops/live-review/windows` =
+`success`, created by `u2giants`, on the exact target. From an Ubuntu review
+host signed in to `gh` as `u2giants`, run
+`ai-release-live-check fleet --target-head <full SHA>`: it runs one real
+DeepSeek review of a tiny fixture from the candidate's own code on this host
+and on Windows host 4837 (over `ssh 4837`), then posts both statuses. Use
+`--provider muse` during a DeepSeek outage. Never run it on EDGE-ALIEN or Envy.
+`ai-release-live-check verify --target-head <SHA>` shows the recorded result.
+Plan: [plan_release-live-review-check.md](../plan_release-live-review-check.md).
+
 For an update containing reviewer-safety paths, leave the installed checkout
 unchanged while preparing two linked worktrees: a disposable installation
 candidate at its current HEAD and a separate reviewer candidate at the exact
