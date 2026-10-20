@@ -58,6 +58,15 @@ fi
 here_main="$primary"
 [ "$(git symbolic-ref -q HEAD 2>/dev/null)" = refs/heads/main ] && here_main=1
 
+# `git worktree add` (git 2.53) writes the NEW worktree's HEAD without that
+# worktree's GIT_DIR, so it looks like a primary HEAD move. The lock git
+# holds tells them apart: the primary's own move locks $git_dir/HEAD.lock;
+# a new worktree locks only worktrees/<name>/HEAD.lock.
+new_worktree_head() {
+  [ ! -e "$git_dir/HEAD.lock" ] || return 1
+  for l in "$git_dir"/worktrees/*/HEAD.lock; do [ -e "$l" ] && return 0; done
+  return 1
+}
 refused=""; to=""
 while read -r old new ref; do
   # A same-value update (merge --abort, reset --hard HEAD) moves nothing.
@@ -69,7 +78,7 @@ while read -r old new ref; do
       # detached move to a commit in the primary worktree is refused.
       case "$new" in
         ref:*) ;;
-        *) if [ "$primary" -eq 1 ]; then refused="HEAD"; [ -n "$to" ] || to="$new"; fi ;;
+        *) if [ "$primary" -eq 1 ] && ! new_worktree_head; then refused="HEAD"; [ -n "$to" ] || to="$new"; fi ;;
       esac ;;
   esac
 done

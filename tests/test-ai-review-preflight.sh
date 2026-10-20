@@ -608,6 +608,18 @@ if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/
 else
   bad "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
 fi
+# git 2.53 sets up a new linked worktree's HEAD without its GIT_DIR, so the
+# hook sees it as the primary; adding a worktree must still work while the
+# primary stays guarded (#1783, edge-dev3).
+GUARD_HEAD="$(git -C "$GUARD/c" rev-parse HEAD)"
+if git -C "$GUARD/c" worktree add -q --detach "$GUARD/wt2" "$GUARD_OLD" 2>/dev/null &&
+   [ "$(git -C "$GUARD/wt2" rev-parse HEAD)" = "$GUARD_OLD" ] &&
+   ! git -C "$GUARD/c" checkout -q --detach "$GUARD_OLD" 2>/dev/null &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_HEAD" ]; then
+  ok "the installed main guard allows a new linked worktree from the primary"
+else
+  bad "the installed main guard allows a new linked worktree from the primary"
+fi
 check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
 check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
 FIXTURE="$TMP/hook-fixture"

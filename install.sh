@@ -162,6 +162,9 @@ else
   flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
 fi
 umask "$install_original_umask"
+# Keep the checkout lock (fd 9) out of op and its long-lived daemon.
+source "$REPO_ROOT/tools/lib/install-lock-shim.sh"
+install_lock_shim_op "$install_lock_dir/op-shim" || exit 1
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" = 1 ] &&
    [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" != 9 ]; then
   warn 'only the lock-owning updater may defer finalization'

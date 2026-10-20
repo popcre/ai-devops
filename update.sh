@@ -91,6 +91,9 @@ else
   trap 'exit 143' TERM
 fi
 umask "$install_original_umask"
+# Keep the checkout lock (fd 9) out of op and its long-lived daemon.
+source "$SOURCE_ROOT/tools/lib/install-lock-shim.sh"
+install_lock_shim_op "$install_lock_dir/op-shim" || exit 1
 if [ -n "$(git status --porcelain)" ]; then
   warn 'checkout has local changes; preserve and reconcile them before updating'
   exit 1
