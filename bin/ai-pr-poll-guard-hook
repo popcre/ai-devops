@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# ai-pr-poll-guard-hook — Claude Code PreToolUse hook for Bash.
+#
+# Why this exists: the global rule "wait on CI with bin/ai-pr-wait" is prose, and
+# prose drifts. A transcript audit (plan_ruleset-trim-and-enforce.md, #1881)
+# found hand-written PR polling loops in 11 of 44 sessions. A hand-rolled
+# `gh pr view` loop cannot see a merge-queue ejection, and it burns API quota.
+#
+# This hook blocks the loop before it runs (exit 2; stderr reaches the model)
+# and names the waiter to use instead. A single `gh pr view`, a lone `sleep`,
+# and ai-pr-wait itself are allowed. It never edits anything.
+
+set -u
+payload="$(cat 2>/dev/null || true)"
+[[ -n "$payload" ]] || exit 0
+
+cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[[ -n "$cmd" ]] || exit 0
+# Loops are often written over several lines; judge the command as one line.
+cmd="$(printf '%s' "$cmd" | tr '\r\n' '  ')"
+
+reason=''
+if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(gh pr (view|checks|merge)|ai-gh pr)\b'; then
+  reason='sleep followed by a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bgh pr (view|checks)\b'; then
+  reason='an until/while loop over a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bgh pr view\b'; then
+  reason='a seq loop over gh pr view'
+elif printf '%s' "$cmd" | grep -Eq '\b(for|while|until)\b.*\btimeout +[0-9]+[smh]?\b.*ai-pr-wait'; then
+  reason='ai-pr-wait wrapped in timeout inside a loop'
+fi
+[[ -n "$reason" ]] || exit 0
+
+printf '%s\n' "Blocked: hand-written pull-request polling ($reason). It cannot see a merge-queue ejection and burns the GitHub API quota. Use one bounded wait instead: bin/ai-pr-wait <pr> --timeout-minutes N (add --fit-tool-call to fit one 10-minute tool call; rerun it if it prints STILL-WAITING)." >&2
+exit 2

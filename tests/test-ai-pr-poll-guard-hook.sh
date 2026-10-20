@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Offline tests for bin/ai-pr-poll-guard-hook and bin/ai-install-pr-poll-guard-hook
+# (plan_ruleset-trim-and-enforce.md step 2.1, #1881).
+#
+# The hook runs before EVERY Bash call, so "allows ordinary commands" matters as
+# much as "blocks hand-written PR polling loops". The installer edits the user's
+# settings.json, so "never corrupts it, never removes an existing hook" is the point.
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOOK="$ROOT/bin/ai-pr-poll-guard-hook"
+INSTALL="$ROOT/bin/ai-install-pr-poll-guard-hook"
+PASS=0; FAIL=0
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+# Runs the hook on a Bash tool payload; prints the exit status.
+fire() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash "$HOOK" 2>"$TMP/err" >/dev/null; echo $?; }
+blocks() { CASE="$2"; check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
+allows() { CASE="$2"; check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
+
+# --- every polling shape in the plan is blocked --------------------------------
+blocks "sleep then gh pr view" 'sleep 60; gh pr view 12 --json state'
+blocks "sleep then gh pr checks" 'sleep 30 && gh pr checks 12'
+blocks "sleep then gh pr merge" 'sleep 120; gh pr merge 12 --squash'
+blocks "sleep then ai-gh pr" 'sleep 45; ai-gh pr view 12'
+blocks "until loop over gh pr view" 'until gh pr view 12 --json state -q .state | grep -q MERGED; do sleep 30; done'
+blocks "while loop over gh pr checks" 'while true; do gh pr checks 12; done'
+blocks "multi-line while loop" $'while :\ndo\n  gh pr view 12\ndone'
+blocks "seq loop over gh pr view" 'for i in $(seq 1 20); do gh pr view 12; done'
+blocks "timeout ai-pr-wait inside a loop" 'for i in 1 2 3; do timeout 600 bin/ai-pr-wait 12 --timeout-minutes 9; done'
+
+# --- ordinary commands are allowed ---------------------------------------------
+allows "a single gh pr view" 'gh pr view 12 --json state'
+allows "ai-pr-wait itself" 'ai-pr-wait 12 --timeout-minutes 9'
+allows "ai-pr-wait with --fit-tool-call" 'bin/ai-pr-wait 12 --timeout-minutes 30 --fit-tool-call'
+allows "sleep alone" 'sleep 5'
+allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
+
+# --- robustness: the hook must never break a turn ------------------------------
+check "empty stdin exits 0" "echo '' | bash \"$HOOK\"; [ \$? -eq 0 ]"
+check "malformed JSON exits 0" "echo 'not json' | bash \"$HOOK\"; [ \$? -eq 0 ]"
+check "payload without a command exits 0" "echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"C:\\\\\\\\x\\\\\\\\y.md\"}}' | bash \"$HOOK\"; [ \$? -eq 0 ]"
+
+# --- installer -----------------------------------------------------------------
+CH="$TMP/claudehome"; mkdir -p "$CH"
+printf '{"theme":"dark","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo pre-existing"}]}]}}\n' > "$CH/settings.json"
+HOME="$TMP/fakehome" bash "$INSTALL" --claude-home "$CH" --repo-root "$ROOT" >/dev/null 2>&1
+check "installer registers the hook" "jq -e '[.hooks.PreToolUse[] | select(.matcher == \"Bash\") | .hooks[].command] | any(contains(\"pr-poll-guard-hook\"))' \"$CH/settings.json\""
+check "installed command keeps the blocking exit status" "! grep -q 'pr-poll-guard-hook.*|| true' \"$CH/settings.json\""
+check "installer keeps the pre-existing hook" "grep -q 'pre-existing' \"$CH/settings.json\""
+check "installer keeps unrelated settings" "grep -q '\"theme\"' \"$CH/settings.json\""
+check "installer leaves valid JSON" "jq -e 'type == \"object\"' \"$CH/settings.json\""
+check "installer backs the file up" "[ -f \"$CH/settings.json.aidevops.bak\" ]"
+check "installer copies the hook script" "[ -f \"$TMP/fakehome/.config/ai-devops/pr-poll-guard-hook\" ]"
+
+before="$(md5sum < "$CH/settings.json")"
+HOME="$TMP/fakehome" bash "$INSTALL" --claude-home "$CH" --repo-root "$ROOT" >/dev/null 2>&1
+after="$(md5sum < "$CH/settings.json")"
+check "installer is idempotent" "[ \"$before\" = \"$after\" ]"
+HOME="$TMP/fakehome" bash "$INSTALL" --check --claude-home "$CH" --repo-root "$ROOT" >/dev/null 2>&1
+check "--check passes once installed" "[ \$? -eq 0 ]"
+
+BAD="$TMP/badhome"; mkdir -p "$BAD"; printf '{ this is not json' > "$BAD/settings.json"
+HOME="$TMP/fakehome2" bash "$INSTALL" --claude-home "$BAD" --repo-root "$ROOT" >/dev/null 2>&1; rc=$?
+check "installer fails on unparseable settings" "[ $rc -ne 0 ]"
+check "installer did not rewrite the broken file" "grep -q 'this is not json' \"$BAD/settings.json\""
+
+printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

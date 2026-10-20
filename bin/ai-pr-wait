@@ -15,7 +15,11 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> --timeout-minutes N [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
+#   ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
+#
+# --fit-tool-call caps the deadline at 9 minutes so one run fits a 10-minute
+# agent tool call, and on timeout prints one line an agent can act on:
+#   STILL-WAITING pr=<n> state=<...> rerun: <same command>
 #
 # --timeout-minutes is required (explicit deadline only; #1183 child 3). There
 # is no default: a waiter is never started without a deadline the caller named.
@@ -38,6 +42,8 @@ TIMEOUT_MINUTES=''
 INTERVAL=300
 API_TIMEOUT_SECONDS=30
 REVIEWER_APPROVAL=''
+FIT_TOOL_CALL=0
+RERUN_COMMAND="ai-pr-wait$(printf ' %q' "$@")"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -53,7 +59,8 @@ while [ $# -gt 0 ]; do
       esac
       shift 2
       ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    --fit-tool-call) FIT_TOOL_CALL=1; shift ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     -*) printf 'ai-pr-wait: unknown option %s\n' "$1" >&2; exit 3 ;;
     *) PR="$1"; shift ;;
   esac
@@ -136,6 +143,8 @@ case "$(uname -s 2>/dev/null || true)" in
     ;;
 esac
 
+# A 10-minute tool call leaves room for one GitHub read after a 9-minute deadline.
+[ "$FIT_TOOL_CALL" -eq 0 ] || [ "$TIMEOUT_MINUTES" -le 9 ] || TIMEOUT_MINUTES=9
 DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAIT_STARTED_SECONDS=$SECONDS
 
@@ -413,6 +422,12 @@ read_failure_cause() {
   fi
 }
 
+still_waiting() {
+  [ "$FIT_TOOL_CALL" -eq 1 ] || return 0
+  local state="${LAST#state=}"; state="${state%% *}"
+  say "STILL-WAITING pr=$PR state=${state:-unknown} rerun: $RERUN_COMMAND"
+}
+
 deadline_reached() {
   [ "$(date +%s)" -ge "$DEADLINE" ]
 }
@@ -450,6 +465,7 @@ while :; do
       emit_workflow_evidence
       say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
       capture_local_end
+      still_waiting
       exit 2
     fi
     say "ai-pr-wait: could not read PR #$PR after $(elapsed_seconds)s (transient: $READ_CAUSE); retrying"
@@ -458,6 +474,7 @@ while :; do
       emit_workflow_evidence
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       capture_local_end
+      still_waiting
       exit 2
     fi
     wait_for_next_poll || {
@@ -465,6 +482,7 @@ while :; do
       emit_workflow_evidence
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       capture_local_end
+      still_waiting
       exit 2
     }
     continue
@@ -587,6 +605,7 @@ while :; do
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
     capture_local_end
+    still_waiting
     exit 2
   fi
   wait_for_next_poll || {
@@ -594,6 +613,7 @@ while :; do
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
     capture_local_end
+    still_waiting
     exit 2
   }
 done
