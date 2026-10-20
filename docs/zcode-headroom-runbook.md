@@ -179,11 +179,13 @@ Get-Item "$env:USERPROFILE\.config\ai-devops\zcode-ca-bundle.crt"
 
 ### 4.2 Rebuild the TLS front on hetz (if the host is lost)
 
-Scripts used on 2026-10-19 (keep copies under private ops storage or recreate
-from this runbook):
+Templates in `config/zcode-headroom/`:
 
 - `zcode_headroom_tls.py` — stdlib HTTPS reverse proxy (path routing in §2)
-- `install-zcode-headroom-tls.sh` — CA + leaf generation, systemd unit
+- `install-zcode-headroom-tls.sh` — CA, leaf and `server-chain.crt`
+  generation, key readable by the `ai` service user, systemd unit. Run it from
+  that folder with `sudo HEADROOM_TAILNET_IP=<ip> HEADROOM_TLS_DNS=<tailnet
+  DNS name> bash install-zcode-headroom-tls.sh`.
 
 Systemd units: `headroom-zcode.service`, `zcode-headroom-tls.service` under
 `/etc/systemd/system/`. Certs under `/etc/ai-zcode-headroom/tls/`.
@@ -289,17 +291,14 @@ status` reports healthy. **Do not change this to solve Z-code problems.**
 | `ai-headroom` on/off/status (Claude) | **Yes** (`bin/ai-headroom`) | n/a | installed |
 | `docs/headroom.md` (Claude) | **Yes** | n/a | yes |
 | `headroom-zcode.service` | No | **Yes** | n/a |
-| `zcode-headroom-tls.service` + Python front | No | **Yes** | n/a |
+| `ai-zcode-headroom` on/off/status (Z-code) | **Yes** (`bin/ai-zcode-headroom`) | n/a | installed |
+| `zcode-headroom-tls.service` + Python front | **Yes** (templates in `config/zcode-headroom/`) | **Yes** | n/a |
 | Private CA / combined bundle | No (secrets/infra) | `/etc/ai-zcode-headroom/tls/` | `~/.config/ai-devops/zcode-*.crt` |
 | Z-code `provider_config.json` override | No | n/a | live user config |
 
-**A new computer will NOT get this automatically.** After a fresh install
-only the Claude `ai-headroom` path is present.
-
-To make it repeatable, a future toolkit change should add (not done in this
-session): a `bin/ai-zcode-headroom` companion or documented install steps,
-install scripts for the two systemd units, and a secrets-free template for
-the TLS front. Until that lands, **rebuild using §4.2–4.3 on the new machine**.
+**A new computer does not turn the lane on automatically.** The switch and
+TLS-front templates ship with the toolkit; `headroom-zcode.service` and the
+private CA are still set up by hand. Rebuild using §4.2–4.3.
 
 ---
 
