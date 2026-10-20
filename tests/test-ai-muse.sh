@@ -327,21 +327,6 @@ muse_preprovider_recovery_cases(){
   (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask $name --prompt again") > "$TMP/preprovider-reask.log" 2>&1 || reask_rc=$?
   check "$name same-session ask continues after pre-provider recovery" "test '$reask_rc' -eq 0 && jq -e '.status==\"active\" and .retained_turn.original_invocation_id!=\"'$prior'\"' '$m'"
   if [ "$reask_rc" -ne 0 ]; then printf 'reask rc=%s\n' "$reask_rc"; cat "$TMP/preprovider-reask.log"; fi
-  # #1876: a pre-pin-bump archived prior still recovers. Evidence hashes and
-  # model identity bind the completed turn; the recorded runtime is historical
-  # fact and must not be required to equal today's pin.
-  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
-  check "$name pin-drift follow-up fails pre-provider without provider contact" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-pindrift-called' '$SCRIPT' ask $name --base missing-preprovider-target --prompt pindrift\" > '$TMP/preprovider-pindrift.log' 2>&1 && test ! -e '$TMP/preprovider-pindrift-called'"
-  archive="${m%.json}.$prior.metadata.json"
-  check "$name pin-drift leaves a preparation_failed turn with an archived prior" "test -f '$archive' && jq -e '(.status==\"preparation_failed\") and (has(\"retained_turn\")|not)' '$m' && jq -e '.retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$archive'"
-  jq '.retained_turn.runtime_version="0.0.0-legacy-pin"' "$archive" > "$archive.pindrift" && chmod 600 "$archive.pindrift" && mv -f "$archive.pindrift" "$archive"
-  check "$name reconcile recovers a pre-pin-bump archived prior" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-pindrift-recover.log' && grep -q 'historical runtime 0.0.0-legacy-pin' '$TMP/preprovider-pindrift-recover.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$m'"
-  # A historical pin must still run every evidence check on a later reconcile.
-  raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/pindrift-stream-original"
-  printf 'tamper' >> "$raw"
-  check "$name tampered stream with a drifted pin still refuses reconcile" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-tamper.log' 2>&1 && grep -q 'retained Muse evidence bytes changed' '$TMP/preprovider-pindrift-tamper.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
-  cp "$TMP/pindrift-stream-original" "$raw"
-  check "$name repeat reconcile on a recovered legacy turn completes without fencing" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recon2.log' 2>&1 && ! grep -q 'no exact successful retained Muse process' '$TMP/preprovider-pindrift-recon2.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
   # Changed-head follow-up that fails pre-provider must restore the prior
   # descriptor, never bind the old completion to the new source.
   printf 'changed source for preprovider\n' >> "$REPO/a.txt"; git -C "$REPO" add a.txt; git -C "$REPO" commit -qm 'preprovider source change'
@@ -359,6 +344,23 @@ muse_preprovider_recovery_cases(){
   before="$(sha256sum "$m")"
   check "$name cannot recover a provider-uncertain turn from the archived prior" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-uncertain-recon.log' 2>&1 && grep -q 'no exact successful retained Muse process' '$TMP/preprovider-uncertain-recon.log' && test \"\$(sha256sum '$m')\" = '$before'"
   check "$name provider-uncertain archive remains intact and unused" "test -f '$archive' && cmp -s \"$archive\" '$TMP/$name.uncertain-before' && jq -e '.status==\"provider_outcome_uncertain\"' '$m'"
+  # #1876: a pre-pin-bump archived prior still recovers. Evidence hashes and
+  # model identity bind the completed turn; the recorded runtime is historical
+  # fact and must not be required to equal today's pin. Runs last so a full
+  # historical-pin reconcile cannot disturb the cases above.
+  cp "$TMP/$name.changed-before" "$m"
+  prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+  check "$name pin-drift follow-up fails pre-provider without provider contact" "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/preprovider-pindrift-called' '$SCRIPT' ask $name --base missing-preprovider-target --prompt pindrift\" > '$TMP/preprovider-pindrift.log' 2>&1 && test ! -e '$TMP/preprovider-pindrift-called'"
+  archive="${m%.json}.$prior.metadata.json"
+  check "$name pin-drift leaves a preparation_failed turn with an archived prior" "test -f '$archive' && jq -e '(.status==\"preparation_failed\") and (has(\"retained_turn\")|not)' '$m' && jq -e '.retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$archive'"
+  jq '.retained_turn.runtime_version="0.0.0-legacy-pin"' "$archive" > "$archive.pindrift" && chmod 600 "$archive.pindrift" && mv -f "$archive.pindrift" "$archive"
+  check "$name reconcile recovers a pre-pin-bump archived prior" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recover.log' 2>&1 && grep -q 'recovered pre-provider Muse follow-up' '$TMP/preprovider-pindrift-recover.log' && grep -q 'historical runtime 0.0.0-legacy-pin' '$TMP/preprovider-pindrift-recover.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\" and .retained_turn.original_invocation_id==\"'$prior'\" and .retained_turn.process_exit==0' '$m'"
+  # A historical pin must still run every evidence check on a later reconcile.
+  raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/pindrift-stream-original"
+  printf 'tamper' >> "$raw"
+  check "$name tampered stream with a drifted pin still refuses reconcile" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-tamper.log' 2>&1 && grep -q 'retained Muse evidence bytes changed' '$TMP/preprovider-pindrift-tamper.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
+  cp "$TMP/pindrift-stream-original" "$raw"
+  check "$name repeat reconcile on a recovered legacy turn completes without fencing" "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/preprovider-pindrift-recon2.log' 2>&1 && ! grep -q 'no exact successful retained Muse process' '$TMP/preprovider-pindrift-recon2.log' && jq -e '.status==\"active\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m'"
 }
 muse_failed_turn_cases(){
   local name=failedturn.positive m event archive report_before meta_before events_before calls_before out rc oldhead list_output list_rows
