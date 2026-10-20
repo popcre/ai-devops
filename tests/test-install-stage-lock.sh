@@ -3,6 +3,7 @@
 # and anything a stage leaves running, such as an `op daemon` (#1783), while the
 # installer shell itself keeps holding the lock.
 set -euo pipefail
+[ "$(uname -s)" = Linux ] || { echo "install-stage-lock: skipped (install.sh is the Linux installer)"; exit 0; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/install-stage-lock.XXXXXX")"
 trap 'kill "$(cat "$TMP/daemon.pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$TMP"' EXIT
