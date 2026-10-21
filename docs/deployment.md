@@ -213,7 +213,9 @@ statuses `ai-devops/live-review/linux` and `ai-devops/live-review/windows` =
 host signed in to `gh` as `u2giants`, run
 `ai-release-live-check fleet --target-head <full SHA>`: it runs one real
 DeepSeek review of a tiny fixture from the candidate's own code on this host
-and on Windows host 4837 (over `ssh 4837`), then posts both statuses. Use
+and on Windows host 4837 (over `ssh 4837`), then posts both statuses. A status is `success` only when that review
+returns APPROVE on the benign fixture; REVISE, REJECT, or no verdict posts
+`failure`. Use
 `--provider muse` during a DeepSeek outage. Never run it on EDGE-ALIEN or Envy.
 `ai-release-live-check verify --target-head <SHA>` shows the recorded result.
 Plan: [plan_release-live-review-check.md](../plan_release-live-review-check.md).

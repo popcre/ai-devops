@@ -25,7 +25,8 @@ Usage: ai-release-live-check run    --target-head SHA [--provider P]
        ai-release-live-check verify --target-head SHA
 run    one real review of the fixture from candidate SHA on this OS; prints one JSON line.
 fleet  run on this Ubuntu host and on Windows host 4837, then post both commit statuses.
-verify exit 0 only when linux and windows statuses on SHA are success by u2giants.
+verify exit 0 only when linux and windows statuses on SHA are success by u2giants
+       (success is posted only for an APPROVE of the benign fixture).
 EOF
 }
 
@@ -77,9 +78,15 @@ cmd_run() {
   fi
   [ "$added" -eq 0 ] || git -C "$ROOT" worktree remove --force "$cand" >/dev/null 2>&1
   rm -rf "$work"
-  if [ "$rc" -eq 0 ] && [[ "$verdict" =~ ^(APPROVE|REVISE|REJECT)$ ]]; then
-    json_line true "$verdict" "$elapsed" 'real review completed with a verdict'
+  # The fixture is a harmless docstring change, so only APPROVE is a pass; a
+  # REVISE or REJECT means the candidate's reviewer misjudges a benign diff.
+  if [ "$rc" -eq 0 ] && [ "$verdict" = APPROVE ]; then
+    json_line true "$verdict" "$elapsed" 'real review approved the benign fixture'
     return 0
+  fi
+  if [ "$rc" -eq 0 ] && [[ "$verdict" =~ ^(REVISE|REJECT)$ ]]; then
+    json_line false "$verdict" "$elapsed" "real review returned $verdict on the benign fixture; only APPROVE passes"
+    return 1
   fi
   json_line false "$verdict" "$elapsed" "ai-review exit $rc: $(printf '%s' "$out" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 3 | tr '\n' ' ' | cut -c1-300)"
   return 1
@@ -102,10 +109,10 @@ exit \$rc
 EOF
 }
 
-post_status() { # OS JSON — success only for a well-formed result from that OS for this exact target
+post_status() { # OS JSON — success only for an APPROVE result from that OS for this exact target
   local state desc
   if printf '%s' "$2" | jq -e --arg os "$1" --arg t "$target" --arg p "$provider" \
-      '.ok==true and .os==$os and .target==$t and .provider==$p and (.verdict|test("^(APPROVE|REVISE|REJECT)$"))' >/dev/null 2>&1; then
+      '.ok==true and .os==$os and .target==$t and .provider==$p and .verdict=="APPROVE"' >/dev/null 2>&1; then
     state=success
   else state=failure; fi
   desc="$(printf '%s' "$2" | jq -r '"\(.host // "?") \(.provider // "") \(.verdict // "") \(.elapsed // 0)s"' 2>/dev/null || echo 'no result') $(est_now)"

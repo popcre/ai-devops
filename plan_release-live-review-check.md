@@ -160,8 +160,8 @@ pass; new test proves a doors-file change matches and a docs change does not.
   hooks disabled like `update.sh:163`), build a two-commit fixture repo
   (one-line docstring change), run `PATH=<cand>/bin:$PATH <cand>/bin/ai-review
   P diff-review --base HEAD~1` with a timeout. Pass = exit 0 and the last line
-  is an existing report containing a `## Verdict` line with
-  APPROVE/REVISE/REJECT. Print one JSON line
+  is an existing report whose `## Verdict` is APPROVE (the fixture is benign,
+  so REVISE/REJECT fail; DeepSeek review finding of b1668dc5). Print one JSON line
   `{os,host,target,provider,ok,verdict,elapsed,detail}`. Always remove the
   worktree.
 - `fleet --target-head SHA [--provider P]`: Ubuntu only. Runs `run` locally,
@@ -193,7 +193,7 @@ the commit statuses on #1783.
 New `tests/test-release-live-check.sh` (offline, fake `ai-review`, fake
 `gh`/`curl` on `PATH`):
 - `run` passes on a fake report with `## Verdict` APPROVE; fails on exit 0
-  with no verdict; fails on non-zero exit; worktree removed in all cases.
+  with no verdict, on REVISE, and on REJECT; fails on non-zero exit; worktree removed in all cases.
 - `verify`: both success by u2giants → 0; one missing → 1; success by another
   login → 1; newer failure after older success → 1.
 - detector: doors file matches, `docs/x.md` does not.

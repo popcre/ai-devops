@@ -31,6 +31,8 @@ cat > "$cand/bin/ai-review" <<'EOF'
 #!/usr/bin/env bash
 case "$(cat "$FAKE_MODE")" in
   approve) printf '# r\n\n## Verdict\nAPPROVE\n' > report.md; echo "$PWD/report.md" ;;
+  reject) printf '# r\n\n## Verdict\nREJECT\n' > report.md; echo "$PWD/report.md" ;;
+  revise) printf '# r\n\n## Verdict\nREVISE\n' > report.md; echo "$PWD/report.md" ;;
   noverdict) printf '# r\nno decision\n' > report.md; echo "$PWD/report.md" ;;
   crash) echo 'spawnSync bash UNKNOWN' >&2; exit 1 ;;
 esac
@@ -42,6 +44,8 @@ head="$(git -C "$cand" rev-parse HEAD)"
 export FAKE_MODE="$TMP/mode"
 run_mode() { echo "$1" > "$FAKE_MODE"; "$cand/bin/ai-release-live-check" run --target-head "$head"; }
 check 'run passes on a real verdict' "run_mode approve | jq -e '.ok==true and .verdict==\"APPROVE\"'"
+check 'run fails on a REJECT of the benign fixture' "out=\$(run_mode reject); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and .verdict==\"REJECT\"'"
+check 'run fails on a REVISE of the benign fixture' "out=\$(run_mode revise); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and .verdict==\"REVISE\"'"
 check 'run fails on exit 0 with no verdict' "! run_mode noverdict"
 check 'run fails on a crashing reviewer and keeps its error' "out=\$(run_mode crash); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and (.detail|test(\"UNKNOWN\"))'"
 check 'run leaves no extra worktree behind' "[ \"\$(git -C '$cand' worktree list | wc -l)\" -eq 1 ]"
