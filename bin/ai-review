@@ -39,7 +39,7 @@ action_review_evidence_args(){
 SKIP_LIB="$REAL_DIR/../tools/lib/review-session-skip.sh"; [ -f "$SKIP_LIB" ] || SKIP_LIB="$ROOT/../tools/lib/review-session-skip.sh"
 # shellcheck source=../tools/lib/review-session-skip.sh
 . "$SKIP_LIB" || { printf 'ai-review: cannot load the session skip list.\n' >&2; exit 3; }
-[ -n "${AI_CALLER_SESSION_ID:-}" ] || review_export_caller_session_id
+review_export_caller_session_id  # validates an inherited id too
 DETACH_DIR="${AI_REVIEW_DETACH_DIR:-$HOME/.local/state/ai-devops/review-detached}"
 detach_lifecycle_state(){ # ID -> lifecycle state file carrying that detach id
   local dir="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}/runs"
@@ -53,11 +53,15 @@ review_outcome(){ # ID [--wait SECONDS]
   if [ "${1:-}" = --wait ]; then wait_s="${2:-}"; case "$wait_s" in ''|*[!0-9]*) printf 'ai-review: --wait needs seconds.\n' >&2; return 2;; esac; fi
   rec="$DETACH_DIR/$id.json"
   [ -f "$rec" ] || { printf 'ai-review: no detached run %s on this machine.\n' "$id" >&2; return 2; }
+  # Single writers: the request record is written once by the caller, the
+  # pid and result files only by the detached run itself.
+  local result="$DETACH_DIR/$id.result.json"
   while :; do
-    status="$(jq -r '.status // "pending"' "$rec" 2>/dev/null || printf pending)"
-    if [ "$status" = pending ]; then
-      pid="$(jq -r '.pid // empty' "$rec" 2>/dev/null || true)"
-      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ "$(jq -r '.status // "pending"' "$rec" 2>/dev/null)" = pending ]; then status=lost; fi
+    status=pending
+    if [ -f "$result" ]; then status=finished
+    elif [ -f "$DETACH_DIR/$id.pid" ]; then
+      pid="$(tr -cd '0-9' < "$DETACH_DIR/$id.pid" 2>/dev/null || true)"
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ ! -f "$result" ]; then status=lost; fi
     fi
     [ "$status" = pending ] && [ "$waited" -lt "$wait_s" ] || break
     sleep 5; waited=$((waited + 5))
@@ -75,8 +79,8 @@ review_outcome(){ # ID [--wait SECONDS]
     *)
       if [ -z "$verdict" ]; then
         # No lifecycle: refused before dispatch, or an earlier pass was reused.
-        report="$(jq -r '.report // empty' "$rec" 2>/dev/null || true)"
-        if [ "$(jq -r '.exit_code' "$rec" 2>/dev/null)" = 0 ] && [ -n "$report" ] && [ -f "$report" ]; then verdict=APPROVE; else verdict=BLOCKED; fi
+        report="$(jq -r '.report // empty' "$result" 2>/dev/null | tr -d '\r' || true)"
+        if [ "$(jq -r '.exit_code' "$result" 2>/dev/null | tr -d '\r')" = 0 ] && [ -n "$report" ] && [ -f "$report" ]; then verdict=APPROVE; else verdict=BLOCKED; fi
       fi ;;
   esac
   printf '%s\n' "$verdict"
@@ -295,16 +299,16 @@ maybe_detach(){
   if [ -n "${AI_SESSION_TMP_ROOT:-}" ] && [ "${TMPDIR:-}" = "$AI_SESSION_TMP_ROOT" ]; then
     launcher=(env -u TMPDIR -u TMP -u TEMP -u AI_SESSION_TMP_ROOT "${launcher[@]}")
   fi
-  AI_REVIEW_DETACH_ID="$id" AI_REVIEW_DETACH_REC="$rec" \
-  AI_REVIEW_DETACH_FILTER='.status="finished"|.exit_code=$rc|.report=(if $report=="" then null else $report end)|.finished_at=$now' \
+  AI_REVIEW_DETACH_ID="$id" AI_REVIEW_DETACH_BASE="$DETACH_DIR/$id" \
   "${launcher[@]}" bash -c '
-    rec="$AI_REVIEW_DETACH_REC"; out="$(mktemp)"
+    base="$AI_REVIEW_DETACH_BASE"; printf "%s\n" "$$" > "$base.pid"
+    out="$(mktemp)"
     "$@" > "$out"; rc=$?
     cat "$out"; report="$(tail -n 1 "$out" | tr -d "\r")"; rm -f "$out"
-    jq --argjson rc "$rc" --arg report "$report" --arg now "$(date -u +%FT%TZ)" "$AI_REVIEW_DETACH_FILTER" "$rec" > "$rec.tmp.$$" && mv -f "$rec.tmp.$$" "$rec"
+    jq -nc --argjson rc "$rc" --arg report "$report" --arg now "$(date -u +%FT%TZ)" \
+      "{exit_code:\$rc,report:(if \$report==\"\" then null else \$report end),finished_at:\$now}" > "$base.result.tmp" \
+      && mv -f "$base.result.tmp" "$base.result.json"
   ' ai-review-detached "$self" "${child_args[@]}" > "$log" 2>&1 < /dev/null &
-  local pid=$!
-  jq --argjson pid "$pid" '.pid=$pid' "$rec" > "$rec.tmp.$$" && mv -f "$rec.tmp.$$" "$rec"
   printf 'ai-review: detached %s %s run %s; read it with: ai-review outcome %s\n' "$pool_provider" "$mode" "$id" "$id" >&2
   printf '%s\n' "$id"
   exit 0

@@ -33,7 +33,7 @@ SKIP_LIB="$(dirname "$GATE_LIB")/review-session-skip.sh"
 [ -f "$SKIP_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the session skip library\n' >&2; exit 1; }
 # shellcheck source=../tools/lib/review-session-skip.sh
 . "$SKIP_LIB"
-[ -n "${AI_CALLER_SESSION_ID:-}" ] || review_export_caller_session_id
+review_export_caller_session_id  # validates an inherited id too
 session_skip_record(){ # STATE FAILURE -> best effort; never changes the terminal result
   local state="$1" failure="$2" provider sid
   skip_failure_counts "$failure" || return 0

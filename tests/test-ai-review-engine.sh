@@ -2074,7 +2074,7 @@ FIRST_OUTCOME="$("$FRONT" outcome "$DETACH_ID" 2>/dev/null | head -1)"
 FINAL_OUTCOME="$("$FRONT" outcome "$DETACH_ID" --wait 60 2>/dev/null | head -1)"
 check "outcome_reports_pending_then_verdict" "[ '$FIRST_OUTCOME' = pending ] && [ '$FINAL_OUTCOME' = APPROVE ]"
 check "detached_run_records_scoreboard_row" "jq -e --arg id '$DETACH_ID' 'select(.detach_id==\$id and .caller_session_id==\"ow-session-c\" and .provider==\"muse\")' '$AI_REVIEW_SCOREBOARD_FILE' >/dev/null && grep -q -- '--force' '$OW_POOL_LOG' && ! grep -q -- '--detach' '$OW_POOL_LOG'"
-check "detached_record_binds_exact_head" "jq -e --arg h \"\$(git -C '$MREPO' rev-parse HEAD)\" '.head==\$h and .status==\"finished\" and .exit_code==0' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.json' >/dev/null"
+check "detached_record_binds_exact_head" "jq -e --arg h \"\$(git -C '$MREPO' rev-parse HEAD)\" '.head==\$h' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.json' >/dev/null && jq -e '.exit_code==0' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.result.json' >/dev/null"
 unset AI_REVIEW_SESSION_SKIP_DIR AI_REVIEW_DETACH_DIR OW_POOL_LOG OW_DIR
 
 # --- engine doctor ----------------------------------------------------------

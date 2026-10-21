@@ -100,7 +100,7 @@ rlc_init() {
   RLC_SHIPPED_DOORS_JSON="$RLC_ROOT/config/review-runner-doors.json"
   RLC_DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$RLC_SHIPPED_DOORS_JSON}"
   export RLC_STAMP RLC_RUNNER_NAME RLC_VERSION
-  [ -n "${AI_CALLER_SESSION_ID:-}" ] || review_export_caller_session_id
+  review_export_caller_session_id  # validates an inherited id too
 }
 
 # ---------------------------------------------------------------------------

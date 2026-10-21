@@ -40,7 +40,19 @@ review_export_caller_session_id() {
   export AI_CALLER_SESSION_ID
 }
 
-_review_skip_file() { local d; d="$(review_skip_dir)" || return 1; printf '%s/%s.jsonl\n' "$d" "$1"; }
+_review_skip_file() { # every read and write validates the id: a path component only
+  local d
+  [[ "${1:-}" =~ ^[A-Za-z0-9._-]{1,128}$ ]] && [ "$1" != . ] && [ "$1" != .. ] || return 1
+  d="$(review_skip_dir)" || return 1
+  printf '%s/%s.jsonl\n' "$d" "$1"
+}
+
+# Retention: a session's list is useless once the session is gone.
+_review_skip_prune() {
+  local d
+  d="$(review_skip_dir)" || return 0
+  [ -d "$d" ] && find "$d" -maxdepth 1 -type f -name '*.jsonl' -mtime +14 -delete 2>/dev/null || true
+}
 
 skip_add() { # skip_add SESSION PROVIDER REASON
   local sid="$1" provider="$2" reason="${3:-failed}" file
@@ -49,6 +61,7 @@ skip_add() { # skip_add SESSION PROVIDER REASON
   file="$(_review_skip_file "$sid")" || return 0
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
   skip_has "$sid" "$provider" && return 0
+  _review_skip_prune
   printf '{"provider":"%s","reason":"%s","at":"%s"}\n' "$provider" "$reason" "$(date -u +%FT%TZ)" >> "$file"
 }
 
