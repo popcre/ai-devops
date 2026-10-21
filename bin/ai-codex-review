@@ -218,15 +218,18 @@ relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
 stop_relay_task(){
   [ ! -e "$REVIEWER_HOME_DIR/relay/removed" ] || RELAY_TASK=""
   [ -n "$RELAY_TASK" ] || return 0
-  relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   local state winpid="" gone=yes
   # Kill the relay's whole process tree (Codex and its sandboxed children), then
   # prove its root process is gone; the task state alone proves nothing about them.
   winpid="$(cat "$REVIEWER_HOME_DIR/relay/winpid" 2>/dev/null | tr -dc 0-9)"
+  # The tree is killed before /End, which would orphan the children by killing their root first.
   if [ -n "$winpid" ]; then
     MSYS2_ARG_CONV_EXCL='*' timeout 30 taskkill /F /T /PID "$winpid" >/dev/null 2>&1 || true
     gone="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "if (Get-Process -Id $winpid -ErrorAction SilentlyContinue) { 'alive' } else { 'yes' }" 2>/dev/null | tr -d '\r')"
+  elif [ -e "$REVIEWER_HOME_DIR/relay/started" ]; then
+    gone=unknown
   fi
+  relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   # The State enum name is not localized, unlike schtasks /Query's text.
   state="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
     && { [ "$state" = Ready ] || [ "$state" = Disabled ]; } && [ "$gone" = yes ] \
@@ -241,7 +244,7 @@ interrupt_review(){
   trap - HUP INT TERM
   stop_provider_tree "$PROVIDER_PID"
   PROVIDER_PID=""
-  stop_relay_task
+  stop_relay_task 2>>"${TMP_ERR:-/dev/stderr}" || echo "ai-codex-review: interrupted, and the desktop relay was NOT confirmed stopped." >>"${TMP_ERR:-/dev/stderr}"
   local elapsed=$(( $(date +%s) - STARTED )) report=""
   report="$(preserve_failure_diagnostic interrupted || true)"
   if [ -n "$STATE" ] && [ -f "$STATE" ] && [ "$(jq -r '.status // ""' "$STATE" 2>/dev/null || true)" = running ]; then

@@ -152,7 +152,7 @@ EOF
   chmod +x "$ST/schtasks" "$ST/powershell.exe" "$ST/taskkill"
   rm -f "$TMP/args/schtasks-log"
   RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
-  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -q '^taskkill /F /T /PID [0-9]' '$TMP/args/schtasks-log' && grep -A2 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
+  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 '^taskkill /F /T /PID [0-9]' '$TMP/args/schtasks-log' | grep -qx /End && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
