@@ -70,7 +70,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
-  (x86_64: `1.4.9-R6297.1`). `install.sh` runs Meta's official installer when the
+  (x86_64: `1.4.11-R6667.1`). `install.sh` runs Meta's official installer when the
   pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
   SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
   ships a newer build, re-pin both files together. The model catalog appears
