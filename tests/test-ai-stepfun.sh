@@ -374,6 +374,25 @@ STUB
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "stepfun_prompt_forbids_extra_decision_lines" "[ '$drc' = 0 ] && grep -qx 'rule=yes' '$RH/dreport'"
   check "stepfun_extra_decision_line_is_classified_not_rewritten" "grep -q 'report-extra-decision-line: 1 non-terminal' '$RH/dout' && grep -qx '\*\*APPROVE\*\* stated before the fix' '$RH/dreport'"
+  # A terminal VERDICT: label (agent-profile shape) must become the recorded
+  ## Verdict block, not a false BLOCKED (edge-dev 20261018T200816Z).
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE abc123\n' > "$RH/term.out"
+ans="$(cat "$RH/term.out")"
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "stepfun_terminal_verdict_label_becomes_heading" "[ '$drc' = 0 ] && awk '/^## Verdict[[:space:]]*$/{p=1;next} p{print;exit}' '$RH/dreport' | grep -qx APPROVE && ! grep -q 'report-extra-decision-line' '$RH/dout'"
+  check "stepfun_terminal_verdict_label_not_recorded_as_blocked" "! grep -qx BLOCKED '$RH/dreport'"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'

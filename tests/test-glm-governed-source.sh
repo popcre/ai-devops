@@ -20,6 +20,7 @@ BASE="$(git -C "$TMP/repo" rev-parse HEAD)"
 printf 'b\n' > "$TMP/repo/f"; git -C "$TMP/repo" commit -qam change
 HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
 ORIG="$(cd "$TMP/repo" && pwd -P)"
+. "$ROOT/tools/lib/path-identity.sh"
 mkdir -p "$ORIG/.ai/reviews"
 POOL="$("$ROOT/bin/ai-review-sandbox" ensure-copy "$ORIG" pool-probe)"
 
@@ -41,7 +42,7 @@ run_case(){ # run_case NAME [env...]
 RECEIPT="$ORIG/.ai/reviews/governed-source-probe.json"
 run_case gov AI_REVIEW_SOURCE_RECEIPT_FILE="$RECEIPT" AI_REVIEW_SOURCE_ROOT="$ORIG" || { cat "$TMP/gov.log" >&2; fail 'governed pool dispatch builds and verifies its packet'; }
 ok 'governed pool dispatch builds and verifies its packet'
-[ "$(jq -r .identity.repository "$RECEIPT")" = "$ORIG" ] && [ "$(jq -r .identity.head "$RECEIPT")" = "$HEAD" ] \
+ai_same_path "$(jq -r .identity.repository "$RECEIPT")" "$ORIG" && [ "$(jq -r .identity.head "$RECEIPT")" = "$HEAD" ] \
   && ok 'receipt binds the original checkout and exact head' || fail 'receipt binds the original checkout and exact head'
 [ "$(head -1 "$(cat "$TMP/gov.out")/.ai-review-sandbox" 2>/dev/null || true)" != "$POOL" ] \
   && ok 'review snapshot is one level deep (not a copy of the pool snapshot)' || fail 'review snapshot is one level deep'
