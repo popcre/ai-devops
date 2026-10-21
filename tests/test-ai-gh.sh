@@ -512,6 +512,8 @@ check 'lock with an empty owner record is recovered' "timeout 20 '$GH' z"
 mkdir -p "$TMP/state/lock.d"; echo "999999 $(date +%s) other" > "$TMP/state/lock.d/owner"
 AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
 check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
+AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 timeout 10 "$GH" auth git-credential get </dev/null >/dev/null 2>&1; rc=$?
+check 'Git credential lookups bypass a held throttle lock' "[ $rc -eq 0 ] && grep -q other '$TMP/state/lock.d/owner'"
 rm -rf "$TMP/state/lock.d"
 # Behavioural: a holder's release must not remove a lock that now belongs to another owner.
 # Real script: hold its post-acquisition back-off read at a FIFO, then replace
