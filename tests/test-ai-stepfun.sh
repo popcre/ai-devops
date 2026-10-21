@@ -382,8 +382,7 @@ STUB
 read -r req
 echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
 echo '{"type":"agent_settled"}'; read -r _
-printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE abc123\n' > "$RH/term.out"
-ans="$(cat "$RH/term.out")"
+ans="$(printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE abc123\n')"
 jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
 STUB
   rm -f "$RH/dreport"; drc=0
