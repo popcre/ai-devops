@@ -139,15 +139,20 @@ exit 0
 EOF
   cat > "$ST/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *Get-ScheduledTask*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
+case "$*" in *Get-ScheduledTask*|*Get-Process*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
 [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] && { echo 'No MSFT_ScheduledTask objects found' >&2; exit 1; }
+case "$*" in *Get-Process*) [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo alive || echo yes; exit 0;; esac
 [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
 EOF
+  cat > "$ST/taskkill" <<'EOF'
+#!/usr/bin/env bash
+printf 'taskkill %s\n' "$*" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
+EOF
   export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"
-  chmod +x "$ST/schtasks" "$ST/powershell.exe"
+  chmod +x "$ST/schtasks" "$ST/powershell.exe" "$ST/taskkill"
   rm -f "$TMP/args/schtasks-log"
   RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
-  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
+  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -q '^taskkill /F /T /PID [0-9]' '$TMP/args/schtasks-log' && grep -A2 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
