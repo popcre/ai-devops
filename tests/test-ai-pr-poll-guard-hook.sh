@@ -48,6 +48,11 @@ blocks "a loop after a here-document" $'cat > x <<EOF\ntext\nEOF\nwhile :; do gh
 blocks "a here-document fed to bash (#1901)" $'bash <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
 blocks "a tab-stripped here-document fed to sh (#1901)" $'sh <<-EOF\n\tuntil gh pr merge 1; do sleep 9; done\nEOF'
 blocks "a loop piped into bash (#1901)" "printf 'while true; do gh pr view 1; sleep 9; done' | bash"
+blocks "a loop after a tab-indented <<- terminator (#1901)" $'cat > f <<-EOF\n\thi\n\tEOF\nwhile :; do gh pr view 1; done'
+blocks "a loop inside an unterminated here-document (#1901)" $'cat > f <<EOF\nwhile :; do gh pr view 1; done'
+blocks "a loop piped into /bin/bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /bin/bash"
+blocks "a loop piped into /usr/bin/env bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /usr/bin/env bash"
+blocks "a here-document fed to /bin/bash (#1901)" $'/bin/bash <<EOF\nwhile :; do gh pr view 1; done\nEOF'
 allows "sleep alone" 'sleep 5'
 allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 

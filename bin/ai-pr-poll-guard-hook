@@ -20,15 +20,18 @@ cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null
 # Text is not a command: drop here-document bodies, then quoted strings (commit
 # messages, notes, echo), so a message that merely mentions polling is allowed.
 cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
-  end != "" { if ($0 == end) end = ""; next }
-  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(ba|da|z|k|a)?sh([ \t]|<|$)/ {
-    end = substr($0, RSTART, RLENGTH); sub(/^<<-?[ \t]*["'"'"']?/, "", end)
+  # A body ends on its exact delimiter (tab-indented for <<-). An
+  # unterminated body is not dropped: it is scanned like any command (#1901).
+  end != "" { line = $0; if (dash) sub(/^\t+/, "", line); if (line == end) { end = ""; buf = ""; next } buf = buf $0 "\n"; next }
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh([ \t]|<|$)/ {
+    end = substr($0, RSTART, RLENGTH); dash = (end ~ /^<<-/); sub(/^<<-?[ \t]*["'"'"']?/, "", end); buf = ""
   }
-  { print }')"
+  { print }
+  END { if (end != "") printf "%s", buf }')"
 # Loops are often written over several lines; judge the command as one line.
 # Text piped into a shell (`printf '...' | bash`) is a script too (#1901).
 piped=""
-if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(ba|da|z|k|a)?sh([[:space:]]|$)'; then
+if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh([[:space:]]|$)'; then
   piped="$(printf '%s' "$cmd" | tr '\n' ' ' | tr -d "\"'")"
 fi
 # A quoted script handed to a child shell or eval IS a command (#1901): unwrap
