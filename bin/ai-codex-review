@@ -154,6 +154,11 @@ cleanup(){
         || { rm -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$"
              printf 'ai-codex-review: warning: could not keep the refreshed Codex token; run codex login if the next call is refused.\n' >&2; }
     fi
+    # Unlink the Windows sandbox junctions first (rmdir removes only the link),
+    # so the recursive delete can never reach the user's real Codex home.
+    for d in .sandbox .sandbox-bin .sandbox-secrets; do
+      [ ! -L "$REVIEWER_HOME_DIR/$d" ] || rmdir "$REVIEWER_HOME_DIR/$d" 2>/dev/null || rm -f "$REVIEWER_HOME_DIR/$d"
+    done
     rm -rf "$REVIEWER_HOME_DIR"
   fi
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
@@ -316,7 +321,8 @@ fi
 # copies, setup marker) under CODEX_HOME. An empty per-run home redoes that
 # setup and every command then hangs, so the review returns BLOCKED (observed
 # 2026-10-20 on al8960ofc). Junction the existing state in; junctions need no
-# symlink rights, and the cleanup's rm unlinks them without touching the target.
+# symlink rights; cleanup unlinks each junction before removing the home, so
+# the target is never touched (live-tested on al8960ofc, #1783).
 if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ]; then
   for d in .sandbox .sandbox-bin .sandbox-secrets; do
     [ -d "$user_codex_home/$d" ] || continue
