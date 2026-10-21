@@ -18,6 +18,17 @@ export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 unset AI_KEEP_SANDBOX 2>/dev/null || true
 
+# Packet/sandbox classification calls ai-task-gates; offline suites mock it
+# (same contract as tests/test-ai-review-engine.sh) so no real gate run starts
+# and the suite does not depend on host install state.
+mkdir -p "$TMP/mockbin"
+cat > "$TMP/mockbin/ai-task-gates" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}'
+EOF
+chmod +x "$TMP/mockbin/ai-task-gates"
+export PATH="$TMP/mockbin:$PATH"
+
 MAIN="$TMP/main"
 mkdir -p "$MAIN"
 git -C "$MAIN" init -q
@@ -106,6 +117,68 @@ for flagval in 0 empty yes true; do
   set -e
   SNAP_F="$(cat "$OUT_F" 2>/dev/null || true)"
   check "keep_flag_rejects_${flagval}"        "[ -n '$SNAP_F' ] && [ ! -d '$SNAP_F' ]"
+done
+
+# --- foreign orphans must not block a fresh review (plan step 4) ------------
+# A backlog of aged managed snapshots — including one holding unpublished
+# paid evidence that removal must refuse — and more entries than the sweep's
+# examination cap cannot prevent a new with-copy run or mutate its snapshot.
+PYTHON_BIN="$(command -v python3 || command -v python)"
+EVENTS_TOOL="$REPO_ROOT/tools/reviewer_events.py"
+FOREIGN_TAG=foreign-orphan-held
+FOREIGN_SNAP="$("$SCRIPT" ensure-copy "$MAIN" "$FOREIGN_TAG")"
+FOREIGN_EVIDENCE_ID=""
+if [ -n "$PYTHON_BIN" ] && [ -f "$EVENTS_TOOL" ]; then
+  FOREIGN_EVIDENCE_ID="$(cd "$MAIN" && "$PYTHON_BIN" "$EVENTS_TOOL" begin grok 2>/dev/null || true)"
+  if [ -n "$FOREIGN_EVIDENCE_ID" ]; then
+    "$PYTHON_BIN" "$EVENTS_TOOL" require-report grok "$FOREIGN_EVIDENCE_ID" "$FOREIGN_SNAP" >/dev/null 2>&1 || true
+  fi
+fi
+check "foreign_orphan_fixture_created"       "[ -d '$FOREIGN_SNAP' ] && [ -f '$FOREIGN_SNAP/.ai-review-sandbox' ]"
+# Age every fixture marker past the default orphan age (2h).
+find "$AI_REVIEW_SANDBOX_DIR" -mindepth 2 -maxdepth 2 -name .ai-review-sandbox \
+  -exec touch -d '3 hours ago' {} + 2>/dev/null || \
+  find "$AI_REVIEW_SANDBOX_DIR" -mindepth 2 -maxdepth 2 -name .ai-review-sandbox \
+    -exec touch -t 202001010000 {} + 2>/dev/null || true
+# Extra recoverable orphans beyond the 16-entry examination cap.
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+  _extra="$AI_REVIEW_SANDBOX_DIR/orphan-extra-$i"
+  mkdir -p "$_extra"
+  printf '%s\nsource_digest=deadbeef\n' "$_extra" > "$_extra/.ai-review-sandbox"
+done
+FRESH_OUT="$TMP/fresh-amid-orphans.out"
+set +e
+"$SCRIPT" with-copy "$MAIN" freshamidorphans -- sh -c 'printf %s "$AI_REVIEW_SNAPSHOT" > "$1"; printf ok > "$1.done"' sh "$FRESH_OUT"
+FRESH_RC=$?
+set -e
+FRESH_SNAP="$(cat "$FRESH_OUT" 2>/dev/null || true)"
+check "foreign_orphans_do_not_block_fresh_review" \
+  "[ '$FRESH_RC' -eq 0 ] && [ -n '$FRESH_SNAP' ] && [ ! -d '$FRESH_SNAP' ] && [ -f '$FRESH_OUT.done' ]"
+# Sweep must stay best-effort and bounded: the held foreign evidence survives,
+# and a subsequent fresh run still works after the sweep.
+set +e
+"$SCRIPT" sweep-orphans --max-age-seconds 7200 --max-removals 16 >/dev/null 2>"$TMP/sweep-amid.err"
+SWEEP_RC=$?
+set -e
+check "orphan_sweep_stays_best_effort"       "[ '$SWEEP_RC' -eq 0 ]"
+check "foreign_orphan_evidence_survives_sweep" "[ -d '$FOREIGN_SNAP' ]"
+FRESH2_OUT="$TMP/fresh-after-sweep.out"
+set +e
+"$SCRIPT" with-copy "$MAIN" freshaftersweep -- sh -c 'printf %s "$AI_REVIEW_SNAPSHOT" > "$1"' sh "$FRESH2_OUT"
+FRESH2_RC=$?
+set -e
+FRESH2_SNAP="$(cat "$FRESH2_OUT" 2>/dev/null || true)"
+check "fresh_review_still_works_after_sweep" \
+  "[ '$FRESH2_RC' -eq 0 ] && [ -n '$FRESH2_SNAP' ] && [ ! -d '$FRESH2_SNAP' ]"
+if [ -n "$FOREIGN_EVIDENCE_ID" ] && [ -n "$PYTHON_BIN" ]; then
+  printf '# Synthetic completed review\n' > "$TMP/foreign-orphan-report.md"
+  "$PYTHON_BIN" "$EVENTS_TOOL" publish-report grok "$FOREIGN_EVIDENCE_ID" "$TMP/foreign-orphan-report.md" >/dev/null 2>&1 || true
+  rm -f "$TMP/foreign-orphan-report.md"
+  "$SCRIPT" remove-copy "$MAIN" "$FOREIGN_TAG" >/dev/null 2>&1 || true
+fi
+[ ! -d "$FOREIGN_SNAP" ] || "$SCRIPT" remove-copy "$MAIN" "$FOREIGN_TAG" >/dev/null 2>&1 || true
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+  rm -rf "$AI_REVIEW_SANDBOX_DIR/orphan-extra-$i"
 done
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
