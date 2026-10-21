@@ -14,10 +14,10 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|
-| 0 | Enforce the no-review landing contract | ⬜ open — 2026-10-15 | Every PR shows `ai-task-gates explain` effective class `prose` or `code` only |
-| 1 | Freeze edge-dev incident inventory and class map | ⬜ open — 2026-10-15 | Sanitized inventory under [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (disposition rows + class map) |
-| 2 | Repair StepFun Windows shell spawn | ⬜ open — 2026-10-15 | Offline fixture + live `ai-stepfun` ask/review starts a shell |
-| 3 | Repair GLM REVISE re-review waste | ⬜ open — 2026-10-15 | Fixture proves one follow-up, not a forced full re-review |
+| 0 | Enforce the no-review landing contract | ✅ done — 2026-10-16 | Every PR shows `ai-task-gates explain` effective class `prose` or `code` only |
+| 1 | Freeze edge-dev incident inventory and class map | ✅ done — 2026-10-16 (`1078ea63`… inventory merged as PR #1805 `bba1bcfe`) | Sanitized inventory under [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (disposition rows + class map) |
+| 2 | Repair StepFun Windows shell spawn | ✅ code landed — 2026-10-18 (`0be8ffa5` PR #1807); live shell proof remains in step 6 | Offline fixture `stepfun_windows_shell_spawn_resolves` green; live `ai-stepfun` ask/review starts a shell (step 6) |
+| 3 | Repair GLM REVISE re-review waste | ✅ done — 2026-10-19 (`b5cfa876` PR #1819, path 1 reviewed workstream) | Fixture `glm_revise_followup_reuses_bound_turn` green (`tests/test-glm-revise-followup.sh` 13/13) |
 | 4 | Repair durable report publish and sandbox non-interference | ⬜ open — 2026-10-15 | Completed review yields a durable report path; foreign orphans intact |
 | 5 | Repair Windows Git Bash / ProgramFiles detection | ⬜ open — 2026-10-15 | `tests/test-windows-bash-selection.sh` green with empty ProgramFiles |
 | 6 | Live smoke + incident disposition (no paid blast) | ⬜ open — 2026-10-15 | Two local incidents resolved/partially-resolved with exact evidence |
