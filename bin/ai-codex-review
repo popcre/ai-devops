@@ -213,15 +213,17 @@ stop_provider_tree(){ # TIMEOUT_PID
 # The desktop relay's provider is not our child, so killing PROVIDER_PID cannot
 # reach it; end and delete its scheduled task instead (also kills its processes).
 RELAY_TASK=""
+# Every scheduler call is bounded so a hung Task Scheduler cannot stall the wrapper.
+relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
 stop_relay_task(){
   [ ! -e "$REVIEWER_HOME_DIR/relay/removed" ] || RELAY_TASK=""
   [ -n "$RELAY_TASK" ] || return 0
-  MSYS2_ARG_CONV_EXCL='*' schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   local state
   # The State enum name is not localized, unlike schtasks /Query's text.
-  state="$(powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
+  state="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
     && { [ "$state" = Ready ] || [ "$state" = Disabled ]; } \
-    && MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 \
+    && relay_schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 \
     || { echo "ai-codex-review: relay task $RELAY_TASK could not be confirmed stopped and removed; end it before trusting this machine's Codex auth." >&2; return 1; }
   # The relay runs in a subshell; this marker tells the parent it is gone.
   [ ! -d "$REVIEWER_HOME_DIR/relay" ] || : > "$REVIEWER_HOME_DIR/relay/removed"
@@ -375,16 +377,16 @@ DESKTOP_RELAY=0
 if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ] && [ -n "${SSH_CONNECTION:-}" ] && [ "${AI_CODEX_DESKTOP_RELAY:-1}" != 0 ]; then DESKTOP_RELAY=1; fi
 run_relayed_provider() {
   local relay task rc i
-  relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$$"; RELAY_TASK="$task"
+  relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
   mkdir -p "$relay" && printf '%s\n' "$PROMPT" > "$relay/prompt"
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
     printf 'touch %q\n' "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
   } > "$relay/run.sh"
-  MSYS2_ARG_CONV_EXCL='*' schtasks /Create /F /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
+  relay_schtasks /Create /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "\"$(cygpath -w "$(command -v bash)")\" \"$(cygpath -w "$relay/run.sh")\"" >/dev/null 2>"$TMP_ERR" \
-    && MSYS2_ARG_CONV_EXCL='*' schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
+    && relay_schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
   for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
   if [ ! -e "$relay/started" ]; then
     echo "desktop relay never started: $USERNAME must be signed in at the desktop of this machine." >> "$TMP_ERR"
@@ -400,7 +402,7 @@ set +e
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
 if [ "$DESKTOP_RELAY" = 1 ]; then
-  RELAY_TASK="AiDevOps-CodexReview-$$"; run_relayed_provider & PROVIDER_PID=$!
+  RELAY_TASK="AiDevOps-CodexReview-$RUN_ID"; run_relayed_provider & PROVIDER_PID=$!
 else
   printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
 fi

@@ -151,7 +151,9 @@ EOF
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
-  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews'"
+  failed_runs(){ find "$TMP/lifecycle/runs" -name '*.json' -exec jq -e 'select(.status=="failed" and .failure_class=="provider-failed")' {} \; 2>/dev/null | grep -c BLOCKED; }
+  FAILED_BEFORE="$(failed_runs)"
+  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
   rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
 fi
