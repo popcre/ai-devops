@@ -469,6 +469,10 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/windows-job-run.ps1",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },

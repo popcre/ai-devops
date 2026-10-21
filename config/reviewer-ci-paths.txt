@@ -11,6 +11,7 @@ bin/ai-review*
 bin/ai-stepfun*
 bin/ai-deepseek*
 bin/windows-private-file.ps1
+bin/windows-job-run.ps1
 config/ci-suite-manifest.json
 config/ci-suites/**
 tools/ci-suites/*
@@ -35,6 +36,7 @@ tests/lib-reviewer-events-isolation.sh
 tests/test-all.ps1
 tests/test-all.sh
 tests/test-ai-codex-review.sh
+tests/test-windows-job-run.sh
 tests/test-delegation-templates.sh
 tests/test-pool-dispatch-doors.sh
 tests/test-ai-review-code-only.sh

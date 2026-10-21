@@ -140,6 +140,11 @@ git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEWER_HOME_DIR=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
+  # A relay that could not be proven stopped keeps every trace it may still use.
+  if [ -n "${RELAY_KEEP:-}" ]; then
+    printf 'ai-codex-review: kept %s, %s, %s and %s because the desktop relay was not proven stopped.\n' "$REVIEWER_HOME_DIR" "$REVIEW_DIR" "$TMP_OUT" "$TMP_ERR" >&2
+    REVIEWER_HOME_DIR=""; REVIEW_DIR=""; TMP_OUT=""; TMP_ERR=""
+  fi
   # The private reviewer home holds only linked auth: keep a refreshed token
   # and remove it even when evidence retention keeps the rest (#1901).
   if [ -n "$REVIEWER_HOME_DIR" ]; then
@@ -176,9 +181,10 @@ cleanup(){
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
   [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
-  "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
+  [ -n "${RELAY_KEEP:-}" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+RELAY_KEEP=""
 
 preserve_failure_diagnostic(){ # FAILURE_CLASS
   local failure="$1" path tmp
@@ -210,10 +216,51 @@ stop_provider_tree(){ # TIMEOUT_PID
   wait "$pid" 2>/dev/null || true
 }
 
+# The desktop relay's provider is not our child, so killing PROVIDER_PID cannot
+# reach it. Its task runs bin/windows-job-run.ps1, which holds Codex and every
+# descendant in a kill-on-close job: once the task's launcher is gone, Windows
+# has terminated all of them. So stopping means /End, then proving the task is
+# no longer running, then deleting it.
+RELAY_TASK=""
+# Every scheduler call is bounded so a hung Task Scheduler cannot stall the wrapper.
+relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
+# Prints the task's State, or "absent" only when Task Scheduler says it does not
+# exist; any other failure prints nothing, which callers treat as unproven.
+# The State enum name is not localized, unlike schtasks /Query's text.
+relay_task_state(){
+  timeout 30 powershell.exe -NoProfile -NonInteractive -Command "try { (Get-ScheduledTask -TaskName '$1' -ErrorAction Stop).State } catch { if (\$_.CategoryInfo.Category -eq 'ObjectNotFound') { 'absent' } }" 2>/dev/null | tr -d '\r'
+}
+stop_relay_task(){
+  local relay="$REVIEWER_HOME_DIR/relay" state i
+  [ ! -e "$relay/removed" ] || RELAY_TASK=""
+  # Nothing to stop when no creation was attempted, or Task Scheduler itself
+  # confirmed that the failed /Create left no task behind.
+  if [ -n "$RELAY_TASK" ] && { [ ! -e "$relay/creating" ] || [ -e "$relay/not-created" ]; }; then RELAY_TASK=""; fi
+  [ -n "$RELAY_TASK" ] || return 0
+  # Revoke the start first. The relay must win this same atomic mkdir before it
+  # runs Codex, so after this line no instance, however late, can start Codex;
+  # one that already won is running inside the task and is ended below.
+  [ ! -d "$relay" ] || mkdir "$relay/ran" 2>/dev/null || true
+  relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  # The launcher and Bash exit asynchronously after /End or a normal finish.
+  for i in $(seq 15); do
+    state="$(relay_task_state "$RELAY_TASK")"
+    [ "$state" = Running ] || [ "$state" = Queued ] || break
+    sleep 1
+  done
+  { [ "$state" = Ready ] || [ "$state" = Disabled ]; } \
+    && relay_schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 \
+    || { echo "ai-codex-review: relay task $RELAY_TASK could not be confirmed stopped and removed; end it before trusting this machine's Codex auth. Its state is kept in $REVIEWER_HOME_DIR." >&2; return 1; }
+  # The relay runs in a subshell; this marker tells the parent it is gone.
+  [ ! -d "$relay" ] || : > "$relay/removed"
+  RELAY_TASK=""
+}
+
 interrupt_review(){
   trap - HUP INT TERM
   stop_provider_tree "$PROVIDER_PID"
   PROVIDER_PID=""
+  stop_relay_task 2>>"${TMP_ERR:-/dev/stderr}" || { echo "ai-codex-review: interrupted, and the desktop relay was NOT confirmed stopped." >>"${TMP_ERR:-/dev/stderr}"; RELAY_KEEP=1; }
   local elapsed=$(( $(date +%s) - STARTED )) report=""
   report="$(preserve_failure_diagnostic interrupted || true)"
   if [ -n "$STATE" ] && [ -f "$STATE" ] && [ "$(jq -r '.status // ""' "$STATE" 2>/dev/null || true)" = running ]; then
@@ -347,14 +394,70 @@ TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
 reviewer_event_evidence require-report codex "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+# Windows over SSH (popcre/ai-devops#1891): the elevated sandbox's command runner
+# cannot attach to an SSH logon session, so every command fails with "timed out
+# connecting runner pipe-in" (unelevated fails with 0xC0000142). The same run
+# works from the desktop session, so over SSH the provider is relayed through a
+# one-shot interactive scheduled task in the signed-in user's desktop session.
+DESKTOP_RELAY=0
+if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ] && [ -n "${SSH_CONNECTION:-}" ] && [ "${AI_CODEX_DESKTOP_RELAY:-1}" != 0 ]; then DESKTOP_RELAY=1; fi
+run_relayed_provider() {
+  local relay task rc i
+  relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
+  mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
+  { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
+    # /Create needs a trigger, so the task has a placeholder 23:59 one. Only the
+    # wrapper's own /Run may start Codex, once: it writes "go" just before /Run.
+    # "go" holds a deadline, so a /Run that failed late cannot arm a later start.
+    printf '[ "$(date +%%s)" -le "$(cat %q 2>/dev/null || echo 0)" ] && mkdir %q 2>/dev/null || exit 95\ntouch %q\n' "$relay/go" "$relay/ran" "$relay/started"
+    printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
+    printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
+  } > "$relay/run.sh"
+  # schtasks caps /TR at 261 characters, so a stub carries the launcher's long
+  # arguments. It runs the launcher in-process: PowerShell itself must be the
+  # task's own process, because /End kills only that process, and its exit is
+  # what closes the job.
+  ps_quote(){ cygpath -w "$1" | sed "s/'/''/g"; }
+  printf "& '%s' -Bash '%s' -Script '%s'\r\nexit \$LASTEXITCODE\r\n" \
+    "$(ps_quote "$SCRIPT_DIR/windows-job-run.ps1")" "$(ps_quote "$(command -v bash)")" "$(ps_quote "$relay/run.sh")" > "$relay/job.ps1"
+  : > "$relay/creating"
+  relay_schtasks /Create /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
+    /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(cygpath -w "$relay/job.ps1")\"" >/dev/null 2>"$TMP_ERR" \
+    || { [ "$(relay_task_state "$task")" != absent ] || : > "$relay/not-created"; stop_relay_task; return 98; }
+  echo "$(( $(date +%s) + ${AI_CODEX_RELAY_START_SECONDS:-60} ))" > "$relay/go"
+  relay_schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
+  for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
+  if [ ! -e "$relay/started" ]; then
+    echo "desktop relay never started: $USERNAME must be signed in at the desktop of this machine." >> "$TMP_ERR"
+    stop_relay_task; return 99
+  fi
+  i="$(( $(date +%s) + ${REVIEW_TIMEOUT%%[!0-9]*} + 120 ))"
+  until [ -s "$relay/rc" ] || [ "$(date +%s)" -gt "$i" ]; do sleep 2; done
+  rc="$(cat "$relay/rc" 2>/dev/null || echo 124)"; stop_relay_task
+  return "$rc"
+}
 set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
-printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+if [ "$DESKTOP_RELAY" = 1 ]; then
+  RELAY_TASK="AiDevOps-CodexReview-$RUN_ID"; run_relayed_provider & PROVIDER_PID=$!
+else
+  printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+fi
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
+# A relay that hit its own deadline leaves the task running; end it here too.
+stop_relay_task 2>>"$TMP_ERR"; RELAY_STOP_RC=$?
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
+
+if [ "$RELAY_STOP_RC" -ne 0 ]; then
+  FAILURE_REPORT="$(preserve_failure_diagnostic relay-not-stopped || true)"
+  RELAY_KEEP=1  # keep the relay, its snapshot and task evidence for a later cleanup
+  if [ -n "$FAILURE_REPORT" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$FAILURE_REPORT" >/dev/null 2>&1 || true
+  else "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; fi
+  die "the desktop relay task could not be stopped; no report was published. Diagnostic: ${FAILURE_REPORT:-unavailable}"
+fi
 
 if [ "$PROVIDER_RC" -ne 0 ]; then
   FAILURE_REPORT="$(preserve_failure_diagnostic provider-failed || true)"
