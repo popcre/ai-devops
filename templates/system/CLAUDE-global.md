@@ -128,7 +128,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
   minimum scope). Before any shared-db work, load `shared-db-change`.
 - **Sign everything posted to GitHub** with `Posted by Claude chat <id> on
   <machine>`, where `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when
-  empty). When editing a body, keep existing signatures and add yours.
+  empty); the shell exports it ready-made as `$AI_GH_SIGNATURE`. When editing
+  a body, keep existing signatures and add yours.
 - **Reviews:** pick an in-rotation reviewer of a different engine via
   `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
 - **Route every successor from its own work,** never a predecessor's
