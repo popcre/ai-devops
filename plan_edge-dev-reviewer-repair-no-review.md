@@ -16,9 +16,9 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 |---|---|---|---|
 | 0 | Enforce the no-review landing contract | ✅ done — 2026-10-16 | Every PR shows `ai-task-gates explain` effective class `prose` or `code` only |
 | 1 | Freeze edge-dev incident inventory and class map | ✅ done — 2026-10-16 (`1078ea63`… inventory merged as PR #1805 `bba1bcfe`) | Sanitized inventory under [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (disposition rows + class map) |
-| 2 | Repair StepFun Windows shell spawn | ✅ code landed — 2026-10-18 (`0be8ffa5` PR #1807); live shell proof remains in step 6 | Offline fixture `stepfun_windows_shell_spawn_resolves` green; live `ai-stepfun` ask/review starts a shell (step 6) |
+| 2 | Repair StepFun Windows shell spawn | ✅ code landed — 2026-10-19 (`4a5e1883` / `6ba96308` / `d13f4157`; first landing `0be8ffa5` PR #1807 reverted as a Windows blocker in PR #1848, re-landed); live shell proof remains in step 6 | Offline fixture `stepfun_windows_shell_spawn_resolves` green; live `ai-stepfun` ask/review starts a shell (step 6) |
 | 3 | Repair GLM REVISE re-review waste | ✅ done — 2026-10-19 (`b5cfa876` PR #1819, path 1 reviewed workstream) | Fixture `glm_revise_followup_reuses_bound_turn` green (`tests/test-glm-revise-followup.sh` 13/13) |
-| 4 | Repair durable report publish and sandbox non-interference | ⬜ open — 2026-10-15 | Completed review yields a durable report path; foreign orphans intact |
+| 4 | Repair durable report publish and sandbox non-interference | ✅ code landed — 2026-10-21 (this PR) | Named fixtures `durable_report_publish_survives_process_exit` and `foreign_orphans_do_not_block_fresh_review` green; live durable report path remains in step 6 |
 | 5 | Repair Windows Git Bash / ProgramFiles detection | ⬜ open — 2026-10-15 | `tests/test-windows-bash-selection.sh` green with empty ProgramFiles |
 | 6 | Live smoke + incident disposition (no paid blast) | ⬜ open — 2026-10-15 | Two local incidents resolved/partially-resolved with exact evidence |
 | 7 | Install code-only release and re-prove | ⬜ open — 2026-10-15 | Installed hashes match merged source; smoke still green |

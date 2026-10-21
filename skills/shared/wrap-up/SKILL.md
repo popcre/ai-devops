@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: One-phrase Claude and Codex end-of-session closer. Use when the user says "wrap up", "wrap it up", "dflow wrap up", "wrap up dflow", "close out this session", "we're done here", "end of session", asks for the full end-of-session documentation update, asks whether the handoff is comprehensive enough for a fresh developer, or asks whether everything is pushed and committed before ending. ANY "wrap up" variant, including project-prefixed ones like "dflow wrap up", routes HERE, not to a ship-only skill. It detects DesignFlow repositories first and assigns their ship step to `dflow-ship`. In a shared-database session it runs the `shared-db-handover` gate. Chains docs update, secrets sweep, handoff-safe state, project-aware shipping, workspace close-out, and a next-session prompt, then gives one plain-English closing report.
+description: "End-of-session closer for Claude and Codex. Use for ANY \"wrap up\" variant (\"wrap it up\", \"dflow wrap up\", \"close out this session\", \"we're done here\", \"end of session\"), a full end-of-session docs update, \"is the handoff comprehensive enough?\", or \"is everything pushed and committed before we end?\". Routes here, not to a ship-only skill; delegates DesignFlow shipping to `dflow-ship` and runs the `shared-db-handover` gate in shared-db sessions."
 ---
 
 # wrap-up

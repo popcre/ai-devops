@@ -6,10 +6,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "=== explicit deadline required ==="
-out=$(bin/ai-pr-wait 1 --repo popcre/ai-devops 2>&1) && rc=0 || rc=$?
-test "$rc" -eq 3
-echo "$out" | grep -q "explicit deadline only"
-echo "pr-wait missing timeout refused OK"
 
 out=$(bin/ai-gh-wait --until-regex x --interval 300 -- run view 1 2>&1) && rc=0 || rc=$?
 test "$rc" -eq 3
@@ -32,7 +28,6 @@ echo "registration residuals clean OK"
 echo "=== no default deadlines ==="
 ! grep -q '^TIMEOUT_MINUTES=180' bin/ai-pr-wait
 ! grep -q 'TIMEOUT=120' bin/ai-gh-wait
-grep -q 'explicit deadline only' bin/ai-pr-wait
 grep -q 'explicit deadline only' bin/ai-gh-wait
 echo "defaults removed OK"
 

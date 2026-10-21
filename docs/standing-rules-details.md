@@ -198,7 +198,8 @@ and points here.
 - **Shared database:** claim-first, minimum scope; see "Production and
   shared-db scope".
 - **GitHub signature:** `Posted by Claude chat <id> on <machine>`, where
-  `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when empty). When editing a
+  `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when empty). The managed
+  shell snippet exports it ready-made as `$AI_GH_SIGNATURE`. When editing a
   body, keep existing signatures and add yours.
 - **Successors:** never inherit a predecessor's repository, work type, route,
   or object claim. Private artifacts stay in their approved private repository.

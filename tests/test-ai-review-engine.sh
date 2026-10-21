@@ -77,6 +77,25 @@ check "core_owns_store_before_delete" "grep -q 'rlc_packet_store' '$CORE' && gre
 check "core_unifies_tag_and_dir_budgets" "grep -q 'RLC_TAG_MAX=48' '$CORE' && grep -q 'RLC_DIR_MAX=64' '$CORE'"
 check "core_owns_both_contracts" "grep -q 'rlc_run_review' '$CORE' && grep -q 'rlc_run_implement' '$CORE'"
 
+# --- durable report publish (plan step 4) -----------------------------------
+# rlc_write_report must leave a complete report at OUT after the writing
+# process exits: regular file, verdict + head bound, temp cleaned up. This is
+# the Windows-path-safe publish helper every completed review uses.
+. "$CORE"
+DURABLE_HEAD=0123456789abcdef0123456789abcdef01234567
+DURABLE_BODY="$TMP/durable-body.md"
+printf 'Substantive analysis of the reviewed change.\n## Verdict\nAPPROVE\nReviewed commit `%s`\n' "$DURABLE_HEAD" > "$DURABLE_BODY"
+DURABLE_OUT="$TMP/durable-out/report.md"
+mkdir -p "$(dirname "$DURABLE_OUT")"
+rlc_write_report "$DURABLE_OUT" mock diff-review "$TMP/srcrepo" "$DURABLE_HEAD" deadbeefcafe run-durable caller-x 1 "$DURABLE_BODY" "" >/dev/null
+check "durable_report_publish_survives_process_exit" \
+  "[ -f '$DURABLE_OUT' ] && [ ! -L '$DURABLE_OUT' ] && [ -s '$DURABLE_OUT' ] \
+   && grep -q '## Verdict' '$DURABLE_OUT' && grep -q 'APPROVE' '$DURABLE_OUT' \
+   && grep -q '$DURABLE_HEAD' '$DURABLE_OUT' \
+   && [ -z \"\$(find '$TMP/durable-out' -name '.rlc-report.*' 2>/dev/null)\" ]"
+check "durable_report_is_readable_after_writer_exit" \
+  "grep -q 'review-lifecycle-core/1' '$DURABLE_OUT' && grep -q 'reviewed commit' '$DURABLE_OUT'"
+
 # --- tag budget -------------------------------------------------------------
 # shellcheck disable=SC1090
 . "$CORE"
@@ -675,6 +694,20 @@ check "report_records_runner_stamp" "grep -q 'review-lifecycle-core/1' '$REPORT_
 check "report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$REPORT_PATH'"
 check "review_contract_leaves_durable_packet" "test -d '$AI_REVIEW_PACKET_STORE' && find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 check "cleanup_removed_working_sandbox_after_store" "! find '${TMP}' -maxdepth 2 -type d -name '*engine-e2e*' 2>/dev/null | grep -v packet-store | grep -q ."
+# Step 4 (plan_edge-dev-reviewer-repair-no-review): after the engine process
+# has exited the report is still a complete, openable artifact outside every
+# sandbox, and a later orphan sweep cannot take it.
+check "durable_report_openable_after_engine_exit" \
+  "test -s '$REPORT_PATH' && [ -f '$REPORT_PATH' ] && [ ! -L '$REPORT_PATH' ] \
+   && grep -q '## Verdict' '$REPORT_PATH' && grep -q '$HEAD_SHA' '$REPORT_PATH' \
+   && grep -q 'review-lifecycle-core/1' '$REPORT_PATH' \
+   && case '$REPORT_PATH' in '$AI_REVIEW_SANDBOX_DIR'/*) false ;; *) true ;; esac"
+set +e
+"$REPO_ROOT/bin/ai-review-sandbox" sweep-orphans --max-age-seconds 0 --max-removals 32 \
+  >/dev/null 2>&1
+set -e
+check "durable_report_survives_later_orphan_sweep" \
+  "test -s '$REPORT_PATH' && grep -q '## Verdict' '$REPORT_PATH' && grep -q '$HEAD_SHA' '$REPORT_PATH'"
 CORE_TEST_STATE=""
 while IFS= read -r _core_state; do
   if jq -e '.tests.exit==0 and (.tests.command|contains("core-tests-receipt")) and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$_core_state" >/dev/null 2>&1; then CORE_TEST_STATE="$_core_state"; break; fi

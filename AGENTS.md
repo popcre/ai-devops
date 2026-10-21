@@ -43,6 +43,7 @@ Then load additional docs only when relevant:
 | Claude Code session | [`CLAUDE.md`](CLAUDE.md), then `AGENTS.md` | Other docs unless the task requires them |
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
 | Standing behavior, triggers, false completion, or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Bulk plan files |
+| Running an in-house tool (ai-review, ai-task-gates, ai-muse, ai-pr-wait, ai-doc-safety, ai-blocker-watch, shared-db scripts) | [`docs/ai-tools-cheat-sheet.md`](docs/ai-tools-cheat-sheet.md) instead of `--help` | The tool's source |
 | Tool, workflow, prompt, install, model, secret, or machine setup | Matching row in [`docs/task-router.md`](docs/task-router.md) | Unrelated plans |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | Matching row in [`docs/task-router.md`](docs/task-router.md) | Full plan bodies until STATUS says so |
 | Repository layout, identifiers, credentials, deployment facts | [`docs/repository-reference.md`](docs/repository-reference.md) | Other sections of it |

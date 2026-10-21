@@ -1,6 +1,6 @@
 ---
 name: codex-handoff
-description: Hand a substantial implementation, ops, or verification task off to Codex (GPT-5.x) and drive it to completion, then verify its work. Use whenever the user says "use codex", "have codex do X", "hand this off to codex", "use the codex-cli MCP", "delegate this to gpt-5", or wants a second engine to build/run/prove something autonomously — especially long tasks worth running in the background. For Codex's opinion on reasoning rather than work to execute, use codex-second-opinion instead.
+description: "Hand a substantial implementation, ops, or verification task to Codex (GPT-5.x), drive it to completion, and verify. Use for \"use codex\", \"have codex do X\", \"hand this off to codex\", \"use the codex-cli MCP\", \"delegate this to gpt-5\", or long autonomous second-engine work. Opinions go to codex-second-opinion."
 ---
 
 # codex-handoff

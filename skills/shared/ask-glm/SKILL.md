@@ -1,6 +1,6 @@
 ---
 name: ask-glm
-description: Rotation reviewer (GLM-5.3, restored 2026-09-30). GLM never reviews GLM-orchestrated (ZCode) work. Delegate a repository analysis, code review, debate, second opinion, or scoped implementation to Z.ai GLM through the persistent `ai-glm` session harness. Use when the user says "ask GLM," "run this by GLM," "get GLM's opinion," requests GLM-5.3, wants an independent GLM review, or explicitly delegates repository work to GLM.
+description: "Rotation reviewer (GLM-5.3); never reviews GLM-orchestrated (ZCode) work. Analysis, review, debate, second opinion, or scoped implementation through `ai-glm`. Use for \"ask GLM\", \"run this by GLM\", \"get GLM's opinion\", GLM-5.3, or delegating repository work to GLM."
 ---
 
 # Ask GLM
