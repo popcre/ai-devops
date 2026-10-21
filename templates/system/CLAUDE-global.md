@@ -156,9 +156,11 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr> --timeout-minutes N --fit-tool-call`; rerun it on
-  `STILL-WAITING`. One probe per state change. A wait that outlives the turn
-  leaves the issue or PR as the card.
+  Run `bin/ai-pr-wait <pr>` in the background (run_in_background) and do
+  other work until it wakes you; rerun it on exit 2. One probe per state
+  change. A wait that outlives the turn leaves the issue or PR as the card.
+  Never write a sleep loop in Bash; wait on reviewers, subagents, and
+  background commands the same way.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 
