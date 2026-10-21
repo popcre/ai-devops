@@ -469,6 +469,10 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/windows-kill-process-tree.ps1",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },

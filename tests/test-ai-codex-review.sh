@@ -139,9 +139,9 @@ exit 0
 EOF
   cat > "$ST/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *Get-ScheduledTask*|*Win32_Process*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
+case "$*" in *Get-ScheduledTask*|*windows-kill-process-tree*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
 [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] && { echo 'No MSFT_ScheduledTask objects found' >&2; exit 1; }
-case "$*" in *Win32_Process*) printf '%s' "$*" | grep -q '@([0-9][0-9]*)' && echo treekill >> "$AI_CODEX_TEST_ARGS/schtasks-log"; [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo alive || echo yes; exit 0;; esac
+case "$*" in *windows-kill-process-tree*) printf '%s' "$*" | grep -q 'RootPid [0-9][0-9]* -RootStart [0-9]' && echo treekill >> "$AI_CODEX_TEST_ARGS/schtasks-log"; [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo alive || echo yes; exit 0;; esac
 [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
 EOF
   export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"

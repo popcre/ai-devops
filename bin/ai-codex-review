@@ -222,13 +222,12 @@ stop_relay_task(){
   # Cancel first: a relay that starts after this point exits before launching
   # Codex, so a missing winpid below really means nothing was launched.
   [ ! -d "$REVIEWER_HOME_DIR/relay" ] || : > "$REVIEWER_HOME_DIR/relay/cancel"
-  # Kill the relay's whole process tree (Codex and its sandboxed children), then
-  # prove its root process is gone; the task state alone proves nothing about them.
+  # Kill the relay's whole process tree (Codex and its sandboxed children) and
+  # prove it gone; the task state alone proves nothing about them.
   winpid="$(cat "$REVIEWER_HOME_DIR/relay/winpid" 2>/dev/null | tr -dc 0-9)"
   # The tree is killed before /End, which would orphan the children by killing their root first.
   if [ -n "$winpid" ]; then
-    # Collect every descendant, kill them all, and answer yes only if none survives.
-    gone="$(timeout 60 powershell.exe -NoProfile -NonInteractive -Command "\$all = Get-CimInstance Win32_Process; \$tree = @($winpid); \$i = 0; while (\$i -lt \$tree.Count) { \$tree += @(\$all | Where-Object { \$_.ParentProcessId -eq \$tree[\$i] } | ForEach-Object { [int]\$_.ProcessId }); \$i++ }; \$tree | ForEach-Object { Stop-Process -Id \$_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; if (\$tree | Where-Object { Get-Process -Id \$_ -ErrorAction SilentlyContinue }) { 'alive' } else { 'yes' }" 2>/dev/null | tr -d '\r')"
+    gone="$(timeout 90 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$SCRIPT_DIR/windows-kill-process-tree.ps1")" -RootPid "$winpid" -RootStart "$(cat "$REVIEWER_HOME_DIR/relay/winstart" 2>/dev/null | tr -d '\r')" 2>/dev/null | tr -d '\r')"
   elif [ -e "$REVIEWER_HOME_DIR/relay/started" ]; then
     gone=unknown
   fi
@@ -393,7 +392,9 @@ run_relayed_provider() {
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
   mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
-    printf 'cat /proc/$$/winpid > %q\n[ ! -e %q ] || exit 95\ntouch %q\n' "$relay/winpid" "$relay/cancel" "$relay/started"
+    # winstart pins the PID to this process so a reused PID is never killed.
+    printf 'w=$(cat /proc/$$/winpid)\npowershell.exe -NoProfile -Command "(Get-Process -Id $w).StartTime.ToUniversalTime().ToString(\x27o\x27)" > %q.tmp && mv %q.tmp %q && echo $w > %q\n' "$relay/winstart" "$relay/winstart" "$relay/winstart" "$relay/winpid"
+    printf '[ ! -e %q ] || exit 95\ntouch %q\n' "$relay/cancel" "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
   } > "$relay/run.sh"

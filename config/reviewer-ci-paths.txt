@@ -11,6 +11,7 @@ bin/ai-review*
 bin/ai-stepfun*
 bin/ai-deepseek*
 bin/windows-private-file.ps1
+bin/windows-kill-process-tree.ps1
 config/ci-suite-manifest.json
 config/ci-suites/**
 tools/ci-suites/*
