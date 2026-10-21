@@ -337,8 +337,8 @@ muse_code_reported_version(){ # only a hash-verified binary may run; an unverifi
   printf "%s" "${line:-unreadable}"
 }
 muse_code_pin_refusal(){ # one clear sentence naming found vs supported
-  printf 'unsupported Muse Code version: reported [%s]; supported pin is %s (config/muse-code/version)' \
-    "$(muse_code_reported_version)" "$VERSION"
+  printf 'unsupported Muse Code version: reported [%s]; supported pin is %s (%s/version)' \
+    "$(muse_code_reported_version)" "$VERSION" "${MUSE_PIN#"$ROOT/"}"
 }
 muse_code_pinned(){
   local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1

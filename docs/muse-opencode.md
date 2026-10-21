@@ -156,3 +156,4 @@ The bounded denied-read recovery extension is designed in
 (issue #674; recurrence parent #1783). Its multi-denial acceptance requires independent design review before implementation.
 
 Release provenance and live Linux stage result: [October 16 Muse Code pin verification](verification/muse-code-repin-20261016.md).
+Windows 1.4.11 re-pin provenance: [October 21 Muse Code pin verification](verification/muse-code-repin-20261021.md).
