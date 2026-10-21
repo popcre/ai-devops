@@ -41,6 +41,7 @@ blocks "a loop after a here-document" $'cat > x <<EOF\ntext\nEOF\nwhile :; do gh
 blocks "a loop handed to bash -c (#1901)" "bash -c 'for i in 1 2 3; do sleep 5; gh pr view 1 >/dev/null; done'"
 blocks "a loop handed to sh -c (#1901)" "sh -c 'while :; do gh pr checks 1; done'"
 blocks "a loop handed to eval (#1901)" 'eval "until gh pr checks 1; do sleep 5; done"'
+allows "a commit message that quotes an eval loop" "git commit -m 'docs: why eval \"sleep 5; gh pr view 1\" is blocked'"
 allows "a quoted note beside an unrelated bash -c" "bash -c 'ls' && git commit -m 'nothing to see'"
 allows "sleep alone" 'sleep 5'
 allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'

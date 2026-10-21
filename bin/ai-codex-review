@@ -150,7 +150,9 @@ cleanup(){
       && [ "$REVIEWER_HOME_DIR/auth.json" -nt "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then
       cp -p "$REVIEWER_HOME_DIR/auth.json" "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" \
         && chmod 600 "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" \
-        && mv -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" "${CODEX_HOME:-$HOME/.codex}/auth.json"
+        && mv -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" "${CODEX_HOME:-$HOME/.codex}/auth.json" \
+        || { rm -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$"
+             printf 'ai-codex-review: warning: could not keep the refreshed Codex token; run codex login if the next call is refused.\n' >&2; }
     fi
     rm -rf "$REVIEWER_HOME_DIR"
   fi

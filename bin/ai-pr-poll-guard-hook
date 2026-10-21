@@ -30,9 +30,11 @@ joined="$(printf '%s' "$cmd" | tr '\n' ' ')"
 cmd="$(printf '%s' "$joined" | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 # A quoted span handed to a child shell or eval is code, not text (#1901):
 # judge it too, with only the quote characters removed.
-if printf '%s' "$joined" | grep -Eq '(^|[^[:alnum:]_])((ba|z|da|k)?sh[[:space:]]+-[[:alpha:]]*c|eval)([[:space:]]|$)'; then
-  cmd="$cmd ; $(printf '%s' "$joined" | tr -d "\"'")"
-fi
+wrapped="$(printf '%s' "$joined" | grep -oE "(^|[^[:alnum:]_])((ba|z|da|k)?sh[[:space:]]+-[[:alpha:]]*c|eval)[[:space:]]+('[^']*'|\"[^\"]*\")" \
+  | sed -E "s/^.*(-[[:alpha:]]*c|eval)[[:space:]]+//; s/^['\"]//; s/['\"]\$//" || true)"
+# Only when the wrapper itself is code (outside every quoted span).
+printf '%s' "$cmd" | grep -Eq '(^|[^[:alnum:]_])((ba|z|da|k)?sh[[:space:]]+-[[:alpha:]]*c|eval)([[:space:]]|$)' || wrapped=""
+[ -z "$wrapped" ] || cmd="$cmd ; $(printf '%s' "$wrapped" | tr '\n' ' ')"
 
 reason=''
 if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then
