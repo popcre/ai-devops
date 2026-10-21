@@ -143,6 +143,14 @@ rulings, verbatim: `docs/owner-rulings.md`.
   2026-10-15); no other repository waits for a review. There, pick an
   in-rotation reviewer of a different engine via `ai-review`; first read
   `docs/reviewer-rotation-rules.md`.
+- **Observation week** (while the window file is live, #1948): send reviews
+  with `--detach` and read them with `ai-review outcome`. Never retry a
+  reviewer that failed or was reported skipped this session. When
+  `ai-task-gates check --before ship` prints `MERGE-UNREVIEWED`, merge on green
+  CI, add label `unreviewed-week`, and continue. Shared-db, production,
+  infrastructure and deployment still wait for an exact-head APPROVE. No
+  reviewer-repair PRs or toolkit installs; log failures with
+  `ai-reviewer-issue`. Allowed operations: `plan_reviewer-observation-week.md` §11.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in
   their approved private repository.
