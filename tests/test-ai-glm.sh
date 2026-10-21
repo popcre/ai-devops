@@ -872,17 +872,18 @@ check "ai-glm never echoes a key"           "! grep -nE 'echo .*(ZHIPU_API_KEY|Z
 check "launcher unsets ZAI_API_KEY"         "grep -q 'unset ZAI_API_KEY' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "launcher guards empty key"           "grep -q 'resolved EMPTY' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "launcher has re-exec guard"          "grep -q 'AI_GLM_LAUNCH_REEXEC' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
-# #1881: the GLM server never loads the owner's ~/.claude/CLAUDE.md or the
-# ~/.claude and ~/.agents skill lists; every launcher turns both off before serve.
-glm_launchers_drop_owner_rules() {
+# #1901: the shared GLM server also hosts implementation and ordinary
+# sessions, so it keeps the owner rules and skills; only the formal review
+# profile turns them off.
+glm_isolation_is_review_only() {
   local f
   for f in "$REPO_ROOT/bin/setup-opencode-glm.sh" "$REPO_ROOT/bin/setup-opencode-glm.ps1"; do
-    awk '/^export OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1\r?$/{seen=1} /^exec .* serve --hostname 127.0.0.1/{ok=seen} END{exit !ok}' "$f" || return 1
+    ! grep -q '^export OPENCODE_DISABLE_CLAUDE_CODE=1' "$f" || return 1
   done
   grep -q '"OPENCODE_DISABLE_CLAUDE_CODE": "true"' "$REPO_ROOT/tools/glm_formal_profile.py" \
     && grep -q '"OPENCODE_DISABLE_EXTERNAL_SKILLS": "true"' "$REPO_ROOT/tools/glm_formal_profile.py"
 }
-check "launchers keep owner instructions and user skills out of GLM (#1881)" glm_launchers_drop_owner_rules
+check "only the formal GLM review profile drops owner rules (#1901)" glm_isolation_is_review_only
 check "mcp.env.example keeps ZAI_API_KEY"   "grep -q '^ZAI_API_KEY=op://' '$REPO_ROOT/config/mcp.env.example'"
 check "dead ZAI_ANTHROPIC_BASE_URL gone"    "! grep -q '^ZAI_ANTHROPIC_BASE_URL=' '$REPO_ROOT/config/mcp.env.example'"
 check "dead ZAI_GLM_MODEL gone"             "! grep -q '^ZAI_GLM_MODEL=' '$REPO_ROOT/config/mcp.env.example'"

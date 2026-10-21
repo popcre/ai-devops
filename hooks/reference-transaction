@@ -64,7 +64,13 @@ here_main="$primary"
 # a new worktree locks only worktrees/<name>/HEAD.lock.
 new_worktree_head() {
   [ ! -e "$git_dir/HEAD.lock" ] || return 1
-  for l in "$git_dir"/worktrees/*/HEAD.lock; do [ -e "$l" ] && return 0; done
+  # Only a worktree still being created counts: it has no HEAD yet and its
+  # lock is fresh, so a stale lock from an interrupted add cannot reopen
+  # primary HEAD moves (#1901).
+  for l in "$git_dir"/worktrees/*/HEAD.lock; do
+    [ -e "$l" ] && [ ! -e "${l%.lock}" ] || continue
+    [ -n "$(find "$l" -prune -mmin -1 2>/dev/null)" ] && return 0
+  done
   return 1
 }
 refused=""; to=""

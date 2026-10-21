@@ -615,6 +615,10 @@ GUARD_HEAD="$(git -C "$GUARD/c" rev-parse HEAD)"
 if git -C "$GUARD/c" worktree add -q --detach "$GUARD/wt2" "$GUARD_OLD" 2>/dev/null &&
    [ "$(git -C "$GUARD/wt2" rev-parse HEAD)" = "$GUARD_OLD" ] &&
    ! git -C "$GUARD/c" checkout -q --detach "$GUARD_OLD" 2>/dev/null &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_HEAD" ] &&
+   mkdir -p "$GUARD/c/.git/worktrees/stale" && : > "$GUARD/c/.git/worktrees/stale/HEAD.lock" &&
+   touch -d '10 minutes ago' "$GUARD/c/.git/worktrees/stale/HEAD.lock" &&
+   ! git -C "$GUARD/c" checkout -q --detach "$GUARD_OLD" 2>/dev/null &&
    [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_HEAD" ]; then
   ok "the installed main guard allows a new linked worktree from the primary"
 else

@@ -26,7 +26,12 @@ cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
   }
   { print }')"
 # Loops are often written over several lines; judge the command as one line.
-cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
+# A quoted script handed to a child shell or eval IS a command (#1901): unwrap
+# `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
+cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z)?sh +(-[A-Za-z]+ +)*-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
+  -e 's/(^|[^A-Za-z0-9_])((ba|da|z)?sh +(-[A-Za-z]+ +)*-[A-Za-z]*c|eval) +"([^"]*)"/\1 \5 /g' \
+  | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
 reason=''
 if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then

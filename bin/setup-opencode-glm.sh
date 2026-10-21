@@ -186,8 +186,9 @@ OPENCODE_SERVER_PASSWORD="\$(<"\$OC_HOME/server-password")"
 export OPENCODE_SERVER_PASSWORD
 [ -n "\$OPENCODE_SERVER_PASSWORD" ] || { echo "FATAL: empty server password." >&2; exit 1; }
 
-# GLM reviews never see the owner's ~/.claude/CLAUDE.md or user skill lists (#1881).
-export OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1
+# No reviewer-only isolation on this shared server: it also hosts GLM
+# implementation and ordinary sessions, which need the owner rules and skills
+# (#1901). Formal GLM reviews run on the separate formal profile, which keeps it.
 
 exec "$BIN_DIR/opencode-ai-devops" serve --hostname 127.0.0.1 --port "\${AI_GLM_PORT:-$PORT}"
 EOF
