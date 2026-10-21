@@ -1154,9 +1154,12 @@ failed_turn_path(){
 failed_turn_source_check(){
   local source_meta="$1" name="$2" root="$3" rid="$4" event stem sid head packet review_dir expected actual item
   [ "$ENGINE" = opencode ] || return 1
-  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" --arg root "$root" \
+  # A historical runtime_version is valid evidence of a completed process under
+  # that pin (#1876 follow-up). Require a recorded version, not today's pin;
+  # every later identity, hash and packet check below still runs.
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg root "$root" \
     '.name==$name and .caller==$caller and .repository_id==$rid and .repository_root==$root and
-     .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and .status=="provider_outcome_uncertain" and
+     .model==$model and .retained_turn.model==$model and (.retained_turn.runtime_version|type=="string" and length>0) and .status=="provider_outcome_uncertain" and
      (.retained_turn.process_exit==0) and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and
      (.head|type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$")) and
      (.packet_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.review_dir|type=="string" and length>0)' \

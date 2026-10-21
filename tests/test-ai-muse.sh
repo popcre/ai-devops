@@ -451,17 +451,29 @@ muse_failed_turn_cases(){
   name=failedturn-binding
   (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-binding-new.log" 2>&1 || :
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; cp "$m" "$TMP/failedturn-binding-original.json"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"; calls_before="$(wc -l < "$calls")"
-  for field in model runtime_version; do
-    jq --arg field "$field" '.retained_turn[$field]="mismatched"' "$TMP/failedturn-binding-original.json" > "$m"
-    meta_before="$(sha256sum "$m")"
-    check "failed-turn refuses mismatched retained $field without mutation or provider call" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-$field.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-$field.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
-  done
+  jq '.retained_turn.model="mismatched"' "$TMP/failedturn-binding-original.json" > "$m"
+  meta_before="$(sha256sum "$m")"
+  check 'failed-turn refuses mismatched retained model without mutation or provider call' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-model.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-model.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
   jq 'del(.retained_turn.model)' "$TMP/failedturn-binding-original.json" > "$m"; meta_before="$(sha256sum "$m")"
   check 'failed-turn refuses missing retained model without mutation or provider call' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-missing-model.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-missing-model.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  jq 'del(.retained_turn.runtime_version)' "$TMP/failedturn-binding-original.json" > "$m"; meta_before="$(sha256sum "$m")"
+  check 'failed-turn refuses missing retained runtime_version without mutation or provider call' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-missing-runtime.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-missing-runtime.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  jq '.retained_turn.runtime_version=""' "$TMP/failedturn-binding-original.json" > "$m"; meta_before="$(sha256sum "$m")"
+  check 'failed-turn refuses empty retained runtime_version without mutation or provider call' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" 2> '$TMP/failedturn-binding-empty-runtime.log' && grep -q 'remains fenced' '$TMP/failedturn-binding-empty-runtime.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  jq '.retained_turn.runtime_version="mismatched"' "$TMP/failedturn-binding-original.json" > "$m"; meta_before="$(sha256sum "$m")"
+  check 'failed-turn accepts a recorded historical runtime_version without mutation or provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" > '$TMP/failedturn-binding-historical-runtime.log' 2>&1 && grep -q 'QUALIFIED NON-AUTHORIZING' '$TMP/failedturn-binding-historical-runtime.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
   cp "$TMP/failedturn-binding-original.json" "$m"; meta_before="$(sha256sum "$m")"; events_before="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"
   if (cd "$REPO" && eval "$ENV AI_MUSE_ENGINE=muse-code '$SCRIPT' finalize-failed-turn $name --dry-run") > "$TMP/failedturn-binding-engine.log" 2>&1; then engine_rc=0; else engine_rc=$?; fi
   events_after="$(jq -c --arg id "$event" 'select(.run_id==$id)' "$event_file")"
   check 'failed-turn refuses the other engine without mutation or provider call' "test '$engine_rc' -ne 0 && grep -q 'remains fenced' '$TMP/failedturn-binding-engine.log' && test \"\$(sha256sum '$m')\" = '$meta_before' && test \"\$(wc -l < '$calls')\" -eq '$calls_before' && test '$events_after' = '$events_before'"
+  name=failedturn-pindrift
+  (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=permission-denied MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-pindrift-new.log" 2>&1 || :
+  m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"; event="$(jq -r '.retained_turn.original_invocation_id' "$m")"; archive="${m%.json}.$event.failed-turn.json"
+  jq '.retained_turn.runtime_version="0.0.0-legacy-pin"' "$m" > "$m.pindrift" && chmod 600 "$m.pindrift" && mv -f "$m.pindrift" "$m"
+  calls_before="$(wc -l < "$calls")"
+  check 'failed-turn pin-drift dry-run qualifies a historical runtime without provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' finalize-failed-turn $name --dry-run\" > '$TMP/failedturn-pindrift-dry.log' 2>&1 && grep -q 'QUALIFIED NON-AUTHORIZING' '$TMP/failedturn-pindrift-dry.log' && jq -e '.retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$m' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
+  if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' finalize-failed-turn $name") > "$TMP/failedturn-pindrift-finalize.log" 2>&1; then bad 'failed-turn pin-drift finalizes its historical retained turn'; return; fi
+  check 'failed-turn pin-drift records a non-authorizing receipt on the historical pin' "jq -e '.status==\"failed_turn_finalized\" and .retained_turn.runtime_version==\"0.0.0-legacy-pin\" and .failed_turn_receipts[-1].authorization==\"non-authorizing-failed-turn\" and .last_report==null' '$m' && test -f '$archive' && jq -e '.retained_turn.runtime_version==\"0.0.0-legacy-pin\"' '$archive' && test \"\$(wc -l < '$calls')\" -eq '$calls_before'"
   name=failedturn-generic
   (cd "$REPO" && eval "$ENV MUSE_STUB_MODE=generic-tool-calls '$SCRIPT' new $name --prompt first") > "$TMP/failedturn-generic-new.log" 2>&1 || :
   m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
