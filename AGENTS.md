@@ -20,11 +20,7 @@ app, service, database, container stack, or product deployment pipeline.
 
 ## Multi-model AI note
 
-There is no universal ignore-file standard across AI coding tools.
-
-`.claudeignore` works for Claude Code.
-
-When using any other AI tool, paste this file as your first message and follow the instructions in the "What to ignore" section.
+`.claudeignore` covers Claude Code; other tools follow "What to ignore" below.
 
 ## Documentation map: what to read for each task
 
@@ -41,7 +37,7 @@ Then load additional docs only when relevant:
 | Add or change configuration, env vars, feature flags, secrets, or runtime settings | `AGENTS.md`, [`docs/configuration.md`](docs/configuration.md), [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md) | Unrelated architecture docs |
 | Change local setup, dev scripts, test/lint/debug workflow, or tooling | `AGENTS.md`, [`docs/development.md`](docs/development.md), relevant package/config files | `docs/deployment.md` unless CI/CD changes |
 | Change install, update, uninstall, restore, deployment, CI/CD, runners, or runtime environment | `AGENTS.md`, [`docs/deployment.md`](docs/deployment.md), [`docs/configuration.md`](docs/configuration.md) | Local-only development docs unless needed |
-| Investigate bugs or incidents | `AGENTS.md`, matching row below or in [`docs/task-router.md`](docs/task-router.md), [`docs/critical-incidents.md`](docs/critical-incidents.md), relevant OPEN files in `HANDOFF.d/` | Unrelated folder-level READMEs |
+| Investigate bugs or incidents | `AGENTS.md`, matching row in [`docs/task-router.md`](docs/task-router.md), [`docs/critical-incidents.md`](docs/critical-incidents.md), relevant OPEN files in `HANDOFF.d/` | Unrelated folder-level READMEs |
 | Continue unfinished work | `AGENTS.md`, [`HANDOFF.md`](HANDOFF.md) (pointer) → OPEN files in [`HANDOFF.d/`](HANDOFF.d/) newest first, then docs named inside them | Docs unrelated to the handoff scope |
 | Work in a subfolder with its own README | `AGENTS.md`, that folder-level `README.md`, and only broader docs referenced there | Other folder-level READMEs |
 | Claude Code session | [`CLAUDE.md`](CLAUDE.md), then `AGENTS.md` | Other docs unless the task requires them |
@@ -49,101 +45,13 @@ Then load additional docs only when relevant:
 | Standing behavior, triggers, false completion, or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Bulk plan files |
 | Tool, workflow, prompt, install, model, secret, or machine setup | Matching row in [`docs/task-router.md`](docs/task-router.md) | Unrelated plans |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | Matching row in [`docs/task-router.md`](docs/task-router.md) | Full plan bodies until STATUS says so |
-| Continue unfinished work from a handoff | OPEN `HANDOFF.d/` files, newest relevant first | Unrelated handoffs |
+| Repository layout, identifiers, credentials, deployment facts | [`docs/repository-reference.md`](docs/repository-reference.md) | Other sections of it |
+| Intentional quirks | [`docs/design-decisions.md`](docs/design-decisions.md) | Unrelated decisions |
+| Active plans and pending work | [`docs/pending-work.md`](docs/pending-work.md), then that plan's STATUS | Completed plans |
 
 Specialized and low-frequency tasks (BlockerWatch, WarpBuild, Jev, individual
 provider repairs, plan STATUS reading) live in
-[`docs/task-router.md`](docs/task-router.md) and the **Specialized task router**
-section below. Load only the matching row.
-
-## Repository structure
-
-| Path | Role | Kind |
-|---|---|---|
-| `bin/` | Executable CLI tools (symlinked into `/usr/local/bin` by `install.sh`) | Project-owned code |
-| `install.sh`, `update.sh`, `uninstall.sh` | Install / update / remove the toolkit on a machine | Project-owned deployment |
-| `config/` | `*.env.example` templates and JSON registries copied or consulted at runtime | Project-owned config |
-| `templates/` | Prompt templates, system globals, handoff/plan standards | Project-owned templates |
-| `docs/` | Architecture, development, configuration, deployment, incidents, specialty guides | Documentation |
-| `skills/` | Shared and per-client skill scaffolding (`skills/shared`, `skills/claude`, `skills/codex`, …) | Project-owned skills |
-| `tools/` | Supporting libraries and specialized helpers | Project-owned code |
-| `tests/` | Focused shell/Python tests for tools and docs gates | Project-owned tests |
-| `mcp/`, `memory/` | MCP wrapper scaffolding and memory helpers | Project-owned code |
-| `hooks/` | Client hook scripts | Project-owned code |
-| `scripts/` | Supporting scripts | Project-owned code |
-| `HANDOFF.d/` | One write-once handoff file per unfinished session | Session workstreams |
-| `plan_*.md`, `fix_*.md`, `bugs.md` | Active plans, fix records, and current defect state | Living working docs |
-| `transcripts/` | Private submodule (`u2giants/ai-devops-transcripts`) | Private — never load casually |
-| `.github/workflows/` | CI: verify, docs reachability, watchdogs, runner qualification | CI |
-| `/etc/ai-devops/` (outside repo) | Real machine runtime config (`*.env`) | Runtime — never committed |
-
-There is no generated application code and no vendor tree in this repository.
-Build artifacts and caches (if any appear) belong under ignored paths only.
-
-## Prime Directive: custom-code boundary
-
-Our custom code lives here:
-
-- `bin/`
-- `install.sh`, `update.sh`, `uninstall.sh`
-- `config/`
-- `templates/`
-- `docs/`
-- `skills/`
-- `tools/`
-- `mcp/`
-- `memory/`
-- `hooks/`
-- `scripts/`
-- `tests/`
-- `.github/workflows/`
-
-Everything else requires justification before touching. Never scatter toolkit
-logic into ignore-irrelevant roots, private submodules, or another repository.
-
-## Core modification inventory
-
-| File | Change made | Why it was necessary | Risk during upgrades |
-|---|---|---|---|
-| _(none)_ | No files outside project-owned areas are modified by this toolkit in normal operation | The repository is the project | Installed machines keep runtime config under `/etc/ai-devops/`; review install/update scripts before assuming they overwrite it |
-
-## Task-to-file navigation: what to edit for common changes
-
-| Task | Files to touch | Files not to touch |
-|---|---|---|
-| Add or change a CLI tool | `bin/ai-*`, matching tests in `tests/`, docs row if behavior is new | Reviewer wrappers unless the task is reviewer-safety class |
-| Change install/update/uninstall behavior | `install.sh` / `update.sh` / `uninstall.sh`, [`docs/deployment.md`](docs/deployment.md), tests | Live `/etc/ai-devops/*.env` on machines |
-| Add or change a skill | `skills/shared/` first; client trees only for true client-specific behavior | Duplicating the same skill in multiple client trees |
-| Change model command flags | `config/models.env.example`, [`docs/configuration.md`](docs/configuration.md), [`docs/model-setup.md`](docs/model-setup.md) | Hard-coding secrets into examples |
-| Change machine or secret onboarding | `docs/onboarding-secrets.md`, setup scripts, `config/*.env.example` | Committing real `.env` or tokens |
-| Change CI or runners | `.github/workflows/`, runner docs, related `config/*.json` | Weakening required checks |
-| Change task gates or review safety | `bin/ai-task-gates`, `config/task-gates.json`, matching tests | Bypassing a protected class |
-| Write or retire a plan | Root `plan_*.md` + STATUS, matching issue | Editing another session's `HANDOFF.d/` file |
-| Documentation-only cleanup | `README.md`, `AGENTS.md`, `docs/`, folder READMEs | Source except to verify accuracy |
-
-## Data model and external identifiers
-
-| Entity / system | Identifier | Where defined | Notes |
-|---|---|---|---|
-| Public toolkit repo | `popcre/ai-devops` | GitHub | Source of truth for code and public docs |
-| Shared database repo | `popcre/shared-db` | GitHub | Durable backend/structure truth |
-| Private machine topology | `u2giants/ai-devops-private-config` | Private repo | Restored by `ai-private-config`; never in this repo |
-| Private transcripts | `u2giants/ai-devops-transcripts` (`transcripts/` submodule) | Private repo | Never commit raw `.jsonl` here |
-| Secrets vault | `vibe_coding` | 1Password | Only via `op` / `secrets-to-1password` |
-| Runtime config root | `/etc/ai-devops/` | Machine | `models.env`, `server.env`, related runtime files |
-| Machine classes | `edge-alien`, `edge-runn-envy`, `edge-runn-xps` | [`docs/deployment.md`](docs/deployment.md) | Networking-only — never install the toolkit |
-| Protected main branch | `main` + merge queue | GitHub | Never push directly; PR + queue |
-| Work claims / plan identity | GitHub issues + `plan_*.md` STATUS | This repo | One issue per application need |
-
-Do not casually rename, regenerate, or replace documented identifiers. Concrete
-machine addresses, SSH host identities, and provider project IDs live in the
-private config repository, not here.
-
-## Container and service inventory
-
-None. This repository is a scripts-and-docs toolkit. It does not ship
-containers, compose stacks, or long-running services. GitHub Actions workflows
-are CI/watchdogs only (see [`.github/workflows/`](.github/workflows/)).
+[`docs/task-router.md`](docs/task-router.md). Load only the matching row.
 
 ## What to ignore
 
@@ -159,183 +67,9 @@ aligned with this list:
 - `node_modules/`, `dist/`, `.cache/`, `coverage/`
 - Machine-local config under `/etc/ai-devops/` (never in the repo anyway)
 
-## Intentional quirks and non-obvious decisions
-
-### Networking-only machine classes
-
-Looks like:
-Any hostname can take the full toolkit install.
-
-Actually:
-`edge-alien`, `edge-runn-envy`, and `edge-runn-xps` receive networking only
-(SSH key, SSH config, hostnames, Tailscale).
-
-Why:
-They are not development machines; installing the toolkit on them has caused
-repeated real damage.
-
-Do not change because:
-A new session that "helpfully" installs there recreates the incident. Check the
-hostname first. Full rule: [`docs/deployment.md`](docs/deployment.md) § Machine classes.
-
-### Canonical checkout is landing-only
-
-Looks like:
-`C:\repos\ai-devops` or `/worksp/ai-devops` is a normal editable clone.
-
-Actually:
-Write-capable work uses a fresh worktree at current upstream. The canonical
-checkout is for landing, installation, and recovery only.
-
-Why:
-Concurrent AI sessions destroy each other's uncommitted work when they share
-one dirty tree (see [`docs/critical-incidents.md`](docs/critical-incidents.md)).
-
-Do not change because:
-Shared-editing in the landing checkout is how sessions lose work with no merge
-to recover it.
-
-### Installation is the deployment
-
-Looks like:
-This repo needs a product deploy pipeline.
-
-Actually:
-`install.sh` / `update.sh` / candidate-worktree `update.sh` with reviewer
-APPROVE **is** the deployment path. There is no app runtime to roll out.
-
-Why:
-The deliverable is a working multi-model toolkit on a machine.
-
-Do not change because:
-Inventing a product deployment path would describe a system that does not exist.
-
-### `HANDOFF.md` is a static pointer
-
-Looks like:
-One shared handoff document that each session rewrites at closeout.
-
-Actually:
-Root `HANDOFF.md` never changes. Each session writes exactly one write-once
-file under `HANDOFF.d/` and deletes it when that workstream is proven done.
-
-Why:
-Concurrent sessions rewriting one file silently drop work.
-
-Do not change because:
-A shared mutable handoff or `merge=union` reintroduces silent corruption. See
-[`templates/system/handoff-standard.md`](templates/system/handoff-standard.md).
-
-### Config lives outside the repo
-
-Looks like:
-Runtime settings belong in committed config.
-
-Actually:
-`config/*.env.example` is committed; real `models.env` / `server.env` live under
-`/etc/ai-devops/` on each machine and are never committed.
-
-Why:
-This repo is public; real env files and secrets must stay out of it.
-
-Do not change because:
-Committing a real `.env` is a credential leak.
-
-More quirks (read-only reviews, MCP secret launcher caching, install-skills
-never pruning, dual Muse engines, and others):
-[`docs/design-decisions.md`](docs/design-decisions.md).
-
-## Credentials and environment
-
-Names only — never secret values in this repository.
-
-| Variable / store | Purpose | Stored where | Required in dev | Required in prod |
-|---|---|---|---|---|
-| `AI_DEVOPS_HOME` | Toolkit checkout root | `/etc/ai-devops/models.env`, `server.env` | yes | yes |
-| `AI_DEVOPS_ETC` | Runtime config directory | `server.env` | yes | yes |
-| `AI_DEVOPS_LOG_DIR` | Log directory | `server.env` | yes | yes |
-| `WORKSPACE_ROOT` | Application repos root (informational) | `server.env` | optional | optional |
-| `DEFAULT_MAIN_BRANCH` | Safety warnings (`main` / `master`) | `server.env` | yes | yes |
-| `OWNER_NAME` | Plain-English review summaries | `server.env` | yes | yes |
-| `CLAUDE_REVIEW_CMD` | Legacy Claude adapter command | `models.env` | optional | optional |
-| `CODEX_PLAN_CMD` | Codex planning stage | `models.env` | yes | yes |
-| `CODEX_IMPLEMENT_CMD` | Codex implementation stage | `models.env` | yes | yes |
-| `CODEX_TEST_CMD` | Codex testing stage | `models.env` | yes | yes |
-| `CODEX_CMD` | Codex second-opinion review | `models.env` | optional | optional |
-| 1Password vault `vibe_coding` | Secrets and service-account token | 1Password | setup once | setup once |
-| CLI login state | Provider auth (`~/.claude`, `~/.codex`, etc.) | Machine, not this repo | yes | yes |
-
-See [`docs/configuration.md`](docs/configuration.md),
-[`docs/onboarding-secrets.md`](docs/onboarding-secrets.md), and
-[`docs/config-inventory.md`](docs/config-inventory.md).
-
-## Deployment
-
-This repository's deployment is **installation**, not a product rollout.
-
-| Topic | Reality |
-|---|---|
-| Mechanism | `install.sh` (Ubuntu), `bin/bootstrap-windows-dev.ps1` (Windows), `update.sh` for upgrades |
-| Update path | Candidate worktree at the reviewed merged commit + `update.sh` with the assigned AI reviewer's exact-head APPROVE |
-| Rollback | Previous checkout / recorded tool pins in `config/tool-versions.json`; see [`docs/deployment.md`](docs/deployment.md) |
-| Runtime env | `/etc/ai-devops/` on each machine |
-| CI workflows | `.github/workflows/` (`verify.yml`, docs reachability, watchdogs, runner qualification) |
-| SSH | Used for machine setup and ops; not a routine "deploy" channel for this repo |
-| Protected branch | `main` + merge queue; never push directly |
-
-Full procedure and machine classes: [`docs/deployment.md`](docs/deployment.md).
-Restore from zero: [`docs/restore-from-zero.md`](docs/restore-from-zero.md).
-
 ## Critical incidents
 
-Maintained in [`docs/critical-incidents.md`](docs/critical-incidents.md). High
-level:
-
-- Silent non-functional Codex on Windows (2026-07-16)
-- 1Password service-account lockout (2026-07-23)
-- `git reset --hard` destroying another session's work (2026-08-18)
-- Force-push dropping commits from `main` (2026-08-19)
-- MCP config written where the client never reads it (2026-08-20)
-- Local test series cancelling live CI on the same machine (2026-08-28)
-- Disk exhaustion from review artifacts (2026-09-23 and later)
-- Installer parity test wiping real skills (2026-09-25)
-- OOM from leaked helpers / huge assert diffs (2026-09-28, 2026-10-11)
-
-Read the incident file before diagnosing "odd" tool behavior — it may be an
-intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
-
-## Pending work
-
-Ruleset trim and enforcement: read the [ruleset plan](plan_ruleset-trim-and-enforce.md) STATUS first ([#1881](https://github.com/popcre/ai-devops/issues/1881)); evidence is private and stays out of Git.
-
-Current reviewer recurrence repairs: read the [edge-dev3 repair plan](plan_reviewer-recurrence-repair.md) STATUS first; reuse existing owners and completed programmes. Current brief: [2026-10-18T1524Z-edge-dev3-claude-reviewer-recurrence-fleet.md](HANDOFF.d/2026-10-18T1524Z-edge-dev3-claude-reviewer-recurrence-fleet.md).
-
-Class-level reviewer stability (≥24h green): read the [reviewer stability plan](plan_reviewer-stability-24h.md) STATUS first ([#1822](https://github.com/popcre/ai-devops/issues/1822)); do not re-derive the sibling host programmes; no bulk raw-transcript third-party extract without a token budget.
-
-Review output contract rebuild (one validator, format repair turn, roster cut): read the [review output contract plan](plan_review-output-contract.md) STATUS first ([#1783](https://github.com/popcre/ai-devops/issues/1783)).
-Release live review check (real review on Ubuntu + Windows 4837 before a shared-review-code release installs): read the [release live check plan](plan_release-live-review-check.md) STATUS first ([#1783](https://github.com/popcre/ai-devops/issues/1783)).
-
-Edge-dev reviewer repair without AI-reviewer gates: read the [edge-dev no-review plan](plan_edge-dev-reviewer-repair-no-review.md) STATUS first (owner bootstrap: implementation must not need reviewers).
-
-For GLM access to its own truncated output, read
-[`plan_glm_own_output_recovery.md`](plan_glm_own_output_recovery.md) STATUS first
-([#1791](https://github.com/popcre/ai-devops/issues/1791)); preserve the shared
-service and repository instructions while qualifying the isolated formal profile.
-
-Live sources (always prefer these over this table when they disagree):
-
-| Status | Item | Owner / next action |
-|---|---|---|
-| live | Active plans and STATUS | Root `plan_*.md` — read STATUS first |
-| live | Open session workstreams | `HANDOFF.d/` OPEN files, newest first |
-| live | Known defects | [`bugs.md`](bugs.md) |
-| live | Specialized task queue | [`docs/task-router.md`](docs/task-router.md) matching rows |
-
-Do not treat completed `plan_*.md` files as a backlog; they remain decision
-records. When adding rows here, mark them `done` or remove them as soon as they
-stale.
-
-Active scoped release repair: [exact sandbox source-release plan](plan_exact-designflow-sandbox-source-releases.md) — owner codex/exact-sandbox-release; retire pointer at issue1796 closure; read STATUS first; design approval precedes implementation.
+Read [`docs/critical-incidents.md`](docs/critical-incidents.md) before diagnosing "odd" tool behavior — it may be an intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 ## Repository contract
 
@@ -434,42 +168,7 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
-High-frequency tasks are in the Documentation map. Use this table only after
-that map routes you here.
-
-| Task | Read first | Boundary |
-|---|---|---|
-| GitHub API limits, request volume, quota coverage or duplicate polling | [GitHub request reduction plan](plan_github-request-reduction.md) STATUS, [issue #658](https://github.com/popcre/ai-devops/issues/658); for remaining unneeded traffic (snapshot reuse, waiter sharing, direct `gh`) use [cut unneeded GitHub traffic plan](plan_cut-unneeded-github-traffic.md) STATUS | Measure and reduce sources; preserve workflow and separate quota buckets; continue authorized phases when actual gates allow |
-| Tools or skills loading per session, per-repository scoping, MCP membership drift | [Tool and skill scoping plan](plan_tool-and-skill-scoping.md) STATUS, [issue #707](https://github.com/popcre/ai-devops/issues/707) | Measure before/after; never remove a constrained server; protected skills stay global; passthrough gateways only |
-| Leftover AI temporary files, full `/tmp`, memory filled by temp | [Session temp cleanup plan](plan_session-temp-cleanup.md) STATUS | Creator deletes its own temp root; sweeper is backup only; never delete another session's files |
-| GitHub Actions minutes, hosted-runner cost, stale or duplicate CI runs | [Actions minutes reduction plan](plan_actions-minutes-reduction.md) STATUS, [issue #1464](https://github.com/popcre/ai-devops/issues/1464) | Never weaken a required check; never cancel merge_group; edge-dev3 first with hosted fallback |
-| Context size or routing ownership | [`docs/context-spec.md`](docs/context-spec.md), relevant STATUS in [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) | One owner per rule; measure before and after |
-| Azure CLI mailbox access | [`docs/onboarding-secrets.md#azure-cli-mailbox-access`](docs/onboarding-secrets.md#azure-cli-mailbox-access) | Use the isolated profile and private machine allowlist; Exchange continues to enforce mailbox scope |
-| BlockerWatch waking (registration is OUT), dependency links, scheduler health, or repair | [`plan_blockerwatch-reliability-repair.md`](plan_blockerwatch-reliability-repair.md) STATUS, then the BlockerWatch row in [`docs/task-router.md`](docs/task-router.md) | Do not trust exit 0 until the plan's reconciliation and live-health gates are complete |
-| StepFun OpenCode compaction or Windows runner list | [StepFun OpenCode profile](config/opencode-stepfun/README.md) | Keep explicit compaction settings until measured evidence supports a change; preserve hashed runner gates |
-| Repeated tests/reviews, interrupted runs, or workflow delivery efficiency | [`plan_workflow-efficiency.md`](plan_workflow-efficiency.md) STATUS, issue #650 | Continue authorized outcomes when actual gates allow; reuse existing repairs and retain source-bound safety |
-| Evidence-only commit churn, unrelated-main review invalidation, or Jujutsu pilot | [`plan_agent_evidence_and_jujutsu_pilot.md`](plan_agent_evidence_and_jujutsu_pilot.md) STATUS, issue #903 | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
-| Windows runner maintenance elevation over SSH | [Windows runner maintenance elevation plan](plan_windows-runner-maintenance-elevation.md) STATUS, [issue #262](https://github.com/popcre/ai-devops/issues/262) | Keep UAC and remote-token filtering; only the qualification refresh is allowlisted; installation/live proof remains a protected gate |
-| WarpBuild Azure BYOC Windows CI (canary or cost cut-over) | [`docs/warpbuild-azure-byoc.md`](docs/warpbuild-azure-byoc.md), [issue #961](https://github.com/popcre/ai-devops/issues/961) | Required CI stays Blacksmith until a reviewed cut-over; public-repo runner groups must allow public jobs |
-| Watchdog duty pool, local timed tasks, or adding a machine to alarms | [`docs/watchdog-duty-pool.md`](docs/watchdog-duty-pool.md), then [`plan_watchdog-local-timed-tasks.md`](plan_watchdog-local-timed-tasks.md) STATUS | Name is **watchdog duty pool** / `watch_hosts`; never Blacksmith for alarms; claim/lease single poster; live proof + failover drill |
-| ZCode for Windows client support (skills, MCP, hooks, wrapper) | [ZCode Windows support plan](plan_zcode-windows-support.md) STATUS, [issue #558](https://github.com/popcre/ai-devops/issues/558) | Follow the Claude/Codex per-client pattern; never edit vendor bytes under `C:\Program Files\ZCode`; NO ZCode reviewer ever (owner ruling 2026-09-17: GLM never reviews GLM-orchestrated work) |
-| MiMo / MiMoCode for Windows client support (skills, MCP, wrapper) | [MiMo Windows support plan](plan_mimo-windows-support.md) STATUS | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` only; MCP `command` is an array and timeout key is `timeout`; NO MiMo reviewer; no completion-check hook (no hook surface) |
-| Shared-db delivery delay or orchestrator throughput | [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md) STATUS (closed #401 decision record) | Preserve the proven request-to-live safeguards; route new defects to new issues rather than reopening the programme |
-| Multiple live proofs or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | Complete authorized proofs across child boundaries; preserve actual dependencies, ownership and safety gates |
-| Reviewer token waste, repeat reviews, paid-key fallbacks (not Grok) | [`plan_reviewer-spend-waste.md`](plan_reviewer-spend-waste.md) STATUS (all done 2026-10-07), parent [#1436](https://github.com/popcre/ai-devops/issues/1436) closed | Never cap turn budgets; no silent paid-key fallback; do not redo C1-C9 |
-| Muse native final packet missing original-source receipt / completed-unrecordable attempt | [`plan_muse_final_source_receipt.md`](plan_muse_final_source_receipt.md) STATUS and issue #1783 | Prospective design only; no old verdict import, failure/refund reclassification or foreign custody adoption |
-| Combined reviewer reliability and cache/session qualification | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md) STATUS | Reuse existing provider work; no completion without installed evidence |
-| TypeSafe Jev evaluation or advisory integration | [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md) STATUS, then [`plan_typesafe-jev-advisory-integrations.md`](plan_typesafe-jev-advisory-integrations.md) STATUS and [issue #643](https://github.com/popcre/ai-devops/issues/643); for measured token substitution read [`plan_typesafe-jev-spend-reduction.md`](plan_typesafe-jev-spend-reduction.md) STATUS | Public-data pilots first; Jev never opens a gate, mutates authoritative state, or replaces review; key via `op run` only |
-| Review-value / review-waste mining from AI transcripts (Jev labeling) | [the Jev review-waste mining plan](plan_jev-review-waste-mining.md) STATUS first — do not re-derive or re-plan | Evidence only; safety-gate reviews get their own bucket; no raw transcript text in the public repo; five-level `Score` value scale is locked |
-| Review-packet race (target moved forward), slow review evidence, or adversarial-case planning | [review-packet race and evidence speed plan](plan_review-packet-race-and-evidence-speed.md) STATUS | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict; never delete a guarded packet test — re-scope it |
-| Shared database or POP business rules | Matching shared-db or `pop-business-rules` skill | Reading is open; governed structure and private-data boundaries remain |
-| Repository or worktree cleanup | `cleanup-worktree`, relevant open handoff, [`docs/critical-incidents.md`](docs/critical-incidents.md) | Preserve every unique change before removal |
-| Find branches, worktrees, handoff files, or agent job records | [the housekeeping inventory guide](docs/housekeeping.md), `bin/ai-housekeeping`, [plan_repo-housekeeping-visibility.md](plan_repo-housekeeping-visibility.md) STATUS first, `skills/shared/cleanup-worktree/SKILL.md` | Report-only inventory; do not build a delete mode — see the plan's rejected approaches |
-| Write a handoff | `handoff-writer`, [`templates/system/handoff-standard.md`](templates/system/handoff-standard.md) | Root `HANDOFF.md` is a static pointer |
-| Write an implementation plan | `implementation-plan-writer`, [`templates/system/implementation-plan-standard.md`](templates/system/implementation-plan-standard.md) | Write for a session with no chat context |
-| Documentation-only cleanup | [`README.md`](README.md) and affected docs | Do not touch source code except to verify accuracy |
-| AI token waste, reply discipline, compression pilots | [`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md), `skills/shared/scaledown-compress/SKILL.md` | Measure billed tokens and cache hits; never send secrets or private transcripts through a compressor |
-| Markdown reachability gate or rollout | [`docs/doc-reachability.md`](docs/doc-reachability.md), `bin/ai-doc-reachability`, `.doc-reachability.json`, and its tests | Gate only PR-added or moved Markdown; do not make legacy orphans block unrelated work |
+Low-frequency and specialized tasks live in [`docs/task-router.md`](docs/task-router.md); load only the matching row.
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
 (`issue:`, `status:`, `owner:`).** A file without it cannot be retired by

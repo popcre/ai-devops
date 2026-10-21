@@ -16,7 +16,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 3.1 One source for the Codex/ZCode/MiMo globals | ✅ done | 2026-10-20 | `bin/ai-render-globals` + `templates/system/global-overrides/`; `tests/test-ai-render-globals.sh` 4/4 (re-render diff, override-lines-only, hand edit fails, CRLF same bytes) |
 | 3.2 Trim the Claude + Codex global rules to ~1,200 words | ✅ done | 2026-10-20 | `wc -w`: Claude 2,650→1,603, Codex 3,084→1,636 (stopped above target: the four-client coordinator block and test-pinned safety phrases stay); job-plan rule kept as 2 lines; removed-sentence table in the phase 3 PR body; `tests/test-client-globals-required-phrases.sh`, `tests/test-session-conduct-policy.sh`, `tests/test-shared-db-routing-rules.sh` |
 | 3.3 Move dated owner rulings to `docs/owner-rulings.md` | ✅ done | 2026-10-20 | `docs/owner-rulings.md` (2026-09-28 ×2, 2026-10-02, 2026-10-13, 2026-10-14); `tests/test-shared-db-routing-rules.sh` now pins the 2026-10-02 quote there and the pointer in both globals |
-| 4.1 AGENTS.md down to a router under 2,000 words | ⬜ open | — | — |
+| 4.1 AGENTS.md down to a router under 2,000 words | ✅ done | e7a6e411: `wc -w AGENTS.md` 1,973; `bin/ai-doc-reachability --base origin/main` PASS; tests/test-session-conduct-policy.sh, test-shared-db-routing-rules.sh, test-client-globals-required-phrases.sh pass | Claude 2026-10-21 |
 | 5.1 Minimal instruction profile for reviewer runs | ✅ done | 2026-10-20 | `tests/test-ai-codex-review.sh` reviewer_profile_* checks; live `codex debug prompt-input` with the reviewer home shows no owner rules and no plugin list |
 | 6.1 Live proof: re-run the transcript audit | ⬜ open | — | — |
 
