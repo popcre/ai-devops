@@ -2,7 +2,6 @@
   "kind": "bash",
   "linux_seconds": 1,
   "windows": [
-    "offline",
-    "reviewer-safety"
+    "offline"
   ]
 }
