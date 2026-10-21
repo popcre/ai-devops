@@ -102,7 +102,7 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
   in `popcre/shared-db`; load `shared-db-change` first. Structural work is
   claim-first: claim exact objects on the existing issue and start.
-- **Sign everything posted to GitHub** (format in details).
+- **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
 - **Reviews:** pick an in-rotation reviewer of a different engine via
   `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
 - **Route every successor from its own work,** never a predecessor's.
