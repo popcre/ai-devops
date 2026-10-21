@@ -44,9 +44,25 @@ from urllib.parse import quote
 
 REPO = "popcre/shared-db"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-OWNER_CHAT = re.compile(r"^(?:Codex|Claude) chat ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) on [A-Za-z0-9][A-Za-z0-9._-]{0,119}$", re.IGNORECASE)
-OWNER_AT_CHAT = re.compile(r"^(?:codex|claude)-chat-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@[A-Za-z0-9][A-Za-z0-9._-]{0,119}$", re.IGNORECASE)
+# MiMo Desktop sessions use ses_<token> identifiers, not UUIDs. Tokens are
+# opaque and case-sensitive; never case-fold them the way UUIDs are folded.
+MIMO_SESSION = re.compile(r"^ses_[A-Za-z0-9]{16,64}$")
+SESSION_TOKEN = r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|ses_[A-Za-z0-9]{16,64})"
+OWNER_CHAT = re.compile(rf"^(?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
+OWNER_AT_CHAT = re.compile(rf"^(?:codex|claude)-chat-([0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}})@[A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$", re.IGNORECASE)
+
+
+def normalize_session(value):
+    raw = value.strip()
+    lowered = raw.lower()
+    if UUID.fullmatch(lowered):
+        return lowered
+    if MIMO_SESSION.fullmatch(raw):
+        return raw
+    return None
+
+
 STAGES = {
     "preview": ("preview", "preview-recovery", "preview-rehearsal"),
     "merge": ("merge",),
@@ -90,28 +106,34 @@ def json_output(value):
 
 
 def resolve_session(explicit):
-    candidates = [value.strip().lower() for value in (
+    candidates = [normalize_session(value) for value in (
         explicit,
         os.environ.get("CODEX_THREAD_ID"),
         os.environ.get("CLAUDE_CODE_SESSION_ID"),
+        os.environ.get("MIMO_SESSION_ID"),
     ) if value is not None and value.strip()]
     if not candidates:
         raise CheckError("session identity is missing")
-    if any(not UUID.fullmatch(value) for value in candidates):
-        raise CheckError("session identity must be an exact UUID")
+    if any(value is None for value in candidates):
+        raise CheckError("session identity must be an exact Codex/Claude UUID or MiMo ses_ id")
     if len(set(candidates)) != 1:
         raise CheckError("session identity sources disagree")
     return candidates[0]
 
 
 def owner_session(owner, actual_session):
-    if UUID.fullmatch(owner.lower()):
-        return owner.lower()
+    raw_owner = owner.strip()
+    if UUID.fullmatch(raw_owner.lower()) or MIMO_SESSION.fullmatch(raw_owner):
+        return normalize_session(raw_owner)
     match = OWNER_CHAT.fullmatch(owner) or OWNER_AT_CHAT.fullmatch(owner) or OWNER_ADOPTION.fullmatch(owner)
     if match:
-        return match.group(1).lower()
-    if re.search(rf"(?<![A-Za-z0-9]){re.escape(actual_session)}(?![A-Za-z0-9])", owner, re.IGNORECASE):
-        raise CheckError("owner label contains this session UUID in an unsupported format")
+        return normalize_session(match.group(1))
+    if UUID.fullmatch(actual_session):
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(actual_session)}(?![A-Za-z0-9])", owner, re.IGNORECASE):
+            raise CheckError("owner label contains this session identity in an unsupported format")
+    elif MIMO_SESSION.fullmatch(actual_session):
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(actual_session)}(?![A-Za-z0-9_])", owner):
+            raise CheckError("owner label contains this session identity in an unsupported format")
     return None
 
 
@@ -251,7 +273,7 @@ def read_stage(stage, kinds):
 
 def main():
     parser = argparse.ArgumentParser(description="Fail if this session still owns shared-db work.")
-    parser.add_argument("--session-id", help="Exact current Codex or Claude session UUID.")
+    parser.add_argument("--session-id", help="Exact current Codex/Claude session UUID or MiMo ses_ session id.")
     args = parser.parse_args()
     try:
         session = resolve_session(args.session_id)

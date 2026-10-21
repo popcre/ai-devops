@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "bin/ai-shared-db-closeout-check"
 SESSION = "11111111-2222-4333-8444-555555555555"
 FOREIGN = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+MIMO_SESSION = "ses_ffe5ea423b44affe0LH2gvduI6"
+FOREIGN_MIMO = "ses_aaaaaaaaaaaaaaaaBBBBBBBBBB"
 
 
 def issue(number, owner, state="active", expires="2026-10-14T00:00:00Z", suffix=""):
@@ -145,6 +147,7 @@ exit 127
         env = self.env.copy()
         env.pop("CODEX_THREAD_ID")
         env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env.pop("MIMO_SESSION_ID", None)
         result = self.run_check(env=env)
         self.assertEqual(result.returncode, 2)
         self.assertIn("session identity is missing", self.summary(result)["error"])
@@ -159,6 +162,71 @@ exit 127
     def test_conflicting_client_identity_environment_variables_refuse(self):
         env = self.env.copy()
         env["CLAUDE_CODE_SESSION_ID"] = FOREIGN
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("sources disagree", self.summary(result)["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def mimo_env(self, session=MIMO_SESSION):
+        env = self.env.copy()
+        env.pop("CODEX_THREAD_ID", None)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env["MIMO_SESSION_ID"] = session
+        return env
+
+    def test_mimo_session_env_is_accepted(self):
+        self.write_data({"open_pages": [[nonclaim_issue(80)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
+                         "stages": {}, "messages": {}})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+        self.assertEqual(self.summary(result)["session_id"], MIMO_SESSION)
+
+    def test_mimo_explicit_session_id_is_accepted(self):
+        env = self.mimo_env()
+        env.pop("MIMO_SESSION_ID")
+        result = self.run_check("--session-id", MIMO_SESSION, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.summary(result)["session_id"], MIMO_SESSION)
+
+    def test_mimo_session_case_is_preserved_and_foreign_case_does_not_block(self):
+        self.write_data({"open_pages": [[issue(81, f"MiMo chat {FOREIGN_MIMO.lower()} on edge-dev")]],
+                         "stages": {}, "messages": {}})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+
+    def test_mimo_chat_owner_label_blocks(self):
+        self.write_data({"open_pages": [[issue(82, f"MiMo chat {MIMO_SESSION} on edge-dev")]],
+                         "stages": {}, "messages": {}})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 82}])
+
+    def test_foreign_mimo_owner_does_not_block(self):
+        self.write_data({"open_pages": [[issue(83, f"MiMo chat {FOREIGN_MIMO} on edge-dev")]],
+                         "stages": {}, "messages": {}})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+
+    def test_unsupported_owner_label_with_mimo_session_fails_closed(self):
+        self.write_data({"open_pages": [[issue(84, f"legacy-owner={MIMO_SESSION};retained")]],
+                         "stages": {}, "messages": {}})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsupported format", self.summary(result)["error"])
+
+    def test_malformed_mimo_session_id_is_refused(self):
+        env = self.mimo_env("ses_short")
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("session identity must be", self.summary(result)["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_mimo_session_and_uuid_sources_disagree(self):
+        env = self.mimo_env()
+        env["CODEX_THREAD_ID"] = SESSION
         result = self.run_check(env=env)
         self.assertEqual(result.returncode, 2)
         self.assertIn("sources disagree", self.summary(result)["error"])
