@@ -41,3 +41,21 @@ Bash(tail:*)
 # a background command instead. Added 2026-10-21.
 deny:Bash(sleep:*)
 deny:Bash(gh run watch:*)
+
+# Read-only commands from a scan of the 50 most recent transcripts on edge-dev3
+# (2026-10-21) that Claude Code does not already auto-allow. Excluded on purpose:
+# `gcloud secrets` (prints secret values), `ai-task-gates start/check` (they
+# record gate state), `gcloud builds retry/triggers` (can change builds).
+Bash(ai-pr-wait *)
+Bash(bin/ai-pr-wait *)
+Bash(ai-doc-safety)
+Bash(ai-doc-safety *)
+Bash(bin/ai-doc-safety)
+Bash(bin/ai-doc-safety *)
+Bash(ai-review doctor)
+Bash(gcloud builds list *)
+Bash(gcloud builds describe *)
+Bash(gcloud builds log *)
+Bash(gcloud run services list *)
+Bash(gcloud run services describe *)
+Bash(gcloud logging read *)
