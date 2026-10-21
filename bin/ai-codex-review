@@ -216,11 +216,8 @@ RELAY_TASK=""
 stop_relay_task(){
   [ -n "$RELAY_TASK" ] || return 0
   MSYS2_ARG_CONV_EXCL='*' schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
-  if MSYS2_ARG_CONV_EXCL='*' schtasks /Query /TN "$RELAY_TASK" /FO CSV /NH 2>/dev/null | grep -q '"Running"'; then
-    echo "ai-codex-review: relay task $RELAY_TASK is still running; end it before trusting this machine's Codex auth." >&2
-    return 1
-  fi
-  MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  local state
+  state="$(MSYS2_ARG_CONV_EXCL='*' schtasks /Query /TN "$RELAY_TASK" /FO CSV /NH 2>/dev/null)" && ! printf '%s' "$state" | grep -q '"Running"'     && MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1     || { echo "ai-codex-review: relay task $RELAY_TASK could not be confirmed stopped and removed; end it before trusting this machine's Codex auth." >&2; return 1; }
   RELAY_TASK=""
 }
 
@@ -369,11 +366,7 @@ reviewer_event_evidence require-report codex "$REVIEW_DIR" || die 'could not res
 # one-shot interactive scheduled task in the signed-in user's desktop session.
 DESKTOP_RELAY=0
 if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ] && [ -n "${SSH_CONNECTION:-}" ] && [ "${AI_CODEX_DESKTOP_RELAY:-1}" != 0 ]; then DESKTOP_RELAY=1; fi
-run_provider() {
-  if [ "$DESKTOP_RELAY" = 0 ]; then
-    printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR"
-    return
-  fi
+run_relayed_provider() {
   local relay task rc i
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$$"; RELAY_TASK="$task"
   mkdir -p "$relay" && printf '%s\n' "$PROMPT" > "$relay/prompt"
@@ -399,8 +392,11 @@ set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
-if [ "$DESKTOP_RELAY" = 1 ]; then RELAY_TASK="AiDevOps-CodexReview-$$"; fi
-run_provider & PROVIDER_PID=$!
+if [ "$DESKTOP_RELAY" = 1 ]; then
+  RELAY_TASK="AiDevOps-CodexReview-$$"; run_relayed_provider & PROVIDER_PID=$!
+else
+  printf '%s\n' "$PROMPT" | env -u OPENAI_API_KEY -u CODEX_API_KEY ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+fi
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 # A relay that hit its own deadline leaves the task running; end it here too.
 stop_relay_task || die "the desktop relay task could not be stopped; no report was published."
