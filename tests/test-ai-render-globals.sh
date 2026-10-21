@@ -19,8 +19,8 @@ for engine in zcode mimo; do
     <(tr -d '\r' < "$sys/AGENTS-global-$engine.md") | grep -c '^>' || true)"
   overrides="$(grep -c '^s' "$sys/global-overrides/$engine.sed")"
   appended=0
-  [[ -f "$sys/global-overrides/$engine.append.md" ]] \
-    && appended="$(wc -l < "$sys/global-overrides/$engine.append.md")"
+  [[ -f "$sys/global-overrides/$engine.append" ]] \
+    && appended="$(wc -l < "$sys/global-overrides/$engine.append")"
   [[ "$changed" -le $((overrides + appended)) ]] \
     || fail "$engine rendering changes $changed lines; overrides allow $((overrides + appended))"
 done

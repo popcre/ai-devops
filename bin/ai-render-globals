@@ -8,7 +8,7 @@
 #
 # Edit templates/system/AGENTS-global-codex.md, never the rendered files. The
 # per-engine differences live in templates/system/global-overrides/:
-# <engine>.sed (line substitutions) and optional <engine>.append.md (appended
+# <engine>.sed (line substitutions) and optional <engine>.append (appended
 # verbatim). Carriage returns are stripped on read so a Windows CRLF checkout
 # renders and checks the same bytes as Linux.
 set -euo pipefail
@@ -28,8 +28,8 @@ esac
 render() {
   local engine="$1"
   tr -d '\r' < "$body" | sed -f <(tr -d '\r' < "$overrides/$engine.sed")
-  if [[ -f "$overrides/$engine.append.md" ]]; then
-    tr -d '\r' < "$overrides/$engine.append.md"
+  if [[ -f "$overrides/$engine.append" ]]; then
+    tr -d '\r' < "$overrides/$engine.append"
   fi
 }
 

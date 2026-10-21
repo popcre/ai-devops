@@ -126,7 +126,7 @@ work that changes the database's SHAPE, or a curated Master Data load.
 Proofs, monitoring, reports, tooling, scripts, docs, and repository
 maintenance never go there. Reading schema and safe sample data is open;
 application row data belongs to the application. Dated rulings:
-`docs/owner-rulings.md`.
+[`docs/owner-rulings.md`](owner-rulings.md).
 
 ## Database writes
 
