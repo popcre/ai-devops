@@ -413,7 +413,14 @@ def run(command, cache, age_file, source_file, expected_head=None,
                 previous = None
         if previous == result.stdout:
             # Zero duplicate unchanged writes: an identical snapshot is already
-            # present, so skip the rewrite and count the avoided duplicate.
+            # present, so skip the content rewrite and count the avoided
+            # duplicate. Refresh mtime anyway so waiters that joined during
+            # this refresh still see st_mtime_ns >= joined_ns and share the
+            # completed read instead of re-hitting upstream.
+            try:
+                os.utime(cache, None)
+            except OSError:
+                pass
             if args_key:
                 emit_write_observation(args_key, "skipped", False)
         else:
