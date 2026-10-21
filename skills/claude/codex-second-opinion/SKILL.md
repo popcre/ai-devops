@@ -1,6 +1,6 @@
 ---
 name: codex-second-opinion
-description: Get Codex (GPT-5.x) to independently review a plan, diagnosis, design, or diff, report what it says, state whether Claude agrees — and when Claude disagrees, argue the point back to Codex and report whether either side moved. Use when the user says "run this by codex", "what does codex think", "get a second opinion", "see if codex agrees", "ask codex and tell me if you agree", or "if you disagree, push back and see if it changes its mind". For handing Codex work to *execute*, use codex-handoff instead; for a canned read-only review of the current git diff, ai-codex-review is the lighter tool.
+description: "Have Codex (GPT-5.x) review a plan, diagnosis, design, or diff, say whether Claude agrees, and argue back on disagreement. Use for \"run this by codex\", \"what does codex think\", \"get a second opinion\", \"see if codex agrees\", or \"push back and see if it changes its mind\". Work to execute goes to codex-handoff."
 ---
 
 # codex-second-opinion
