@@ -10,7 +10,7 @@ if [ -z "${SYSTEMROOT:-}" ] || ! command -v cygpath >/dev/null 2>&1; then
   echo '  skip (not Windows)'; echo "$PASS passed, $FAIL failed"; exit 0
 fi
 HELPER="$(cygpath -w "$REPO_ROOT/bin/windows-kill-process-tree.ps1")"
-kill_tree(){ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$HELPER" -Marker "$1" | tr -d '\r'; }
+kill_tree(){ AI_REVIEW_KILL_MARKER="$1" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$HELPER" | tr -d '\r'; }
 ps_q(){ powershell.exe -NoProfile -NonInteractive -Command "$1" | tr -d '\r'; }
 MARK="C:\\ai-review-test-marker-$$-$RANDOM"
 # A native root whose command line carries the marker, a cmd child and a ping

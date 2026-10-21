@@ -1,17 +1,18 @@
 # Kill every process of one review run and all their native descendants, then
 # prove none survives (popcre/ai-devops#1891, used by bin/ai-codex-review).
 #
-# A run's roots are the processes whose command line contains -Marker (the
+# A run's roots are the processes whose command line contains the marker (the
 # run's unique review directory, which Codex receives via --cd). Git Bash
 # processes do not expose real Windows parent links, so roots are found by
 # marker, not by walking down from a shell. Descendants are processes whose
 # parent is a known tree member AND that started after it, so a reused PID is
 # never adopted; each kill re-checks PID plus creation time first.
 # Prints "yes" when nothing from the run is left, otherwise "alive".
-param([Parameter(Mandatory)][string]$Marker)
+# The marker arrives in $env:AI_REVIEW_KILL_MARKER, never on a command line, so
+# neither this helper nor the watchdog that launched it can match it.
 
 $norm = { param($s) if ($s) { $s.Replace('\', '/').ToLowerInvariant() } else { '' } }
-$mark = & $norm $Marker
+$mark = & $norm $env:AI_REVIEW_KILL_MARKER
 if ($mark.Length -lt 12) { 'alive'; exit 0 }   # refuse a marker too short to be unique
 function Get-Key($p) { "$($p.ProcessId)@$($p.CreationDate.ToUniversalTime().Ticks)" }
 

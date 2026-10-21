@@ -140,6 +140,11 @@ git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEWER_HOME_DIR=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
+  # A relay that could not be proven stopped keeps every trace it may still use.
+  if [ -n "${RELAY_KEEP:-}" ]; then
+    printf 'ai-codex-review: kept %s and %s because the desktop relay was not proven stopped.\n' "$REVIEWER_HOME_DIR" "$REVIEW_DIR" >&2
+    REVIEWER_HOME_DIR=""; REVIEW_DIR=""
+  fi
   # The private reviewer home holds only linked auth: keep a refreshed token
   # and remove it even when evidence retention keeps the rest (#1901).
   if [ -n "$REVIEWER_HOME_DIR" ]; then
@@ -176,9 +181,10 @@ cleanup(){
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
   [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
-  "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
+  [ -n "${RELAY_KEEP:-}" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+RELAY_KEEP=""
 
 preserve_failure_diagnostic(){ # FAILURE_CLASS
   local failure="$1" path tmp
@@ -215,16 +221,31 @@ stop_provider_tree(){ # TIMEOUT_PID
 RELAY_TASK=""
 # Every scheduler call is bounded so a hung Task Scheduler cannot stall the wrapper.
 relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
+# Kill every process of this run (found by its unique review directory, passed
+# by environment so the helper's own watchdog never matches) and prove none is left.
+relay_kill_scan(){
+  AI_REVIEW_KILL_MARKER="$(cygpath -w "$REVIEW_DIR")" timeout 90 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+    -File "$(cygpath -w "$SCRIPT_DIR/windows-kill-process-tree.ps1")" 2>/dev/null | tr -d '\r'
+}
 stop_relay_task(){
   [ ! -e "$REVIEWER_HOME_DIR/relay/removed" ] || RELAY_TASK=""
   [ -n "$RELAY_TASK" ] || return 0
-  local state gone
-  # Cancel first: a relay that starts after this point exits before launching Codex.
-  [ ! -d "$REVIEWER_HOME_DIR/relay" ] || : > "$REVIEWER_HOME_DIR/relay/cancel"
-  # Kill every process of this run (found by its unique review directory) and its
-  # native descendants, and prove none is left; task state alone proves nothing.
+  local state gone=alive relay="$REVIEWER_HOME_DIR/relay" i
+  # The relay and this cleanup race for one atomic claim (mkdir). If cleanup wins,
+  # Codex is never launched. If the relay won, Codex is (or soon will be) running:
+  # kill-scan until the relay records its exit code, which it can only do once
+  # Codex is gone, then require one final clean scan. Task state proves nothing.
   # This runs before /End, which would otherwise orphan the children first.
-  gone="$(timeout 90 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$SCRIPT_DIR/windows-kill-process-tree.ps1")" -Marker "$(cygpath -w "$REVIEW_DIR")" 2>/dev/null | tr -d '\r')"
+  if [ ! -d "$relay" ] || mkdir "$relay/claim" 2>/dev/null; then
+    gone="$(relay_kill_scan)"
+  else
+    for i in $(seq 60); do
+      gone="$(relay_kill_scan)"
+      [ -s "$relay/rc" ] && break
+      sleep 1
+    done
+    [ -s "$relay/rc" ] && gone="$(relay_kill_scan)" || gone=alive
+  fi
   relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   # The State enum name is not localized, unlike schtasks /Query's text.
   state="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
@@ -240,10 +261,9 @@ interrupt_review(){
   trap - HUP INT TERM
   stop_provider_tree "$PROVIDER_PID"
   PROVIDER_PID=""
-  stop_relay_task 2>>"${TMP_ERR:-/dev/stderr}" || { echo "ai-codex-review: interrupted, and the desktop relay was NOT confirmed stopped." >>"${TMP_ERR:-/dev/stderr}"; RELAY_KEEP_HOME=1; }
+  stop_relay_task 2>>"${TMP_ERR:-/dev/stderr}" || { echo "ai-codex-review: interrupted, and the desktop relay was NOT confirmed stopped." >>"${TMP_ERR:-/dev/stderr}"; RELAY_KEEP=1; }
   local elapsed=$(( $(date +%s) - STARTED )) report=""
   report="$(preserve_failure_diagnostic interrupted || true)"
-  [ -z "${RELAY_KEEP_HOME:-}" ] || REVIEWER_HOME_DIR=""
   if [ -n "$STATE" ] && [ -f "$STATE" ] && [ "$(jq -r '.status // ""' "$STATE" 2>/dev/null || true)" = running ]; then
     if [ -n "$report" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$elapsed" --failure interrupted --report "$report" >/dev/null 2>&1 || true
     else "$LIFECYCLE" fail --state "$STATE" --elapsed "$elapsed" --failure interrupted >/dev/null 2>&1 || true; fi
@@ -387,7 +407,7 @@ run_relayed_provider() {
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
   mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
-    printf '[ ! -e %q ] || exit 95\ntouch %q\n' "$relay/cancel" "$relay/started"
+    printf 'mkdir %q 2>/dev/null || exit 95\ntouch %q\n' "$relay/claim" "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
   } > "$relay/run.sh"
@@ -421,7 +441,7 @@ ELAPSED="$(( $(date +%s)-STARTED ))"
 
 if [ "$RELAY_STOP_RC" -ne 0 ]; then
   FAILURE_REPORT="$(preserve_failure_diagnostic relay-not-stopped || true)"
-  REVIEWER_HOME_DIR=""  # keep the relay's PID and task evidence for a later cleanup
+  RELAY_KEEP=1  # keep the relay, its snapshot and task evidence for a later cleanup
   if [ -n "$FAILURE_REPORT" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$FAILURE_REPORT" >/dev/null 2>&1 || true
   else "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; fi
   die "the desktop relay task could not be stopped; no report was published. Diagnostic: ${FAILURE_REPORT:-unavailable}"
