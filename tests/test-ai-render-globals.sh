@@ -37,13 +37,15 @@ printf '\nhand edit\n' >> "$fixture/templates/system/AGENTS-global-mimo.md"
   || fail "a hand edit to the MiMo global passed the check"
 
 echo "4/4 a CRLF checkout renders and checks the same bytes"
+# The real checkout may itself be CRLF (Windows autocrlf); the renderer always
+# writes LF, so compare against the LF form of the committed file.
 for f in "$fixture"/templates/system/AGENTS-global-*.md "$fixture"/templates/system/global-overrides/*; do
   sed -i 's/\r\{0,1\}$/\r/' "$f"
 done
 bash "$fixture/bin/ai-render-globals" >/dev/null
-cmp -s "$fixture/templates/system/AGENTS-global-zcode.md" "$sys/AGENTS-global-zcode.md" \
+cmp -s "$fixture/templates/system/AGENTS-global-zcode.md" <(tr -d '\r' < "$sys/AGENTS-global-zcode.md") \
   || fail "CRLF input rendered different ZCode bytes"
-cmp -s "$fixture/templates/system/AGENTS-global-mimo.md" "$sys/AGENTS-global-mimo.md" \
+cmp -s "$fixture/templates/system/AGENTS-global-mimo.md" <(tr -d '\r' < "$sys/AGENTS-global-mimo.md") \
   || fail "CRLF input rendered different MiMo bytes"
 bash "$fixture/bin/ai-render-globals" --check >/dev/null || fail "CRLF checkout failed the check"
 
