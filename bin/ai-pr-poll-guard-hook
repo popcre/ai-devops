@@ -29,8 +29,8 @@ cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
 # A quoted script handed to a child shell or eval IS a command (#1901): unwrap
 # `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
 cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
-  -e "s/(^|[^A-Za-z0-9_])((ba|da|z)?sh +(-[A-Za-z]+ +)*-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
-  -e 's/(^|[^A-Za-z0-9_])((ba|da|z)?sh +(-[A-Za-z]+ +)*-[A-Za-z]*c|eval) +"([^"]*)"/\1 \5 /g' \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\5 /g" \
   | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
 reason=''
