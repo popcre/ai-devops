@@ -2,6 +2,25 @@
 
 ## STATUS — read first
 
+Resume reconciliation — October 21, 2026, 2:12 PM EDT. Owner: current Codex
+session on edge-dev3, tracking #658 and #660. Their cleanup closures did not
+establish acceptance; both issues are reopened. The October 15 successor handoff
+supersedes older installation instructions: the duration adapter is already
+contained by installed manifest source `eeae25ef`. Existing repair PR #1710
+retains the remaining item-2 source work; its stale test conflict is reconciled
+with current upstream without adding a second counters-suite invocation.
+Merge, reviewed installation and original coalescing live proof remain open.
+
+An immutable October 15–20 local sample validates with the existing reporter:
+262 local timing observations (160 deadlines, 102 completed outcomes), 712
+target-correlated reads, 495 same-target replays and zero cache serves. These
+are provisional instrument counts, not qualified matched savings. HTTP and
+whole-account GraphQL totals remain unknown. Comparable baseline/candidate
+costs, safety-event equivalence, detection ceilings and required host/client
+coverage still block programme acceptance. See the dated evidence in
+[the existing baseline](tests/verification/github-requests/p1-baseline.md).
+Keep `live proof` on #658; no manufactured demand or weakened thresholds.
+
 P1 baseline reconciliation — October 13, 2026, 12:20 PM EDT. Owner of #660
 evidence: MiMo chat on edge-dev. Privacy-safe attribution and a measured
 edge-dev3 baseline are frozen in
