@@ -156,3 +156,66 @@ never grow with names.
 worktree`. That is local branch cleanup failing AFTER the merge succeeded.
 Confirm with `gh pr view <n> --json state`, delete the remote branch, and
 continue — do not report it as a failed merge.
+
+## Procedures moved from the Claude global (2026-10-21)
+
+These were in `templates/system/CLAUDE-global.md`; the global keeps the rule
+and points here.
+
+- **Job plan:** restate goal, scope, done-when in the first reply for anything
+  beyond a one-phrase command. It confirms understanding; it is not a request
+  for approval. A clear request authorizes ordinary scoped work.
+- **Live proof:** until proven live, leave `- [ ] live proof` on the **same**
+  issue and name it in the closing note; never open a second ticket for that
+  gap. One named owner until the app works live.
+- **Authorized scope:** track multi-step work on its existing issue, verify
+  each outcome, and continue. Respect actual dependencies, ownership,
+  collision controls, and safety gates.
+- **Worktrees:** every write-capable task uses its own current-upstream
+  worktree. Edit a shared checkout only for a serialized landing,
+  installation, or recovery. Each child Git repository in a project folder
+  gets its own worktree.
+- **Manual steps:** the AI does access, tooling, sign-in, and keys itself;
+  never ask Albert to run, click, or set up anything. Prove success with a
+  commit, PR, passing check, live result, or screenshot.
+- **Task class** (class list stays in the global, test-pinned): start with `ai-task-gates start --class <class>`; before a
+  paid review, PR wait, shipment, deployment, database, infrastructure, or
+  production action, run `ai-task-gates check --before <action>`. If the work
+  outgrew the class, redeclare and say so. private-evidence is read-only
+  analysis.
+- **Secrets:** values move only through pipes or protected files. Rotation
+  needs an assigned AI reviewer's APPROVE of the rotation plan (exact
+  credential, provider, and consumers), except a credential under a standing
+  owner no-rotation directive.
+- **Destructive actions:** inspect the exact target; keep a commit, backup, or
+  reviewed preview. No broad staging or destructive Git over unreviewed work,
+  another session's files, a repository root, or a machine-local overlay.
+- **Production:** the reviewer's APPROVE is on the exact inputs. Database
+  writes skip that APPROVE but keep every other gate (see "Database writes").
+  The automatic `shared-db` migration promotion exception re-proves the one
+  open structural work issue or stops for an engineer; it authorizes no manual
+  production command or bypass.
+- **Shared database:** claim-first, minimum scope; see "Production and
+  shared-db scope".
+- **GitHub signature:** `Posted by Claude chat <id> on <machine>`, where
+  `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when empty). When editing a
+  body, keep existing signatures and add yours.
+- **Successors:** never inherit a predecessor's repository, work type, route,
+  or object claim. Private artifacts stay in their approved private repository.
+- **Engineering:** never replace operating-system binaries.
+- **Git identity:** before the first commit in a repository, run
+  `git var GIT_COMMITTER_IDENT`; it must show
+  `Albert Hazan <u2giants@users.noreply.github.com>`. Never `git pull` the
+  installed ai-devops checkout; see `docs/deployment.md`.
+- **Merging:** checks and the merge queue decide
+  (`config/repository-policy.json`). A prose-only PR merges with
+  `gh pr merge --squash --admin` once `bin/ai-doc-safety` passes on the exact
+  head.
+- **Compression:** never send secrets, private transcripts, review verdicts,
+  or code through a compressor.
+- **Subagents:** never delegate schema, merge, production, or security
+  decisions. A subagent returns finished work or a blocker with its verbatim
+  evidence line. When relaying owner authority, say the words came from
+  Albert's chat.
+- **Skills and procedures** govern the work and what goes into files; they
+  never override the reply style.
