@@ -513,6 +513,12 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     local review_source="$review"
     if jq -e '.code_only.mode == "code-only"' < "$file" >/dev/null 2>&1; then
       review_source="$source"
+    elif [ "$(canon "$review")" = "$(canon "$source")" ]; then
+      # In-place build: the review root IS the sealed source. When that source
+      # is itself a review snapshot (a repository test or nested review run
+      # inside one), its marker names the PARENT checkout, which is not the
+      # repository this identity sealed. Head and digest below still bind it.
+      review_source="$source"
     elif [ -f "$review/.ai-review-sandbox" ]; then
       review_source="$(head -1 "$review/.ai-review-sandbox")"
     fi
