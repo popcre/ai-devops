@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Retain topology hits unless every match is a dependency-version span.
+"""Retain topology hits unless every match is a proven public semantic span.
 
 Owned by ai-public-boundary-check. This is deliberately not a file or line
 allowlist: comments, URL authorities and adjacent addresses are still scanned.
-Only familiar pinned requirements and parsed uv package metadata qualify. If
-TOML parsing is unavailable or any context is uncertain, keep the original hit.
+Only familiar dependency versions and direct complete-standard-network calls
+qualify. If parsing is unavailable or context is uncertain, keep the hit.
 """
 from __future__ import annotations
 
+import ast
+import ipaddress
 import pathlib
 import re
 import sys
@@ -43,6 +45,78 @@ PIN = re.compile(
 )
 UV_VERSION = re.compile(r'^[ \t]*version[ \t]*=[ \t]*"(?P<version>' + VERSION + r')"[ \t]*(?:#.*)?$')
 UV_URL = re.compile(r'\burl[ \t]*=[ \t]*"(?P<url>[^"\\\n]*)"')
+REQUIREMENTS_NAME = re.compile(r"(?:[A-Za-z0-9_.-]+-)?requirements(?:-[A-Za-z0-9_.-]+)?\.txt")
+STANDARD_NETWORKS = frozenset((
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+))
+
+
+def network_spans(text):
+    """Recognize only direct stdlib calls with complete RFC1918 literals."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return {}
+    imported = any(isinstance(node, ast.Import) and any(alias.name == "ipaddress" and alias.asname in (None, "ipaddress") for alias in node.names) for node in tree.body)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if (alias.asname or alias.name.split(".")[0]) == "ipaddress":
+                    if alias.name != "ipaddress":
+                        return {}
+        elif isinstance(node, ast.ImportFrom):
+            if any((alias.asname or alias.name) in ("ipaddress", "*") for alias in node.names):
+                return {}
+        elif isinstance(node, ast.Name) and node.id == "ipaddress" and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return {}
+        elif isinstance(node, ast.arg) and node.arg == "ipaddress":
+            return {}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.ExceptHandler)) and node.name == "ipaddress":
+            return {}
+        elif type(node).__name__ in ("MatchAs", "MatchStar") and getattr(node, "name", None) == "ipaddress":
+            return {}
+        elif type(node).__name__ == "MatchMapping" and getattr(node, "rest", None) == "ipaddress":
+            return {}
+        elif isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            if any(isinstance(part, ast.Name) and part.id == "ipaddress" for part in ast.walk(node)):
+                return {}
+            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) and node.slice.value == "ipaddress":
+                return {}
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("setattr", "delattr"):
+            if node.args and isinstance(node.args[0], ast.Name) and node.args[0].id == "ipaddress":
+                return {}
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("exec", "globals", "locals", "vars"):
+            return {}
+    if not imported:
+        return {}
+    lines = text.splitlines()
+    result = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "ipaddress"
+                and node.func.attr == "ip_network" and len(node.args) == 1 and not node.keywords):
+            continue
+        literal = node.args[0]
+        if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
+            continue
+        try:
+            network = ipaddress.ip_network(literal.value)
+        except ValueError:
+            continue
+        if network not in STANDARD_NETWORKS or str(network) != literal.value:
+            continue
+        if getattr(literal, "end_lineno", None) != literal.lineno:
+            continue
+        line = lines[literal.lineno - 1]
+        # AST columns count UTF-8 bytes; regex matches count Unicode characters.
+        start = len(line.encode("utf-8")[:literal.col_offset].decode("utf-8"))
+        end = len(line.encode("utf-8")[:literal.end_col_offset].decode("utf-8"))
+        if line[start:end] not in ('"' + literal.value + '"', "'" + literal.value + "'"):
+            continue
+        result.setdefault(literal.lineno, []).append((start + 1, end - 1))
+    return result
 
 
 def uv_spans(text):
@@ -133,15 +207,21 @@ def main():
             file.resolve().relative_to(root)
             if file.is_symlink():
                 raise ValueError("symlink manifest")
-            if file.name == "uv.lock":
+            if file.name == "uv.lock" or file.suffix == ".py":
+                if file.suffix == ".py":
+                    # A sibling/root module could shadow the claimed stdlib.
+                    if any((directory / "ipaddress.py").exists() or (directory / "ipaddress/__init__.py").exists()
+                           for directory in (file.parent, root)):
+                        raise ValueError("shadowed ipaddress module")
                 if path not in cache:
                     text = file.read_text(encoding="utf-8")
-                    cache[path] = (text.splitlines(), uv_spans(text))
+                    spans_for_file = uv_spans(text) if file.name == "uv.lock" else network_spans(text)
+                    cache[path] = (text.splitlines(), spans_for_file)
                 lines, by_line = cache[path]
                 number = int(number_text)
                 if 0 < number <= len(lines) and lines[number - 1] == content:
                     spans = by_line.get(number, [])
-            elif re.fullmatch(r"(?:[A-Za-z0-9_.-]*-)?requirements(?:[A-Za-z0-9_.-]*)\.txt", file.name):
+            elif REQUIREMENTS_NAME.fullmatch(file.name):
                 match = PIN.fullmatch(content)
                 if match:
                     spans = [match.span("version")]

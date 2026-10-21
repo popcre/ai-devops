@@ -46,10 +46,11 @@ fi
 
 # Private/RFC1918 and carrier-grade/Tailscale addresses identify Albert's
 # topology even though they are not credentials. The documented network range
-# itself is harmless and is the one deliberate exception.
+# itself is harmless. Complete RFC1918 standards also qualify only in proven
+# direct stdlib policy calls, never as bare text or narrower host networks.
 topology_ip_pattern='(100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})'
-# Dependency versions are not addresses. Remove only proven version spans in
-# pinned requirement lines or parsed uv metadata; other same-line hits remain.
+# Dependency versions and complete standard networks are not host topology.
+# Remove only proven semantic spans; all other same-line hits remain protected.
 tool_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 topology_matches="$(git -C "$root" grep -anE "$topology_ip_pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -vE '100\.64\.0\.0/(10|255\.192\.0\.0)' || true)"
 if [ -n "$topology_matches" ]; then

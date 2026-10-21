@@ -113,6 +113,62 @@ class VersionSpans(unittest.TestCase):
         result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True)
         self.assertNotEqual(result.returncode, 0)
 
+    def test_direct_standard_network_calls_only(self):
+        for network in DATA["standard_networks"]:
+            source = f'import ipaddress\nallowed = ipaddress.ip_network("{network}")\n'
+            with self.subTest(network=network):
+                self.assertEqual(self.filtered("policy.py", source), "")
+                unicode_source = f'import ipaddress\nlabel = "π"; allowed = ipaddress.ip_network("{network}")\n'
+                self.assertEqual(self.filtered("policy.py", unicode_source), "")
+                self.assertTrue(self.filtered("README.md", source))
+                for suffix in [" # " + DATA["other_private"], " # https://" + DATA["other_private"] + "/", " # " + network]:
+                    self.assertTrue(self.filtered("policy.py", source.rstrip() + suffix + "\n"))
+        source = 'import ipaddress\nallowed = tuple(ipaddress.ip_network(n) for n in ' + repr(tuple(DATA["standard_networks"])) + ')\n'
+        self.assertTrue(self.filtered("policy.py", source))
+
+    def test_nonstandard_network_values_stay_blocked(self):
+        for network in DATA["nonstandard_networks"]:
+            with self.subTest(network=network):
+                self.assertTrue(self.filtered("policy.py", f'import ipaddress\nallowed = ipaddress.ip_network("{network}")\n'))
+        network = DATA["standard_networks"][0]
+        self.assertTrue(self.filtered("policy.py", f'allowed = "{network}"\n'))
+        self.assertTrue(self.filtered("policy.py", f'import ipaddress\nallowed = ipaddress.ip_network("{network}")\ninvalid Python !\n'))
+
+    def test_shadowed_network_module_or_function_stays_blocked(self):
+        network = DATA["standard_networks"][0]
+        call = f'allowed = ipaddress.ip_network("{network}")\n'
+        for binding in [
+            'ipaddress = object()\n',
+            'import other as ipaddress\n',
+            'from other import ipaddress\n',
+            'from other import *\n',
+            'def ipaddress(): pass\n',
+            'def f(ipaddress): pass\n',
+            'ipaddress.ip_network = other\n',
+            'setattr(ipaddress, "ip_network", other)\n',
+            'globals()["ipaddress"] = other\n',
+            'match value:\n    case {**ipaddress}: pass\n',
+        ]:
+            with self.subTest(binding=binding):
+                self.assertTrue(self.filtered("policy.py", 'import ipaddress\n' + binding + call))
+        self.assertTrue(self.filtered("policy.py", call))
+        self.assertTrue(self.filtered("policy.py", 'def f():\n    import ipaddress\n' + call))
+        (self.root / "ipaddress.py").write_text("# fake local module\n")
+        self.assertTrue(self.filtered("policy.py", 'import ipaddress\n' + call))
+
+    def test_network_semantics_do_not_launder_other_boundaries(self):
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        source = 'import ipaddress\nallowed = ipaddress.ip_network("' + DATA["standard_networks"][0] + '")'
+        policy = self.root / "policy.py"
+        policy.write_text(source + "\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "policy.py"], check=True)
+        command = ["bash", str(ROOT / "bin/ai-public-boundary-check"), str(self.root)]
+        clean = subprocess.run(command, capture_output=True)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        for suffix in [" # " + DATA["project"], " # " + DATA["credential"], " # https://" + DATA["public_endpoint"] + "/"]:
+            policy.write_text(source + suffix + "\n")
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
