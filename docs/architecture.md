@@ -45,6 +45,22 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Prompts | `templates/prompts/01..07` | One Markdown prompt per workflow stage |
 | Config seed | `config/*.env.example` | Seeds `/etc/ai-devops/*.env` on install |
 
+The public privacy boundary owns a narrow dependency-version parser in
+`tools/public-boundary-version-spans.py`. It excludes only proven version
+spans in pinned requirements or parsed PyPI package metadata in `uv.lock`;
+same-line addresses, comments, URL authorities, credentials and project
+identifiers retain their existing checks. Unknown formats and parser failures
+retain the original strict scan. Lock metadata recognition uses standard-library
+TOML on Python 3.11 or newer; older Python retains the strict lock scan without
+an additional dependency. The parser is a helper of the existing boundary tool,
+not a separate policy or ignore list. Its adversarial suite runs through the
+existing public-boundary test entrypoint.
+The same helper recognizes only literal complete RFC1918 standard networks in
+direct, unshadowed `ipaddress.ip_network` calls in valid Python. It does not
+follow variables or generators, allow bare CIDR text, or exempt comments,
+adjacent addresses or nonstandard network masks. Actual host addresses remain
+protected. Unknown or shadowed Python contexts retain the strict scan.
+
 The shared-db closeout checker captures `ai-gh` output as bytes and strictly decodes stdout and stderr as UTF-8 on the main thread. Invalid UTF-8 becomes a structured fail-closed result; keep this explicit byte-to-text boundary so subprocess reader threads cannot turn decode errors into missing output.
 
 ## The staged workflow

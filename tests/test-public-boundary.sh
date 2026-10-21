@@ -57,5 +57,6 @@ for dir in ".ai/reviewer-issues" ".AI/reviewer-issues" ".Ai/reviewer-issues" ".a
 done
 git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/repo/.ai/reviewer-issues"
 
+python3 "$ROOT/tests/test-public-boundary-versions.py"
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
 echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'
