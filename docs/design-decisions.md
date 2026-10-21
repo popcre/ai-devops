@@ -444,3 +444,89 @@ Copying credentials, pointing `HOME` at the auth directory, or dropping the
 allowlist reopens the rejected findings. Do not merge the review and implement
 wrappers to reuse `prepare_auth_link`.
 
+
+## Intentional quirks and non-obvious decisions
+
+### Networking-only machine classes
+
+Looks like:
+Any hostname can take the full toolkit install.
+
+Actually:
+`edge-alien`, `edge-runn-envy`, and `edge-runn-xps` receive networking only
+(SSH key, SSH config, hostnames, Tailscale).
+
+Why:
+They are not development machines; installing the toolkit on them has caused
+repeated real damage.
+
+Do not change because:
+A new session that "helpfully" installs there recreates the incident. Check the
+hostname first. Full rule: [`docs/deployment.md`](deployment.md) § Machine classes.
+
+### Canonical checkout is landing-only
+
+Looks like:
+`C:\repos\ai-devops` or `/worksp/ai-devops` is a normal editable clone.
+
+Actually:
+Write-capable work uses a fresh worktree at current upstream. The canonical
+checkout is for landing, installation, and recovery only.
+
+Why:
+Concurrent AI sessions destroy each other's uncommitted work when they share
+one dirty tree (see [`docs/critical-incidents.md`](critical-incidents.md)).
+
+Do not change because:
+Shared-editing in the landing checkout is how sessions lose work with no merge
+to recover it.
+
+### Installation is the deployment
+
+Looks like:
+This repo needs a product deploy pipeline.
+
+Actually:
+`install.sh` / `update.sh` / candidate-worktree `update.sh` with reviewer
+APPROVE **is** the deployment path. There is no app runtime to roll out.
+
+Why:
+The deliverable is a working multi-model toolkit on a machine.
+
+Do not change because:
+Inventing a product deployment path would describe a system that does not exist.
+
+### `HANDOFF.md` is a static pointer
+
+Looks like:
+One shared handoff document that each session rewrites at closeout.
+
+Actually:
+Root `HANDOFF.md` never changes. Each session writes exactly one write-once
+file under `HANDOFF.d/` and deletes it when that workstream is proven done.
+
+Why:
+Concurrent sessions rewriting one file silently drop work.
+
+Do not change because:
+A shared mutable handoff or `merge=union` reintroduces silent corruption. See
+[`templates/system/handoff-standard.md`](../templates/system/handoff-standard.md).
+
+### Config lives outside the repo
+
+Looks like:
+Runtime settings belong in committed config.
+
+Actually:
+`config/*.env.example` is committed; real `models.env` / `server.env` live under
+`/etc/ai-devops/` on each machine and are never committed.
+
+Why:
+This repo is public; real env files and secrets must stay out of it.
+
+Do not change because:
+Committing a real `.env` is a credential leak.
+
+More quirks (read-only reviews, MCP secret launcher caching, install-skills
+never pruning, dual Muse engines, and others):
+[`docs/design-decisions.md`](design-decisions.md).
