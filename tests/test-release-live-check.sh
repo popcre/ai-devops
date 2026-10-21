@@ -31,6 +31,9 @@ cat > "$cand/bin/ai-review" <<'EOF'
 #!/usr/bin/env bash
 case "$(cat "$FAKE_MODE")" in
   approve) printf '# r\n\n## Verdict\nAPPROVE\n' > report.md; echo "$PWD/report.md" ;;
+  reject) printf '# r\n\n## Verdict\nREJECT\n' > report.md; echo "$PWD/report.md" ;;
+  revise) printf '# r\n\n## Verdict\nREVISE\n' > report.md; echo "$PWD/report.md" ;;
+  twoblock) printf '# r\n\n## Verdict\nAPPROVE\n\nmore\n\n## Verdict\nREJECT\n' > report.md; echo "$PWD/report.md" ;;
   noverdict) printf '# r\nno decision\n' > report.md; echo "$PWD/report.md" ;;
   crash) echo 'spawnSync bash UNKNOWN' >&2; exit 1 ;;
 esac
@@ -42,10 +45,26 @@ head="$(git -C "$cand" rev-parse HEAD)"
 export FAKE_MODE="$TMP/mode"
 run_mode() { echo "$1" > "$FAKE_MODE"; "$cand/bin/ai-release-live-check" run --target-head "$head"; }
 check 'run passes on a real verdict' "run_mode approve | jq -e '.ok==true and .verdict==\"APPROVE\"'"
+check 'run fails on a REJECT of the benign fixture' "out=\$(run_mode reject); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and .verdict==\"REJECT\"'"
+check 'run fails on a REVISE of the benign fixture' "out=\$(run_mode revise); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and .verdict==\"REVISE\"'"
+check 'run fails when an early APPROVE contradicts a final REJECT' "out=\$(run_mode twoblock); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and .verdict==\"CONTRADICTORY\"'"
 check 'run fails on exit 0 with no verdict' "! run_mode noverdict"
 check 'run fails on a crashing reviewer and keeps its error' "out=\$(run_mode crash); [ \$? -ne 0 ] && printf '%s' \"\$out\" | jq -e '.ok==false and (.detail|test(\"UNKNOWN\"))'"
 check 'run leaves no extra worktree behind' "[ \"\$(git -C '$cand' worktree list | wc -l)\" -eq 1 ]"
 check 'run refuses a short SHA' "! '$cand/bin/ai-release-live-check' run --target-head abc"
+
+# post_status: only an APPROVE result posts success (fake ai-gh records the state).
+mkdir -p "$TMP/ps/bin"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" | grep "^state=" >> %q\n' "$TMP/posted" > "$TMP/ps/bin/ai-gh"; chmod +x "$TMP/ps/bin/ai-gh"
+posted() { # VERDICT -> the state post_status sent
+  : > "$TMP/posted"
+  ( source "$ROOT/bin/ai-release-live-check"; ROOT="$TMP/ps"; target="$head"; provider=deepseek
+    post_status linux "$(jq -nc --arg t "$head" --arg v "$1" '{ok:true,os:"linux",target:$t,provider:"deepseek",verdict:$v}')" ) >/dev/null 2>&1
+  cat "$TMP/posted"
+}
+check 'post_status posts success for APPROVE' '[ "$(posted APPROVE)" = state=success ]'
+check 'post_status posts failure for REVISE' '[ "$(posted REVISE)" = state=failure ]'
+check 'post_status posts failure for REJECT' '[ "$(posted REJECT)" = state=failure ]'
 
 # verify: fake gh returns the statuses in $TMP/statuses.json.
 mkdir -p "$TMP/fake"
