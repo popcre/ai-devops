@@ -391,7 +391,7 @@ STUB
     AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
-  check "stepfun_terminal_verdict_label_becomes_heading" "[ '$drc' = 0 ] && awk '/^## Verdict[[:space:]]*$/{p=1;next} p{print;exit}' '$RH/dreport' | grep -qx APPROVE && ! grep -q 'report-extra-decision-line' '$RH/dout'"
+  check "stepfun_terminal_verdict_label_becomes_heading" "[ '$drc' = 0 ] && grep -qx APPROVE '$RH/dreport' && grep -q '^## Verdict$' '$RH/dreport' && ! grep -q 'report-extra-decision-line' '$RH/dout'"
   check "stepfun_terminal_verdict_label_not_recorded_as_blocked" "! grep -qx BLOCKED '$RH/dreport'"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
@@ -562,7 +562,7 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
-check "OpenCode keeps exactly one verdict-format instruction in either review profile" "[ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
+check "OpenCode keeps exactly one verdict-format instruction in either review profile" "grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md' && grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md' && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
 check "OpenCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' | grep -Eq '[0-9a-f]{40}' && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$TMP/args.oc.prompt' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'check f'"
 cp "$TMP/args.oc.prompt" "$TMP/first-review.prompt"
 mode verdict; "$SCRIPT" review --repo "$TMP/repo" --prompt 'different review request' >/dev/null 2>&1
