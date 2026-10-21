@@ -380,11 +380,11 @@ run_provider() {
   } > "$relay/run.sh"
   MSYS2_ARG_CONV_EXCL='*' schtasks /Create /F /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "\"$(cygpath -w "$(command -v bash)")\" \"$(cygpath -w "$relay/run.sh")\"" >/dev/null 2>"$TMP_ERR" \
-    && MSYS2_ARG_CONV_EXCL='*' schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$task" >/dev/null 2>&1; return 98; }
+    && MSYS2_ARG_CONV_EXCL='*' schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
   for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
   if [ ! -e "$relay/started" ]; then
     echo "desktop relay never started: $USERNAME must be signed in at the desktop of this machine." >> "$TMP_ERR"
-    MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$task" >/dev/null 2>&1; return 99
+    stop_relay_task; return 99
   fi
   i="$(( $(date +%s) + ${REVIEW_TIMEOUT%%[!0-9]*} + 120 ))"
   until [ -s "$relay/rc" ] || [ "$(date +%s)" -gt "$i" ]; do sleep 2; done
