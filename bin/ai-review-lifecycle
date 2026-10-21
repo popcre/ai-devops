@@ -27,6 +27,22 @@ for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
   break
 done
 [ -n "$GATE_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the task-gate library\n' >&2; exit 1; }
+# Per-session skip list (plan_reviewer-observation-week step 2): every
+# terminal reviewer failure removes that reviewer for the calling session.
+SKIP_LIB="$(dirname "$GATE_LIB")/review-session-skip.sh"
+[ -f "$SKIP_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the session skip library\n' >&2; exit 1; }
+# shellcheck source=../tools/lib/review-session-skip.sh
+. "$SKIP_LIB"
+[ -n "${AI_CALLER_SESSION_ID:-}" ] || review_export_caller_session_id
+session_skip_record(){ # STATE FAILURE -> best effort; never changes the terminal result
+  local state="$1" failure="$2" provider sid
+  skip_failure_counts "$failure" || return 0
+  provider="$(jq -r '.provider // empty' "$state" 2>/dev/null || true)"
+  sid="$(jq -r '.caller_session_id // empty' "$state" 2>/dev/null || true)"
+  [ -n "$sid" ] || sid="$AI_CALLER_SESSION_ID"
+  [ -n "$provider" ] || return 0
+  skip_add "$sid" "$provider" "$failure" 2>/dev/null || true
+}
 # shellcheck source=../tools/lib/task-gates.sh
 . "$GATE_LIB"
 
@@ -344,6 +360,7 @@ begin(){
   row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" --arg rmode "$review_mode" --arg impl "$implementer" \
     '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,review_mode:(if $rmode=="" then null else $rmode end),implementer_engine:(if $impl=="" then null else $impl end),base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
   row="$(jq --arg owner "$owner" --arg start "$owner_start" '.owner_pid=(if $owner=="" then null else ($owner|tonumber) end)|.owner_start=(if $start=="" then null else $start end)' <<<"$row")"
+  row="$(jq --arg csid "$AI_CALLER_SESSION_ID" --arg detach "${AI_REVIEW_DETACH_ID:-}" '.caller_session_id=$csid|.detach_id=(if $detach=="" then null else $detach end)' <<<"$row")"
   row="$(jq --arg export "$export_root" --argjson binding "$export_record" 'if $export!="" then .code_only_export=$export|.code_only=$binding|.evidence_scope="selected-code" else . end' <<<"$row")"
   atomic_json "$state" "$row"
   if [ -n "$action_profile$action_manifest" ]; then
@@ -370,6 +387,7 @@ begin(){
       valid_safe_atom "$held_class" || held_class=""
       row="$(jq --arg now "$(date -u +%FT%TZ)" --arg output "$(tail -20 "$preflight_out")" --argjson rc "$preflight_rc" --arg class "$held_class" '.status="preflight_failed"|.preflight={exit_code:$rc,summary:$output,failure_class:(if $class=="" then null else $class end)}|.failure_class=(if $class=="" then null else $class end)|.updated_at=$now|.finished_at=$now' "$state")"
       rm -f "$preflight_out"; atomic_json "$state" "$row"; release_lock "$state"; BEGIN_LOCK=""; BEGIN_TOKEN=""; trap - EXIT INT TERM
+      session_skip_record "$state" "preflight-${held_class:-failed}"
       die "provider preflight failed${held_class:+ ($held_class)}; terminal state recorded at $state"
     fi
     rm -f "$preflight_out"
@@ -451,6 +469,7 @@ terminal(){ # finish|fail args
     row="$(jq --arg now "$(date -u +%FT%TZ)" '.status="accounting_failed"|.updated_at=$now' "$state")"; atomic_json "$state" "$row"
     die "terminal result was preserved but scoreboard accounting failed; lock retained: $state"
   fi
+  [ "$verdict" != BLOCKED ] || session_skip_record "$state" "${failure:-blocked}"
   release_lock "$state"; jq . "$state"
 }
 

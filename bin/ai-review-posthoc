@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# ai-review-posthoc — drain the observation-week post-hoc review queue
+# (plan_reviewer-observation-week steps 4 and 8).
+#
+#   ai-review-posthoc [--repo OWNER/NAME] [--dry-run] [--limit N]
+#
+# Lists merged pull requests labelled `unreviewed-week` whose merged head has
+# no scoreboard verdict yet, and (without --dry-run) reviews each merged head
+# with the next usable rotation reviewer:
+#   ai-review <provider> final-check --base <sha>^ --assert-head <sha>
+# in a temporary detached worktree. A REJECT opens a fix-forward issue
+# "Post-hoc REJECT on <repo>#<pr>" linking the report; it never reverts.
+# Run it from a checkout of the repository being drained.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+repo=""; dry_run=0; limit=50
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo) repo="${2:-}"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    --limit) limit="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    *) printf 'ai-review-posthoc: unknown option %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+case "$limit" in ''|*[!0-9]*) printf 'ai-review-posthoc: --limit needs a number.\n' >&2; exit 2 ;; esac
+GH="${AI_POSTHOC_GH_BIN:-gh}"
+REVIEW="${AI_POSTHOC_REVIEW_BIN:-$ROOT/ai-review}"
+PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$ROOT/ai-review-preflight}"
+BOARD="${AI_REVIEW_SCOREBOARD_FILE:-${AI_REVIEW_SCOREBOARD_DIR:-$HOME/.local/state/ai-devops/review-scoreboard}/reviews.jsonl}"
+[ -n "$repo" ] || repo="$("$GH" repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null | tr -d '\r')" \
+  || { printf 'ai-review-posthoc: cannot resolve the repository; pass --repo.\n' >&2; exit 2; }
+[ -n "$repo" ] || { printf 'ai-review-posthoc: cannot resolve the repository; pass --repo.\n' >&2; exit 2; }
+
+has_verdict() { # SHA -> 0 when the scoreboard holds a decision for it
+  [ -f "$BOARD" ] || return 1
+  jq -e --arg h "$1" 'select(.head==$h and (.verdict=="APPROVE" or .verdict=="REJECT" or .verdict=="REVISE"))' "$BOARD" >/dev/null 2>&1
+}
+
+queue="$("$GH" pr list -R "$repo" --state merged --label unreviewed-week --limit "$limit" --json number,mergeCommit,title \
+  -q '.[] | "\(.number) \(.mergeCommit.oid) \(.title)"' | tr -d '\r')" \
+  || { printf 'ai-review-posthoc: cannot list unreviewed-week pull requests in %s.\n' "$repo" >&2; exit 3; }
+
+pending=()
+while read -r number sha title; do
+  [ -n "${number:-}" ] || continue
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || continue
+  has_verdict "$sha" && continue
+  pending+=("$number $sha")
+  printf 'queued %s#%s %s %s\n' "$repo" "$number" "$sha" "$title"
+done <<<"$queue"
+printf 'ai-review-posthoc: %d merged unreviewed-week pull request(s) without a verdict in %s.\n' "${#pending[@]}" "$repo" >&2
+[ "$dry_run" = 0 ] || exit 0
+[ "${#pending[@]}" -gt 0 ] || exit 0
+
+provider=""
+for p in muse deepseek glm stepfun; do
+  if "$PREFLIGHT" usable "$p" >/dev/null 2>&1; then provider="$p"; break; fi
+done
+[ -n "$provider" ] || { printf 'ai-review-posthoc: no rotation reviewer is usable now; the queue waits.\n' >&2; exit 75; }
+
+top="$(git rev-parse --show-toplevel)"
+rc_all=0
+for item in "${pending[@]}"; do
+  number="${item%% *}"; sha="${item#* }"
+  git -C "$top" fetch -q origin "$sha" 2>/dev/null || true
+  wt="$(mktemp -d)/posthoc-$number"
+  git -C "$top" worktree add -q --detach "$wt" "$sha" || { printf 'ai-review-posthoc: cannot check out %s for #%s.\n' "$sha" "$number" >&2; rc_all=3; continue; }
+  out="$(mktemp)"; rc=0
+  ( cd "$wt" && "$REVIEW" "$provider" final-check --base "$sha^" --assert-head "$sha" ) >"$out" || rc=$?
+  report="$(tail -n 1 "$out" | tr -d '\r')"
+  verdict=""
+  [ -f "$report" ] && verdict="$(awk '/^## Verdict[[:space:]]*$/{getline v; while (v ~ /^[[:space:]]*$/) getline v; last=v} END{gsub(/[[:space:]]/,"",last); print last}' "$report")"
+  printf '%s#%s %s: %s (exit %s)\n' "$repo" "$number" "$provider" "${verdict:-no verdict}" "$rc"
+  if [ "$verdict" = REJECT ]; then
+    "$GH" issue create -R "$repo" --title "Post-hoc REJECT on $repo#$number" \
+      --body "$(printf 'Post-hoc review (observation week) by %s rejected merged head `%s` of #%s.\n\nReport (on the reviewing host): `%s`\n\nFix forward; never revert. Tracked by popcre/ai-devops#1948.\n\nPosted by ai-review-posthoc on %s\n' "$provider" "$sha" "$number" "$report" "$(hostname)")" || rc_all=3
+  fi
+  git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  rm -f "$out"
+done
+exit "$rc_all"
