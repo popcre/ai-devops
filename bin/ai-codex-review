@@ -154,12 +154,21 @@ cleanup(){
         || { rm -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$"
              printf 'ai-codex-review: warning: could not keep the refreshed Codex token; run codex login if the next call is refused.\n' >&2; }
     fi
-    # Unlink the Windows sandbox junctions first (rmdir removes only the link),
-    # so the recursive delete can never reach the user's real Codex home.
+    # Unlink the Windows sandbox junctions first, with the native rmdir that
+    # removes only the reparse point (the pattern the Muse Code tests use), so
+    # the recursive delete can never reach the user's real Codex home. If an
+    # unlink fails, keep the home rather than risk deleting through it.
+    codex_home_safe=1
     for d in .sandbox .sandbox-bin .sandbox-secrets; do
-      [ ! -L "$REVIEWER_HOME_DIR/$d" ] || rmdir "$REVIEWER_HOME_DIR/$d" 2>/dev/null || rm -f "$REVIEWER_HOME_DIR/$d"
+      [ -e "$REVIEWER_HOME_DIR/$d" ] || [ -L "$REVIEWER_HOME_DIR/$d" ] || continue
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) MSYS2_ARG_CONV_EXCL='*' cmd /c rmdir "$(cygpath -w "$REVIEWER_HOME_DIR/$d")" >/dev/null 2>&1 || true ;;
+        *) [ ! -L "$REVIEWER_HOME_DIR/$d" ] || rm -f "$REVIEWER_HOME_DIR/$d" || true ;;
+      esac
+      [ ! -e "$REVIEWER_HOME_DIR/$d" ] && [ ! -L "$REVIEWER_HOME_DIR/$d" ] || codex_home_safe=0
     done
-    rm -rf "$REVIEWER_HOME_DIR"
+    if [ "$codex_home_safe" = 1 ]; then rm -rf "$REVIEWER_HOME_DIR"
+    else printf 'ai-codex-review: warning: left %s in place; a sandbox link could not be removed safely.\n' "$REVIEWER_HOME_DIR" >&2; fi
   fi
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
