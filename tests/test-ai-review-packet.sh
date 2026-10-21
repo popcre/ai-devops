@@ -22,6 +22,7 @@ export PYTHON
 SCRIPT="$REPO_ROOT/bin/ai-review-packet"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/lib/path-identity.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -68,7 +69,7 @@ check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
 check "packet_lives_inside_the_review_dir"    "[ \"\$(cd \"\$(dirname '$PKT')\" && pwd -P)\" = \"\$(cd '$R' && pwd -P)\" ] && [ \"\$(basename '$PKT')\" = '.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
 check "reviewer_manifest_uses_accessible_relative_root" "grep -q 'Accessible repository root for tool reads:' '$M' && grep -q 'immutable provenance only; do not read this host path' '$M' && grep -q 'Old host paths in conversation history are not accessible' '$M'"
-check "original_identity_remains_sealed" "test \"\$(jq -r .repository '$PKT/identity.json')\" = '$R'"
+check "original_identity_remains_sealed" "ai_same_path \"\$(jq -r .repository '$PKT/identity.json')\" '$R'"
 
 # A governed review brief can exceed the kernel's per-argument limit. Keep the
 # entire request in the sealed manifest without routing it through argv.
@@ -434,6 +435,15 @@ jq --arg bad "$STALE_LOCAL_SHA" '.base=$bad' "$IDENTITY" > "$TMP/wrong-base.json
 check "build_rejects_forged_base_identity" "! '$SCRIPT' build '$IDENTITY_SNAPSHOT' wrong-base --identity '$TMP/wrong-base.json'"
 jq --arg bad "$BASE_SHA" '.head=$bad' "$IDENTITY" > "$TMP/wrong-head.json"
 check "build_rejects_forged_head_identity" "! '$SCRIPT' build '$IDENTITY_SNAPSHOT' wrong-head --identity '$TMP/wrong-head.json'"
+# A repository test run inside a review snapshot builds evidence IN PLACE on
+# that snapshot: the identity seals the snapshot itself, whose marker names the
+# parent checkout. That is the same repository, not a mismatch.
+"$SCRIPT" resolve "$IDENTITY_SNAPSHOT" --base release > "$TMP/in-place-identity.json"
+check "in_place_snapshot_build_accepts_its_own_identity" "'$SCRIPT' build '$IDENTITY_SNAPSHOT' in-place --identity '$TMP/in-place-identity.json' >/dev/null && '$SCRIPT' remove '$IDENTITY_SNAPSHOT' in-place >/dev/null"
+jq '.head="0000000000000000000000000000000000000000"' "$TMP/in-place-identity.json" > "$TMP/in-place-wrong-head.json"
+check "in_place_snapshot_build_still_rejects_forged_head" "! '$SCRIPT' build '$IDENTITY_SNAPSHOT' in-place-forged --identity '$TMP/in-place-wrong-head.json'"
+OTHER_SNAPSHOT="$(AI_REVIEW_SANDBOX_BASE=release "$REPO_ROOT/bin/ai-review-sandbox" ensure-copy "$STALE" identity-other)"
+check "snapshot_identity_still_refused_for_a_different_review_root" "'$SCRIPT' build '$OTHER_SNAPSHOT' cross-copy --identity '$TMP/in-place-identity.json' 2>&1 | grep -q source-repository-mismatch"
 echo changed-untracked > "$STALE/identity-new.txt"
 check "identity_rejects_untracked_source_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 check "retained_packet_survives_proven_source_movement" "'$SCRIPT' verify-retained '$IDENTITY_PACKET'"
@@ -457,6 +467,7 @@ check "identity_rejects_target_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' 
 git -C "$STALE" update-ref refs/heads/release "$STALE_REMOTE_SHA"
 check "unchanged_identity_verifies_after_restoring_target" "'$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 "$REPO_ROOT/bin/ai-review-sandbox" remove-copy "$STALE" identity-contract
+"$REPO_ROOT/bin/ai-review-sandbox" remove-copy "$STALE" identity-other
 
 # The per-tag private base ref pins the recorded base in the REAL source
 # checkout. Prove the full anti-GC property: with the release ref, the fetched
