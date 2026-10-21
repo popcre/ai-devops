@@ -224,8 +224,8 @@ stop_relay_task(){
   winpid="$(cat "$REVIEWER_HOME_DIR/relay/winpid" 2>/dev/null | tr -dc 0-9)"
   # The tree is killed before /End, which would orphan the children by killing their root first.
   if [ -n "$winpid" ]; then
-    MSYS2_ARG_CONV_EXCL='*' timeout 30 taskkill /F /T /PID "$winpid" >/dev/null 2>&1 || true
-    gone="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "if (Get-Process -Id $winpid -ErrorAction SilentlyContinue) { 'alive' } else { 'yes' }" 2>/dev/null | tr -d '\r')"
+    # Collect every descendant, kill them all, and answer yes only if none survives.
+    gone="$(timeout 60 powershell.exe -NoProfile -NonInteractive -Command "\$all = Get-CimInstance Win32_Process; \$tree = @($winpid); \$i = 0; while (\$i -lt \$tree.Count) { \$tree += @(\$all | Where-Object { \$_.ParentProcessId -eq \$tree[\$i] } | ForEach-Object { [int]\$_.ProcessId }); \$i++ }; \$tree | ForEach-Object { Stop-Process -Id \$_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; if (\$tree | Where-Object { Get-Process -Id \$_ -ErrorAction SilentlyContinue }) { 'alive' } else { 'yes' }" 2>/dev/null | tr -d '\r')"
   elif [ -e "$REVIEWER_HOME_DIR/relay/started" ]; then
     gone=unknown
   fi
