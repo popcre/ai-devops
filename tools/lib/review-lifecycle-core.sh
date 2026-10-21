@@ -427,9 +427,10 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # provider (#1834): doors are untouched. The door runs with a private TMPDIR,
 # so every log it writes there is visible here. The watch kills the door's
 # process tree when:
-#   silent-start  nothing grows (door stdout/stderr or any file in its TMPDIR)
+#   silent-start  the door prints nothing and no file in its TMPDIR grows
 #                 for AI_REVIEW_FIRST_OUTPUT_SECONDS (default 300) after the
-#                 settle window; disarmed for good by the first growth, so a
+#                 settle window (its own prompt files); disarmed for good by
+#                 any door output or the first growth after settle, so a
 #                 healthy review that is producing output is never killed
 #                 (the door's own timeout still governs those);
 #   fatal-pattern a known fatal line on the door's STDERR only (stdout may
@@ -476,6 +477,8 @@ rlc_fast_fail_watch() { # PID WATCH_DIR STDERR_FILE -> sets RLC_FAST_FAIL_REASON
       RLC_FAST_FAIL_REASON=fatal-pattern; break
     fi
     [ "$armed" = 1 ] || continue
+    # Anything the door itself printed is output, however early it came.
+    if [ -s "$dir/door.out" ] || [ -s "$err" ]; then armed=0; continue; fi
     size="$(rlc_tree_bytes "$dir")"
     if [ "$ticks" -le "$settle" ] || [ -z "$base" ]; then base="$size"; continue; fi
     if [ "$size" != "$base" ]; then armed=0; continue; fi
