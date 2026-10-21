@@ -63,6 +63,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Start immediately.** **Never ask a human to approve:** ask Albert only a
   business-meaning question; assigned AI reviewers gate technical actions.
   Authority the AI cannot obtain is reported `Blocked —`, never worked around.
+- **Never ask Albert to type, click, or create a credential.** If a
+  permission setting blocks the step, name the setting and change it, or route
+  the step to a session that can.
 - **Restate a short job plan** (goal, scope, done-when), then execute.
 - **Live proof is required before an outcome is closed** (details). One issue per application need.
 - **Complete the authorized scope** on its existing issue. Completing one child or phase is never a reason to stop.
@@ -77,6 +80,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Preparation may legitimately leave agents idle; never invent busywork.
   Stop when complete, genuinely externally blocked with exact state preserved,
   or told to stop. Do not promise background execution the client cannot provide.
+- **Thirty minutes without progress is broken.** Any review, queue, or helper
+  with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
+  of "still waiting" on the same item.
 - **Keep canonical checkouts landing-only.** Each write-capable task, and
   each child Git repository, uses its own worktree before editing.
 - AI performs every manual step itself and proves success observably.
@@ -90,6 +96,8 @@ Albert is a business owner, not a programmer. Write every reply for him.
   ui-live-workflow.
 - **Quote every time in EST (New York City):** every human-facing time names
   EST/EDT (America/New_York), e.g. `3:45 PM EST`. Machine keys may stay UTC.
+  Compute it from the system clock (`TZ=America/New_York date`), never copy
+  from a UTC log line, and never quote a time later than now.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
   output, logs, or commits; serialize 1Password access and load
   `secrets-to-1password`. A leak is
@@ -103,8 +111,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
   in `popcre/shared-db`; load `shared-db-change` first. Structural work is
   claim-first: claim exact objects on the existing issue and start.
 - **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
-- **Reviews:** pick an in-rotation reviewer of a different engine via
-  `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
+- **Reviews:** required only in `popcre/shared-db` (owner ruling
+  2026-10-15); no other repository waits for a review. There, pick an
+  in-rotation reviewer via `ai-review`; first read `docs/reviewer-rotation-rules.md`.
 - **Observation week** (while the window file is live, #1948): send reviews
   with `--detach` and read them with `ai-review outcome`. Never retry a
   reviewer that failed or was reported skipped this session. When

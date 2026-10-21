@@ -527,7 +527,7 @@ List:
 - what risk exists
 - how it could be restored
 
-Keep every deletion recoverable (commit or backup) and get the assigned AI reviewer's APPROVE before deleting anything significant. Never wait for my approval.
+Keep every deletion recoverable (commit or backup); no AI review is required outside popcre/shared-db (owner 2026-10-15). Never wait for my approval.
 
 ### Step 5: Delete reviewed items
 

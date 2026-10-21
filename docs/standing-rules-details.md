@@ -93,12 +93,10 @@ shared-db allocator draws; everywhere else, a rotation reviewer run through
 shared-db there is no draw command: the session itself picks any reviewer the
 registry lists as in rotation (`config/reviewer-registry.json`, mirrored from
 the allocator) and moves to the next one if it is unreachable. The
-implementing session never approves its own change. Discretionary AI review is
-**shared-db-only** (owner 2026-10-13, popcre/ai-devops#1714): outside
-`popcre/shared-db`, dispatch a review only when the task class's gate already
-demands one (installation, reviewer-safety, deployment, infrastructure,
-production, shared-db promotion). Ordinary docs, tooling, and non-shared-db
-code land with no review. Authority an AI cannot
+implementing session never approves its own change. AI review is required
+**only in `popcre/shared-db`** (owner 2026-10-15, verbatim in
+`docs/owner-rulings.md`, superseding 2026-10-13 popcre/ai-devops#1714): no other
+repository's work waits for a review. Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's
 exact-head APPROVE report (popcre/ai-devops#996), from a review run with

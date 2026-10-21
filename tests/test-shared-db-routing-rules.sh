@@ -26,7 +26,7 @@ check "manual requires reclassification from scratch" "grep -qi 'successor issue
 check "Codex global carries successor rule" "grep -qi 'Route every successor from its own work' '$CODEX'"
 check "Claude global carries successor rule" "grep -qi 'Route every successor from its own work' '$CLAUDE'"
 check "misroute preserves private artifacts" "grep -qi 'private artifact' '$ORCH'"
-check "review safety gate is scoped to this toolkit, not every project" "grep -qi 'Independent review is required for the reviewer safety path' '$REPO_AGENTS' && grep -qi 'Ordinary plans' '$REPO_AGENTS'"
+check "required review is scoped to shared-db only (owner 2026-10-15)" "grep -qi 'AI review is required only in .popcre/shared-db' '$REPO_AGENTS'"
 check "skill keeps protected claims locked with no author ceiling" "grep -qi 'Protected blocked claims keep every object and version lock' '$ORCH' && grep -qi 'no numeric ceiling on concurrent authors' '$ORCH' && grep -qi 'no numeric ceiling on concurrent authors' '$MANUAL'"
 check "manual preserves collision protection after relinquishment" "grep -qi 'protected claim remains in every collision calculation' '$MANUAL'"
 check "skill and manual name the guarded relinquish command" "grep -q -- '--relinquish-author-lease' '$ORCH' && grep -q -- '--relinquish-author-lease' '$MANUAL'"
