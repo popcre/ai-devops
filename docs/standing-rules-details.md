@@ -114,6 +114,20 @@ its full checklist lives in the [shared-db structural safety reference](shared-d
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
 
+## Production and shared-db scope (moved from the globals, #1881)
+
+AI sessions are read-only for production and shared cloud infrastructure by
+default. The assigned AI reviewer's explicit APPROVE on the exact inputs gates
+`terraform apply`, mutating production `gcloud`, and every other technical
+production action; anything else stops. Shared-db structural work is
+claim-first: claim exact objects on the existing issue and start; no
+orchestrator chat or marker is required. Its scope stays the minimum — only
+work that changes the database's SHAPE, or a curated Master Data load.
+Proofs, monitoring, reports, tooling, scripts, docs, and repository
+maintenance never go there. Reading schema and safe sample data is open;
+application row data belongs to the application. Dated rulings:
+[`docs/owner-rulings.md`](owner-rulings.md).
+
 ## Database writes
 
 Owner ruling (2026-10-14, Albert Hazan, verbatim: "Our own safety rules
