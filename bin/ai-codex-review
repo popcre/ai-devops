@@ -378,7 +378,7 @@ if [ "${#WINDOWS_SANDBOX_ARGS[@]}" -gt 0 ] && [ -n "${SSH_CONNECTION:-}" ] && [ 
 run_relayed_provider() {
   local relay task rc i
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
-  mkdir -p "$relay" && printf '%s\n' "$PROMPT" > "$relay/prompt"
+  mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
     printf 'touch %q\n' "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
