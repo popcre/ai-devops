@@ -255,12 +255,18 @@ if [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] && skip_has "$AI_CALLER_SES
   skip_at="${skip_detail#* }"
   skip_when="$(TZ=EST5EDT date -d "$skip_at" '+%-I:%M %p %Z' 2>/dev/null || printf '%s' "$skip_at")"
   printf 'ai-review: %s skipped for this session (%s, %s)\n' "$pool_provider" "${skip_detail%% *}" "$skip_when" >&2
-  skip_remaining=""
+  skip_remaining=""; skip_members=""
   skip_registry="$REAL_DIR/../config/reviewer-registry.json"; [ -z "${AI_REVIEW_REGISTRY_FILE:-}" ] || skip_registry="$AI_REVIEW_REGISTRY_FILE"
   skip_scope="$REAL_DIR/../config/reviewer-membership-scope.json"
   for skip_p in $(jq -r --slurpfile scope "$skip_scope" '.providers|to_entries[]|select(.value.registry_state=="registered")|.key as $k|select(($scope[0].outside_allocator//{})|has($k)|not)|$k' "$skip_registry" 2>/dev/null | tr -d '\r'); do
+    skip_members="$skip_members $skip_p"
     skip_has "$AI_CALLER_SESSION_ID" "$skip_p" || skip_remaining="$skip_remaining $skip_p"
   done
+  if [ -z "$skip_members" ]; then
+    # Fail closed: an unreadable roster is never "every reviewer skipped".
+    printf 'ai-review: cannot read the rotation roster; this reviewer stays skipped.\n' >&2
+    exit 77
+  fi
   if [ -z "$skip_remaining" ]; then
     printf 'ai-review: all reviewers skipped this session\n' >&2
     # The week's merge gate accepts this as the head's review evidence.

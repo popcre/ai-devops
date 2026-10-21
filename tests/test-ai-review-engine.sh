@@ -2064,6 +2064,10 @@ check "skip_does_not_leak_to_other_session" "[ '$rc' = 0 ] && grep -q '^muse dif
 rc=0; AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/c.out" 2>"$OW/c.err" || rc=$?
 check "all_skipped_exits_75" "[ '$rc' = 75 ] && grep -q 'all reviewers skipped this session' '$OW/c.err' && grep -lq '\"status\":\"all-skipped\"' '$AI_REVIEW_DETACH_DIR'/s*.json"
 
+rm -f "$AI_REVIEW_DETACH_DIR"/s*.json
+rc=0; AI_REVIEW_REGISTRY_FILE="$OW/missing-registry.json" AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/r.out" 2>"$OW/r.err" || rc=$?
+check "unreadable_roster_never_counts_as_all_skipped" "[ '$rc' = 77 ] && grep -q 'cannot read the rotation roster' '$OW/r.err' && ! ls '$AI_REVIEW_DETACH_DIR'/s*.json >/dev/null 2>&1"
+
 : > "$OW_POOL_LOG"
 SECONDS_BEFORE=$SECONDS
 rc=0; AI_CALLER_SESSION_ID=ow-session-c ow_front muse final-check --force --detach >"$OW/d.out" 2>"$OW/d.err" || rc=$?

@@ -439,11 +439,21 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # clock jump cannot fire or suppress the watch. AI_REVIEW_FIRST_OUTPUT_SECONDS=0
 # disables the watch entirely (rollback without a reinstall).
 # ---------------------------------------------------------------------------
-RLC_FAST_FAIL_PATTERN='spawn .*NotFound|E2BIG|command not found|(^|[^0-9])429([^0-9]|$)|insufficient_quota|allowance|project_token_login_failed|unknown option|not a repository top level|ENOENT.*governed-source'
+RLC_FAST_FAIL_PATTERN='spawn .*NotFound|E2BIG|: command not found$|(status|HTTP|code|error)[^0-9]{0,4}429([^0-9]|$)|insufficient_quota|allowance (exhausted|exceeded|reached)|project_token_login_failed|(error|Error|ERROR)[: ].*unknown option|not a repository top level|ENOENT.*governed-source'
 RLC_FAST_FAIL_REASON=""
 
 rlc_tree_bytes() { # DIR -> total bytes of regular files below DIR
   find "$1" -type f -printf '%s\n' 2>/dev/null | awk '{t+=$1} END{print t+0}'
+}
+
+rlc_tree_pids() { # PID -> PID and every descendant, parents first
+  local pid="$1" child
+  printf '%s\n' "$pid"
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do rlc_tree_pids "$child"; done
+  else
+    for child in $(ps -ef 2>/dev/null | awk -v p="$pid" '$3==p{print $2}'); do rlc_tree_pids "$child"; done
+  fi
 }
 
 rlc_kill_tree() { # PID -> best-effort kill of PID and every descendant
@@ -486,9 +496,11 @@ rlc_fast_fail_watch() { # PID WATCH_DIR STDERR_FILE -> sets RLC_FAST_FAIL_REASON
   done
   if [ -n "$RLC_FAST_FAIL_REASON" ]; then
     rlc_note "fast-fail: ${RLC_FAST_FAIL_REASON} after ${ticks}s; stopping the reviewer process."
+    local tree; tree="$(rlc_tree_pids "$pid")"
     rlc_kill_tree "$pid"
     sleep 1
-    kill -KILL "$pid" 2>/dev/null || true
+    # Descendants that ignored TERM are killed too, never left running.
+    for p in $tree; do kill -KILL "$p" 2>/dev/null || true; done
   fi
   return 0
 }

@@ -72,7 +72,14 @@ ow_head_evidence() { # HEAD
     status="$(jq -r '.status // empty' "$f" 2>/dev/null | tr -d '\r')"
     case "$status" in
       all-skipped) printf 'all-skipped %s\n' "$id"; return 0 ;;
-      pending|finished) printf 'detached %s\n' "$id"; return 0 ;;
+      pending|finished)
+        [ -n "$id" ] || continue
+        # Finished with no lifecycle carrying this id: refused before dispatch.
+        if [ -f "$dir/$id.result.json" ] && ! grep -rqlE --include='*.json' "\"detach_id\": ?\"$id\"" \
+            "${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}/runs" 2>/dev/null; then
+          continue
+        fi
+        printf 'detached %s\n' "$id"; return 0 ;;
     esac
   done
   return 1

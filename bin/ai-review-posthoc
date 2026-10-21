@@ -59,10 +59,11 @@ while read -r number sha branch_head title; do
   [ -n "${number:-}" ] || continue
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || continue
   # The detached run reviewed the branch head; the drain reviews the merged head.
-  known="$(verdict_for "$sha" || verdict_for "$branch_head" || true)"
+  known="$(verdict_for "$sha" || true)"; refused="$sha"
+  [ -n "$known" ] || { known="$(verdict_for "$branch_head" || true)"; refused="$branch_head"; }
   if [ "$known" = REJECT ]; then
-    printf 'rejected %s#%s %s (a detached run refused it after merge)\n' "$repo" "$number" "$branch_head"
-    [ "$dry_run" = 1 ] || open_reject_issue "$number" "$branch_head" "detached run" "$BOARD" || rc_all=3
+    printf 'rejected %s#%s %s (refused after merge)\n' "$repo" "$number" "$refused"
+    [ "$dry_run" = 1 ] || open_reject_issue "$number" "$refused" "an earlier run" "$BOARD" || rc_all=3
     continue
   fi
   [ -z "$known" ] || continue
