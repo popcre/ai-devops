@@ -130,8 +130,9 @@ if [ -n "${SYSTEMROOT:-}" ]; then
   cat > "$ST/schtasks" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
+[ "$1" = /Create ] && [ "${AI_CODEX_FAKE_CREATE_FAIL:-}" = 1 ] && exit 1
 prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
-[ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*" "(.*)"$/\1/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
+[ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*-File "(.*)job[.]ps1"$/\1run.sh/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
 [ "$1" = /Create ] && rm -f "$AI_CODEX_TEST_ARGS/schtasks-deleted"
 [ "$1" = /Delete ] && : > "$AI_CODEX_TEST_ARGS/schtasks-deleted"
 if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
@@ -139,22 +140,23 @@ exit 0
 EOF
   cat > "$ST/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *Get-ScheduledTask*|*windows-kill-process-tree*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
+case "$*" in *Get-ScheduledTask*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
 [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] && { echo 'No MSFT_ScheduledTask objects found' >&2; exit 1; }
-case "$*" in *windows-kill-process-tree*) [ -n "${AI_REVIEW_KILL_MARKER:-}" ] && echo treekill >> "$AI_CODEX_TEST_ARGS/schtasks-log"; [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo alive || echo yes; exit 0;; esac
 [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
 EOF
   export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"
   chmod +x "$ST/schtasks" "$ST/powershell.exe"
   rm -f "$TMP/args/schtasks-log"
   RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
-  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x treekill '$TMP/args/schtasks-log' | grep -qx /End && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
+  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
   failed_runs(){ find "$TMP/lifecycle/runs" -name '*.json' -exec jq -e 'select(.status=="failed" and .failure_class=="provider-failed")' {} \; 2>/dev/null | grep -c BLOCKED; }
   FAILED_BEFORE="$(failed_runs)"
   check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && kept=\$(grep -rho 'Its state is kept in [^ ]*[^. ]' '$R/.ai/reviews' | head -1 | sed 's/Its state is kept in //') && [ -d \"\$kept/relay\" ] && touch \"\$kept/relay/cancel\" && rm -rf \"\$kept\" && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
+  check "ssh_review_create_failure_keeps_nothing_and_stops_nothing" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_CREATE_FAIL=1 PATH='$ST:$PATH' '$SCRIPT' diff-review 2>'$TMP/create-fail.err' >/dev/null && ! grep -q 'kept' '$TMP/create-fail.err' && ! grep -qx /End '$TMP/args/schtasks-log'"
   rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
 fi

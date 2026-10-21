@@ -469,7 +469,7 @@
           "class": "reviewer-safety"
         },
         {
-          "glob": "bin/windows-kill-process-tree.ps1",
+          "glob": "bin/windows-job-run.ps1",
           "class": "reviewer-safety"
         },
         {
