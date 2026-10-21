@@ -220,7 +220,7 @@ stop_relay_task(){
   local state
   # The State enum name is not localized, unlike schtasks /Query's text.
   state="$(powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
-    && [ -n "$state" ] && [ "$state" != Running ] && [ "$state" != Queued ] \
+    && { [ "$state" = Ready ] || [ "$state" = Disabled ]; } \
     && MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 \
     || { echo "ai-codex-review: relay task $RELAY_TASK could not be confirmed stopped and removed; end it before trusting this machine's Codex auth." >&2; return 1; }
   # The relay runs in a subshell; this marker tells the parent it is gone.
