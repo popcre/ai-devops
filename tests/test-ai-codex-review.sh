@@ -132,6 +132,7 @@ if [ -n "${SYSTEMROOT:-}" ]; then
 printf '%s\n' "$1" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
 prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
 [ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*" "(.*)"$/\1/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
+if [ "$1" = /Query ]; then [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo '"t","N/A","Running"' || echo '"t","N/A","Ready"'; fi
 if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
 exit 0
 EOF
@@ -142,6 +143,8 @@ EOF
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
+  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log'"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
 fi
 check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"

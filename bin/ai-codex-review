@@ -216,6 +216,10 @@ RELAY_TASK=""
 stop_relay_task(){
   [ -n "$RELAY_TASK" ] || return 0
   MSYS2_ARG_CONV_EXCL='*' schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  if MSYS2_ARG_CONV_EXCL='*' schtasks /Query /TN "$RELAY_TASK" /FO CSV /NH 2>/dev/null | grep -q '"Running"'; then
+    echo "ai-codex-review: relay task $RELAY_TASK is still running; end it before trusting this machine's Codex auth." >&2
+    return 1
+  fi
   MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   RELAY_TASK=""
 }
@@ -399,7 +403,7 @@ if [ "$DESKTOP_RELAY" = 1 ]; then RELAY_TASK="AiDevOps-CodexReview-$$"; fi
 run_provider & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 # A relay that hit its own deadline leaves the task running; end it here too.
-stop_relay_task
+stop_relay_task || die "the desktop relay task could not be stopped; no report was published."
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 
