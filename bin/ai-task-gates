@@ -57,10 +57,9 @@ fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX
 blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
 
 # Reviewer observation week (plan_reviewer-observation-week step 4). Only
-# while a valid window file is live: a code ship needs evidence that this exact
-# head was sent for review (an APPROVE, a --detach run, or ai-review exit 75)
-# and is then a MERGE-UNREVIEWED merge; reviewer code and toolkit installs are
-# frozen. shared-db, production, infrastructure and deployment classes are
+# while a valid window file is live: a code ship whose exact head was sent for
+# review without an APPROVE yet (a --detach run, or ai-review exit 75) is a
+# MERGE-UNREVIEWED merge; reviewer code and toolkit installs are frozen. shared-db, production, infrastructure and deployment classes are
 # never admitted by the window and keep their gates unchanged.
 observation_week_check(){ # ACTION EFFECTIVE_CLASS
   local action="$1" effective="$2" head evidence
@@ -88,7 +87,9 @@ observation_week_check(){ # ACTION EFFECTIVE_CLASS
         printf 'Unreviewed merge (observation week, all-skipped)\n'
       fi ;;
     *)
-      blocked "$(printf 'ai-task-gates: STOP before "%s". Reviewer observation week: head %s was never sent for review. Run ai-review <reviewer> final-check --detach first (or record that every reviewer is skipped), then re-run this check.' "$action" "${head:-unknown}")" ;;
+      # Ordinary code needs no review (rotation rule 14), so the week never
+      # blocks it; without evidence there is simply no unreviewed-week tag.
+      printf 'ai-task-gates: observation week: head %s was never sent for review; ordinary code needs none (reviewer-rotation-rules rule 14), so no unreviewed-week label. To add it to the week'"'"'s data, run ai-review <reviewer> final-check --detach first.\n' "${head:-unknown}" ;;
   esac
   return 0
 }

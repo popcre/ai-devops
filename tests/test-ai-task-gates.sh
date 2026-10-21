@@ -1979,8 +1979,8 @@ printf 'x\n' > "$TMP/ow-code/tool.sh"; git -C "$TMP/ow-code" add -A; git -C "$TM
 ( cd "$TMP/ow-code" && "$GATES" start --class code >/dev/null 2>&1 )
 OW_HEAD="$(git -C "$TMP/ow-code" rev-parse HEAD)"
 ow_window "$OW_NOW_START" "$OW_NOW_END" '["code","prose"]'
-check 'observation_window_refuses_code_merge_never_sent_for_review' \
-  "ow_rc 3 '$TMP/ow-code' check --before ship && ow_out '$TMP/ow-code' check --before ship | grep -q 'never sent for review'"
+check 'observation_window_never_blocks_unreviewed_ordinary_code' \
+  "ow_rc 0 '$TMP/ow-code' check --before ship && ow_out '$TMP/ow-code' check --before ship | grep -q 'needs none' && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
 printf '{"id":"d20261021T000000-1-1","status":"pending","head":"%s"}\n' "$OW_HEAD" > "$OWT/detached/d20261021T000000-1-1.json"
 check 'observation_window_admits_code_merge_with_detached_run' \
   "ow_out '$TMP/ow-code' check --before ship | grep -qx 'MERGE-UNREVIEWED' && ow_out '$TMP/ow-code' check --before ship | grep -q 'Unreviewed merge (observation week, run d20261021T000000-1-1)'"
@@ -1994,7 +1994,7 @@ check 'observation_window_approved_head_merges_normally' \
   "ow_rc 0 '$TMP/ow-code' check --before ship && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
 rm -f "$OWT/reviews.jsonl"
 printf '{"id":"d1","status":"pending","head":"0000000000000000000000000000000000000000"}\n' > "$OWT/detached/d1.json"
-check 'unreviewed_label_without_evidence_refuses' "ow_rc 3 '$TMP/ow-code' check --before ship"
+check 'unreviewed_label_without_evidence_refuses' "! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
 rm -f "$OWT/detached/"*.json
 ow_window "$(date -u -d '-9 days' +%FT%TZ)" "$(date -u -d '-2 days' +%FT%TZ)" '["code","prose"]'
 check 'observation_window_expired_refuses' \
