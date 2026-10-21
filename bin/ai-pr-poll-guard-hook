@@ -49,6 +49,8 @@ elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bg[h] pr (view|checks|me
   reason='an until/while loop over a pull-request read'
 elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bg[h] pr view\b'; then
   reason='a seq loop over a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\bfor\b.*\bdo\b.*\bg[h] pr (view|checks|merge)\b'; then
+  reason='a for loop over a pull-request read'
 elif printf '%s' "$cmd" | grep -Eq '\b(for|while|until)\b.*\btimeout +[0-9]+[smh]?\b.*ai-pr-wait'; then
   reason='ai-pr-wait wrapped in timeout inside a loop'
 fi
