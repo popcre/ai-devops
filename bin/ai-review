@@ -38,8 +38,12 @@ action_review_evidence_args(){
 # the pool, the engine, the lifecycle and the scoreboard.
 SKIP_LIB="$REAL_DIR/../tools/lib/review-session-skip.sh"; [ -f "$SKIP_LIB" ] || SKIP_LIB="$ROOT/../tools/lib/review-session-skip.sh"
 # shellcheck source=../tools/lib/review-session-skip.sh
-. "$SKIP_LIB" || { printf 'ai-review: cannot load the session skip list.\n' >&2; exit 3; }
-review_export_caller_session_id  # validates an inherited id too
+load_skip_lib(){ # only reviews and outcomes need it; doctor stays usable without it
+  [ -z "${SKIP_LIB_LOADED:-}" ] || return 0
+  . "$SKIP_LIB" 2>/dev/null || { printf 'ai-review: cannot load the session skip list.\n' >&2; exit 3; }
+  review_export_caller_session_id  # validates an inherited id too
+  SKIP_LIB_LOADED=1
+}
 DETACH_DIR="${AI_REVIEW_DETACH_DIR:-$HOME/.local/state/ai-devops/review-detached}"
 detach_lifecycle_state(){ # ID -> lifecycle state file carrying that detach id
   local dir="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}/runs"
@@ -92,7 +96,7 @@ orig_args=("$@")
 pool_provider=""
 review_provider="${1:-}"
 case "${1:-}" in
-  outcome) shift; review_outcome "$@"; exit $? ;;
+  outcome) shift; load_skip_lib; review_outcome "$@"; exit $? ;;
   claude)
     # Claude left the reviewer pool (owner instruction 2026-09-30). The registry
     # is the gate even for the legacy wrapper name, so a test fixture may still
@@ -250,6 +254,7 @@ fi
 # A reviewer that already failed in this calling session is never drawn again
 # by it (plan_reviewer-observation-week step 2). Exit 75 when every rotation
 # reviewer is skipped (the week's merge gate consumes it), 77 otherwise.
+load_skip_lib
 if [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] && skip_has "$AI_CALLER_SESSION_ID" "$pool_provider"; then
   skip_detail="$(skip_reason "$AI_CALLER_SESSION_ID" "$pool_provider")"
   skip_at="${skip_detail#* }"
