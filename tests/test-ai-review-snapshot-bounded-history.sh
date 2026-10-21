@@ -102,6 +102,13 @@ check "root_base_hint_carries_whole_chain"  "test \"\$(git -C '$ROOT_SNAP' rev-p
 "$SCRIPT" remove-copy "$MAIN" root-hint
 git -C "$MAIN" branch -q -D legacy
 
+# A short-SHA revision expression (abc1234~1) is not a ref name; recreating it
+# as refs/heads/abc1234~1 made the fetch refuse and the review never started.
+SHORT_EXPR="$(git -C "$MAIN" rev-parse --short HEAD)~1"
+EXPR_SNAP="$(AI_REVIEW_SANDBOX_BASE="$SHORT_EXPR" "$SCRIPT" ensure-copy "$MAIN" shortexpr)"
+check "short_sha_expression_hint_is_carried" "test \"\$(git -C '$EXPR_SNAP' rev-parse '$SHORT_EXPR' 2>/dev/null)\" = \"\$(git -C '$MAIN' rev-parse '$SHORT_EXPR')\""
+"$SCRIPT" remove-copy "$MAIN" shortexpr
+
 # An unresolvable hint is ignored with a warning, never fatal: the packet
 # build is what must fail loudly if the ref truly mattered.
 IGNORED_SNAP="$(AI_REVIEW_SANDBOX_BASE=no-such-ref "$SCRIPT" ensure-copy "$MAIN" ignoredbad 2>"$TMP/hint.err")"
