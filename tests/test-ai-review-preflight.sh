@@ -620,6 +620,27 @@ if git -C "$GUARD/c" worktree add -q --detach "$GUARD/wt2" "$GUARD_OLD" 2>/dev/n
 else
   bad "the installed main guard allows a new linked worktree from the primary"
 fi
+# A stale worktree HEAD.lock left by an interrupted `git worktree add` must not
+# reopen primary HEAD moves; only a lock written in the last minute counts.
+# Drive the hook directly with no primary HEAD.lock, varying only the age (#1901).
+mkdir -p "$GUARD/c/.git/worktrees/stale"
+: > "$GUARD/c/.git/worktrees/stale/HEAD.lock"
+guard_hook_head_move() {
+  printf '%s %s HEAD\n' "$GUARD_HEAD" "$GUARD_OLD" | ( cd "$GUARD/c" && bash "$ROOT/hooks/reference-transaction" prepared ) >/dev/null 2>&1
+}
+if guard_hook_head_move; then
+  ok "a fresh worktree lock still marks a new linked worktree"
+else
+  bad "a fresh worktree lock still marks a new linked worktree"
+fi
+touch -d '10 minutes ago' "$GUARD/c/.git/worktrees/stale/HEAD.lock"
+if ! guard_hook_head_move; then
+  ok "a stale worktree lock does not reopen primary HEAD moves"
+else
+  bad "a stale worktree lock does not reopen primary HEAD moves"
+fi
+rm -f "$GUARD/c/.git/ai-devops-main-guard-refused"
+rm -rf "$GUARD/c/.git/worktrees/stale"
 check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
 check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
 FIXTURE="$TMP/hook-fixture"

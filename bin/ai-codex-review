@@ -142,7 +142,20 @@ STATE=""; REVIEWER_HOME_DIR=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ER
 cleanup(){
   reviewer_event_cleanup_allowed codex || return 1
   [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
-  [ -z "$REVIEWER_HOME_DIR" ] || rm -rf "$REVIEWER_HOME_DIR"
+  if [ -n "$REVIEWER_HOME_DIR" ]; then
+    # A refresh written by rename replaces the link with a newer regular file;
+    # keep that token rather than deleting it with the home (#1901).
+    if [ -f "$REVIEWER_HOME_DIR/auth.json" ] && [ ! -L "$REVIEWER_HOME_DIR/auth.json" ] \
+      && ! [ "$REVIEWER_HOME_DIR/auth.json" -ef "${CODEX_HOME:-$HOME/.codex}/auth.json" ] \
+      && [ "$REVIEWER_HOME_DIR/auth.json" -nt "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then
+      cp -p "$REVIEWER_HOME_DIR/auth.json" "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" \
+        && chmod 600 "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" \
+        && mv -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$" "${CODEX_HOME:-$HOME/.codex}/auth.json" \
+        || { rm -f "${CODEX_HOME:-$HOME/.codex}/auth.json.tmp.$$"
+             printf 'ai-codex-review: warning: could not keep the refreshed Codex token; run codex login if the next call is refused.\n' >&2; }
+    fi
+    rm -rf "$REVIEWER_HOME_DIR"
+  fi
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
