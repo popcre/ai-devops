@@ -243,6 +243,10 @@ export OPENCODE_SERVER_PASSWORD
 [ -n "`$OPENCODE_SERVER_PASSWORD" ] || { echo "FATAL: empty server password." >&2; exit 1; }
 
 # GLM reviews never see the owner's ~/.claude/CLAUDE.md or user skill lists (#1881).
+# This shared server also hosts ai-glm implement and ordinary GLM sessions;
+# they run without the owner rules and skills too. Accepted (#1901): GLM
+# reviews use this server on Windows and before formal activation, and review
+# isolation outranks owner context for GLM implementation.
 export OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1
 
 exec "$binaryBash" serve --hostname 127.0.0.1 --port "`${AI_GLM_PORT:-$Port}"

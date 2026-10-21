@@ -264,7 +264,8 @@ main() {
              XDG_DATA_HOME="$(native_path "$xdg/data")" \
              XDG_STATE_HOME="$(native_path "$xdg/state")" \
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
-      export "${REVIEWER_OPENCODE_ENV[@]}"
+      # Reviewer-only isolation: an implement turn keeps the owner rules and skills (#1901).
+      [ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"
       muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
         | reviewer_credit_run muse "$log" "$out.err" --timeout-seconds "$MU_TIMEOUT" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \

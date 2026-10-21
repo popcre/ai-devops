@@ -608,6 +608,12 @@ oc_door ok; drc=$?
 check "OpenCode door turn takes a slot from the shared pacer" "[ $drc = 0 ] && [ \"\$(wc -l < '$OD/state/pace/starts')\" = 1 ]"
 # #1881: a review never sees the owner's ~/.claude/CLAUDE.md or user skill lists.
 check "OpenCode door review loads only the reviewer rules" "cmp -s '$ROOT/templates/system/REVIEWER-global.md' '$OD/n.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\\n' | cmp -s - '$OD/n.env'"
+# #1901: an implement turn keeps the owner rules and skills.
+printf ok > "$OD/mode"; rm -f "$OD/n" "$OD/n.env" "$OD/n.rules"; rm -rf "$OD/state/pace"
+AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$OD/bin/opencode" AI_STEPFUN_STATE_DIR="$OD/state" \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$OD/w" DOOR_PACKET_DIR="$OD/p" DOOR_PROMPT_FILE="$OD/prompt" \
+  DOOR_REPORT_OUT="$OD/report" DOOR_HEAD=abc123 bash "$ROOT/tools/lib/review-doors/stepfun.sh" implement > "$OD/out" 2>&1
+check "OpenCode door implement keeps owner rules and skills (#1901)" "[ -f '$OD/n' ] && [ ! -s '$OD/n.env' ] && [ ! -e '$OD/n.rules' ]"
 for m in jsonl429 err429; do
   oc_door "$m"; drc=$?
   check "OpenCode door reruns the turn after a $m rate limit, through the shared cooldown" "[ $drc = 0 ] && grep -q STEPFUN-OK '$OD/report' && grep -q 'rate limit reached' '$OD/out' && [ \"\$(cat '$OD/n')\" = 2 ]"

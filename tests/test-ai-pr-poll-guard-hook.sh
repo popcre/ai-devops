@@ -29,6 +29,13 @@ blocks "while loop over gh pr checks" 'while true; do gh pr checks 12; done'
 blocks "multi-line while loop" $'while :\ndo\n  gh pr view 12\ndone'
 blocks "seq loop over gh pr view" 'for i in $(seq 1 20); do gh pr view 12; done'
 blocks "timeout ai-pr-wait inside a loop" 'for i in 1 2 3; do timeout 600 bin/ai-pr-wait 12 --timeout-minutes 9; done'
+# #1901: a loop handed to a child shell or eval is still a loop.
+blocks "a poll loop inside bash -c" "bash -c 'for i in 1 2 3; do sleep 5; gh pr view 1 >/dev/null; done'"
+blocks "a poll loop inside sh -lc" 'sh -lc "until gh pr view 1; do sleep 9; done"'
+blocks "a poll loop inside eval" "eval 'while true; do gh pr checks 1; done'"
+blocks "a poll loop inside bash with options" "bash --norc -o pipefail -c 'while :; do gh pr view 1; done'"
+blocks "a poll loop inside ksh -c" "ksh -c 'until gh pr view 1; do sleep 5; done'"
+allows "a quoted note passed to bash -c" "bash -c 'echo done'"
 
 # --- ordinary commands are allowed ---------------------------------------------
 allows "a single gh pr view" 'gh pr view 12 --json state'
