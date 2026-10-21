@@ -1,3 +1,7 @@
+issue: 1881
+status: OPEN
+owner: claude/cd3125e3-e300-43fe-a3a2-35c4277eb456
+---
 # Install the Codex Windows reviewer fix (#1900) on al8960ofc
 
 ## 1. Goal
