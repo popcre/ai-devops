@@ -328,6 +328,10 @@ Restore it with:  cp '$backup' '$BASHRC'"
 
 CCD_DIR="${AI_HEADROOM_CCD_DIR:-$HOME/.claude/remote/ccd-cli}"
 CCD_REAL_SUFFIX=".headroom-real"
+# Claude Desktop (Linux) installs its Claude Code as <ver>/<hash>/claude and
+# also forces ANTHROPIC_BASE_URL=https://api.anthropic.com on it. Each Desktop
+# update drops a new version that bypasses the proxy until it is wrapped.
+DESKTOP_CC_DIR="${AI_HEADROOM_DESKTOP_CC_DIR:-$HOME/.config/Claude/claude-code}"
 CCD_MARK="# Managed by ai-headroom"
 
 is_elf() {
@@ -379,41 +383,52 @@ ccd_unwrap_one() { # ccd_unwrap_one <path>
   chmod +x "$bin" 2>/dev/null || true
 }
 
+ccd_candidates() { # every launcher-execed Claude Code binary path on this host
+  local f
+  if [ -d "$CCD_DIR" ]; then
+    for f in "$CCD_DIR"/*; do printf '%s\n' "$f"; done
+  fi
+  if [ -d "$DESKTOP_CC_DIR" ]; then
+    for f in "$DESKTOP_CC_DIR"/*/*/claude; do
+      # Desktop writes .verified only after the download finishes; never touch
+      # a half-written binary.
+      [ -e "$(dirname "$f")/.verified" ] && printf '%s\n' "$f"
+    done
+  fi
+}
+
 ccd_wrap_all() {
   local f n=0
-  [ -d "$CCD_DIR" ] || return 0
-  for f in "$CCD_DIR"/*; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
     if is_ccd_wrapper "$f" || is_elf "$f"; then
       ccd_wrap_one "$f"
       n=$((n + 1))
     fi
-  done
-  [ "$n" -gt 0 ] && printf 'Claude remote workers : wrapped %s binary(ies) in %s\n' "$n" "$CCD_DIR"
+  done < <(ccd_candidates)
+  [ "$n" -gt 0 ] && printf 'Claude remote workers : wrapped %s binary(ies)\n' "$n"
   return 0
 }
 
 ccd_unwrap_all() {
   local f
-  [ -d "$CCD_DIR" ] || return 0
-  for f in "$CCD_DIR"/*; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
     ccd_unwrap_one "$f"
-  done
+  done < <(ccd_candidates)
 }
 
 ccd_wrap_status() {
   local f wrapped=0 raw=0
-  [ -d "$CCD_DIR" ] || return 0
-  for f in "$CCD_DIR"/*; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
     if is_ccd_wrapper "$f"; then wrapped=$((wrapped + 1))
     elif is_elf "$f"; then raw=$((raw + 1))
     fi
-  done
+  done < <(ccd_candidates)
   if [ "$wrapped" -gt 0 ] && [ "$raw" -eq 0 ]; then
     printf 'Claude remote workers : %s wrapped -> Headroom   (new spawns only)\n' "$wrapped"
   elif [ "$raw" -gt 0 ] && [ "$wrapped" -eq 0 ]; then
@@ -422,6 +437,30 @@ ccd_wrap_status() {
   elif [ "$raw" -gt 0 ]; then
     printf 'Claude remote workers : %s wrapped, %s still DIRECT (new Claude version?)\n' "$wrapped" "$raw"
     printf '  Re-run "ai-headroom on" to wrap the new binary.\n'
+  fi
+}
+
+# Desktop updates arrive silently, so on a Linux desktop a systemd user timer
+# re-runs wrap-remote every few minutes. Idempotent; a no-op once wrapped.
+AUTOWRAP_UNIT="ai-headroom-autowrap"
+
+autowrap_set() { # autowrap_set on|off
+  local dir="$HOME/.config/systemd/user" self
+  is_windows && return 0
+  [ -d "$DESKTOP_CC_DIR" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  if [ "$1" = on ]; then
+    self="$(readlink -f "$0")"
+    mkdir -p "$dir" || die "ai-headroom: could not create $dir"
+    printf '[Unit]\nDescription=Re-wrap Claude Desktop Claude Code through Headroom\n\n[Service]\nType=oneshot\nExecStart=%s wrap-remote\n' "$self" > "$dir/$AUTOWRAP_UNIT.service"
+    printf '[Unit]\nDescription=Re-wrap Claude Code after Desktop updates\n\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=5min\n\n[Install]\nWantedBy=timers.target\n' > "$dir/$AUTOWRAP_UNIT.timer"
+    systemctl --user daemon-reload && systemctl --user enable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 \
+      || die "ai-headroom: could not enable $AUTOWRAP_UNIT.timer"
+    printf 'Desktop auto-rewrap    : on (every 5 min)\n'
+  else
+    systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
+    rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
 }
 
@@ -506,6 +545,7 @@ Turning it on now would leave Claude unable to connect at all."
     winenv_set "$PROXY_URL"
     bashrc_set on
     ccd_wrap_all
+    autowrap_set on
     # Capture first: a `die` inside $( ) only kills the subshell, so
     # `[ -n "$(json_url)" ]` silently swallowed a fatal read error and the branch
     # went on to print success. Assign, check status, then act.
@@ -521,6 +561,7 @@ Turning it on now would leave Claude unable to connect at all."
   off)
     winenv_set ""
     bashrc_set off
+    autowrap_set off
     ccd_unwrap_all
     stale="$(json_url)" || die "ai-headroom: could not read $SETTINGS; refusing to claim success."
     [ -n "$stale" ] && json_set ""

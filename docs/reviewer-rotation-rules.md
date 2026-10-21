@@ -254,6 +254,16 @@ does not remove the separate suspended-membership restriction.
     skipped. A `small-owner-entry` is a review-*skipping* database override and
     is not a review-requiring gate.
 
+15. **Observation week: fail fast, skip per session, never wait.** Owner
+    request 2026-10-21 (#1948, [plan](../plan_reviewer-observation-week.md)).
+    The shared review core stops a reviewer that prints nothing for five
+    minutes or shows a fatal error, and a reviewer that fails is skipped for
+    the rest of that calling session (`ai-review` exits 77; 75 when all four
+    are skipped). While the window file is live, reviews go out with
+    `--detach`, a sent-but-undecided code head merges as `unreviewed-week`,
+    reviewer code and installs are frozen, and `ai-review-posthoc` drains the
+    queue afterwards. Shared-db and production gates are unchanged.
+
 ---
 
 ## Reviewer lookup table (wrapper → pin → reroute)
