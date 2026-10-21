@@ -91,15 +91,17 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Quote every time in EST (New York City):** every human-facing time names
   EST/EDT (America/New_York), e.g. `3:45 PM EST`. Machine keys may stay UTC.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
-  output, logs, or commits; load `secrets-to-1password`. A leak is
+  output, logs, or commits; serialize 1Password access and load
+  `secrets-to-1password`. A leak is
   compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE (skill).
 - **Destructive actions:** make each recoverable first (details).
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE gates every technical production
+  The assigned AI reviewer's explicit APPROVE gates `terraform apply` and every technical production
   action; database writes skip it (details). The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue; this exception authorizes no manual production command (rulings: owner-rulings.md).
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
-  in `popcre/shared-db`; load `shared-db-change` first.
+  in `popcre/shared-db`; load `shared-db-change` first. Structural work is
+  claim-first: claim exact objects on the existing issue and start.
 - **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
 - **Reviews:** pick an in-rotation reviewer of a different engine via
   `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
@@ -118,9 +120,10 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 - **GPT-5.6 uses `low` or `medium` reasoning only.** Split a harder task.
 - Prefer permanent, fewest-moving-parts fixes; test code, verify UI visually.
-  GitHub is the source of truth; never live-edit a server.
-- Commit only as Albert's verified identity, staging only owned files
-  (details).
+  GitHub is the source of truth; never live-edit a server. Never replace
+  operating-system binaries.
+- Commit only as Albert's verified identity (`git var GIT_COMMITTER_IDENT`),
+  staging only owned files (details).
 - **Never push directly to a protected `main`;** branch and PR. DesignFlow
   goes from Albert's sandbox branch to `develop`, never self-merged.
 - **Albert does not merge — you do,** except DesignFlow or a PR he will
