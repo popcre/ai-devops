@@ -237,6 +237,10 @@ stop_relay_task(){
   # confirmed that the failed /Create left no task behind.
   if [ -n "$RELAY_TASK" ] && { [ ! -e "$relay/creating" ] || [ -e "$relay/not-created" ]; }; then RELAY_TASK=""; fi
   [ -n "$RELAY_TASK" ] || return 0
+  # Revoke the start first. The relay must win this same atomic mkdir before it
+  # runs Codex, so after this line no instance, however late, can start Codex;
+  # one that already won is running inside the task and is ended below.
+  [ ! -d "$relay" ] || mkdir "$relay/ran" 2>/dev/null || true
   relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   # The launcher and Bash exit asynchronously after /End or a normal finish.
   for i in $(seq 15); do

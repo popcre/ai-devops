@@ -157,6 +157,22 @@ EOF
   FAILED_BEFORE="$(failed_runs)"
   check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && kept=\$(grep -rho 'Its state is kept in [^ ]*[^. ]' '$R/.ai/reviews' | head -1 | sed 's/Its state is kept in //') && [ -d \"\$kept/relay\" ] && touch \"\$kept/relay/cancel\" && rm -rf \"\$kept\" && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
   rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
+  # A /Run reported failed but dispatched late, once cleanup has begun, must never start Codex.
+  mkdir -p "$TMP/late-bin"; cp "$ST/powershell.exe" "$TMP/late-bin/"
+  cat > "$TMP/late-bin/schtasks" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = /Run ]; then
+  printf '%s\n' /Run >> "\$AI_CODEX_TEST_ARGS/schtasks-log"
+  script="\$(cygpath -u "\$(cat "\$AI_CODEX_TEST_ARGS/schtasks-script")")"; relay="\$(dirname "\$script")"
+  ( until [ -d "\$relay/ran" ]; do sleep .05; done; bash "\$script"; echo \$? > "\$AI_CODEX_TEST_ARGS/late-rc" ) &
+  exit 1
+fi
+exec "$ST/schtasks" "\$@"
+EOF
+  chmod +x "$TMP/late-bin/"*
+  rm -f "$TMP/args/schtasks-log" "$TMP/args/late-rc"; CALLS_BEFORE="$(find "$TMP/args" -name 'args-*' | wc -l)"
+  check "late_dispatched_run_after_cleanup_never_starts_codex" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' PATH='$TMP/late-bin:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1; for _ in \$(seq 50); do [ -s '$TMP/args/late-rc' ] && break; sleep .1; done; [ -s '$TMP/args/late-rc' ] && [ \"\$(cat '$TMP/args/late-rc')\" != 0 ] && [ \"\$(find '$TMP/args' -name 'args-*' | wc -l)\" = '$CALLS_BEFORE' ]"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   check "ssh_review_create_failure_keeps_nothing_and_stops_nothing" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_CREATE_FAIL=1 PATH='$ST:$PATH' '$SCRIPT' diff-review 2>'$TMP/create-fail.err' >/dev/null && ! grep -q 'kept' '$TMP/create-fail.err' && ! grep -qx /End '$TMP/args/schtasks-log'"
   rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
