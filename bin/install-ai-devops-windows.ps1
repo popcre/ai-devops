@@ -1409,7 +1409,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     if ((Test-Path -LiteralPath $sshCreds) -and -not $SkillsDryRun -and $env:AI_DEVOPS_INSTALL_TEST_MODE -ne '1') {
         # Git keeps this helper path after the install, so it must name the
         # installed checkout, never a temporary candidate copy running the install.
-        $sshProbe = Invoke-NativeProbe -Command 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sshCreds, '-GhGate', (Join-Path $RepoPath 'bini-gh'))
+        $sshProbe = Invoke-NativeProbe -Command 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sshCreds, '-GhGate', (Join-Path $RepoPath 'bin\ai-gh'))
         if ($sshProbe.ExitCode -eq 0 -or $sshProbe.ExitCode -eq 2) {
             Write-Note "GitHub login for SSH sessions: $($sshProbe.Output -join ' ')"
         } else {
