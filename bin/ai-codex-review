@@ -218,19 +218,13 @@ relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
 stop_relay_task(){
   [ ! -e "$REVIEWER_HOME_DIR/relay/removed" ] || RELAY_TASK=""
   [ -n "$RELAY_TASK" ] || return 0
-  local state winpid="" gone=yes
-  # Cancel first: a relay that starts after this point exits before launching
-  # Codex, so a missing winpid below really means nothing was launched.
+  local state gone
+  # Cancel first: a relay that starts after this point exits before launching Codex.
   [ ! -d "$REVIEWER_HOME_DIR/relay" ] || : > "$REVIEWER_HOME_DIR/relay/cancel"
-  # Kill the relay's whole process tree (Codex and its sandboxed children) and
-  # prove it gone; the task state alone proves nothing about them.
-  winpid="$(cat "$REVIEWER_HOME_DIR/relay/winpid" 2>/dev/null | tr -dc 0-9)"
-  # The tree is killed before /End, which would orphan the children by killing their root first.
-  if [ -n "$winpid" ]; then
-    gone="$(timeout 90 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$SCRIPT_DIR/windows-kill-process-tree.ps1")" -RootPid "$winpid" -RootStart "$(cat "$REVIEWER_HOME_DIR/relay/winstart" 2>/dev/null | tr -d '\r')" 2>/dev/null | tr -d '\r')"
-  elif [ -e "$REVIEWER_HOME_DIR/relay/started" ]; then
-    gone=unknown
-  fi
+  # Kill every process of this run (found by its unique review directory) and its
+  # native descendants, and prove none is left; task state alone proves nothing.
+  # This runs before /End, which would otherwise orphan the children first.
+  gone="$(timeout 90 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$SCRIPT_DIR/windows-kill-process-tree.ps1")" -Marker "$(cygpath -w "$REVIEW_DIR")" 2>/dev/null | tr -d '\r')"
   relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
   # The State enum name is not localized, unlike schtasks /Query's text.
   state="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
@@ -393,14 +387,9 @@ run_relayed_provider() {
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
   mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
-    # winstart pins the PID to this process so a reused PID is never killed.
-    printf 'w=$(cat /proc/$$/winpid)\npowershell.exe -NoProfile -Command "(Get-Process -Id $w).StartTime.ToUniversalTime().ToString(\x27o\x27)" > %q.tmp && mv %q.tmp %q && echo $w > %q\n' "$relay/winstart" "$relay/winstart" "$relay/winstart" "$relay/winpid"
     printf '[ ! -e %q ] || exit 95\ntouch %q\n' "$relay/cancel" "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
-    # Stay alive until cleanup, so the tree kill sees the real root and any
-    # leftover children instead of a vacuous "root already gone".
-    printf 'for i in $(seq 300); do [ -e %q ] && break; sleep 1; done\n' "$relay/cancel"
   } > "$relay/run.sh"
   relay_schtasks /Create /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "\"$(cygpath -w "$(command -v bash)")\" \"$(cygpath -w "$relay/run.sh")\"" >/dev/null 2>"$TMP_ERR" \

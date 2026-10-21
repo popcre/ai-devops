@@ -1,31 +1,41 @@
-# Kill a Windows process and every descendant, then prove none survives.
-# Prints "yes" only when the root (matched by PID AND creation time, so a reused
-# PID is never touched) and all descendants are gone; anything else is a failure.
-# Used by bin/ai-codex-review to stop its desktop relay (popcre/ai-devops#1891).
-param([Parameter(Mandatory)][int]$RootPid, [Parameter(Mandatory)][string]$RootStart)
+# Kill every process of one review run and all their native descendants, then
+# prove none survives (popcre/ai-devops#1891, used by bin/ai-codex-review).
+#
+# A run's roots are the processes whose command line contains -Marker (the
+# run's unique review directory, which Codex receives via --cd). Git Bash
+# processes do not expose real Windows parent links, so roots are found by
+# marker, not by walking down from a shell. Descendants are processes whose
+# parent is a known tree member AND that started after it, so a reused PID is
+# never adopted; each kill re-checks PID plus creation time first.
+# Prints "yes" when nothing from the run is left, otherwise "alive".
+param([Parameter(Mandatory)][string]$Marker)
 
-function Get-Tree([int[]]$Seed) {
-  $all = @(Get-CimInstance Win32_Process)
-  $tree = [System.Collections.Generic.List[int]]::new(); $Seed | ForEach-Object { $tree.Add($_) }
-  for ($i = 0; $i -lt $tree.Count; $i++) {
-    $all | Where-Object { $_.ParentProcessId -eq $tree[$i] -and -not $tree.Contains([int]$_.ProcessId) } |
-      ForEach-Object { $tree.Add([int]$_.ProcessId) }
+$norm = { param($s) if ($s) { $s.Replace('\', '/').ToLowerInvariant() } else { '' } }
+$mark = & $norm $Marker
+if ($mark.Length -lt 12) { 'alive'; exit 0 }   # refuse a marker too short to be unique
+function Get-Key($p) { "$($p.ProcessId)@$($p.CreationDate.ToUniversalTime().Ticks)" }
+
+for ($round = 0; $round -lt 10; $round++) {
+  $live = @(Get-CimInstance Win32_Process | Where-Object { $_.CreationDate -and $_.ProcessId -ne $PID })
+  $tree = [System.Collections.Generic.Dictionary[string,object]]::new()
+  $live | Where-Object { (& $norm $_.CommandLine).Contains($mark) } | ForEach-Object { $tree[(Get-Key $_)] = $_ }
+  $grew = $tree.Count -gt 0
+  while ($grew) {
+    $grew = $false
+    foreach ($p in $live) {
+      $k = Get-Key $p
+      if ($tree.ContainsKey($k)) { continue }
+      foreach ($q in @($tree.Values)) {
+        if ($q.ProcessId -eq $p.ParentProcessId -and $q.CreationDate -le $p.CreationDate) { $tree[$k] = $p; $grew = $true; break }
+      }
+    }
   }
-  return ,$tree
-}
-
-$root = Get-Process -Id $RootPid -ErrorAction SilentlyContinue
-if ($root -and $root.StartTime.ToUniversalTime().ToString('o') -ne $RootStart) { $root = $null }
-$seed = @(); if ($root) { $seed = @($RootPid) }
-$known = [System.Collections.Generic.HashSet[int]]::new()
-# Repeat until a fresh snapshot finds nothing new, so late-spawned children are
-# caught too; kill leaves first so no child is orphaned by its parent dying.
-for ($round = 0; $round -lt 10 -and $seed.Count -gt 0; $round++) {
-  $tree = Get-Tree $seed
-  $tree | ForEach-Object { [void]$known.Add($_) }
-  for ($i = $tree.Count - 1; $i -ge 0; $i--) { Stop-Process -Id $tree[$i] -Force -ErrorAction SilentlyContinue }
+  if ($tree.Count -eq 0) { 'yes'; exit 0 }
+  # Leaves first, so no child is orphaned by its parent dying before it.
+  $tree.Values | Sort-Object CreationDate -Descending | ForEach-Object {
+    $cur = Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)" -ErrorAction SilentlyContinue
+    if ($cur -and (Get-Key $cur) -eq (Get-Key $_)) { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
   Start-Sleep -Milliseconds 300
-  $seed = @($known | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
 }
-$orphans = @(Get-CimInstance Win32_Process | Where-Object { $known.Contains([int]$_.ParentProcessId) -or $known.Contains([int]$_.ProcessId) })
-if ($orphans.Count -eq 0) { 'yes' } else { 'alive' }
+'alive'
