@@ -74,7 +74,10 @@ cmd_run() {
   report="$(printf '%s\n' "$out" | tr -d '\r' | awk 'NF{l=$0} END{print l}')"
   verdict=""
   if [ -f "$report" ]; then
-    verdict="$(tr -d '\r' < "$report" | awk '/^##[[:space:]]+Verdict/{f=1;next} f&&NF{gsub(/[^A-Z]/," ");split($0,w," ");print w[1];exit}')"
+    # Read every `## Verdict` block; a report whose blocks disagree is
+    # CONTRADICTORY and fails, so a stray early APPROVE can never pass.
+    verdict="$(tr -d '\r' < "$report" | awk '/^##[[:space:]]+Verdict/{f=1;next} f&&NF{gsub(/[^A-Z]/," ");split($0,w," ");print w[1];f=0}' | sort -u)"
+    [ "$(printf '%s' "$verdict" | grep -c .)" -le 1 ] || verdict=CONTRADICTORY
   fi
   [ "$added" -eq 0 ] || git -C "$ROOT" worktree remove --force "$cand" >/dev/null 2>&1
   rm -rf "$work"
@@ -151,6 +154,9 @@ cmd_verify() {
   done
   return "$bad"
 }
+
+# Sourced by the tests to exercise post_status without a fleet run.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 sub="${1:-}"; [ $# -gt 0 ] && shift
 target=""; provider="$DEFAULT_PROVIDER"
