@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Semantic-version positives plus retained privacy denials (#1921)."""
+import ast
 import importlib.util
 import json
 import os
@@ -125,6 +126,34 @@ class VersionSpans(unittest.TestCase):
                     self.assertTrue(self.filtered("policy.py", source.rstrip() + suffix + "\n"))
         source = 'import ipaddress\nallowed = tuple(ipaddress.ip_network(n) for n in ' + repr(tuple(DATA["standard_networks"])) + ')\n'
         self.assertTrue(self.filtered("policy.py", source))
+
+    def test_legacy_ast_string_without_end_positions(self):
+        class Str(ast.AST):
+            _fields = ("s",)
+
+        parse = ast.parse
+        def legacy_parse(text):
+            tree = parse(text)
+            class Legacy(ast.NodeTransformer):
+                def visit_Constant(self, node):
+                    if not isinstance(node.value, str):
+                        return node
+                    old = Str()
+                    old.s, old.lineno, old.col_offset = node.value, node.lineno, node.col_offset
+                    return old
+            return Legacy().visit(tree)
+
+        network = DATA["standard_networks"][0]
+        source = f'import ipaddress\nlabel = "π"; allowed = ipaddress.ip_network("{network}")'
+        with patch.object(MODULE.ast, "parse", legacy_parse):
+            spans = MODULE.network_spans(source)
+            self.assertEqual(len(spans.get(2, [])), 1)
+            for suffix in [" # " + DATA["other_private"], " # https://" + DATA["other_private"] + "/"]:
+                line = source.splitlines()[1] + suffix
+                allowed = MODULE.network_spans(source + suffix).get(2, [])
+                self.assertTrue(any(not any(a <= hit.start() and hit.end() <= b for a, b in allowed) for hit in MODULE.TOPOLOGY.finditer(line)))
+            self.assertEqual(MODULE.network_spans('import ipaddress\nipaddress = other\n' + source.splitlines()[1]), {})
+            self.assertEqual(MODULE.network_spans('import ipaddress\nx = "' + network + '"'), {})
 
     def test_nonstandard_network_values_stay_blocked(self):
         for network in DATA["nonstandard_networks"]:

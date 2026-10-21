@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import ast
 import ipaddress
+import io
+import tokenize
 import pathlib
 import re
 import sys
@@ -53,6 +55,14 @@ STANDARD_NETWORKS = frozenset((
 ))
 
 
+def string_value(node):
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if type(node).__name__ == "Str":  # Python 3.7 AST
+        return node.s
+    return None
+
+
 def network_spans(text):
     """Recognize only direct stdlib calls with complete RFC1918 literals."""
     try:
@@ -82,7 +92,7 @@ def network_spans(text):
         elif isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
             if any(isinstance(part, ast.Name) and part.id == "ipaddress" for part in ast.walk(node)):
                 return {}
-            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) and node.slice.value == "ipaddress":
+            if isinstance(node, ast.Subscript) and string_value(node.slice.value if type(node.slice).__name__ == "Index" else node.slice) == "ipaddress":
                 return {}
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("setattr", "delattr"):
             if node.args and isinstance(node.args[0], ast.Name) and node.args[0].id == "ipaddress":
@@ -99,23 +109,37 @@ def network_spans(text):
                 and node.func.attr == "ip_network" and len(node.args) == 1 and not node.keywords):
             continue
         literal = node.args[0]
-        if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
+        value = string_value(literal)
+        if value is None:
             continue
         try:
-            network = ipaddress.ip_network(literal.value)
+            network = ipaddress.ip_network(value)
         except ValueError:
             continue
-        if network not in STANDARD_NETWORKS or str(network) != literal.value:
-            continue
-        if getattr(literal, "end_lineno", None) != literal.lineno:
+        if network not in STANDARD_NETWORKS or str(network) != value:
             continue
         line = lines[literal.lineno - 1]
-        # AST columns count UTF-8 bytes; regex matches count Unicode characters.
-        start = len(line.encode("utf-8")[:literal.col_offset].decode("utf-8"))
-        end = len(line.encode("utf-8")[:literal.end_col_offset].decode("utf-8"))
-        if line[start:end] not in ('"' + literal.value + '"', "'" + literal.value + "'"):
+        # AST columns are UTF-8 bytes; tokenize columns are Unicode characters.
+        try:
+            start = len(line.encode("utf-8")[:literal.col_offset].decode("utf-8"))
+            tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+        except (UnicodeDecodeError, tokenize.TokenError, IndentationError):
             continue
-        result.setdefault(literal.lineno, []).append((start + 1, end - 1))
+        matching = [token for token in tokens if token.start == (literal.lineno, start)]
+        if len(matching) != 1:
+            continue
+        token = matching[0]
+        if (token.type != tokenize.STRING or token.end[0] != literal.lineno
+                or token.string not in ('"' + value + '"', "'" + value + "'")):
+            continue
+        # On modern ASTs require the token to cover the entire literal as well.
+        # Legacy ASTs lack ends; exact AST start + exact plain token stays bounded.
+        end_line = getattr(literal, "end_lineno", None)
+        if end_line is not None:
+            end_byte = len(line[:token.end[1]].encode("utf-8"))
+            if (end_line, literal.end_col_offset) != (token.end[0], end_byte):
+                continue
+        result.setdefault(literal.lineno, []).append((start + 1, token.end[1] - 1))
     return result
 
 
