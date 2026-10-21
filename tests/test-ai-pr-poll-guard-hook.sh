@@ -45,6 +45,9 @@ allows "a quoted commit message that mentions polling" "git commit -m 'stop slee
 allows "a double-quoted note that mentions polling" 'printf "sleep then gh pr view\n" >> notes.md'
 allows "a here-document that mentions polling" $'cat > notes.md <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF\nwc -l notes.md'
 blocks "a loop after a here-document" $'cat > x <<EOF\ntext\nEOF\nwhile :; do gh pr checks 1; done'
+blocks "a here-document fed to bash (#1901)" $'bash <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+blocks "a tab-stripped here-document fed to sh (#1901)" $'sh <<-EOF\n\tuntil gh pr merge 1; do sleep 9; done\nEOF'
+blocks "a loop piped into bash (#1901)" "printf 'while true; do gh pr view 1; sleep 9; done' | bash"
 allows "sleep alone" 'sleep 5'
 allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 
