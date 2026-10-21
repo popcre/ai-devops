@@ -404,7 +404,8 @@ run_relayed_provider() {
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
     # /Create needs a trigger, so the task has a placeholder 23:59 one. Only the
     # wrapper's own /Run may start Codex, once: it writes "go" just before /Run.
-    printf '[ -e %q ] && mkdir %q 2>/dev/null || exit 95\ntouch %q\n' "$relay/go" "$relay/ran" "$relay/started"
+    # "go" holds a deadline, so a /Run that failed late cannot arm a later start.
+    printf '[ "$(date +%%s)" -le "$(cat %q 2>/dev/null || echo 0)" ] && mkdir %q 2>/dev/null || exit 95\ntouch %q\n' "$relay/go" "$relay/ran" "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
   } > "$relay/run.sh"
@@ -419,7 +420,7 @@ run_relayed_provider() {
   relay_schtasks /Create /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(cygpath -w "$relay/job.ps1")\"" >/dev/null 2>"$TMP_ERR" \
     || { [ "$(relay_task_state "$task")" != absent ] || : > "$relay/not-created"; stop_relay_task; return 98; }
-  : > "$relay/go"
+  echo "$(( $(date +%s) + ${AI_CODEX_RELAY_START_SECONDS:-60} ))" > "$relay/go"
   relay_schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
   for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
   if [ ! -e "$relay/started" ]; then
