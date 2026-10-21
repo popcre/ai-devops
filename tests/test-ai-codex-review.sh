@@ -132,6 +132,9 @@ if [ -n "${SYSTEMROOT:-}" ]; then
 printf '%s\n' "$1" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
 prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
 [ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*" "(.*)"$/\1/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
+[ "$1" = /Create ] && rm -f "$AI_CODEX_TEST_ARGS/schtasks-deleted"
+[ "$1" = /Delete ] && : > "$AI_CODEX_TEST_ARGS/schtasks-deleted"
+if [ "$1" = /Query ] && [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ]; then echo 'ERROR: The system cannot find the file specified.' >&2; exit 1; fi
 if [ "$1" = /Query ]; then [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo '"t","N/A","Running"' || echo '"t","N/A","Ready"'; fi
 if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
 exit 0
