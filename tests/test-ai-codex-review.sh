@@ -155,7 +155,7 @@ EOF
   rm -f "$TMP/args/schtasks-log"
   failed_runs(){ find "$TMP/lifecycle/runs" -name '*.json' -exec jq -e 'select(.status=="failed" and .failure_class=="provider-failed")' {} \; 2>/dev/null | grep -c BLOCKED; }
   FAILED_BEFORE="$(failed_runs)"
-  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && kept=\$(grep -rho 'Its state is kept in [^ ]*[^. ]' '$R/.ai/reviews' | head -1 | sed 's/Its state is kept in //') && [ -d \"\$kept/relay\" ] && touch \"\$kept/relay/cancel\" && rm -rf \"\$kept\" && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
+  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>'$TMP/stuck.err' && grep -q 'codex-output' '$TMP/stuck.err' && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && kept=\$(grep -rho 'Its state is kept in [^ ]*[^. ]' '$R/.ai/reviews' | head -1 | sed 's/Its state is kept in //') && [ -d \"\$kept/relay\" ] && touch \"\$kept/relay/cancel\" && rm -rf \"\$kept\" && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
   rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
   # A /Run reported failed but dispatched late, once cleanup has begun, must never start Codex.
   mkdir -p "$TMP/late-bin"; cp "$ST/powershell.exe" "$TMP/late-bin/"

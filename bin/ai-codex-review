@@ -142,8 +142,8 @@ STATE=""; REVIEWER_HOME_DIR=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ER
 cleanup(){
   # A relay that could not be proven stopped keeps every trace it may still use.
   if [ -n "${RELAY_KEEP:-}" ]; then
-    printf 'ai-codex-review: kept %s and %s because the desktop relay was not proven stopped.\n' "$REVIEWER_HOME_DIR" "$REVIEW_DIR" >&2
-    REVIEWER_HOME_DIR=""; REVIEW_DIR=""
+    printf 'ai-codex-review: kept %s, %s, %s and %s because the desktop relay was not proven stopped.\n' "$REVIEWER_HOME_DIR" "$REVIEW_DIR" "$TMP_OUT" "$TMP_ERR" >&2
+    REVIEWER_HOME_DIR=""; REVIEW_DIR=""; TMP_OUT=""; TMP_ERR=""
   fi
   # The private reviewer home holds only linked auth: keep a refreshed token
   # and remove it even when evidence retention keeps the rest (#1901).
