@@ -53,6 +53,8 @@ blocks "a loop inside an unterminated here-document (#1901)" $'cat > f <<EOF\nwh
 blocks "a loop piped into /bin/bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /bin/bash"
 blocks "a loop piped into /usr/bin/env bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /usr/bin/env bash"
 blocks "a here-document fed to /bin/bash (#1901)" $'/bin/bash <<EOF\nwhile :; do gh pr view 1; done\nEOF'
+blocks "a tight for loop over gh pr view (#1901)" 'for i in 1 2 3; do gh pr view 1; done'
+blocks "a for loop inside bash -c (#1901)" "bash -c \"for i in 1 2 3; do gh pr checks 1; done\""
 allows "sleep alone" 'sleep 5'
 allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 

@@ -37,6 +37,8 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - Say "nothing is needed" only after that check passes; never make Albert ask
   "what's next". Take reversible in-scope choices; never present menus. Name
   any assumption you made and what would change it.
+  If uncertainty could materially change scope, safety, or outcome, surface it
+  before acting; ask Albert only when the choice is his (a business-meaning choice).
 
 ## When something goes wrong
 
