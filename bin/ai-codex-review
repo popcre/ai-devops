@@ -224,16 +224,27 @@ stop_provider_tree(){ # TIMEOUT_PID
 RELAY_TASK=""
 # Every scheduler call is bounded so a hung Task Scheduler cannot stall the wrapper.
 relay_schtasks(){ MSYS2_ARG_CONV_EXCL='*' timeout 30 schtasks "$@"; }
+# Prints the task's State, or "absent" only when Task Scheduler says it does not
+# exist; any other failure prints nothing, which callers treat as unproven.
+# The State enum name is not localized, unlike schtasks /Query's text.
+relay_task_state(){
+  timeout 30 powershell.exe -NoProfile -NonInteractive -Command "try { (Get-ScheduledTask -TaskName '$1' -ErrorAction Stop).State } catch { if (\$_.CategoryInfo.Category -eq 'ObjectNotFound') { 'absent' } }" 2>/dev/null | tr -d '\r'
+}
 stop_relay_task(){
-  local relay="$REVIEWER_HOME_DIR/relay" state
+  local relay="$REVIEWER_HOME_DIR/relay" state i
   [ ! -e "$relay/removed" ] || RELAY_TASK=""
-  # Nothing to stop when the task was never created (the relay marks the attempt).
+  # Nothing to stop when no creation was attempted, or Task Scheduler itself
+  # confirmed that the failed /Create left no task behind.
   if [ -n "$RELAY_TASK" ] && { [ ! -e "$relay/creating" ] || [ -e "$relay/not-created" ]; }; then RELAY_TASK=""; fi
   [ -n "$RELAY_TASK" ] || return 0
   relay_schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
-  # The State enum name is not localized, unlike schtasks /Query's text.
-  state="$(timeout 30 powershell.exe -NoProfile -NonInteractive -Command "(Get-ScheduledTask -TaskName '$RELAY_TASK' -ErrorAction Stop).State" 2>/dev/null | tr -d '\r')" \
-    && { [ "$state" = Ready ] || [ "$state" = Disabled ]; } \
+  # The launcher and Bash exit asynchronously after /End or a normal finish.
+  for i in $(seq 15); do
+    state="$(relay_task_state "$RELAY_TASK")"
+    [ "$state" = Running ] || [ "$state" = Queued ] || break
+    sleep 1
+  done
+  { [ "$state" = Ready ] || [ "$state" = Disabled ]; } \
     && relay_schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 \
     || { echo "ai-codex-review: relay task $RELAY_TASK could not be confirmed stopped and removed; end it before trusting this machine's Codex auth. Its state is kept in $REVIEWER_HOME_DIR." >&2; return 1; }
   # The relay runs in a subshell; this marker tells the parent it is gone.
@@ -391,7 +402,9 @@ run_relayed_provider() {
   relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$RUN_ID"; RELAY_TASK="$task"
   mkdir -p "$relay" && secure_review_directory "$relay" && (umask 077; printf '%s\n' "$PROMPT" > "$relay/prompt") && protect_windows_path "$relay/prompt" file || return 96
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
-    printf 'touch %q\n' "$relay/started"
+    # /Create needs a trigger, so the task has a placeholder 23:59 one. Only the
+    # wrapper's own /Run may start Codex, once: it writes "go" just before /Run.
+    printf '[ -e %q ] && mkdir %q 2>/dev/null || exit 95\ntouch %q\n' "$relay/go" "$relay/ran" "$relay/started"
     printf 'env -u OPENAI_API_KEY -u CODEX_API_KEY'; printf ' %q' ${REVIEWER_HOME_ARGS[@]+"${REVIEWER_HOME_ARGS[@]}"} timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config "${REVIEWER_PROFILE_ARGS[@]}" --cd "$REVIEW_DIR" -
     printf ' < %q > %q 2> %q\necho $? > %q.tmp && mv %q.tmp %q\n' "$relay/prompt" "$TMP_OUT" "$TMP_ERR" "$relay/rc" "$relay/rc" "$relay/rc"
   } > "$relay/run.sh"
@@ -405,7 +418,8 @@ run_relayed_provider() {
   : > "$relay/creating"
   relay_schtasks /Create /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(cygpath -w "$relay/job.ps1")\"" >/dev/null 2>"$TMP_ERR" \
-    || { : > "$relay/not-created"; return 98; }
+    || { [ "$(relay_task_state "$task")" != absent ] || : > "$relay/not-created"; stop_relay_task; return 98; }
+  : > "$relay/go"
   relay_schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { stop_relay_task; return 98; }
   for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
   if [ ! -e "$relay/started" ]; then

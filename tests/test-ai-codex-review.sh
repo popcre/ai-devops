@@ -141,7 +141,7 @@ EOF
   cat > "$ST/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in *Get-ScheduledTask*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
-[ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] && { echo 'No MSFT_ScheduledTask objects found' >&2; exit 1; }
+{ [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] || [ "${AI_CODEX_FAKE_CREATE_FAIL:-}" = 1 ]; } && { echo absent; exit 0; }
 [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
 EOF
   export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"
@@ -149,6 +149,7 @@ EOF
   rm -f "$TMP/args/schtasks-log"
   RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
   check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
+  check "late_trigger_run_of_the_relay_script_launches_nothing" "f=\$(cygpath -u \"\$(cat '$TMP/args/schtasks-script')\"); [ ! -e \"\$f\" ] || { bash \"\$f\"; [ \$? = 95 ]; }"
   rm -f "$TMP/args/schtasks-log"
   check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
   rm -f "$TMP/args/schtasks-log"
