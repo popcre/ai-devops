@@ -21,11 +21,16 @@ cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null
 # messages, notes, echo), so a message that merely mentions polling is allowed.
 cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
   end != "" { if ($0 == end) end = ""; next }
-  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) {
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(ba|da|z|k|a)?sh([ \t]|<|$)/ {
     end = substr($0, RSTART, RLENGTH); sub(/^<<-?[ \t]*["'"'"']?/, "", end)
   }
   { print }')"
 # Loops are often written over several lines; judge the command as one line.
+# Text piped into a shell (`printf '...' | bash`) is a script too (#1901).
+piped=""
+if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(ba|da|z|k|a)?sh([[:space:]]|$)'; then
+  piped="$(printf '%s' "$cmd" | tr '\n' ' ' | tr -d "\"'")"
+fi
 # A quoted script handed to a child shell or eval IS a command (#1901): unwrap
 # `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
 cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
@@ -33,10 +38,11 @@ cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
   -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\5 /g" \
   | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
+[ -z "$piped" ] || cmd="$cmd ; $piped"
 reason=''
 if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then
   reason='sleep followed by a pull-request read'
-elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bg[h] pr (view|checks)\b'; then
+elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bg[h] pr (view|checks|merge)\b'; then
   reason='an until/while loop over a pull-request read'
 elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bg[h] pr view\b'; then
   reason='a seq loop over a pull-request read'
