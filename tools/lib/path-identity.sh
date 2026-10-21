@@ -26,3 +26,12 @@ ai_same_path() { # ai_same_path A B -> 0 when both name the same place
   a="$(ai_path_canonical "$1")" && b="$(ai_path_canonical "$2")" || return 1
   [ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ]
 }
+
+ai_git_toplevel() { # ai_git_toplevel DIR -> 0 when DIR is the repository top level
+  local dir="$1" top
+  [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  dir="$(cd "$dir" && pwd -P)" || return 1
+  top="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "$top" ] || return 1
+  ai_same_path "$dir" "$top"
+}
