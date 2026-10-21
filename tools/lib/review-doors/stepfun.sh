@@ -509,7 +509,8 @@ main() {
     while :; do
       stepfun_pace_wait
       (
-        export "${REVIEWER_OPENCODE_ENV[@]}"
+        # Reviewer-only isolation: implementation keeps owner rules and skills.
+        [ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"
         export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
                XDG_DATA_HOME="$(native_path "$xdg/data")" \
                XDG_STATE_HOME="$(native_path "$xdg/state")" \

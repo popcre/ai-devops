@@ -279,7 +279,9 @@ main() {
     # Native plugins and inherited subprocesses must start in the same owned
     # scratch as the command broker, before any engine code can execute.
     cd "$oc_dir" || exit 127
-    export DOOR_MODE="$MODE" "${REVIEWER_OPENCODE_ENV[@]}"
+    export DOOR_MODE="$MODE"
+    # Reviewer-only isolation: implementation keeps owner rules and skills.
+    [ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"
     export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
            XDG_DATA_HOME="$(native_path "$xdg/data")" \
            XDG_STATE_HOME="$(native_path "$xdg/state")" \

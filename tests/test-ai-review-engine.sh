@@ -1607,6 +1607,17 @@ DS_STUB_RC=$?
 set -e
 # #1881: a DeepSeek review sees only the reviewer rules, never the owner's
 # ~/.claude/CLAUDE.md or the ~/.claude and ~/.agents skill lists.
+# #1901: every door exports reviewer isolation only for review turns, so
+# implementation keeps the owner rules and installed skills.
+doors_scope_reviewer_isolation() {
+  local d f
+  for d in deepseek stepfun muse; do
+    f="$REPO_ROOT/tools/lib/review-doors/$d.sh"
+    grep -Fq '[ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"' "$f" || return 1
+    ! grep -Eq '^[[:space:]]*export (DOOR_MODE="\$MODE" )?"\$\{REVIEWER_OPENCODE_ENV' "$f" || return 1
+  done
+}
+check 'review doors export reviewer isolation only for review turns (#1901)' doors_scope_reviewer_isolation
 check "deepseek_review_loads_only_reviewer_rules" \
   "cmp -s '$REPO_ROOT/templates/system/REVIEWER-global.md' '$TMP/ds-stub-profile.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\n' | cmp -s - '$TMP/ds-stub-profile'"
 check "deepseek_door_parses_opencode_envelope_to_report_shape" \
