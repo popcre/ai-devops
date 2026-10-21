@@ -134,12 +134,17 @@ prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
 [ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*" "(.*)"$/\1/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
 [ "$1" = /Create ] && rm -f "$AI_CODEX_TEST_ARGS/schtasks-deleted"
 [ "$1" = /Delete ] && : > "$AI_CODEX_TEST_ARGS/schtasks-deleted"
-if [ "$1" = /Query ] && [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ]; then echo 'ERROR: The system cannot find the file specified.' >&2; exit 1; fi
-if [ "$1" = /Query ]; then [ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo '"t","N/A","Running"' || echo '"t","N/A","Ready"'; fi
 if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
 exit 0
 EOF
-  chmod +x "$ST/schtasks"
+  cat > "$ST/powershell.exe" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in *Get-ScheduledTask*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
+[ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] && { echo 'No MSFT_ScheduledTask objects found' >&2; exit 1; }
+[ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
+EOF
+  export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"
+  chmod +x "$ST/schtasks" "$ST/powershell.exe"
   rm -f "$TMP/args/schtasks-log"
   RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
   check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
