@@ -297,14 +297,21 @@ release_boundary() { # release_boundary ROOT NAME
 }
 
 GLM_BOUNDARY_ROOT=""
+# path-identity: never compare filesystem paths as raw strings (#1835). On
+# Windows Git Bash, pwd -P is MSYS (/c/...) while git reports C:/...
+_AI_PATH_ID="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib" 2>/dev/null && pwd)/path-identity.sh"
+[ -f "$_AI_PATH_ID" ] && . "$_AI_PATH_ID"
+unset _AI_PATH_ID
 governed_source_root() { # governed_source_root CWD_ROOT -> directory to snapshot
   local cwd_root="$1" source receipt_parent
   if [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || [ -z "${AI_REVIEW_SOURCE_ROOT:-}" ]; then printf '%s' "$cwd_root"; return 0; fi
   [ -d "$AI_REVIEW_SOURCE_ROOT" ] && [ ! -L "$AI_REVIEW_SOURCE_ROOT" ] || die "governed source root is not a directory."
   source="$(cd "$AI_REVIEW_SOURCE_ROOT" && pwd -P)" || die "governed source root is unreadable."
-  [ "$(git -C "$source" rev-parse --show-toplevel 2>/dev/null)" = "$source" ] || die "governed source root is not a repository top level."
+  type ai_git_toplevel >/dev/null 2>&1 || die "path-identity helpers are missing; install the toolkit's tools/lib/."
+  ai_git_toplevel "$source" || die "governed source root is not a repository top level."
   receipt_parent="$(cd "$(dirname "$AI_REVIEW_SOURCE_RECEIPT_FILE")" 2>/dev/null && pwd -P)" || die "governed source receipt directory is unavailable."
-  [ "$receipt_parent" = "$source/.ai/reviews" ] || die "governed source receipt is not inside the governed source root's .ai/reviews."
+  type ai_same_path >/dev/null 2>&1 || die "path-identity helpers are missing; install the toolkit's tools/lib/."
+  ai_same_path "$receipt_parent" "$source/.ai/reviews" || die "governed source receipt is not inside the governed source root's .ai/reviews."
   printf '%s' "$source"
 }
 
