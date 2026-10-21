@@ -124,6 +124,25 @@ check "provider_command_receives_private_directory" "grep -Rzq -- '--cd' '$TMP/a
 # from `--sandbox read-only`, which the check above proves is unchanged.
 if [ -n "${SYSTEMROOT:-}" ]; then
   check "provider_command_keeps_the_windows_sandbox_implementation" "grep -Rzq -- 'windows.sandbox=' '$TMP/args'"
+  # #1891: over SSH the provider runs through a desktop-session scheduled task.
+  # The fake schtasks runs the task's script in the background and logs actions.
+  ST="$TMP/schtasks-bin"; mkdir -p "$ST"
+  cat > "$ST/schtasks" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
+prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
+[ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*" "(.*)"$/\1/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
+if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
+exit 0
+EOF
+  chmod +x "$ST/schtasks"
+  rm -f "$TMP/args/schtasks-log"
+  RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
+  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -qx /Delete '$TMP/args/schtasks-log'"
+  rm -f "$TMP/args/schtasks-log"
+  check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'signed in at the desktop' '$R/.ai/reviews'"
+  rm -f "$TMP/args/schtasks-log"
+  check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
 fi
 check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
 check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"

@@ -210,10 +210,21 @@ stop_provider_tree(){ # TIMEOUT_PID
   wait "$pid" 2>/dev/null || true
 }
 
+# The desktop relay's provider is not our child, so killing PROVIDER_PID cannot
+# reach it; end and delete its scheduled task instead (also kills its processes).
+RELAY_TASK=""
+stop_relay_task(){
+  [ -n "$RELAY_TASK" ] || return 0
+  MSYS2_ARG_CONV_EXCL='*' schtasks /End /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$RELAY_TASK" >/dev/null 2>&1 || true
+  RELAY_TASK=""
+}
+
 interrupt_review(){
   trap - HUP INT TERM
   stop_provider_tree "$PROVIDER_PID"
   PROVIDER_PID=""
+  stop_relay_task
   local elapsed=$(( $(date +%s) - STARTED )) report=""
   report="$(preserve_failure_diagnostic interrupted || true)"
   if [ -n "$STATE" ] && [ -f "$STATE" ] && [ "$(jq -r '.status // ""' "$STATE" 2>/dev/null || true)" = running ]; then
@@ -360,7 +371,7 @@ run_provider() {
     return
   fi
   local relay task rc i
-  relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$$"
+  relay="$reviewer_home/relay"; task="AiDevOps-CodexReview-$$"; RELAY_TASK="$task"
   mkdir -p "$relay" && printf '%s\n' "$PROMPT" > "$relay/prompt"
   { printf 'export PATH=%q\ncd %q || exit 97\n' "$PATH" "$REVIEW_DIR"
     printf 'touch %q\n' "$relay/started"
@@ -370,7 +381,7 @@ run_provider() {
   MSYS2_ARG_CONV_EXCL='*' schtasks /Create /F /TN "$task" /SC ONCE /ST 23:59 /IT /RU "$USERNAME" \
     /TR "\"$(cygpath -w "$(command -v bash)")\" \"$(cygpath -w "$relay/run.sh")\"" >/dev/null 2>"$TMP_ERR" \
     && MSYS2_ARG_CONV_EXCL='*' schtasks /Run /TN "$task" >/dev/null 2>>"$TMP_ERR" || { MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$task" >/dev/null 2>&1; return 98; }
-  for i in $(seq 60); do [ -e "$relay/started" ] && break; sleep 1; done
+  for i in $(seq "${AI_CODEX_RELAY_START_SECONDS:-60}"); do [ -e "$relay/started" ] && break; sleep 1; done
   if [ ! -e "$relay/started" ]; then
     echo "desktop relay never started: $USERNAME must be signed in at the desktop of this machine." >> "$TMP_ERR"
     MSYS2_ARG_CONV_EXCL='*' schtasks /Delete /F /TN "$task" >/dev/null 2>&1; return 99
@@ -384,8 +395,11 @@ set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
+if [ "$DESKTOP_RELAY" = 1 ]; then RELAY_TASK="AiDevOps-CodexReview-$$"; fi
 run_provider & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
+# A relay that hit its own deadline leaves the task running; end it here too.
+stop_relay_task
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 
