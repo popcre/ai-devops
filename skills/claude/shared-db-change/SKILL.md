@@ -14,6 +14,11 @@ Concrete project identifiers are protected configuration. Resolve them with
 `ai-private-config value supabase_shared_preview_ref`; never copy a value into
 this public skill. Prove the live link immediately before every write.
 
+One project serves every app (CRM, DAM, PM-PIM, PLM/DesignFlow runtime logins,
+monitor): there is no per-app project. Its API URL is
+`https://<ref>.supabase.co` with the prod ref above; preview branches use the
+preview ref. Do not re-fetch these from the dashboard or the MCP each session.
+
 `popcre/shared-db` is the canonical repo for the shared supabase.com backend
 (project `<protected-shared-prod-ref>`) used by CRM / DAM / PM-PIM / PLM. Albert had to
 say "pull the repo again and re-read the .md files to see the proper way to make

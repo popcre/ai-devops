@@ -100,7 +100,7 @@ Albert is a business owner, not a programmer. Write every reply for him.
   which re-proves the one open structural work issue; this exception authorizes no manual production command (rulings: owner-rulings.md).
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
   in `popcre/shared-db`; load `shared-db-change` first.
-- **Sign everything posted to GitHub** (format in details).
+- **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
 - **Reviews:** pick an in-rotation reviewer of a different engine via
   `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
 - **Route every successor from its own work,** never a predecessor's.
