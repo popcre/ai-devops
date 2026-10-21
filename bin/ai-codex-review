@@ -406,9 +406,16 @@ else
 fi
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 # A relay that hit its own deadline leaves the task running; end it here too.
-stop_relay_task || die "the desktop relay task could not be stopped; no report was published."
+stop_relay_task 2>>"$TMP_ERR"; RELAY_STOP_RC=$?
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
+
+if [ "$RELAY_STOP_RC" -ne 0 ]; then
+  FAILURE_REPORT="$(preserve_failure_diagnostic relay-not-stopped || true)"
+  if [ -n "$FAILURE_REPORT" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$FAILURE_REPORT" >/dev/null 2>&1 || true
+  else "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; fi
+  die "the desktop relay task could not be stopped; no report was published. Diagnostic: ${FAILURE_REPORT:-unavailable}"
+fi
 
 if [ "$PROVIDER_RC" -ne 0 ]; then
   FAILURE_REPORT="$(preserve_failure_diagnostic provider-failed || true)"
