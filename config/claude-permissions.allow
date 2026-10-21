@@ -14,3 +14,7 @@
 # permission prompt that nobody is sitting there to answer. Added 2026-08-13.
 mcp__playwright__browser_evaluate
 mcp__claude-in-chrome__javascript_tool
+# Hand-written wait loops (sleep in a loop, gh run watch) are refused; wait with
+# a background command instead. Added 2026-10-21.
+deny:Bash(sleep:*)
+deny:Bash(gh run watch:*)
