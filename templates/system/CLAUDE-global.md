@@ -139,6 +139,7 @@ rulings, verbatim: `docs/owner-rulings.md`.
 
 ## Engineering and Git
 
+- **GPT-5.6 uses `low` or `medium` reasoning only.** Split a harder task.
 - Prefer permanent, fewest-moving-parts fixes. Test created code; verify UI
   visually. GitHub is the source of truth; never live-edit a server or replace
   operating-system binaries.

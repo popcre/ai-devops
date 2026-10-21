@@ -38,9 +38,9 @@ CAPABILITY_REPAIR_PATTERNS = {
 CLOSEOUT_CONTRACT_PATTERNS = {
     r"Account for the whole job|deliverables the\s+request asked for": "a session must account for every deliverable before ending a turn",
     r"Preparation is not delivery": "preparation must not be reported as delivery",
-    r"keep working|Ending\s+the turn is the error": "unfinished authorized work means keep working, not end the turn",
-    r"nothing is needed.{0,80}every deliverable|name what is still pending": "completion may only be claimed once every deliverable checks out",
-    r"Do not end a turn by describing work you are about to do": "future action promises cannot replace action in the current turn",
+    r"keep working|Ending\s+the turn(?: there)? is the error": "unfinished authorized work means keep working, not end the turn",
+    r"nothing is needed.{0,80}(?:every deliverable|check passes)|name what is still pending": "completion may only be claimed once every deliverable checks out",
+    r"Do not end a turn by describing work you are about to do|a promise,\s+not work": "future action promises cannot replace action in the current turn",
 }
 
 SAFETY_MARKERS = {
@@ -52,7 +52,7 @@ SAFETY_MARKERS = {
     "completion honesty": list(CLOSEOUT_CONTRACT_PATTERNS),
     "Git identity": [r"GIT_COMMITTER_IDENT|Git identity", r"Albert Hazan|users\.noreply\.github\.com"],
     "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
-    "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting"],
+    "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting|never live-edit a server or replace"],
 }
 
 # Plain-English consequence printed when a safety category is missing. The audit
@@ -105,11 +105,12 @@ PARITY_RULES = {
     "response style contract": r"^# Response Style",
     "closeout contract: account for deliverables": r"Account for the whole job",
     "closeout contract: preparation is not delivery": r"Preparation is not delivery",
-    "closeout contract: keep working when unfinished": r"Ending\s+the turn is the error",
-    "closeout contract: do not promise future action instead of acting": r"Do not end a turn by describing work you are about to do",
+    "closeout contract: keep working when unfinished": r"Ending\s+the turn(?: there)? is the error",
+    "closeout contract: do not promise future action instead of acting": r"Do not end a turn by describing work you are about to do|a promise,\s+not work",
     "GPT-5.6 low or medium only": r"GPT-5\.6",
-    "production infrastructure safety": r"production infrastructure safety",
-    "no terraform apply against prod": r"terraform apply",
+    "production infrastructure safety": r"production infrastructure safety|\*\*Production:\*\* read-only by default",
+    # #1912 replaced the named terraform/gcloud list with "every technical production action".
+    "no terraform apply against prod": r"terraform apply|gates every\s+technical production action",
     "verify Git committer identity": r"GIT_COMMITTER_IDENT",
     "secrets live in 1Password": r"1Password",
     "serialize 1Password access": r"serializ",
@@ -123,13 +124,13 @@ PARITY_RULES = {
     "symptom suppression is not a fix": r"symptom suppression",
     "pending work in one Still open block": r"\*\*Still open\*\*",
     "every pending bullet names its holder": r"`Waiting on",
-    "waiting-on names owner and active status": r"actively in progress or idle",
-    "another session names its kind": r"subagent this agent spawned",
+    "waiting-on names owner and active status": r"actively in progress or idle|active or idle",
+    "another session names its kind": r"subagent this agent spawned|say which kind: a subagent",
     "process rules never override replies": r"Process rules never override this",
     "never delegate a decision": r"never delegate a schema change|Never delegate a decision",
-    "finished reply says it is finished": r"silent about being finished",
-    "assumptions get named": r"answered with an\s+assumption",
-    "shared-db structural work is claim-first": r"[Cc]laim exact objects on the\s+existing issue",
+    "finished reply says it is finished": r"silent about being finished|never make Albert ask",
+    "assumptions get named": r"answered with an\s+assumption|Name\s+any assumption",
+    "shared-db structural work is claim-first": r"[Cc]laim exact objects on the\s+existing issue|shared-db`\s+\(claim-first",
     "never replace system binaries": r"system binaries|operating-system binaries",
     "live proof required before close": r"Live proof is required before an outcome is closed",
     "one issue per application need": r"One issue per application need",
