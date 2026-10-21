@@ -19,7 +19,7 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 | 2 | Repair StepFun Windows shell spawn | ✅ code landed — 2026-10-18 (`0be8ffa5` PR #1807); live shell proof remains in step 6 | Offline fixture `stepfun_windows_shell_spawn_resolves` green; live `ai-stepfun` ask/review starts a shell (step 6) |
 | 3 | Repair GLM REVISE re-review waste | ✅ done — 2026-10-19 (`b5cfa876` PR #1819, path 1 reviewed workstream) | Fixture `glm_revise_followup_reuses_bound_turn` green (`tests/test-glm-revise-followup.sh` 13/13) |
 | 4 | Repair durable report publish and sandbox non-interference | ⬜ open — 2026-10-15 | Completed review yields a durable report path; foreign orphans intact |
-| 5 | Repair Windows Git Bash / ProgramFiles detection | ⬜ open — 2026-10-15 | `tests/test-windows-bash-selection.sh` green with empty ProgramFiles |
+| 5 | Repair Windows Git Bash / ProgramFiles detection | ✅ code landed — 2026-10-21 (code-class `*.cmd` only; 13 protected `.cmd` + installer half stay #1701) | `tests/test-bin-cmd-launchers.sh` green, including `launcher_resolves_git_bash_with_empty_programfiles` (named suite is this, not `test-windows-bash-selection.sh`, which is CI-lane selection) |
 | 6 | Live smoke + incident disposition (no paid blast) | ⬜ open — 2026-10-15 | Two local incidents resolved/partially-resolved with exact evidence |
 | 7 | Install code-only release and re-prove | ⬜ open — 2026-10-15 | Installed hashes match merged source; smoke still green |
 
@@ -314,13 +314,17 @@ Never “just ship” a protected path.
 **Step 5 — Git Bash / ProgramFiles detection.**
 
 - What: fix launcher/bash discovery so an empty or missing `ProgramFiles` still
-  finds Git Bash (issue #1701). Likely helpers under `bin/` or `tools/` used by
-  `*.cmd` launchers — confirm the owning file’s class first; stay in `code`.
-  Keep the `.cmd` wrapper pattern.
-- Tests: `tests/test-windows-bash-selection.sh` must cover empty ProgramFiles
-  and still resolve `C:\Program Files\Git\bin\bash.exe` or the known fallback.
+  finds Git Bash (issue #1701). Own the walk in the code-class `*.cmd`
+  launchers; keep the `.cmd` wrapper pattern. Thirteen launchers whose `.cmd`
+  classifies `reviewer-safety` and the installer Join-Path sites stay on #1701
+  and are out of this plan (§8).
+- Tests: `tests/test-bin-cmd-launchers.sh` must cover empty ProgramFiles and
+  still resolve `C:\Program Files\Git\bin\bash.exe` via the hard-coded fallback
+  (`launcher_resolves_git_bash_with_empty_programfiles`). Plan draft named
+  `tests/test-windows-bash-selection.sh`; that suite is CI-lane selection, not
+  bash.exe lookup — do not overload it.
 - Depends on: step 1 (can run parallel with 2–4).
-- **Verification gate:** `bash tests/test-windows-bash-selection.sh` green.
+- **Verification gate:** `bash tests/test-bin-cmd-launchers.sh` green.
 
 ### Phase C — proof and install
 
