@@ -108,7 +108,7 @@ rulings, verbatim: `docs/owner-rulings.md`.
   EST/EDT (America/New_York), e.g. `3:45 PM EST`. Machine keys may stay UTC.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan, except a credential under a standing
+  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
