@@ -91,8 +91,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
   Preparation may legitimately leave agents idle; never invent busywork.
   Stop when complete, genuinely externally blocked with exact state preserved,
   or told to stop. Do not promise background execution the client cannot provide.
-  Any review, queue, or helper with no progress for 30 minutes is broken:
-  reroute, redraw, or use the documented fallback; never report a second turn
+- **Thirty minutes without progress is broken.** Any review, queue, or helper
+  with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
   of "still waiting" on the same item.
 - **Keep canonical checkouts landing-only.** Every write-capable task uses its
   own current-upstream worktree before editing. Edit a shared checkout only for
