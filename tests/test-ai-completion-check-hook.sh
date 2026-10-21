@@ -110,6 +110,18 @@ rm -f "$XDG_STATE_HOME/ai-devops/completion-check/actions/sess-1"
 check "a promise without activity-event evidence stays fail-open" \
   "[ -z \"\$(fire f4 \"I'll start now.\")\" ]"
 
+# --- sample transcripts: a bare promise blocks (exit 2), a backed one passes ---
+fire s-init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+jq -nc '{hook_event_name:"Stop",session_id:"sess-1",prompt_id:"s1",last_assistant_message:"Plan noted.\n\nRunning now; I will update you."}' \
+  | bash "$HOOK" >/dev/null 2>"$TMP/s1.err"; s1_rc=$?
+check "sample: promise with no tool call exits 2" "[ $s1_rc -eq 2 ]"
+check "sample: block reason goes to stderr" "grep -q 'no implementation' \"$TMP/s1.err\""
+fire s-init2 '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+fire s-edit '' '{"hook_event_name":"PostToolUse","tool_name":"Edit"}' >/dev/null
+jq -nc '{hook_event_name:"Stop",session_id:"sess-1",prompt_id:"s2",last_assistant_message:"Edited the file.\n\nRunning now; I will update you."}' \
+  | bash "$HOOK" >/dev/null 2>&1; s2_rc=$?
+check "sample: promise after a tool call passes (exit 0)" "[ $s2_rc -eq 0 ]"
+
 # --- silence where silence is correct ------------------------------------------
 check "an ordinary reply is silent" "[ -z \"\$(fire p4 'Here is the diff. Two tests fail on line 40.')\" ]"
 check "a reply naming pending work is silent" "[ -z \"\$(fire p5 'The loader is still pending; I am building it next.')\" ]"

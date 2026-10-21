@@ -422,6 +422,12 @@ issue. Open no marker or leftover-proof issue.
 
 ## Before you call the handover done
 
+**Release every claim and lock first.** Before the closing report, release
+every database claim and lock this session holds (shared-db object claims,
+author reservations, migration or preview locks, any app-level advisory lock)
+and prove zero remain with `ai-shared-db-closeout-check`. A claim still held at
+the closing report is a wrap-up failure, not a disclosure item.
+
 1. **Re-verify the moving facts at write time**, not from memory: `git fetch`,
    the `main` tip SHA, the maximum migration version, and every open PR's state.
    Stamp each with the time it was checked.

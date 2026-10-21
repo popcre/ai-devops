@@ -1,5 +1,9 @@
 # Reviewer rotation rules
 
+**Scope (owner ruling 2026-10-15):** review is required only in
+`popcre/shared-db`. These rules govern that rotation and any review requested
+by name elsewhere; nothing outside shared-db waits for a review.
+
 Owner rules, 2026-09-22. They exist because GLM was retired in the shared-db
 allocator but stayed registered here, and a session spent an hour trying it.
 

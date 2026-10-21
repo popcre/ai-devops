@@ -242,6 +242,12 @@ successor can open in a browser from anywhere:
 
 ## Closing report (plain English, one message)
 
+**Release every claim and lock first.** Before the closing report, release
+every database claim and lock this session holds (shared-db object claims,
+author reservations, migration or preview locks, any app-level advisory lock)
+and prove zero remain with `ai-shared-db-closeout-check`. A claim still held at
+the closing report is a wrap-up failure, not a disclosure item.
+
 ```md
 ## Session closed
 - What we accomplished: [1-3 sentences, business language]
