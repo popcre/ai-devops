@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,35 @@ class TargetOrdinal(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout.strip(), r"^[1-9][0-9]*$")
 
+    def test_concurrent_distinct_keys_get_distinct_ordinals(self):
+        import concurrent.futures
+        keys = [f"owner/repo#{n}" for n in range(20)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            ordinals = list(pool.map(lambda k: target_ordinal.ordinal_for(self.state, k), keys))
+        self.assertEqual(len(set(ordinals)), len(keys), ordinals)
+        # Stable on re-read
+        self.assertEqual(target_ordinal.ordinal_for(self.state, keys[0]), ordinals[0])
+
+    def test_cross_process_lock_prevents_duplicate_ordinals(self):
+        # Two real processes must not share one ordinal for distinct keys.
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "import target_ordinal; from pathlib import Path;"
+            "print(target_ordinal.ordinal_for(Path(sys.argv[2]), sys.argv[3]))"
+        )
+        helper = str(ROOT / "tools/github-requests")
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, helper, str(self.state), f"owner/repo#{n}"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for n in range(8)
+        ]
+        out = [p.communicate(timeout=30)[0].strip() for p in procs]
+        for p in procs:
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(set(out)), 8, out)
+        self.assertTrue(all(o.isdigit() for o in out), out)
+
 
 class MeasureAppend(unittest.TestCase):
     def setUp(self):
@@ -89,16 +119,17 @@ class ReportCounters(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def read_row(self, source, ordinal):
+    def read_row(self, source, ordinal, workflow="pr_wait", caller="ai-pr-wait"):
         return {"schema": 6, "utc": "2026-10-12T00:00:00Z", "measurement": "read_observation",
-                "caller": "ai-pr-wait", "workflow": "pr_wait", "target_ordinal": ordinal,
+                "caller": caller, "workflow": workflow, "target_ordinal": ordinal,
                 "source": source, "cache_hit": source == "cache",
                 "saved_upstream_read": source == "cache"}
 
-    def write_row(self, action, relation, ordinal=1):
+    def write_row(self, action, relation, ordinal=1, workflow="blocker_watch_tick",
+                  caller="ai-blocker-watch"):
         return {"schema": 6, "utc": "2026-10-12T00:00:00Z", "measurement": "write_observation",
-                "caller": "ai-blocker-watch", "workflow": "blocker_watch_tick",
-                "target_ordinal": ordinal, "action": action, "content_relation": relation,
+                "caller": caller, "workflow": workflow, "target_ordinal": ordinal,
+                "action": action, "content_relation": relation,
                 "duplicate_unchanged_write": action == "written" and relation == "unchanged"}
 
     def test_replay_denominator_and_reduction(self):
@@ -143,6 +174,16 @@ class ReportCounters(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
 
+    def test_merge_group_evidence_observations_accepted(self):
+        # telemetry.sh allows merge_group_evidence; report.py must not crash.
+        self.write(self.read_row("cache", 1, workflow="merge_group_evidence",
+                                 caller="ai-merge-group-evidence"))
+        self.write(self.write_row("skipped", "unchanged", workflow="merge_group_evidence",
+                                  caller="ai-merge-group-evidence"))
+        summary = self.run_report()
+        self.assertEqual(summary["section13_item2_redundant_reads"]["read_observations"], 1)
+        self.assertEqual(summary["section13_item2_duplicate_writes"]["write_observations"], 1)
+
 
 class SingleFlightEmits(unittest.TestCase):
     def setUp(self):
@@ -157,13 +198,17 @@ class SingleFlightEmits(unittest.TestCase):
         self.count = self.base / "calls"
         self.fake = self.base / "fake.py"
         self.fake.write_text(
-            """import json, os
+            """import json, os, time
 with open(os.environ['COUNT'], 'a') as f: f.write('x\\n')
+time.sleep(float(os.environ.get('DELAY', '0')))
+mode = os.environ.get('MODE', 'open')
 pr = {'state': 'OPEN', 'headRefOid': 'h1', 'isInMergeQueue': False, 'mergeCommit': None,
       'commits': {'nodes': [{'commit': {'statusCheckRollup': {
-      'state': 'PENDING', 'contexts': {'totalCount': 0,
+      'state': 'FAILURE' if mode == 'failed' else 'PENDING',
+      'contexts': {'totalCount': 1 if mode == 'failed' else 0,
                    'pageInfo': {'hasPreviousPage': False},
-                   'nodes': []}}}}]}}
+                   'nodes': ([{'name': 'test', 'conclusion': 'FAILURE'}]
+                             if mode == 'failed' else [])}}}}]}}
 print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
 """
         )
@@ -171,14 +216,17 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
                         AI_GH_STATE_DIR=str(self.state),
                         AI_GH_CALLER="ai-pr-wait")
 
-    def call(self, suffix):
+    def call(self, suffix, force=False, delay="0", mode="open", wait_seconds="4"):
+        argv = [sys.executable, str(SINGLE), "--state-dir", str(self.base / "snap"),
+                "--key", "same-target", "--expected-head", "h1", "--ttl", "10",
+                "--wait-seconds", wait_seconds, "--age-file", str(self.base / (suffix + ".age")),
+                "--source-file", str(self.base / (suffix + ".source"))]
+        if force:
+            argv.append("--force-refresh")
+        argv.extend(["--", sys.executable, str(self.fake)])
+        env = dict(self.env, DELAY=delay, MODE=mode)
         return subprocess.Popen(
-            [sys.executable, str(SINGLE), "--state-dir", str(self.base / "snap"),
-             "--key", "same-target", "--expected-head", "h1", "--ttl", "10",
-             "--wait-seconds", "4", "--age-file", str(self.base / (suffix + ".age")),
-             "--source-file", str(self.base / (suffix + ".source")),
-             "--", sys.executable, str(self.fake)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
     def _rows(self):
         rows = []
@@ -186,6 +234,9 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
             for line in path.read_text().splitlines():
                 rows.append(json.loads(line))
         return rows
+
+    def calls(self):
+        return len(self.count.read_text().splitlines()) if self.count.exists() else 0
 
     def test_cache_hit_emits_saved_read_and_upstream_emits_read(self):
         first = self.call("a")
@@ -230,6 +281,32 @@ print(json.dumps({'data': {'repository': {'pullRequest': pr}}}))
         skipped = next(w for w in writes if w["action"] == "skipped")
         self.assertEqual(skipped["content_relation"], "unchanged")
         self.assertFalse(skipped["duplicate_unchanged_write"])
+
+    def test_identical_skip_refreshes_mtime_for_in_flight_coalescing(self):
+        # A failing snapshot is not TTL-cacheable, so waiters only share via
+        # the same-flight mtime window. Skipping the identical content rewrite
+        # must still bump mtime, or a waiter that joined during the refresh
+        # re-hits upstream instead of sharing the completed read.
+        first = self.call("a", mode="failed")
+        out, err = first.communicate(timeout=8)
+        self.assertEqual(first.returncode, 0, err)
+        cache = next((self.base / "snap").glob("*.json"))
+        before = cache.stat().st_mtime_ns
+        owner = self.call("owner", force=True, delay="0.6", mode="failed", wait_seconds="8")
+        time.sleep(0.2)
+        joiner = self.call("joiner", mode="failed", wait_seconds="8")
+        out, err = owner.communicate(timeout=10)
+        self.assertEqual(owner.returncode, 0, err)
+        out, err = joiner.communicate(timeout=10)
+        self.assertEqual(joiner.returncode, 0, err)
+        self.assertEqual((self.base / "owner.source").read_text(), "upstream")
+        self.assertEqual((self.base / "joiner.source").read_text(), "cache")
+        self.assertEqual(self.calls(), 2)
+        after = cache.stat().st_mtime_ns
+        self.assertGreater(after, before, "identical skip must refresh cache mtime")
+        writes = [r for r in self._rows() if r.get("measurement") == "write_observation"]
+        self.assertEqual(sorted(w["action"] for w in writes), ["skipped", "written"])
+        self.assertFalse(any(w["duplicate_unchanged_write"] for w in writes))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,42 @@
 # P1 request attribution — working baseline
 
+## Resume sample — October 21, 2026, 2:12 PM EDT
+
+Owner: current Codex session on edge-dev3 under #658/#660. This supplements
+the frozen P1 evidence below; it does not replace its baseline or turn the
+existing candidate cohort into a retrospective baseline.
+
+Six closed daily telemetry files were copied without modifying the originals.
+The existing reporter validates the immutable copy from October 14, 2026,
+8:00 PM EDT through October 20, 2026, 7:58:05 PM EDT. Input digest:
+`f8477e7532d881905a4e3c7dda07500ea47863576c4bb2739a6d42a3f868cb28`.
+Report digest:
+`454bd166cf9e1f8943205b1a29e802b05b241cdadeae26823b7d22fec27a31a6`.
+The private snapshot and full report are retained in the protected machine-local
+state under `658-resume-20261021`; raw rows are not published.
+
+- 262 local timing observations: 57 merged, 41 checks-failed, 3 ejected,
+  1 closed and 160 deadlines. Excluding deadlines leaves 102 completed
+  observations. These unpaired observations do not establish a latency ratio.
+- 712 target-correlated reads, 217 target ordinals, 495 same-target replays,
+  zero cache serves. Repetition over six days is not proof that those reads
+  were redundant or eligible for one shared refresh.
+- 712 new-write observations and zero observed unchanged writes. Target
+  adapter qualification and completeness remain acceptance prerequisites;
+  the existing PR #1710 contains their pending source repair.
+- 712 observed GraphQL points. Actual total HTTP requests and whole-account
+  GraphQL points remain null. The report retains 6,112 unknown-caller rows.
+- Schema-4 safety evidence remains unqualified: all 262 records lack source
+  verification, target ordinal and clock-error bound. Qualified local duration
+  intervals do not substitute for safety-event detection latency.
+
+The actual installed manifest names `eeae25ef`, which contains duration adapter
+`4e172768`; no repeat installation of that historical adapter is required.
+The rejected item-2 source is not considered repaired or live until #1710
+lands, passes its installation gate and preserves original waiter coalescing.
+Keep live proof and matched baseline/candidate costs, latency, safety equivalence
+and host/client coverage open on #658/#660. No savings or completion is claimed.
+
 Owner: Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114`, ALBT16.
 Tracking: [P1 #660](https://github.com/popcre/ai-devops/issues/660), parent
 [#658](https://github.com/popcre/ai-devops/issues/658).

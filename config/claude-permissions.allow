@@ -36,3 +36,8 @@ Bash(rg:*)
 Bash(wc:*)
 Bash(head:*)
 Bash(tail:*)
+
+# Hand-written wait loops (sleep in a loop, gh run watch) are refused; wait with
+# a background command instead. Added 2026-10-21.
+deny:Bash(sleep:*)
+deny:Bash(gh run watch:*)
