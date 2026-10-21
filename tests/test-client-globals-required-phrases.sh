@@ -61,7 +61,7 @@ done
 
 # Each global lists the valid task-gate classes; the list must match
 # config/task-gates.json change_classes exactly so it cannot go stale (#1881).
-expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | sort | tr '\n' ' ')"
+expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | tr -d '\r' | sort | tr '\n' ' ')"
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
   listed_classes="$(tr -d '\r' < "$client_file" | tr '\n' ' '  | grep -oP 'Classes: \K[^.]*' | head -n1 \
     | sed 's/([^)]*)//g' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort | tr '\n' ' ')"
