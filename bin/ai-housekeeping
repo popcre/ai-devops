@@ -265,9 +265,10 @@ else
 fi
 
 gh_call() {
-  # Bounded GitHub invocation. Returns non-zero on timeout or failure.
+  # Bounded GitHub invocation. Returns non-zero on timeout or failure. The
+  # bound must exceed the shared ai-gh queue wait on a busy machine (often >30s).
   if command -v timeout >/dev/null 2>&1; then
-    timeout 30 "$GH" "$@"
+    timeout "${AI_HOUSEKEEPING_GH_TIMEOUT:-120}" "$GH" "$@"
   else
     "$GH" "$@"
   fi
