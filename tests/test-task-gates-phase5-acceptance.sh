@@ -114,7 +114,9 @@ oracle_json="$(explain "$TMP/oracle" .github/workflows/release.yml)"
 check 'Oracle production intent dominates the observed deployment path' "jq -e '.declared_class==\"production\" and .observed_class==\"deployment\" and .effective_class==\"production\"' <<<\"\$oracle_json\""
 check 'Oracle production retains exact resource-and-action authorization' "jq -e '(.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null' <<<\"\$oracle_json\""
 check 'Oracle production also retains deployment release review and owner authorization' "jq -e '([\"managed-platform-release-review\",\"exact-owner-action-authorization\",\"local-tests\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$oracle_json\""
-check 'Oracle fixture opens production without an AI reviewer approval outside shared-db (#1960)' "rc '$TMP/oracle' 0 check --before production"
+# #1962: the production-mutation APPROVE is not a PR review; the 2026-10-15
+# ruling (#1960) waives only PR/code-review gates, so this stays refused.
+check 'Oracle fixture is refused production without an AI reviewer approval outside shared-db (#1962)' "rc '$TMP/oracle' 3 check --before production"
 
 # Non-protected reviewer-approved overrides are recorded, never silent (#996).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"

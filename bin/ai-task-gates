@@ -73,7 +73,7 @@ observation_week_check(){ # ACTION EFFECTIVE_CLASS
       blocked "$(printf 'ai-task-gates: STOP before "%s". Reviewer observation week (%s to %s): reviewer-code changes and toolkit installs are frozen. Log the failure with ai-reviewer-issue and use only the allowed operations in plan_reviewer-observation-week.md section 11.' "$action" "$OW_START" "$OW_END")" ;;
   esac
   [ "$action" = ship ] && ow_class_allowed "$effective" || return 0
-  [ "$effective" = code ] || return 0
+  case "$effective" in code|prose) ;; *) return 0 ;; esac
   head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
   evidence="$(ow_head_evidence "$head" || true)"
   case "$evidence" in
@@ -87,7 +87,7 @@ observation_week_check(){ # ACTION EFFECTIVE_CLASS
         printf 'Unreviewed merge (observation week, all-skipped)\n'
       fi ;;
     *)
-      # Ordinary code needs no review (rotation rule 14), so the week never
+      # Ordinary code and prose need no review (rotation rule 14), so the week never
       # blocks it; without evidence there is simply no unreviewed-week tag.
       printf 'ai-task-gates: observation week: head %s was never sent for review; ordinary code needs none (reviewer-rotation-rules rule 14), so no unreviewed-week label. To add it to the week'"'"'s data, run ai-review <reviewer> final-check --detach first.\n' "${head:-unknown}" ;;
   esac
@@ -1050,9 +1050,13 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission|reviewed-generated-definition-fixture-only)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
 # Owner ruling 2026-10-15 (#1960): "we turned off reviewing in all repos aside
-# from shared-db." Outside popcre/shared-db a reviewer-approval gate a policy
-# lists is not required; it is reported as waived and never enforced.
-REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'
+# from shared-db." Outside popcre/shared-db a PR/code-review gate a policy
+# lists is not required; it is reported as waived and never enforced. The
+# production-mutation gate (exact-resource-and-action-ai-reviewer-approval) is
+# NOT a PR review: the standing safety rule "the assigned AI reviewer's explicit
+# APPROVE gates every technical production action" was not repealed, so it
+# stays enforced in every repository (#1962, DeepSeek REJECT of 5cc973dd).
+REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-head-independent-review)$'
 # Identity aliases come from config/repository-coverage.json ("aliases" per
 # repository): a checkout whose origin still reads the pre-transfer name
 # u2giants/shared-db is the same repository and keeps the same gates (#1962).
