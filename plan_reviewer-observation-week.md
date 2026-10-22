@@ -5,14 +5,14 @@
 | Step | Status | Evidence / where a fresh session starts |
 |---|---|---|
 | 0. Register issue, plan, handoff; declare freeze start | ✅ done 2026-10-21 | [#1948](https://github.com/popcre/ai-devops/issues/1948); pending-work and task-router rows already present |
-| 1. Fast-fail detector in the shared lifecycle | ✅ shipped 2026-10-22 (#1982) | `tools/lib/review-lifecycle-core.sh` fast-fail watch |
-| 2. Per-session skip list | ✅ shipped 2026-10-22 (#1982) | `tools/lib/review-session-skip.sh` |
-| 3. Non-blocking dispatch (`--detach`) + outcome recorder | ✅ shipped 2026-10-22 (#1982) | `bin/ai-review --detach`, `ai-review outcome` |
-| 4. Merge policy for the week: `unreviewed` tag + post-hoc queue | ✅ shipped 2026-10-22 (#1982) | `tools/lib/observation-week.sh`, `bin/ai-task-gates check --before ship` (code and prose) |
-| 5. Global rules text for the week (Claude/Codex/MiMo/ZCode globals) | ⬜ open | Start here |
-| 6. Fleet install + freeze declaration | ⬜ open | |
-| 7. Seven-day observation and daily tally | ⬜ open | |
-| 8. Post-hoc review drain + findings report | ◐ tool shipped 2026-10-22 (#1982); drain runs after step 7 | `bin/ai-review-posthoc` |
+| 1. Fast-fail detector in the shared lifecycle | ✅ shipped 2026-10-22 (#1952, follow-ups #1982) | `tools/lib/review-lifecycle-core.sh` fast-fail watch |
+| 2. Per-session skip list | ✅ shipped 2026-10-22 (#1952, follow-ups #1982) | `tools/lib/review-session-skip.sh` |
+| 3. Non-blocking dispatch (`--detach`) + outcome recorder | ✅ shipped 2026-10-22 (#1952, follow-ups #1982) | `bin/ai-review --detach`, `ai-review outcome` |
+| 4. Merge policy for the week: `unreviewed` tag + post-hoc queue | ✅ shipped 2026-10-22 (#1952, follow-ups #1982) | `tools/lib/observation-week.sh`, `bin/ai-task-gates check --before ship` (code and prose) |
+| 5. Global rules text for the week (Claude/Codex/MiMo/ZCode globals) | ✅ done 2026-10-21 (#1953) | Globals paragraph + rotation rule 15 |
+| 6. Fleet install + freeze declaration | ✅ done 2026-10-22 9:56 AM EDT | All five hosts contain a77fda0c; window file on each; freeze to 9:56 AM EDT Oct 29 ([#1948 comment](https://github.com/popcre/ai-devops/issues/1948#issuecomment-6342582614)) |
+| 7. Seven-day observation and daily tally | ⬜ open | Start here: first tally ~9 AM EDT Oct 23 (`python3 tools/reviewer_events.py tally --since 2026-10-22T13:56:18Z`) |
+| 8. Post-hoc review drain + findings report | ◐ tool shipped 2026-10-22 (#1952, follow-ups #1982); drain runs after step 7 | `bin/ai-review-posthoc` |
 | 9. Closeout: decide what to keep, what to revert | ⬜ open | |
 
 **Owner issue:** [#1948](https://github.com/popcre/ai-devops/issues/1948).
