@@ -1930,6 +1930,7 @@ mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
 cp "$REPO_ROOT/tools/lib/deepseek-opencode.sh" "$DS_API_ROOT/tools/lib/deepseek-opencode.sh"
 cp "$REPO_ROOT/tools/lib/reviewer-instructions.sh" "$DS_API_ROOT/tools/lib/reviewer-instructions.sh"
+cp "$REPO_ROOT/tools/lib/review-terminal-verdict.sh" "$DS_API_ROOT/tools/lib/review-terminal-verdict.sh"
 : > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
 printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
 sed -n '/^review_verdict() {/,/^take_governed_head()/p' "$REPO_ROOT/bin/ai-deepseek-agent" | sed '$d' > "$DS_API_ROOT/validator"
