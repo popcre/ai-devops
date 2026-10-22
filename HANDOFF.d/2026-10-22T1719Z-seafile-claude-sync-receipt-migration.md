@@ -31,6 +31,18 @@ https://github.com/popcre/ai-devops/issues/1962 with a signed comment.
   `mcp.env` matches the example, shellrc sourced, zero plaintext `ops_` tokens).
 - Steps 1b, 1c, 2b, 4, 4c, 5, 6, 6b, 6c, 6c2, 6c2b, 7, 8 have NOT run.
 
+## 2a. Update 1:40 PM EDT — legacy install FAILED (blocker)
+The `94ef5b0d` legacy-migration `install.sh` finished with
+`Install incomplete; required failures: ai-devops doctor`. Doctor line:
+`[FAIL] review provider muse status invalid`. Optional failures: Watchdog duty
+pool scheduling, Muse Code (Linux). No manifest was written; the checkout is still clean at `94ef5b0d`.
+Muse cannot run on Seafile (pin not installed, no catalog, no protected key
+store). Next session: decide the supported fix: install Muse Code properly on
+Seafile (`setup` route in the muse skill), or get a repository change so that
+doctor treats an uninstalled rotation provider as a warning on a host that never
+qualified it. Then retry the authorized install (the one-use authority may need
+re-issuing).
+
 ## 3. Machine-local repairs already made on Seafile (keep)
 - `python-is-python3` installed via apt (two suites called `python`).
 - AppArmor profile `/etc/apparmor.d/bwrap` added (userns for `/usr/bin/bwrap`).
