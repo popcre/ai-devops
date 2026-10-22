@@ -274,7 +274,14 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
           if (last < 1) exit 1
           t = lines[last]
           gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-          if (t ~ /^(VERDICT:[[:space:]]*)?(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) exit 0
+          if (t !~ /^(VERDICT:[[:space:]]*)?(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) exit 1
+          # Accept only "<word>" or "<word> <hex sha>": a qualified line
+          # such as "APPROVE only after X" must fail closed as BLOCKED.
+          sub(/^VERDICT:[[:space:]]*/, "", t)
+          gsub(/\*+/, "", t)
+          sub(/^(APPROVE|REJECT|REVISE|BLOCKED)/, "", t)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
+          if (t == "" || t ~ /^[0-9a-f]+$/) exit 0
           exit 1
         }'; then
       # Agent profiles and older briefs end with "VERDICT: <word> <head>".
