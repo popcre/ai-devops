@@ -18,6 +18,8 @@
 # Strictly additive and idempotent:
 #   - never removes an existing allow entry,
 #   - a line starting `deny:` is added to permissions.deny the same way,
+#   - a line starting `retire:` (or `retire:deny:`) names an entry this toolkit
+#     once installed and now withdraws; only that exact entry is removed,
 #   - never touches ask / hooks / env / anything else,
 #   - creates `permissions.allow` when the file has no permissions block,
 #   - creates the settings file itself when it does not exist,
@@ -89,10 +91,13 @@ import json, os, shutil, sys
 settings_path, allow_path, mode = sys.argv[1:4]
 
 wanted = []
+retired = []
 with open(allow_path, encoding="utf-8") as fh:
     for line in fh:
         line = line.strip()
-        if line and not line.startswith("#"):
+        if line.startswith("retire:"):
+            retired.append(line[7:].strip())
+        elif line and not line.startswith("#"):
             wanted.append(line)
 
 data = {}
@@ -121,12 +126,15 @@ def split(entry):
     return ("deny", entry[5:].strip()) if entry.startswith("deny:") else ("allow", entry)
 
 missing = [entry for entry in wanted if split(entry)[1] not in lists[split(entry)[0]]]
-if not missing:
+stale = [entry for entry in retired if split(entry)[1] in lists[split(entry)[0]]]
+if not missing and not stale:
     print("OK all %d required permission(s) already present" % len(wanted))
     sys.exit(0)
 
 for entry in missing:
     print("MISSING %s" % entry)
+for entry in stale:
+    print("RETIRED %s" % entry)
 
 if mode == "check":
     sys.exit(1)
@@ -137,14 +145,21 @@ if os.path.exists(settings_path):
 for entry in missing:
     key, rule = split(entry)
     lists[key].append(rule)
+for entry in stale:
+    key, rule = split(entry)
+    lists[key] = [r for r in lists[key] if r != rule]
 for key, rules in lists.items():
     if rules:
+        perms[key] = rules
+    elif key in perms:
         perms[key] = rules
 data["permissions"] = perms
 with open(settings_path, "w", encoding="utf-8") as fh:
     json.dump(data, fh, indent=2)
     fh.write("\n")
 print("ADDED %d permission(s) to %s" % (len(missing), settings_path))
+if stale:
+    print("REMOVED %d retired permission(s) from %s" % (len(stale), settings_path))
 PY
 }
 
@@ -153,8 +168,10 @@ run_node() {
 const fs = require('fs');
 const [settingsPath, allowPath, mode] = process.argv.slice(2);
 
-const wanted = fs.readFileSync(allowPath, 'utf8').split(/\r?\n/)
+const lines = fs.readFileSync(allowPath, 'utf8').split(/\r?\n/)
   .map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+const wanted = lines.filter(s => !s.startsWith('retire:'));
+const retired = lines.filter(s => s.startsWith('retire:')).map(s => s.slice(7).trim());
 
 let data = {};
 if (fs.existsSync(settingsPath)) {
@@ -174,19 +191,23 @@ const lists = { allow: Array.isArray(perms.allow) ? perms.allow : [], deny: Arra
 const split = e => e.startsWith('deny:') ? ['deny', e.slice(5).trim()] : ['allow', e];
 
 const missing = wanted.filter(e => { const [k, r] = split(e); return !lists[k].includes(r); });
-if (missing.length === 0) {
+const stale = retired.filter(e => { const [k, r] = split(e); return lists[k].includes(r); });
+if (missing.length === 0 && stale.length === 0) {
   console.log(`OK all ${wanted.length} required permission(s) already present`);
   process.exit(0);
 }
 missing.forEach(e => console.log(`MISSING ${e}`));
+stale.forEach(e => console.log(`RETIRED ${e}`));
 if (mode === 'check') process.exit(1);
 
 if (fs.existsSync(settingsPath)) fs.copyFileSync(settingsPath, settingsPath + '.aidevops.bak');
 missing.forEach(e => { const [k, r] = split(e); lists[k].push(r); });
-for (const [k, rules] of Object.entries(lists)) if (rules.length) perms[k] = rules;
+stale.forEach(e => { const [k, r] = split(e); lists[k] = lists[k].filter(x => x !== r); });
+for (const [k, rules] of Object.entries(lists)) if (rules.length || k in perms) perms[k] = rules;
 data.permissions = perms;
 fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2) + '\n');
 console.log(`ADDED ${missing.length} permission(s) to ${settingsPath}`);
+if (stale.length) console.log(`REMOVED ${stale.length} retired permission(s) from ${settingsPath}`);
 JS
 }
 

@@ -70,6 +70,19 @@ test_runtime() {
   printf '{"permissions":"nope"}\n' > "$H5/settings.json"
   run "$H5" >/dev/null; check "weird: exit 0" "$?" "0"
   grep -q '"alpha_tool"' "$H5/settings.json" && ok "weird: entries added anyway" || bad "weird: entries added anyway"
+
+  # 7. A retire: line removes exactly that installed entry and nothing else (#1962).
+  H6="$TMP/$RUNTIME-retire"; mkdir -p "$H6"
+  printf '{"permissions":{"allow":["alpha_tool","beta_tool"],"deny":["Bash(sleep:*)","Read(./.env)"]}}\n' > "$H6/settings.json"
+  printf 'alpha_tool\nbeta_tool\nretire:deny:Bash(sleep:*)\n' > "$TMP/allow-retire"
+  out="$(AI_DEVOPS_PERMISSIONS_FILE="$TMP/allow-retire" CLAUDE_HOME="$H6" AI_DEVOPS_JSON_RUNTIME="$RUNTIME" "$SCRIPT" --check 2>&1)"
+  check "retire: check exit 1" "$?" "1"
+  out="$(AI_DEVOPS_PERMISSIONS_FILE="$TMP/allow-retire" CLAUDE_HOME="$H6" AI_DEVOPS_JSON_RUNTIME="$RUNTIME" "$SCRIPT" 2>&1)"
+  check "retire: exit 0" "$?" "0"
+  grep -q 'sleep' "$H6/settings.json" && bad "retire: sleep deny removed" || ok "retire: sleep deny removed"
+  grep -q 'Read(./.env)' "$H6/settings.json" && ok "retire: other deny kept" || bad "retire: other deny kept"
+  out="$(AI_DEVOPS_PERMISSIONS_FILE="$TMP/allow-retire" CLAUDE_HOME="$H6" AI_DEVOPS_JSON_RUNTIME="$RUNTIME" "$SCRIPT" 2>&1)"
+  case "$out" in *"already present"*) ok "retire: rerun no-op" ;; *) bad "retire: rerun no-op ($out)" ;; esac
 }
 
 RAN=0

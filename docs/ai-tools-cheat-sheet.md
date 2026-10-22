@@ -41,7 +41,7 @@ ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name
 ## ai-pr-wait (`bin/ai-pr-wait`)
 
 ```text
-ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--repo OWNER/NAME] [--reviewer-approval REPORT]
+ai-pr-wait <pr-number> [--timeout-minutes N (default 60)] [--fit-tool-call] [--repo OWNER/NAME] [--reviewer-approval REPORT]
 ```
 
 On `STILL-WAITING` rerun the printed command. Prose-only PRs do not wait for

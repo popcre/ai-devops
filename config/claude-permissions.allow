@@ -37,10 +37,12 @@ Bash(wc:*)
 Bash(head:*)
 Bash(tail:*)
 
-# Hand-written wait loops (sleep in a loop, gh run watch) are refused; wait with
-# a background command instead. Added 2026-10-21.
-deny:Bash(sleep:*)
+# `gh run watch` is refused; wait with a background command instead. Added
+# 2026-10-21. Sleep-in-a-loop is blocked by the PR-poll guard hook, which still
+# allows a lone `sleep`; the earlier blanket sleep deny overreached (#1962) and
+# is retired from installed settings below.
 deny:Bash(gh run watch:*)
+retire:deny:Bash(sleep:*)
 
 # Read-only commands from a scan of the 50 most recent transcripts on edge-dev3
 # (2026-10-21) that Claude Code does not already auto-allow. Excluded on purpose:

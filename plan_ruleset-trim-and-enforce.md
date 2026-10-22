@@ -182,12 +182,17 @@ them as sample estimates, not exact figures.
   maintenance. Enforce only rules whose violation costs real time or money
   (PR polling). The rest are fixed by being short and findable.
 - **Delete the job-plan rule outright.** Open (see §8). Albert wrote it on purpose.
-- **Make `ai-pr-wait` default to unbounded.** Rejected. #1183 deliberately requires
-  an explicit deadline.
+- **Make `ai-pr-wait` default to unbounded.** Rejected. #1183 requires a deadline;
+  the 60-minute default (§8, 2026-10-21) keeps one.
 
 ### 8. Decisions
 
 Locked (2026-10-20):
+
+- 2026-10-21 (#1965, recorded after the fact): `ai-pr-wait` defaults
+  `--timeout-minutes` to 60 so the global rule "run `bin/ai-pr-wait <pr>` in the
+  background" works without a flag. This reverses #1183 child 3's
+  explicit-flag requirement but keeps its substance: every wait has a deadline.
 
 - Safety meaning is preserved verbatim in substance. Owner rulings keep Albert's
   exact quoted words, but in `docs/owner-rulings.md`; the global keeps a one-line
@@ -277,7 +282,8 @@ citing a commit SHA or test file. Never cite a bare number.
 **2.2 One run fits one tool call.**
 - Add `--fit-tool-call` to `bin/ai-pr-wait`. It caps the deadline at 9 minutes and,
   on timeout, prints one line: `STILL-WAITING pr=<n> state=<…> rerun: <same command>`.
-- The explicit `--timeout-minutes` stays required (#1183).
+- Superseded 2026-10-21 (#1965): `--timeout-minutes` now defaults to 60, still a
+  bounded deadline, so a background run needs no flag; see §8.
 - Update the global wait bullet to name exactly this form.
 - Done when: a test with a stubbed `gh` (pattern in the existing ai-pr-wait test;
   `ls tests | grep pr-wait`) shows the cap and the rerun line.
