@@ -87,7 +87,9 @@ Measured with `bin/ai-task-gates explain --paths-from -` on this worktree at
 | `tests/test-ai-review-lifecycle.sh` | code | 3, 4 |
 | `tests/test-ai-review-sandbox-self-cleanup.sh` | code | 4 (`foreign_orphans_do_not_block_fresh_review`) |
 | `tests/test-ai-review-sandbox-delete-guard.sh` | code | 4 |
-| `tests/test-windows-bash-selection.sh` | code | 5 |
+| `bin/*.cmd` launchers (code-class siblings) | code | 5 (Git Bash walk; not the bash entrypoints) |
+| `tests/test-bin-cmd-launchers.sh` | code | 5 (`launcher_resolves_git_bash_with_empty_programfiles`) |
+| `tests/test-windows-bash-selection.sh` | code | not used by step 5 (CI-lane selection only) |
 | `tests/test-markdown-links.sh` | code | 1 (gate only) |
 | `tests/verification/edge-dev-reviewer-repair/README.md` | prose | 1, 6, 7 |
 | `config/reviewer-registry.json` | code | 2–5 if registry rows need aligning |
@@ -97,9 +99,16 @@ Measured with `bin/ai-task-gates explain --paths-from -` on this worktree at
 
 **Protected — do not edit under this programme** (would escalate to
 `reviewer-safety` / `exact-head-independent-review`):
-`bin/ai-*` entrypoints (including `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`,
+`bin/ai-*` bash entrypoints (including `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`,
 `bin/ai-glm`, `bin/ai-review`, `bin/ai-review-pool`),
 `tools/reviewer_*.py`, `config/task-gates.json`.
+Sibling `bin/*.cmd` launchers are mostly `code` and may change in step 5; the
+bash entrypoints they launch stay untouched. Exception — 13 `.cmd` launchers
+classify `reviewer-safety` and stay on #1701: `ai-gemini`, `ai-gemini-usage`,
+`ai-review-credit-watch`, `ai-review-engine`, `ai-review-lifecycle`,
+`ai-review-packet`, `ai-review-pool`, `ai-review-preflight`, `ai-review-sandbox`,
+`ai-review-scoreboard`, `ai-reviewer-logs-sync`, `ai-stepfun`,
+`ai-stepfun-windows-shell`.
 
 If a fix is only possible inside a protected path, stop per plan §8 and record
 the file + observed class here — do not edit it.
@@ -113,7 +122,7 @@ the file + observed class here — do not edit it.
 | 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | open |
 | 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | open |
 | 4 | Durable publish + orphan non-interference | Windows-observable publish/non-interference only; deep receipt protocol stays with sibling plan | **code landed** — named fixtures `durable_report_publish_survives_process_exit` (`tests/test-ai-review-engine.sh`) and `foreign_orphans_do_not_block_fresh_review` (`tests/test-ai-review-sandbox-self-cleanup.sh`); offline suites mock `ai-task-gates` (same contract as the engine suite) |
-| 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | open |
+| 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | **code landed** — code-class `bin/*.cmd` walk includes hard-coded `C:\Program Files\Git\bin\bash.exe`; fixture `launcher_resolves_git_bash_with_empty_programfiles` in `tests/test-bin-cmd-launchers.sh`. 13 protected `.cmd` + installer Join-Path half stay #1701 reviewer-safety |
 | 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | open |
 | 7 | Code-only install + re-prove | installed hashes match merged source; smoke green | open |
 
