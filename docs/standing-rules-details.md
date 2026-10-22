@@ -140,8 +140,12 @@ database you are pointed at immediately before every write. Run:
 
     ai-task-gates check --before database
 
-`--small-owner-entry` is no longer needed; if passed, the gate records it as
-optional history and still opens without a reviewer. Private-evidence and
+`--small-owner-entry` is no longer needed in ordinary tasks; if passed, the
+gate records it as optional history and still opens without a reviewer. In a
+`production`-class task a row-data write of any size opens without a reviewer
+when it passes `--small-owner-entry ISSUE_URL --row-count N --owner-quote
+TEXT` (owner request verbatim in owner-authored issue text; no row cap);
+without it the production seal stays. Private-evidence and
 private-tooling licensed-row seals are unchanged.
 
 ## Reviewer rotation details
