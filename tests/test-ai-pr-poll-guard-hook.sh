@@ -16,8 +16,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # Runs the hook on a Bash tool payload; prints the exit status.
 fire() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash "$HOOK" 2>"$TMP/err" >/dev/null; echo $?; }
-blocks() { CASE="$2"; check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
-allows() { CASE="$2"; check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
+CASES=()
+blocks() { CASE="$2"; CASES+=("$2"); check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
+allows() { CASE="$2"; CASES+=("$2"); check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
 
 # --- every polling shape in the plan is blocked --------------------------------
 blocks "sleep then gh pr view" 'sleep 60; gh pr view 12 --json state'
@@ -48,22 +49,6 @@ blocks "a loop after a here-document" $'cat > x <<EOF\ntext\nEOF\nwhile :; do gh
 blocks "a here-document fed to bash (#1901)" $'bash <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
 blocks "a tab-stripped here-document fed to sh (#1901)" $'sh <<-EOF\n\tuntil gh pr merge 1; do sleep 9; done\nEOF'
 blocks "a loop piped into bash (#1901)" "printf 'while true; do gh pr view 1; sleep 9; done' | bash"
-# Windows shells carry .exe (#1891 install review).
-blocks "a poll loop inside bash.exe -c" "bash.exe -c 'while true; do gh pr view 1; done'"
-blocks "a loop piped into bash.exe" "printf 'while true; do gh pr view 1; sleep 9; done' | bash.exe"
-blocks "a here-document fed to bash.exe" $'bash.exe <<'EOF'
-while true; do gh pr view 1; sleep 9; done
-EOF'
-blocks "a poll loop inside sh.exe -c" "sh.exe -c 'until gh pr merge 1; do sleep 9; done'"
-allows "a quoted note passed to bash.exe -c" "bash.exe -c 'echo done'"
-allows "a here-document written to a file named bash.exe" $'cat > bash.exe <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
-allows "a here-document written to a quoted full path bash.exe" $'cat > "C:/tmp/bash.exe" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
-allows "BASH.EXE -C (noclobber) runs no quoted script" "BASH.EXE -C 'while true; do gh pr view 1; done'"
-blocks "an uppercase BASH.EXE -c loop" "BASH.EXE -c 'while true; do gh pr view 1; done'"
-blocks "a quoted full-path bash.exe -c loop" "\"C:/Program Files/Git/bin/bash.exe\" -c 'while true; do gh pr view 1; done'"
-blocks "a loop piped into a quoted full-path bash.exe" "printf 'while true; do gh pr view 1; sleep 9; done' | \"C:/Program Files/Git/bin/bash.exe\""
-blocks "a here-document fed to a backslash-path bash.exe" $'"C:\\Program Files\\Git\\bin\\bash.exe" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
-blocks "a here-document fed to Bash.Exe" $'Bash.Exe <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
 blocks "a loop after a tab-indented <<- terminator (#1901)" $'cat > f <<-EOF\n\thi\n\tEOF\nwhile :; do gh pr view 1; done'
 blocks "a loop inside an unterminated here-document (#1901)" $'cat > f <<EOF\nwhile :; do gh pr view 1; done'
 blocks "a loop piped into /bin/bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /bin/bash"
@@ -78,6 +63,22 @@ allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 check "empty stdin exits 0" "echo '' | bash \"$HOOK\"; [ \$? -eq 0 ]"
 check "malformed JSON exits 0" "echo 'not json' | bash \"$HOOK\"; [ \$? -eq 0 ]"
 check "payload without a command exits 0" "echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"C:\\\\\\\\x\\\\\\\\y.md\"}}' | bash \"$HOOK\"; [ \$? -eq 0 ]"
+
+# --- Windows spellings get exactly the Unix verdict (#1891 install review) ------
+# Every case above that runs bash or sh is replayed with each Windows spelling of
+# that shell; the hook must give the same answer as for the plain name.
+parity_bad=0; parity_n=0
+for c in "${CASES[@]}"; do
+  printf '%s' "$c" | grep -Eq '(^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?(bash|sh)([^A-Za-z0-9_.-]|$)' || continue
+  want="$(fire "$c")"
+  for form in 'bash.exe' 'BASH.EXE' '"C:/Program Files/Git/bin/bash.exe"' 'C:\Git\bin\bash.exe'; do
+    t="${c//\/usr\/bin\/bash/bash}"; t="${t//\/bin\/bash/bash}"; w="${t//bash/$form}"
+    [ "$w" != "$c" ] || continue
+    parity_n=$((parity_n+1)); got="$(fire "$w")"
+    [ "$got" = "$want" ] || { parity_bad=$((parity_bad+1)); printf '  parity mismatch (%s vs %s): %s\n' "$got" "$want" "$w"; }
+  done
+done
+check "Windows shell spellings match the Unix verdict on every shell case ($parity_n variants)" "[ $parity_n -ge 8 ] && [ $parity_bad = 0 ]"
 
 # --- installer -----------------------------------------------------------------
 CH="$TMP/claudehome"; mkdir -p "$CH"
