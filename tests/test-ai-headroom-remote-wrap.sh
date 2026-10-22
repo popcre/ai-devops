@@ -42,10 +42,16 @@ cat > "$TMP/fakebin/systemctl" <<EOF
 printf '%s
 ' "\$*" >> "$TMP/systemctl.log"
 # is-active succeeds only for a unit named in FAKE_ACTIVE, so tests can hold a unit "running".
-if [ "\$2" = is-active ]; then case " \${FAKE_ACTIVE:-} " in *" \${4:-\$3} "*) exit 0;; *) exit 3;; esac; fi
+# show -p ActiveState reports FAKE_STATE for a unit named in FAKE_ACTIVE, else inactive.
+if [ "\$2" = show ]; then
+  [ -z "\${FAKE_SHOW_FAIL:-}" ] || exit 1
+  case " \${FAKE_ACTIVE:-} " in *" \${6} "*) echo "\${FAKE_STATE:-activating}";; *) echo inactive;; esac; exit 0
+fi
 exit 0
 EOF
 chmod +x "$TMP/fakebin/systemctl"; export PATH="$TMP/fakebin:$PATH"
+# Installed auto-rewrap units, so unwrap-remote has a timer to stop.
+arm() { mkdir -p "$HOME/.config/systemd/user"; : > "$HOME/.config/systemd/user/ai-headroom-autowrap.timer"; }
 
 "$TOOL" wrap-remote >"$TMP/wrap.out"
 check 'wrap moves first binary aside' test -f "$TMP/ccd/2.1.299-deadbeef.headroom-real"
@@ -83,22 +89,23 @@ export AI_HEADROOM_PROXY_URL="http://127.0.0.1:9/other"
 check 're-wrap updates URL' grep -q "ANTHROPIC_BASE_URL='http://127.0.0.1:9/other'" "$TMP/ccd/2.1.299-deadbeef"
 check 're-wrap keeps one real binary' bash -c "[ ! -e '$TMP/ccd/2.1.299-deadbeef.headroom-real.headroom-real' ]"
 
-"$TOOL" unwrap-remote >/dev/null
+arm; "$TOOL" unwrap-remote >/dev/null
 check 'unwrap restores raw binary' bash -c "dd if='$TMP/ccd/2.1.299-deadbeef' bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d ' \\n' | grep -q 7f454c46"
 check 'unwrap removes wrapper' bash -c "! grep -q 'Managed by ai-headroom' '$TMP/ccd/2.1.299-deadbeef'"
 check 'unwrap removes real sidecar' bash -c "! test -e '$TMP/ccd/2.1.299-deadbeef.headroom-real'"
 if [ -f "$TMP/systemctl.log" ]; then  # Linux only: Windows skips the timer entirely
   check 'unwrap disables the auto-rewrap timer' grep -q 'disable --now ai-headroom-autowrap.timer' "$TMP/systemctl.log"
-  check 'unwrap waits for a running rewrap instead of killing it' bash -c "grep -q 'is-active --quiet ai-headroom-autowrap.service' '$TMP/systemctl.log' && ! grep -q '^--user stop' '$TMP/systemctl.log'"
+  check 'unwrap waits for a running rewrap instead of killing it' bash -c "grep -q 'show -p ActiveState --value ai-headroom-autowrap.service' '$TMP/systemctl.log' && ! grep -q '^--user stop' '$TMP/systemctl.log'"
 fi
 
 # A rewrap that will not finish, or a timer that will not stop, blocks the unwrap (Linux only).
 if [ -f "$TMP/systemctl.log" ]; then
   "$TOOL" wrap-remote >/dev/null
-  check 'stuck rewrap service refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.service AI_HEADROOM_AUTOWRAP_WAIT=1 '$TOOL' unwrap-remote >/dev/null 2>&1"
+  arm; check 'stuck rewrap service refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.service AI_HEADROOM_AUTOWRAP_WAIT=1 '$TOOL' unwrap-remote >/dev/null 2>&1"
   check 'refused unwrap leaves the wrapper intact' test -f "$TMP/ccd/2.1.299-deadbeef.headroom-real"
-  check 'active timer refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.timer '$TOOL' unwrap-remote >/dev/null 2>&1"
-  "$TOOL" unwrap-remote >/dev/null
+  arm; check 'active timer refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.timer '$TOOL' unwrap-remote >/dev/null 2>&1"
+  arm; check 'an unreadable unit state refuses the unwrap' bash -c "! FAKE_SHOW_FAIL=1 '$TOOL' unwrap-remote >/dev/null 2>&1"
+  arm; "$TOOL" unwrap-remote >/dev/null
 fi
 
 # Claude Desktop layout: <ver>/<hash>/claude, wrapped only once .verified exists.
@@ -111,7 +118,7 @@ export AI_HEADROOM_DESKTOP_CC_DIR="$D"
 check 'desktop binary wrapped' grep -q 'Managed by ai-headroom' "$D/2.1.304/abc/claude"
 check 'desktop real binary kept' test -f "$D/2.1.304/abc/claude.headroom-real"
 check 'unverified download untouched' bash -c "! test -e '$D/2.1.305/def/claude.headroom-real'"
-"$TOOL" unwrap-remote >/dev/null
+arm; "$TOOL" unwrap-remote >/dev/null
 check 'desktop unwrap restores binary' bash -c "! test -e '$D/2.1.304/abc/claude.headroom-real'"
 
 printf 'ok - all ai-headroom remote-wrap checks\n'

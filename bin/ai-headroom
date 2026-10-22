@@ -460,20 +460,24 @@ autowrap_set() { # autowrap_set on|off
     printf 'Desktop auto-rewrap    : on (every 5 min)\n'
   else
     local i
+    # Never installed here: nothing to stop, even without a user manager.
+    [ -e "$dir/$AUTOWRAP_UNIT.timer" ] || [ -e "$dir/$AUTOWRAP_UNIT.service" ] || return 0
     systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
-    # Never trust a silent failure: the timer must be confirmed inactive.
-    if systemctl --user is-active --quiet "$AUTOWRAP_UNIT.timer" 2>/dev/null; then
-      die "ai-headroom: $AUTOWRAP_UNIT.timer is still active; not unwrapping"
-    fi
+    # Idle means systemd itself reports inactive or failed. Activating (a oneshot
+    # rewrap mid-run), active, reloading or any query error is not idle.
+    unit_idle() {
+      case "$(systemctl --user show -p ActiveState --value "$1" 2>/dev/null)" in
+        inactive|failed) return 0 ;; *) return 1 ;;
+      esac
+    }
+    unit_idle "$AUTOWRAP_UNIT.timer" || die "ai-headroom: $AUTOWRAP_UNIT.timer could not be confirmed stopped; not unwrapping"
     # A rewrap already running is left to finish (killing it mid-move could
     # strand a binary); wait (60s by default), and refuse to continue if it persists.
     for i in $(seq "${AI_HEADROOM_AUTOWRAP_WAIT:-60}"); do
-      systemctl --user is-active --quiet "$AUTOWRAP_UNIT.service" 2>/dev/null || break
+      unit_idle "$AUTOWRAP_UNIT.service" && break
       sleep 1
     done
-    if systemctl --user is-active --quiet "$AUTOWRAP_UNIT.service" 2>/dev/null; then
-      die "ai-headroom: $AUTOWRAP_UNIT.service is still running; not unwrapping"
-    fi
+    unit_idle "$AUTOWRAP_UNIT.service" || die "ai-headroom: $AUTOWRAP_UNIT.service is still running or unreadable; not unwrapping"
     rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
