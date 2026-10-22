@@ -199,5 +199,182 @@ class VersionSpans(unittest.TestCase):
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
 
 
+class TailnetScan(unittest.TestCase):
+    """Same existential ERE population; bounded long lines and fail-closed scans."""
+
+    OLD = r"([A-Za-z0-9-]+\.){2}ts\.net"
+    SUFFIX = b"ts" + b".net"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        self.target = self.root / "population.txt"
+        self.target.write_bytes(b"safe\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "population.txt"], check=True)
+
+    def grep(self, pattern):
+        result = subprocess.run(["git", "-C", str(self.root), "grep", "-anE", pattern], capture_output=True, timeout=10)
+        self.assertIn(result.returncode, (0, 1), result.stderr)
+        return result
+
+    def external_grep(self):
+        result = subprocess.run(["grep", "-anHE", self.OLD, "--", self.target.name], cwd=self.root, capture_output=True, timeout=10)
+        self.assertIn(result.returncode, (0, 1), result.stderr)
+        return result
+
+    def test_short_oracle_equivalence_and_explicit_bytes(self):
+        import itertools
+        suffix = self.SUFFIX
+        positives = [b"a.b." + suffix, b"prefixhost.tailnet." + suffix,
+                     b"outer.host.tailnet." + suffix, b"_host.tailnet." + suffix,
+                     b"\xc3\xa9host.tailnet." + suffix, b"\x00host.tailnet." + suffix,
+                     b"\rhost.tailnet." + suffix, b"A" * 256 + b".tailnet." + suffix,
+                     b"-a.-b." + suffix + b"suffix", b"/a.b." + suffix]
+        negatives = [suffix, b"host." + suffix, b"a.." + suffix,
+                     b"a_b." + suffix, b"a.\xff." + suffix,
+                     b"a.b.TS.NET", b"a.b.tsXnet", b"A" * 256]
+        cases = positives + negatives
+        # Short bounded oracle only: never apply the former matcher to 1MiB.
+        alphabet = [b"a", b"0", b"-", b".", b"_", b"/", b"\xc3\xa9", b"\x00", b"\r"]
+        cases += [b"".join(parts) + ending for parts in itertools.product(alphabet, repeat=3)
+                  for ending in (suffix, b".x." + suffix, b"x.y." + suffix, b"safe")]
+        self.target.write_bytes(b"\n".join(b"case%d=" % i + value for i, value in enumerate(cases)) + b"\r\n")
+        old = self.grep(self.OLD)
+        new = self.external_grep()
+        self.assertEqual(new.stdout, old.stdout)
+        matched = {int(line.split(b"case", 1)[1].split(b"=", 1)[0]) for line in new.stdout.splitlines() if b"case" in line}
+        self.assertTrue(set(range(len(positives))) <= matched)
+        self.assertTrue(set(range(len(positives), len(positives) + len(negatives))).isdisjoint(matched))
+
+    def test_megabyte_label_full_gate_finishes_and_still_finds_suffix(self):
+        tool = ROOT / "bin/ai-public-boundary-check"
+        label = b"A" * 1_048_577
+        self.target.write_bytes(b'<testcase name="' + label + b'"/>\n')
+        clean = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        # A real match following the same long label cannot be truncated away.
+        self.target.write_bytes(label + b".tailnet." + self.SUFFIX + b"\n")
+        denied = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertIn(b"protected tailnet hostname", denied.stderr)
+        self.assertNotIn(b"PASS:", denied.stdout)
+
+    def test_execution_failure_and_signal_never_become_no_match(self):
+        # Child-only functions supply actual failed/signalled operations;
+        # unrelated Git/grep operations still invoke the real executables.
+        script = r'''
+        grep() {
+          for arg in "$@"; do
+            if [ "$arg" = "$SCAN_PATTERN" ]; then
+              case "$SCAN_MODE" in
+                signal) bash -c 'kill -TERM $$'; return $? ;;
+                error) return 2 ;;
+                empty) return 1 ;;
+              esac
+            fi
+          done
+          command grep "$@"
+        }
+        git() {
+          local listing=0 specs=0
+          for arg in "$@"; do
+            [ "$arg" != ls-files ] || listing=1
+            [ "$arg" != -- ] || specs=1
+          done
+          if [ "$listing" = 1 ] && [ "$specs" = 1 ]; then
+            case "$SCAN_MODE" in
+              inventory-error) return 2 ;;
+              inventory-signal) bash -c 'kill -TERM $$'; return $? ;;
+            esac
+          fi
+          command git "$@"
+        }
+        export -f git grep
+        bash "$1" "$2"
+        '''
+        for tool in ("ai-public-boundary-check", "ai-doc-safety"):
+            for mode in ("error", "signal", "empty", "inventory-error", "inventory-signal"):
+                with self.subTest(tool=tool, mode=mode):
+                    env = dict(os.environ, SCAN_PATTERN=self.OLD, SCAN_MODE=mode)
+                    result = subprocess.run(["bash", "-c", script, "fixture", str(ROOT / "bin" / tool), str(self.root)], env=env, capture_output=True, timeout=10)
+                    if mode == "empty":
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn(b"PASS:", result.stdout)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        message = b"tailnet tracked inventory could not complete" if mode.startswith("inventory-") else b"tailnet hostname scan could not complete"
+                        self.assertIn(message, result.stderr)
+                        if tool == "ai-public-boundary-check":
+                            self.assertNotIn(b"PASS:", result.stdout)
+                        else:
+                            self.assertIn(b"public-boundary invariant failed", result.stderr)
+                            self.assertNotIn(b"public boundary and local Markdown links hold", result.stdout)
+
+    def test_filename_bytes_binary_content_and_missing_tracked_file(self):
+        tool = ROOT / "bin/ai-public-boundary-check"
+        self.target.write_bytes(b"safe\n")
+        names = ["one file.txt", "-leading-dash.txt", "nonascii-\u00e9.txt"]
+        if os.name != "nt":  # These filename bytes cannot exist on Windows.
+            names += ["colon:file.txt", "line\nbreak.txt", "literal*[a]?.txt", "tab\tname.txt"]
+        for name in names:
+            with self.subTest(name=name):
+                path = self.root / name
+                path.write_bytes(b"before\x00host.tailnet." + self.SUFFIX + b"\r\nafter\n")
+                subprocess.run(["git", "-C", str(self.root), "add", "--", name], check=True)
+                result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b"protected tailnet hostname", result.stderr)
+                subprocess.run(["git", "-C", str(self.root), "rm", "-q", "-f", "--", name], check=True)
+        # An unreadable/absent inventory member is an error, never an empty scan.
+        self.target.unlink()
+        result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"tailnet indexed regular file unavailable or replaced", result.stderr)
+
+    def test_index_symlink_gitlink_exclusion_and_regular_substitution(self):
+        # Index mode, not file bytes or an inferred directory, owns exclusion.
+        # A regular placeholder also exercises core.symlinks=false platforms.
+        link = self.root / "indexed-link"
+        link.write_bytes(b"host.tailnet." + self.SUFFIX + b"\n")
+        blob = subprocess.check_output(["git", "-C", str(self.root), "hash-object", "-w", "indexed-link"], text=True).strip()
+        subprocess.run(["git", "-C", str(self.root), "update-index", "--add", "--cacheinfo", "120000," + blob + ",indexed-link"], check=True)
+        module = self.root / "nested-module"
+        module.mkdir()
+        subprocess.run(["git", "init", "-q", str(module)], check=True)
+        (module / "nested.txt").write_bytes(b"host.tailnet." + self.SUFFIX + b"\n")
+        subprocess.run(["git", "-C", str(module), "add", "nested.txt"], check=True)
+        subprocess.run(["git", "-C", str(module), "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "invented"], check=True)
+        commit = subprocess.check_output(["git", "-C", str(module), "rev-parse", "HEAD"], text=True).strip()
+        subprocess.run(["git", "-C", str(self.root), "update-index", "--add", "--cacheinfo", "160000," + commit + ",nested-module"], check=True)
+        self.assertEqual(self.grep(self.OLD).returncode, 1)
+        tool = ROOT / "bin/ai-public-boundary-check"
+        result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        if os.name != "nt":  # Actual no-follow guard; Windows privilege proof remains separate.
+            self.target.unlink()
+            self.target.symlink_to(link.name)
+            result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"tailnet indexed regular file unavailable or replaced", result.stderr)
+            self.assertNotIn(b"PASS:", result.stdout)
+
+    def test_later_batch_is_not_omitted_and_missing_member_still_refuses(self):
+        for i in range(70):
+            (self.root / ("item%03d.txt" % i)).write_bytes(b"safe\n")
+        last = self.root / "item069.txt"
+        last.write_bytes(b"host.tailnet." + self.SUFFIX + b"\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "--", "."], check=True)
+        tool = ROOT / "bin/ai-public-boundary-check"
+        result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"protected tailnet hostname", result.stderr)
+        last.unlink()
+        result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"tailnet indexed regular file unavailable or replaced", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
