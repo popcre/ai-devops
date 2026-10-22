@@ -58,6 +58,10 @@ shared-db. why is this waiting for a review?"
 Current rule: only `popcre/shared-db` requires an AI review. No other
 repository's PR, merge, or task waits for one; a task-class gate that still
 names a review outside shared-db is stale and does not apply.
+Scope (clarified 2026-10-22, #1962): this ruling covers PR and code-review
+gates only; it does not repeal the standing safety rule that the assigned AI
+reviewer's explicit APPROVE gates every technical production action, so
+`ai-task-gates check --before production` stays enforced in every repository.
 
 ## 2026-10-21 — ai-pr-wait defaults to 60 minutes; no new wait tooling
 

@@ -5,14 +5,14 @@
 | Step | Status | Evidence / where a fresh session starts |
 |---|---|---|
 | 0. Register issue, plan, handoff; declare freeze start | ✅ done 2026-10-21 | [#1948](https://github.com/popcre/ai-devops/issues/1948); pending-work and task-router rows already present |
-| 1. Fast-fail detector in the shared lifecycle | ⬜ open | Start here |
-| 2. Per-session skip list | ⬜ open | |
-| 3. Non-blocking dispatch (`--detach`) + outcome recorder | ⬜ open | |
-| 4. Merge policy for the week: `unreviewed` tag + post-hoc queue | ⬜ open | |
-| 5. Global rules text for the week (Claude/Codex/MiMo/ZCode globals) | ⬜ open | |
+| 1. Fast-fail detector in the shared lifecycle | ✅ shipped 2026-10-22 (#1982) | `tools/lib/review-lifecycle-core.sh` fast-fail watch |
+| 2. Per-session skip list | ✅ shipped 2026-10-22 (#1982) | `tools/lib/review-session-skip.sh` |
+| 3. Non-blocking dispatch (`--detach`) + outcome recorder | ✅ shipped 2026-10-22 (#1982) | `bin/ai-review --detach`, `ai-review outcome` |
+| 4. Merge policy for the week: `unreviewed` tag + post-hoc queue | ✅ shipped 2026-10-22 (#1982) | `tools/lib/observation-week.sh`, `bin/ai-task-gates check --before ship` (code and prose) |
+| 5. Global rules text for the week (Claude/Codex/MiMo/ZCode globals) | ⬜ open | Start here |
 | 6. Fleet install + freeze declaration | ⬜ open | |
 | 7. Seven-day observation and daily tally | ⬜ open | |
-| 8. Post-hoc review drain + findings report | ⬜ open | |
+| 8. Post-hoc review drain + findings report | ◐ tool shipped 2026-10-22 (#1982); drain runs after step 7 | `bin/ai-review-posthoc` |
 | 9. Closeout: decide what to keep, what to revert | ⬜ open | |
 
 **Owner issue:** [#1948](https://github.com/popcre/ai-devops/issues/1948).
@@ -189,7 +189,7 @@ Fresh worktree from `origin/main`. Declare `ai-task-gates start --class reviewer
 
 #### Step 4 — Merge policy for the week (ordinary repos)
 
-- **Where:** `config/task-gates.json`: new gate `observation-week-unreviewed-merge` admitted for class `code` and `prose` only, when the file `/etc/ai-devops/observation-week.json` (Windows: `C:\ProgramData\ai-devops\observation-week.json`) exists with `{"start":"<ISO>","end":"<ISO>","allowed_classes":["code","prose"]}`. `bin/ai-task-gates check --before merge` passes when either an exact-head APPROVE exists **or** the window file is live and the session has run `ai-review … --detach` for the head (run_id recorded) **or** `ai-review` returned 75 (all skipped). It prints `MERGE-UNREVIEWED` and the caller must add label `unreviewed-week` and the body line `Unreviewed merge (observation week, run <run_id>|all-skipped)`.
+- **Where:** `config/task-gates.json`: new gate `observation-week-unreviewed-merge` admitted for class `code` and `prose` only, when the file `/etc/ai-devops/observation-week.json` (Windows: `C:\ProgramData\ai-devops\observation-week.json`) exists with `{"start":"<ISO>","end":"<ISO>","allowed_classes":["code","prose"]}`. `bin/ai-task-gates check --before ship` passes when either an exact-head APPROVE exists **or** the window file is live and the session has run `ai-review … --detach` for the head (run_id recorded) **or** `ai-review` returned 75 (all skipped). It prints `MERGE-UNREVIEWED` and the caller must add label `unreviewed-week` and the body line `Unreviewed merge (observation week, run <run_id>|all-skipped)`.
 - **Post-hoc queue:** `bin/ai-review-posthoc` (new, small) lists PRs with label `unreviewed-week` and no scoreboard verdict for their merged head, and runs `ai-review <next usable provider> final-check --assert-head <merged sha>` on them when at least one reviewer is usable. A REJECT opens a fix-forward issue titled `Post-hoc REJECT on <repo>#<pr>` and links the report; it never reverts.
 - **Production/shared-db:** no change. `shared-db` classes and `infrastructure|production|deployment` are not in `allowed_classes`; the gate refuses as today. Document on the issue that such work waits on its branch until a reviewer is back.
 - **Gate:** `bash tests/test-ai-task-gates.sh` with `observation_window_admits_code_merge_with_detached_run`, `observation_window_admits_all_skipped_75`, `observation_window_never_admits_shared_db_or_production`, `observation_window_expired_refuses`; `bin/ai-review-posthoc --dry-run` lists the expected PRs in a fixture repo.

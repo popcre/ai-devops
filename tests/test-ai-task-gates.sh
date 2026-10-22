@@ -901,14 +901,26 @@ printf 'x\n' > "$TMP/detached/note.md"
 check 'a detached HEAD still classifies the working tree' \
   "[ \"\$( out '$TMP/detached' explain --json | jq -r .observed_class )\" = prose ]"
 
-# Owner ruling 2026-10-15 (#1960): outside popcre/shared-db no class waits
-# for a reviewer. These production refusals are proven in shared-db.
+# Owner ruling 2026-10-15 (#1960): outside popcre/shared-db no PR waits for a
+# code review. The production-mutation APPROVE is not a PR review and stays
+# enforced everywhere (#1962: DeepSeek REJECT of 5cc973dd).
 newrepo "$TMP/noreview"
 ( cd "$TMP/noreview" && "$GATES" start --class production ) >/dev/null
-check 'outside shared-db a production task opens without a reviewer approval' \
-  "rc 0 '$TMP/noreview' check --before production"
-check 'outside shared-db the reviewer gate is reported as waived, not required' \
-  "out '$TMP/noreview' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null) and (.waived_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
+check 'outside shared-db a production task is still refused without a reviewer approval' \
+  "rc 3 '$TMP/noreview' check --before production"
+check 'outside shared-db the production-mutation gate stays required, never waived' \
+  "out '$TMP/noreview' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|length)==0'"
+check 'outside shared-db a valid exact-head APPROVE still opens the production path' \
+  "rc 0 '$TMP/noreview' check --before production --reviewer-approval \"\$(appr '$TMP/noreview' production)\""
+# Reviewer regression case: u2giants/ansible, production class, no approval.
+newrepo "$TMP/ansible" u2giants/ansible
+( cd "$TMP/ansible" && "$GATES" start --class production ) >/dev/null
+check 'u2giants/ansible production without an approval fails closed (rc 3)' \
+  "rc 3 '$TMP/ansible' check --before production"
+check 'u2giants/ansible production refusal names the missing reviewer approval' \
+  "out '$TMP/ansible' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
+check 'u2giants/ansible reports the production gate required, not waived' \
+  "out '$TMP/ansible' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null)'"
 ( cd "$TMP/noreview" && "$GATES" start --class deployment ) >/dev/null
 check 'outside shared-db a deployment-class check opens without a reviewer approval' \
   "rc 0 '$TMP/noreview' check --before ship"
