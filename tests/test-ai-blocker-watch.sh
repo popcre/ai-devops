@@ -812,8 +812,8 @@ check 'install.sh does not require BlockerWatch registration' \
   "! grep -q 'hold an \`ai-blocker-watch wait\`' '$ROOT/install.sh'"
 check 'traffic plan does not mandate long-wait registration' \
   "! grep -q 'are registered with \`ai-blocker-watch wait\`' '$ROOT/plan_cut-unneeded-github-traffic.md'"
-check 'session-conduct policy matches the explicit-deadline router text' \
-  "grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/tests/test-session-conduct-policy.sh'"
+check 'session-conduct policy matches the background-wait router text' \
+  "grep -q 'ai-pr-wait <pr>\\\\\` (run in the background)' '$ROOT/tests/test-session-conduct-policy.sh'"
 check 'ai-pr-wait defaults to a 60-minute background wait' \
   "grep -q '^TIMEOUT_MINUTES=60$' '$ROOT/bin/ai-pr-wait'"
 check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
