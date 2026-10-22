@@ -84,24 +84,37 @@ function shutdownWindows(code) {
     if (!failure && (!helperStopped || !treeStopped)) return
     finished = true
     clearTimeout(force)
+    if (hardStop) clearTimeout(hardStop)
     if (failure) {
-      // Only the teardown subprocess we own may be stopped here. Never replay
-      // taskkill against a PID whose original helper may now be gone/reused.
-      if (killer && killer.exitCode == null && killer.signalCode == null) {
-        try { killer.kill('SIGKILL') } catch { /* already gone */ }
-      }
+      // Never replay taskkill against a PID whose original helper may now be
+      // gone/reused, and never stop the one in-flight taskkill either.
       process.stderr.write(`mcp-session-guard: Windows helper teardown unconfirmed: ${failure}\n`)
     }
     process.exit(failure ? 1 : code)
   }
-  // Retain the existing absolute two-second shutdown bound; it starts before
-  // native teardown and never restarts when the direct .cmd child exits.
-  const force = setTimeout(() => finish('shutdown deadline reached'), 2000)
+  const killerRunning = () => killer && killer.exitCode == null && killer.signalCode == null
+  // The two-second shutdown bound starts before native teardown and never
+  // restarts when the direct .cmd child exits. If taskkill is still walking
+  // the tree at that point, report it and keep this process alive until it
+  // finishes: exiting closes libuv's kill-on-close job, which kills the .cmd
+  // root while its node descendants (silent breakaway) survive, so taskkill
+  // /T can no longer find them. taskkill's WMI process lookup alone takes
+  // ~2.5s on EDGE-RUNN-ENVY; that path leaked every helper tree there. A hard
+  // stop still bounds a taskkill that never returns; taskkill is detached so
+  // even then it is not killed mid-walk with this process.
+  let hardStop = null
+  const force = setTimeout(() => {
+    if (finished) return
+    if (!killerRunning()) { finish('shutdown deadline reached'); return }
+    process.stderr.write('mcp-session-guard: Windows helper teardown still running after 2s; waiting for it\n')
+    hardStop = setTimeout(() => finish('shutdown deadline reached'), 10000)
+    if (typeof hardStop.unref === 'function') hardStop.unref()
+  }, 2000)
   if (typeof force.unref === 'function') force.unref()
   child.once('exit', () => { helperStopped = true; finish() })
   try {
     killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
-      stdio: 'ignore', windowsHide: true,
+      stdio: 'ignore', windowsHide: true, detached: true,
     })
     killer.on('error', () => finish('native teardown could not start'))
     killer.once('exit', (status) => {

@@ -7,7 +7,7 @@ import vm from 'node:vm'
 const source = readFileSync(new URL('../bin/mcp-session-guard.mjs', import.meta.url), 'utf8')
   .replace(/^#!.*\n/, '').replace(/^import .*\n/gm, '')
 function fixture({ throwTaskkill = false } = {}) {
-  const calls = [], exits = [], diagnostics = [], timers = []
+  const calls = [], exits = [], diagnostics = [], timers = [], killerOptions = []
   const helper = new EventEmitter(), killer = new EventEmitter(), process = new EventEmitter()
   Object.assign(helper, { pid: 200, exitCode: null, signalCode: null, stdin: new EventEmitter() })
   Object.assign(killer, { pid: 300, exitCode: null, signalCode: null,
@@ -18,14 +18,15 @@ function fixture({ throwTaskkill = false } = {}) {
     exit(code) { exits.push(code) }, kill() { throw new Error('no PID-based kill permitted') } })
   process.stdin.pipe = () => {}
   vm.runInNewContext(source, { process,
-    spawn(command, args) {
+    spawn(command, args, options) {
       calls.push([command, ...args])
+      if (command === 'taskkill') killerOptions.push(options)
       if (command === 'taskkill' && throwTaskkill) throw new Error('fixture synchronous spawn failure')
       return command === 'taskkill' ? killer : helper
     }, spawnSync() { return { stdout: '' } }, readFileSync() { return '' },
     setTimeout(fn, ms) { const timer = { fn, ms, cleared: false, unref() {} }; timers.push(timer); return timer },
     clearTimeout(timer) { timer.cleared = true }, setInterval() { return { unref() {} } }, clearInterval() {} })
-  return { calls, exits, diagnostics, timers, helper, killer, process,
+  return { calls, exits, diagnostics, timers, killerOptions, helper, killer, process,
     eof() { process.stdin.emit('end'); timers.find(t => t.ms === 250).fn() },
     childExit(code = 1) { helper.exitCode = code; helper.emit('exit', code, null) },
     taskkillExit(code = 0) { killer.exitCode = code; killer.emit('exit', code, null) } }
@@ -44,11 +45,24 @@ for (const mode of ['nonzero', 'spawn-error', 'timeout']) {
   const f = fixture(); f.eof(); f.childExit()
   if (mode === 'nonzero') f.taskkillExit(5)
   if (mode === 'spawn-error') f.killer.emit('error', new Error('fixture taskkill unavailable'))
-  if (mode === 'timeout') f.timers.find(t => t.ms === 2000).fn()
+  if (mode === 'timeout') {
+    // taskkill still walking at 2s: keep the .cmd root alive (exit would
+    // kill it via libuv's job and orphan the tree) until the hard stop.
+    f.timers.find(t => t.ms === 2000).fn()
+    assert.deepEqual(f.exits, [], 'in-flight taskkill must keep the guard alive past 2s')
+    assert.ok(f.diagnostics.join('').includes('still running'), 'slow teardown must be visible')
+    f.timers.find(t => t.ms === 10000).fn()
+  }
   assert.deepEqual(f.exits, [1], `${mode}: unconfirmed cleanup must fail`)
   assert.ok(f.diagnostics.join('').includes('teardown'), `${mode}: failure must be visible`)
   assert.equal(f.calls.filter(c => c[0] === 'taskkill').length, 1,
     `${mode}: never retry against a potentially reused child PID`)
+  // A slow taskkill (~2s on EDGE-RUNN-ENVY) must finish its tree walk after
+  // the deadline: stopping it mid-walk leaked the helper tree. Detached so it
+  // survives this guard's exit.
+  assert.ok(!f.calls.some(c => c[0] === 'owned-killer-stop'),
+    `${mode}: the in-flight tree teardown must never be stopped`)
+  assert.equal(f.killerOptions[0]?.detached, true, `${mode}: taskkill must outlive the guard`)
   f.taskkillExit(); f.killer.emit('error', new Error('fixture late failure'))
   f.helper.emit('exit', 1, null); f.timers.find(t => t.ms === 2000).fn()
   assert.deepEqual(f.exits, [1], `${mode}: late events must not finish twice`)
@@ -76,9 +90,20 @@ const reused = fixture(); reused.eof(); reused.childExit()
 // ChildProcess.pid still names the old PID after exit; a later taskkill retry
 // could hit its new owner. Never submit another tree kill on the deadline.
 reused.timers.find(t => t.ms === 2000).fn()
+assert.deepEqual(reused.exits, [])
+reused.timers.find(t => t.ms === 10000).fn()
 assert.deepEqual(reused.exits, [1])
 assert.deepEqual(reused.calls.filter(c => c[0] === 'taskkill'), [['taskkill', '/PID', '200', '/T', '/F']])
 const rootStillRunning = fixture(); rootStillRunning.eof(); rootStillRunning.taskkillExit()
 rootStillRunning.timers.find(t => t.ms === 2000).fn()
 assert.deepEqual(rootStillRunning.exits, [1], 'taskkill success alone cannot prove direct child stopped')
+// Slow but successful teardown (EDGE-RUNN-ENVY: ~2.5s taskkill) is confirmed,
+// keeps the EOF exit status, and never needs the hard stop.
+const slow = fixture(); slow.eof()
+slow.timers.find(t => t.ms === 2000).fn()
+assert.deepEqual(slow.exits, [])
+slow.taskkillExit(); slow.childExit()
+assert.deepEqual(slow.exits, [143], 'late confirmed teardown keeps its exit status')
+assert.ok(slow.timers.find(t => t.ms === 10000).cleared)
+assert.ok(!slow.calls.some(c => c[0] === 'owned-killer-stop'))
 console.log('PASS: Windows shutdown waits for native teardown without stale PID retries')
