@@ -18,6 +18,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
+# Isolate from a live reviewer observation week window on the host running
+# the suite; the observation-week section sets its own window explicitly.
+export AI_OBSERVATION_WEEK_FILE="$TMP/no-observation-week-window.json"
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required for this suite\n' >&2; exit 1; }
 
