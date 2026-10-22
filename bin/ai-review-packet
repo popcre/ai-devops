@@ -983,7 +983,10 @@ Structure your reply in this order:
    escapes, other places that trust a binary or input) and report those too.
 2. **Final verdict** — last, under a literal \`## Verdict\` heading. It is
    the only decision: give no early or provisional verdict, and begin no
-   other line with APPROVE, REJECT, REVISE or BLOCKED.
+   other line with APPROVE, REJECT, REVISE or BLOCKED. The verdict word must
+   be the very next non-blank line after the heading: put any head-SHA
+   binding sentence in your findings ABOVE the heading, never between the
+   heading and the word.
 
 Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
 Use BLOCKED when you could not reach a judgment; never approve by default.

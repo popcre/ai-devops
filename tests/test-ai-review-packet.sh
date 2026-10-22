@@ -221,6 +221,9 @@ check "requires_the_literal_verdict_heading"  "grep -qF '## Verdict' '$M'"
 check "verdict_vocabulary_is_fixed"           "grep -q 'APPROVE' '$M' && grep -q 'BLOCKED' '$M'"
 check "provisional_verdict_not_requested"     "! grep -q 'Provisional verdict' '$M'"
 check "final_verdict_is_only_decision"        "grep -q 'give no early or provisional verdict' '$M'"
+# GLM 2026-10-21 (al8960ofc): a head-binding sentence placed between the
+# heading and the word made a valid review unparseable; the brief says where it goes.
+check "verdict_word_directly_under_heading"   "grep -q 'be the very next non-blank line after the heading' '$M' && grep -q 'never between the' '$M'"
 
 # --- hashing ------------------------------------------------------------------
 check "hash_file_written"                     "[ -s '$PKT/MANIFEST.sha256' ]"
