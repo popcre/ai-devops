@@ -1,7 +1,7 @@
 # Plan — Model-tier delegation: frontier models plan, lower-tier models implement
 
 Parent issue: [popcre/ai-devops #782](https://github.com/popcre/ai-devops/issues/782)
-Registered handoff: [`HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-delegation.md`](HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-delegation.md)
+Registered handoff: `HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-delegation.md` (retired; recoverable from git history)
 
 ## STATUS — read this first
 

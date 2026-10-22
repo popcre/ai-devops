@@ -31,7 +31,7 @@ Current implementation owner for unclaimed rows: #650 roadmap owner, **not an ac
 
 2026-09-29 transcript finding 4: wall-clock / suite budgets — no-progress detector + per-suite cancel remain in scope for P3/P6/P7; the ban on exact timing asserts must **exempt** generous upper-bound checks (doctor wall-time regression guard).
 
-Discovery handoff: [planning-session handoff](HANDOFF.d/2026-09-20T1515Z-916-codex-workflow-efficiency.md). Evidence: [September 20 baseline](tests/verification/repo-throughput/2026-09-20-workflow-efficiency-baseline.md). Historical completed work: [throughput restructure](plan_repo-throughput-restructure.md), [September 17 audit](docs/ci-speed-audit-2026-09-17.md). This plan is the current efficiency roadmap, not a reopening of that completed programme.
+Discovery handoff: `HANDOFF.d/2026-09-20T1515Z-916-codex-workflow-efficiency.md` (retired; recoverable from git history). Evidence: [September 20 baseline](tests/verification/repo-throughput/2026-09-20-workflow-efficiency-baseline.md). Historical completed work: [throughput restructure](plan_repo-throughput-restructure.md), [September 17 audit](docs/ci-speed-audit-2026-09-17.md). This plan is the current efficiency roadmap, not a reopening of that completed programme.
 
 ## 1. Ultimate goal — what we are trying to achieve
 

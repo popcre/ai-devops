@@ -1,6 +1,6 @@
 # Implementation plan — cut GitHub Actions minutes (fewer runs, cancel stale runs, tiny checks on edge-dev3 first)
 
-Related handoff: [HANDOFF.d/2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md](HANDOFF.d/2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md). Do not rewrite root `HANDOFF.md`.
+Related handoff: `HANDOFF.d/2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md` (retired; recoverable from git history). Do not rewrite root `HANDOFF.md`.
 Parent issue: https://github.com/popcre/ai-devops/issues/1464 (children: ai-devops #1459 A, #1460 B, #1461 C, #1462 D, #1463 E; shared-db #4067 B, #4068 C).
 
 ## STATUS

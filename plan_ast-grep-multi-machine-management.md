@@ -2,7 +2,7 @@
 
 Plan owner: Codex planning session, 2026-08-30
 Tracking issue: [popcre/ai-devops#187](https://github.com/popcre/ai-devops/issues/187)
-Companion handoff: [HANDOFF.d/2026-08-30T1403Z-edge-dev-codex-ast-grep-management.md](HANDOFF.d/2026-08-30T1403Z-edge-dev-codex-ast-grep-management.md)
+Companion handoff: `HANDOFF.d/2026-08-30T1403Z-edge-dev-codex-ast-grep-management.md` (retired; recoverable from git history)
 
 ## STATUS — read this first
 

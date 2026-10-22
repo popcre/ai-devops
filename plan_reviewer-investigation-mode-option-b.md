@@ -2,7 +2,7 @@
 
 Plan owner: issue [#253](https://github.com/popcre/ai-devops/issues/253)
 
-Plan handoff: [`HANDOFF.d/2026-09-16T2013Z-edge-dev-grok-253-grok-child.md`](HANDOFF.d/2026-09-16T2013Z-edge-dev-grok-253-grok-child.md)
+Plan handoff: `HANDOFF.d/2026-09-16T2013Z-edge-dev-grok-253-grok-child.md` (retired; recoverable from git history)
 
 Predecessor planning handoff (retired by this update): `HANDOFF.d/2026-09-16T1948Z-edge-dev-grok-reviewer-investigation-plan-fix.md`
 

@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — Xiaomi MiMo as a formal AI reviewer (Windows + Ubuntu wrappers) (2026-10-13)
 
-Paired handoff: [`HANDOFF.d/2026-10-13T1723Z-edge-dev3-claude-mimo-reviewer-plan.md`](HANDOFF.d/2026-10-13T1723Z-edge-dev3-claude-mimo-reviewer-plan.md)
+Paired handoff: `HANDOFF.d/2026-10-13T1723Z-edge-dev3-claude-mimo-reviewer-plan.md` (retired; recoverable from git history)
 Tracking issue: [popcre/ai-devops#1696](https://github.com/popcre/ai-devops/issues/1696)
 
 ## STATUS

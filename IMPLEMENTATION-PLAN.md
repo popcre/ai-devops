@@ -22,7 +22,7 @@
 
 **Fresh session starts at step 1.** Re-read this STATUS table first. Do not re-derive or re-plan.
 
-Companion handoff: [`HANDOFF.d/2026-09-29T2148Z-edge-dev-mimo-doctor-orphan-guard.md`](HANDOFF.d/2026-09-29T2148Z-edge-dev-mimo-doctor-orphan-guard.md)
+Companion handoff: `HANDOFF.d/2026-09-29T2148Z-edge-dev-mimo-doctor-orphan-guard.md` (retired; recoverable from git history)
 
 ---
 

@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — reviewer-assisted problem solving (2026-08-31; corrected 2026-09-01)
 
-Linked handoff: [`HANDOFF.d/2026-09-01T1059Z-edge-dev-codex-reviewer-problem-solving-corrections.md`](HANDOFF.d/2026-09-01T1059Z-edge-dev-codex-reviewer-problem-solving-corrections.md)
+Linked handoff: `HANDOFF.d/2026-09-01T1059Z-edge-dev-codex-reviewer-problem-solving-corrections.md` (retired; recoverable from git history)
 Tracking issue: [#198](https://github.com/popcre/ai-devops/issues/198)
 
 ## STATUS
