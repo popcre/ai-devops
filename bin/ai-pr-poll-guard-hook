@@ -17,6 +17,15 @@ payload="$(cat 2>/dev/null || true)"
 
 cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [[ -n "$cmd" ]] || exit 0
+# Windows spells shells case-insensitively, with .exe, and often as a quoted
+# full path ("C:/Program Files/Git/bin/bash.exe"). Reduce each to its bare
+# name, then lowercase everything, so every pattern below sees plain `bash`.
+cmd="$(printf '%s' "$cmd" | sed -E \
+  -e 's/"[^"]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?"/\1/Ig' \
+  -e "s/'[^']*[\\\\/]((ba|da|z|k|a)?sh)(\\.exe)?'/\\1/Ig" \
+  -e 's/(^|[^A-Za-z0-9_])[^ "'"'"';&|()<]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?([ \t<;|&)]|$)/\1\2\5/Ig' \
+  -e 's/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh)\.exe([^A-Za-z0-9_]|$)/\1\2\4/Ig' \
+  | tr 'A-Z' 'a-z')"
 # Text is not a command: drop here-document bodies, then quoted strings (commit
 # messages, notes, echo), so a message that merely mentions polling is allowed.
 cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '

@@ -56,6 +56,11 @@ while true; do gh pr view 1; sleep 9; done
 EOF'
 blocks "a poll loop inside sh.exe -c" "sh.exe -c 'until gh pr merge 1; do sleep 9; done'"
 allows "a quoted note passed to bash.exe -c" "bash.exe -c 'echo done'"
+blocks "an uppercase BASH.EXE -c loop" "BASH.EXE -c 'while true; do gh pr view 1; done'"
+blocks "a quoted full-path bash.exe -c loop" "\"C:/Program Files/Git/bin/bash.exe\" -c 'while true; do gh pr view 1; done'"
+blocks "a loop piped into a quoted full-path bash.exe" "printf 'while true; do gh pr view 1; sleep 9; done' | \"C:/Program Files/Git/bin/bash.exe\""
+blocks "a here-document fed to a backslash-path bash.exe" $'"C:\\Program Files\\Git\\bin\\bash.exe" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+blocks "a here-document fed to Bash.Exe" $'Bash.Exe <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
 blocks "a loop after a tab-indented <<- terminator (#1901)" $'cat > f <<-EOF\n\thi\n\tEOF\nwhile :; do gh pr view 1; done'
 blocks "a loop inside an unterminated here-document (#1901)" $'cat > f <<EOF\nwhile :; do gh pr view 1; done'
 blocks "a loop piped into /bin/bash (#1901)" "printf '%s' 'while :; do gh pr view 1; done' | /bin/bash"
