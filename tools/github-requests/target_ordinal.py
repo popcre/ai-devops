@@ -23,8 +23,63 @@ import re
 import stat
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 
 MAX_MAP = 10000
+
+
+@contextmanager
+def map_lock(directory: Path):
+    """Serialize read-modify-write of the ordinal map across processes.
+
+    Uses an OS-level advisory/exclusive lock on a dedicated file so release
+    is ownership-safe: the kernel drops the lock when the holder exits, and a
+    waiter can never delete another holder's lock the way a directory-mkdir
+    lock can after a stale takeover.
+    """
+    lock_path = directory / "target-ordinals.lock"
+    if lock_path.is_symlink():
+        raise OSError("ordinal map lock path is a symlink")
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            deadline = time.time() + 30.0
+            while True:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.time() >= deadline:
+                        raise OSError("ordinal map lock unavailable")
+                    time.sleep(0.01)
+        else:
+            import fcntl
+            deadline = time.time() + 30.0
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() >= deadline:
+                        raise OSError("ordinal map lock unavailable")
+                    time.sleep(0.01)
+        yield
+    finally:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
 
 def unique_object(pairs):
@@ -127,23 +182,24 @@ def ordinal_for(directory: Path, key: str) -> int:
         directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     if os.name != "nt" and not unix_private(directory, "directory"):
         raise OSError("state directory is not private")
-    salt = ensure_salt(directory)
-    digest = hashlib.sha256(salt + b"\x00" + key.encode("utf-8")).hexdigest()[:16]
-    row = load_map(directory / "target-ordinals.json")
-    if digest in row["map"]:
-        return row["map"][digest]
-    if len(row["map"]) >= MAX_MAP:
-        # Bound private metadata: drop the lowest ordinals first so recent
-        # same-target traffic keeps its identity within one measurement window.
-        for stale in sorted(row["map"], key=row["map"].get)[: MAX_MAP // 10]:
-            del row["map"][stale]
-    ordinal = row["next"]
-    if ordinal > 1_000_000_000:
-        raise ValueError("ordinal space exhausted")
-    row["map"][digest] = ordinal
-    row["next"] = ordinal + 1
-    save_map(directory / "target-ordinals.json", row)
-    return ordinal
+    with map_lock(directory):
+        salt = ensure_salt(directory)
+        digest = hashlib.sha256(salt + b"\x00" + key.encode("utf-8")).hexdigest()[:16]
+        row = load_map(directory / "target-ordinals.json")
+        if digest in row["map"]:
+            return row["map"][digest]
+        if len(row["map"]) >= MAX_MAP:
+            # Bound private metadata: drop the lowest ordinals first so recent
+            # same-target traffic keeps its identity within one measurement window.
+            for stale in sorted(row["map"], key=row["map"].get)[: MAX_MAP // 10]:
+                del row["map"][stale]
+        ordinal = row["next"]
+        if ordinal > 1_000_000_000:
+            raise ValueError("ordinal space exhausted")
+        row["map"][digest] = ordinal
+        row["next"] = ordinal + 1
+        save_map(directory / "target-ordinals.json", row)
+        return ordinal
 
 
 def main() -> int:

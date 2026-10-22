@@ -77,4 +77,17 @@ check 'unwrap restores raw binary' bash -c "dd if='$TMP/ccd/2.1.299-deadbeef' bs
 check 'unwrap removes wrapper' bash -c "! grep -q 'Managed by ai-headroom' '$TMP/ccd/2.1.299-deadbeef'"
 check 'unwrap removes real sidecar' bash -c "! test -e '$TMP/ccd/2.1.299-deadbeef.headroom-real'"
 
+# Claude Desktop layout: <ver>/<hash>/claude, wrapped only once .verified exists.
+D="$TMP/desktop"
+mkdir -p "$D/2.1.304/abc" "$D/2.1.305/def"
+make_elf "$D/2.1.304/abc/claude"; : > "$D/2.1.304/abc/.verified"
+make_elf "$D/2.1.305/def/claude"   # still downloading: no .verified
+export AI_HEADROOM_DESKTOP_CC_DIR="$D"
+"$TOOL" wrap-remote >/dev/null
+check 'desktop binary wrapped' grep -q 'Managed by ai-headroom' "$D/2.1.304/abc/claude"
+check 'desktop real binary kept' test -f "$D/2.1.304/abc/claude.headroom-real"
+check 'unverified download untouched' bash -c "! test -e '$D/2.1.305/def/claude.headroom-real'"
+"$TOOL" unwrap-remote >/dev/null
+check 'desktop unwrap restores binary' bash -c "! test -e '$D/2.1.304/abc/claude.headroom-real'"
+
 printf 'ok - all ai-headroom remote-wrap checks\n'

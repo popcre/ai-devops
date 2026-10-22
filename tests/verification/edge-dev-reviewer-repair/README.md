@@ -121,7 +121,7 @@ the file + observed class here — do not edit it.
 | 1 | This inventory | all open edge-dev incidents have a disposition row | **this file** |
 | 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | open |
 | 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | open |
-| 4 | Durable publish + orphan non-interference | Windows-observable publish/non-interference only; deep receipt protocol stays with sibling plan | open |
+| 4 | Durable publish + orphan non-interference | Windows-observable publish/non-interference only; deep receipt protocol stays with sibling plan | **code landed** — named fixtures `durable_report_publish_survives_process_exit` (`tests/test-ai-review-engine.sh`) and `foreign_orphans_do_not_block_fresh_review` (`tests/test-ai-review-sandbox-self-cleanup.sh`); offline suites mock `ai-task-gates` (same contract as the engine suite) |
 | 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | **code landed** — code-class `bin/*.cmd` walk includes hard-coded `C:\Program Files\Git\bin\bash.exe`; fixture `launcher_resolves_git_bash_with_empty_programfiles` in `tests/test-bin-cmd-launchers.sh`. 13 protected `.cmd` + installer Join-Path half stay #1701 reviewer-safety |
 | 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | open |
 | 7 | Code-only install + re-prove | installed hashes match merged source; smoke green | open |

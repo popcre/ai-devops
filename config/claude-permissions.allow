@@ -14,3 +14,48 @@
 # permission prompt that nobody is sitting there to answer. Added 2026-08-13.
 mcp__playwright__browser_evaluate
 mcp__claude-in-chrome__javascript_tool
+
+# Read-only commands that 245 sessions in 2026-09/10 stopped on (transcript
+# analysis 2026-10-21). Read-only prefixes only. Deliberately NOT here: `find`
+# (it has -delete/-exec) and `timeout` (a prefix rule would allow any command
+# behind it).
+Bash(git status:*)
+Bash(git log:*)
+Bash(git diff:*)
+Bash(git branch --show-current:*)
+Bash(git branch -a:*)
+Bash(git branch --list:*)
+Bash(git show:*)
+Bash(gh pr view:*)
+Bash(gh pr checks:*)
+Bash(gh issue view:*)
+Bash(ls:*)
+Bash(cat:*)
+Bash(grep:*)
+Bash(rg:*)
+Bash(wc:*)
+Bash(head:*)
+Bash(tail:*)
+
+# Hand-written wait loops (sleep in a loop, gh run watch) are refused; wait with
+# a background command instead. Added 2026-10-21.
+deny:Bash(sleep:*)
+deny:Bash(gh run watch:*)
+
+# Read-only commands from a scan of the 50 most recent transcripts on edge-dev3
+# (2026-10-21) that Claude Code does not already auto-allow. Excluded on purpose:
+# `gcloud secrets` (prints secret values), `ai-task-gates start/check` (they
+# record gate state), `gcloud builds retry/triggers` (can change builds).
+Bash(ai-pr-wait *)
+Bash(bin/ai-pr-wait *)
+Bash(ai-doc-safety)
+Bash(ai-doc-safety *)
+Bash(bin/ai-doc-safety)
+Bash(bin/ai-doc-safety *)
+Bash(ai-review doctor)
+Bash(gcloud builds list *)
+Bash(gcloud builds describe *)
+Bash(gcloud builds log *)
+Bash(gcloud run services list *)
+Bash(gcloud run services describe *)
+Bash(gcloud logging read *)

@@ -49,3 +49,12 @@ Current rule: no assigned AI reviewer APPROVE is required for a database
 write. Every other gate stays: task declaration, class escalation,
 protected-class seals, target identity proof, claim rules, and live proof.
 `ai-task-gates check --before database` opens without `--reviewer-approval`.
+
+## 2026-10-15 — review is required only in popcre/shared-db
+
+Verbatim, from Albert's chat: "we turned off reviewing in all repos aside from
+shared-db. why is this waiting for a review?"
+
+Current rule: only `popcre/shared-db` requires an AI review. No other
+repository's PR, merge, or task waits for one; a task-class gate that still
+names a review outside shared-db is stale and does not apply.

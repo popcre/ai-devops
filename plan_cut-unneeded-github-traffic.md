@@ -12,6 +12,16 @@ Linked handoff (this session):
 
 ## STATUS — read first
 
+October 21, 2026, 2:12 PM EDT: current Codex session on edge-dev3 owns resumed
+#658/#660 acceptance. Both cleanup closures are reopened. The duration adapter
+is already installed; do not repeat the October 15 handoff's pending install.
+Existing PR #1710 carries the item-2 repair, now reconciled with current
+upstream. Its merge and reviewed installation/live proof remain required.
+The October 15–20 immutable local sample has 102 completed timing observations
+after excluding 160 deadlines, but no matched baseline/candidate cost or latency
+comparison. S4/P8 remain open; accepted S1/S2 and the two busy-window proofs
+are preserved. Details: parent STATUS and the existing P1 baseline.
+
 October 8, 2026, 1:16 PM EDT supersedes the snapshot below: #1402 and #1516
 source outcomes are merged. #1510 remains OPEN at approved published `d61550a6`;
 failed Linux pre-test jobs and a canceled Windows section await the current

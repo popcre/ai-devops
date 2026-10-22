@@ -43,6 +43,7 @@ Then load additional docs only when relevant:
 | Claude Code session | [`CLAUDE.md`](CLAUDE.md), then `AGENTS.md` | Other docs unless the task requires them |
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
 | Standing behavior, triggers, false completion, or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Bulk plan files |
+| Running an in-house tool (ai-review, ai-task-gates, ai-muse, ai-pr-wait, ai-doc-safety, ai-blocker-watch, shared-db scripts) | [`docs/ai-tools-cheat-sheet.md`](docs/ai-tools-cheat-sheet.md) instead of `--help` | The tool's source |
 | Tool, workflow, prompt, install, model, secret, or machine setup | Matching row in [`docs/task-router.md`](docs/task-router.md) | Unrelated plans |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | Matching row in [`docs/task-router.md`](docs/task-router.md) | Full plan bodies until STATUS says so |
 | Repository layout, identifiers, credentials, deployment facts | [`docs/repository-reference.md`](docs/repository-reference.md) | Other sections of it |
@@ -124,17 +125,14 @@ pipeline. The recovery procedure lives in
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.
-- **Independent review is required for the reviewer safety path:** changes to
-  reviewer wrappers, evidence tools, safety tests, or installed routing rules
-  need one read-only exact-head final review before merge. Ordinary plans,
-  analysis notes, and documentation-router wording do not.
+- **The reviewer safety path** (reviewer wrappers, evidence tools, safety
+  tests, installed routing rules) no longer needs a review before merge: owner
+  ruling 2026-10-15 limits required review to `popcre/shared-db`.
 - **Two operating systems, one toolkit** (#1783): reviewer tooling runs on Ubuntu (hetz, edge-dev3) and Windows (4837/al8960ofc, 916, edge-dev). Before changing it, write down the OS the problem happened on and every OS the change will run on; design for both, prove both, install on both by each OS's route. Brief: [`config/reviewer-platform-brief.txt`](config/reviewer-platform-brief.txt) (printed by `ai-task-gates start` and `ai-reviewer-issue show`).
 - **One code path for every reviewer** (#1834): in shared review code, a step that decides whether evidence, a receipt, a record, cleanup or qualification happens never branches on a provider name — declare the exception as a capability in `config/review-runner-doors.json` (inventory: [`docs/reviewer-harness-consolidation.md`](docs/reviewer-harness-consolidation.md)).
-- **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
-  Outside `popcre/shared-db`, dispatch a review only when the task class's gate
-  already demands one (installation, reviewer-safety, deployment,
-  infrastructure, production, shared-db promotion). Ordinary docs, tooling, and
-  non-shared-db code land with no review; a review stays available on request
+- **AI review is required only in `popcre/shared-db`** (owner 2026-10-15,
+  superseding 2026-10-13 #1714; see `docs/owner-rulings.md`). No other
+  repository's work waits for a review; a review stays available on request
   by name. The rotation pool is Muse, DeepSeek, GLM, and StepFun. Other
   wrappers stay installed and callable by name but are frozen (best-effort,
   not maintained). Rules: [`docs/reviewer-rotation-rules.md`](docs/reviewer-rotation-rules.md)

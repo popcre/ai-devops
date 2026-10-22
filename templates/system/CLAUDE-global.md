@@ -63,6 +63,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Start immediately.** **Never ask a human to approve:** ask Albert only a
   business-meaning question; assigned AI reviewers gate technical actions.
   Authority the AI cannot obtain is reported `Blocked —`, never worked around.
+- **Never ask Albert to type, click, or create a credential.** If a
+  permission setting blocks the step, name the setting and change it, or route
+  the step to a session that can.
 - **Restate a short job plan** (goal, scope, done-when), then execute.
 - **Live proof is required before an outcome is closed** (details). One issue per application need.
 - **Complete the authorized scope** on its existing issue. Completing one child or phase is never a reason to stop.
@@ -77,6 +80,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Preparation may legitimately leave agents idle; never invent busywork.
   Stop when complete, genuinely externally blocked with exact state preserved,
   or told to stop. Do not promise background execution the client cannot provide.
+- **Thirty minutes without progress is broken.** Any review, queue, or helper
+  with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
+  of "still waiting" on the same item.
 - **Keep canonical checkouts landing-only.** Each write-capable task, and
   each child Git repository, uses its own worktree before editing.
 - AI performs every manual step itself and proves success observably.
@@ -90,19 +96,32 @@ Albert is a business owner, not a programmer. Write every reply for him.
   ui-live-workflow.
 - **Quote every time in EST (New York City):** every human-facing time names
   EST/EDT (America/New_York), e.g. `3:45 PM EST`. Machine keys may stay UTC.
+  Compute it from the system clock (`TZ=America/New_York date`), never copy
+  from a UTC log line, and never quote a time later than now.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
-  output, logs, or commits; load `secrets-to-1password`. A leak is
+  output, logs, or commits; serialize 1Password access and load
+  `secrets-to-1password`. A leak is
   compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE (skill).
 - **Destructive actions:** make each recoverable first (details).
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE gates every technical production
+  The assigned AI reviewer's explicit APPROVE gates `terraform apply` and every technical production
   action; database writes skip it (details). The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue; this exception authorizes no manual production command (rulings: owner-rulings.md).
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
-  in `popcre/shared-db`; load `shared-db-change` first.
-- **Sign everything posted to GitHub** (format in details).
-- **Reviews:** pick an in-rotation reviewer of a different engine via
-  `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
+  in `popcre/shared-db`; load `shared-db-change` first. Structural work is
+  claim-first: claim exact objects on the existing issue and start.
+- **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
+- **Reviews:** required only in `popcre/shared-db` (owner ruling
+  2026-10-15); no other repository waits for a review. There, pick an
+  in-rotation reviewer via `ai-review`; first read `docs/reviewer-rotation-rules.md`.
+- **Observation week** (while the window file is live, #1948): send reviews
+  with `--detach` and read them with `ai-review outcome`. Never retry a
+  reviewer that failed or was reported skipped this session. When
+  `ai-task-gates check --before ship` prints `MERGE-UNREVIEWED`, merge on green
+  CI, add label `unreviewed-week`, and continue. Shared-db, production,
+  infrastructure and deployment still wait for an exact-head APPROVE. No
+  reviewer-repair PRs or toolkit installs; log failures with
+  `ai-reviewer-issue`. Allowed operations: `plan_reviewer-observation-week.md` §11.
 - **Route every successor from its own work,** never a predecessor's.
 - **Synology:** NAS reads over 25 s load `synology-long-running-operations`.
 
@@ -110,9 +129,10 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 - **GPT-5.6 uses `low` or `medium` reasoning only.** Split a harder task.
 - Prefer permanent, fewest-moving-parts fixes; test code, verify UI visually.
-  GitHub is the source of truth; never live-edit a server.
-- Commit only as Albert's verified identity, staging only owned files
-  (details).
+  GitHub is the source of truth; never live-edit a server. Never replace
+  operating-system binaries.
+- Commit only as Albert's verified identity (`git var GIT_COMMITTER_IDENT`),
+  staging only owned files (details).
 - **Never push directly to a protected `main`;** branch and PR. DesignFlow
   goes from Albert's sandbox branch to `develop`, never self-merged.
 - **Albert does not merge — you do,** except DesignFlow or a PR he will
@@ -120,9 +140,11 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr> --timeout-minutes N --fit-tool-call`; rerun it on
-  `STILL-WAITING`. One probe per state change. A wait that outlives the turn
-  leaves the issue or PR as the card.
+  Run `bin/ai-pr-wait <pr>` in the background (run_in_background) and do
+  other work until it wakes you; rerun it on exit 2. One probe per state
+  change. A wait that outlives the turn leaves the issue or PR as the card.
+  Never write a sleep loop in Bash; wait on reviewers, subagents, and
+  background commands the same way.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 
