@@ -71,7 +71,7 @@ parity_bad=0; parity_n=0; parity_cases=0
 # Token-aware replacement without regex replacement syntax, so backslashes survive.
 swap() { # TEXT NAME FORM -> TEXT with each command token NAME (or /bin/NAME, /usr/bin/NAME) as FORM
   local s="$1" out="" re="(^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?($2)([^A-Za-z0-9_.-]|\$)" m
-  while [[ $s =~ $re ]]; do
+  for ((;;)); do [[ $s =~ $re ]] || break
     m="${BASH_REMATCH[0]}"; out+="${s%%"$m"*}${BASH_REMATCH[1]}$3"; s="${BASH_REMATCH[4]}${s#*"$m"}"
   done
   printf '%s' "$out$s"
