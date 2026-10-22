@@ -623,7 +623,13 @@ if [ "$provider" = glm ]; then
 else
   RUNNER_ENV=()
 fi
+# Python run by the model must not write __pycache__ into the snapshot; the
+# digest check below stays exactly as strict (edge-dev3 Muse, 2026-10-21).
+PY_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ai-review-pycache.XXXXXX")" || die 'cannot create the reviewer Python cache directory.'
+PY_CACHE_NATIVE="$PY_CACHE_DIR"; ! command -v cygpath >/dev/null 2>&1 || PY_CACHE_NATIVE="$(cygpath -w "$PY_CACHE_DIR")"
+RUNNER_ENV+=(PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$PY_CACHE_NATIVE")
 set +e; ( cd "$REVIEW_DIR" && exec env "${RUNNER_ENV[@]}" AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+rm -rf "$PY_CACHE_DIR"
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -eq 0 ] && [ -n "${glm_followup_meta:-}" ]; then
   glm_followup_clear "$glm_followup_meta"

@@ -100,7 +100,7 @@ allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bi
 unset BAILIAN_CODING_PLAN_API_KEY
 clean_env=("$env_bin" -i "PATH=${PATH:-}" "HOME=$qwen_home" "USERPROFILE=$qwen_home" "QWEN_HOME=$qwen_home"
   "APPDATA=$qwen_home/appdata" "LOCALAPPDATA=$qwen_home/localappdata" "TEMP=$qwen_home/tmp" "TMP=$qwen_home/tmp" "TMPDIR=$qwen_home/tmp")
-for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM; do
+for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX; do
   [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
 done
 if [ "$allow_key" = 1 ]; then

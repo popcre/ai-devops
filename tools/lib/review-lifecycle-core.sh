@@ -419,6 +419,14 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # Door invocation. The door receives provider bits only; every governance
 # surface above stays here.
 # ---------------------------------------------------------------------------
+rlc_native_path() { # PATH -> the spelling a native (Windows) Python accepts
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
+}
+
+rlc_python_cache_dir() { # -> a fresh private directory outside every snapshot
+  mktemp -d "${TMPDIR:-/tmp}/ai-review-pycache.XXXXXX"
+}
+
 rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPORT_OUT HEAD [MAX_TURNS] [ALLOW_WRITE] [REVIEW_MODE] [OPERATION]
   local mode="$1" door="$2" workdir="$3" packet_dir="$4" prompt_file="$5" report_out="$6" head="$7"
   local max_turns="${8:-}" allow_write="${9:-0}" review_mode="${10:-}" operation="${11:-}" rc=0
@@ -426,8 +434,16 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
   [ -f "$door" ] || rlc_die "door not found: $door"
   [ -f "$prompt_file" ] || rlc_die "prompt file not found: $prompt_file"
   : > "$report_out" || rlc_die "cannot write report destination: $report_out"
+  # A reviewer that runs Python inside the immutable snapshot must not leave
+  # __pycache__ there (edge-dev3 Muse, 2026-10-21): suppress bytecode and
+  # redirect any forced write to a per-call cache outside the snapshot. The
+  # snapshot digest check stays exactly as strict.
+  local pycache
+  pycache="$(rlc_python_cache_dir)" || rlc_die 'cannot create the reviewer Python cache directory.'
   set +e
-  env AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
+  env PYTHONDONTWRITEBYTECODE=1 \
+      PYTHONPYCACHEPREFIX="$(rlc_native_path "$pycache")" \
+      AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
       AI_REVIEW_VIA_RUNNER=1 \
       DOOR_MODE="$mode" \
       DOOR_WORKDIR="$workdir" \
@@ -442,6 +458,7 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
       DOOR_OPERATION="$operation" \
       bash "$door" "$mode"
   rc=$?
+  rm -rf "$pycache"
   # Do not re-enable set -e before a possible non-zero return: `return N`
   # under set -e aborts the runner instead of reporting the door status.
   [ "$rc" -eq 0 ] || return "$rc"
