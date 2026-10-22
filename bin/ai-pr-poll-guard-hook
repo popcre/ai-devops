@@ -23,7 +23,7 @@ cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
   # A body ends on its exact delimiter (tab-indented for <<-). An
   # unterminated body is not dropped: it is scanned like any command (#1901).
   end != "" { line = $0; if (dash) sub(/^\t+/, "", line); if (line == end) { end = ""; buf = ""; next } buf = buf $0 "\n"; next }
-  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh([ \t]|<|$)/ {
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh(\.exe)?([ \t]|<|$)/ {
     end = substr($0, RSTART, RLENGTH); dash = (end ~ /^<<-/); sub(/^<<-?[ \t]*["'"'"']?/, "", end); buf = ""
   }
   { print }
@@ -31,14 +31,14 @@ cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
 # Loops are often written over several lines; judge the command as one line.
 # Text piped into a shell (`printf '...' | bash`) is a script too (#1901).
 piped=""
-if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh([[:space:]]|$)'; then
+if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh(\.exe)?([[:space:]]|$)'; then
   piped="$(printf '%s' "$cmd" | tr '\n' ' ' | tr -d "\"'")"
 fi
 # A quoted script handed to a child shell or eval IS a command (#1901): unwrap
 # `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
 cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
-  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
-  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\5 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh([.]exe)?( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\6 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh([.]exe)?( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\6 /g" \
   | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
 [ -z "$piped" ] || cmd="$cmd ; $piped"
