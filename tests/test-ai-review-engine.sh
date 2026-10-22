@@ -2060,6 +2060,7 @@ check "door_gets_bytecode_off_and_cache_prefix_outside_snapshot" \
 # bytecode settings must survive it so Muse's sandboxed shell inherits them.
 ( . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
   PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/outside/cache
+  XDG_CONFIG_HOME="$TMP/x" XDG_DATA_HOME="$TMP/x" XDG_STATE_HOME="$TMP/x" XDG_CACHE_HOME="$TMP/x"
   muse_clean_environment "$TMP" muse-code /usr/bin/env 0
   printf '%s\n' "${clean_env[@]}" ) > "$TMP/muse-clean-env.txt"
 check "muse_clean_environment_keeps_bytecode_settings" \
