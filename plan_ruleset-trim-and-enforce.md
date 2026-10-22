@@ -277,7 +277,7 @@ citing a commit SHA or test file. Never cite a bare number.
 **2.2 One run fits one tool call.**
 - Add `--fit-tool-call` to `bin/ai-pr-wait`. It caps the deadline at 9 minutes and,
   on timeout, prints one line: `STILL-WAITING pr=<n> state=<…> rerun: <same command>`.
-- The explicit `--timeout-minutes` stays required (#1183).
+- `--timeout-minutes` is now optional on `ai-pr-wait` (default 60, still bounded); `ai-gh-wait` keeps it required (#1183).
 - Update the global wait bullet to name exactly this form.
 - Done when: a test with a stubbed `gh` (pattern in the existing ai-pr-wait test;
   `ls tests | grep pr-wait`) shows the cap and the rerun line.

@@ -15,6 +15,7 @@ set -euo pipefail
 umask 077
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/review-terminal-verdict.sh"
 source "$DOOR_CREDIT_ROOT/tools/lib/gemini-review-contract.sh"
 # Match the managed wrapper: ordinary native calls must not silently replace
 # the runtime whose bytes are bound to the live qualification.
@@ -145,6 +146,8 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'

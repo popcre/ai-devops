@@ -48,6 +48,7 @@ source "$SF_ROOT/tools/lib/stepfun-pace.sh"
 # reviewer_credit_scan: the shared out-of-credit classifier.
 # shellcheck source=../../reviewer_event_guard.sh
 source "$SF_ROOT/tools/reviewer_event_guard.sh"
+source "$SF_ROOT/tools/lib/review-terminal-verdict.sh"
 SF_OC_VERSION="$(tr -d ' \r\n' < "$SF_ROOT/config/opencode/version" 2>/dev/null || true)"
 
 # Model pins. StepCode uses the step/ id; the OpenCode profile pins
@@ -267,37 +268,8 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
-    elif printf '%s\n' "$text" | awk '
-        { lines[NR]=$0 }
-        NF { last=NR }
-        END {
-          if (last < 1) exit 1
-          t = lines[last]
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-          if (t ~ /^(VERDICT:[[:space:]]*)?(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) exit 0
-          exit 1
-        }'; then
-      # Agent profiles and older briefs end with "VERDICT: <word> <head>".
-      # Emit that as the terminal ## Verdict block so pool/lifecycle can
-      # record the decision instead of a false BLOCKED (edge-dev incidents
-      # 20261018T200816Z / 20261019T151933Z). Do not invent a decision.
-      printf '### Findings and reasoning\n\n'
-      printf '%s\n' "$text" | sed '/^$/d' | sed '$d'
-      printf '\n---\n\n## Verdict\n'
-      printf '%s\n' "$text" | awk '
-        { lines[NR]=$0 }
-        NF { last=NR }
-        END {
-          t = lines[last]
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-          sub(/^[Vv][Ee][Rr][Dd][Ii][Cc][Tt][[:space:]]*:[[:space:]]*/, "", t)
-          gsub(/\*+/, "", t)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-          # Keep only the decision word; any trailing head SHA is dropped
-          # because rlc_parse_verdict accepts a bare word only.
-          split(t, w, /[[:space:]]+/)
-          print w[1]
-        }'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'

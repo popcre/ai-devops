@@ -1,3 +1,9 @@
+---
+issue: 1783
+status: OPEN
+owner: unclaimed — next session claims on issue 1783
+---
+
 # Handoff — review output contract plan (hetz, Claude, 2026-10-19 4:00 PM EDT)
 
 Plan: [../plan_review-output-contract.md](../plan_review-output-contract.md) — read its STATUS first.

@@ -37,8 +37,8 @@ line in the body. Never leave it unowned.
   to one agent in sequence.
 - Every dispatch prompt says: create a uniquely named worktree and verify its
   branch before every commit; only the agent that opened an issue closes it;
-  and every wait uses a bounded in-session tool with an explicit deadline
-  (`ai-pr-wait --timeout-minutes N` / `ai-gh-wait --timeout-minutes N`). Never
+  and every wait uses a bounded in-session tool with a deadline
+  (`ai-pr-wait [--timeout-minutes N]`, default 60 / `ai-gh-wait --timeout-minutes N`, required). Never
   poll ad hoc. If the wait will outlive the turn, leave the issue or pull
   request as the card — do not create a waiter, registry entry, or park-state.
 

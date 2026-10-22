@@ -34,6 +34,7 @@ case "$MODE" in review|implement) ;; *) printf 'deepseek door: usage: deepseek.s
 # Repository root, for the pinned OpenCode install and the profile source.
 DS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DS_ROOT/tools/reviewer_event_guard.sh"
+source "$DS_ROOT/tools/lib/review-terminal-verdict.sh"
 source "$DS_ROOT/tools/lib/deepseek-opencode.sh"
 source "$DS_ROOT/tools/lib/reviewer-instructions.sh"
 PROFILE_SRC="$DS_ROOT/config/opencode-deepseek"
@@ -146,6 +147,8 @@ extract_report() { # extract_report LOG_JSONL DEST HEAD MODE
     if grep -Eq '^## Verdict[[:space:]]*$' <<< "$text"; then
       printf '### Findings and reasoning\n\n'
       printf '%s\n' "$text" | deepseek_terminal_report || return 1
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'
