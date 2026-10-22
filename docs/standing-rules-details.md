@@ -191,8 +191,8 @@ and points here.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or
   reviewed preview. No broad staging or destructive Git over unreviewed work,
   another session's files, a repository root, or a machine-local overlay.
-- **Production:** in `popcre/shared-db` the reviewer's APPROVE is on the exact
-  inputs; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database
+- **Production:** in every repository the reviewer's APPROVE on the exact
+  inputs gates every technical production action (the 2026-10-15 ruling waives only PR and code-review gates outside `popcre/shared-db`, never this APPROVE). Database
   writes skip that APPROVE but keep every other gate (see "Database writes").
   The automatic `shared-db` migration promotion exception re-proves the one
   open structural work issue or stops for an engineer; it authorizes no manual
