@@ -273,7 +273,7 @@ git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
 check 'reviewer-safety installation needs an assigned AI reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
 check 'reviewer-safety installation keeps independent review and routing proof' \
-  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates) | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
+  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates + .waived_gates) | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
 check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 class_state="$(state_file_for "$TMP/class-candidate")"
@@ -807,7 +807,7 @@ git -C "$TMP/mixed-explain" commit -qm 'toolkit declaration'
 printf '#!/bin/sh\n' > "$TMP/mixed-explain/bin/ai-review"
 printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
 check 'explain includes reviewer proofs inside a stronger mixed class' \
-  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates)|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
+  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
 
 printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
@@ -892,7 +892,18 @@ printf 'x\n' > "$TMP/detached/note.md"
 check 'a detached HEAD still classifies the working tree' \
   "[ \"\$( out '$TMP/detached' explain --json | jq -r .observed_class )\" = prose ]"
 
-newrepo "$TMP/clean"
+# Owner ruling 2026-10-15 (#1960): outside popcre/shared-db no class waits
+# for a reviewer. These production refusals are proven in shared-db.
+newrepo "$TMP/noreview"
+( cd "$TMP/noreview" && "$GATES" start --class production ) >/dev/null
+check 'outside shared-db a production task opens without a reviewer approval' \
+  "rc 0 '$TMP/noreview' check --before production"
+check 'outside shared-db the reviewer gate is reported as waived, not required' \
+  "out '$TMP/noreview' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null) and (.waived_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
+( cd "$TMP/noreview" && "$GATES" start --class deployment ) >/dev/null
+check 'outside shared-db a deployment-class check opens without a reviewer approval' \
+  "rc 0 '$TMP/noreview' check --before ship"
+newrepo "$TMP/clean" popcre/shared-db
 check 'no changes at all allows the action' "rc 0 '$TMP/clean' check --before ship"
 check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/clean' check --before production"
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
@@ -914,7 +925,7 @@ check 'a production task may still run code-only review without a reviewer repor
   "rc 0 '$TMP/clean' check --before code-only-review"
 check 'a production task refuses ship without an AI reviewer approval' \
   "rc 3 '$TMP/clean' check --before ship"
-newrepo "$TMP/rs"
+newrepo "$TMP/rs" popcre/shared-db
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
 newrepo "$TMP/unchecked"
 ( cd "$TMP/unchecked" && "$GATES" start --class code ) >/dev/null
@@ -1093,9 +1104,9 @@ check 'the reviewer approval is recorded in the intent state' \
 ( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a stronger declared class supplies the effective gates' \
-  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
+  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and ((.required_gates+.waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
 check 'a stronger declared class does not drop observed-class required proof' \
-  "out '$TMP/gate' explain --json | jq -e '.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null'"
+  "out '$TMP/gate' explain --json | jq -e '(.required_gates+.waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null'"
 rm -f "$TMP/gate/note.md"
 ( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 mkdir -p "$TMP/gate/bin"; printf '#!/bin/sh\n' > "$TMP/gate/bin/ai-review-lifecycle"
@@ -1530,8 +1541,8 @@ check 'mixed protected application source keeps the generic deployment refusal' 
   "rc 3 '$APP' check --before deploy --reviewer-approval '$APP_APPROVAL'"
 check 'the exact committed application source target records its independent approval' \
   "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
-check 'application source route refuses missing reviewer approval instead of ordinary success' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+check 'outside shared-db the application source route records its release without a reviewer approval' \
+  "rc 0 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
 check 'application source route rejects a reviewer REJECT' \
   "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.verdict=\"REJECT\"')\""
 check 'application source route rejects plan-review for a live action' \

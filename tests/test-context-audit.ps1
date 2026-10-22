@@ -501,7 +501,7 @@ owner: claude/fixture-$n
             "Never ask a human to approve",
             "assigned AI reviewer's explicit APPROVE",
             "no human approval is ever requested",
-            "rotates them itself under an assigned AI reviewer's APPROVE",
+            "waits for an assigned AI reviewer's APPROVE of the rotation plan",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",

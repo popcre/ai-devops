@@ -101,11 +101,11 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
   output, logs, or commits; serialize 1Password access and load
   `secrets-to-1password`. A leak is
-  compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE (skill).
+  compromised; the AI rotates them itself (skill); only a `popcre/shared-db` credential waits for an assigned AI reviewer's APPROVE of the rotation plan.
 - **Destructive actions:** make each recoverable first (details).
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE gates `terraform apply` and every technical production
-  action; database writes skip it (details). The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
+  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE gates `terraform apply` and every technical production
+  action; database writes skip it; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required) (details). The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue; this exception authorizes no manual production command (rulings: owner-rulings.md).
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
   in `popcre/shared-db`; load `shared-db-change` first. Structural work is
