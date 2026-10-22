@@ -29,7 +29,7 @@ codex_bin="$(command -v codex 2>/dev/null || true)"
 if [[ -z "$codex_bin" ]]; then
   for c in "$HOME/.codex/packages/standalone/current/bin/codex" \
            "$USERPROFILE/.codex/packages/standalone/current/bin/codex" \
-           /usr/local/bin/codex; do
+           "${AI_CODEX_SYSTEM_BIN:-/usr/local/bin/codex}"; do
     [[ -x "$c" ]] && { codex_bin="$c"; break; }
   done
 fi
