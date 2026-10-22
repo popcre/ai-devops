@@ -447,9 +447,10 @@ AUTOWRAP_UNIT="ai-headroom-autowrap"
 autowrap_set() { # autowrap_set on|off
   local dir="$HOME/.config/systemd/user" self
   is_windows && return 0
-  [ -d "$DESKTOP_CC_DIR" ] || return 0
   command -v systemctl >/dev/null 2>&1 || return 0
   if [ "$1" = on ]; then
+    # Only "on" needs Desktop; "off" must clean up the timer even after Desktop is gone.
+    [ -d "$DESKTOP_CC_DIR" ] || return 0
     self="$(readlink -f "$0")"
     mkdir -p "$dir" || die "ai-headroom: could not create $dir"
     printf '[Unit]\nDescription=Re-wrap Claude Desktop Claude Code through Headroom\n\n[Service]\nType=oneshot\nExecStart=%s wrap-remote\n' "$self" > "$dir/$AUTOWRAP_UNIT.service"
