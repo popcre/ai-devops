@@ -545,10 +545,11 @@ try {
   Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-sandbox') -Destination (Join-Path $stamp.Repo 'bin\ai-review-sandbox')
   New-Item -ItemType Directory -Force -Path (Join-Path $stamp.Repo 'tools\lib') | Out-Null
   Copy-Item -LiteralPath (Join-Path $root 'tools\lib\task-gates.sh') -Destination (Join-Path $stamp.Repo 'tools\lib\task-gates.sh')
+  Copy-Item -LiteralPath (Join-Path $root 'tools\lib\review-session-skip.sh') -Destination (Join-Path $stamp.Repo 'tools\lib\review-session-skip.sh')
   'fixture helper' | Set-Content (Join-Path $stamp.Repo 'bin\ai-helper') -Encoding ASCII
   @("ai-task-gates`tbin/ai-task-gates`tbash+cmd", "ai-helper`tbin/ai-helper`tbash+cmd") |
     Set-Content (Join-Path $stamp.Repo 'config\machine-tools.tsv') -Encoding ASCII
-  git -C $stamp.Repo add bin config/machine-tools.tsv tools/lib/task-gates.sh
+  git -C $stamp.Repo add bin config/machine-tools.tsv tools/lib/task-gates.sh tools/lib/review-session-skip.sh
   git -C $stamp.Repo commit -m guarded-stamp-base | Out-Null
   git -C $stamp.Repo push origin main | Out-Null
   $stampBase=(git -C $stamp.Repo rev-parse HEAD).Trim()
