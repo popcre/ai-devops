@@ -2032,6 +2032,9 @@ echo '== python bytecode outside snapshot'
 PYC_SNAP="$TMP/pyc-snapshot"
 mkdir -p "$PYC_SNAP"
 printf 'def add(a, b):\n    return a + b\n' > "$PYC_SNAP/calc.py"
+git -C "$PYC_SNAP" init -q
+git -C "$PYC_SNAP" add calc.py
+git -C "$PYC_SNAP" -c user.name=t -c user.email=t@t commit -q -m fixture
 PYC_DOOR="$TMP/pyc-door.sh"
 # The door models a reviewer that imports the fixture's module from inside
 # the snapshot, and records the environment any sandboxed child would see.
