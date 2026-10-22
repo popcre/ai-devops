@@ -119,11 +119,23 @@ the file + observed class here — do not edit it.
 |---|---|---|---|
 | 0 | No-review landing contract | effective class stays `prose`/`code`; no reviewer report in PR bodies | contract recorded; re-check before each PR |
 | 1 | This inventory | all open edge-dev incidents have a disposition row | **this file** |
-| 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | open |
-| 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | open |
+| 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | **partially-resolved 2026-10-21 11:21 PM EDT** — door spawn proven; ask path in protected `bin/ai-stepfun` remains |
+| 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | **resolved 2026-10-21 11:21 PM EDT** — `b5cfa876`; fixture 13/13 |
 | 4 | Durable publish + orphan non-interference | Windows-observable publish/non-interference only; deep receipt protocol stays with sibling plan | **code landed** — named fixtures `durable_report_publish_survives_process_exit` (`tests/test-ai-review-engine.sh`) and `foreign_orphans_do_not_block_fresh_review` (`tests/test-ai-review-sandbox-self-cleanup.sh`); offline suites mock `ai-task-gates` (same contract as the engine suite) |
 | 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | **code landed** — code-class `bin/*.cmd` walk includes hard-coded `C:\Program Files\Git\bin\bash.exe`; fixture `launcher_resolves_git_bash_with_empty_programfiles` in `tests/test-bin-cmd-launchers.sh`. 13 protected `.cmd` + installer Join-Path half stay #1701 reviewer-safety |
-| 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | **done 2026-10-21 11:21 PM EST** — door probe spawn works (gate answered `stepfun-shell: refused`; `npm test` executed); durable report with `## Verdict`; GLM fixture 13/13. `20261014T203826Z-edge-dev-stepfun-2686842` partially-resolved (ask path in protected `bin/ai-stepfun` still old `bash.exe` script shim); `20261014T201712Z-edge-dev-glm-2563781` resolved (`b5cfa876`). Repairs: `4a5e1883`/`6ba96308`/`d13f4157`, `b5cfa876`, `3de4f83e`, `108973f8` |
+| 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | **done 2026-10-21 11:21 PM EDT** — see smoke table below. `20261014T203826Z` partially-resolved; `20261014T201712Z` resolved (`b5cfa876`). Repairs: `4a5e1883`/`6ba96308`/`d13f4157`, `b5cfa876`, `3de4f83e`, `108973f8` |
+
+### Step 6 smoke commands (2026-10-21 11:21 PM EDT)
+
+| Command | Exit | Evidence |
+|---|---|---|
+| `ai-stepfun ask "Run this shell command and reply with only its output: echo shell-spawn-ok"` via door probe `tools/lib/review-doors/stepfun.sh review` | 0 | Durable report path `~/.local/state/ai-devops/stepfun/door-shell.rK5QC7/report`; `## Verdict` `BLOCKED`; reviewed commit `0000…0000` (probe head). Shell spawn proven: gate returned `stepfun-shell: refused (not an allowlisted test runner)` for `echo`, and `npm test` executed (`ENOENT package.json`) |
+| `bash tests/test-glm-revise-followup.sh` | 0 | `passed=13 failed=0` |
+| `bash tests/test-bin-cmd-launchers.sh` | 0 | `launcher_resolves_git_bash_with_empty_programfiles` ok; `empty_programfiles_launcher_still_runs` ok; `PASS: bin launchers` |
+| `ai-reviewer-issue resolve 20261014T203826Z-edge-dev-stepfun-2686842 --status partially-resolved` | 0 | Resolution record under `.ai/reviewer-issues/…/resolutions/` |
+| `ai-reviewer-issue resolve 20261014T201712Z-edge-dev-glm-2563781 --status resolved` | 0 | Resolution record under `.ai/reviewer-issues/…/resolutions/` |
+
+Note: `ai-stepfun ask` (protected `bin/ai-stepfun` Windows path) still fails `ChildProcess.spawn`; the door path is the proven governed path.
 | 7 | Code-only install + re-prove | installed hashes match merged source; smoke green | open |
 
 ## Verification gate for this step
