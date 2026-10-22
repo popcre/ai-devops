@@ -205,6 +205,42 @@ certutil -addstore -user Root "$env:USERPROFILE\.config\ai-devops\zcode-headroom
 # Fully quit Z-code (tray) and reopen so child processes inherit env
 ```
 
+### 4.3b Per-machine trust on Linux (proven 2026-10-22, hetz VPS itself)
+
+§4.3 is Windows-only, and the trust it builds is **per machine**. A Linux box
+whose Z-code `provider_config.json` points at `https://$HEADROOM_HOST:8443/v1`
+fails every model turn with `provider_code=MODEL_TLS_VALIDATION_FAILED` until
+its own trust is set up. Diagnosed and fixed live on the hetz VPS
+(`~/.zcode` of user `ai`), accepted by an owner chat turn through the lane:
+
+```bash
+# 1. Combined bundle = private CA first, then public roots (never private-only).
+#    On a remote machine, copy ca.crt from hetz:/etc/ai-zcode-headroom/tls/ first.
+mkdir -p ~/.config/ai-devops
+cat /etc/ai-zcode-headroom/tls/ca.crt /etc/ssl/certs/ca-certificates.crt \
+  > ~/.config/ai-devops/zcode-ca-bundle.crt
+
+# 2. Exports ABOVE the `case $- in` non-interactive guard in ~/.bashrc —
+#    SSH-launched Z-code chats run NON-interactive shells and never see
+#    anything below the guard.
+export ZCODE_AGENT_CA_CERT="$HOME/.config/ai-devops/zcode-ca-bundle.crt"
+export AGENT_CA_CERT="$HOME/.config/ai-devops/zcode-ca-bundle.crt"
+export NODE_EXTRA_CA_CERTS="$HOME/.config/ai-devops/zcode-ca-bundle.crt"
+
+# 3. Env-independent path the app reads directly — ~/.zcode/cli/config.json:
+#    { "network": { "caCertFile": "/home/<user>/.config/ai-devops/zcode-ca-bundle.crt" } }
+
+# 4. Proofs before declaring done:
+NODE_EXTRA_CA_CERTS=~/.config/ai-devops/zcode-ca-bundle.crt node -e \
+  "https.get('https://$HEADROOM_HOST:8443/health',r=>{console.log('HTTP',r.statusCode);process.exit(r.statusCode===200?0:1)}).on('error',e=>{console.error(e.code);process.exit(1)})"
+ssh <host> 'echo $NODE_EXTRA_CA_CERTS'   # must print the bundle path (non-interactive)
+```
+
+Acceptance is the same as §4.4: one real chat turn on that machine. The env is
+inherited at process start, so any chat opened before the fix must be closed
+and reopened. Do not set `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE` here either —
+the §2.2 footgun is platform-independent.
+
 ### 4.4 Live proof (required before calling it done)
 
 Send one Z-code message that completes a model turn. CLI `ai-zcode ask` may
@@ -298,7 +334,8 @@ status` reports healthy. **Do not change this to solve Z-code problems.**
 
 **A new computer does not turn the lane on automatically.** The switch and
 TLS-front templates ship with the toolkit; `headroom-zcode.service` and the
-private CA are still set up by hand. Rebuild using §4.2–4.3.
+private CA are still set up by hand. Rebuild using §4.2–4.3 (Windows) and
+§4.3b (Linux).
 
 ---
 
