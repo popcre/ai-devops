@@ -84,9 +84,13 @@ case "$STUB_MODE" in
   touchcaller) touch "$CALLER/CALLER_TOUCHED"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
-  # burst: the provider refuses a call that starts within 2s of the previous one.
-  burst) now=$(date +%s); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
-         if [ $((now - last)) -lt 2 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
+  # burst: the provider refuses a call that starts within 1.5s of the previous
+  # one, measured in milliseconds (#1985: whole-second stamps misjudged gaps by
+  # up to 1s). The pacer spaces starts more than 2s apart; the 0.5s margin
+  # absorbs start-up jitter between the pacer and this call, while an unpaced
+  # burst (gaps of milliseconds) is still refused.
+  burst) now=$(( ${EPOCHREALTIME/[.,]/} / 1000 )); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
+         if [ $((now - last)) -lt 1500 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
          echo 'paced answer' ;;
   # json: StepCode --mode json events, two provider calls with usage.
   json) mu(){ jq -cn --arg t "$1" --argjson i "$2" --argjson o "$3" --argjson r "$4" \

@@ -20,6 +20,10 @@ _stepfun_pace_dir(){ printf '%s/pace' "${1:-${AI_STEPFUN_STATE_DIR:-$HOME/.local
 
 # _stepfun_pace_slot DIR: one locked decision. Prints 0 and records the start
 # when a slot is free now; otherwise prints the seconds to wait.
+# Starts are whole seconds, so a start logged as N really happened anywhere in
+# [N, N+1). A start stays in the log through second N+WINDOW inclusive, which
+# guarantees more than WINDOW real seconds between it and the next start it
+# gates (#1985: an exclusive bound let two starts land about WINDOW-1 apart).
 _stepfun_pace_slot(){
   local d="$1" now cool=0 oldest count
   now="$(date +%s)"
@@ -27,13 +31,13 @@ _stepfun_pace_slot(){
   [[ "$cool" =~ ^[0-9]+$ ]] || cool=0
   if [ "$now" -lt "$cool" ]; then printf '%s' "$((cool - now))"; return 0; fi
   touch "$d/starts"
-  awk -v min="$((now - STEPFUN_PACE_WINDOW))" '$1 ~ /^[0-9]+$/ && $1 > min' "$d/starts" > "$d/starts.new" && mv -f "$d/starts.new" "$d/starts"
+  awk -v min="$((now - STEPFUN_PACE_WINDOW))" '$1 ~ /^[0-9]+$/ && $1 >= min' "$d/starts" > "$d/starts.new" && mv -f "$d/starts.new" "$d/starts"
   count="$(wc -l < "$d/starts" | tr -d ' ')"
   if [ "$count" -lt "$STEPFUN_PACE_RPM" ]; then
     printf '%s\n' "$now" >> "$d/starts"; printf 0; return 0
   fi
   oldest="$(head -n1 "$d/starts")"
-  printf '%s' "$(( oldest + STEPFUN_PACE_WINDOW - now > 0 ? oldest + STEPFUN_PACE_WINDOW - now : 1 ))"
+  printf '%s' "$(( oldest + STEPFUN_PACE_WINDOW + 1 - now > 0 ? oldest + STEPFUN_PACE_WINDOW + 1 - now : 1 ))"
 }
 
 # stepfun_pace_wait [STATE_DIR]: blocks until this turn may start, then
