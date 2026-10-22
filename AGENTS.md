@@ -103,7 +103,9 @@ pipeline. The recovery procedure lives in
 - Production and shared cloud infrastructure are read-only by default. Run `terraform apply`,
   `terraform destroy`, or mutating production `gcloud` commands only with the
   assigned AI reviewer's explicit APPROVE of the exact action and
-  resource; never ask Albert to approve (owner ruling 2026-09-28). Where
+  resource when the work is in `popcre/shared-db`; outside shared-db no
+  review is required (owner ruling 2026-10-15). Never ask Albert to approve
+  (owner ruling 2026-09-28). Where
   `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude

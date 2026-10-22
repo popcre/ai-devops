@@ -120,15 +120,15 @@ rulings, verbatim: `docs/owner-rulings.md`.
   from a UTC log line, and never quote a time later than now.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself (no reviewer APPROVE outside `popcre/shared-db` (owner ruling 2026-10-15)), except a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE on the exact inputs gates every
-  technical production action. Database writes skip that APPROVE but keep every other gate. Before production or database work, read
+  Only in `popcre/shared-db` does an assigned AI reviewer's explicit APPROVE on the exact
+  inputs gate a technical production action; elsewhere none is needed. Database writes skip that APPROVE but keep every other gate. Before production or database work, read
   `docs/standing-rules-details.md`. (rulings: docs/owner-rulings.md)
   The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue or stops for an engineer;
@@ -147,8 +147,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
   with `--detach` and read them with `ai-review outcome`. Never retry a
   reviewer that failed or was reported skipped this session. When
   `ai-task-gates check --before ship` prints `MERGE-UNREVIEWED`, merge on green
-  CI, add label `unreviewed-week`, and continue. Shared-db, production,
-  infrastructure and deployment still wait for an exact-head APPROVE. No
+  CI, add label `unreviewed-week`, and continue. Only shared-db still
+  waits for an exact-head APPROVE. No
   reviewer-repair PRs or toolkit installs; log failures with
   `ai-reviewer-issue`. Allowed operations: `plan_reviewer-observation-week.md` §11.
 - **Route every successor from its own work,** never a predecessor's

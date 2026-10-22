@@ -77,7 +77,8 @@ git -C "$TMP/candidate" commit -qm ordinary
 ordinary="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
-expect_stop 'ordinary update requires an assigned AI reviewer approval' gate preflight "$TMP/candidate" "$ordinary"
+# Owner ruling 2026-10-15: an ordinary ai-devops update needs no reviewer
+# approval; a supplied one is still verified below.
 expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" grok)"
 expect_stop 'ordinary update refuses an approval for another head' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$old")"
 # The real preflight accepts a pinned target behind a later origin/main merge,
@@ -206,7 +207,9 @@ for crash_point in completion authority marker; do
   fi
   expect_ok 'completed protected finalize remains idempotent after cleanup' gate finalize "$TMP/installed" "$protected"
   [ ! -e "$auth.consuming" ] && [ ! -e "$TMP/state/install-stages/$protected.json" ] || { echo 'FAIL: recovered protected cleanup left a transaction'; exit 1; }
-  expect_stop 'completed protected authority cannot reopen preflight' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+  # Owner ruling 2026-10-15: with the protected authority consumed, a re-preflight of the
+  # installed head is only an ordinary no-op update, which needs no reviewer approval.
+  [ ! -e "$auth" ] || { echo 'FAIL: completed protected authority is still reusable'; exit 1; }
 done
 rm -rf -- "$TMP/state"
 cp -a "$TMP/state-after-protected-finalize" "$TMP/state"

@@ -115,9 +115,10 @@ production command.
 ## Production and shared-db scope (moved from the globals, #1881)
 
 AI sessions are read-only for production and shared cloud infrastructure by
-default. The assigned AI reviewer's explicit APPROVE on the exact inputs gates
-`terraform apply`, mutating production `gcloud`, and every other technical
-production action; anything else stops. Shared-db structural work is
+default. In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE on
+the exact inputs gates every technical production action; outside shared-db no
+review is required (owner ruling 2026-10-15). `ai-task-gates` keeps only its
+sealed forbidden-action releases reviewer-bound. Shared-db structural work is
 claim-first: claim exact objects on the existing issue and start; no
 orchestrator chat or marker is required. Its scope stays the minimum — only
 work that changes the database's SHAPE, or a curated Master Data load.
@@ -184,13 +185,14 @@ and points here.
   outgrew the class, redeclare and say so. private-evidence is read-only
   analysis.
 - **Secrets:** values move only through pipes or protected files. Rotation
-  needs an assigned AI reviewer's APPROVE of the rotation plan (exact
-  credential, provider, and consumers), except a credential under a standing
+  needs no reviewer APPROVE outside `popcre/shared-db` (owner ruling 2026-10-15); in shared-db it needs an APPROVE of the rotation plan (exact
+  credential, provider, and consumers). Never rotate a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or
   reviewed preview. No broad staging or destructive Git over unreviewed work,
   another session's files, a repository root, or a machine-local overlay.
-- **Production:** the reviewer's APPROVE is on the exact inputs. Database
+- **Production:** in shared-db the reviewer's APPROVE is on the exact inputs;
+  elsewhere no review is required. Database
   writes skip that APPROVE but keep every other gate (see "Database writes").
   The automatic `shared-db` migration promotion exception re-proves the one
   open structural work issue or stops for an engineer; it authorizes no manual

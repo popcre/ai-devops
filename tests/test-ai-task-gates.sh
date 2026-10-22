@@ -898,10 +898,16 @@ check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
 check 'a declared production task retains its production gate with no file change' \
   "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
-check 'a declared production task is refused without an AI reviewer approval' \
-  "rc 3 '$TMP/clean' check --before production"
-check 'a production refusal names the missing reviewer approval' \
-  "out '$TMP/clean' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
+check 'outside shared-db a declared production task opens without an AI reviewer approval (owner ruling 2026-10-15)' \
+  "rc 0 '$TMP/clean' check --before production"
+check 'the production waiver names the owner ruling' \
+  "out '$TMP/clean' check --before production | grep -q 'no AI reviewer required outside popcre/shared-db (owner ruling 2026-10-15)'"
+newrepo "$TMP/sdbprod" popcre/shared-db
+( cd "$TMP/sdbprod" && "$GATES" start --class production ) >/dev/null
+check 'in popcre/shared-db a declared production task is still refused without an AI reviewer approval' \
+  "rc 3 '$TMP/sdbprod' check --before production"
+check 'the shared-db production refusal names the missing reviewer approval' \
+  "out '$TMP/sdbprod' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
 check 'a production task refuses a reviewer report path that does not exist' \
   "rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/no-such-report.json'"
 check 'a production task with a valid exact-head AI APPROVE may enter its guarded path' \
@@ -912,8 +918,8 @@ check 'a production task may still wait on its pull request without a reviewer r
   "rc 0 '$TMP/clean' check --before pr-wait"
 check 'a production task may still run code-only review without a reviewer report' \
   "rc 0 '$TMP/clean' check --before code-only-review"
-check 'a production task refuses ship without an AI reviewer approval' \
-  "rc 3 '$TMP/clean' check --before ship"
+check 'outside shared-db a production task may ship without an AI reviewer approval' \
+  "rc 0 '$TMP/clean' check --before ship"
 newrepo "$TMP/rs"
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
 newrepo "$TMP/unchecked"
@@ -985,8 +991,8 @@ check 'a historical archive outside the change set does not block code-only-revi
   "rc 0 '$TMP/rawhistory' check --before code-only-review"
 check 'a historical archive outside the change set does not block ship' \
   "rc 0 '$TMP/rawhistory' check --before ship"
-check 'a reviewer-safety task refuses ship without an exact-head independent review' \
-  "rc 3 '$TMP/rs' check --before ship"
+check 'outside shared-db a reviewer-safety task may ship without an independent review' \
+  "rc 0 '$TMP/rs' check --before ship"
 check 'a reviewer-gated release refuses an approval that carries no passing test evidence' \
   "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\""
 check 'the local-tests refusal names the missing test evidence' \
@@ -1530,8 +1536,8 @@ check 'mixed protected application source keeps the generic deployment refusal' 
   "rc 3 '$APP' check --before deploy --reviewer-approval '$APP_APPROVAL'"
 check 'the exact committed application source target records its independent approval' \
   "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
-check 'application source route refuses missing reviewer approval instead of ordinary success' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
+check 'outside shared-db the application source route records its release without a reviewer approval' \
+  "rc 0 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
 check 'application source route rejects a reviewer REJECT' \
   "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.verdict=\"REJECT\"')\""
 check 'application source route rejects plan-review for a live action' \

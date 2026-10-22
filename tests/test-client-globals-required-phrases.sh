@@ -115,8 +115,8 @@ for addon in "$REPO_ROOT/templates/repo-docs/AGENTS.addon.md" "$REPO_ROOT/templa
 done
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
-  grep -qF "rotates them itself under an assigned AI reviewer's APPROVE" "$client_file" \
-    || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
+  grep -qF "no reviewer APPROVE outside \`popcre/shared-db\` (owner ruling 2026-10-15)" "$client_file" \
+    || fail "$(basename "$client_file") lost the shared-db-only reviewer gate on secret rotation"
 done
 
 for sync_skill in "$REPO_ROOT/skills/claude/sync-dotfiles/SKILL.md" "$REPO_ROOT/skills/codex/codex-sync-dotfiles/SKILL.md"; do
