@@ -934,6 +934,12 @@ check 'a production task may still run code-only review without a reviewer repor
   "rc 0 '$TMP/clean' check --before code-only-review"
 check 'a production task refuses ship without an AI reviewer approval' \
   "rc 3 '$TMP/clean' check --before ship"
+# The pre-rename identity u2giants/shared-db (a redirected remote) is the same
+# repository and keeps the reviewer requirement.
+newrepo "$TMP/clean-alias" u2giants/shared-db
+( cd "$TMP/clean-alias" && "$GATES" start --class production ) >/dev/null
+check 'a redirected u2giants/shared-db production task is refused without an AI reviewer approval'   "rc 3 '$TMP/clean-alias' check --before production"
+check 'a redirected u2giants/shared-db keeps the reviewer gate required, not waived'   "out '$TMP/clean-alias' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
 newrepo "$TMP/rs" popcre/shared-db
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
 newrepo "$TMP/unchecked"
