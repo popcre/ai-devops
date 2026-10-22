@@ -214,9 +214,9 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
   }
   cp "$src" "$xdg/agent/${agent}.md"
   # Verdict stop: no post-verdict compaction auto-continue (both OSes).
-  mkdir -p "$xdg/plugin"
-  cp "$SF_PROFILE_SRC/plugin/stepfun-verdict-stop.js" "$xdg/plugin/stepfun-verdict-stop.js" || {
-    printf 'stepfun door: local_dependency_unavailable: plugin missing: %s\n' "$SF_PROFILE_SRC/plugin/stepfun-verdict-stop.js" >&2
+  reviewer_opencode_verdict_stop "$xdg" || {
+    printf 'stepfun door: local_dependency_unavailable: verdict-stop plugin
+' >&2
     return 127
   }
   # A review sees only the reviewer rules, never the owner's (#1881).

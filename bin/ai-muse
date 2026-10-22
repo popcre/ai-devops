@@ -273,6 +273,7 @@ runtime_env(){
   export XDG_CONFIG_HOME="$RUN_TMP/reviewer-xdg"
   mkdir -p "$XDG_CONFIG_HOME/opencode" && chmod 700 "$XDG_CONFIG_HOME" \
     && cp "$OC_CFG/opencode.json" "$XDG_CONFIG_HOME/opencode/opencode.json" && cp -R "$OC_CFG/agent" "$XDG_CONFIG_HOME/opencode/agent" \
+    && reviewer_opencode_verdict_stop "$XDG_CONFIG_HOME/opencode" \
     || die 'could not stage the Muse profile in the reviewer config home; refusing to run with the owner instructions.'
   # Reviewer rules and isolation only for review turns (ai-muse review sets
   # REQUIRE_VERDICT=1) and live qualification (doctor --live); new/ask/implement

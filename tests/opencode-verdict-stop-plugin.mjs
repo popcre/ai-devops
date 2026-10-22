@@ -1,5 +1,5 @@
-// Behaviour check for config/opencode-stepfun/plugin/stepfun-verdict-stop.js.
-// Usage: node tests/stepfun-verdict-stop-plugin.mjs <plugin path>
+// Behaviour check for config/opencode-plugins/verdict-stop.js.
+// Usage: node tests/opencode-verdict-stop-plugin.mjs <plugin path>
 import { pathToFileURL } from "node:url"
 import { resolve } from "node:path"
 

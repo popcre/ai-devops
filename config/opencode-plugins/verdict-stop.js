@@ -1,4 +1,8 @@
-// stepfun-verdict-stop.js: end a StepFun OpenCode turn once its verdict is out.
+// verdict-stop.js: end an OpenCode reviewer turn once its verdict is out.
+//
+// Shared by every OpenCode reviewer door (StepFun, DeepSeek, Muse on the
+// OpenCode engine; Windows and Linux). tools/lib/reviewer-instructions.sh
+// reviewer_opencode_verdict_stop copies it into each per-run config home.
 //
 // Pinned OpenCode 1.18.12 compacts a long session automatically (the profile
 // keeps compaction.auto on, so long reviews never overflow) and, after every
@@ -19,8 +23,7 @@
 // OpenCode calls every export of a plugin file as a plugin, so this file
 // exports exactly one function and nothing else.
 
-// Verdict shapes the door records (tools/lib/review-doors/stepfun.sh
-// extract_report): the "## Verdict" heading block, or a terminal line that
+// Verdict shapes the doors record (tools/lib/review-doors/*.sh): the "## Verdict" heading block, or a terminal line that
 // tools/lib/review-terminal-verdict.sh accepts (bare word, optional
 // "VERDICT:" prefix, optional hex head SHA).
 const VERDICT_BLOCK = /^## Verdict[ \t]*\r?\n[ \t]*(APPROVE|REJECT|REVISE|BLOCKED)[ \t]*\r?$/m
@@ -32,7 +35,7 @@ const hasVerdict = (text) => {
   return lines.length > 0 && TERMINAL_LINE.test(lines[lines.length - 1])
 }
 
-export const StepfunVerdictStop = async () => {
+export const VerdictStop = async () => {
   const delivered = new Set()
   return {
     "experimental.text.complete": async (input, output) => {

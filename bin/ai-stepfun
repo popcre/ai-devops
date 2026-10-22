@@ -46,6 +46,7 @@ declare -F reviewer_credit_scan >/dev/null || source "$REAL_DIR/../tools/reviewe
 source "$REAL_DIR/../tools/lib/stepfun-sandbox.sh"
 # shellcheck source=../tools/lib/stepfun-pace.sh
 source "$REAL_DIR/../tools/lib/stepfun-pace.sh"
+source "$REAL_DIR/../tools/lib/reviewer-instructions.sh"
 
 # StepCode model id; the OpenCode profile pins stepfun-api/step-5-preview.
 MODEL="${AI_STEPFUN_MODEL:-step/step-5-preview}"
@@ -364,10 +365,8 @@ install_oc_profile(){
   cp "$OC_PROFILE_SRC/opencode.json" "$xdg/opencode.json"
   cp "$OC_PROFILE_SRC/agent/$OC_AGENT_REVIEW.md" "$xdg/agent/$OC_AGENT_REVIEW.md"
   cp "$OC_PROFILE_SRC/agent/$OC_AGENT_IMPLEMENT.md" "$xdg/agent/$OC_AGENT_IMPLEMENT.md"
-  # No post-verdict compaction auto-continue (config/opencode-stepfun/plugin).
-  mkdir -p "$xdg/plugin"
-  cp "$OC_PROFILE_SRC/plugin/stepfun-verdict-stop.js" "$xdg/plugin/stepfun-verdict-stop.js" \
-    || die "StepFun OpenCode plugin is missing from $OC_PROFILE_SRC/plugin."
+  # No post-verdict compaction auto-continue (config/opencode-plugins).
+  reviewer_opencode_verdict_stop "$xdg" || die "shared OpenCode verdict-stop plugin is missing."
 }
 
 oc_bin(){
