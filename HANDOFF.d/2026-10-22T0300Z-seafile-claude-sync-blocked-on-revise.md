@@ -1,3 +1,9 @@
+---
+issue: 1962
+status: OPEN
+owner: unclaimed — next session claims on the owner issue
+---
+
 # Seafile toolkit sync blocked on GLM REVISE (release 54840353)
 
 ## 1. Goal

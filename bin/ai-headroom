@@ -447,9 +447,10 @@ AUTOWRAP_UNIT="ai-headroom-autowrap"
 autowrap_set() { # autowrap_set on|off
   local dir="$HOME/.config/systemd/user" self
   is_windows && return 0
-  [ -d "$DESKTOP_CC_DIR" ] || return 0
   command -v systemctl >/dev/null 2>&1 || return 0
   if [ "$1" = on ]; then
+    # Only "on" needs Desktop; "off" must clean up the timer even after Desktop is gone.
+    [ -d "$DESKTOP_CC_DIR" ] || return 0
     self="$(readlink -f "$0")"
     mkdir -p "$dir" || die "ai-headroom: could not create $dir"
     printf '[Unit]\nDescription=Re-wrap Claude Desktop Claude Code through Headroom\n\n[Service]\nType=oneshot\nExecStart=%s wrap-remote\n' "$self" > "$dir/$AUTOWRAP_UNIT.service"
@@ -458,7 +459,25 @@ autowrap_set() { # autowrap_set on|off
       || die "ai-headroom: could not enable $AUTOWRAP_UNIT.timer"
     printf 'Desktop auto-rewrap    : on (every 5 min)\n'
   else
+    local i
+    # Never installed here: nothing to stop, even without a user manager.
+    [ -e "$dir/$AUTOWRAP_UNIT.timer" ] || [ -e "$dir/$AUTOWRAP_UNIT.service" ] || return 0
     systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
+    # Idle means systemd itself reports inactive or failed. Activating (a oneshot
+    # rewrap mid-run), active, reloading or any query error is not idle.
+    unit_idle() {
+      case "$(systemctl --user show -p ActiveState --value "$1" 2>/dev/null)" in
+        inactive|failed) return 0 ;; *) return 1 ;;
+      esac
+    }
+    unit_idle "$AUTOWRAP_UNIT.timer" || die "ai-headroom: $AUTOWRAP_UNIT.timer could not be confirmed stopped; not unwrapping"
+    # A rewrap already running is left to finish (killing it mid-move could
+    # strand a binary); wait (60s by default), and refuse to continue if it persists.
+    for i in $(seq "${AI_HEADROOM_AUTOWRAP_WAIT:-60}"); do
+      unit_idle "$AUTOWRAP_UNIT.service" && break
+      sleep 1
+    done
+    unit_idle "$AUTOWRAP_UNIT.service" || die "ai-headroom: $AUTOWRAP_UNIT.service is still running or unreadable; not unwrapping"
     rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
@@ -582,6 +601,8 @@ Turning it on now would leave Claude unable to connect at all."
 '
     ;;
   unwrap-remote)
+    # Stop the auto-rewrap timer first, or it re-wraps within five minutes.
+    autowrap_set off
     ccd_unwrap_all
     ccd_wrap_status
     ;;
