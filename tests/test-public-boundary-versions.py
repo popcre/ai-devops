@@ -220,7 +220,7 @@ class TailnetScan(unittest.TestCase):
         return result
 
     def external_grep(self):
-        result = subprocess.run(["grep", "-anHE", self.OLD, "--", self.target.name], cwd=self.root, capture_output=True, timeout=10)
+        result = subprocess.run(["grep", "-anHE", self.OLD, "--", self.target.name], cwd=self.root, capture_output=True, timeout=10, env={**os.environ, "LC_ALL": "C"})
         self.assertIn(result.returncode, (0, 1), result.stderr)
         return result
 
@@ -247,6 +247,37 @@ class TailnetScan(unittest.TestCase):
         matched = {int(line.split(b"case", 1)[1].split(b"=", 1)[0]) for line in new.stdout.splitlines() if b"case" in line}
         self.assertTrue(set(range(len(positives))) <= matched)
         self.assertTrue(set(range(len(positives), len(positives) + len(negatives))).isdisjoint(matched))
+
+    def test_original_git_ascii_contract_across_available_locales(self):
+        # Probe availability without changing the parent or global locale. C is
+        # mandatory; every installed C UTF-8 / en_US UTF-8 variant is exercised.
+        candidates = ("C", "C.UTF-8", "C.utf8", "en_US.UTF-8", "en_US.utf8")
+        available = []
+        for name in candidates:
+            probe = subprocess.run([sys.executable, "-c",
+                                    "import locale,sys; locale.setlocale(locale.LC_ALL,sys.argv[1])", name],
+                                   capture_output=True, timeout=10)
+            if probe.returncode == 0:
+                available.append(name)
+        self.assertIn("C", available)
+        print("Tailnet oracle locales qualified: " + ", ".join(available))
+        # Keep the complete original short corpus and all explicit expectations.
+        # The existing test compares the C-scoped external matcher to original
+        # Git under each available inherited locale, including the CI failure.
+        for name in available:
+            with self.subTest(locale=name), patch.dict(os.environ, {"LC_ALL": name}):
+                self.test_short_oracle_equivalence_and_explicit_bytes()
+                self.target.write_bytes(b"aa\xc3\xa9.x." + self.SUFFIX + b"\n")
+                old = self.grep(self.OLD)
+                self.assertEqual(old.returncode, 1)
+                gate = subprocess.run(["bash", str(ROOT / "bin/ai-public-boundary-check"), str(self.root)],
+                                      capture_output=True, timeout=10)
+                self.assertEqual(gate.returncode, 0, gate.stderr)
+                self.target.write_bytes(b"\xc3\xa9host.tailnet." + self.SUFFIX + b"\n")
+                self.assertEqual(self.grep(self.OLD).returncode, 0)
+                gate = subprocess.run(["bash", str(ROOT / "bin/ai-public-boundary-check"), str(self.root)],
+                                      capture_output=True, timeout=10)
+                self.assertNotEqual(gate.returncode, 0)
 
     def test_megabyte_label_full_gate_finishes_and_still_finds_suffix(self):
         tool = ROOT / "bin/ai-public-boundary-check"

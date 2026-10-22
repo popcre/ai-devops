@@ -94,7 +94,9 @@ scan_tailnet_batch() {
   [ "${#regular_files[@]}" -gt 0 ] || return 0
   # -H retains Git-relative filename:line even for a single-file batch; -a
   # retains matching inside binary/NUL content. Private hits remain private.
-  (cd "$root" && grep -anHE "$tailnet_host_pattern" -- "${regular_files[@]}") >>"$tailnet_matches" 2>/dev/null || status=$?
+  # Git treats the explicit ASCII ranges as bytes regardless of caller locale.
+  # Scope C to this matcher only: locale collation must not broaden those ranges.
+  (cd "$root" && LC_ALL=C grep -anHE "$tailnet_host_pattern" -- "${regular_files[@]}") >>"$tailnet_matches" 2>/dev/null || status=$?
   case "$status" in
     0) tailnet_found=1 ;;
     1) ;;
