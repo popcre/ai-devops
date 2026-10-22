@@ -120,15 +120,15 @@ rulings, verbatim: `docs/owner-rulings.md`.
   from a UTC log line, and never quote a time later than now.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself; only a `popcre/shared-db` credential waits for an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), and no rotation happens for a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE on the exact inputs gates every
-  technical production action. Database writes skip that APPROVE but keep every other gate. Before production or database work, read
+  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE on the exact inputs gates every
+  technical production action; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database writes skip that APPROVE but keep every other gate. Before production or database work, read
   `docs/standing-rules-details.md`. (rulings: docs/owner-rulings.md)
   The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue or stops for an engineer;
