@@ -192,6 +192,9 @@ same change. Never add a value, address, or project identifier.
   access`, `GitHub PAT ai-devops RUNNER pool read token`
 - Hosting: `Railway API`, `Coolify API Token - Hetz production VPS`,
   `cloudflare token`, `cloudflare-tunnel-tokens`
+- DesignFlow sandbox test logins: `DesignFlow PLM vendor account test login 1 -
+  alsand sandbox (users.level=vendor)`, `DesignFlow PLM vendor account test
+  login 2 - alsand sandbox (users.level=vendor)`
 
 ## Title format
 
