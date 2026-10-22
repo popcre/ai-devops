@@ -1546,7 +1546,70 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
             "review_mode": mode, "head": head, "source_digest": source_digest, "finished_at": best[0]}
 
 
+def tally(args):
+    """Observation-week daily tally: a read of the scoreboard ledger only.
+
+    tally --since ISO [--by provider,failure_class,host]
+    """
+    since, by = "", ["provider", "failure_class", "host"]
+    i = 0
+    while i < len(args):
+        if args[i] == "--since" and i + 1 < len(args):
+            since = args[i + 1]; i += 2
+        elif args[i] == "--by" and i + 1 < len(args):
+            by = [k for k in args[i + 1].split(",") if k]; i += 2
+        else:
+            raise Blocked("tally usage: tally --since ISO [--by provider,failure_class,host]")
+    require(bool(since), "tally requires --since")
+    require(all(k in {"provider", "failure_class", "host", "verdict", "caller_session_id"} for k in by), "unknown tally key")
+    start = datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=datetime.timezone.utc)
+    ledger = os.environ.get("AI_REVIEW_SCOREBOARD_FILE") or os.path.join(
+        os.environ.get("AI_REVIEW_SCOREBOARD_DIR") or os.path.expanduser("~/.local/state/ai-devops/review-scoreboard"),
+        "reviews.jsonl")
+    import socket
+    host = socket.gethostname()
+    groups = {}
+    if os.path.isfile(ledger):
+        with open(ledger, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                stamp = row.get("recorded_at") or row.get("finished_at") or row.get("timestamp") or ""
+                try:
+                    when = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=datetime.timezone.utc)
+                if when < start:
+                    continue
+                values = dict(row, host=host)
+                key = tuple(str(values.get(k)) for k in by)
+                group = groups.setdefault(key, {"runs": 0, "verdicts": {}, "fail_elapsed": [], "sessions": set()})
+                group["runs"] += 1
+                verdict = str(row.get("verdict"))
+                group["verdicts"][verdict] = group["verdicts"].get(verdict, 0) + 1
+                if row.get("failure_class") and isinstance(row.get("elapsed_seconds"), (int, float)):
+                    group["fail_elapsed"].append(row["elapsed_seconds"])
+                if row.get("caller_session_id"):
+                    group["sessions"].add(row["caller_session_id"])
+    out = []
+    for key, group in sorted(groups.items()):
+        elapsed = sorted(group["fail_elapsed"])
+        median = elapsed[len(elapsed) // 2] if elapsed else None
+        out.append(dict(zip(by, key), runs=group["runs"], verdicts=group["verdicts"],
+                        median_seconds_to_fail=median, calling_sessions=len(group["sessions"])))
+    return {"ledger": ledger, "since": since, "host": host, "by": by, "groups": out}
+
+
 def main():
+    if sys.argv[1] == "tally":
+        print(json.dumps(tally(sys.argv[2:]), indent=2))
+        return
     if sys.argv[1] == "find-passing-report":
         # find-passing-report PROVIDER|any MODE HEAD DIGEST REPO_KEY [BASE_SHA] [IMPLEMENTER]
         require(len(sys.argv) in {7, 8, 9}, "find-passing-report requires provider, mode, head, digest and repository key")

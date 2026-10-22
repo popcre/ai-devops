@@ -25,6 +25,7 @@ config/review-action-profiles.json
 tools/review_action_profile.py
 bin/ai-repo-policy
 config/repository-policy.json
+config/repository-coverage.json
 config/task-gates.schema.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
@@ -78,6 +79,8 @@ tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
 tools/lib/review-operation.sh
 tools/lib/review-capabilities.sh
+tools/lib/review-session-skip.sh
+tools/lib/observation-week.sh
 tools/lib/stepfun-pace.sh
 tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh

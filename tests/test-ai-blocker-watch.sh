@@ -806,8 +806,10 @@ check 'wake prompts do not tell sessions to re-register' \
   "! grep -q 'register a new wait' '$SCRIPT'"
 check 'skills do not require BlockerWatch registration' \
   "! grep -RIn --include='SKILL.md' -E 'ai-blocker-watch wait|REGISTERED with' '$ROOT/skills'"
-check 'global templates show the explicit-deadline wait form' \
-  "grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/templates/system/AGENTS-global-mimo.md' && grep -q 'ai-pr-wait <pr>\` in the background' '$ROOT/templates/system/CLAUDE-global.md'"
+# Owner ruling 2026-10-21 (#1962): the 60-minute background form in every
+# client global; no template may still mandate an explicit deadline.
+check 'global templates show the background wait form' \
+  "for f in CLAUDE-global AGENTS-global-codex AGENTS-global-zcode AGENTS-global-mimo; do grep -q 'ai-pr-wait <pr>\` in the background' \"$ROOT/templates/system/\$f.md\" && ! grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$ROOT/templates/system/\$f.md\" || exit 1; done"
 check 'install.sh does not require BlockerWatch registration' \
   "! grep -q 'hold an \`ai-blocker-watch wait\`' '$ROOT/install.sh'"
 check 'traffic plan does not mandate long-wait registration' \

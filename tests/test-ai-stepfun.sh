@@ -66,6 +66,7 @@ case "$STUB_MODE" in
   headingprose) printf 'Analysis of the change with plenty of detail in f:1.\n\nSo overall:\n\nREVISE %s\n' "$head" ;;
   headingtwo) printf 'Analysis of the change with plenty of detail in f:1.\nVERDICT: APPROVE %s\n\n## Verdict\n\nREVISE %s\n' "$head" "$head" ;;
   short) printf 'ok\nVERDICT: APPROVE %s\n' "$head" ;;
+  qualified) printf 'Analysis of the change with plenty of detail in f:1.\n\nAPPROVE only after the lint fix lands\n' ;;
   credit) attempt; echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
   write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   rate) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
@@ -146,6 +147,7 @@ head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
 case "$STUB_MODE" in
   ok) printf '{"type":"text","part":{"text":"STEPFUN-OK"}}\n' ;;
   verdict) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
+  qualified) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nAPPROVE only after the lint fix lands"}}\n' ;;
   impl) printf 'print(1)\n' > "$dir/new.py"; printf '{"type":"text","part":{"text":"Created new.py and ran it."}}\n' ;;
   askok) printf '{"type":"text","part":{"text":"The loop is bounded by RATE_RETRIES."}}\n' ;;
   jsonl429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
@@ -211,6 +213,7 @@ check "a Verdict heading with a bare REVISE naming the head becomes the terminal
 check "a bold Verdict heading with a bold bare APPROVE is normalized" "mode headingbold; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -qx \"VERDICT: APPROVE $HEAD_SHA\""
 check "a bare decision naming another sha is still refused" "mode headingwrong; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "a bare decision under prose (no Verdict heading) is still refused" "mode headingprose; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
+check "a qualified decision line (APPROVE only after ...) is refused" "mode qualified; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "a report that already has a VERDICT line is never rewritten" "mode headingtwo; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "StepCode retains its only verdict-format instructions" "[ \"\$(grep -c '^VERDICT: APPROVE <head sha>' '$STUB_ARGS.prompt')\" = 1 ] && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$STUB_ARGS.prompt'"
 check "StepCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$STUB_ARGS.prompt' | grep -Eq '[0-9a-f]{40}' && tail -n1 '$STUB_ARGS.prompt' | grep -qx 'check f'"
@@ -561,6 +564,7 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+check "OpenCode refuses a qualified decision line (APPROVE only after ...)" "mode qualified; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "OpenCode keeps exactly one verdict-format instruction in either review profile" "grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md' && grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md' && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
 check "OpenCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' | grep -Eq '[0-9a-f]{40}' && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$TMP/args.oc.prompt' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'check f'"
 cp "$TMP/args.oc.prompt" "$TMP/first-review.prompt"

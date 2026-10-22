@@ -18,10 +18,10 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 | 1 | Freeze edge-dev incident inventory and class map | ✅ done — 2026-10-16 (`1078ea63`… inventory merged as PR #1805 `bba1bcfe`) | Sanitized inventory under [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (disposition rows + class map) |
 | 2 | Repair StepFun Windows shell spawn | ✅ code landed — 2026-10-19 (`4a5e1883` / `6ba96308` / `d13f4157`; first landing `0be8ffa5` PR #1807 reverted as a Windows blocker in PR #1848, re-landed); live shell proof remains in step 6 | Offline fixture `stepfun_windows_shell_spawn_resolves` green; live `ai-stepfun` ask/review starts a shell (step 6) |
 | 3 | Repair GLM REVISE re-review waste | ✅ done — 2026-10-19 (`b5cfa876` PR #1819, path 1 reviewed workstream) | Fixture `glm_revise_followup_reuses_bound_turn` green (`tests/test-glm-revise-followup.sh` 13/13) |
-| 4 | Repair durable report publish and sandbox non-interference | ✅ code landed — 2026-10-21 (this PR) | Named fixtures `durable_report_publish_survives_process_exit` and `foreign_orphans_do_not_block_fresh_review` green; live durable report path remains in step 6 |
-| 5 | Repair Windows Git Bash / ProgramFiles detection | ⬜ open — 2026-10-15 | `tests/test-windows-bash-selection.sh` green with empty ProgramFiles |
-| 6 | Live smoke + incident disposition (no paid blast) | ⬜ open — 2026-10-15 | Two local incidents resolved/partially-resolved with exact evidence |
-| 7 | Install code-only release and re-prove | ⬜ open — 2026-10-15 | Installed hashes match merged source; smoke still green |
+| 4 | Repair durable report publish and sandbox non-interference | ✅ code landed — 2026-10-21 (PR #1928 `3de4f83e`) | Named fixtures `durable_report_publish_survives_process_exit` and `foreign_orphans_do_not_block_fresh_review` green; live durable report path remains in step 6 |
+| 5 | Repair Windows Git Bash / ProgramFiles detection | ✅ code landed — 2026-10-21 (code-class `*.cmd` only; 13 protected `.cmd` + installer half stay #1701) | `tests/test-bin-cmd-launchers.sh` green, including `launcher_resolves_git_bash_with_empty_programfiles` (named suite is this, not `test-windows-bash-selection.sh`, which is CI-lane selection) |
+| 6 | Live smoke + incident disposition (no paid blast) | ✅ done — 2026-10-21 11:21 PM EDT | Smoke table in [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (commands + exit status + durable report path); `20261014T203826Z` partially-resolved and `20261014T201712Z` resolved |
+| 7 | Install code-only release and re-prove | ✅ done — 2026-10-22 1:20 AM EDT (reviewed install of `240b90d5`, owner authorized) | Installed launcher `source-sha=240b90d5`; `tests/test-bin-cmd-launchers.sh` PASS; GLM fixture 13/13 |
 
 Fresh session starts at **step 0**, then **step 1**. A row is done only with an
 openable artifact (file under `tests/verification/`, command output, or merged
@@ -314,13 +314,17 @@ Never “just ship” a protected path.
 **Step 5 — Git Bash / ProgramFiles detection.**
 
 - What: fix launcher/bash discovery so an empty or missing `ProgramFiles` still
-  finds Git Bash (issue #1701). Likely helpers under `bin/` or `tools/` used by
-  `*.cmd` launchers — confirm the owning file’s class first; stay in `code`.
-  Keep the `.cmd` wrapper pattern.
-- Tests: `tests/test-windows-bash-selection.sh` must cover empty ProgramFiles
-  and still resolve `C:\Program Files\Git\bin\bash.exe` or the known fallback.
+  finds Git Bash (issue #1701). Own the walk in the code-class `*.cmd`
+  launchers; keep the `.cmd` wrapper pattern. Thirteen launchers whose `.cmd`
+  classifies `reviewer-safety` and the installer Join-Path sites stay on #1701
+  and are out of this plan (§8).
+- Tests: `tests/test-bin-cmd-launchers.sh` must cover empty ProgramFiles and
+  still resolve `C:\Program Files\Git\bin\bash.exe` via the hard-coded fallback
+  (`launcher_resolves_git_bash_with_empty_programfiles`). Plan draft named
+  `tests/test-windows-bash-selection.sh`; that suite is CI-lane selection, not
+  bash.exe lookup — do not overload it.
 - Depends on: step 1 (can run parallel with 2–4).
-- **Verification gate:** `bash tests/test-windows-bash-selection.sh` green.
+- **Verification gate:** `bash tests/test-bin-cmd-launchers.sh` green.
 
 ### Phase C — proof and install
 
@@ -350,7 +354,10 @@ Never “just ship” a protected path.
   checkout. Follow `docs/deployment.md` for the ordinary/code-only update route
   that applies; if the installer still demands a reviewer report because the
   release classifier saw a safety path, **stop** and report `Blocked —` with
-  the unexpected class — do not bypass.
+  the unexpected class — do not bypass. **Owner update 2026-10-21:** that
+  stop condition fired (the release window includes protected paths from other
+  PRs). Owner authorized the one-time reviewed install
+  (`docs/owner-rulings.md`); it is install-time safety, not a merge gate.
 - After install: verify launcher hashes and re-run step 6 smoke.
 - Depends on: step 6.
 - **Verification gate:** installed command hashes match merged source; smoke

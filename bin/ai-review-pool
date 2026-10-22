@@ -465,7 +465,7 @@ Your session harness announces an evidence packet (a sealed snapshot of the repo
 
 $DECISION
 
-Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one allowed word exactly:
+Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. State the reviewed head SHA in your findings, ABOVE the verdict heading. End with a literal heading followed directly by one allowed word on the very next non-blank line - put no sentence, head binding or other text between the heading and the word, or the verdict is refused:
 
 ## Verdict
 $(if review_capability "$CAP_JSON" "$provider" revise_verdict; then printf 'APPROVE|REVISE|REJECT|BLOCKED'; else printf 'APPROVE|REJECT|BLOCKED'; fi)

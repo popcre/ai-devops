@@ -445,6 +445,13 @@
         "test-ai-review-engine.sh",
         "test-pool-dispatch-doors.sh"
       ],
+      "tools/lib/review-session-skip.sh": [
+        "test-ai-review-lifecycle.sh",
+        "test-ai-review-engine.sh"
+      ],
+      "tools/lib/observation-week.sh": [
+        "test-ai-task-gates.sh"
+      ],
       "tools/lib/review-capabilities.sh": [
         "test-pool-dispatch-doors.sh",
         "test-ai-review-preflight.sh",

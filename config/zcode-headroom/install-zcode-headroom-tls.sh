@@ -3,12 +3,15 @@
 #
 # Usage:
 #   sudo HEADROOM_TAILNET_IP=$(tailscale ip -4) \
+#     HEADROOM_TAILNET_HOST=$(tailscale status --self --json | jq -r '.Self.DNSName | rtrimstr(".")') \
 #     bash install-zcode-headroom-tls.sh
 #
-# Concrete tailnet addresses stay out of the public toolkit; pass them in.
+# Concrete tailnet addresses and MagicDNS names stay out of the public
+# toolkit; pass them in. Both have no default on purpose.
 set -euo pipefail
 
 : "${HEADROOM_TAILNET_IP:?set HEADROOM_TAILNET_IP to the VPS tailnet address}"
+: "${HEADROOM_TAILNET_HOST:?set HEADROOM_TAILNET_HOST to the VPS tailnet MagicDNS name}"
 
 # ZCODE_HEADROOM_TEST_ROOT is only for the offline test; it must be empty on hosts.
 R="${ZCODE_HEADROOM_TEST_ROOT:-}"
@@ -37,9 +40,9 @@ if [[ ! -f "$TLS/server.crt" ]]; then
     -addext "keyUsage=critical,keyCertSign,cRLSign"
   openssl req -newkey rsa:2048 -nodes \
     -keyout "$TLS/server.key" -out "$TLS/server.csr" \
-    -subj "/CN=hetz.coho-banded.ts.net"
+    -subj "/CN=${HEADROOM_TAILNET_HOST}"
   cat > "$TLS/server.ext" <<EOF
-subjectAltName=DNS:hetz.coho-banded.ts.net,IP:${HEADROOM_TAILNET_IP}
+subjectAltName=DNS:${HEADROOM_TAILNET_HOST},IP:${HEADROOM_TAILNET_IP}
 EOF
   openssl x509 -req -in "$TLS/server.csr" -CA "$TLS/ca.crt" -CAkey "$TLS/ca.key" \
     -CAcreateserial -out "$TLS/server.crt" -days 825 -extfile "$TLS/server.ext"

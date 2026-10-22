@@ -16,8 +16,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # Runs the hook on a Bash tool payload; prints the exit status.
 fire() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash "$HOOK" 2>"$TMP/err" >/dev/null; echo $?; }
-blocks() { CASE="$2"; check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
-allows() { CASE="$2"; check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
+CASES=()
+blocks() { CASE="$2"; CASES+=("$2"); check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
+allows() { CASE="$2"; CASES+=("$2"); check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
 
 # --- every polling shape in the plan is blocked --------------------------------
 blocks "sleep then gh pr view" 'sleep 60; gh pr view 12 --json state'
@@ -62,6 +63,38 @@ allows "an unrelated loop" 'for f in *.md; do wc -w "$f"; done'
 check "empty stdin exits 0" "echo '' | bash \"$HOOK\"; [ \$? -eq 0 ]"
 check "malformed JSON exits 0" "echo 'not json' | bash \"$HOOK\"; [ \$? -eq 0 ]"
 check "payload without a command exits 0" "echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"C:\\\\\\\\x\\\\\\\\y.md\"}}' | bash \"$HOOK\"; [ \$? -eq 0 ]"
+
+# --- Windows spellings get exactly the Unix verdict (#1891 install review) ------
+# Every case above that runs bash or sh is replayed with each Windows spelling of
+# that shell; the hook must give the same answer as for the plain name.
+parity_bad=0; parity_n=0; parity_cases=0
+# Token-aware replacement without regex replacement syntax, so backslashes survive.
+swap() { # TEXT NAME FORM -> TEXT with each command token NAME (or /bin/NAME, /usr/bin/NAME) as FORM
+  local s="$1" out="" re="(^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?($2)([^A-Za-z0-9_.-]|\$)" m
+  for ((;;)); do [[ $s =~ $re ]] || break
+    m="${BASH_REMATCH[0]}"; out+="${s%%"$m"*}${BASH_REMATCH[1]}$3"; s="${BASH_REMATCH[4]}${s#*"$m"}"
+  done
+  printf '%s' "$out$s"
+}
+for c in "${CASES[@]}"; do
+  hit=0; want=""
+  for n in bash dash zsh ksh ash sh; do
+    [[ $c =~ (^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?$n([^A-Za-z0-9_.-]|$) ]] || continue
+    [ -n "$want" ] || want="$(fire "$c")"; hit=1
+    upper="$(printf '%s' "$n" | tr a-z A-Z)"
+    for form in "$n.exe" "$upper.EXE" "\"C:/Program Files/Git/bin/$n.exe\"" "C:\\Git\\bin\\$n.exe"; do
+      w="$(swap "$c" "$n" "$form")"
+      [ "$w" != "$c" ] || { parity_bad=$((parity_bad+1)); printf '  parity replay did not change: %s\n' "$c"; continue; }
+      parity_n=$((parity_n+1)); got="$(fire "$w")"
+      [ "$got" = "$want" ] || { parity_bad=$((parity_bad+1)); printf '  parity mismatch (%s vs %s): %s\n' "$got" "$want" "$w"; }
+    done
+  done
+  parity_cases=$((parity_cases+hit))
+done
+check "Windows shell spellings match the Unix verdict on every shell case ($parity_cases cases, $parity_n variants)" "[ $parity_cases -ge 12 ] && [ $parity_bad = 0 ]"
+# A quoted Unix path is not a Windows spelling and keeps its old treatment.
+allows "a here-document fed to a quoted Unix path keeps its old verdict" $'"/bin/bash" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+
 
 # --- installer -----------------------------------------------------------------
 CH="$TMP/claudehome"; mkdir -p "$CH"

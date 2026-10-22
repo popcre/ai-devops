@@ -87,7 +87,9 @@ Measured with `bin/ai-task-gates explain --paths-from -` on this worktree at
 | `tests/test-ai-review-lifecycle.sh` | code | 3, 4 |
 | `tests/test-ai-review-sandbox-self-cleanup.sh` | code | 4 (`foreign_orphans_do_not_block_fresh_review`) |
 | `tests/test-ai-review-sandbox-delete-guard.sh` | code | 4 |
-| `tests/test-windows-bash-selection.sh` | code | 5 |
+| `bin/*.cmd` launchers (code-class siblings) | code | 5 (Git Bash walk; not the bash entrypoints) |
+| `tests/test-bin-cmd-launchers.sh` | code | 5 (`launcher_resolves_git_bash_with_empty_programfiles`) |
+| `tests/test-windows-bash-selection.sh` | code | not used by step 5 (CI-lane selection only) |
 | `tests/test-markdown-links.sh` | code | 1 (gate only) |
 | `tests/verification/edge-dev-reviewer-repair/README.md` | prose | 1, 6, 7 |
 | `config/reviewer-registry.json` | code | 2–5 if registry rows need aligning |
@@ -97,9 +99,16 @@ Measured with `bin/ai-task-gates explain --paths-from -` on this worktree at
 
 **Protected — do not edit under this programme** (would escalate to
 `reviewer-safety` / `exact-head-independent-review`):
-`bin/ai-*` entrypoints (including `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`,
+`bin/ai-*` bash entrypoints (including `bin/ai-stepfun`, `bin/ai-stepfun-windows-shell`,
 `bin/ai-glm`, `bin/ai-review`, `bin/ai-review-pool`),
 `tools/reviewer_*.py`, `config/task-gates.json`.
+Sibling `bin/*.cmd` launchers are mostly `code` and may change in step 5; the
+bash entrypoints they launch stay untouched. Exception — 13 `.cmd` launchers
+classify `reviewer-safety` and stay on #1701: `ai-gemini`, `ai-gemini-usage`,
+`ai-review-credit-watch`, `ai-review-engine`, `ai-review-lifecycle`,
+`ai-review-packet`, `ai-review-pool`, `ai-review-preflight`, `ai-review-sandbox`,
+`ai-review-scoreboard`, `ai-reviewer-logs-sync`, `ai-stepfun`,
+`ai-stepfun-windows-shell`.
 
 If a fix is only possible inside a protected path, stop per plan §8 and record
 the file + observed class here — do not edit it.
@@ -110,12 +119,38 @@ the file + observed class here — do not edit it.
 |---|---|---|---|
 | 0 | No-review landing contract | effective class stays `prose`/`code`; no reviewer report in PR bodies | contract recorded; re-check before each PR |
 | 1 | This inventory | all open edge-dev incidents have a disposition row | **this file** |
-| 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | open |
-| 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | open |
+| 2 | StepFun Windows shell spawn | repair `20261014T203826Z-edge-dev-stepfun-2686842` | **partially-resolved 2026-10-21 11:21 PM EDT** — door spawn proven; ask path in protected `bin/ai-stepfun` remains |
+| 3 | GLM REVISE follow-up | repair `20261014T201712Z-edge-dev-glm-2563781` | **resolved 2026-10-21 11:21 PM EDT** — `b5cfa876`; fixture 13/13 |
 | 4 | Durable publish + orphan non-interference | Windows-observable publish/non-interference only; deep receipt protocol stays with sibling plan | **code landed** — named fixtures `durable_report_publish_survives_process_exit` (`tests/test-ai-review-engine.sh`) and `foreign_orphans_do_not_block_fresh_review` (`tests/test-ai-review-sandbox-self-cleanup.sh`); offline suites mock `ai-task-gates` (same contract as the engine suite) |
-| 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | open |
-| 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | open |
-| 7 | Code-only install + re-prove | installed hashes match merged source; smoke green | open |
+| 5 | Git Bash / empty `ProgramFiles` | repair #1701 detection half | **code landed** — code-class `bin/*.cmd` walk includes hard-coded `C:\Program Files\Git\bin\bash.exe`; fixture `launcher_resolves_git_bash_with_empty_programfiles` in `tests/test-bin-cmd-launchers.sh`. 13 protected `.cmd` + installer Join-Path half stay #1701 reviewer-safety |
+| 6 | Live smoke + incident disposition | both local incidents resolved/partially-resolved with evidence on #1678 | **done 2026-10-21 11:21 PM EDT** — smoke table below. `20261014T203826Z` partially-resolved; `20261014T201712Z` resolved (`b5cfa876`). Repairs: `4a5e1883`/`6ba96308`/`d13f4157`, `b5cfa876`, `3de4f83e`, `108973f8` |
+| 7 | Code-only install + re-prove | installed hashes match merged source; smoke green | **done 2026-10-22 1:20 AM EDT** — reviewed install of `240b90d5` (owner authorized); DeepSeek APPROVE with recorded tests; live-review linux+windows success; launcher `source-sha=240b90d5`; smoke re-run green |
+
+### Step 6 smoke commands (2026-10-21 11:21 PM EDT)
+
+| Command | Exit | Evidence |
+|---|---|---|
+| Door probe (see invocation below) | 0 | Durable report at `$DOOR_REPORT_OUT`; `## Verdict` `BLOCKED`; reviewed commit `0000…0000` (probe head). Shell spawn proven: gate returned `stepfun-shell: refused (not an allowlisted test runner)` for `echo`, and `npm test` executed (`ENOENT package.json`) |
+| `bash tests/test-glm-revise-followup.sh` | 0 | `passed=13 failed=0` |
+| `bash tests/test-bin-cmd-launchers.sh` | 0 | `launcher_resolves_git_bash_with_empty_programfiles` ok; `empty_programfiles_launcher_still_runs` ok; `PASS: bin launchers` |
+| `bin/ai-reviewer-issue resolve 20261014T203826Z-edge-dev-stepfun-2686842 --status partially-resolved --summary "Door path spawn fixed and live-proven" --repair-commit 4a5e1883 --repair-commit 6ba96308 --repair-commit d13f4157 --evidence /tmp/1678-step6-smoke/stepfun-door-report.md` | 0 | `ai-reviewer-issue: marked … partially-resolved`; resolution JSON under `.ai/reviewer-issues/…/resolutions/` |
+| `bin/ai-reviewer-issue resolve 20261014T201712Z-edge-dev-glm-2563781 --status resolved --summary "GLM REVISE warm follow-up reuses bound turn; fixture 13/13" --repair-commit b5cfa876 --evidence /tmp/1678-step6-smoke/glm-followup.txt` | 0 | `ai-reviewer-issue: marked … resolved`; resolution JSON under `.ai/reviewer-issues/…/resolutions/` |
+
+Door probe invocation (reproducible):
+
+```bash
+t=$(mktemp -d "${STATE_DIR:-$HOME/.local/state/ai-devops/stepfun}/door-shell.XXXXXX")
+mkdir -p "$t/work" "$t/packet"
+printf 'Health probe.\n' > "$t/packet/MANIFEST.md"
+printf 'You must run this shell command and put its exact output in the report: echo shell-spawn-ok\nAlso end the report with ## Verdict\nAPPROVE 0000000000000000000000000000000000000000\n' > "$t/prompt"
+AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  DOOR_WORKDIR="$t/work" DOOR_PACKET_DIR="$t/packet" \
+  DOOR_PROMPT_FILE="$t/prompt" DOOR_REPORT_OUT="$t/report" \
+  DOOR_HEAD=0000000000000000000000000000000000000000 DOOR_TIMEOUT=120 \
+  bash tools/lib/review-doors/stepfun.sh review
+```
+
+Note: `ai-stepfun ask` (protected `bin/ai-stepfun` Windows path) still fails `ChildProcess.spawn`; the door path is the proven governed path.
 
 ## Verification gate for this step
 
