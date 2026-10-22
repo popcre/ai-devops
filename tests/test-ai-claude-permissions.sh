@@ -58,16 +58,16 @@ test_runtime() {
   grep -q '"Bash(ls:\*)"' "$H3/settings.json"  && ok "existing: prior allow entry kept"      || bad "existing: prior allow entry kept"
   grep -q '"Read(./.env)"' "$H3/settings.json" && ok "existing: prior deny entry kept"       || bad "existing: prior deny entry kept"
   grep -q '"alpha_tool"' "$H3/settings.json"   && ok "existing: new entry added"             || bad "existing: new entry added"
-  grep -q '"gamma_tool"' "$H3/settings.json" && grep -q '"Read(./.env)"' "$H3/settings.json" \
-    && ok "existing: deny entry added beside the prior deny" || bad "existing: deny entry added beside the prior deny"
+  check "existing: deny entry sits in deny beside the prior deny, not in allow" \
+    "$(jq -c '[(.permissions.deny|index("gamma_tool"))!=null, (.permissions.deny|index("Read(./.env)"))!=null, (.permissions.allow|index("gamma_tool"))==null]' "$H3/settings.json")" '[true,true,true]'
 
   # 4b. Only the deny entry missing: --check notices it, install adds it to deny once.
   H4="$TMP/$RUNTIME-denyonly"; mkdir -p "$H4"
   printf '{"permissions":{"allow":["alpha_tool","beta_tool"],"deny":["Read(./.env)"]}}\n' > "$H4/settings.json"
   out="$(run "$H4" --check)"; check "deny-only: check exit 1" "$?" "1"
   run "$H4" >/dev/null; run "$H4" >/dev/null
-  n="$(grep -o '"gamma_tool"' "$H4/settings.json" | wc -l | tr -d ' ')"
-  check "deny-only: added exactly once" "$n" "1"
+  check "deny-only: added exactly once, to deny, never to allow" \
+    "$(jq -c '[(.permissions.deny|map(select(.=="gamma_tool"))|length), (.permissions.allow|map(select(.=="gamma_tool"))|length)]' "$H4/settings.json")" '[1,0]'
   out="$(run "$H4" --check)"; check "deny-only: check exit 0 after install" "$?" "0"
   [ -f "$H3/settings.json.aidevops.bak" ]      && ok "existing: backup written"              || bad "existing: backup written"
 

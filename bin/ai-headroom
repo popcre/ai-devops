@@ -460,6 +460,8 @@ autowrap_set() { # autowrap_set on|off
     printf 'Desktop auto-rewrap    : on (every 5 min)\n'
   else
     systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
+    # A rewrap already running would race the unwrap; stop waits for it to end.
+    systemctl --user stop "$AUTOWRAP_UNIT.service" >/dev/null 2>&1 || true
     rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
@@ -583,6 +585,8 @@ Turning it on now would leave Claude unable to connect at all."
 '
     ;;
   unwrap-remote)
+    # Stop the auto-rewrap timer first, or it re-wraps within five minutes.
+    autowrap_set off
     ccd_unwrap_all
     ccd_wrap_status
     ;;
