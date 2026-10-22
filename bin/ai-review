@@ -3,7 +3,7 @@
 set -euo pipefail
 _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap review "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA] [--action-profile NAME --action-manifest PRIVATE_JSON]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA] [--action-profile NAME --action-manifest PRIVATE_JSON]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       [--detach] sends the review and returns at once with a run id (observation week); ai-review outcome <id> [--wait SECONDS] reads it' '       Exit 75: every rotation reviewer is skipped for this session. Exit 77: this reviewer is skipped for this session.' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -33,9 +33,70 @@ action_review_evidence_args(){
     done
   fi
 }
+# Per-session skip list and detached runs (plan_reviewer-observation-week
+# steps 2-3). The calling session id is resolved once here and inherited by
+# the pool, the engine, the lifecycle and the scoreboard.
+SKIP_LIB="$REAL_DIR/../tools/lib/review-session-skip.sh"; [ -f "$SKIP_LIB" ] || SKIP_LIB="$ROOT/../tools/lib/review-session-skip.sh"
+# shellcheck source=../tools/lib/review-session-skip.sh
+load_skip_lib(){ # only reviews and outcomes need it; doctor stays usable without it
+  [ -z "${SKIP_LIB_LOADED:-}" ] || return 0
+  . "$SKIP_LIB" 2>/dev/null || { printf 'ai-review: cannot load the session skip list.\n' >&2; exit 3; }
+  review_export_caller_session_id  # validates an inherited id too
+  SKIP_LIB_LOADED=1
+}
+DETACH_DIR="${AI_REVIEW_DETACH_DIR:-$HOME/.local/state/ai-devops/review-detached}"
+detach_lifecycle_state(){ # ID -> lifecycle state file carrying that detach id
+  local dir="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}/runs"
+  [ -d "$dir" ] || return 1
+  grep -rlE --include='*.json' "\"detach_id\": ?\"$1\"" "$dir" 2>/dev/null | head -1 | grep .
+}
+review_outcome(){ # ID [--wait SECONDS]
+  local id="${1:-}" wait_s=0 rec state status verdict report pid waited=0
+  [[ "$id" =~ ^d[0-9A-Za-z-]{6,80}$ ]] || { printf 'ai-review: outcome needs a detached run id.\n' >&2; return 2; }
+  shift
+  if [ "${1:-}" = --wait ]; then wait_s="${2:-}"; case "$wait_s" in ''|*[!0-9]*) printf 'ai-review: --wait needs seconds.\n' >&2; return 2;; esac; fi
+  rec="$DETACH_DIR/$id.json"
+  [ -f "$rec" ] || { printf 'ai-review: no detached run %s on this machine.\n' "$id" >&2; return 2; }
+  # Single writers: the request record is written once by the caller, the
+  # pid and result files only by the detached run itself.
+  local result="$DETACH_DIR/$id.result.json"
+  while :; do
+    status=pending
+    if [ -f "$result" ]; then status=finished
+    elif [ -f "$DETACH_DIR/$id.pid" ]; then
+      pid="$(tr -cd '0-9' < "$DETACH_DIR/$id.pid" 2>/dev/null || true)"
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ ! -f "$result" ]; then status=lost; fi
+    fi
+    [ "$status" = pending ] && [ "$waited" -lt "$wait_s" ] || break
+    sleep 5; waited=$((waited + 5))
+  done
+  state="$(detach_lifecycle_state "$id" || true)"
+  report=""; verdict=""
+  if [ -n "$state" ]; then
+    verdict="$(jq -r '.verdict // empty' "$state" 2>/dev/null || true)"
+    report="$(jq -r '.report_path // empty' "$state" 2>/dev/null || true)"
+    [ "$(jq -r '.status // empty' "$state" 2>/dev/null)" != running ] || verdict=""
+  fi
+  case "$status" in
+    pending) [ -n "$verdict" ] || verdict=pending ;;
+    lost) [ -n "$verdict" ] || verdict=BLOCKED ;;
+    *)
+      if [ -z "$verdict" ]; then
+        # No lifecycle: refused before dispatch, or an earlier pass was reused.
+        report="$(jq -r '.report // empty' "$result" 2>/dev/null | tr -d '\r' || true)"
+        if [ "$(jq -r '.exit_code' "$result" 2>/dev/null | tr -d '\r')" = 0 ] && [ -n "$report" ] && [ -f "$report" ]; then verdict=APPROVE; else verdict=BLOCKED; fi
+      fi ;;
+  esac
+  printf '%s\n' "$verdict"
+  [ -z "$report" ] || printf 'report: %s\n' "$report"
+  printf 'log: %s\n' "$(jq -r '.log // empty' "$rec" 2>/dev/null)"
+  return 0
+}
+orig_args=("$@")
 pool_provider=""
 review_provider="${1:-}"
 case "${1:-}" in
+  outcome) shift; load_skip_lib; review_outcome "$@"; exit $? ;;
   claude)
     # Claude left the reviewer pool (owner instruction 2026-09-30). The registry
     # is the gate even for the legacy wrapper name, so a test fixture may still
@@ -109,7 +170,7 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; action_profile=""; action_manifest=""; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; additional_reviewer=0; wrapper_args=()
+detach=0; implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; action_profile=""; action_manifest=""; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; additional_reviewer=0; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
@@ -125,6 +186,8 @@ while [ "$#" -gt 0 ]; do
       operation="$2"; shift 2 ;;
     --force)
       force_review=1; shift ;;
+    --detach)
+      detach=1; shift ;;
     --additional-reviewer)
       additional_reviewer=1; shift ;;
     --action-profile|--action-manifest)
@@ -188,6 +251,82 @@ if [ "$attachment_route" = 1 ] && [ "$code_only" -ne 1 ]; then
   wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}"
   wrapper_args=("$review_provider" "${wrapper_args[@]}")
 fi
+# A reviewer that already failed in this calling session is never drawn again
+# by it (plan_reviewer-observation-week step 2). Exit 75 when every rotation
+# reviewer is skipped (the week's merge gate consumes it), 77 otherwise.
+load_skip_lib
+if [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] && skip_has "$AI_CALLER_SESSION_ID" "$pool_provider"; then
+  skip_detail="$(skip_reason "$AI_CALLER_SESSION_ID" "$pool_provider")"
+  skip_at="${skip_detail#* }"
+  skip_when="$(TZ=EST5EDT date -d "$skip_at" '+%-I:%M %p %Z' 2>/dev/null || printf '%s' "$skip_at")"
+  printf 'ai-review: %s skipped for this session (%s, %s)\n' "$pool_provider" "${skip_detail%% *}" "$skip_when" >&2
+  skip_remaining=""; skip_members=""
+  skip_registry="$REAL_DIR/../config/reviewer-registry.json"; [ -z "${AI_REVIEW_REGISTRY_FILE:-}" ] || skip_registry="$AI_REVIEW_REGISTRY_FILE"
+  skip_scope="$REAL_DIR/../config/reviewer-membership-scope.json"
+  for skip_p in $(jq -r --slurpfile scope "$skip_scope" '.providers|to_entries[]|select(.value.registry_state=="registered")|.key as $k|select(($scope[0].outside_allocator//{})|has($k)|not)|$k' "$skip_registry" 2>/dev/null | tr -d '\r'); do
+    skip_members="$skip_members $skip_p"
+    skip_has "$AI_CALLER_SESSION_ID" "$skip_p" || skip_remaining="$skip_remaining $skip_p"
+  done
+  if [ -z "$skip_members" ]; then
+    # Fail closed: an unreadable roster is never "every reviewer skipped".
+    printf 'ai-review: cannot read the rotation roster; this reviewer stays skipped.\n' >&2
+    exit 77
+  fi
+  if [ -z "$skip_remaining" ]; then
+    printf 'ai-review: all reviewers skipped this session\n' >&2
+    # The week's merge gate accepts this as the head's review evidence.
+    skip_head="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$skip_head" =~ ^[0-9a-f]{40}$ ]] && mkdir -p "$DETACH_DIR" 2>/dev/null; then
+      skip_id="s$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"
+      jq -nc --arg id "$skip_id" --arg head "$skip_head" --arg repo "$(git rev-parse --show-toplevel 2>/dev/null)" \
+        --arg csid "$AI_CALLER_SESSION_ID" --arg now "$(date -u +%FT%TZ)" \
+        '{id:$id,status:"all-skipped",head:$head,repo:$repo,caller_session_id:$csid,at:$now}' > "$DETACH_DIR/$skip_id.json" 2>/dev/null || true
+    fi
+    exit 75
+  fi
+  printf 'ai-review: reviewers not skipped this session:%s\n' "$skip_remaining" >&2
+  exit 77
+fi
+if [ "$detach" = 1 ] && { [ -z "$pool_provider" ] || [ "$code_only" -ne 0 ]; }; then
+  printf 'ai-review: --detach applies only to pool reviewers.\n' >&2; exit 2
+fi
+# --detach (step 3): everything a review does today still happens (receipt,
+# packet, sandbox, verdict record, incident package); only the caller stops
+# waiting. The same front door re-runs without --detach in the background.
+maybe_detach(){
+  [ "$detach" = 1 ] || return 0
+  local id rec log a; local -a child_args=()
+  for a in "${orig_args[@]}"; do [ "$a" = --detach ] || child_args+=("$a"); done
+  id="d$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"
+  mkdir -p "$DETACH_DIR" || { printf 'ai-review: cannot create the detached run store.\n' >&2; exit 3; }
+  rec="$DETACH_DIR/$id.json"; log="$DETACH_DIR/$id.log"
+  jq -nc --arg id "$id" --arg p "$pool_provider" --arg m "$mode" --arg repo "$(git rev-parse --show-toplevel 2>/dev/null)" --arg head "$(git rev-parse HEAD 2>/dev/null)" \
+    --arg csid "$AI_CALLER_SESSION_ID" --arg log "$log" --arg now "$(date -u +%FT%TZ)" \
+    '{id:$id,status:"pending",provider:$p,mode:$m,repo:$repo,head:$head,caller_session_id:$csid,log:$log,started_at:$now}' > "$rec"
+  local self; self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "$0")"
+  local launcher=(nohup); command -v setsid >/dev/null 2>&1 && launcher=(setsid nohup)
+  # This process's session temp root is deleted when it exits; the detached
+  # run must make its own.
+  if [ -n "${AI_SESSION_TMP_ROOT:-}" ] && [ "${TMPDIR:-}" = "$AI_SESSION_TMP_ROOT" ]; then
+    launcher=(env -u TMPDIR -u TMP -u TEMP -u AI_SESSION_TMP_ROOT "${launcher[@]}")
+  fi
+  AI_REVIEW_DETACH_ID="$id" AI_REVIEW_DETACH_BASE="$DETACH_DIR/$id" \
+  "${launcher[@]}" bash -c '
+    base="$AI_REVIEW_DETACH_BASE"; printf "%s\n" "$$" > "$base.pid"
+    out="$(mktemp)"
+    "$@" > "$out"; rc=$?
+    cat "$out"; report="$(tail -n 1 "$out" | tr -d "\r")"; rm -f "$out"
+    jq -nc --argjson rc "$rc" --arg report "$report" --arg now "$(date -u +%FT%TZ)" \
+      "{exit_code:\$rc,report:(if \$report==\"\" then null else \$report end),finished_at:\$now}" > "$base.result.tmp" \
+      && mv -f "$base.result.tmp" "$base.result.json"
+  ' ai-review-detached "$self" "${child_args[@]}" > "$log" 2>&1 < /dev/null &
+  printf 'ai-review: detached %s %s run %s; read it with: ai-review outcome %s\n' "$pool_provider" "$mode" "$id" "$id" >&2
+  printf '%s\n' "$id"
+  exit 0
+}
+# Detach before the slower checks: the background run repeats every one of
+# them, and a refusal there is reported by ai-review outcome as BLOCKED.
+maybe_detach
 # --force (#1428) only means something to the pool adapter: it bypasses the
 # reuse of an earlier passing report for the same reviewer, mode and source.
 if [ "$force_review" = 1 ]; then

@@ -40,6 +40,8 @@ done
 [ -n "$ROOT" ] || { printf 'ai-task-gates: cannot find tools/lib/task-gates.sh\n' >&2; exit 4; }
 # shellcheck source=../tools/lib/task-gates.sh
 . "$ROOT/tools/lib/task-gates.sh"
+# shellcheck source=../tools/lib/observation-week.sh
+. "$ROOT/tools/lib/observation-week.sh"
 
 POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
 STATE_DIR="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
@@ -53,6 +55,44 @@ die(){ printf 'ai-task-gates: error: %s\n' "$*" >&2; exit 1; }
 need_value(){ [ $# -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."; }
 fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX_UNCLASSIFIED"; }
 blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
+
+# Reviewer observation week (plan_reviewer-observation-week step 4). Only
+# while a valid window file is live: a code ship whose exact head was sent for
+# review without an APPROVE yet (a --detach run, or ai-review exit 75) is a
+# MERGE-UNREVIEWED merge; reviewer code and toolkit installs are frozen. shared-db, production, infrastructure and deployment classes are
+# never admitted by the window and keep their gates unchanged.
+observation_week_check(){ # ACTION EFFECTIVE_CLASS
+  local action="$1" effective="$2" head evidence
+  if ! ow_window_live; then
+    case "$OW_WHY" in "no window file") ;; *) printf 'ai-task-gates: note: observation week not applied (%s); full gating applies.\n' "$OW_WHY" >&2 ;; esac
+    return 0
+  fi
+  case "$action" in review|code-only-review|pr-wait) return 0 ;; esac
+  case "$effective" in
+    reviewer-safety|installation)
+      blocked "$(printf 'ai-task-gates: STOP before "%s". Reviewer observation week (%s to %s): reviewer-code changes and toolkit installs are frozen. Log the failure with ai-reviewer-issue and use only the allowed operations in plan_reviewer-observation-week.md section 11.' "$action" "$OW_START" "$OW_END")" ;;
+  esac
+  [ "$action" = ship ] && ow_class_allowed "$effective" || return 0
+  [ "$effective" = code ] || return 0
+  head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
+  evidence="$(ow_head_evidence "$head" || true)"
+  case "$evidence" in
+    approved\ *) printf 'ai-task-gates: observation week: head %s has an APPROVE (%s); normal merge.\n' "$head" "${evidence#approved }" ;;
+    detached\ *|all-skipped\ *)
+      printf 'MERGE-UNREVIEWED\n'
+      printf 'ai-task-gates: observation week: merge on green CI, add label unreviewed-week, and put this line in the squash body:\n'
+      if [ "${evidence%% *}" = detached ]; then
+        printf 'Unreviewed merge (observation week, run %s)\n' "${evidence#detached }"
+      else
+        printf 'Unreviewed merge (observation week, all-skipped)\n'
+      fi ;;
+    *)
+      # Ordinary code needs no review (rotation rule 14), so the week never
+      # blocks it; without evidence there is simply no unreviewed-week tag.
+      printf 'ai-task-gates: observation week: head %s was never sent for review; ordinary code needs none (reviewer-rotation-rules rule 14), so no unreviewed-week label. To add it to the week'"'"'s data, run ai-review <reviewer> final-check --detach first.\n' "${head:-unknown}" ;;
+  esac
+  return 0
+}
 
 # Keep the terminal report-shape check alongside the lifecycle verdict check.
 # Provider adapters may put blank lines around a structured verdict, but the
@@ -1642,6 +1682,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
   decide_local_tests_required "$action" "$required_full"
+  observation_week_check "$action" "$effective"
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \

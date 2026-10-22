@@ -1976,4 +1976,61 @@ check 'scoped skill gate cannot bypass universal raw archive refusal' \
 check 'scoped skill plan cannot be supplied to a different action' \
   "rc 1 '$TMP/rs' check --before ship --scoped-skills-plan '$TMP/not-a-plan'"
 
+printf 'observation week merge gate (plan_reviewer-observation-week step 4)\n'
+OWT="$TMP/ow"; mkdir -p "$OWT/detached"
+ow_window(){ # START END CLASSES_JSON
+  printf '{"start":"%s","end":"%s","allowed_classes":%s}\n' "$1" "$2" "$3" > "$OWT/window.json"
+}
+OW_NOW_START="$(date -u -d '-1 hour' +%FT%TZ)"; OW_NOW_END="$(date -u -d '+6 days' +%FT%TZ)"
+ow_out(){ ( cd "$1" && shift && AI_OBSERVATION_WEEK_FILE="$OWT/window.json" AI_REVIEW_DETACH_DIR="$OWT/detached" \
+  AI_REVIEW_SCOREBOARD_FILE="$OWT/reviews.jsonl" "$GATES" "$@" ) 2>&1; }
+ow_rc(){ local want="$1" got; shift; ow_out "$@" >/dev/null; got=$?; [ "$got" -eq "$want" ]; }
+newrepo "$TMP/ow-code" popcre/ow-fixture
+printf 'x\n' > "$TMP/ow-code/tool.sh"; git -C "$TMP/ow-code" add -A; git -C "$TMP/ow-code" commit -qm code
+( cd "$TMP/ow-code" && "$GATES" start --class code >/dev/null 2>&1 )
+OW_HEAD="$(git -C "$TMP/ow-code" rev-parse HEAD)"
+ow_window "$OW_NOW_START" "$OW_NOW_END" '["code","prose"]'
+check 'observation_window_never_blocks_unreviewed_ordinary_code' \
+  "ow_rc 0 '$TMP/ow-code' check --before ship && ow_out '$TMP/ow-code' check --before ship | grep -q 'needs none' && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
+printf '{"id":"d20261021T000000-1-1","status":"pending","head":"%s"}\n' "$OW_HEAD" > "$OWT/detached/d20261021T000000-1-1.json"
+check 'observation_window_admits_code_merge_with_detached_run' \
+  "ow_out '$TMP/ow-code' check --before ship | grep -qx 'MERGE-UNREVIEWED' && ow_out '$TMP/ow-code' check --before ship | grep -q 'Unreviewed merge (observation week, run d20261021T000000-1-1)'"
+rm -f "$OWT/detached/"*.json
+printf '{"id":"s20261021T000000-1-1","status":"all-skipped","head":"%s"}\n' "$OW_HEAD" > "$OWT/detached/s20261021T000000-1-1.json"
+check 'observation_window_admits_all_skipped_75' \
+  "ow_out '$TMP/ow-code' check --before ship | grep -qx 'MERGE-UNREVIEWED' && ow_out '$TMP/ow-code' check --before ship | grep -q 'all-skipped)'"
+rm -f "$OWT/detached/"*.json
+printf '{"provider":"muse","head":"%s","verdict":"APPROVE","stale":false,"failure_class":null}\n' "$OW_HEAD" > "$OWT/reviews.jsonl"
+check 'observation_window_approved_head_merges_normally' \
+  "ow_rc 0 '$TMP/ow-code' check --before ship && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
+rm -f "$OWT/reviews.jsonl"
+printf '{"id":"d1","status":"pending","head":"0000000000000000000000000000000000000000"}\n' > "$OWT/detached/d1.json"
+check 'unreviewed_label_without_evidence_refuses' "! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
+rm -f "$OWT/detached/"*.json
+ow_window "$(date -u -d '-9 days' +%FT%TZ)" "$(date -u -d '-2 days' +%FT%TZ)" '["code","prose"]'
+check 'observation_window_expired_refuses' \
+  "ow_rc 0 '$TMP/ow-code' check --before ship && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED' && ow_out '$TMP/ow-code' check --before ship | grep -q 'observation week not applied (window has ended'"
+printf '{"start":' > "$OWT/window.json"
+check 'observation_window_malformed_refuses' \
+  "! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED' && ow_out '$TMP/ow-code' check --before ship | grep -q 'window file is malformed'"
+ow_window "$OW_NOW_END" "$OW_NOW_START" '["code"]'
+check 'observation_window_reversed_dates_refuse' "ow_out '$TMP/ow-code' check --before ship | grep -q 'end is not after its start'"
+ow_window "$OW_NOW_START" "$OW_NOW_END" '["code","shared-db"]'
+check 'observation_window_rejects_protected_classes_in_file' \
+  "ow_out '$TMP/ow-code' check --before ship | grep -q 'admits a protected class' && ! ow_out '$TMP/ow-code' check --before ship | grep -q 'MERGE-UNREVIEWED'"
+ow_window "$OW_NOW_START" "$OW_NOW_END" '["code","prose"]'
+newrepo "$TMP/ow-db" popcre/ow-fixture
+mkdir -p "$TMP/ow-db/db/migrations"; printf 'select 1;\n' > "$TMP/ow-db/db/migrations/001.sql"
+git -C "$TMP/ow-db" add -A; git -C "$TMP/ow-db" commit -qm migration
+( cd "$TMP/ow-db" && "$GATES" start --class shared-db >/dev/null 2>&1 )
+printf '{"id":"d2","status":"pending","head":"%s"}\n' "$(git -C "$TMP/ow-db" rev-parse HEAD)" > "$OWT/detached/d2.json"
+check 'observation_window_never_admits_shared_db_or_production' \
+  "! ow_out '$TMP/ow-db' check --before shared-db-promotion | grep -q 'MERGE-UNREVIEWED' && ow_rc 3 '$TMP/ow-db' check --before production && ! ow_out '$TMP/ow-db' check --before ship | grep -q 'MERGE-UNREVIEWED'"
+newrepo "$TMP/ow-rs" popcre/ai-devops
+mkdir -p "$TMP/ow-rs/bin"; printf '#!/bin/sh\n' > "$TMP/ow-rs/bin/ai-review-lifecycle"; git -C "$TMP/ow-rs" add -A; git -C "$TMP/ow-rs" commit -qm reviewer
+( cd "$TMP/ow-rs" && "$GATES" start --class reviewer-safety >/dev/null 2>&1 )
+check 'observation_window_freezes_reviewer_code_and_installs' \
+  "ow_rc 3 '$TMP/ow-rs' check --before ship && ow_out '$TMP/ow-rs' check --before ship | grep -q 'are frozen'"
+check 'observation_window_still_lets_reviews_start' "! ow_out '$TMP/ow-rs' check --before review | grep -q 'are frozen'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
