@@ -2028,6 +2028,60 @@ check "brief_ends_with_single_decision_rule" \
 check "brief_restates_risk_block_rule_when_requested" "grep -q 'MUST contain exactly one fenced block' '$TMP/risk-brief-present.md'"
 check "brief_says_missing_tool_is_not_blocked" "grep -q 'is not by itself grounds for BLOCKED' '$TMP/risk-brief-present.md'"
 
+# --- per-session skip and --detach at the front door (plan_reviewer-observation-week steps 2-3)
+echo '== per-session skip and detached reviews'
+FRONT="$REPO_ROOT/bin/ai-review"
+OW="$TMP/observation-week"; mkdir -p "$OW"
+export AI_REVIEW_SESSION_SKIP_DIR="$OW/skip" AI_REVIEW_DETACH_DIR="$OW/detached"
+OW_POOL="$OW/pool-stub"
+cat > "$OW_POOL" <<'EOF'
+#!/usr/bin/env bash
+# Stands in for ai-review-pool: records what the front door handed it.
+printf '%s\n' "$*" >> "$OW_POOL_LOG"
+[ -z "${AI_REVIEW_DETACH_ID:-}" ] || sleep 3
+d="$AI_REVIEW_LIFECYCLE_DIR/runs/k/$1/c"; mkdir -p "$d" "$(dirname "$AI_REVIEW_SCOREBOARD_FILE")"
+rep="$OW_DIR/report-${AI_REVIEW_DETACH_ID:-sync}.md"
+printf 'Analysis.\n## Verdict\nAPPROVE\n' > "$rep"
+jq -n --arg id "${AI_REVIEW_DETACH_ID:-}" --arg r "$rep" --arg s "$AI_CALLER_SESSION_ID" \
+  '{status:"completed",verdict:"APPROVE",report_path:$r,detach_id:(if $id=="" then null else $id end),caller_session_id:$s}' > "$d/run-${AI_REVIEW_DETACH_ID:-sync}.json"
+printf '{"provider":"%s","detach_id":"%s","caller_session_id":"%s"}\n' "$1" "${AI_REVIEW_DETACH_ID:-}" "$AI_CALLER_SESSION_ID" >> "$AI_REVIEW_SCOREBOARD_FILE"
+printf '%s\n' "$rep"
+EOF
+chmod +x "$OW_POOL"
+export OW_POOL_LOG="$OW/pool.log" OW_DIR="$OW"
+ow_front(){ ( cd "$MREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$OW_POOL" "$FRONT" "$@" ); }
+(
+  . "$REPO_ROOT/tools/lib/review-session-skip.sh"
+  skip_add ow-session-a muse fast-fail-silent-start
+)
+rc=0; AI_CALLER_SESSION_ID=ow-session-a ow_front muse diff-review --force >"$OW/a.out" 2>"$OW/a.err" || rc=$?
+check "skip_excludes_provider_within_session" "[ '$rc' = 77 ] && grep -q 'muse skipped for this session (fast-fail-silent-start' '$OW/a.err' && ! grep -q . '$OW_POOL_LOG' 2>/dev/null"
+rc=0; AI_CALLER_SESSION_ID=ow-session-b ow_front muse diff-review --force >"$OW/b.out" 2>"$OW/b.err" || rc=$?
+check "skip_does_not_leak_to_other_session" "[ '$rc' = 0 ] && grep -q '^muse diff-review' '$OW_POOL_LOG'"
+(
+  . "$REPO_ROOT/tools/lib/review-session-skip.sh"
+  for p in deepseek glm stepfun; do skip_add ow-session-a "$p" provider-failed; done
+)
+rc=0; AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/c.out" 2>"$OW/c.err" || rc=$?
+check "all_skipped_exits_75" "[ '$rc' = 75 ] && grep -q 'all reviewers skipped this session' '$OW/c.err' && grep -lq '\"status\":\"all-skipped\"' '$AI_REVIEW_DETACH_DIR'/s*.json"
+
+rm -f "$AI_REVIEW_DETACH_DIR"/s*.json
+rc=0; AI_REVIEW_REGISTRY_FILE="$OW/missing-registry.json" AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/r.out" 2>"$OW/r.err" || rc=$?
+check "unreadable_roster_never_counts_as_all_skipped" "[ '$rc' = 77 ] && grep -q 'cannot read the rotation roster' '$OW/r.err' && ! ls '$AI_REVIEW_DETACH_DIR'/s*.json >/dev/null 2>&1"
+
+: > "$OW_POOL_LOG"
+SECONDS_BEFORE=$SECONDS
+rc=0; AI_CALLER_SESSION_ID=ow-session-c ow_front muse final-check --force --detach >"$OW/d.out" 2>"$OW/d.err" || rc=$?
+DETACH_SECS=$((SECONDS - SECONDS_BEFORE))
+DETACH_ID="$(tail -1 "$OW/d.out" | tr -d '\r')"
+check "detach_returns_run_id_in_under_10s" "[ '$rc' = 0 ] && [ '$DETACH_SECS' -lt 10 ] && [[ '$DETACH_ID' =~ ^d[0-9A-Za-z-]+$ ]] && grep -q 'ai-review outcome $DETACH_ID' '$OW/d.err'"
+FIRST_OUTCOME="$("$FRONT" outcome "$DETACH_ID" 2>/dev/null | head -1)"
+FINAL_OUTCOME="$("$FRONT" outcome "$DETACH_ID" --wait 60 2>/dev/null | head -1)"
+check "outcome_reports_pending_then_verdict" "[ '$FIRST_OUTCOME' = pending ] && [ '$FINAL_OUTCOME' = APPROVE ]"
+check "detached_run_records_scoreboard_row" "jq -e --arg id '$DETACH_ID' 'select(.detach_id==\$id and .caller_session_id==\"ow-session-c\" and .provider==\"muse\")' '$AI_REVIEW_SCOREBOARD_FILE' >/dev/null && grep -q -- '--force' '$OW_POOL_LOG' && ! grep -q -- '--detach' '$OW_POOL_LOG'"
+check "detached_record_binds_exact_head" "jq -e --arg h \"\$(git -C '$MREPO' rev-parse HEAD)\" '.head==\$h' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.json' >/dev/null && jq -e '.exit_code==0' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.result.json' >/dev/null"
+unset AI_REVIEW_SESSION_SKIP_DIR AI_REVIEW_DETACH_DIR OW_POOL_LOG OW_DIR
+
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'
 check "engine_doctor_reports_core_stamp" "'$ENGINE' doctor | grep -q 'review-lifecycle-core/1'"

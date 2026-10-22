@@ -184,13 +184,15 @@ and points here.
   outgrew the class, redeclare and say so. private-evidence is read-only
   analysis.
 - **Secrets:** values move only through pipes or protected files. Rotation
-  needs an assigned AI reviewer's APPROVE of the rotation plan (exact
-  credential, provider, and consumers), except a credential under a standing
+  of a `popcre/shared-db` credential needs an assigned AI reviewer's APPROVE of
+  the rotation plan (exact credential, provider, and consumers); elsewhere the
+  AI rotates without review. Never rotate a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or
   reviewed preview. No broad staging or destructive Git over unreviewed work,
   another session's files, a repository root, or a machine-local overlay.
-- **Production:** the reviewer's APPROVE is on the exact inputs. Database
+- **Production:** in `popcre/shared-db` the reviewer's APPROVE is on the exact
+  inputs; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database
   writes skip that APPROVE but keep every other gate (see "Database writes").
   The automatic `shared-db` migration promotion exception re-proves the one
   open structural work issue or stops for an engineer; it authorizes no manual

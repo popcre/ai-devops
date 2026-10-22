@@ -20,8 +20,8 @@ Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-
 | 3 | Repair GLM REVISE re-review waste | ✅ done — 2026-10-19 (`b5cfa876` PR #1819, path 1 reviewed workstream) | Fixture `glm_revise_followup_reuses_bound_turn` green (`tests/test-glm-revise-followup.sh` 13/13) |
 | 4 | Repair durable report publish and sandbox non-interference | ✅ code landed — 2026-10-21 (PR #1928 `3de4f83e`) | Named fixtures `durable_report_publish_survives_process_exit` and `foreign_orphans_do_not_block_fresh_review` green; live durable report path remains in step 6 |
 | 5 | Repair Windows Git Bash / ProgramFiles detection | ✅ code landed — 2026-10-21 (code-class `*.cmd` only; 13 protected `.cmd` + installer half stay #1701) | `tests/test-bin-cmd-launchers.sh` green, including `launcher_resolves_git_bash_with_empty_programfiles` (named suite is this, not `test-windows-bash-selection.sh`, which is CI-lane selection) |
-| 6 | Live smoke + incident disposition (no paid blast) | ✅ done — 2026-10-21 11:21 PM EST | Door spawn proven (gate answered); GLM fixture 13/13; `20261014T203826Z` partially-resolved and `20261014T201712Z` resolved with evidence on #1678 |
-| 7 | Install code-only release and re-prove | ⬜ open — 2026-10-15 | Installed hashes match merged source; smoke still green |
+| 6 | Live smoke + incident disposition (no paid blast) | ✅ done — 2026-10-21 11:21 PM EDT | Smoke table in [`tests/verification/edge-dev-reviewer-repair/README.md`](tests/verification/edge-dev-reviewer-repair/README.md) (commands + exit status + durable report path); `20261014T203826Z` partially-resolved and `20261014T201712Z` resolved |
+| 7 | Install code-only release and re-prove | ⬜ open — owner authorized reviewed install 2026-10-21 (`docs/owner-rulings.md`) | Installed hashes match merged source; smoke still green |
 
 Fresh session starts at **step 0**, then **step 1**. A row is done only with an
 openable artifact (file under `tests/verification/`, command output, or merged
@@ -354,7 +354,10 @@ Never “just ship” a protected path.
   checkout. Follow `docs/deployment.md` for the ordinary/code-only update route
   that applies; if the installer still demands a reviewer report because the
   release classifier saw a safety path, **stop** and report `Blocked —` with
-  the unexpected class — do not bypass.
+  the unexpected class — do not bypass. **Owner update 2026-10-21:** that
+  stop condition fired (the release window includes protected paths from other
+  PRs). Owner authorized the one-time reviewed install
+  (`docs/owner-rulings.md`); it is install-time safety, not a merge gate.
 - After install: verify launcher hashes and re-run step 6 smoke.
 - Depends on: step 6.
 - **Verification gate:** installed command hashes match merged source; smoke

@@ -580,5 +580,55 @@ STATE_BADSHA="$($SCRIPT begin --provider grok --repo "$R" --run-id bad-sha-run -
 check "invalid_packet_sha256_is_rejected" \
   "! $SCRIPT finish --state '$STATE_BADSHA' --verdict APPROVE --report '$REPORT' --elapsed 5 --packet-sha256 'not-hex' >/dev/null 2>&1"
 
+# --- fast-fail watch and per-session skip (plan_reviewer-observation-week steps 1-2)
+echo '== fast-fail watch'
+FF="$TMP/fast-fail"; mkdir -p "$FF/fakebin"
+FF_HEAD=0123456789abcdef0123456789abcdef01234567
+ff_door(){ printf '#!/usr/bin/env bash\n%s\n' "$2" > "$FF/$1.sh"; }
+ff_call(){ # DOOR -> "$FF/DOOR.result" holds "rc reason seconds"
+  (
+    . "$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
+    rlc_init; rlc_export_runner_token
+    export AI_REVIEW_FIRST_OUTPUT_SECONDS=3 AI_REVIEW_FAST_FAIL_POLL_SECONDS=1 AI_REVIEW_FAST_FAIL_SETTLE_SECONDS=1
+    printf 'prompt\n' > "$FF/prompt"
+    started=$SECONDS; rc=0
+    rlc_call_door review "$FF/$1.sh" "$FF" "$FF" "$FF/prompt" "$FF/$1.report" "$FF_HEAD" "" 0 diff-review "" \
+      > "$FF/$1.stdout" 2> "$FF/$1.stderr" || rc=$?
+    printf '%s %s %s\n' "$rc" "${RLC_FAST_FAIL_REASON:-none}" "$((SECONDS - started))" > "$FF/$1.result"
+  )
+}
+ff_door silent 'sleep 40'
+ff_door fatal 'printf "Error: spawn pwsh.exe NotFound\n" >&2; sleep 40'
+ff_door streaming 'for i in 1 2 3 4 5 6; do printf "progress %s\n" "$i"; sleep 2; done; exit 0'
+ff_door diff429 'printf "+ return status 429 from the mock\n"; sleep 6; exit 0'
+ff_door verdict 'printf "Analysis.\n## Verdict\nAPPROVE\n" > "$DOOR_REPORT_OUT"; printf "HTTP 429 retry\n" >&2; sleep 40'
+ff_door binary 'printf "\000\377\376\001binary\000\n" >&2; sleep 4; exit 0'
+for d in silent fatal streaming diff429 verdict binary; do ff_call "$d" & done
+wait
+check "fast_fail_on_silent_start" "read -r rc why secs < '$FF/silent.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = silent-start ] && [ \"\$secs\" -lt 20 ]"
+check "fast_fail_on_fatal_pattern" "read -r rc why secs < '$FF/fatal.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = fatal-pattern ] && [ \"\$secs\" -lt 20 ] && grep -q NotFound '$FF/fatal.stderr'"
+check "fast_fail_never_on_streaming_review" "read -r rc why secs < '$FF/streaming.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ] && grep -q 'progress 6' '$FF/streaming.stdout'"
+check "fast_fail_pattern_only_on_stderr_or_status_lines" "read -r rc why secs < '$FF/diff429.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ]"
+check "fast_fail_after_verdict_still_records_verdict" "read -r rc why secs < '$FF/verdict.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ] && [ \"\$secs\" -lt 20 ] && grep -q 'keeping it' '$FF/verdict.stderr'"
+check "fast_fail_tolerates_binary_output" "read -r rc why secs < '$FF/binary.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ]"
+# A wall clock that jumps (here: a date that always answers 1970) cannot
+# stop or delay the watch: elapsed time is counted in sleep ticks.
+printf '#!/usr/bin/env bash\nprintf "0\\n"\n' > "$FF/fakebin/date"; chmod +x "$FF/fakebin/date"
+ff_door clock 'sleep 40'
+PATH="$FF/fakebin:$PATH" ff_call clock
+check "fast_fail_uses_monotonic_clock" "read -r rc why secs < '$FF/clock.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = silent-start ] && [ \"\$secs\" -lt 20 ]"
+check "fast_fail_watch_lives_in_shared_core_not_doors" "grep -q 'rlc_fast_fail_watch' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh' && ! grep -rq 'rlc_fast_fail_watch\|AI_REVIEW_FIRST_OUTPUT_SECONDS' '$REPO_ROOT/tools/lib/review-doors'"
+
+echo '== per-session skip recorded by the lifecycle'
+export AI_REVIEW_SESSION_SKIP_DIR="$TMP/session-skip"
+STATE_SKIP="$(AI_CALLER_SESSION_ID=skip-session-a $SCRIPT begin --provider grok --repo "$R" --run-id skip-run-a --caller codex)"
+AI_CALLER_SESSION_ID=skip-session-a $SCRIPT fail --state "$STATE_SKIP" --elapsed 3 --failure fast-fail-silent-start >/dev/null 2>&1
+check "lifecycle_records_caller_session_id" "jq -e '.caller_session_id==\"skip-session-a\"' '$STATE_SKIP' >/dev/null"
+check "lifecycle_failure_adds_provider_to_session_skip" "grep -q '\"provider\":\"grok\",\"reason\":\"fast-fail-silent-start\"' '$AI_REVIEW_SESSION_SKIP_DIR/skip-session-a.jsonl'"
+STATE_SKIP_B="$(AI_CALLER_SESSION_ID=skip-session-b $SCRIPT begin --provider grok --repo "$R" --run-id skip-run-b --caller codex)"
+AI_CALLER_SESSION_ID=skip-session-b $SCRIPT fail --state "$STATE_SKIP_B" --elapsed 3 --failure tests-command-failed >/dev/null 2>&1
+check "caller_side_failure_does_not_skip_reviewer" "test ! -e '$AI_REVIEW_SESSION_SKIP_DIR/skip-session-b.jsonl'"
+unset AI_REVIEW_SESSION_SKIP_DIR
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -40,6 +40,8 @@ done
 [ -n "$ROOT" ] || { printf 'ai-task-gates: cannot find tools/lib/task-gates.sh\n' >&2; exit 4; }
 # shellcheck source=../tools/lib/task-gates.sh
 . "$ROOT/tools/lib/task-gates.sh"
+# shellcheck source=../tools/lib/observation-week.sh
+. "$ROOT/tools/lib/observation-week.sh"
 
 POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
 STATE_DIR="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
@@ -53,6 +55,44 @@ die(){ printf 'ai-task-gates: error: %s\n' "$*" >&2; exit 1; }
 need_value(){ [ $# -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."; }
 fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX_UNCLASSIFIED"; }
 blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
+
+# Reviewer observation week (plan_reviewer-observation-week step 4). Only
+# while a valid window file is live: a code ship whose exact head was sent for
+# review without an APPROVE yet (a --detach run, or ai-review exit 75) is a
+# MERGE-UNREVIEWED merge; reviewer code and toolkit installs are frozen. shared-db, production, infrastructure and deployment classes are
+# never admitted by the window and keep their gates unchanged.
+observation_week_check(){ # ACTION EFFECTIVE_CLASS
+  local action="$1" effective="$2" head evidence
+  if ! ow_window_live; then
+    case "$OW_WHY" in "no window file") ;; *) printf 'ai-task-gates: note: observation week not applied (%s); full gating applies.\n' "$OW_WHY" >&2 ;; esac
+    return 0
+  fi
+  case "$action" in review|code-only-review|pr-wait) return 0 ;; esac
+  case "$effective" in
+    reviewer-safety|installation)
+      blocked "$(printf 'ai-task-gates: STOP before "%s". Reviewer observation week (%s to %s): reviewer-code changes and toolkit installs are frozen. Log the failure with ai-reviewer-issue and use only the allowed operations in plan_reviewer-observation-week.md section 11.' "$action" "$OW_START" "$OW_END")" ;;
+  esac
+  [ "$action" = ship ] && ow_class_allowed "$effective" || return 0
+  [ "$effective" = code ] || return 0
+  head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
+  evidence="$(ow_head_evidence "$head" || true)"
+  case "$evidence" in
+    approved\ *) printf 'ai-task-gates: observation week: head %s has an APPROVE (%s); normal merge.\n' "$head" "${evidence#approved }" ;;
+    detached\ *|all-skipped\ *)
+      printf 'MERGE-UNREVIEWED\n'
+      printf 'ai-task-gates: observation week: merge on green CI, add label unreviewed-week, and put this line in the squash body:\n'
+      if [ "${evidence%% *}" = detached ]; then
+        printf 'Unreviewed merge (observation week, run %s)\n' "${evidence#detached }"
+      else
+        printf 'Unreviewed merge (observation week, all-skipped)\n'
+      fi ;;
+    *)
+      # Ordinary code needs no review (rotation rule 14), so the week never
+      # blocks it; without evidence there is simply no unreviewed-week tag.
+      printf 'ai-task-gates: observation week: head %s was never sent for review; ordinary code needs none (reviewer-rotation-rules rule 14), so no unreviewed-week label. To add it to the week'"'"'s data, run ai-review <reviewer> final-check --detach first.\n' "${head:-unknown}" ;;
+  esac
+  return 0
+}
 
 # Keep the terminal report-shape check alongside the lifecycle verdict check.
 # Provider adapters may put blank lines around a structured verdict, but the
@@ -804,18 +844,20 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
   # local-tests: decide the evidence requirement from this release class's own
   # gates before either approval call; the approval is mandatory here.
   decide_local_tests_required deploy "$(merged_gate "$IDENTITY" "$effective" | sed -n 's/^required\t//p' | paste -sd, -)" 1
-  [ -n "$report" ] \
+  [ -n "$report" ] || ! reviews_required \
     || blocked 'ai-task-gates: STOP. Application source release requires --reviewer-approval with an independent final-check or security-review APPROVE.'
   head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
     || blocked 'ai-task-gates: STOP. Application release source HEAD is unavailable.'
   [ "$head" = "$APP_RELEASE_HEAD" ] \
     || blocked 'ai-task-gates: STOP. Application source changed after target validation.'
-  summary="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
+  summary="waived-outside-shared-db(owner-ruling-2026-10-15)"
+  [ -z "$report" ] || summary="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
     || approval_refused deploy $? 'ai-task-gates: STOP. Application release needs an independent lifecycle-recorded final-check or security-review APPROVE bound to this exact repository, HEAD, worktree digest, and deploy action.'
   application_release_validate_target "$APP_RELEASE_MANIFEST_PATH" "$effective"
   [ "$APP_RELEASE_HEAD" = "$head" ] \
     || blocked 'ai-task-gates: STOP. Application source moved during release proof validation.'
-  summary_after="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
+  summary_after="$summary"
+  [ -z "$report" ] || summary_after="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
     || approval_refused deploy $? 'ai-task-gates: STOP. Application approval became invalid during release proof validation.'
   [ "$summary_after" = "$summary" ] \
     || blocked 'ai-task-gates: STOP. Application approval evidence changed during release proof validation.'
@@ -1007,8 +1049,18 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # or enforced here. Keep this list in step with the enforcement code paths.
 GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission|reviewed-generated-definition-fixture-only)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
+# Owner ruling 2026-10-15 (#1960): "we turned off reviewing in all repos aside
+# from shared-db." Outside popcre/shared-db a reviewer-approval gate a policy
+# lists is not required; it is reported as waived and never enforced.
+REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'
+reviews_required(){ [ "$IDENTITY" = popcre/shared-db ]; }
 split_required_gates(){
   local all="$1" checked
+  REQUIRED_WAIVED=""
+  if ! reviews_required; then
+    REQUIRED_WAIVED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$REVIEWER_GATE_RE" | paste -sd, - || true)"
+    all="$(printf '%s\n' "$all" | tr ',' '\n' | grep -vE "$REVIEWER_GATE_RE" | grep -v '^$' | paste -sd, - || true)"
+  fi
   checked="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" || true)"
   # local-tests is enforced only where a reviewer approval is required: the review
   # record then carries the passing test evidence. Elsewhere it stays unchecked.
@@ -1121,7 +1173,7 @@ cmd_explain(){
       --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
       --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg effective "$effective" --arg policy "$POLICY_FILE" \
       --arg required "$required" --arg unchecked "$unchecked_required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" \
-      --arg rawarch "${RAW_ARCHIVE_PATHS:-}" '
+      --arg waived "${REQUIRED_WAIVED:-}" --arg rawarch "${RAW_ARCHIVE_PATHS:-}" '
       {schema_version:1,
        repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
        base:$base, policy_file:$policy,
@@ -1131,6 +1183,7 @@ cmd_explain(){
        effective_class:$effective,
        required_gates:(if $required=="" then [] else ($required|split(",")) end),
        unchecked_gates:(if $unchecked=="" then [] else ($unchecked|split(",")) end),
+       waived_gates:(if $waived=="" then [] else ($waived|split(",")) end),
        forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
        raw_archive_paths:($rawarch|split("\n")|map(select(length>0))),
        changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
@@ -1433,13 +1486,15 @@ cmd_check(){
   refuse_raw_archives "$action" "${RAW_ARCHIVE_PATHS:-}"
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
-    [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
+    [ -n "$reviewer_approval" ] || ! reviews_required || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
     # local-tests: this route runs BEFORE the gate split below, so decide the
     # evidence requirement here; installation gates require both local-tests
     # and the reviewer approval this branch demands unconditionally.
     decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
-      || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
+    if [ -n "$reviewer_approval" ]; then
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+        || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
+    fi
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
     [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
     local same_root same_head expected_launcher
@@ -1627,6 +1682,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   local reviewer_gated_action=1
   case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
   decide_local_tests_required "$action" "$required_full"
+  observation_week_check "$action" "$effective"
   if [ "$action" = offline-private-capture-transform ]; then
     [ "$IDENTITY" = u2giants/theoracle ] && [ "$declared" = private-tooling ] && [ "$effective" = private-tooling ] \
       && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
@@ -1778,7 +1834,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   # before any reviewer exists), so they are not gated here; they mutate nothing.
   # LOCAL_TESTS_REQUIRED was already set with the gate split above, before every
   # approval call site in this function.
-  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required_full" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
+  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
     if [ -n "$small_entry" ]; then
       [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
         || blocked "$(printf 'ai-task-gates: STOP before "%s". The required gates for "%s" in %s are: %s\nA small owner entry applies only to a row-data database write; this action needs --reviewer-approval.' "$action" "$effective" "$IDENTITY" "$required")"
@@ -1811,6 +1867,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
+  [ -z "${REQUIRED_WAIVED:-}" ] || printf 'waived outside popcre/shared-db (owner ruling 2026-10-15): %s\n' "$REQUIRED_WAIVED"
   [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool: %s\n' "$unchecked_required"
   return 0
 }
