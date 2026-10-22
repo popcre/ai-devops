@@ -115,7 +115,7 @@ for addon in "$REPO_ROOT/templates/repo-docs/AGENTS.addon.md" "$REPO_ROOT/templa
 done
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
-  grep -qF "rotates them itself under an assigned AI reviewer's APPROVE" "$client_file" \
+  grep -qF "waits for an assigned AI reviewer's APPROVE of the rotation plan" "$client_file" \
     || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
 done
 

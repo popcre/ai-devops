@@ -68,6 +68,9 @@ rulings, verbatim: `docs/owner-rulings.md`.
   gate technical actions. Authority the AI cannot obtain itself (a platform
   limit) is reported `Blocked —`, never worked around. (rulings:
   docs/owner-rulings.md)
+- **Never ask Albert to type, click, or create a credential.** If a
+  permission setting blocks the step, name the setting and change it, or route
+  the step to a session that can.
 - **Restate a short job plan** (goal, scope, done-when) in the first reply for
   anything beyond a one-phrase command, then execute; it confirms
   understanding and is not a request for approval.
@@ -88,6 +91,9 @@ rulings, verbatim: `docs/owner-rulings.md`.
   Preparation may legitimately leave agents idle; never invent busywork.
   Stop when complete, genuinely externally blocked with exact state preserved,
   or told to stop. Do not promise background execution the client cannot provide.
+- **Thirty minutes without progress is broken.** Any review, queue, or helper
+  with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
+  of "still waiting" on the same item.
 - **Keep canonical checkouts landing-only.** Every write-capable task uses its
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository
@@ -110,17 +116,19 @@ rulings, verbatim: `docs/owner-rulings.md`.
   production, shared-db, ui-live-workflow.
 - **Quote every time in EST (New York City):** every human-facing time names
   EST/EDT (America/New_York), e.g. `3:45 PM EST`. Machine keys may stay UTC.
+  Compute it from the system clock (`TZ=America/New_York date`), never copy
+  from a UTC log line, and never quote a time later than now.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself; only a `popcre/shared-db` credential waits for an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), and no rotation happens for a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production:** read-only by default; no human approval is ever requested.
-  The assigned AI reviewer's explicit APPROVE on the exact inputs gates every
-  technical production action. Database writes skip that APPROVE but keep every other gate. Before production or database work, read
+  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE on the exact inputs gates every
+  technical production action; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database writes skip that APPROVE but keep every other gate. Before production or database work, read
   `docs/standing-rules-details.md`. (rulings: docs/owner-rulings.md)
   The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue or stops for an engineer;
@@ -131,8 +139,10 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - **Sign everything posted to GitHub** with `Posted by ZCode chat <id> on
   <machine>`, where `<id>` is `$ZCODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
-- **Reviews:** pick an in-rotation reviewer of a different engine via
-  `ai-review`; before any review, read `docs/reviewer-rotation-rules.md`.
+- **Reviews:** required only in `popcre/shared-db` (owner ruling
+  2026-10-15); no other repository waits for a review. There, pick an
+  in-rotation reviewer of a different engine via `ai-review`; first read
+  `docs/reviewer-rotation-rules.md`.
 - **Observation week** (while the window file is live, #1948): send reviews
   with `--detach` and read them with `ai-review outcome`. Never retry a
   reviewer that failed or was reported skipped this session. When

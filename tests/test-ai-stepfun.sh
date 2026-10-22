@@ -374,6 +374,24 @@ STUB
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "stepfun_prompt_forbids_extra_decision_lines" "[ '$drc' = 0 ] && grep -qx 'rule=yes' '$RH/dreport'"
   check "stepfun_extra_decision_line_is_classified_not_rewritten" "grep -q 'report-extra-decision-line: 1 non-terminal' '$RH/dout' && grep -qx '\*\*APPROVE\*\* stated before the fix' '$RH/dreport'"
+  # A terminal VERDICT: label (agent-profile shape) must become the recorded
+  ## Verdict block, not a false BLOCKED (edge-dev 20261018T200816Z).
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+ans="$(printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE abc123\n')"
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "stepfun_terminal_verdict_label_becomes_heading" "[ '$drc' = 0 ] && grep -qx APPROVE '$RH/dreport' && grep -q '^## Verdict$' '$RH/dreport' && ! grep -q 'report-extra-decision-line' '$RH/dout'"
+  check "stepfun_terminal_verdict_label_not_recorded_as_blocked" "! grep -qx BLOCKED '$RH/dreport'"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'
@@ -543,7 +561,7 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
-check "OpenCode keeps exactly one verdict-format instruction in either review profile" "[ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
+check "OpenCode keeps exactly one verdict-format instruction in either review profile" "grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md' && grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md' && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
 check "OpenCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' | grep -Eq '[0-9a-f]{40}' && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$TMP/args.oc.prompt' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'check f'"
 cp "$TMP/args.oc.prompt" "$TMP/first-review.prompt"
 mode verdict; "$SCRIPT" review --repo "$TMP/repo" --prompt 'different review request' >/dev/null 2>&1

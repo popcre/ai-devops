@@ -513,6 +513,12 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     local review_source="$review"
     if jq -e '.code_only.mode == "code-only"' < "$file" >/dev/null 2>&1; then
       review_source="$source"
+    elif [ "$(canon "$review")" = "$(canon "$source")" ]; then
+      # In-place build: the review root IS the sealed source. When that source
+      # is itself a review snapshot (a repository test or nested review run
+      # inside one), its marker names the PARENT checkout, which is not the
+      # repository this identity sealed. Head and digest below still bind it.
+      review_source="$source"
     elif [ -f "$review/.ai-review-sandbox" ]; then
       review_source="$(head -1 "$review/.ai-review-sandbox")"
     fi
@@ -977,7 +983,10 @@ Structure your reply in this order:
    escapes, other places that trust a binary or input) and report those too.
 2. **Final verdict** — last, under a literal \`## Verdict\` heading. It is
    the only decision: give no early or provisional verdict, and begin no
-   other line with APPROVE, REJECT, REVISE or BLOCKED.
+   other line with APPROVE, REJECT, REVISE or BLOCKED. The verdict word must
+   be the very next non-blank line after the heading: put any head-SHA
+   binding sentence in your findings ABOVE the heading, never between the
+   heading and the word.
 
 Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
 Use BLOCKED when you could not reach a judgment; never approve by default.

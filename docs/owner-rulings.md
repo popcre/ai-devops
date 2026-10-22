@@ -49,3 +49,23 @@ Current rule: no assigned AI reviewer APPROVE is required for a database
 write. Every other gate stays: task declaration, class escalation,
 protected-class seals, target identity proof, claim rules, and live proof.
 `ai-task-gates check --before database` opens without `--reviewer-approval`.
+
+## 2026-10-15 — review is required only in popcre/shared-db
+
+Verbatim, from Albert's chat: "we turned off reviewing in all repos aside from
+shared-db. why is this waiting for a review?"
+
+Current rule: only `popcre/shared-db` requires an AI review. No other
+repository's PR, merge, or task waits for one; a task-class gate that still
+names a review outside shared-db is stale and does not apply.
+
+## 2026-10-21 — ai-pr-wait defaults to 60 minutes; no new wait tooling
+
+Verbatim, from Albert's chat: "add NO new tooling"; the waiter default was
+raised to 60 minutes on purpose and runs in the background.
+
+Current rule: `bin/ai-pr-wait` keeps its 60-minute default deadline and is run
+in the background; the explicit `--timeout-minutes` flag is optional. This
+supersedes the #1183 child 3 requirement that every `ai-pr-wait` call name an
+explicit deadline. A lone `sleep` is legitimate; sleep-in-a-loop shapes are
+refused by the pr-poll-guard hook, not by a blanket permission deny (#1962).

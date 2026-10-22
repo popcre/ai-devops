@@ -93,12 +93,10 @@ shared-db allocator draws; everywhere else, a rotation reviewer run through
 shared-db there is no draw command: the session itself picks any reviewer the
 registry lists as in rotation (`config/reviewer-registry.json`, mirrored from
 the allocator) and moves to the next one if it is unreachable. The
-implementing session never approves its own change. Discretionary AI review is
-**shared-db-only** (owner 2026-10-13, popcre/ai-devops#1714): outside
-`popcre/shared-db`, dispatch a review only when the task class's gate already
-demands one (installation, reviewer-safety, deployment, infrastructure,
-production, shared-db promotion). Ordinary docs, tooling, and non-shared-db
-code land with no review. Authority an AI cannot
+implementing session never approves its own change. AI review is required
+**only in `popcre/shared-db`** (owner 2026-10-15, verbatim in
+`docs/owner-rulings.md`, superseding 2026-10-13 popcre/ai-devops#1714): no other
+repository's work waits for a review. Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's
 exact-head APPROVE report (popcre/ai-devops#996), from a review run with
@@ -186,13 +184,15 @@ and points here.
   outgrew the class, redeclare and say so. private-evidence is read-only
   analysis.
 - **Secrets:** values move only through pipes or protected files. Rotation
-  needs an assigned AI reviewer's APPROVE of the rotation plan (exact
-  credential, provider, and consumers), except a credential under a standing
+  of a `popcre/shared-db` credential needs an assigned AI reviewer's APPROVE of
+  the rotation plan (exact credential, provider, and consumers); elsewhere the
+  AI rotates without review. Never rotate a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or
   reviewed preview. No broad staging or destructive Git over unreviewed work,
   another session's files, a repository root, or a machine-local overlay.
-- **Production:** the reviewer's APPROVE is on the exact inputs. Database
+- **Production:** in `popcre/shared-db` the reviewer's APPROVE is on the exact
+  inputs; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database
   writes skip that APPROVE but keep every other gate (see "Database writes").
   The automatic `shared-db` migration promotion exception re-proves the one
   open structural work issue or stops for an engineer; it authorizes no manual

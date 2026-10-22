@@ -4,10 +4,12 @@
 # `bin/ai-claude-permissions` merges these into the USER-level settings file
 # (~/.claude/settings.json), so they cover every project on the machine.
 #
-# This file is additive only: the script never removes an entry a machine
-# already has, and never touches `deny`, `ask`, or anything else in the file.
-# Delete a line here and it simply stops being enforced on the next sync;
-# machines that already have it keep it.
+# This file is additive: the script never removes an entry a machine already
+# has, and never touches `ask` or anything else in the file. Delete a line here
+# and it simply stops being enforced on the next sync; machines that already
+# have it keep it. The one exception is a `retire:` line, which names an entry
+# this file once installed and removes exactly that entry (`retire:deny:...`
+# for a deny entry) wherever it is still present.
 #
 # Browser page-inspection tools. A session doing visual/UI verification needs
 # these to screenshot and read a rendered page; without them it stops on a
@@ -37,7 +39,28 @@ Bash(wc:*)
 Bash(head:*)
 Bash(tail:*)
 
-# Hand-written wait loops (sleep in a loop, gh run watch) are refused; wait with
-# a background command instead. Added 2026-10-21.
-deny:Bash(sleep:*)
+# `gh run watch` is refused; wait with a background `ai-pr-wait` instead. A lone
+# `sleep` is legitimate and is NOT denied: hand-written sleep-in-a-loop shapes are
+# refused by the tested pr-poll-guard hook, which is the contract. The broad
+# `deny:Bash(sleep:*)` shipped on 2026-10-21 (PR #1932) is retired below so every
+# machine that installed it loses it on the next sync (#1962).
 deny:Bash(gh run watch:*)
+retire:deny:Bash(sleep:*)
+
+# Read-only commands from a scan of the 50 most recent transcripts on edge-dev3
+# (2026-10-21) that Claude Code does not already auto-allow. Excluded on purpose:
+# `gcloud secrets` (prints secret values), `ai-task-gates start/check` (they
+# record gate state), `gcloud builds retry/triggers` (can change builds).
+Bash(ai-pr-wait *)
+Bash(bin/ai-pr-wait *)
+Bash(ai-doc-safety)
+Bash(ai-doc-safety *)
+Bash(bin/ai-doc-safety)
+Bash(bin/ai-doc-safety *)
+Bash(ai-review doctor)
+Bash(gcloud builds list *)
+Bash(gcloud builds describe *)
+Bash(gcloud builds log *)
+Bash(gcloud run services list *)
+Bash(gcloud run services describe *)
+Bash(gcloud logging read *)

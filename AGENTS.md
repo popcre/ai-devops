@@ -125,17 +125,14 @@ pipeline. The recovery procedure lives in
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.
-- **Independent review is required for the reviewer safety path:** changes to
-  reviewer wrappers, evidence tools, safety tests, or installed routing rules
-  need one read-only exact-head final review before merge. Ordinary plans,
-  analysis notes, and documentation-router wording do not.
+- **The reviewer safety path** (reviewer wrappers, evidence tools, safety
+  tests, installed routing rules) no longer needs a review before merge: owner
+  ruling 2026-10-15 limits required review to `popcre/shared-db`.
 - **Two operating systems, one toolkit** (#1783): reviewer tooling runs on Ubuntu (hetz, edge-dev3) and Windows (4837/al8960ofc, 916, edge-dev). Before changing it, write down the OS the problem happened on and every OS the change will run on; design for both, prove both, install on both by each OS's route. Brief: [`config/reviewer-platform-brief.txt`](config/reviewer-platform-brief.txt) (printed by `ai-task-gates start` and `ai-reviewer-issue show`).
 - **One code path for every reviewer** (#1834): in shared review code, a step that decides whether evidence, a receipt, a record, cleanup or qualification happens never branches on a provider name — declare the exception as a capability in `config/review-runner-doors.json` (inventory: [`docs/reviewer-harness-consolidation.md`](docs/reviewer-harness-consolidation.md)).
-- **Discretionary AI review is shared-db-only** (owner 2026-10-13, #1714).
-  Outside `popcre/shared-db`, dispatch a review only when the task class's gate
-  already demands one (installation, reviewer-safety, deployment,
-  infrastructure, production, shared-db promotion). Ordinary docs, tooling, and
-  non-shared-db code land with no review; a review stays available on request
+- **AI review is required only in `popcre/shared-db`** (owner 2026-10-15,
+  superseding 2026-10-13 #1714; see `docs/owner-rulings.md`). No other
+  repository's work waits for a review; a review stays available on request
   by name. The rotation pool is Muse, DeepSeek, GLM, and StepFun. Other
   wrappers stay installed and callable by name but are frozen (best-effort,
   not maintained). Rules: [`docs/reviewer-rotation-rules.md`](docs/reviewer-rotation-rules.md)
@@ -156,7 +153,9 @@ pipeline. The recovery procedure lives in
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
   iteration cap (#401). Use bounded in-session `ai-pr-wait` /
-  `ai-gh-wait` with an **explicit** `--timeout-minutes` deadline only; there is
+  `ai-gh-wait`; `ai-pr-wait` defaults to a 60-minute deadline and runs in the
+  background (owner ruling 2026-10-21, #1962, supersedes the #1183 explicit-flag
+  rule), `ai-gh-wait` still needs an explicit `--timeout-minutes`; there is
   no required waiter registry, TTL service, or park-state store (voluntary
   inert registration is permitted, unrequired, unmeasured). If the wait will outlive
   the turn, leave the existing issue or pull request as the card and return
