@@ -35,6 +35,12 @@ make_elf "$TMP/ccd/2.1.300-cafebabe"
 export AI_HEADROOM_CCD_DIR="$TMP/ccd"
 export AI_HEADROOM_PROXY_URL="http://127.0.0.1:9/health-parent"
 export HOME="$TMP/home"
+# A fake systemctl, so unwrap-remote never touches this host's real user units.
+mkdir -p "$TMP/fakebin"
+printf '#!/usr/bin/env bash
+printf "%%s\n" "$*" >> "%s/systemctl.log"
+' "$TMP" > "$TMP/fakebin/systemctl"
+chmod +x "$TMP/fakebin/systemctl"; export PATH="$TMP/fakebin:$PATH"
 
 "$TOOL" wrap-remote >"$TMP/wrap.out"
 check 'wrap moves first binary aside' test -f "$TMP/ccd/2.1.299-deadbeef.headroom-real"
@@ -76,6 +82,10 @@ check 're-wrap keeps one real binary' bash -c "[ ! -e '$TMP/ccd/2.1.299-deadbeef
 check 'unwrap restores raw binary' bash -c "dd if='$TMP/ccd/2.1.299-deadbeef' bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d ' \\n' | grep -q 7f454c46"
 check 'unwrap removes wrapper' bash -c "! grep -q 'Managed by ai-headroom' '$TMP/ccd/2.1.299-deadbeef'"
 check 'unwrap removes real sidecar' bash -c "! test -e '$TMP/ccd/2.1.299-deadbeef.headroom-real'"
+if [ -f "$TMP/systemctl.log" ]; then  # Linux only: Windows skips the timer entirely
+  check 'unwrap disables the auto-rewrap timer' grep -q 'disable --now ai-headroom-autowrap.timer' "$TMP/systemctl.log"
+  check 'unwrap stops a running rewrap service' grep -q 'stop ai-headroom-autowrap.service' "$TMP/systemctl.log"
+fi
 
 # Claude Desktop layout: <ver>/<hash>/claude, wrapped only once .verified exists.
 D="$TMP/desktop"
