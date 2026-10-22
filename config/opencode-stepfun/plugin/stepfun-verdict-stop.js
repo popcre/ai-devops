@@ -19,13 +19,24 @@
 // OpenCode calls every export of a plugin file as a plugin, so this file
 // exports exactly one function and nothing else.
 
-const VERDICT_BLOCK = /^## Verdict[ \t]*\r?\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*\r?$/m
+// Verdict shapes the door records (tools/lib/review-doors/stepfun.sh
+// extract_report): the "## Verdict" heading block, or a terminal line that
+// tools/lib/review-terminal-verdict.sh accepts (bare word, optional
+// "VERDICT:" prefix, optional hex head SHA).
+const VERDICT_BLOCK = /^## Verdict[ \t]*\r?\n[ \t]*(APPROVE|REJECT|REVISE|BLOCKED)[ \t]*\r?$/m
+const TERMINAL_LINE = /^(VERDICT:\s*)?\**(APPROVE|REJECT|REVISE|BLOCKED)\**(\s+[0-9a-f]+)?$/
+
+const hasVerdict = (text) => {
+  if (VERDICT_BLOCK.test(text)) return true
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "")
+  return lines.length > 0 && TERMINAL_LINE.test(lines[lines.length - 1])
+}
 
 export const StepfunVerdictStop = async () => {
   const delivered = new Set()
   return {
     "experimental.text.complete": async (input, output) => {
-      if (input && input.sessionID && output && typeof output.text === "string" && VERDICT_BLOCK.test(output.text)) {
+      if (input && input.sessionID && output && typeof output.text === "string" && hasVerdict(output.text)) {
         delivered.add(input.sessionID)
       }
     },

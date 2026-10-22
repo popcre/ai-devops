@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-st
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+HOME_REAL="$HOME"   # only to find the installed pinned OpenCode binary
 export HOME="$TMP/home" AI_STEPFUN_STATE_DIR="$TMP/state" AI_STEPFUN_KEY_STORE="$TMP/home/key"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_STEPFUN_STEP_BIN="$TMP/bin/step"
 export AI_REVIEW_EVENT_DIR="$TMP/events"
@@ -660,6 +661,22 @@ if command -v node >/dev/null 2>&1; then
   check "verdict-stop plugin continues before the verdict and stops after it" "node '$ROOT/tests/stepfun-verdict-stop-plugin.mjs' '$ROOT/config/opencode-stepfun/plugin/stepfun-verdict-stop.js'"
 else
   skip "verdict-stop plugin behaviour (node is not installed)"
+fi
+# Pinned-binary contract: OpenCode 1.18.12 fires both hooks with the payload
+# shapes the plugin reads (sessionID input; enabled / text outputs), and the
+# synthetic continue the plugin declines is the one gated by the hook.
+OC_PIN="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
+OC_PINNED_BIN=""
+for c in "$HOME_REAL/.local/lib/ai-devops/opencode/$OC_PIN/node_modules/opencode-ai/bin/opencode.exe" \
+         "$HOME_REAL/.local/lib/ai-devops/opencode/$OC_PIN/node_modules/opencode-ai/bin/.opencode" \
+         "$HOME_REAL/.local/lib/ai-devops/opencode/$OC_PIN/node_modules/opencode-ai/bin/opencode"; do
+  [ -f "$c" ] && [ "$(head -c 2 "$c")" != '#!' ] && { OC_PINNED_BIN="$c"; break; }
+done
+if [ -n "$OC_PINNED_BIN" ] && [ "$OC_PIN" = 1.18.12 ]; then
+  check "pinned OpenCode gates the post-compaction continue on the autocontinue hook" "LC_ALL=C grep -aFq 'trigger(\"experimental.compaction.autocontinue\",{sessionID:w.sessionID' '$OC_PINNED_BIN' && LC_ALL=C grep -aFq '{enabled:!0})).enabled)' '$OC_PINNED_BIN'"
+  check "pinned OpenCode passes the whole text part to experimental.text.complete" "LC_ALL=C grep -aFq 'trigger(\"experimental.text.complete\",{sessionID:a.sessionID,messageID:a.assistantMessage.id,partID:a.currentText.id},{text:a.currentText.text})' '$OC_PINNED_BIN'"
+else
+  skip "pinned OpenCode hook contract (OpenCode ${OC_PIN:-?} binary not installed here)"
 fi
 
 printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
