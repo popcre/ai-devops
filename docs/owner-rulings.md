@@ -69,3 +69,15 @@ in the background; the explicit `--timeout-minutes` flag is optional. This
 supersedes the #1183 child 3 requirement that every `ai-pr-wait` call name an
 explicit deadline. A lone `sleep` is legitimate; sleep-in-a-loop shapes are
 refused by the pr-poll-guard hook, not by a blanket permission deny (#1962).
+
+## 2026-10-21 — reviewed install authorized for the edge-dev repair release
+
+Verbatim, from Albert's chat: "yes" (after: "The reviewer says we can finish
+with one extra safety blessing. That is only for putting the software on this
+machine. It does not break your earlier rule about reviews for our fixes.").
+
+Current rule: the one-time reviewed install of the merged edge-dev repair
+release (plan `plan_edge-dev-reviewer-repair-no-review.md` step 7) is
+authorized. That reviewed install is an install-time safety authorization,
+not a merge gate on the repair PRs. The earlier "only shared-db requires an
+AI review" rule still governs PR merges everywhere else.
