@@ -7,7 +7,8 @@
 # 20261018T200816Z / 20261019T151933Z, #1947). Never invents a decision.
 
 # rtv_has_terminal_verdict < TEXT — exit 0 when the last non-blank line is a
-# decision (optionally prefixed "VERDICT:").
+# bare decision (optionally prefixed "VERDICT:", optionally followed by a
+# hex head SHA). Qualified decisions are not terminal verdicts.
 rtv_has_terminal_verdict() {
   awk '
     { lines[NR]=$0 }
@@ -16,7 +17,14 @@ rtv_has_terminal_verdict() {
       if (last < 1) exit 1
       t = lines[last]
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-      if (t ~ /^(VERDICT:[[:space:]]*)?(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) exit 0
+      if (t !~ /^(VERDICT:[[:space:]]*)?(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) exit 1
+      # Accept only "<word>" or "<word> <hex sha>": a qualified line such as
+      # "APPROVE only after X" must fail closed as BLOCKED (#1973).
+      sub(/^VERDICT:[[:space:]]*/, "", t)
+      gsub(/\*+/, "", t)
+      sub(/^(APPROVE|REJECT|REVISE|BLOCKED)/, "", t)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
+      if (t == "" || t ~ /^[0-9a-f]+$/) exit 0
       exit 1
     }'
 }

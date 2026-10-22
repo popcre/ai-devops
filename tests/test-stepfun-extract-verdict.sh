@@ -56,4 +56,14 @@ if printf 'no decision here\n' | rtv_has_terminal_verdict; then
 fi
 echo 'PASS helper ignores text without a decision'
 
+# Qualified prose after the decision word must fail closed as BLOCKED
+for line in 'APPROVE only after the lint fix lands' 'VERDICT: APPROVE once CI passes' 'REJECT unless reverted abc123'; do
+  printf 'Analysis of the change with plenty of detail in f:1.
+
+%s
+' "$line" > "$result"
+  extract_report "$result" "$TMP/r4.md" abc123 review stepcode
+  grep -qx BLOCKED <(awk '/^## Verdict[[:space:]]*$/{p=1;next} p{print;exit}' "$TMP/r4.md")     && echo "PASS qualified line stays BLOCKED: $line"     || { echo "FAIL qualified: $line"; cat "$TMP/r4.md"; exit 1; }
+done
+
 echo ALL_PASS
