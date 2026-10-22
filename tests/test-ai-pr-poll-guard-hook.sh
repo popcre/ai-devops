@@ -67,18 +67,34 @@ check "payload without a command exits 0" "echo '{\"tool_name\":\"Write\",\"tool
 # --- Windows spellings get exactly the Unix verdict (#1891 install review) ------
 # Every case above that runs bash or sh is replayed with each Windows spelling of
 # that shell; the hook must give the same answer as for the plain name.
-parity_bad=0; parity_n=0
-for c in "${CASES[@]}"; do
-  printf '%s' "$c" | grep -Eq '(^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?(bash|sh)([^A-Za-z0-9_.-]|$)' || continue
-  want="$(fire "$c")"
-  for form in 'bash.exe' 'BASH.EXE' '"C:/Program Files/Git/bin/bash.exe"' 'C:\Git\bin\bash.exe'; do
-    t="${c//\/usr\/bin\/bash/bash}"; t="${t//\/bin\/bash/bash}"; w="${t//bash/$form}"
-    [ "$w" != "$c" ] || continue
-    parity_n=$((parity_n+1)); got="$(fire "$w")"
-    [ "$got" = "$want" ] || { parity_bad=$((parity_bad+1)); printf '  parity mismatch (%s vs %s): %s\n' "$got" "$want" "$w"; }
+parity_bad=0; parity_n=0; parity_cases=0
+# Token-aware replacement without regex replacement syntax, so backslashes survive.
+swap() { # TEXT NAME FORM -> TEXT with each command token NAME (or /bin/NAME, /usr/bin/NAME) as FORM
+  local s="$1" out="" re="(^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?($2)([^A-Za-z0-9_.-]|\$)" m
+  while [[ $s =~ $re ]]; do
+    m="${BASH_REMATCH[0]}"; out+="${s%%"$m"*}${BASH_REMATCH[1]}$3"; s="${BASH_REMATCH[4]}${s#*"$m"}"
   done
+  printf '%s' "$out$s"
+}
+for c in "${CASES[@]}"; do
+  hit=0; want=""
+  for n in bash dash zsh ksh ash sh; do
+    [[ $c =~ (^|[^A-Za-z0-9_./-])(/usr/bin/|/bin/)?$n([^A-Za-z0-9_.-]|$) ]] || continue
+    [ -n "$want" ] || want="$(fire "$c")"; hit=1
+    upper="$(printf '%s' "$n" | tr a-z A-Z)"
+    for form in "$n.exe" "$upper.EXE" "\"C:/Program Files/Git/bin/$n.exe\"" "C:\\Git\\bin\\$n.exe"; do
+      w="$(swap "$c" "$n" "$form")"
+      [ "$w" != "$c" ] || { parity_bad=$((parity_bad+1)); printf '  parity replay did not change: %s\n' "$c"; continue; }
+      parity_n=$((parity_n+1)); got="$(fire "$w")"
+      [ "$got" = "$want" ] || { parity_bad=$((parity_bad+1)); printf '  parity mismatch (%s vs %s): %s\n' "$got" "$want" "$w"; }
+    done
+  done
+  parity_cases=$((parity_cases+hit))
 done
-check "Windows shell spellings match the Unix verdict on every shell case ($parity_n variants)" "[ $parity_n -ge 8 ] && [ $parity_bad = 0 ]"
+check "Windows shell spellings match the Unix verdict on every shell case ($parity_cases cases, $parity_n variants)" "[ $parity_cases -ge 12 ] && [ $parity_bad = 0 ]"
+# A quoted Unix path is not a Windows spelling and keeps its old treatment.
+allows "a here-document fed to a quoted Unix path keeps its old verdict" $'"/bin/bash" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+
 
 # --- installer -----------------------------------------------------------------
 CH="$TMP/claudehome"; mkdir -p "$CH"
