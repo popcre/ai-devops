@@ -135,7 +135,8 @@
         "test-ai-muse.sh",
         "test-ai-muse-part2.sh",
         "test-ai-muse-part3.sh",
-        "test-ai-lock-doctor.sh"
+        "test-ai-lock-doctor.sh",
+        "test-opencode-verdict-stop.sh"
       ],
       "bin/ai-muse.cmd": [
         "test-ai-muse.sh",
@@ -382,7 +383,8 @@
         "test-ai-review-engine.sh",
         "test-ai-review-lifecycle.sh",
         "test-ai-review-preflight.sh",
-        "test-pool-dispatch-doors.sh"
+        "test-pool-dispatch-doors.sh",
+        "test-opencode-verdict-stop.sh"
       ],
       "tools/lib/review-doors/gemini.sh": [
         "test-ai-gemini-request-precheck.sh",
@@ -419,7 +421,8 @@
         "test-ai-review-preflight.sh",
         "test-pool-dispatch-doors.sh",
         "test-ubuntu-install-stages.sh",
-        "test-workflow-policy.sh"
+        "test-workflow-policy.sh",
+        "test-opencode-verdict-stop.sh"
       ],
       "tools/lib/review-doors/qwen.sh": [
         "test-ai-grok-review.sh",
@@ -440,7 +443,8 @@
         "test-ai-stepfun-windows-shell.sh",
         "test-ai-stepfun.sh",
         "test-pool-dispatch-doors.sh",
-        "test-stepfun-extract-verdict.sh"
+        "test-stepfun-extract-verdict.sh",
+        "test-opencode-verdict-stop.sh"
       ],
       "tools/lib/review-terminal-verdict.sh": [
         "test-pool-dispatch-doors.sh",
@@ -467,7 +471,8 @@
         "test-ai-glm.sh",
         "test-ai-muse.sh",
         "test-ai-review-engine.sh",
-        "test-ai-stepfun.sh"
+        "test-ai-stepfun.sh",
+        "test-opencode-verdict-stop.sh"
       ],
       "tools/lib/stepfun-pace.sh": [
         "test-ai-grok-review.sh",
