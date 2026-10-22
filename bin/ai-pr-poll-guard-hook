@@ -17,22 +17,23 @@ payload="$(cat 2>/dev/null || true)"
 
 cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [[ -n "$cmd" ]] || exit 0
-# Windows spells shells case-insensitively, with .exe, and often as a quoted
-# full path ("C:/Program Files/Git/bin/bash.exe"). Reduce each to its bare
-# name, then lowercase everything, so every pattern below sees plain `bash`.
+# Windows spells a shell case-insensitively, with .exe, and often as a quoted
+# full path ("C:/Program Files/Git/bin/bash.exe"). Where a shell is the command
+# being run (line start, or after ; & | or a paren, optionally after env),
+# reduce it to its plain lowercase name so the patterns below see `bash`. Only
+# that name changes: a file merely named bash.exe and the case of flags stay.
 cmd="$(printf '%s' "$cmd" | sed -E \
-  -e 's/"[^"]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?"/\1/Ig' \
-  -e "s/'[^']*[\\\\/]((ba|da|z|k|a)?sh)(\\.exe)?'/\\1/Ig" \
-  -e 's/(^|[^A-Za-z0-9_])[^ "'"'"';&|()<]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?([ \t<;|&)]|$)/\1\2\5/Ig' \
-  -e 's/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh)\.exe([^A-Za-z0-9_]|$)/\1\2\4/Ig' \
-  | tr 'A-Z' 'a-z')"
+  -e 's/(^|[;&|(])([ \t]*)(env[ \t]+)?"[^"]*[\/]((ba|da|z|k|a)?sh)(\.exe)?"/\1\2\3\L\4/Ig' \
+  -e "s/(^|[;&|(])([ \t]*)(env[ \t]+)?'[^']*[\\/]((ba|da|z|k|a)?sh)(\.exe)?'/\1\2\3\L\4/Ig" \
+  -e 's/(^|[;&|(])([ \t]*)(env[ \t]+)?[^ \t"'"'"';&|()<>]*[\/]((ba|da|z|k|a)?sh)(\.exe)?([ \t<;|&)]|$)/\1\2\3\L\4\E\7/Ig' \
+  -e 's/(^|[;&|(])([ \t]*)(env[ \t]+)?((ba|da|z|k|a)?sh)(\.exe)?([ \t<;|&)]|$)/\1\2\3\L\4\E\7/Ig')"
 # Text is not a command: drop here-document bodies, then quoted strings (commit
 # messages, notes, echo), so a message that merely mentions polling is allowed.
 cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
   # A body ends on its exact delimiter (tab-indented for <<-). An
   # unterminated body is not dropped: it is scanned like any command (#1901).
   end != "" { line = $0; if (dash) sub(/^\t+/, "", line); if (line == end) { end = ""; buf = ""; next } buf = buf $0 "\n"; next }
-  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh(\.exe)?([ \t]|<|$)/ {
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh([ \t]|<|$)/ {
     end = substr($0, RSTART, RLENGTH); dash = (end ~ /^<<-/); sub(/^<<-?[ \t]*["'"'"']?/, "", end); buf = ""
   }
   { print }
@@ -40,14 +41,14 @@ cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
 # Loops are often written over several lines; judge the command as one line.
 # Text piped into a shell (`printf '...' | bash`) is a script too (#1901).
 piped=""
-if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh(\.exe)?([[:space:]]|$)'; then
+if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh([[:space:]]|$)'; then
   piped="$(printf '%s' "$cmd" | tr '\n' ' ' | tr -d "\"'")"
 fi
 # A quoted script handed to a child shell or eval IS a command (#1901): unwrap
 # `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
 cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
-  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh([.]exe)?( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\6 /g" \
-  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh([.]exe)?( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\6 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\5 /g" \
   | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
 
 [ -z "$piped" ] || cmd="$cmd ; $piped"

@@ -56,6 +56,9 @@ while true; do gh pr view 1; sleep 9; done
 EOF'
 blocks "a poll loop inside sh.exe -c" "sh.exe -c 'until gh pr merge 1; do sleep 9; done'"
 allows "a quoted note passed to bash.exe -c" "bash.exe -c 'echo done'"
+allows "a here-document written to a file named bash.exe" $'cat > bash.exe <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+allows "a here-document written to a quoted full path bash.exe" $'cat > "C:/tmp/bash.exe" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
+allows "BASH.EXE -C (noclobber) runs no quoted script" "BASH.EXE -C 'while true; do gh pr view 1; done'"
 blocks "an uppercase BASH.EXE -c loop" "BASH.EXE -c 'while true; do gh pr view 1; done'"
 blocks "a quoted full-path bash.exe -c loop" "\"C:/Program Files/Git/bin/bash.exe\" -c 'while true; do gh pr view 1; done'"
 blocks "a loop piped into a quoted full-path bash.exe" "printf 'while true; do gh pr view 1; sleep 9; done' | \"C:/Program Files/Git/bin/bash.exe\""
