@@ -37,9 +37,14 @@ export AI_HEADROOM_PROXY_URL="http://127.0.0.1:9/health-parent"
 export HOME="$TMP/home"
 # A fake systemctl, so unwrap-remote never touches this host's real user units.
 mkdir -p "$TMP/fakebin"
-printf '#!/usr/bin/env bash
-printf "%%s\n" "$*" >> "%s/systemctl.log"
-' "$TMP" > "$TMP/fakebin/systemctl"
+cat > "$TMP/fakebin/systemctl" <<EOF
+#!/usr/bin/env bash
+printf '%s
+' "\$*" >> "$TMP/systemctl.log"
+# is-active succeeds only for a unit named in FAKE_ACTIVE, so tests can hold a unit "running".
+if [ "\$2" = is-active ]; then case " \${FAKE_ACTIVE:-} " in *" \${4:-\$3} "*) exit 0;; *) exit 3;; esac; fi
+exit 0
+EOF
 chmod +x "$TMP/fakebin/systemctl"; export PATH="$TMP/fakebin:$PATH"
 
 "$TOOL" wrap-remote >"$TMP/wrap.out"
@@ -84,7 +89,16 @@ check 'unwrap removes wrapper' bash -c "! grep -q 'Managed by ai-headroom' '$TMP
 check 'unwrap removes real sidecar' bash -c "! test -e '$TMP/ccd/2.1.299-deadbeef.headroom-real'"
 if [ -f "$TMP/systemctl.log" ]; then  # Linux only: Windows skips the timer entirely
   check 'unwrap disables the auto-rewrap timer' grep -q 'disable --now ai-headroom-autowrap.timer' "$TMP/systemctl.log"
-  check 'unwrap stops a running rewrap service' grep -q 'stop ai-headroom-autowrap.service' "$TMP/systemctl.log"
+  check 'unwrap waits for a running rewrap instead of killing it' bash -c "grep -q 'is-active --quiet ai-headroom-autowrap.service' '$TMP/systemctl.log' && ! grep -q '^--user stop' '$TMP/systemctl.log'"
+fi
+
+# A rewrap that will not finish, or a timer that will not stop, blocks the unwrap (Linux only).
+if [ -f "$TMP/systemctl.log" ]; then
+  "$TOOL" wrap-remote >/dev/null
+  check 'stuck rewrap service refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.service AI_HEADROOM_AUTOWRAP_WAIT=1 '$TOOL' unwrap-remote >/dev/null 2>&1"
+  check 'refused unwrap leaves the wrapper intact' test -f "$TMP/ccd/2.1.299-deadbeef.headroom-real"
+  check 'active timer refuses the unwrap' bash -c "! FAKE_ACTIVE=ai-headroom-autowrap.timer '$TOOL' unwrap-remote >/dev/null 2>&1"
+  "$TOOL" unwrap-remote >/dev/null
 fi
 
 # Claude Desktop layout: <ver>/<hash>/claude, wrapped only once .verified exists.

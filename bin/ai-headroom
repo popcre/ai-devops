@@ -459,9 +459,21 @@ autowrap_set() { # autowrap_set on|off
       || die "ai-headroom: could not enable $AUTOWRAP_UNIT.timer"
     printf 'Desktop auto-rewrap    : on (every 5 min)\n'
   else
+    local i
     systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
-    # A rewrap already running would race the unwrap; stop waits for it to end.
-    systemctl --user stop "$AUTOWRAP_UNIT.service" >/dev/null 2>&1 || true
+    # Never trust a silent failure: the timer must be confirmed inactive.
+    if systemctl --user is-active --quiet "$AUTOWRAP_UNIT.timer" 2>/dev/null; then
+      die "ai-headroom: $AUTOWRAP_UNIT.timer is still active; not unwrapping"
+    fi
+    # A rewrap already running is left to finish (killing it mid-move could
+    # strand a binary); wait (60s by default), and refuse to continue if it persists.
+    for i in $(seq "${AI_HEADROOM_AUTOWRAP_WAIT:-60}"); do
+      systemctl --user is-active --quiet "$AUTOWRAP_UNIT.service" 2>/dev/null || break
+      sleep 1
+    done
+    if systemctl --user is-active --quiet "$AUTOWRAP_UNIT.service" 2>/dev/null; then
+      die "ai-headroom: $AUTOWRAP_UNIT.service is still running; not unwrapping"
+    fi
     rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
