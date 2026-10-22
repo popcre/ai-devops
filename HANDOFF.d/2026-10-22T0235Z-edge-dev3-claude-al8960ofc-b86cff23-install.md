@@ -1,3 +1,9 @@
+---
+issue: popcre/ai-devops#1881
+status: OPEN
+owner: unclaimed — next session claims on the issue
+---
+
 # Handoff — finish the b86cff23 toolkit install on al8960ofc
 
 ## 1. Goal

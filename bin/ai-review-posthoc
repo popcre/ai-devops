@@ -8,8 +8,9 @@
 # no scoreboard verdict yet, and (without --dry-run) reviews each merged head
 # with the next usable rotation reviewer:
 #   ai-review <provider> final-check --base <sha>^ --assert-head <sha>
-# in a temporary detached worktree. A REJECT opens a fix-forward issue
-# "Post-hoc REJECT on <repo>#<pr>" linking the report; it never reverts.
+# in a temporary detached worktree. A REJECT or REVISE opens a fix-forward
+# issue "Post-hoc <VERDICT> on <repo>#<pr>" linking the report; it never
+# reverts. Every GitHub call goes through bin/ai-gh (AGENTS.md throttle rule).
 # Run it from a checkout of the repository being drained.
 set -euo pipefail
 
@@ -25,7 +26,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$limit" in ''|*[!0-9]*) printf 'ai-review-posthoc: --limit needs a number.\n' >&2; exit 2 ;; esac
-GH="${AI_POSTHOC_GH_BIN:-gh}"
+GH="${AI_POSTHOC_GH_BIN:-$ROOT/ai-gh}"
+[ -x "$GH" ] || { printf 'ai-review-posthoc: GitHub throttle %s is missing; no GitHub call was made.\n' "$GH" >&2; exit 2; }
 REVIEW="${AI_POSTHOC_REVIEW_BIN:-$ROOT/ai-review}"
 PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$ROOT/ai-review-preflight}"
 BOARD="${AI_REVIEW_SCOREBOARD_FILE:-${AI_REVIEW_SCOREBOARD_DIR:-$HOME/.local/state/ai-devops/review-scoreboard}/reviews.jsonl}"
@@ -39,14 +41,15 @@ verdict_for() { # SHA -> prints the latest APPROVE|REJECT|REVISE for it, if any
     | tr -d '\r' | tail -1 | grep .
 }
 
-# One fix-forward issue per pull request, whichever host or run finds it.
-open_reject_issue() { # NUMBER SHA PROVIDER REPORT
-  local title="Post-hoc REJECT on $repo#$1"
+# One fix-forward issue per pull request and verdict, whichever host or run finds it.
+open_fix_issue() { # VERDICT NUMBER SHA PROVIDER REPORT
+  local verdict="$1"; shift
+  local title="Post-hoc $verdict on $repo#$1"
   if "$GH" issue list -R "$repo" --state all --search "\"$title\" in:title" --json title -q '.[].title' 2>/dev/null | tr -d '\r' | grep -Fxq "$title"; then
     printf 'ai-review-posthoc: %s already exists.\n' "$title" >&2; return 0
   fi
   "$GH" issue create -R "$repo" --title "$title" \
-    --body "$(printf 'Post-hoc review (observation week) by %s rejected head `%s` of #%s.\n\nReport (on the reviewing host %s): `%s`\n\nFix forward; never revert. Tracked by popcre/ai-devops#1948.\n\nPosted by ai-review-posthoc on %s\n' "$3" "$2" "$1" "$(hostname)" "$4" "$(hostname)")"
+    --body "$(printf 'Post-hoc review (observation week) by %s returned %s for head `%s` of #%s.\n\nReport (on the reviewing host %s): `%s`\n\nFix forward; never revert. Tracked by popcre/ai-devops#1948.\n\nPosted by ai-review-posthoc on %s\n' "$3" "$verdict" "$2" "$1" "$(hostname)" "$4" "$(hostname)")"
 }
 
 queue="$("$GH" pr list -R "$repo" --state merged --label unreviewed-week --limit "$limit" --json number,mergeCommit,headRefOid,title \
@@ -61,9 +64,11 @@ while read -r number sha branch_head title; do
   # The detached run reviewed the branch head; the drain reviews the merged head.
   known="$(verdict_for "$sha" || true)"; refused="$sha"
   [ -n "$known" ] || { known="$(verdict_for "$branch_head" || true)"; refused="$branch_head"; }
-  if [ "$known" = REJECT ]; then
-    printf 'rejected %s#%s %s (refused after merge)\n' "$repo" "$number" "$refused"
-    [ "$dry_run" = 1 ] || open_reject_issue "$number" "$refused" "an earlier run" "$BOARD" || rc_all=3
+  # A REJECT or REVISE already on the board is a refused merge that still needs
+  # its fix-forward issue; neither verdict may strand the pull request.
+  if [ "$known" = REJECT ] || [ "$known" = REVISE ]; then
+    printf '%s %s#%s %s (refused after merge)\n' "$(printf '%s' "$known" | tr '[:upper:]' '[:lower:]')" "$repo" "$number" "$refused"
+    [ "$dry_run" = 1 ] || open_fix_issue "$known" "$number" "$refused" "an earlier run" "$BOARD" || rc_all=3
     continue
   fi
   [ -z "$known" ] || continue
@@ -104,7 +109,9 @@ for item in "${pending[@]}"; do
   verdict=""
   [ -f "$report" ] && verdict="$(awk '/^## Verdict[[:space:]]*$/{getline v; while (v ~ /^[[:space:]]*$/) getline v; last=v} END{gsub(/[[:space:]]/,"",last); print last}' "$report")"
   printf '%s#%s %s: %s (exit %s)\n' "$repo" "$number" "$provider" "${verdict:-no verdict}" "$rc"
-  [ "$verdict" != REJECT ] || open_reject_issue "$number" "$sha" "$provider" "$report" || rc_all=3
+  case "$verdict" in
+    REJECT|REVISE) open_fix_issue "$verdict" "$number" "$sha" "$provider" "$report" || rc_all=3 ;;
+  esac
   git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1 || true
 done
 exit "$rc_all"

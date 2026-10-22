@@ -1053,7 +1053,15 @@ GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-appr
 # from shared-db." Outside popcre/shared-db a reviewer-approval gate a policy
 # lists is not required; it is reported as waived and never enforced.
 REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$'
-reviews_required(){ [ "$IDENTITY" = popcre/shared-db ]; }
+# Identity aliases come from config/repository-coverage.json ("aliases" per
+# repository): a checkout whose origin still reads the pre-transfer name
+# u2giants/shared-db is the same repository and keeps the same gates (#1962).
+canonical_identity(){
+  local coverage="$ROOT/config/repository-coverage.json" canonical=""
+  [ -f "$coverage" ] && canonical="$(jq -r --arg id "$IDENTITY" '[.repositories[]? | select((.aliases // []) | index($id)) | .identity][0] // empty' "$coverage" 2>/dev/null | tr -d '\r')"
+  printf '%s' "${canonical:-$IDENTITY}"
+}
+reviews_required(){ [ "$(canonical_identity)" = popcre/shared-db ]; }
 split_required_gates(){
   local all="$1" checked
   REQUIRED_WAIVED=""
