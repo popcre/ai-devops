@@ -184,7 +184,7 @@ Templates in `config/zcode-headroom/`:
 - `zcode_headroom_tls.py` — stdlib HTTPS reverse proxy (path routing in §2)
 - `install-zcode-headroom-tls.sh` — CA, leaf and `server-chain.crt`
   generation, key owned by the `ai` service user, systemd unit. Run it from
-  the repository with `sudo HEADROOM_TAILNET_IP=<ip> bash
+  the repository with `sudo HEADROOM_TAILNET_IP=<ip> HEADROOM_TAILNET_HOST=<magicdns-name> bash
   config/zcode-headroom/install-zcode-headroom-tls.sh`.
 
 Systemd units: `headroom-zcode.service`, `zcode-headroom-tls.service` under

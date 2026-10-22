@@ -15,6 +15,12 @@ git -C "$TMP/repo" reset -q HEAD leak.txt; rm -f "$TMP/repo/leak.txt"
 printf 'HostName 100.90.80.70\n' > "$TMP/repo/topology.txt"; git -C "$TMP/repo" add topology.txt
 if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: seeded topology fixture passed'; exit 1; fi
 git -C "$TMP/repo" reset -q HEAD topology.txt; rm -f "$TMP/repo/topology.txt"
+printf 'subjectAltName=DNS:hetz.example-tailnet.ts.net\n' > "$TMP/repo/tailnet.txt"; git -C "$TMP/repo" add tailnet.txt
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: seeded tailnet hostname fixture passed'; exit 1; fi
+git -C "$TMP/repo" reset -q HEAD tailnet.txt; rm -f "$TMP/repo/tailnet.txt"
+printf 'Tailscale cannot issue ts.net certs here.\n' > "$TMP/repo/prose.txt"; git -C "$TMP/repo" add prose.txt
+bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null || { echo 'FAIL: bare ts.net prose rejected'; exit 1; }
+git -C "$TMP/repo" reset -q HEAD prose.txt; rm -f "$TMP/repo/prose.txt"
 printf 'project-ref abcdefghijklmnopqrst\n' > "$TMP/repo/project.txt"; git -C "$TMP/repo" add project.txt
 if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: seeded project identifier fixture passed'; exit 1; fi
 git -C "$TMP/repo" reset -q HEAD project.txt; rm -f "$TMP/repo/project.txt"
@@ -59,4 +65,4 @@ git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/re
 
 python3 "$ROOT/tests/test-public-boundary-versions.py"
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
-echo 'PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'
+echo 'PASS: seeded transcript, AI artifact, credential, topology, tailnet hostname, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'

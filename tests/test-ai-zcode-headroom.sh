@@ -56,6 +56,7 @@ printf 'ok - on refuses missing CA\n'
 # (never touches /etc, systemd or the live lane).
 INSTALLER="$ROOT/config/zcode-headroom/install-zcode-headroom-tls.sh"
 check 'installer has no /tmp proxy source' bash -c "! grep -q '/tmp/zcode_headroom_tls.py' '$INSTALLER'"
+check 'installer has no literal tailnet hostname' bash -c "! grep -q 'ts\.net' '$INSTALLER'"
 check 'proxy loads server-chain.crt' grep -q 'server-chain.crt' "$ROOT/config/zcode-headroom/zcode_headroom_tls.py"
 # The installer is Linux-only (hetz, systemd); Git Bash mangles openssl -subj.
 if [ "$(uname -s)" = Linux ]; then
@@ -63,7 +64,7 @@ STUB="$TMP/stub"; FAKE="$TMP/root"; mkdir -p "$STUB"
 for c in systemctl ss sleep; do printf '#!/bin/sh\nexit 0\n' > "$STUB/$c"; chmod +x "$STUB/$c"; done
 printf '#!/bin/sh\necho "$@" >> "%s/chown.log"\n' "$TMP" > "$STUB/chown"; chmod +x "$STUB/chown"
 run_installer() {
-  PATH="$STUB:$PATH" ZCODE_HEADROOM_TEST_ROOT="$FAKE" HEADROOM_TAILNET_IP=192.0.2.10 \
+  PATH="$STUB:$PATH" ZCODE_HEADROOM_TEST_ROOT="$FAKE" HEADROOM_TAILNET_IP=192.0.2.10 HEADROOM_TAILNET_HOST=headroom.test \
     bash "$INSTALLER" >"$TMP/install.out" 2>&1 || { cat "$TMP/install.out" >&2; return 1; }
 }
 check 'installer runs offline' run_installer
