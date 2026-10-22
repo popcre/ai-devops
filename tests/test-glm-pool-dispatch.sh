@@ -103,6 +103,10 @@ export AI_REVIEW_BRIEF_FILE="$TMP/question with spaces.md"
 run
 grep -Fq "$QUESTION" "$TMP/runner-brief"
 grep -q 'carried request sha256' "$(tail -1 "$TMP/out")"
+# The brief must say the verdict word follows the heading directly and the head
+# binding sits above it (GLM 2026-10-21: binding prose between them was refused).
+grep -Fq 'State the reviewed head SHA in your findings, ABOVE the verdict heading.' "$TMP/runner-brief"
+grep -Fq 'put no sentence, head binding or other text between the heading and the word' "$TMP/runner-brief"
 # Real #2336 governed review requests exceed the old 256 KiB ceiling. Keep the
 # complete request byte-for-byte and bind its exact digest in the report.
 python3 - "$TMP" <<'PY'

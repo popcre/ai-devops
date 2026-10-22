@@ -17,7 +17,7 @@ check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (want '$3', got '$2')"; 
 
 # A fixed allow list, so the test does not change when the real one does.
 ALLOW="$TMP/allow"
-printf '# comment\n\nalpha_tool\nbeta_tool\n' > "$ALLOW"
+printf '# comment\n\nalpha_tool\nbeta_tool\ndeny:gamma_tool\nretire:deny:Bash(sleep:*)\nretire:old_tool\n' > "$ALLOW"
 
 run() { # run <home> [args...]
   CLAUDE_HOME="$1" AI_DEVOPS_JSON_RUNTIME="$RUNTIME" \
@@ -32,9 +32,11 @@ test_runtime() {
   H="$TMP/$RUNTIME-fresh"; mkdir -p "$H"
   out="$(run "$H")"; rc=$?
   check "fresh: exit 0" "$rc" "0"
-  case "$out" in *"ADDED 2"*) ok "fresh: added 2" ;; *) bad "fresh: added 2 ($out)" ;; esac
+  case "$out" in *"ADDED 3, RETIRED 0"*) ok "fresh: added 3, retired 0" ;; *) bad "fresh: added 3, retired 0 ($out)" ;; esac
   grep -q '"alpha_tool"' "$H/settings.json" && grep -q '"beta_tool"' "$H/settings.json" \
     && ok "fresh: both entries written" || bad "fresh: both entries written"
+  grep -q '"gamma_tool"' "$H/settings.json" && ok "fresh: deny entry written" || bad "fresh: deny entry written"
+  grep -q 'sleep' "$H/settings.json" && bad "fresh: retired entry never added" || ok "fresh: retired entry never added"
 
   # 2. Re-run is a no-op.
   out="$(run "$H")"; rc=$?
@@ -54,7 +56,7 @@ test_runtime() {
   run "$H3" >/dev/null
   grep -q '"model"' "$H3/settings.json"        && ok "existing: other top-level key kept"   || bad "existing: other top-level key kept"
   grep -q '"Bash(ls:\*)"' "$H3/settings.json"  && ok "existing: prior allow entry kept"      || bad "existing: prior allow entry kept"
-  grep -q '"deny"' "$H3/settings.json"         && ok "existing: deny untouched"              || bad "existing: deny untouched"
+  grep -q '"Read(./.env)"' "$H3/settings.json" && ok "existing: prior deny entry kept"       || bad "existing: prior deny entry kept"
   grep -q '"alpha_tool"' "$H3/settings.json"   && ok "existing: new entry added"             || bad "existing: new entry added"
   [ -f "$H3/settings.json.aidevops.bak" ]      && ok "existing: backup written"              || bad "existing: backup written"
 
@@ -65,7 +67,20 @@ test_runtime() {
   check "broken: file untouched" "$(cat "$H4/settings.json")" "{ oops"
   case "$out" in *"unparseable"*) ok "broken: says unparseable" ;; *) bad "broken: says unparseable ($out)" ;; esac
 
-  # 6. A permissions value of the wrong shape does not crash the script.
+  # 6. A retired entry is removed from exactly the list it names, and only
+  #    that entry; a machine without it is untouched (#1962, deny:Bash(sleep:*)).
+  H6="$TMP/$RUNTIME-retire"; mkdir -p "$H6"
+  printf '{"permissions":{"allow":["alpha_tool","beta_tool","old_tool","Bash(sleep:*)"],"deny":["gamma_tool","Bash(sleep:*)","Read(./.env)"]}}\n' > "$H6/settings.json"
+  out="$(run "$H6" --check)"; check "retire: --check flags stale entry (exit 1)" "$?" "1"
+  case "$out" in *"RETIRE deny:Bash(sleep:*)"*) ok "retire: check names the entry" ;; *) bad "retire: check names the entry ($out)" ;; esac
+  out="$(run "$H6")"; check "retire: exit 0" "$?" "0"
+  case "$out" in *"ADDED 0, RETIRED 2"*) ok "retire: retired 2" ;; *) bad "retire: retired 2 ($out)" ;; esac
+  [ "$(grep -c 'Bash(sleep:\*)' "$H6/settings.json")" = "1" ] && grep -q '"gamma_tool"' "$H6/settings.json" \
+    && grep -q '"Read(./.env)"' "$H6/settings.json" && ! grep -q '"old_tool"' "$H6/settings.json"
+  [ $? -eq 0 ] && ok "retire: only the named deny removed; allow Bash(sleep:*) kept" || bad "retire: only the named deny removed; allow Bash(sleep:*) kept"
+  out="$(run "$H6")"; case "$out" in *"already present"*) ok "retire: rerun is a no-op" ;; *) bad "retire: rerun is a no-op ($out)" ;; esac
+
+  # 7. A permissions value of the wrong shape does not crash the script.
   H5="$TMP/$RUNTIME-weird"; mkdir -p "$H5"
   printf '{"permissions":"nope"}\n' > "$H5/settings.json"
   run "$H5" >/dev/null; check "weird: exit 0" "$?" "0"

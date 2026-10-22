@@ -152,9 +152,10 @@ pipeline. The recovery procedure lives in
   migrated; other waits use `bin/ai-gh-wait`. At most one
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
-  iteration cap (#401). Use bounded in-session `ai-pr-wait`
-  (`--timeout-minutes N`, default 60) / `ai-gh-wait` (explicit
-  `--timeout-minutes` required) only; there is
+  iteration cap (#401). Use bounded in-session `ai-pr-wait` /
+  `ai-gh-wait`; `ai-pr-wait` defaults to a 60-minute deadline and runs in the
+  background (owner ruling 2026-10-21, #1962, supersedes the #1183 explicit-flag
+  rule), `ai-gh-wait` still needs an explicit `--timeout-minutes`; there is
   no required waiter registry, TTL service, or park-state store (voluntary
   inert registration is permitted, unrequired, unmeasured). If the wait will outlive
   the turn, leave the existing issue or pull request as the card and return

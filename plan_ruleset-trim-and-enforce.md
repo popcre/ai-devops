@@ -19,6 +19,7 @@ Evidence (private, not in Git): `~/Dropbox/ai/chat_transcripts/_audit/ruleset-au
 | 4.1 AGENTS.md down to a router under 2,000 words | ✅ done | e7a6e411: `wc -w AGENTS.md` 1,973; `bin/ai-doc-reachability --base origin/main` PASS; tests/test-session-conduct-policy.sh, test-shared-db-routing-rules.sh, test-client-globals-required-phrases.sh pass | Claude 2026-10-21 |
 | 5.1 Minimal instruction profile for reviewer runs | ✅ done | 2026-10-20 | `tests/test-ai-codex-review.sh` reviewer_profile_* checks; live `codex debug prompt-input` with the reviewer home shows no owner rules and no plugin list |
 | 6.1 Live proof: re-run the transcript audit | ⬜ open | — | — |
+| 2.3 Owner ruling: `ai-pr-wait` defaults to 60 minutes, background; `deny:Bash(sleep:*)` retired | ✅ done | 2026-10-21 | #1962; `docs/owner-rulings.md` 2026-10-21 ("add NO new tooling"); `bin/ai-pr-wait` `TIMEOUT_MINUTES=60`; `config/claude-permissions.allow` `retire:` line; `tests/test-ai-claude-permissions.sh`, `tests/test-ai-blocker-watch.sh` |
 
 **Start here:** Phase 1, step 1.1. Each phase is one PR. Phases 1, 2 and 5 are
 independent and can run in parallel sessions. Phase 3 must precede phase 4 (both
@@ -133,8 +134,9 @@ this plan was written. Relevant existing pieces:
   All are installed by `install.sh` stage "Claude closeout hook" (~line 650) and are
   idempotent and additive. Tests: `tests/test-ai-completion-check-hook.sh`,
   `tests/test-ai-memory-index-hook.sh`. The new hook follows exactly this pattern.
-- `bin/ai-pr-wait` (line 18 usage) requires `--timeout-minutes N` with no default
-  (#1183 child 3). Claude's Bash tool call is capped at 10 minutes, so sessions wrap
+- `bin/ai-pr-wait` (line 18 usage) required `--timeout-minutes N` with no default
+  (#1183 child 3; superseded 2026-10-21 by the 60-minute default, see STATUS 2.3
+  and `docs/owner-rulings.md`). Claude's Bash tool call is capped at 10 minutes, so sessions wrap
   it as `timeout 580 bin/ai-pr-wait N --timeout-minutes 9` in a loop. That loop is
   itself the failure.
 - Task-gate classes live in `config/task-gates.json` → `change_classes`. They are:
@@ -183,7 +185,8 @@ them as sample estimates, not exact figures.
   (PR polling). The rest are fixed by being short and findable.
 - **Delete the job-plan rule outright.** Open (see §8). Albert wrote it on purpose.
 - **Make `ai-pr-wait` default to unbounded.** Rejected. #1183 deliberately requires
-  an explicit deadline.
+  an explicit deadline. (A bounded 60-minute default was adopted instead on
+  2026-10-21, owner ruling in `docs/owner-rulings.md`, #1962.)
 
 ### 8. Decisions
 
@@ -277,7 +280,9 @@ citing a commit SHA or test file. Never cite a bare number.
 **2.2 One run fits one tool call.**
 - Add `--fit-tool-call` to `bin/ai-pr-wait`. It caps the deadline at 9 minutes and,
   on timeout, prints one line: `STILL-WAITING pr=<n> state=<…> rerun: <same command>`.
-- `--timeout-minutes` is now optional on `ai-pr-wait` (default 60, still bounded); `ai-gh-wait` keeps it required (#1183).
+- The explicit `--timeout-minutes` stayed required (#1183) until 2026-10-21, when
+  Albert set a 60-minute default that runs in the background (#1962,
+  `docs/owner-rulings.md`); the flag is now optional.
 - Update the global wait bullet to name exactly this form.
 - Done when: a test with a stubbed `gh` (pattern in the existing ai-pr-wait test;
   `ls tests | grep pr-wait`) shows the cap and the rerun line.

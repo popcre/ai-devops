@@ -10,6 +10,19 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# This suite names ai-review-pool only as a protected launcher basename, but
+# test-reviewer-events-isolation.sh requires any suite that mentions that
+# token to source the shared isolation helper.
+. "$REPO_ROOT/tests/lib-reviewer-events-isolation.sh"
+# Launchers whose .cmd is reviewer-safety and cannot change under the
+# no-review plan (plan §8). Their empty-ProgramFiles walk stays on #1701.
+PROTECTED_LAUNCHERS="ai-gemini ai-gemini-usage ai-review-credit-watch ai-review-engine ai-review-lifecycle ai-review-packet ai-review-pool ai-review-preflight ai-review-sandbox ai-review-scoreboard ai-reviewer-logs-sync ai-stepfun ai-stepfun-windows-shell"
+is_protected() {
+  case " $PROTECTED_LAUNCHERS " in
+  *" $1 "*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
 fail=0
 for src in "$REPO_ROOT"/bin/*; do
   name="$(basename "$src")"
@@ -20,7 +33,48 @@ for src in "$REPO_ROOT"/bin/*; do
     echo "FAIL: bin/$name has no bin/$name.cmd launcher" >&2; fail=1; continue
   fi
   grep -q '"%~dpn0" %\*' "$launcher" || { echo "FAIL: bin/$name.cmd does not run its own script" >&2; fail=1; }
+  is_protected "$name" && continue
+  # Empty/missing ProgramFiles must still find Git Bash (issue #1701). The
+  # walk keeps the .cmd wrapper pattern and ends at the hard-coded machine
+  # path so a bare \Git\bin\bash.exe candidate cannot win.
+  grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=%ProgramFiles(x86)%\Git\bin\bash.exe"' "$launcher" || {
+    echo "FAIL: bin/$name.cmd lacks the ProgramFiles(x86) Git Bash fallback" >&2; fail=1; }
+  grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe"' "$launcher" || {
+    echo "FAIL: bin/$name.cmd lacks the LOCALAPPDATA Git Bash fallback" >&2; fail=1; }
+  grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=C:\Program Files\Git\bin\bash.exe"' "$launcher" || {
+    echo "FAIL: bin/$name.cmd lacks the hard-coded Git Bash fallback" >&2; fail=1; }
+  grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=C:\Program Files (x86)\Git\bin\bash.exe"' "$launcher" || {
+    echo "FAIL: bin/$name.cmd lacks the hard-coded x86 Git Bash fallback" >&2; fail=1; }
 done
+
+# Named fixture (plan step 5): every code-class launcher can resolve Git Bash
+# even when ProgramFiles is empty, because the hard-coded machine path is in
+# the chain. Protected launchers are the known #1701 remainder.
+hardcoded_missing=0
+for launcher in "$REPO_ROOT"/bin/*.cmd; do
+  name="$(basename "$launcher" .cmd)"
+  is_protected "$name" && continue
+  if ! grep -Fq 'if not exist "%AI_BASH%" set "AI_BASH=C:\Program Files\Git\bin\bash.exe"' "$launcher"; then
+    echo "FAIL: launcher_resolves_git_bash_with_empty_programfiles: $name" >&2
+    hardcoded_missing=1
+    fail=1
+  fi
+done
+[ "$hardcoded_missing" -eq 0 ] && echo "ok: launcher_resolves_git_bash_with_empty_programfiles"
+
+# Live Windows walk with ProgramFiles cleared: a real launcher must still
+# start through the hard-coded fallback. Skipped on the Linux lane (those
+# paths never exist there).
+if command -v cmd.exe >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/ai-doc-reachability.cmd" ]; then
+  win="$(cygpath -w "$REPO_ROOT/bin/ai-doc-reachability.cmd")"
+  if out="$(MSYS_NO_PATHCONV=1 cmd.exe /d /c "set \"ProgramFiles=\" && set \"ProgramFiles(x86)=\" && $win --help" 2>&1)"; then
+    echo "ok: empty_programfiles_launcher_still_runs"
+  else
+    echo "FAIL: empty_programfiles_launcher_still_runs" >&2
+    printf '%s\n' "$out" | tail -n 15 | sed 's/^/  | /' >&2
+    fail=1
+  fi
+fi
 for launcher in "$REPO_ROOT"/bin/*.cmd; do
   script="${launcher%.cmd}"
   [ -f "$script" ] || { echo "FAIL: $(basename "$launcher") has no matching script" >&2; fail=1; }

@@ -44,6 +44,8 @@ ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name
 ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--repo OWNER/NAME] [--reviewer-approval REPORT]
 ```
 
+`--timeout-minutes` defaults to 60 (owner ruling 2026-10-21, #1962); run the wait
+in the background rather than a `sleep` loop.
 On `STILL-WAITING` rerun the printed command. Prose-only PRs do not wait for
 checks unless `--reviewer-approval` is given.
 

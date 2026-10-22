@@ -17,6 +17,19 @@ payload="$(cat 2>/dev/null || true)"
 
 cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [[ -n "$cmd" ]] || exit 0
+# Windows spellings of a shell get exactly the Unix treatment (#1891 install
+# review): a Windows full path (drive letter or .exe, quoted or not) becomes
+# the bare name, .exe is dropped, and the name is lowercased. Nothing
+# else changes (a quoted Unix path such as "/bin/bash" stays as it was), so every rule below judges `BASH.EXE`,
+# `bash.exe` and "C:/Program Files/Git/bin/bash.exe" exactly as it judges `bash`.
+cmd="$(printf '%s' "$cmd" | sed -E \
+  -e 's#"[A-Za-z]:[^"]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?"#\L\1#Ig' \
+  -e 's#"[^"]*[\\/]((ba|da|z|k|a)?sh)\.exe"#\L\1#Ig' \
+  -e "s#'[A-Za-z]:[^']*[\\\\/]((ba|da|z|k|a)?sh)(\\.exe)?'#\\L\\1#Ig" \
+  -e "s#'[^']*[\\\\/]((ba|da|z|k|a)?sh)\\.exe'#\\L\\1#Ig" \
+  -e 's#(^|[^A-Za-z0-9_.-])((ba|da|z|k|a)?sh)\.exe([^A-Za-z0-9_]|$)#\1\2\4#Ig' \
+  -e 's#(^|[^A-Za-z0-9_.-])[A-Za-z]:[^ \t"'"'"';&|()<>]*[\\/]((ba|da|z|k|a)?sh)([^A-Za-z0-9_.]|$)#\1\2\4#Ig' \
+  -e 's#(^|[^A-Za-z0-9_.-])((ba|da|z|k|a)?sh)([^A-Za-z0-9_.-]|$)#\1\L\2\E\4#Ig')"
 # Text is not a command: drop here-document bodies, then quoted strings (commit
 # messages, notes, echo), so a message that merely mentions polling is allowed.
 cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
