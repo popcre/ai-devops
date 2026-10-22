@@ -12,6 +12,7 @@
 set -euo pipefail
 DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
+source "$DOOR_CREDIT_ROOT/tools/lib/review-terminal-verdict.sh"
 source "$DOOR_CREDIT_ROOT/tools/lib/grok-runtime.sh"
 # Owner rule "remove the paid fallback": no grok child inherits a paid key.
 source "$DOOR_CREDIT_ROOT/tools/lib/grok-paid-keys.sh"
@@ -119,6 +120,8 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'

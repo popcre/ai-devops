@@ -77,6 +77,7 @@ tools/lib/opencode-maintenance-lock.sh
 tools/lib/deepseek-opencode.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
+tools/lib/review-terminal-verdict.sh
 tools/lib/review-operation.sh
 tools/lib/review-capabilities.sh
 tools/lib/review-session-skip.sh

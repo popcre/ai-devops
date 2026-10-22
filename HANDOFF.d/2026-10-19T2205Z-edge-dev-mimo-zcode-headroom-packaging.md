@@ -1,6 +1,8 @@
+---
 issue: none
-status: open
+status: OPEN
 owner: u2giants / next MiMo session
+---
 
 # Z-code Headroom HTTPS lane — packaging PR still in merge queue
 

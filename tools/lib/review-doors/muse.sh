@@ -33,6 +33,7 @@ case "$MODE" in review|implement) ;; *) printf 'muse door: usage: muse.sh review
 # Repository root, for the pinned engine install and the OpenCode profile.
 MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$MU_ROOT/tools/reviewer_event_guard.sh"
+source "$MU_ROOT/tools/lib/review-terminal-verdict.sh"
 
 . "$MU_ROOT/tools/lib/muse-credential-boundary.sh"
 . "$MU_ROOT/tools/lib/reviewer-instructions.sh"
@@ -191,6 +192,8 @@ extract_report() { # extract_report RESULT_FILE DEST HEAD MODE ENGINE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'

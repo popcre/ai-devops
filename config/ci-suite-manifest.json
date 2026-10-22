@@ -439,7 +439,12 @@
         "test-ai-review-preflight.sh",
         "test-ai-stepfun-windows-shell.sh",
         "test-ai-stepfun.sh",
-        "test-pool-dispatch-doors.sh"
+        "test-pool-dispatch-doors.sh",
+        "test-stepfun-extract-verdict.sh"
+      ],
+      "tools/lib/review-terminal-verdict.sh": [
+        "test-pool-dispatch-doors.sh",
+        "test-stepfun-extract-verdict.sh"
       ],
       "tools/lib/review-lifecycle-core.sh": [
         "test-ai-review-engine.sh",
