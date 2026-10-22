@@ -168,6 +168,15 @@ check 'redirected shared-db identity may launch the promotion run' \
   "rc 0 '$TMP/db-redirected' check --before shared-db-promotion"
 check 'the promotion launch never unlocks a manual production action' \
   "! rc 0 '$TMP/db-canonical' check --before production"
+# #1962: the pre-transfer identity is the same repository; its reviewer gates
+# are required, never waived, so a manual production action stays refused.
+check 'the redirected shared-db identity never unlocks a manual production action' \
+  "! rc 0 '$TMP/db-redirected' check --before production"
+( cd "$TMP/db-redirected" && "$GATES" start --class production ) >/dev/null
+check 'a declared production task in the redirected shared-db identity keeps its reviewer gate required, not waived' \
+  "out '$TMP/db-redirected' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|length)==0'"
+check 'a redirected shared-db production refusal names the missing reviewer approval' \
+  "rc 3 '$TMP/db-redirected' check --before production && out '$TMP/db-redirected' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
 newrepo "$TMP/db-app" u2giants/licensor-source-data
 mkdir -p "$TMP/db-app/db/migrations"; printf 'select 1;\n' > "$TMP/db-app/db/migrations/001.sql"
 git -C "$TMP/db-app" add -A; git -C "$TMP/db-app" commit -qm migration

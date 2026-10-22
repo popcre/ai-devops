@@ -1,3 +1,9 @@
+---
+issue: popcre/ai-devops#1948
+status: OPEN
+owner: unclaimed — next session claims on the issue
+---
+
 # Seafile toolkit sync blocked on GLM REVISE (release 54840353)
 
 ## 1. Goal
