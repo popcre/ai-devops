@@ -2028,6 +2028,45 @@ check "brief_ends_with_single_decision_rule" \
 check "brief_restates_risk_block_rule_when_requested" "grep -q 'MUST contain exactly one fenced block' '$TMP/risk-brief-present.md'"
 check "brief_says_missing_tool_is_not_blocked" "grep -q 'is not by itself grounds for BLOCKED' '$TMP/risk-brief-present.md'"
 
+# --- Python bytecode stays out of the review snapshot (edge-dev3 Muse) -------
+echo '== python bytecode outside snapshot'
+PYC_SNAP="$TMP/pyc-snapshot"
+mkdir -p "$PYC_SNAP"
+printf 'def add(a, b):\n    return a + b\n' > "$PYC_SNAP/calc.py"
+git -C "$PYC_SNAP" init -q
+git -C "$PYC_SNAP" add calc.py
+git -C "$PYC_SNAP" -c user.name=t -c user.email=t@t commit -q -m fixture
+PYC_DOOR="$TMP/pyc-door.sh"
+# The door models a reviewer that imports the fixture's module from inside
+# the snapshot, and records the environment any sandboxed child would see.
+cat > "$PYC_DOOR" <<'EOF'
+cd "$DOOR_WORKDIR" || exit 1
+printf '%s\n%s\n' "${PYTHONDONTWRITEBYTECODE:-}" "${PYTHONPYCACHEPREFIX:-}" > "$PYC_ENV_RECORD"
+py="$(command -v python3 || command -v python)" || exit 0
+"$py" -c 'import calc; assert calc.add(2, 2) == 4' || exit 1
+EOF
+: > "$TMP/pyc-prompt.txt"
+PYC_BEFORE="$("$REPO_ROOT/bin/ai-review-sandbox" digest "$PYC_SNAP")"
+PYC_RC=0
+( unset PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX
+  export PYC_ENV_RECORD="$TMP/pyc-env" AI_REVIEW_RUNNER_CORE="$RLC_STAMP"
+  rlc_call_door review "$PYC_DOOR" "$PYC_SNAP" "$PYC_SNAP" "$TMP/pyc-prompt.txt" "$TMP/pyc-report" deadbeef ) >/dev/null 2>&1 || PYC_RC=$?
+PYC_AFTER="$("$REPO_ROOT/bin/ai-review-sandbox" digest "$PYC_SNAP")"
+PYC_PREFIX="$(sed -n 2p "$TMP/pyc-env" 2>/dev/null)"
+check "door_python_import_leaves_snapshot_digest_unchanged" \
+  "test '$PYC_RC' -eq 0 && test '$PYC_BEFORE' = '$PYC_AFTER' && test ! -e '$PYC_SNAP/__pycache__'"
+check "door_gets_bytecode_off_and_cache_prefix_outside_snapshot" \
+  "test \"\$(sed -n 1p '$TMP/pyc-env')\" = 1 && test -n '$PYC_PREFIX' && case '$PYC_PREFIX' in *pyc-snapshot*) false;; *) true;; esac"
+# The Muse credential boundary scrubs the environment with env -i; the
+# bytecode settings must survive it so Muse's sandboxed shell inherits them.
+( . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/outside/cache
+  XDG_CONFIG_HOME="$TMP/x" XDG_DATA_HOME="$TMP/x" XDG_STATE_HOME="$TMP/x" XDG_CACHE_HOME="$TMP/x"
+  muse_clean_environment "$TMP" muse-code /usr/bin/env 0
+  printf '%s\n' "${clean_env[@]}" ) > "$TMP/muse-clean-env.txt"
+check "muse_clean_environment_keeps_bytecode_settings" \
+  "grep -qx 'PYTHONDONTWRITEBYTECODE=1' '$TMP/muse-clean-env.txt' && grep -qx 'PYTHONPYCACHEPREFIX=/outside/cache' '$TMP/muse-clean-env.txt'"
+
 # --- per-session skip and --detach at the front door (plan_reviewer-observation-week steps 2-3)
 echo '== per-session skip and detached reviews'
 FRONT="$REPO_ROOT/bin/ai-review"

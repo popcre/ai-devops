@@ -422,6 +422,10 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # Door invocation. The door receives provider bits only; every governance
 # surface above stays here.
 # ---------------------------------------------------------------------------
+rlc_native_path() { # PATH -> the spelling a native (Windows) Python accepts
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
+}
+
 # ---------------------------------------------------------------------------
 # Fast-fail watch (plan_reviewer-observation-week step 1). One place for every
 # provider (#1834): doors are untouched. The door runs with a private TMPDIR,
@@ -517,8 +521,15 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
   mkdir -p "$ff_dir/t"
   ff_out="$ff_dir/door.out"; ff_err="$ff_dir/door.err"
   : > "$ff_out"; : > "$ff_err"
+  # A reviewer that runs Python inside the immutable snapshot must not leave
+  # __pycache__ there (edge-dev3 Muse, 2026-10-21): suppress bytecode and
+  # redirect any forced write to a per-call cache outside the snapshot (and
+  # outside the watched TMPDIR). The snapshot digest check stays as strict.
+  mkdir -p "$ff_dir/pyc"
   set +e
-  env AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
+  env PYTHONDONTWRITEBYTECODE=1 \
+      PYTHONPYCACHEPREFIX="$(rlc_native_path "$ff_dir/pyc")" \
+      AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
       TMPDIR="$ff_dir/t" \
       AI_REVIEW_VIA_RUNNER=1 \
       DOOR_MODE="$mode" \
