@@ -15,9 +15,13 @@
 # repo, and this script merges them into `~/.claude/settings.json`, which is the
 # USER-level file and therefore covers every project on the machine.
 #
-# Strictly additive and idempotent:
+# Additive and idempotent, with one exception:
 #   - never removes an existing allow entry,
 #   - a line starting `deny:` is added to permissions.deny the same way,
+#   - a line starting `retire:` names an entry (allow, or `retire:deny:` for a
+#     deny entry) this toolkit once installed and now removes; nothing else is
+#     ever removed. Needed because an installed `deny:` keeps biting on every
+#     machine after its line is deleted here (#1962),
 #   - never touches ask / hooks / env / anything else,
 #   - creates `permissions.allow` when the file has no permissions block,
 #   - creates the settings file itself when it does not exist,
@@ -120,13 +124,18 @@ for key in ("allow", "deny"):
 def split(entry):
     return ("deny", entry[5:].strip()) if entry.startswith("deny:") else ("allow", entry)
 
+retired = [split(e[7:].strip()) for e in wanted if e.startswith("retire:")]
+wanted = [e for e in wanted if not e.startswith("retire:")]
 missing = [entry for entry in wanted if split(entry)[1] not in lists[split(entry)[0]]]
-if not missing:
+stale = [(k, r) for k, r in retired if r in lists[k]]
+if not missing and not stale:
     print("OK all %d required permission(s) already present" % len(wanted))
     sys.exit(0)
 
 for entry in missing:
     print("MISSING %s" % entry)
+for key, rule in stale:
+    print("RETIRE %s:%s" % (key, rule))
 
 if mode == "check":
     sys.exit(1)
@@ -137,14 +146,16 @@ if os.path.exists(settings_path):
 for entry in missing:
     key, rule = split(entry)
     lists[key].append(rule)
+for key, rule in stale:
+    lists[key] = [r for r in lists[key] if r != rule]
 for key, rules in lists.items():
-    if rules:
+    if rules or key in perms:
         perms[key] = rules
 data["permissions"] = perms
 with open(settings_path, "w", encoding="utf-8") as fh:
     json.dump(data, fh, indent=2)
     fh.write("\n")
-print("ADDED %d permission(s) to %s" % (len(missing), settings_path))
+print("ADDED %d, RETIRED %d permission(s) in %s" % (len(missing), len(stale), settings_path))
 PY
 }
 
@@ -173,20 +184,25 @@ if (perms === null || typeof perms !== 'object' || Array.isArray(perms)) perms =
 const lists = { allow: Array.isArray(perms.allow) ? perms.allow : [], deny: Array.isArray(perms.deny) ? perms.deny : [] };
 const split = e => e.startsWith('deny:') ? ['deny', e.slice(5).trim()] : ['allow', e];
 
-const missing = wanted.filter(e => { const [k, r] = split(e); return !lists[k].includes(r); });
-if (missing.length === 0) {
-  console.log(`OK all ${wanted.length} required permission(s) already present`);
+const retired = wanted.filter(e => e.startsWith('retire:')).map(e => split(e.slice(7).trim()));
+const required = wanted.filter(e => !e.startsWith('retire:'));
+const missing = required.filter(e => { const [k, r] = split(e); return !lists[k].includes(r); });
+const stale = retired.filter(([k, r]) => lists[k].includes(r));
+if (missing.length === 0 && stale.length === 0) {
+  console.log(`OK all ${required.length} required permission(s) already present`);
   process.exit(0);
 }
 missing.forEach(e => console.log(`MISSING ${e}`));
+stale.forEach(([k, r]) => console.log(`RETIRE ${k}:${r}`));
 if (mode === 'check') process.exit(1);
 
 if (fs.existsSync(settingsPath)) fs.copyFileSync(settingsPath, settingsPath + '.aidevops.bak');
 missing.forEach(e => { const [k, r] = split(e); lists[k].push(r); });
-for (const [k, rules] of Object.entries(lists)) if (rules.length) perms[k] = rules;
+stale.forEach(([k, r]) => { lists[k] = lists[k].filter(x => x !== r); });
+for (const [k, rules] of Object.entries(lists)) if (rules.length || k in perms) perms[k] = rules;
 data.permissions = perms;
 fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2) + '\n');
-console.log(`ADDED ${missing.length} permission(s) to ${settingsPath}`);
+console.log(`ADDED ${missing.length}, RETIRED ${stale.length} permission(s) in ${settingsPath}`);
 JS
 }
 
