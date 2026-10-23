@@ -18,6 +18,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
+# Isolate from a live reviewer observation week window on the host running
+# the suite; the observation-week section sets its own window explicitly.
+export AI_OBSERVATION_WEEK_FILE="$TMP/no-observation-week-window.json"
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required for this suite\n' >&2; exit 1; }
 
@@ -1762,8 +1765,21 @@ check 'a 3-row owner entry records optional history without a reviewer' \
   "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'optional small owner entry'"
 check 'a 10-row owner entry is still valid optional history' \
   "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
-check 'an 11-row entry is refused on the optional path' \
-  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
+check 'a 390-row owner entry has no size cap' \
+  "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 390 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/prod-entry" popcre/some-app
+( cd "$TMP/prod-entry" && "$GATES" start --class production >/dev/null 2>&1 )
+check 'a 390-row owner-requested write in a production task passes without a reviewer' \
+  "out '$TMP/prod-entry' check $SMALL '$SMALL_URL' --row-count 390 --owner-quote '$SMALL_Q' | grep -q 'no AI reviewer' && jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/prod-entry')\" >/dev/null"
+echo change > "$TMP/prod-entry/app.txt"
+check 'with a changed file the 390-row production owner entry still passes without a reviewer' \
+  "out '$TMP/prod-entry' check $SMALL '$SMALL_URL' --row-count 390 --owner-quote '$SMALL_Q' | grep -q 'no AI reviewer'"
+check 'a production database write without an owner entry stays sealed' \
+  "rc 3 '$TMP/prod-entry' check --before database"
+check 'a production owner entry with an unverified quote stays sealed' \
+  "rc 3 '$TMP/prod-entry' check $SMALL '$SMALL_URL' --row-count 390 --owner-quote 'delete every contact row'"
+check 'a production owner entry never opens the production action' \
+  "rc 3 '$TMP/prod-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 390 --owner-quote '$SMALL_Q'"
 check 'a zero or non-numeric row count is refused' \
   "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
 check 'a missing row count is refused' \

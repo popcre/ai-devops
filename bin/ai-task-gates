@@ -929,13 +929,17 @@ small_owner_entry_summary(){
   local action="$1" url="$2" rows="$3" quote="$4" class="$5" repo num json text
   _soe_stop(){ printf 'ai-task-gates: STOP. %s\n' "$*" >&2; return 1; }
   [ "$action" = database ] || { _soe_stop '--small-owner-entry applies only to --before database.'; return 1; }
-  case "$class" in none|prose|code) ;; *) _soe_stop "A small owner entry is row data only; the \"$class\" change set is out of scope for this optional path."; return 1 ;; esac
+  # production: an owner-requested row-data write into live data (owner
+  # ruling 2026-10-14). The verified owner request is what opens it there.
+  case "$class" in none|prose|code|production) ;; *) _soe_stop "An owner entry is row data only; the \"$class\" change set is out of scope for this path."; return 1 ;; esac
   [[ "$url" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/[1-9][0-9]*$ ]] \
     || { _soe_stop '--small-owner-entry needs a GitHub issue URL (https://github.com/OWNER/REPO/issues/N).'; return 1; }
   repo="${BASH_REMATCH[1]}"; num="${url##*/}"
   [ "${repo,,}" = "${IDENTITY,,}" ] || { _soe_stop "The owner-request issue must belong to $IDENTITY (got $repo)."; return 1; }
-  [[ "$rows" =~ ^[1-9][0-9]?$ ]] && [ "$rows" -le 10 ] \
-    || { _soe_stop "A small owner entry needs --row-count between 1 and 10 (got \"$rows\")."; return 1; }
+  # No size cap (owner ruling 2026-10-14 covers database writes of any size);
+  # the count is recorded so the caller's transaction asserts exactly it.
+  [[ "$rows" =~ ^[1-9][0-9]{0,8}$ ]] \
+    || { _soe_stop "An owner entry needs a positive --row-count (got \"$rows\")."; return 1; }
   local squeezed="${quote//[[:space:]]/}"
   [ "${#squeezed}" -ge 12 ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
     || { _soe_stop 'A small owner entry needs a one-line --owner-quote of at least 12 non-space characters with the owner request verbatim.'; return 1; }
@@ -1854,7 +1858,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       state_record_override small-owner-entry "$action" "$approval_summary" "$effective" \
         && jq -e --arg r "$approval_summary" '.overrides | map(select(.kind=="small-owner-entry" and .reason==$r)) | length > 0' "$(state_path)" >/dev/null 2>&1 \
         || blocked 'ai-task-gates: STOP. The small owner entry could not be recorded in the task state; nothing was released.'
-      printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
+      printf 'ai-task-gates: "%s" allowed as an owner-requested row-data write (no AI reviewer, owner ruling 2026-10-14): %s\n' "$action" "$approval_summary"
       return 0
     fi
     if [ -z "$reviewer_approval" ]; then
