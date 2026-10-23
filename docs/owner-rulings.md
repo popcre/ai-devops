@@ -85,3 +85,17 @@ release (plan `plan_edge-dev-reviewer-repair-no-review.md` step 7) is
 authorized. That reviewed install is an install-time safety authorization,
 not a merge gate on the repair PRs. The earlier "only shared-db requires an
 AI review" rule still governs PR merges everywhere else.
+
+## 2026-10-23 — no PR reviews by Albert; AI merges; DesignFlow merges on sandbox-albert
+
+Verbatim, from Albert's chat: "i don't review pull requests, you must merge
+everything", then refined the same day: "merge to sandbox-albert, not develop.
+open a PR to develop".
+
+Current rule: Albert never reviews or merges pull requests; the AI does every
+merge. For the DesignFlow repos the AI's merge target is the user sandbox
+branch (`sandbox-albert` / `albert-2sandbox`) — pushing it auto-deploys the
+sandbox (alsand) — and the AI opens the PR from that branch to `develop`
+without merging it. This supersedes the earlier "DesignFlow goes from Albert's
+sandbox branch to develop, never self-merged" insofar as it waited on Albert:
+nothing waits on him; the develop PR simply stays open.
