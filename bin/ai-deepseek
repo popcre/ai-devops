@@ -30,6 +30,7 @@ _ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 source "$ROOT/tools/reviewer_event_guard.sh"
+source "$ROOT/tools/lib/reviewer-instructions.sh"
 IS_WINDOWS=0
 case "$(uname -s 2>/dev/null || echo unknown)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1;; esac
 # On Windows the managed files live under the Windows profile, not Git Bash's HOME.
@@ -110,6 +111,8 @@ install_profile() { # the repository copy always wins, like the GLM/Muse agents
   mkdir -p "$xdg/agent" "$STATE_DIR/xdg/data" "$STATE_DIR/xdg/state"
   cp "$PROFILE_SRC/opencode.json" "$xdg/opencode.json"
   cp "$PROFILE_SRC/agent/$AGENT.md" "$xdg/agent/$AGENT.md"
+  # No post-verdict compaction auto-continue (config/opencode-plugins).
+  reviewer_opencode_verdict_stop "$xdg" || die "shared OpenCode verdict-stop plugin is missing."
   chmod 700 "$STATE_DIR" 2>/dev/null || true
 }
 

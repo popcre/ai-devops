@@ -153,6 +153,11 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT
   if [ -f "$MU_PROFILE_SRC/agent/$MU_AGENT.md" ]; then
     cp "$MU_PROFILE_SRC/agent/$MU_AGENT.md" "$xdg/agent/$MU_AGENT.md"
   fi
+  # Verdict stop: no post-verdict compaction auto-continue (both OSes).
+  reviewer_opencode_verdict_stop "$xdg" || {
+    printf 'muse door: local_dependency_unavailable: verdict-stop plugin\n' >&2
+    return 127
+  }
   # A review sees only the reviewer rules, never the owner's (#1881).
   [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }

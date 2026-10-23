@@ -213,6 +213,12 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
     return 127
   }
   cp "$src" "$xdg/agent/${agent}.md"
+  # Verdict stop: no post-verdict compaction auto-continue (both OSes).
+  reviewer_opencode_verdict_stop "$xdg" || {
+    printf 'stepfun door: local_dependency_unavailable: verdict-stop plugin
+' >&2
+    return 127
+  }
   # A review sees only the reviewer rules, never the owner's (#1881).
   [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }

@@ -1588,6 +1588,7 @@ cat > "$STUB_OC" <<EOF
 if [ -n "\${DS_STUB_PROFILE_OUT:-}" ]; then
   env | grep '^OPENCODE_DISABLE_' | sort > "\$DS_STUB_PROFILE_OUT"
   cp "\$XDG_CONFIG_HOME/opencode/AGENTS.md" "\$DS_STUB_PROFILE_OUT.rules" 2>/dev/null || true
+  cp "\$XDG_CONFIG_HOME/opencode/plugin/verdict-stop.js" "\$DS_STUB_PROFILE_OUT.plugin" 2>/dev/null || true
 fi
 out=''
 dir=''
@@ -1642,6 +1643,8 @@ set -e
 # ~/.claude/CLAUDE.md or the ~/.claude and ~/.agents skill lists.
 check "deepseek_review_loads_only_reviewer_rules" \
   "cmp -s '$REPO_ROOT/templates/system/REVIEWER-global.md' '$TMP/ds-stub-profile.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\n' | cmp -s - '$TMP/ds-stub-profile'"
+# The shared verdict-stop plugin rides in every OpenCode reviewer config home.
+check "deepseek_door_installs_shared_verdict_stop_plugin"   "cmp -s '$REPO_ROOT/config/opencode-plugins/verdict-stop.js' '$TMP/ds-stub-profile.plugin'"
 check "deepseek_door_parses_opencode_envelope_to_report_shape" \
   "test '$DS_STUB_RC' -eq 0 && grep -q '## Verdict' '$DS_REPORT'"
 check "deepseek_door_report_carries_opencode_metadata" \
