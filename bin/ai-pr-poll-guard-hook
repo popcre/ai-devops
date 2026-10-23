@@ -69,5 +69,5 @@ elif printf '%s' "$cmd" | grep -Eq '\b(for|while|until)\b.*\btimeout +[0-9]+[smh
 fi
 [[ -n "$reason" ]] || exit 0
 
-printf '%s\n' "Blocked: hand-written pull-request polling ($reason). It cannot see a merge-queue ejection and burns the GitHub API quota. Use one bounded wait instead: bin/ai-pr-wait <pr> --timeout-minutes N (add --fit-tool-call to fit one 10-minute tool call; rerun it if it prints STILL-WAITING)." >&2
+printf '%s\n' "Blocked: hand-written pull-request polling ($reason). It cannot see a merge-queue ejection and burns the GitHub API quota. Use one bounded wait instead: bin/ai-pr-wait <pr> run in the background (60-minute default; --timeout-minutes is optional; rerun it if it prints STILL-WAITING)." >&2
 exit 2
