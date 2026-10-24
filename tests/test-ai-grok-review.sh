@@ -182,7 +182,7 @@ for _a in "$@"; do
 done
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
-  models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.6"; exit 0 ;;
+  models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.7"; exit 0 ;;
   export)    printf '%s\n' "$GROK_HOME" > "$TMPDIR_FOR_TEST/export-home"; echo "# transcript stub"; exit 0 ;;
 esac
 touch "$TMPDIR_FOR_TEST/provider-contacted"
@@ -634,7 +634,7 @@ printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 run new t1 --prompt "review this" >/dev/null 2>&1
 ARGV="$(cat "$TMP/argv.txt")"
 check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
-check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
+check "new pins the model"                "grep -q -- '--model grok-4.7' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
 check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS your current turn' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"

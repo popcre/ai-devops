@@ -103,7 +103,7 @@ STATE_DIR="$(grok_default_state_dir)"
 IMPL_DIR="$STATE_DIR/implement"
 CALLER="${AI_GROK_CALLER:-claude}"
 
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.6}"
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.7}"
 DEFAULT_MAX_TURNS="${AI_GROK_IMPL_MAX_TURNS:-20}"
 
 die()  { printf 'ai-grok-implement: error: %s\n' "$*" >&2; exit 1; }

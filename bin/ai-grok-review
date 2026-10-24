@@ -146,7 +146,7 @@ case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-grok-review: error: caller
 # web_fetch during a purely local repository review.
 # default + explicit allows, never auto/acceptEdits: auto-cancelled headless
 # Bash ends the run (see ai-grok-implement).
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.6}"
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.7}"
 GROK_PERMS=(--permission-mode default --allow Read --allow Grep
             --allow Edit --allow Write --allow Bash --deny 'MCPTool(*)'
             --disallowed-tools search_tool,use_tool,Agent --no-subagents
