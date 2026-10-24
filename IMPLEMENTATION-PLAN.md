@@ -64,7 +64,7 @@ If any step below conflicts with this goal, the goal wins — stop and flag it.
 
 ## 3. What triggered this work
 
-A session classified ~1,346 private chat digests (2026-09-08→09-29) and deep-read 22 transcripts. Nine process findings came out (full text in `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` §5a). Four independent advisors (GLM, Gemini, StepFun, Qwen 3.8 Max) plus the parent agent debated the re-cut on 2026-09-29.
+A session classified ~1,346 private chat digests (2026-09-08→09-29) and deep-read 22 transcripts. Nine process findings came out (full text in `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` (retired; recoverable from git history) §5a). Four independent advisors (GLM, Gemini, StepFun, Qwen 3.8 Max) plus the parent agent debated the re-cut on 2026-09-29.
 
 **Albert accepted (chat, 2026-09-29):** one small doctor-safety PR, no new plan book, drop the "easier tool upgrades" item.
 
@@ -233,7 +233,7 @@ Reviewer wrappers other than `ai-glm`'s doctor path; shared-db; installers; CI w
 
 ### Step 3 — Correct the digest-fix handoff
 
-**File:** `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` (on `origin/main` after #1060).
+**File:** `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` (retired; recoverable from git history) (on `origin/main` after #1060).
 
 1. §5a item 1 residual: replace "lease TTL" wording. Correct fact: lease liveness is complete; **there is no TTL** (design forbids age-only release). Residual if any: empty-report → mark provider unavailable in the capacity record (`bin/ai-review-preflight` closed `reason` enum — small schema addition, not prose).
 2. §5a item 2 / incident text: replace "60s governed preflight" with **10s** (`CHECK_TIMEOUT` default). This is load-bearing (one open record >10s is fatal).
@@ -347,7 +347,7 @@ Never write "add tests" without the names above.
 | Review | `ai-review <provider> final-check …` (Gemini/Muse/Grok usable; Qwen works without Docker) |
 | 1Password | vault `vibe_coding` — names only, never values. Reviews do not call 1Password |
 | Prior debate reports | `.ai/reviews/qwen-jev-plan-debate-qwen-2-*.md`, StepFun log in session notes |
-| Related handoff | `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` |
+| Related handoff | `HANDOFF.d/2026-09-29T1357Z-edge-dev-mimo-digest-fix-and-process-plan.md` (retired; recoverable from git history) |
 
 No local server. No UI.
 
