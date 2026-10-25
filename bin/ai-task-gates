@@ -398,16 +398,6 @@ classify_paths(){
     if licensed_row_containment_breach "$path"; then
       LICENSED_ESCAPE_PATHS="${LICENSED_ESCAPE_PATHS}${path}"$'\n'
     fi
-    # Ancestry closure (Muse final word): a known-private root makes the path
-    # private regardless of leaf shape. Evaluated before the rule table so a
-    # new layout under a known root cannot fall through to the fallback class.
-    if private_root_path "$path"; then
-      CONTRIBUTORS+=("private-evidence	$path")
-      if [ "${TG_RANK[private-evidence]:-0}" -gt "$OBSERVED_RANK" ]; then
-        OBSERVED_CLASS=private-evidence; OBSERVED_RANK="${TG_RANK[private-evidence]:-0}"
-      fi
-      continue
-    fi
     # Compile the applicable rules once for the complete path set. Calling
     # tg_glob_match for every path/rule pair starts a Bash command substitution
     # for each comparison, which dominates large --paths-from inputs on Windows.
