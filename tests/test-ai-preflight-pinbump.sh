@@ -263,7 +263,7 @@ check "the qualify record binds the CLI binary hash" \
 check "the qualify record reuses the existing hash-pin store, not a second store" \
   "test -f '$TMP/state/grok-live-qualified.json' && jq -e '.wrapper_sha256|test(\"^[0-9a-f]{64}\$\")' '$TMP/state/grok-live-qualified.json'"
 check "pin-bump qualification does NOT add the provider to the live-qualified gate" \
-  "grep -q 'LIVE_QUALIFIED_PROVIDERS=\"gemini qwen\"' '$SCRIPT' && ! printf '%s' \"\$(sed -n '/^static_status()/,/^}/p' '$SCRIPT')\" | grep -q 'grok'"
+  "jq -e '[.capabilities|del(._comment)|to_entries[]|select(.value.live_qualification_required==true)|.key]==[\"gemini\",\"qwen\"]' \"\$(dirname '$SCRIPT')/../config/review-runner-doors.json\" >/dev/null && ! printf '%s' \"\$(sed -n '/^static_status()/,/^}/p' '$SCRIPT')\" | grep -q 'grok'"
 
 # Auto-quarantine on pin mismatch: a build below the floor fails policy.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"

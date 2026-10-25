@@ -1,6 +1,6 @@
 # Plan: split the CI suite manifest so tool fixes merge in parallel
 
-Handoff registration: [HANDOFF.d/2026-09-28T1755Z-edge-dev3-claude-plans-manifest-and-self-healing.md](HANDOFF.d/2026-09-28T1755Z-edge-dev3-claude-plans-manifest-and-self-healing.md)
+Handoff registration: `HANDOFF.d/2026-09-28T1755Z-edge-dev3-claude-plans-manifest-and-self-healing.md` (retired; recoverable from git history)
 Owner issue: https://github.com/popcre/ai-devops/issues/1001.
 
 ## STATUS

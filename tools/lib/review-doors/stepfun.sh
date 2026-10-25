@@ -41,12 +41,14 @@ SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
 # The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
 # shellcheck source=../stepfun-sandbox.sh
 source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+source "$SF_ROOT/tools/lib/reviewer-instructions.sh"
 # The shared request pacer, also used by bin/ai-stepfun (#1432).
 # shellcheck source=../stepfun-pace.sh
 source "$SF_ROOT/tools/lib/stepfun-pace.sh"
 # reviewer_credit_scan: the shared out-of-credit classifier.
 # shellcheck source=../../reviewer_event_guard.sh
 source "$SF_ROOT/tools/reviewer_event_guard.sh"
+source "$SF_ROOT/tools/lib/review-terminal-verdict.sh"
 SF_OC_VERSION="$(tr -d ' \r\n' < "$SF_ROOT/config/opencode/version" 2>/dev/null || true)"
 
 # Model pins. StepCode uses the step/ id; the OpenCode profile pins
@@ -211,6 +213,8 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
     return 127
   }
   cp "$src" "$xdg/agent/${agent}.md"
+  # A review sees only the reviewer rules, never the owner's (#1881).
+  [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
 
 # StepCode 0.1.1 reads its custom catalog from ~/.stepcode/models.json. The
@@ -264,6 +268,8 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'
@@ -288,8 +294,18 @@ sf_rpc_turn() {
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check 2>>"$out.err"
   }
-  sf_pid="$SF_RPC_PID"
-  local to_rpc="${SF_RPC[1]}" from_rpc="${SF_RPC[0]}"
+  sf_pid="${SF_RPC_PID:-}"
+  local rpc_in="${SF_RPC[1]:-}" rpc_out="${SF_RPC[0]:-}" to_rpc from_rpc
+  [ -n "$sf_pid" ] && [ -n "$rpc_in" ] && [ -n "$rpc_out" ] || return 1
+  # Bash closes a named coprocess's descriptors when that child exits. Own
+  # duplicates so a fast final response remains readable after process exit.
+  exec {to_rpc}>&"$rpc_in" || return 1
+  if ! exec {from_rpc}<&"$rpc_out"; then
+    exec {to_rpc}>&-
+    kill "$sf_pid" 2>/dev/null || true
+    wait "$sf_pid" 2>/dev/null || true
+    return 1
+  fi
   # --rawfile: a full review prompt can exceed the 128 KiB argv string limit.
   jq -cn --rawfile m "$prompt_file" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
   while IFS= read -r line <&"$from_rpc"; do
@@ -332,7 +348,8 @@ sf_rpc_turn() {
         esac ;;
     esac
   done
-  eval "exec ${to_rpc}>&-" 2>/dev/null || true
+  exec {to_rpc}>&-
+  exec {from_rpc}<&-
   kill "$sf_pid" 2>/dev/null || true
   wait "$sf_pid" 2>/dev/null || true
   [ -n "$text" ] || return 1
@@ -343,6 +360,66 @@ sf_rpc_turn() {
 SF_TEMP_PATHS=()
 sf_temp_cleanup() { [ "${#SF_TEMP_PATHS[@]}" -eq 0 ] || rm -rf -- "${SF_TEMP_PATHS[@]}" 2>/dev/null || true; }
 trap sf_temp_cleanup EXIT
+
+# Classify, never rewrite: a report with a non-terminal line that opens with a
+# decision word is refused by governed consumers. Name it here so the failure is
+# specific at its source; the report bytes stay exactly as the provider wrote them.
+extra_decision_warning() { # REPORT
+  local n
+  n="$(awk '{ l[NR]=$0 } NF { last=NR } END {
+      for (i = 1; i <= NR; i++) { if (i == last) continue
+        t = l[i]; sub(/^[[:space:]>*_#-]+/, "", t); sub(/^[Vv][Ee][Rr][Dd][Ii][Cc][Tt][[:space:]]*:[[:space:]]*/, "", t)
+        if (toupper(t) ~ /^(APPROVE|REJECT|REVISE|BLOCKED)([^A-Z0-9_]|$)/) c++ }
+      print c + 0 }' "$1" 2>/dev/null)" || return 0
+  [ "${n:-0}" -eq 0 ] || printf 'stepfun door: report-extra-decision-line: %s non-terminal line(s) open with a decision word; governed consumers will refuse to record this report.\n' "$n" >&2
+}
+
+# Windows OpenCode bash tool (incident 20261014T203826Z-edge-dev-stepfun-2686842).
+# OpenCode 1.18.12 resolves its shell from OPENCODE_GIT_BASH_PATH / SHELL and
+# Node spawns it as `<shell> -c CMD`, so the spawn target must be a real
+# executable: Git's own bash.exe. Confinement comes from BASH_ENV, which a
+# non-interactive bash sources before running CMD: this trampoline replaces
+# that bash with the folder gate (bin/ai-stepfun-windows-shell) on the same
+# command string, so CMD itself never runs outside the gate. A bash started
+# any other way is refused. The gate itself is not edited here.
+sf_write_windows_bash_env() { # sf_write_windows_bash_env FILE GATE REVIEW_DIR GATE_PATH
+  local file="$1" gate="$2" dir="$3" gate_path="$4"
+  [ -n "$gate" ] && [ -f "$gate" ] && [ -n "$dir" ] || return 1
+  {
+    printf '# StepFun BASH_ENV trampoline: every OpenCode bash goes through the folder gate.\n'
+    printf 'unset BASH_ENV\n'
+    printf 'export AI_STEPFUN_REVIEW_DIR=%q GATE_PATH=%q\n' "$dir" "$gate_path"
+    printf 'SF_GATE=%q\n' "$gate"
+    cat <<'TRAMPOLINE'
+sf_refuse(){ printf 'stepfun-shell: refused (%s)\n' "$1" >&2; exit 126; }
+[ -n "${BASH_EXECUTION_STRING+x}" ] || sf_refuse 'bash without -c'
+sf_s=$BASH_EXECUTION_STRING
+# OpenCode 1.18.12 (jG) runs every bash tool command as
+#   bash -l -c "<this exact wrapper>" opencode <cwd>
+# with the command JSON-encoded after eval. Accept that wrapper byte-for-byte
+# only, decode the one command, and gate that command alone.
+sf_pre=$'\n        shopt -s expand_aliases\n        [[ -f ~/.bashrc ]] && source ~/.bashrc >/dev/null 2>&1 || true\n        cd -- "$1"\n        eval '
+sf_suf=$'\n      '
+case "$sf_s" in
+  *$'\n'*|*$'\r'*)
+    [[ $sf_s == "$sf_pre"*"$sf_suf" ]] || sf_refuse 'unrecognised OpenCode wrapper'
+    [ "$0" = opencode ] && [ "$#" -eq 1 ] || sf_refuse 'unrecognised OpenCode wrapper arguments'
+    sf_j=${sf_s#"$sf_pre"}; sf_j=${sf_j%"$sf_suf"}
+    case "$sf_j" in '"'*'"') ;; *) sf_refuse 'wrapper payload is not one JSON string' ;; esac
+    sf_cmd=$(jq -jn --arg s "$sf_j" '$s | fromjson | if type == "string" then . else error("not a string") end' 2>/dev/null) \
+      || sf_refuse 'wrapper payload is not one JSON string'
+    sf_cwd=$(cd -- "$1" 2>/dev/null && pwd -P) || sf_refuse 'wrapper directory'
+    sf_root=$(cd -- "$AI_STEPFUN_REVIEW_DIR" 2>/dev/null && pwd -P) || sf_refuse 'review folder'
+    case "$sf_cwd/" in "$sf_root"/*) ;; *) sf_refuse 'wrapper directory outside the review folder' ;; esac
+    cd -- "$sf_cwd" || sf_refuse 'wrapper directory'
+    exec "$BASH" "$SF_GATE" bash -c "$sf_cmd"
+    ;;
+esac
+exec "$BASH" "$SF_GATE" bash -c "$sf_s"
+TRAMPOLINE
+  } > "$file" || return 1
+  chmod 600 "$file" 2>/dev/null || true
+}
 
 main() {
   local engine bin prompt_full out log rc agent
@@ -364,6 +441,10 @@ main() {
     printf '\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: end with the literal heading ## Verdict on its own line, immediately followed on the next line by exactly one plain word: APPROVE, REJECT, or BLOCKED. Do not insert a blank line or Markdown styling between the heading and word. Do not give an earlier or provisional decision or a second verdict.\n'
+    # Governed consumers read ANY line that opens with a decision word (after
+    # leading > * _ # - punctuation and an optional VERDICT: label) as a second
+    # decision and refuse to record the review (#1783). Say so explicitly.
+    printf 'No other line of the report may begin with APPROVE, REJECT, REVISE or BLOCKED, including headings, bullets, bold or quoted text; when a finding must mention a decision, put other words first (for example: "Earlier wording said approve").\n'
   } > "$prompt_full"
   chmod 600 "$prompt_full" 2>/dev/null || true
 
@@ -391,16 +472,55 @@ main() {
     # writable clone must not be duplicated.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    # Windows: OpenCode's bash tool must spawn a real bash.exe that lands in
+    # the folder gate (see sf_write_windows_bash_env). BASH_ENV is set only
+    # on the OpenCode process, never on the door's own wrappers.
+    local -a win_env=()
+    # The gate wraps the resolved OpenCode. Only an explicit
+    # AI_STEPFUN_OPENCODE override that is a script (test/doctor stubs) runs
+    # without it: bash would source the trampoline for the stub itself.
+    if [ "$SF_IS_WINDOWS" = 1 ] && { [ "$bin" != "${AI_STEPFUN_OPENCODE:-}" ] || [ "$(head -c 2 "$bin" 2>/dev/null)" = MZ ]; }; then
+      # The wrapper below is OpenCode 1.18.12's exact bash form; another pin
+      # needs its wrapper re-verified before it may run gated.
+      if [ "$SF_OC_VERSION" != 1.18.12 ]; then
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: OpenCode pin %s has no verified Windows shell wrapper (1.18.12 only); refusing.\n' "${SF_OC_VERSION:-unknown}" >&2
+        exit 127
+      fi
+      local win_tramp win_bash win_bash_unix win_tramp_native
+      win_tramp="$(mktemp)"; SF_TEMP_PATHS+=("$win_tramp")
+      win_bash=""; win_bash_unix="$(command -v bash 2>/dev/null)" || win_bash_unix=""
+      [ -z "$win_bash_unix" ] || win_bash="$(cygpath -w "$win_bash_unix" 2>/dev/null)" || win_bash=""
+      # Only Git for Windows' own bash reads the native BASH_ENV trampoline.
+      case "$win_bash" in *\\Git\\usr\\bin\\bash.exe|*\\Git\\bin\\bash.exe) ;; *) win_bash="" ;; esac
+      win_tramp_native="$(cygpath -m "$win_tramp" 2>/dev/null)" || win_tramp_native=""
+      if [ -z "$win_bash" ] || [ -z "$win_tramp_native" ]; then
+        # Without both, OpenCode would fall back to an ungated shell: refuse.
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: cannot resolve Git bash for the Windows shell gate; refusing an ungated shell.\n' >&2
+        exit 127
+      fi
+      sf_write_windows_bash_env "$win_tramp" "$SF_ROOT/bin/ai-stepfun-windows-shell" \
+          "$oc_dir" "/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin" || {
+        rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"; rm -f "$prompt_full"
+        printf 'stepfun door: Windows shell gate is missing: %s\n' "$SF_ROOT/bin/ai-stepfun-windows-shell" >&2
+        exit 127
+      }
+      win_env=(env "BASH_ENV=$win_tramp_native" \
+               "SHELL=$win_bash" "OPENCODE_GIT_BASH_PATH=$win_bash")
+    fi
     while :; do
       stepfun_pace_wait
       (
+        # Reviewer-only isolation: an implement turn keeps the owner rules and skills (#1901).
+        [ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"
         export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
                XDG_DATA_HOME="$(native_path "$xdg/data")" \
                XDG_STATE_HOME="$(native_path "$xdg/state")" \
                XDG_CACHE_HOME="$(native_path "$xdg/cache")"
         if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
         printf '%s' "$(cat "$prompt_full")" \
-          | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+          | reviewer_credit_run stepfun "$log" "$out.err" --timeout-seconds "$SF_TIMEOUT" -- timeout "$SF_TIMEOUT" "${win_env[@]}" "$bin" run --agent "$agent" --auto \
               --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
               --dir "$(native_path "$oc_dir")" \
               > "$log" 2> "$out.err"
@@ -511,6 +631,7 @@ main() {
     exit 1
   fi
   rm -f "$prompt_full"
+  extra_decision_warning "$DOOR_REPORT_OUT"
   SF_KEY=""
   exit 0
 }

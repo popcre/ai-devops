@@ -39,14 +39,21 @@ and exclusive stages, stop its writers, and verify each outcome:
 
 - Completed and live-accepted work: use native release only after its delivery,
   source, recovery and closed-issue gates pass.
-- Unfinished clean source: execute merged `--stop-author` with exact claim,
-  issue, PR/head, owner, branch and worktree. Re-read the relinquished claim and
-  create-only owner-issued handoff-ready receipt. A qualified successor can take
-  over immediately without waiting for the former deadline or waking the old chat.
-- Known successor: that actual recipient uses `--handoff-claim-author` with
-  the exact ready receipt, declares its own identity, and verifies source,
-  reservation, object protection, clean custody and its thirty-minute permission.
-  Do not impersonate the predecessor or call cooperative handoff abandonment.
+- Unfinished source with no **actual successor that has accepted**: preserve and
+  publish unique source/evidence, then park its open PRs and use native ordinary
+  `--release-claim` as the exact owner. On merged tooling with parking support,
+  use `--release-claim <claim> --owner <exact owner> --confirm-finished --park`.
+  Otherwise, close (do not delete) the preserved branch's open PRs with a resume
+  note, then perform the native ordinary release. Never add `--retire`, delete a
+  branch, reuse a migration version, or imply the application work is complete.
+- Known successor: that actual recipient uses the native handoff operation and
+  accepts ownership, then verifies its identity, source, reservation,
+  exact-object protection and bounded
+  permission. During transfer, `--stop-author` publishes a
+  create-only owner-issued handoff-ready receipt. This is an intermediate
+  transfer step; it is **not finished closeout**. If acceptance has not happened
+  before this session ends, park and ordinarily release instead of retaining an
+  idle reservation. Do not impersonate the predecessor or recipient.
 - Dirty, remote, legacy or ambiguous custody: preserve unique bytes through the
   governed route and record the precise refusal on the same issue. Never delete
   source/object/version protection or fake expiry. Release only finished stages
@@ -65,10 +72,20 @@ documented flags, or its required readiness evidence is unavailable, report the
 ownership action as blocked; do not claim live capability.
 
 This is also the normal completion/stop rule; wrap-up repeats it as a fallback.
-Before declaring closeout complete, freshly verify that no execution capacity
-remains with the stopped session and every retained object claim has a verified
-successor or immediately acceptable ready receipt. A refused gate leaves closeout
-incomplete; AI owns its repair.
+Before declaring closeout complete, run `ai-shared-db-closeout-check` from the
+reviewed installed toolkit with this actual session's UUID (`--session-id` when
+neither client session variable is available). It must freshly read **all** open
+claims and the preview, merge and production stages and return success with zero
+owned reservations. An expired, relinquished or handoff-ready claim still owns
+its objects and **fails** this check. A note, stopped process, capacity release,
+ready receipt or deadline is never a substitute for actual release/accepted
+transfer. Foreign claims do not prevent this session closing. Missing identity,
+unreadable APIs or malformed evidence must fail closed; repair and re-run rather
+than interpret missing data as zero. Keep the resulting JSON receipt in private
+session evidence and record its outcome on the same issue. Run it after the final
+ownership operation; older pre-release snapshots do not qualify. If the command
+is unavailable, complete the supported reviewed toolkit installation; do not
+replace it with a hand-written count or claim the wrap-up finished.
 
 Active structural sessions explicitly confirm continued need using owner-bound
 `--check-in-author` every ten minutes and before protected writes. New permissions
@@ -405,6 +422,12 @@ issue. Open no marker or leftover-proof issue.
 
 ## Before you call the handover done
 
+**Release every claim and lock first.** Before the closing report, release
+every database claim and lock this session holds (shared-db object claims,
+author reservations, migration or preview locks, any app-level advisory lock)
+and prove zero remain with `ai-shared-db-closeout-check`. A claim still held at
+the closing report is a wrap-up failure, not a disclosure item.
+
 1. **Re-verify the moving facts at write time**, not from memory: `git fetch`,
    the `main` tip SHA, the maximum migration version, and every open PR's state.
    Stamp each with the time it was checked.
@@ -510,7 +533,8 @@ issue. Open no marker or leftover-proof issue.
 
 **`shared-db-handover` is all-encompassing for a shared-db session.** When it is
 done, every loose end is tied: swept, documented, committed, pushed, merged, and
-ownership verified through native release, handoff-ready consent or succession.
+ownership verified through native release or completed successor acceptance,
+followed by a passing fresh closeout check. A ready receipt alone is insufficient.
 
 **Do NOT run `wrap-up` after this skill.** They overlap, and `wrap-up`'s ship step
 is already owned here — steps 5 and 5b merge the docs-only handover PR and finish
@@ -552,7 +576,7 @@ silent skip and a clean result look identical, and only one of them is finished.
   WINS over this skill wherever the two disagree.** This file is a portable
   summary; §12 "Standing facts an incoming session must know" is the canonical
   version of the safety rules restated here.
-- `shared-db-orchestrator` — optional historical safety reference. Current
+- `ai-devops/docs/shared-db-structural-safety/` — detailed structural safety reference. Current
   structural work is claim-first; do not route requests to an orchestrator, wait
   for dispatch, create a marker, or use a marker as a lock.
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;

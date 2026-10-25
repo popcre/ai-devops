@@ -25,11 +25,15 @@ function Install-AiDevOpsMuseCode {
     $pin = Join-Path $RepoPath 'config\muse-code'
     $versionFile = Join-Path $pin 'version'
     $shaFile = Join-Path $pin 'sha256'
-    if (-not (Test-Path -LiteralPath $versionFile) -or -not (Test-Path -LiteralPath $shaFile)) {
+    $installerShaFile = Join-Path $pin 'windows-installer-sha256'
+    if (-not (Test-Path -LiteralPath $versionFile) -or -not (Test-Path -LiteralPath $shaFile) -or
+        -not (Test-Path -LiteralPath $installerShaFile)) {
         throw 'no Windows Muse Code pin in config\muse-code'
     }
     $version = ((Get-Content -Raw -LiteralPath $versionFile) -replace '\s', '')
     $want = ((Get-Content -Raw -LiteralPath $shaFile) -replace '\s', '').ToLowerInvariant()
+    $installerWant = ((Get-Content -Raw -LiteralPath $installerShaFile) -replace '\s', '').ToLowerInvariant()
+    if ($installerWant -notmatch '^[0-9a-f]{64}$') { throw 'invalid Windows Muse Code installer SHA-256 pin' }
     if (-not $InstallDir) {
         if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is not set' }
         $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\muse'
@@ -41,6 +45,8 @@ function Install-AiDevOpsMuseCode {
         try {
             try {
                 & $Fetch $script:AiDevOpsMuseInstallerUrl $temp
+                $installerGot = (Get-FileHash -Algorithm SHA256 -LiteralPath $temp).Hash.ToLowerInvariant()
+                if ($installerGot -ne $installerWant) { throw 'downloaded installer does not match the pinned SHA-256' }
                 & $RunInstaller $temp
             } catch {
                 throw "Meta's Muse Code installer failed: $($_.Exception.Message)"

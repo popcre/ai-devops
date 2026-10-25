@@ -3,8 +3,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $repair = Join-Path $repoRoot "bin\repair-codex-github-cli-access.ps1"
 $setup = Join-Path $repoRoot "bin\setup-machine.ps1"
-$skill = Join-Path $repoRoot "skills\shared\shared-db-orchestrator\SKILL.md"
-$manual = Join-Path $repoRoot "skills\shared\shared-db-orchestrator\references\operating-manual.md"
+$skill = Join-Path $repoRoot "docs\shared-db-structural-safety\README.md"
+$manual = Join-Path $repoRoot "docs\shared-db-structural-safety\references\operating-manual.md"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-gh-access-" + [guid]::NewGuid())
 # A clean CI runner does not have Codex's machine-local sandbox group. The
 # well-known Users group exercises the exact ACL grant and denial contract; the

@@ -63,12 +63,12 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
   row="$(jq -nc --arg timestamp "$(date -u +%FT%TZ)" --arg provider "$provider" \
     --arg repo "$repo" --arg base "$(jq -r '.base // empty' "$meta")" --arg head "$head" \
     --arg packet "$(jq -r '.packet_sha256 // empty' "$meta")" --arg verdict "$verdict" \
-    --arg failure "$failure" --arg evidence_state "$evidence_state" --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg upstream "$upstream" --arg report_sha "$report_sha" --argjson elapsed "$elapsed" --argjson stale "$stale" \
+    --arg failure "$failure" --arg evidence_state "$evidence_state" --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --argjson csid "$(jq -c '.caller_session_id // null' "$meta")" --arg source_digest "$source_digest" --arg upstream "$upstream" --arg report_sha "$report_sha" --argjson elapsed "$elapsed" --argjson stale "$stale" \
     --argjson turns "$(jq '.turns // null' "$meta")" \
     --argjson tokens "$(jq '.total_tokens // .tokens // null' "$meta")" \
     --argjson cost "$(jq '.total_cost_usd // null' "$meta")" \
     '{schema_version:2,timestamp:$timestamp,provider:$provider,repo:$repo,normalized_upstream:(if $upstream=="" then null else $upstream end),base:$base,head:$head,source_digest:(if $source_digest=="" then null else $source_digest end),
-      run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),
+      run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),caller_session_id:$csid,
       packet_sha256:$packet,report_sha256:(if $report_sha=="" then null else $report_sha end),elapsed_seconds:$elapsed,turns:$turns,tokens:$tokens,cost_usd:$cost,
       verdict:(if $verdict=="" then null else $verdict end),
       failure_class:(if $failure=="" then null else $failure end),evidence_state:$evidence_state,stale:$stale}')"

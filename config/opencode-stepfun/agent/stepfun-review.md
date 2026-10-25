@@ -35,8 +35,10 @@ Be specific and concrete: cite file paths and line numbers. When you disagree,
 say exactly what breaks and under what conditions. When something is correct,
 say so in one line and move on. Do not pad and do not agree just to be agreeable.
 
-When the prompt asks for a formal verdict, end your answer with exactly one
-final line of the form:
-VERDICT: APPROVE <head sha>
-or VERDICT: REVISE <head sha>, or VERDICT: REJECT <head sha>. Nothing may
-follow that line.
+When the prompt asks for a formal verdict, end your answer with the literal
+heading ## Verdict on its own line, immediately followed on the next line by
+exactly one plain word: APPROVE, REJECT, or BLOCKED (REVISE only when the
+prompt explicitly allows it). Do not insert a blank line or Markdown styling
+between the heading and word. Do not give an earlier or provisional decision
+or a second verdict. No other line of the report may begin with APPROVE,
+REJECT, REVISE or BLOCKED.

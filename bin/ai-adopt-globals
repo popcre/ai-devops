@@ -5,6 +5,7 @@
 #
 #   ai-adopt-globals            # detect, preview, install, re-append, verify
 #   ai-adopt-globals --dry-run  # detect and preview only; writes nothing
+#   ai-adopt-globals --check    # exit 1 if an installed global drifted from its template
 #
 # Why this exists
 # ---------------
@@ -43,10 +44,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRY_RUN=false
+CHECK=false
 
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
+    --check) CHECK=true ;;
     -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -173,6 +176,31 @@ TARGETS=(
   "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md|self"
   "MiMo|$MIMO_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-mimo.md|self"
 )
+
+# --check: read-only drift report (#1881). Each installed global, with its
+# machine section stripped, must equal its template; a missing file is not drift.
+if $CHECK; then
+  drift=0
+  for entry in "${TARGETS[@]}"; do
+    IFS='|' read -r label installed template _ <<<"$entry"
+    [[ -f "$installed" ]] || { say "$label: not installed."; continue; }
+    start="$(find_section_start "$installed")"
+    if [[ -n "$start" ]]; then
+      head -n "$((start - 1))" "$installed" | tr -d '\r' | trim_tail > "$WORK/$label.body"
+    else
+      tr -d '\r' < "$installed" | trim_tail > "$WORK/$label.body"
+    fi
+    tr -d '\r' < "$template" | trim_tail > "$WORK/$label.template"
+    if diff -q "$WORK/$label.template" "$WORK/$label.body" >/dev/null; then
+      say "$label: CLEAN"
+    else
+      say "$label: DRIFT ($(diff "$WORK/$label.template" "$WORK/$label.body" | grep -c '^[<>]') changed lines) in $installed"
+      drift=1
+    fi
+  done
+  ((drift == 0)) || say "Run ai-adopt-globals to reinstall the current globals."
+  exit "$drift"
+fi
 
 say "==> machine: ${SHORT_HOST:-unknown}"
 say "==> repo:    $REPO_ROOT"

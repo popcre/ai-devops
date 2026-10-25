@@ -38,6 +38,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
   hang) sleep 3; printf '## Verdict\nAPPROVE\n';;
   signal) [ -z "${AI_CODEX_SIGNAL_READY:-}" ] || printf '%s\n' "$$" > "$AI_CODEX_SIGNAL_READY"; trap '[ -z "${AI_CODEX_SIGNAL_STOPPED:-}" ] || printf stopped > "$AI_CODEX_SIGNAL_STOPPED"; exit 143' HUP INT TERM; sleep 30;;
   slow) sleep 1; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
+  profilespy) { printf 'home=%s\n' "$CODEX_HOME"; cat "$CODEX_HOME/AGENTS.md"; if [ -L "$CODEX_HOME/auth.json" ]; then printf 'auth=symlink\n'; elif [ "$CODEX_HOME/auth.json" -ef "$AI_CODEX_TEST_USER_HOME/auth.json" ]; then printf 'auth=hardlink\n'; fi; } > "$AI_CODEX_TEST_ARGS/profile-spy"; printf '%s\n' "$@" > "$AI_CODEX_TEST_ARGS/profile-args"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   envspy) env > "$AI_CODEX_TEST_ARGS/env-spy"; printf 'review complete\n\n## Verdict\nAPPROVE\n';;
   *) printf 'review saw complete snapshot\n\n## Verdict\nAPPROVE\n\n'; printf 'codex diagnostic after response\n' >&2;;
 esac
@@ -47,6 +48,8 @@ MODELS="$TMP/models.env"; printf "CODEX_CMD='%s exec -m gpt-5.6-sol --skip-git-r
 
 export AI_DEVOPS_MODELS_ENV="$MODELS"
 export AI_CODEX_REVIEW_TEST_DIR="$TMP"
+UH="$TMP/user-codex-home"; mkdir -p "$UH"; printf 'Albert is a business owner\n' > "$UH/AGENTS.md"; printf '{}' > "$UH/auth.json"
+export CODEX_HOME="$UH" AI_CODEX_TEST_USER_HOME="$UH"
 export AI_CODEX_TEST_ARGS="$TMP/args"
 export AI_CODEX_STUB_SOURCE="$R"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
@@ -80,6 +83,18 @@ check "source_identity_refusals_submit_zero_provider_calls" "[ '$IDENTITY_CALLS_
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
 # #1427: Codex reviews use the ChatGPT login only; API keys never reach it.
 check "codex_review_unsets_api_keys" "cd '$R' && OPENAI_API_KEY=fake-openai-1427 CODEX_API_KEY=fake-codex-1427 AI_CODEX_STUB_MODE=envspy '$SCRIPT' diff-review >/dev/null 2>&1 && test -s '$TMP/args/env-spy' && ! grep -q 'fake-.*-1427' '$TMP/args/env-spy'"
+# Step 5.1 (#1881): reviewer runs get only the reviewer rules, no owner globals, skills or plugins.
+check "reviewer_profile_replaces_owner_globals" "cd '$R' && AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -qE 'auth=(symlink|hardlink)' '$TMP/args/profile-spy' && ! grep -q 'business owner' '$TMP/args/profile-spy' && ! grep -qx 'home=$UH' '$TMP/args/profile-spy'"
+check "reviewer_profile_disables_plugins_and_skills" "grep -qx plugins '$TMP/args/profile-args' && grep -qx skills.enabled=false '$TMP/args/profile-args' && grep -qxe --ignore-user-config '$TMP/args/profile-args'"
+LB="$TMP/launcher-bin"; mkdir -p "$LB"; ln -s "$SCRIPT" "$LB/ai-codex-review"
+# Git Bash without symlink rights copies on ln -s; installed launchers there are .cmd shims, not symlinks.
+if [ -L "$LB/ai-codex-review" ]; then
+  check "reviewer_profile_found_through_installed_launcher_symlink" "rm -f '$TMP/args/profile-spy'; cd '$R' && AI_CODEX_STUB_MODE=profilespy '$LB/ai-codex-review' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy'"
+fi
+NOSYM="$TMP/no-symlink-bin"; mkdir -p "$NOSYM"; printf '#!/usr/bin/env bash\n[ "$1" = -s ] && exit 1\nexec "%s" "$@"\n' "$(command -v ln)" > "$NOSYM/ln"; chmod +x "$NOSYM/ln"
+check "reviewer_profile_hard_links_auth_without_symlink_rights" "rm -f '$TMP/args/profile-spy'; cd '$R' && PATH='$NOSYM':\"\$PATH\" AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1 && grep -q 'one-shot, read-only code reviewer' '$TMP/args/profile-spy' && grep -q 'auth=hardlink' '$TMP/args/profile-spy'"
+check "reviewer_profile_refuses_without_codex_auth" "cd '$R' && ! CODEX_HOME='$TMP/no-auth-home' AI_CODEX_STUB_MODE=profilespy '$SCRIPT' diff-review >/dev/null 2>&1"
+check "reviewer_profile_home_is_removed_and_user_home_kept" "home=\$(sed -n 's/^home=//p' '$TMP/args/profile-spy'); [ ! -e \"\$home\" ] && grep -q 'business owner' '$UH/AGENTS.md' && [ -f '$UH/auth.json' ]"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"
 check "review_runs_the_supplied_test_evidence_command" "cd '$R' && '$SCRIPT' diff-review --tests 'printf passed > \"\$AI_CODEX_TEST_MARKER\"' >/dev/null && grep -qx passed '$TMP/tests-ran'"
 check "review_rejects_a_missing_tests_command" "cd '$R' && ! '$SCRIPT' diff-review --tests >/dev/null 2>&1"
@@ -109,6 +124,58 @@ check "provider_command_receives_private_directory" "grep -Rzq -- '--cd' '$TMP/a
 # from `--sandbox read-only`, which the check above proves is unchanged.
 if [ -n "${SYSTEMROOT:-}" ]; then
   check "provider_command_keeps_the_windows_sandbox_implementation" "grep -Rzq -- 'windows.sandbox=' '$TMP/args'"
+  # #1891: over SSH the provider runs through a desktop-session scheduled task.
+  # The fake schtasks runs the task's script in the background and logs actions.
+  ST="$TMP/schtasks-bin"; mkdir -p "$ST"
+  cat > "$ST/schtasks" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$AI_CODEX_TEST_ARGS/schtasks-log"
+[ "$1" = /Create ] && [ "${AI_CODEX_FAKE_CREATE_FAIL:-}" = 1 ] && exit 1
+prev=""; for a in "$@"; do [ "$prev" = /TR ] && tr="$a"; prev="$a"; done
+[ "$1" = /Create ] && printf '%s' "$tr" | sed -E 's/.*-File "(.*)job[.]ps1"$/\1run.sh/' > "$AI_CODEX_TEST_ARGS/schtasks-script"
+[ "$1" = /Create ] && rm -f "$AI_CODEX_TEST_ARGS/schtasks-deleted"
+[ "$1" = /Delete ] && : > "$AI_CODEX_TEST_ARGS/schtasks-deleted"
+if [ "$1" = /Run ] && [ "${AI_CODEX_FAKE_NO_DESKTOP:-}" != 1 ]; then bash "$(cygpath -u "$(cat "$AI_CODEX_TEST_ARGS/schtasks-script")")" & fi
+exit 0
+EOF
+  cat > "$ST/powershell.exe" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in *Get-ScheduledTask*) ;; *) exec "$AI_CODEX_REAL_POWERSHELL" "$@";; esac
+{ [ -e "$AI_CODEX_TEST_ARGS/schtasks-deleted" ] || [ "${AI_CODEX_FAKE_CREATE_FAIL:-}" = 1 ]; } && { echo absent; exit 0; }
+[ "${AI_CODEX_FAKE_STUCK:-}" = 1 ] && echo Running || echo Ready
+EOF
+  export AI_CODEX_REAL_POWERSHELL="$(command -v powershell.exe)"
+  chmod +x "$ST/schtasks" "$ST/powershell.exe"
+  rm -f "$TMP/args/schtasks-log"
+  RELAY_OUT="$(cd "$R" && SSH_CONNECTION='1 2 3 4' PATH="$ST:$PATH" "$SCRIPT" diff-review 2>/dev/null)"
+  check "ssh_review_relays_through_desktop_task_and_returns_verdict" "grep -A1 '^## Verdict' '$RELAY_OUT' | tail -1 | grep -qx APPROVE && grep -qx /Run '$TMP/args/schtasks-log' && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete"
+  check "late_trigger_run_of_the_relay_script_launches_nothing" "f=\$(cygpath -u \"\$(cat '$TMP/args/schtasks-script')\"); [ ! -e \"\$f\" ] || { bash \"\$f\"; [ \$? = 95 ]; }"
+  rm -f "$TMP/args/schtasks-log"
+  check "ssh_review_without_desktop_session_fails_clearly" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_NO_DESKTOP=1 AI_CODEX_RELAY_START_SECONDS=2 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && grep -A1 -x /End '$TMP/args/schtasks-log' | grep -qx /Delete && grep -rq 'signed in at the desktop' '$R/.ai/reviews' && rm -f '$R'/.ai/reviews/codex-*-failed-*.log"
+  rm -f "$TMP/args/schtasks-log"
+  failed_runs(){ find "$TMP/lifecycle/runs" -name '*.json' -exec jq -e 'select(.status=="failed" and .failure_class=="provider-failed")' {} \; 2>/dev/null | grep -c BLOCKED; }
+  FAILED_BEFORE="$(failed_runs)"
+  check "ssh_review_refuses_when_relay_task_will_not_stop" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_STUCK=1 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>'$TMP/stuck.err' && grep -q 'codex-output' '$TMP/stuck.err' && ! grep -qx /Delete '$TMP/args/schtasks-log' && grep -rq 'could not be confirmed stopped' '$R/.ai/reviews' && kept=\$(grep -rho 'Its state is kept in [^ ]*[^. ]' '$R/.ai/reviews' | head -1 | sed 's/Its state is kept in //') && [ -d \"\$kept/relay\" ] && touch \"\$kept/relay/cancel\" && rm -rf \"\$kept\" && [ \"\$(failed_runs)\" -gt '$FAILED_BEFORE' ]"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
+  # A /Run reported failed but dispatched late, once cleanup has begun, must never start Codex.
+  mkdir -p "$TMP/late-bin"; cp "$ST/powershell.exe" "$TMP/late-bin/"
+  cat > "$TMP/late-bin/schtasks" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = /Run ]; then
+  printf '%s\n' /Run >> "\$AI_CODEX_TEST_ARGS/schtasks-log"
+  script="\$(cygpath -u "\$(cat "\$AI_CODEX_TEST_ARGS/schtasks-script")")"; relay="\$(dirname "\$script")"
+  ( until [ -d "\$relay/ran" ]; do sleep .05; done; bash "\$script"; echo \$? > "\$AI_CODEX_TEST_ARGS/late-rc" ) &
+  exit 1
+fi
+exec "$ST/schtasks" "\$@"
+EOF
+  chmod +x "$TMP/late-bin/"*
+  rm -f "$TMP/args/schtasks-log" "$TMP/args/late-rc"; CALLS_BEFORE="$(find "$TMP/args" -name 'args-*' | wc -l)"
+  check "late_dispatched_run_after_cleanup_never_starts_codex" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' PATH='$TMP/late-bin:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1; for _ in \$(seq 50); do [ -s '$TMP/args/late-rc' ] && break; sleep .1; done; [ -s '$TMP/args/late-rc' ] && [ \"\$(cat '$TMP/args/late-rc')\" != 0 ] && [ \"\$(find '$TMP/args' -name 'args-*' | wc -l)\" = '$CALLS_BEFORE' ]"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
+  check "ssh_review_create_failure_keeps_nothing_and_stops_nothing" "cd '$R' && ! SSH_CONNECTION='1 2 3 4' AI_CODEX_FAKE_CREATE_FAIL=1 PATH='$ST:$PATH' '$SCRIPT' diff-review 2>'$TMP/create-fail.err' >/dev/null && ! grep -q 'kept' '$TMP/create-fail.err' && ! grep -qx /End '$TMP/args/schtasks-log'"
+  rm -f "$TMP/args/schtasks-log" "$R"/.ai/reviews/codex-*-failed-*.log
+  check "ssh_review_opt_out_runs_provider_directly" "cd '$R' && SSH_CONNECTION='1 2 3 4' AI_CODEX_DESKTOP_RELAY=0 PATH='$ST:$PATH' '$SCRIPT' diff-review >/dev/null 2>&1 && test ! -e '$TMP/args/schtasks-log'"
 fi
 check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
 check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"

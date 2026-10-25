@@ -27,13 +27,44 @@ Never treat a run timestamp alone as the bookmark, and never let a short or fail
 read as the licensor withdrawing assets. The gates in the shared skill exist because that
 failure silently destroys data.
 
+## STAR LABS 2.0 (current site, live by 2026-10-21)
+
+Warner replaced the Polymer/React portal with STAR LABS 2.0 at `https://sl2.starlabs.warnerbros.com/`. The old `portal.starlabs.warnerbros.com` address now redirects there, and some links on the new site still point back to it. It is a server-rendered Rails app (Turbo + Stimulus), not a single-page app, so most catalogue data sits in the page HTML or behind small same-origin JSON endpoints. Everything below the "legacy" marker in this skill describes the old portal; reuse its rules (read-only, IDs over labels, no downloads during a metadata scrape) but not its UI steps.
+
+Sign-in: `/users/login` shows "Sign in with Okta" (and a separate Nuxeo-credentials option). The user signs in; never use either option yourself. Check which connected Chrome holds the session before working - on 2026-10-21 only one of two connected browsers was signed in.
+
+Navigation: Home `/`, Kick-Off `/kickoffs`, Submit Job `/submit-job`, My Workspace `/submissions`, Art Assets `/art-assets`, Reporting `/audit-report`, brand landing pages `/brands/<slug>`, new creative `/new-creatives`.
+
+Submission properties (replaces the old Product-page Property select):
+
+- `/submit-job` renders every entitled contract as a radio `submission[contract_id]` whose value is the contract UUID, with contract metadata in `data-contract-*` attributes (title, territories and IDs, product detail and IDs, office, status, region).
+- Each contract's entitled properties are rendered in the page as checkboxes named `contract_property_selection[<contract UUID>][selected][]`. Their `value` is the exact Warner property **label**; no property UUID is exposed there. Read them straight from the DOM; no form field needs filling and nothing needs to be clicked. Never submit the wizard.
+- Match these labels to the stored product-catalogue UUIDs by exact label. A label that matches nothing is a rename or a new property: report it, do not guess.
+- The property-to-character catalogue lives in wizard step 3. Reaching it needs a draft job. Reuse a draft that already exists (My Workspace). Only if none exists may you choose a job type and press Save and Next on `/submit-job` to create one, and only after the owner approves that in the current session (he approved one on 2026-10-21; that does not carry over). This is the single exception to the read-only rule below: never submit, never press Save anywhere else, and the owner deletes the draft himself. Step 3's character picker then reads `GET /api/autocomplete/categories?context=character&contract_id=<contract uuid>&q=&property=<JSON array of exact property labels>` (the same call works for any property once one draft exists). Send `property` as `JSON.stringify([label])`: a bare label with a comma ("Wizard of Oz, The (1939)") is split and returns only the placeholder. Omit `page`: without it the whole list returns (server page size 2000); passing `page` returns one row. Rows are labels only (`id` is `category-<slug>`), so carry Warner UUIDs from the stored catalogue by exact label and mark the rest `id_fallback=true`. On 2026-10-21 all four contracts returned identical lists.
+
+Creative (Art Assets) properties:
+
+- `GET /api/art_assets/search?q=&page=1` (same origin, `Accept: application/json`) returns `results_count`, `entries`, `next_cursor`, `result_window_exhausted`, `incomplete_facets`, `facet_supplements`, and Nuxeo-style `aggregations` (`Public_property_agg`, `Public_character_agg`, `Public_franchise_agg`, `Public_styleGuideName_agg`, `Public_season_agg`, `Public_theme_agg`, `Public_subcategory_agg`, `Public_digitalLanguage_agg`).
+- An empty query now works and returns the whole entitled library. With `facet_supplements: "full"` the property aggregation returned every property bucket (more than 200 on 2026-10-21) - the old 100-bucket cap is gone. Each bucket is `key` (Warner property UUID), `docCount`, and `fetchedKey.title` (exact label). Confirm `incomplete_facets` is empty before trusting a facet as complete.
+- The UI page size is 48; `page_size` accepts up to 200 (larger values are clamped). Paging with `after=<next_cursor>` passes the old 10,000-result window. `sort_by` (`modified`, `created`, `title`) with `sort_order` disables the cursor, so sorted reads are offset pages limited to 10,000.
+- Facet filters: repeat the aggregation id as a plain query parameter, for example `Public_franchise_agg=DC` or `Public_theme_agg=<key>`.
+- **Server bug (2026-10-21): every ordering silently drops its final page.** No rows come back once `offset + page_size >= results_count`, even for a one-row result, while `results_count` still counts them. Recover by slicing (brand, then theme, season, property, style guide) until each slice is at most 10,000, reading each slice with `sort_by=modified` in both `desc` and `asc`, and unioning by asset UUID. For a slice of 200 or fewer use `page_size = count - 1`. Prove completeness by unique UUIDs equal to the unfiltered `results_count`.
+- Search rows carry `id`, `path`, `title`, dates, `season`, `property` + `property_ids`, `theme`, `subcategory`, `style_guide` (name only), `character` + `character_ids`, `digital_language`, `restricted`. They carry no brand (`public:franchise`), no file size and no Warner asset number. Brand comes from which brand filter returned the asset. `GET /api/art_assets/<uuid>` adds `file_name`, `file_length` and `file_mime_type`; fetch it only for added and changed rows.
+- The old Nuxeo NXQL endpoint on `dam.starlabs.warnerbros.com` returns 401 from the new site.
+- The new site returned about 8% fewer assets than the 2026-08-20 Nuxeo index, as whole style-guide kits (theme-park, retail and pop-up kits). Treat that as an entitlement difference to explain, not withdrawals; the shrink gate correctly stops the manifest update.
+- Other read endpoints seen in page config: `/search/preview`, `/api/art_assets/image_query`, `/api/art_assets/recently_viewed`, `/api/art_assets/saved_searches`. Bulk download (`/api/art_assets/bulk_download`), cart, collections, and restriction acknowledgements change state: never call them during a scrape.
+- Tool output from the browser is cut off near 1,000 characters, and the browser may be on another machine than the repository. Compare in the page (send short ID prefixes in, return only the differences) instead of dumping full lists. Results that echo a URL query string or cursor are blocked by the browser tool; return counts and booleans instead.
+- Bulk transfer that worked on 2026-10-21: a small Node receiver on `127.0.0.1` on the Windows machine running Chrome (started detached with `Invoke-CimMethod Win32_Process Create` over SSH, since `Start-Process` dies with the SSH session), CORS origin `https://sl2.starlabs.warnerbros.com` plus `Access-Control-Allow-Private-Network: true`, page fetches with `targetAddressSpace: 'loopback'` (`'local'` fails for 127.0.0.1). Run the crawl as an un-awaited async loop in the page, POST JSONL chunks, poll a status object, then `scp` the files back and delete the receiver and files. Owner approval for the receiver is required each time.
+
+## Legacy portal (before STAR LABS 2.0)
+
 ## Mandatory sources
 
-- Direct property-character relationship: `https://portal.starlabs.warnerbros.com/submit/product/`.
-- Style-guide and file metadata: `https://portal.starlabs.warnerbros.com/#!/search`.
+- Direct property-character relationship: `https://portal.starlabs.warnerbros.com/submit/product/` (legacy; see STAR LABS 2.0 above).
+- Style-guide and file metadata: `https://portal.starlabs.warnerbros.com/#!/search` (legacy; see STAR LABS 2.0 above).
 - Database contract: `shared-db/docs/licensor-portal-scrape-source-schema-20260807.md`, especially sections 3 and 4.
 
-Use the user's authenticated Chrome session. The user performs every login and MFA step. Never inspect or enter cookies, passwords, MFA codes, browser storage, or authentication tokens. Treat both portal pages as read-only: never click Save, Submit, approval controls, or anything that creates or changes a Warner record.
+Use the user's authenticated Chrome session. The user performs every login and MFA step. Never inspect or enter cookies, passwords, MFA codes, browser storage, or authentication tokens. Treat both portal pages as read-only: never click Save, Submit, approval controls, or anything that creates or changes a Warner record. The one exception is the owner-approved STAR LABS 2.0 draft job described above.
 
 ## Property-character scrape
 

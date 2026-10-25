@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# ai-pr-poll-guard-hook — Claude Code PreToolUse hook for Bash.
+#
+# Why this exists: the global rule "wait on CI with bin/ai-pr-wait" is prose, and
+# prose drifts. A transcript audit (plan_ruleset-trim-and-enforce.md, #1881)
+# found hand-written PR polling loops in 11 of 44 sessions. A hand-rolled
+# `gh pr view` loop cannot see a merge-queue ejection, and it burns API quota.
+#
+# Patterns spell g[h] so the transport guard does not read them as GitHub calls.
+# This hook blocks the loop before it runs (exit 2; stderr reaches the model)
+# and names the waiter to use instead. A single `gh pr view`, a lone `sleep`,
+# and ai-pr-wait itself are allowed. It never edits anything.
+
+set -u
+payload="$(cat 2>/dev/null || true)"
+[[ -n "$payload" ]] || exit 0
+
+cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[[ -n "$cmd" ]] || exit 0
+# Windows spellings of a shell get exactly the Unix treatment (#1891 install
+# review): a Windows full path (drive letter or .exe, quoted or not) becomes
+# the bare name, .exe is dropped, and the name is lowercased. Nothing
+# else changes (a quoted Unix path such as "/bin/bash" stays as it was), so every rule below judges `BASH.EXE`,
+# `bash.exe` and "C:/Program Files/Git/bin/bash.exe" exactly as it judges `bash`.
+cmd="$(printf '%s' "$cmd" | sed -E \
+  -e 's#"[A-Za-z]:[^"]*[\\/]((ba|da|z|k|a)?sh)(\.exe)?"#\L\1#Ig' \
+  -e 's#"[^"]*[\\/]((ba|da|z|k|a)?sh)\.exe"#\L\1#Ig' \
+  -e "s#'[A-Za-z]:[^']*[\\\\/]((ba|da|z|k|a)?sh)(\\.exe)?'#\\L\\1#Ig" \
+  -e "s#'[^']*[\\\\/]((ba|da|z|k|a)?sh)\\.exe'#\\L\\1#Ig" \
+  -e 's#(^|[^A-Za-z0-9_.-])((ba|da|z|k|a)?sh)\.exe([^A-Za-z0-9_]|$)#\1\2\4#Ig' \
+  -e 's#(^|[^A-Za-z0-9_.-])[A-Za-z]:[^ \t"'"'"';&|()<>]*[\\/]((ba|da|z|k|a)?sh)([^A-Za-z0-9_.]|$)#\1\2\4#Ig' \
+  -e 's#(^|[^A-Za-z0-9_.-])((ba|da|z|k|a)?sh)([^A-Za-z0-9_.-]|$)#\1\L\2\E\4#Ig')"
+# Text is not a command: drop here-document bodies, then quoted strings (commit
+# messages, notes, echo), so a message that merely mentions polling is allowed.
+cmd="$(printf '%s\n' "$cmd" | tr -d '\r' | awk '
+  # A body ends on its exact delimiter (tab-indented for <<-). An
+  # unterminated body is not dropped: it is scanned like any command (#1901).
+  end != "" { line = $0; if (dash) sub(/^\t+/, "", line); if (line == end) { end = ""; buf = ""; next } buf = buf $0 "\n"; next }
+  match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/) && $0 !~ /(^|[;&|( \t])(\/(usr\/)?bin\/)?(env[ \t]+)?(ba|da|z|k|a)?sh([ \t]|<|$)/ {
+    end = substr($0, RSTART, RLENGTH); dash = (end ~ /^<<-/); sub(/^<<-?[ \t]*["'"'"']?/, "", end); buf = ""
+  }
+  { print }
+  END { if (end != "") printf "%s", buf }')"
+# Loops are often written over several lines; judge the command as one line.
+# Text piped into a shell (`printf '...' | bash`) is a script too (#1901).
+piped=""
+if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '\|[[:space:]]*(/(usr/)?bin/)?(env[[:space:]]+)?(ba|da|z|k|a)?sh([[:space:]]|$)'; then
+  piped="$(printf '%s' "$cmd" | tr '\n' ' ' | tr -d "\"'")"
+fi
+# A quoted script handed to a child shell or eval IS a command (#1901): unwrap
+# `bash -c '...'`, `sh -lc "..."`, `eval '...'` before dropping other quotes.
+cmd="$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +'([^']*)'/\\1 \\5 /g" \
+  -e "s/(^|[^A-Za-z0-9_])((ba|da|z|k|a)?sh( +[^ '\"]+)* +-[A-Za-z]*c|eval) +\"([^\"]*)\"/\\1 \\5 /g" \
+  | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')"
+
+[ -z "$piped" ] || cmd="$cmd ; $piped"
+reason=''
+if printf '%s' "$cmd" | grep -Eq '\bsleep\b.*\b(g[h] pr (view|checks|merge)|ai-gh pr)\b'; then
+  reason='sleep followed by a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\b(until|while)\b.*\bg[h] pr (view|checks|merge)\b'; then
+  reason='an until/while loop over a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\bseq\b.*\bg[h] pr view\b'; then
+  reason='a seq loop over a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\bfor\b.*\bdo\b.*\bg[h] pr (view|checks|merge)\b'; then
+  reason='a for loop over a pull-request read'
+elif printf '%s' "$cmd" | grep -Eq '\b(for|while|until)\b.*\btimeout +[0-9]+[smh]?\b.*ai-pr-wait'; then
+  reason='ai-pr-wait wrapped in timeout inside a loop'
+fi
+[[ -n "$reason" ]] || exit 0
+
+printf '%s\n' "Blocked: hand-written pull-request polling ($reason). It cannot see a merge-queue ejection and burns the GitHub API quota. Use one bounded wait instead: bin/ai-pr-wait <pr> --timeout-minutes N (add --fit-tool-call to fit one 10-minute tool call; rerun it if it prints STILL-WAITING)." >&2
+exit 2

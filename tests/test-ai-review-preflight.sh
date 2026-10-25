@@ -303,8 +303,8 @@ check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
 check "status names the exact resolved wrapper command per provider" "env -u AI_REVIEW_GROK_WRAPPER $SCRIPT status grok | jq -e '.wrapper_command==\"ai-grok-review\" and (.wrapper_path|endswith(\"/ai-grok-review\"))' && env -u AI_REVIEW_QWEN_WRAPPER $SCRIPT status qwen | jq -e '.wrapper_command==\"ai-qwen\"' && env -u AI_REVIEW_CODEX_WRAPPER $SCRIPT status codex | jq -e '.wrapper_command==\"ai-codex-review\"' && $SCRIPT status grok | jq -e '.wrapper_command==\"good\"'"
 check "check prints the exact resolved wrapper command" "$SCRIPT check grok '$REPO' 2>&1 | grep -qF 'grok wrapper command: good ($TMP/bin/good)'"
-check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/grok.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"grok\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
-check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek stepfun; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
+check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/glm.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"glm\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
+check "all active providers are registered" "for p in glm muse deepseek stepfun codex; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
@@ -530,6 +530,11 @@ check "dispatch_after_reset: a passed reset lifts the hold and the provider is c
 
 echo '== post-merge reviewer hook (#804)'
 HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
+# The real hook records plain pulls in the task-gates state log; keep that
+# record inside this fixture so live ai-task-gates never warns about it (#1783).
+LIVE_ADV_LOG="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/unprotected-advances.log"
+LIVE_ADV_BEFORE="$(cat "$LIVE_ADV_LOG" 2>/dev/null | sha256sum)"
+export AI_TASK_GATES_DIR="$HOOKTEST/task-gates"
 git init -q --bare -b main "$HOOK_ORIGIN"
 git clone -q "$HOOK_ORIGIN" "$HOOK_CLONE" 2>/dev/null
 git -C "$HOOK_CLONE" config user.name Test; git -C "$HOOK_CLONE" config user.email t@example.com
@@ -563,8 +568,79 @@ HOOK_SILENT="$(git -C "$HOOK_CLONE" pull -q --ff-only 2>&1)"; HOOK_RC=$?
 check "the shipped hook carries the managed marker" "grep -q '^# ai-devops-managed: reviewer auto-requalification' '$ROOT/hooks/post-merge'"
 check "the shipped hook fails hard when its exec target is missing" "grep -q '^set -euo pipefail' '$ROOT/hooks/post-merge'"
 
+check "synthetic hook pulls record only in the fixture state log" "grep -qF 'hooktest/clone' '$HOOKTEST/task-gates/unprotected-advances.log' && [ \"\$(cat '$LIVE_ADV_LOG' 2>/dev/null | sha256sum)\" = '$LIVE_ADV_BEFORE' ]"
+unset AI_TASK_GATES_DIR
+
 echo '== managed hook installer (#804)'
 HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
+# #1836: the installed main guard refuses a plain pull (and a detached move)
+# in the primary checkout and restores its files (never a refused commit's own
+# work), allows fetch and other-branch work in a linked
+# worktree, and lets the installers' empty core.hooksPath advance main.
+GUARD="$TMP/guard"; git init -q --bare -b main "$GUARD/origin.git"
+git clone -q "$GUARD/origin.git" "$GUARD/c" 2>/dev/null
+git -C "$GUARD/c" config user.name Test; git -C "$GUARD/c" config user.email t@example.com
+git -C "$GUARD/c" config core.hooksPath "$GUARD/c/.git/hooks"
+for n in 1 2; do echo "$n" > "$GUARD/c/f"; git -C "$GUARD/c" add f; git -C "$GUARD/c" commit -qm "c$n"; git -C "$GUARD/c" push -q origin main; done
+git -C "$GUARD/c" reset -q --hard HEAD~1; GUARD_OLD="$(git -C "$GUARD/c" rev-parse HEAD)"
+git -C "$GUARD/c" worktree add -q -b dev "$GUARD/wt" 2>/dev/null
+mkdir -p "$GUARD/empty"
+if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/reference-transaction" &&
+   GUARD_ERR="$(git -C "$GUARD/c" pull -q --ff-only 2>&1)"; [ $? -ne 0 ] &&
+   printf '%s' "$GUARD_ERR" | grep -q 'protected installer' &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_OLD" ] &&
+   [ -z "$(git -C "$GUARD/c" status --porcelain --untracked-files=no)" ] && [ "$(cat "$GUARD/c/f")" = 1 ] &&
+   ! git -C "$GUARD/c" checkout -q --detach origin/main 2>/dev/null &&
+   [ -z "$(git -C "$GUARD/c" status --porcelain --untracked-files=no)" ] &&
+   echo own > "$GUARD/c/own" && git -C "$GUARD/c" add own && ! git -C "$GUARD/c" commit -qm own 2>/dev/null &&
+   [ "$(cat "$GUARD/c/own")" = own ] && ! git -C "$GUARD/c" diff --cached --quiet HEAD -- own &&
+   git -C "$GUARD/c" rm -q --cached own && rm -f "$GUARD/c/own" &&
+   echo mine > "$GUARD/c/f" && git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" commit -qam mine &&
+   ! git -C "$GUARD/c" pull -q --no-rebase --no-edit -X ours 2>/dev/null &&
+   test -f "$GUARD/c/.git/MERGE_HEAD" && git -C "$GUARD/c" merge --abort &&
+   ! test -f "$GUARD/c/.git/MERGE_HEAD" && [ "$(cat "$GUARD/c/f")" = mine ] &&
+   git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" reset -q --hard "$GUARD_OLD" &&
+   git -C "$GUARD/c" fetch -q origin &&
+   echo w > "$GUARD/wt/w" && git -C "$GUARD/wt" add w && git -C "$GUARD/wt" commit -qm wt &&
+   git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" merge -q --ff-only origin/main &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$(git -C "$GUARD/c" rev-parse origin/main)" ]; then
+  ok "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
+else
+  bad "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
+fi
+# git 2.53 sets up a new linked worktree's HEAD without its GIT_DIR, so the
+# hook sees it as the primary; adding a worktree must still work while the
+# primary stays guarded (#1783, edge-dev3).
+GUARD_HEAD="$(git -C "$GUARD/c" rev-parse HEAD)"
+if git -C "$GUARD/c" worktree add -q --detach "$GUARD/wt2" "$GUARD_OLD" 2>/dev/null &&
+   [ "$(git -C "$GUARD/wt2" rev-parse HEAD)" = "$GUARD_OLD" ] &&
+   ! git -C "$GUARD/c" checkout -q --detach "$GUARD_OLD" 2>/dev/null &&
+   [ "$(git -C "$GUARD/c" rev-parse HEAD)" = "$GUARD_HEAD" ]; then
+  ok "the installed main guard allows a new linked worktree from the primary"
+else
+  bad "the installed main guard allows a new linked worktree from the primary"
+fi
+# A stale worktree HEAD.lock left by an interrupted `git worktree add` must not
+# reopen primary HEAD moves; only a lock written in the last minute counts.
+# Drive the hook directly with no primary HEAD.lock, varying only the age (#1901).
+mkdir -p "$GUARD/c/.git/worktrees/stale"
+: > "$GUARD/c/.git/worktrees/stale/HEAD.lock"
+guard_hook_head_move() {
+  printf '%s %s HEAD\n' "$GUARD_HEAD" "$GUARD_OLD" | ( cd "$GUARD/c" && bash "$ROOT/hooks/reference-transaction" prepared ) >/dev/null 2>&1
+}
+if guard_hook_head_move; then
+  ok "a fresh worktree lock still marks a new linked worktree"
+else
+  bad "a fresh worktree lock still marks a new linked worktree"
+fi
+touch -d '10 minutes ago' "$GUARD/c/.git/worktrees/stale/HEAD.lock"
+if ! guard_hook_head_move; then
+  ok "a stale worktree lock does not reopen primary HEAD moves"
+else
+  bad "a stale worktree lock does not reopen primary HEAD moves"
+fi
+rm -f "$GUARD/c/.git/ai-devops-main-guard-refused"
+rm -rf "$GUARD/c/.git/worktrees/stale"
 check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
 check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
 FIXTURE="$TMP/hook-fixture"
@@ -648,6 +724,7 @@ export MOCK_PREFLIGHT_SANDBOX="$ROOT/bin/ai-review-sandbox"
 cat > "$TMP/bin/packet-observer" <<'EOF'
 #!/usr/bin/env bash
 printf 'packet %s\n' "$1" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"
+if [ "$1" = verify ]; then printf 'receipt=%s\n' "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"; fi
 if [ "${MOCK_PREFLIGHT_VERIFY_FAIL:-0}" = 1 ] && [ "$1" = verify ]; then exit 79; fi
 exec "$MOCK_PREFLIGHT_PACKET" "$@"
 EOF
@@ -698,8 +775,10 @@ check "plain check still refuses a persistent capacity hold" "! AI_REVIEW_KIMI_W
 check "successful live probe clears a persistent capacity hold" "AI_REVIEW_KIMI_WRAPPER='$TMP/bin/good' $SCRIPT check kimi '$REPO' --live >/dev/null 2>&1 && $SCRIPT status kimi | grep -q installed-healthy"
 $SCRIPT clear kimi >/dev/null
 
-OUT="$(AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
-[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && ok "healthy provider retains complete isolated evidence checks and cleanup" || bad "healthy provider retains complete isolated evidence checks and cleanup"
+mkdir -p "$REPO/.ai/reviews"
+MOCK_RECEIPT="$REPO/.ai/reviews/final-review.json"
+OUT="$(AI_REVIEW_SOURCE_RECEIPT_FILE="$MOCK_RECEIPT" AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'receipt=' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && [ ! -e "$MOCK_RECEIPT" ] && ok "healthy preflight verifies isolated evidence without publishing the final review receipt" || bad "healthy preflight verifies isolated evidence without publishing the final review receipt"
 OUT="$(MOCK_PREFLIGHT_VERIFY_FAIL=1 AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
 [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep -q 'health=ok' && ok "healthy doctor cannot bypass failed packet verification" || bad "healthy doctor cannot bypass failed packet verification"
 
@@ -834,14 +913,9 @@ jq -n --arg h "$PH_HEAD" --arg d "$PH_DIGEST" --arg k "$PH_KEY" --arg r "$PH_REP
   '{schema_version:1,status:"completed",provider:"gemini",run_id:"ph1",review_mode:"final-check",base:null,repository_key:$k,head:$h,source_digest:$d,verdict:"APPROVE",failure_class:null,report_path:$r,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
   > "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 # Native Windows jq/Python may record and print C:/ paths (CRLF-terminated) for
-# a Git Bash /tmp path; elsewhere the comparison stays exact.
-same_path(){
-  local a="${1%$'\r'}" b="${2%$'\r'}"
-  [ -n "$a" ] && [ -n "$b" ] || return 1
-  if command -v cygpath >/dev/null 2>&1; then
-    a="$(cygpath -m "$a")" && b="$(cygpath -m "$b")" && [ -n "$a" ] && [ "$a" = "$b" ]
-  else [ "$a" = "$b" ]; fi
-}
+# a Git Bash /tmp path; the shared helper compares them as one place (#1835).
+source "$ROOT/tools/lib/path-identity.sh"
+same_path(){ ai_same_path "$@"; }
 ph(){ AI_POOL_TEST_HOOKS=1 AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" "$SCRIPT" passed-head "$REPO" "$@"; }
 PH_OUT="$(ph final-check 2>/dev/null)"; PH_RC=$?
 [ "$PH_RC" -eq 0 ] && same_path "$(jq -r .report <<<"$PH_OUT")" "$PH_REPORT" && [ "$(jq -r .provider <<<"$PH_OUT")" = gemini ] \
@@ -875,9 +949,17 @@ rm -f "$TMP/ph-pool-args"
 PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
 [ "$PH_RC" -eq 0 ] && same_path "$(printf '%s\n' "$PH_FRONT" | tail -1)" "$PH_REPORT" && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
   && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
+AI_REVIEW_SOURCE_RECEIPT_FILE="$REPO/.ai/reviews/governed-ph.json" ph_front > /dev/null 2>"$TMP/ph-governed.err"
+grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ! grep -q 'already passed' "$TMP/ph-governed.err" \
+  && ok "governed_caller_never_receives_another_reviewers_pass" || bad "governed_caller_never_receives_another_reviewers_pass"
+rm -f "$TMP/ph-pool-args"
 ph_front --additional-reviewer >/dev/null 2>&1
 grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
 grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
+rm -f "$TMP/ph-pool-args"
+printf 'A specific review question.\n' > "$TMP/carried-question.md"
+AI_REVIEW_BRIEF_FILE="$TMP/carried-question.md" ph_front >/dev/null 2>&1
+grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "carried_question_never_uses_a_generic_front_door_approval" || bad "carried_question_never_uses_a_generic_front_door_approval"
 rm -f "$TMP/ph-pool-args"
 jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
 ph_front --implementer codex >/dev/null 2>&1

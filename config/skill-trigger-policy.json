@@ -18,7 +18,6 @@
     "secrets-to-1password",
     "shared-db-change",
     "shared-db-handover",
-    "shared-db-orchestrator",
     "synology-long-running-operations"
   ]
 }

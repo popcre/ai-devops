@@ -14,9 +14,10 @@ resolve(){ (cd "$ROOT/tools" && env "$@" "$PY" -c 'import reviewer_events; print
 # The real profile home, in Python's own spelling (C:\Users\... on Windows), so
 # the default-live probe needs no POSIX suffix strip.
 live_home="$(cd "$ROOT/tools" && "$PY" -c 'import reviewer_events; print(reviewer_events._profile_home())')"
-# Windows Python prints C:\...\Temp paths for Git Bash /tmp inputs; compare
-# both spellings through cygpath where it exists.
-same_path(){ [ "$1" = "$2" ] && return 0; command -v cygpath >/dev/null 2>&1 || return 1; [ "$(cygpath -u "$1")" = "$(cygpath -u "$2")" ]; }
+# Windows Python prints C:\...\Temp paths for Git Bash /tmp inputs; the shared
+# helper compares both spellings as one place (#1835).
+source "$ROOT/tools/lib/path-identity.sh"
+same_path(){ ai_same_path "$@"; }
 
 check "harness exports the test isolation marker" '[ "${AI_REVIEW_TEST_ISOLATION:-}" = 1 ]'
 check "harness gives the suite a private events directory" '[ -n "${AI_REVIEW_EVENT_DIR:-}" ] && [ -d "$AI_REVIEW_EVENT_DIR" ]'

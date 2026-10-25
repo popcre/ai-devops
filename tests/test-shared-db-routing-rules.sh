@@ -5,15 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 FIX="$ROOT/tests/fixtures/shared-db-routing/1097-successor-1113.md"
-ORCH="$ROOT/skills/shared/shared-db-orchestrator/SKILL.md"
-MANUAL="$ROOT/skills/shared/shared-db-orchestrator/references/operating-manual.md"
+ORCH="$ROOT/docs/shared-db-structural-safety/README.md"
+MANUAL="$ROOT/docs/shared-db-structural-safety/references/operating-manual.md"
 AUTHORING="$ROOT/skills/codex/codex-shared-db-change/SKILL.md"
 CLAUDE="$ROOT/templates/system/CLAUDE-global.md"
 CODEX="$ROOT/templates/system/AGENTS-global-codex.md"
 REPO_AGENTS="$ROOT/AGENTS.md"
 
 field(){ sed -n "s/^$1:[[:space:]]*//p" "$FIX" | head -1; }
-eligible(){ [ "$(field status)" = ready ] && [ "$(field work_type)" = structural ] && [ "$(field route)" = shared-db-orchestrator ] && grep -q '^  - ' "$FIX"; }
+eligible(){ [ "$(field status)" = ready ] && [ "$(field work_type)" = structural ] && [ "$(field route)" = claim-first ] && grep -q '^  - ' "$FIX"; }
 
 echo '== shared-db source routing'
 check "fixture names the predecessor" "grep -q '#1097' '$FIX'"
@@ -26,7 +26,7 @@ check "manual requires reclassification from scratch" "grep -qi 'successor issue
 check "Codex global carries successor rule" "grep -qi 'Route every successor from its own work' '$CODEX'"
 check "Claude global carries successor rule" "grep -qi 'Route every successor from its own work' '$CLAUDE'"
 check "misroute preserves private artifacts" "grep -qi 'private artifact' '$ORCH'"
-check "review safety gate is scoped to this toolkit, not every project" "grep -qi 'Independent review is required for the reviewer safety path' '$REPO_AGENTS' && grep -qi 'Ordinary plans' '$REPO_AGENTS'"
+check "required review is scoped to shared-db only (owner 2026-10-15)" "grep -qi 'AI review is required only in .popcre/shared-db' '$REPO_AGENTS'"
 check "skill keeps protected claims locked with no author ceiling" "grep -qi 'Protected blocked claims keep every object and version lock' '$ORCH' && grep -qi 'no numeric ceiling on concurrent authors' '$ORCH' && grep -qi 'no numeric ceiling on concurrent authors' '$MANUAL'"
 check "manual preserves collision protection after relinquishment" "grep -qi 'protected claim remains in every collision calculation' '$MANUAL'"
 check "skill and manual name the guarded relinquish command" "grep -q -- '--relinquish-author-lease' '$ORCH' && grep -q -- '--relinquish-author-lease' '$MANUAL'"
@@ -39,7 +39,7 @@ check "automatic production never falls back to owner version naming" "grep -q '
 check "automatic production retains engineer refusal and dry-run lock" "grep -q 'engineer action required' '$MANUAL' && grep -q 'fresh dry-run immediately' '$MANUAL' && grep -q 'global production lock' '$MANUAL'"
 check "automatic production blocks every derived business-risk class" "grep -q 'All five derived business-risk conclusions must be clear' '$ORCH' && grep -q 'Automatic v2 evidence proceeds only' '$MANUAL' && grep -q 'any risk class stops to an engineer before a database' '$MANUAL'"
 check "automatic production independently re-admits actual structural work" "grep -q 'one open linked structural work issue independently admitted' '$ORCH' && grep -q 'current scope plus the PR.s actual migration files' '$MANUAL' && grep -q 'one open structural work' '$CODEX' && grep -q 'one open structural work' '$CLAUDE'"
-check "automatic production pins refusal and prior activation evidence" "grep -q 'exception authorizes no manual production command' '$CODEX' && grep -q 'let AI launch it and remove that rule' '$CODEX' && grep -q 'exception authorizes no manual production command' '$CLAUDE' && grep -q 'let AI launch it and remove that rule' '$CLAUDE' && grep -q 'This policy cannot authorize its own rollout' '$MANUAL' && grep -q '6e4ea801798dae3ae30648a5e4682bbb3aa06e66' '$MANUAL' && grep -q '7c3e25454561748cd29e24bcfe1f3b4c0d3bdeb6' '$MANUAL'"
+check "automatic production pins refusal and prior activation evidence" "grep -q 'exception authorizes no manual production command' '$CODEX' && grep -q 'let AI launch it and remove that rule' '$ROOT/docs/owner-rulings.md' && grep -q 'exception authorizes no manual production command' '$CLAUDE' && grep -q 'owner-rulings.md' '$CODEX' && grep -q 'owner-rulings.md' '$CLAUDE' && grep -q 'This policy cannot authorize its own rollout' '$MANUAL' && grep -q '6e4ea801798dae3ae30648a5e4682bbb3aa06e66' '$MANUAL' && grep -q '7c3e25454561748cd29e24bcfe1f3b4c0d3bdeb6' '$MANUAL'"
 check "authoring skill defers only to the activated governed workflow" "grep -q 'sole exception is the separately activated automatic workflow' '$AUTHORING' && grep -q 'never reconstructs it or applies to production' '$AUTHORING' && grep -q 'stops for an engineer' '$AUTHORING'"
 check "repository router pins the same narrow exception" "grep -q 'sole exception is the separately activated .*shared-db.* automatic migration' '$REPO_AGENTS' && grep -q 'authorizes no manual production command' '$REPO_AGENTS'"
 

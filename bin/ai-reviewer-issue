@@ -414,6 +414,12 @@ show_issue(){
   else
     jq '. + {resolution:null}' "$file"
   fi
+  # Stdout stays pure JSON; the platform obligations go to stderr so whoever
+  # diagnoses this incident sees them before designing a fix (#1783).
+  if [ -f "$TOOLKIT_ROOT/config/reviewer-platform-brief.txt" ]; then
+    printf '\nThis incident happened on: %s\n' "$(jq -r '[.machine.hostname // .machine.name // empty, .machine.os // empty] | map(tostring) | join(" / ")' "$file" 2>/dev/null | cut -c1-160)" >&2
+    cat "$TOOLKIT_ROOT/config/reviewer-platform-brief.txt" >&2
+  fi
 }
 
 resolve_issue(){

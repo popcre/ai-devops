@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "config": {
+    "providerConfigRules": {
+      "providerRules": [
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "config": {
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://REPLACE_HEADROOM_HOST:8443/v1"
+            }
+          }
+        }
+      ]
+    },
+    "modelConfigRules": {
+      "providerModelRules": [],
+      "manualProviderModelRules": []
+    },
+    "defaultModelSelection": {
+      "providerId": "account:zai-individual-coding-plan",
+      "modelId": "GLM-5.3"
+    }
+  }
+}

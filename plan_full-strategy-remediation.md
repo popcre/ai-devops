@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — complete strategy remediation (2026-08-21)
 
-Handoff: [`HANDOFF.d/2026-08-21T2325Z-albt16-codex-full-strategy-remediation.md`](HANDOFF.d/2026-08-21T2325Z-albt16-codex-full-strategy-remediation.md)  
+Handoff: `HANDOFF.d/2026-08-21T2325Z-albt16-codex-full-strategy-remediation.md` (retired; recoverable from git history)  
 Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 
 ## STATUS

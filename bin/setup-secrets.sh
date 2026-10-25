@@ -211,6 +211,9 @@ info "Shell snippet -> $SHELLRC"
 read -r -d '' SHELLRC_BODY <<EOF
 # >>> ai-devops secrets (managed by setup-secrets.sh — do not edit by hand) >>>
 # POSIX sh + bash safe. Sourced from ~/.bashrc and ~/.profile.
+# Ready-made GitHub post signature (set before the non-interactive return so
+# agent shells get it too). Use: \$AI_GH_SIGNATURE
+export AI_GH_SIGNATURE="Posted by Claude chat \${CLAUDE_CODE_SESSION_ID:-unknown} on \$(hostname 2>/dev/null || echo unknown)"
 # Login shells used to launch Codex and other unattended tools must not inherit
 # every credential. An explicit script may opt in to the old behavior.
 case \$- in

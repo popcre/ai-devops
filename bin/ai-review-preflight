@@ -32,6 +32,15 @@ if command -v readlink >/dev/null 2>&1; then
   REGISTRY_REAL_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
   [ -z "$REGISTRY_REAL_SOURCE" ] || REGISTRY_REAL_DIR="$(cd "$(dirname "$REGISTRY_REAL_SOURCE")" && pwd)"
 fi
+# Behaviour capabilities (#1834): whether a qualification, probe, refresh or
+# evidence-rebind step happens is read by name from the shipped registry, never
+# decided by a provider-name branch. Policy data (timeouts, routes, platform
+# guards, identity formats) stays below.
+CAP_JSON="$REGISTRY_REAL_DIR/../config/review-runner-doors.json"
+# shellcheck source=../tools/lib/review-capabilities.sh
+. "$REGISTRY_REAL_DIR/../tools/lib/review-capabilities.sh" 2>/dev/null && [ -f "$CAP_JSON" ] \
+  || { printf 'ai-review-preflight: cannot load the review capability registry.\n' >&2; exit 3; }
+has_cap() { review_capability "$CAP_JSON" "$1" "$2"; } # PROVIDER FIELD
 REGISTRY_FILE="${AI_REVIEW_REGISTRY_FILE:-}"
 if [ -z "$REGISTRY_FILE" ]; then
   for candidate in "$REGISTRY_REAL_DIR/../config/reviewer-registry.json"                    "$SCRIPT_DIR/../config/reviewer-registry.json"                    "${AI_DEVOPS_CONFIG_DIR:-/etc/ai-devops}/reviewer-registry.json"; do
@@ -399,14 +408,14 @@ capacity_admission() { # PROVIDER -> current hold, with due-only read-only refre
   local provider="$1" hold
   hold="$(admission_store capacity-status "$provider")" || return 1
   if [ "$hold" != null ] && [ "$(printf '%s' "$hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
-    case "$provider" in gemini|deepseek|glm|stepfun)
+    if has_cap "$provider" credit_watch_refresh; then
       # Refresh only through bin/ai-review-credit-watch. That entrypoint is the
       # sole place that hands the credit reader a qualified Git Bash on Windows;
       # calling tools/reviewer_credit_watch.py directly leaves tool_command
       # without AI_REVIEW_CREDIT_WATCH_BASH and every due re-check refuses.
       "${AI_REVIEW_CREDIT_WATCH_BIN:-$SCRIPT_DIR/ai-review-credit-watch}" \
-        refresh "$provider" >/dev/null 2>&1 || true ;;
-    esac
+        refresh "$provider" >/dev/null 2>&1 || true
+    fi
     hold="$(admission_store capacity-status "$provider")" || return 1
   fi
   printf '%s\n' "$hold"
@@ -454,8 +463,7 @@ health_status() { # PROVIDER
     jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"wrapper-missing"}'
     return 1
   fi
-  case "$1" in
-    claude|codex|deepseek|stepfun|muse)
+  if has_cap "$1" offline_doctor_probe; then
       # These doctors validate the configured command and local safety tools
       # without contacting the provider. A missing CLI must never be drawn.
       local doctor_timeout="$DOCTOR_PROBE_TIMEOUT"
@@ -471,8 +479,7 @@ health_status() { # PROVIDER
         jq -nc --arg provider "$1" '{provider:$provider,status:"installation-unavailable",failure_class:"local-doctor-failed"}'
         return 1
       fi
-      ;;
-  esac
+  fi
   if [ "$1" = grok ]; then
     # Its ordinary doctor queries the provider catalogue. Reuse only the
     # native door's offline executable selection before assigning work.
@@ -517,9 +524,11 @@ reconciled_status() { # PROVIDER
 }
 
 static_status() {
+  if has_cap "$1" live_qualification_required; then
+    "${1}_live_qualified" && return 1
+    printf '{"provider":"%s","status":"quarantined","failure_class":"live-qualification-required"}\n' "$1"; return 0
+  fi
   case "$1" in
-    gemini) gemini_live_qualified && return 1; printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
-    qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     # StepFun: Linux (bubblewrap) or Windows (folder + test shell, owner
     # 2026-09-30). Other platforms unsupported.
     stepfun)
@@ -738,7 +747,8 @@ qualify_gemini() {
 # live qualification record. requalify iterates exactly these; adding a live
 # qualification contract for another provider means adding it here and a
 # stale-check case in requalify_provider.
-LIVE_QUALIFIED_PROVIDERS="gemini qwen"
+# Derived from the live_qualification_required capability (gemini qwen today).
+LIVE_QUALIFIED_PROVIDERS="$(review_capability_providers "$CAP_JSON" live_qualification_required)"
 
 qualification_subject() { # exact current wrapper and local non-generating identity
   local provider="$1" wrapper identity rc=0
@@ -763,7 +773,7 @@ qualification_subject() { # exact current wrapper and local non-generating ident
 
 reset_requalify() { # only a due reset of an exact capacity-deferred installation
   local provider="$1" marker recorded subject claim capacity_record
-  case "$provider" in gemini|qwen) ;; *) return 0;; esac
+  has_cap "$provider" live_qualification_required || return 0
   [ "$(registry_state "$provider")" = registered ] || return 0
   known_broken "$provider" && return 0
   active_quarantine "$provider" && return 0
@@ -778,7 +788,7 @@ reset_requalify() { # only a due reset of an exact capacity-deferred installatio
   claim="$(admission_store reset-qualification-claim "$provider" --run-id "$capacity_record" --check-only)" || return 1
   [ "$(printf '%s' "$claim" | jq -r '.ready // false')" = true ] || return 0
   # Preserve a current qualification; this path is never a health probe.
-  case "$provider" in gemini) gemini_live_qualified && return 0;; qwen) qwen_live_qualified && return 0;; esac
+  "${provider}_live_qualified" && return 0
   subject="$(qualification_subject "$provider")" || return 0
   [ "$subject" = "$recorded" ] || return 0
   # Expiration lifts only its own allowance hold, retaining the exact reset receipt.
@@ -871,11 +881,8 @@ requalify_provider() { # PROVIDER
     note "ai-review-preflight: $provider qualification record is missing but this host held one before; retrying."
   else
     write_atomic "$marker" "$(jq -nc --arg provider "$provider" --argjson at "$(now_epoch)" '{version:1,provider:$provider,expected_epoch:$at}')"
-    case "$provider" in
-      gemini) gemini_live_qualified && { note "ai-review-preflight: gemini live qualification is current."; return 0; } ;;
-      qwen)   qwen_live_qualified   && { note "ai-review-preflight: qwen live qualification is current."; return 0; } ;;
-      *) die "requalify has no stale check for provider '$provider'." ;;
-    esac
+    has_cap "$provider" live_qualification_required || die "requalify has no stale check for provider '$provider'."
+    "${provider}_live_qualified" && { note "ai-review-preflight: $provider live qualification is current."; return 0; }
     note "ai-review-preflight: $provider live qualification is stale (wrapper, runtime, or preloader changed); re-qualifying."
   fi
   output="$(mktemp "${TMPDIR:-/tmp}/requalify.XXXXXX")"
@@ -883,7 +890,7 @@ requalify_provider() { # PROVIDER
   prior_capacity="$(admission_store capacity-status "$provider" | jq -r '.record_id // empty')" || return 1
   attempt_started="$(now_epoch)"
   set +e
-  qualify_output="$(case "$provider" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; esac 2>&1)"
+  qualify_output="$("qualify_${provider}" 2>&1)"
   rc=$?
   set -e
   printf '%s\n' "$qualify_output" >&2
@@ -1006,12 +1013,13 @@ check_provider() { # PROVIDER REPO LIVE BASE
   # an explicit --live check makes exactly one probe, and only its success
   # clears the same records it tested (#1544 item B). No loop, no retry here.
   # GLM has no live doctor, so its credit hold stays with ai-review-credit-watch.
-  local credit_global="" credit_hold_id="" credit_probe=0 credit_global_ok=0
+  local credit_global="" credit_hold_id="" credit_probe=0 credit_global_ok=0 no_live_doctor=0
+  has_cap "$provider" no_live_doctor && no_live_doctor=1
   if active_quarantine "$provider"; then
     case "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // empty')" in
       out-of-credit|allowance-exhausted) credit_global="$ACTIVE_QUARANTINE"; credit_global_ok=1 ;;
     esac
-    if [ "$credit_global_ok" != 1 ] || [ "$live" != 1 ] || [ "$provider" = glm ]; then
+    if [ "$credit_global_ok" != 1 ] || [ "$live" != 1 ] || [ "$no_live_doctor" = 1 ]; then
       printf '%s\n' "$ACTIVE_QUARANTINE" | jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' >&2
       return 3
     fi
@@ -1021,7 +1029,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
   capacity_hold="$(capacity_admission "$provider")" || return 1
   # Only a paid-balance hold: an allowance hold already releases at its own
   # reset through the scheduled reset requalification.
-  if [ "$capacity_hold" != null ] && [ "$live" = 1 ] && [ "$provider" != glm ] \
+  if [ "$capacity_hold" != null ] && [ "$live" = 1 ] && [ "$no_live_doctor" = 0 ] \
     && [ "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" = out-of-credit ]; then
     credit_hold_id="$(printf '%s' "$capacity_hold" | jq -r '.record_id // empty')"
     [ -z "$credit_hold_id" ] || { credit_probe=1; capacity_hold=null; }
@@ -1051,7 +1059,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   if static_status "$provider" >/dev/null; then
     static_status "$provider" >&2
-    case "$provider" in gemini|qwen) return 3 ;; *) return 4 ;; esac
+    if has_cap "$provider" live_qualification_required; then return 3; else return 4; fi
   fi
   # Windows StepFun without OpenCode is an engine miss (exit 4), not a quarantine.
   if [ "$provider" = stepfun ]; then
@@ -1081,7 +1089,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     # so it gets its own bounded budget. A timeout still never means healthy.
     if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
-  elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
+  elif [ "$live" = 1 ] && [ "$no_live_doctor" = 0 ]; then
     if [ "$provider" = gemini ]; then out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     # A StepCode live turn takes about 8-9s, too close to the 10s check budget.
     elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
@@ -1107,7 +1115,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     if [ "$provider" = muse ]; then
       if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
-    elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
+    elif [ "$live" = 1 ] && [ "$no_live_doctor" = 0 ]; then
       if [ "$provider" = gemini ]; then out="$(AI_GEMINI_CALLER=preflight timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
@@ -1144,7 +1152,12 @@ check_provider() { # PROVIDER REPO LIVE BASE
   PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
-  "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  # This packet is only a health preflight. The final reviewer wrapper owns
+  # publication of the governed source receipt; letting this preparatory packet
+  # publish it would bind the receipt to a different packet/tag than the review.
+  ( unset AI_REVIEW_SOURCE_RECEIPT_FILE
+    "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  )
   if [ "$credit_probe" = 1 ]; then
     if [ "$(admission_store clear-credit "$provider" --expect-record "$credit_global" --run-id "$credit_hold_id" | jq -r '.cleared // false')" = credit ]; then
       note "ai-review-preflight: $provider live probe succeeded; cleared its credit/allowance hold (scoped backoffs kept)."
@@ -1154,7 +1167,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     fi
   fi
   printf 'PASS provider=%s repository=%s packet=verified health=ok allowance=%s\n' \
-    "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
+    "$provider" "$repo" "$([ "$live" = 1 ] && [ "$no_live_doctor" = 0 ] && printf live-verified || printf not-separately-exposed)"
 }
 
 # provider_cli_binary PROVIDER prints the path of the provider CLI that the
@@ -1252,10 +1265,9 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   local policy_path cur_entry prev_entry proof prior_mode prior_cmd prior_model policy_cmd policy_model proot prel
   local wdir wroot wrel wbase _w_old _w_new
   valid_provider "$provider" || die "unknown provider '$provider'."
-  case "$provider" in
-    gemini|qwen)
-      die "pin-bump-qualify is the cheap lane for version-pin bumps only; $provider has its own full live qualification (ai-review-preflight qualify $provider)." ;;
-  esac
+  if has_cap "$provider" live_qualification_required; then
+      die "pin-bump-qualify is the cheap lane for version-pin bumps only; $provider has its own full live qualification (ai-review-preflight qualify $provider)."
+  fi
   need jq; need timeout; need sha256sum; need awk
   policy_bin="${AI_PROVIDER_VERSION_BIN:-$REGISTRY_REAL_DIR/ai-provider-version}"
   [ -x "$policy_bin" ] || die "ai-provider-version is not executable: $policy_bin"
@@ -1446,7 +1458,7 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   # re-hash, and re-check the version pin on those bytes before the live
   # smoke so evidence binds the tested bytes and an unsupported build cannot
   # slip through on the caller's version check.
-  if [ "$provider" = kimi ]; then
+  if has_cap "$provider" borrowed_user_binary_rebind; then
     switched_as="$(printf '%s' "$out" | sed -n 's/.*borrowed from user "\([^"]*\)".*/\1/p' | head -1)"
     if [ -n "$switched_as" ]; then
       switched_bin="$(su - "$switched_as" -c 'printf %s "$HOME/.kimi-code/bin/kimi"' 2>/dev/null || true)"
@@ -1692,7 +1704,8 @@ case "$cmd" in
     mark_known_broken "$provider" "$reason" "$issue" ;;
   qualify)
     [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify gemini|qwen'
-    case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
+    valid_provider "${1:-}" && has_cap "$1" live_qualification_required || die 'usage: ai-review-preflight qualify gemini|qwen'
+    "qualify_$1" ;;
   pin-bump-qualify)
     provider="${1:-}"; shift || true
     old_pin=""; new_pin=""; saw_assert=0; allow_first=0
@@ -1715,12 +1728,12 @@ case "$cmd" in
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
+    else providers=(glm muse deepseek stepfun codex); fi
     for provider in "${providers[@]}"; do emit_status "$provider" || true; done ;;
   usable)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
+    else providers=(glm muse deepseek stepfun codex); fi
     usable_rc=0
     for provider in "${providers[@]}"; do emit_status "$provider" || usable_rc=3; done
     exit "$usable_rc" ;;

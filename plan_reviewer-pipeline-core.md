@@ -275,4 +275,4 @@ Full suite: `bin/ai-test-local` after `bin/ai-test-local --check-collision`. Nev
 
 ## Handoff link
 
-See [`HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md`](HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md).
+See `HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md` (retired; recoverable from git history).

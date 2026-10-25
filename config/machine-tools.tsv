@@ -39,3 +39,5 @@ ai-review-credit-watch	bin/ai-review-credit-watch	bash+cmd	yes	none	install-mach
 ai-housekeeping	bin/ai-housekeeping	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reviewer-logs-sync	bin/ai-reviewer-logs-sync	bash+cmd	yes	none	install-machine-tools.ps1
 az-mail	bin/az-mail	bash+cmd	yes	none	install-machine-tools.ps1
+ai-shared-db-closeout-check	bin/ai-shared-db-closeout-check	bash+cmd	yes	none	install-machine-tools.ps1
+ai-zcode-headroom	bin/ai-zcode-headroom	bash+cmd	yes	none	install-machine-tools.ps1

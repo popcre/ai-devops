@@ -59,6 +59,16 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
 
+# Each global lists the valid task-gate classes; the list must match
+# config/task-gates.json change_classes exactly so it cannot go stale (#1881).
+expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | tr -d '\r' | sort | tr '\n' ' ')"
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
+  listed_classes="$(tr -d '\r' < "$client_file" | tr '\n' ' '  | grep -oP 'Classes: \K[^.]*' | head -n1 \
+    | sed 's/([^)]*)//g' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort | tr '\n' ' ')"
+  [[ "$listed_classes" == "$expected_classes" ]] \
+    || fail "$(basename "$client_file") task-gate class list '$listed_classes' does not match config/task-gates.json '$expected_classes'"
+done
+
 # Owner ruling 2026-09-28 ("never ask a human to approve"): the repository
 # guide, the secrets skill, and the details doc must keep the AI-reviewer gate
 # and must not return to asking Albert to approve.
@@ -90,13 +100,13 @@ for never_ask in \
   "$REPO_ROOT"/plan_ai-devops-work-claims.md "$REPO_ROOT"/plan_grok_integration-review-access.md \
   "$REPO_ROOT"/docs/transcript-leak-audit-2026-07-19.md "$REPO_ROOT"/skills/claude/sync-dotfiles/SKILL.md \
   "$REPO_ROOT"/templates/repo-docs/docs-ai-branching.md "$REPO_ROOT"/plan_cross_repo_routing_and_gate_enforcement.md \
-  "$REPO_ROOT"/skills/shared/shared-db-orchestrator/references/operating-manual.md \
+  "$REPO_ROOT"/docs/shared-db-structural-safety/references/operating-manual.md \
   "$REPO_ROOT"/skills/shared/handoff-writer/SKILL.md "$REPO_ROOT"/templates/system/handoff-standard.md \
-  "$REPO_ROOT"/skills/codex/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/skills/shared/shared-db-orchestrator/SKILL.md \
+  "$REPO_ROOT"/skills/codex/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/docs/shared-db-structural-safety/README.md \
   "$REPO_ROOT"/plan_ast-grep-multi-machine-management.md "$REPO_ROOT"/plan_shared-db-finish-first-delivery.md \
   "$REPO_ROOT"/plan_shared-db-complete-throughput-repair.md "$REPO_ROOT"/plan_ai-muse-native-engine-parity.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
-  ! tr '\n' ' ' < "$never_ask" | tr -s ' ' | grep -qiP "(?<!never )(?<!not )(asks? Albert to approve|asking Albert to approve)|needs a human ruling|WHOLE list to (him|the owner)|material scope/authority decisions|(?<!never )(?<!not )(ask (me|Albert) to approve|asking Albert to approve|ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert's current-chat (authorization|response)|decided by Albert|current-chat (ruling|resource|authority)|to Albert once|Owner authorization is consumed|If Albert's authority is required|needs an owner decision|specifically authorized request|stops for Albert|explicit owner approval|separate explicit authorization gate|Present Albert|Albert names the exact|current-chat authorization|owner authorization required|Albert's explicit repository|let him choose|is his call|specific approved action|required owner authorization|stops for an owner decision|must tell Albert immediately|needs Albert's action|is Albert's decision|Albert's explicit decision|Albert (must )?explicitly authoriz|Albert decides it|ask Albert (once|whether)|asks Albert once|Albert explicitly clears|Albert must explicitly|tell Albert the token|let Albert decide|offer to register|explicit human approval|do not need Albert unless|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" \
+  ! tr -d '\r' < "$never_ask" | tr '\n' ' ' | tr -s ' ' | grep -qiP "(?<!never )(?<!not )(asks? Albert to approve|asking Albert to approve)|needs a human ruling|WHOLE list to (him|the owner)|material scope/authority decisions|(?<!never )(?<!not )(ask (me|Albert) to approve|asking Albert to approve|ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert's current-chat (authorization|response)|decided by Albert|current-chat (ruling|resource|authority)|to Albert once|Owner authorization is consumed|If Albert's authority is required|needs an owner decision|specifically authorized request|stops for Albert|explicit owner approval|separate explicit authorization gate|Present Albert|Albert names the exact|current-chat authorization|owner authorization required|Albert's explicit repository|let him choose|is his call|specific approved action|required owner authorization|stops for an owner decision|must tell Albert immediately|needs Albert's action|is Albert's decision|Albert's explicit decision|Albert (must )?explicitly authoriz|Albert decides it|ask Albert (once|whether)|asks Albert once|Albert explicitly clears|Albert must explicitly|tell Albert the token|let Albert decide|offer to register|explicit human approval|do not need Albert unless|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" \
     || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
 done
 
@@ -105,7 +115,7 @@ for addon in "$REPO_ROOT/templates/repo-docs/AGENTS.addon.md" "$REPO_ROOT/templa
 done
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
-  grep -qF "rotates them itself under an assigned AI reviewer's APPROVE" "$client_file" \
+  grep -qF "waits for an assigned AI reviewer's APPROVE of the rotation plan" "$client_file" \
     || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
 done
 

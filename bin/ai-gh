@@ -105,6 +105,9 @@ if [ -z "$REAL" ]; then
   done < <(type -ap gh 2>/dev/null)
 fi
 [ -n "$REAL" ] || { say "the real gh is not installed"; exit 3; }
+# Git's credential helper only reads the stored login and never calls GitHub,
+# so it skips the throttle: queuing it behind API spacing stalls every fetch.
+if [ "${1:-}" = auth ] && [ "${2:-}" = git-credential ]; then exec "$REAL" "$@"; fi
 
 [ ! -L "$STATE" ] || { say "invalid GitHub state directory"; exit 3; }
 (umask 077; mkdir -p "$STATE") || { say "cannot create $STATE"; exit 3; }

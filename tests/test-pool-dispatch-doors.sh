@@ -11,11 +11,18 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 export AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none
+unset AI_REVIEW_BRIEF_FILE
 POOLTMP="$(mktemp -d)"
 trap 'rm -rf "$POOLTMP"' EXIT
 
 check "all_six_pool_providers_are_registered_doors" \
   "for p in grok muse qwen gemini deepseek stepfun; do jq -e --arg p \"\$p\" 'has(\$p)' '$DOORS_JSON' >/dev/null || exit 1; done"
+# #1834: behaviour gates read a named capability, never a provider-name branch.
+CAPLIB="$REPO_ROOT/tools/lib/review-capabilities.sh"
+check "capability_reader_answers_declared_and_absent_fields" \
+  ". '$CAPLIB' && review_capability '$DOORS_JSON' gemini leading_verdict_contract && review_capability '$DOORS_JSON' muse pool_session_release && review_capability '$DOORS_JSON' deepseek attachment_only_code_review && ! review_capability '$DOORS_JSON' grok pool_session_release && ! review_capability '$DOORS_JSON' muse no-such-field && ! review_capability '$POOLTMP/missing.json' gemini leading_verdict_contract && [ \"\$(review_capability_providers '$DOORS_JSON' live_qualification_required)\" = 'gemini qwen' ]"
+check "shared_review_layers_have_no_converted_name_gates" \
+  "! grep -nE '!= glm|provider\" = kimi|gemini\\|qwen\\)|gemini\\|deepseek\\|glm\\|stepfun\\)|claude\\|codex\\|deepseek\\|stepfun\\|muse\\)|review_provider\" = deepseek|provider\" = gemini \\] (&&|\\\\)|^    muse\\)\$' '$POOL' '$REPO_ROOT/bin/ai-review' '$REPO_ROOT/bin/ai-review-preflight' | grep -vE ':[0-9]+:[[:space:]]*#' | grep -q ."
 check "pool_usage_lists_stepfun" "grep -q 'stepfun' '$POOL' && grep -q 'AI_POOL_RUNNER_STEPFUN' '$POOL'"
 check "pool_keeps_legacy_fallback_for_future_unregistered_providers" \
   "grep -q 'Legacy session-runner fallback only' '$POOL'"
@@ -39,9 +46,20 @@ cat > "$POOLTMP/lifecycle" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-cat > "$POOLTMP/engine" <<EOF
+export TEST_POOL_FIXTURE="$POOLTMP"
+cat > "$POOLTMP/engine" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$POOLTMP/engine-args"
+printf '%s\n' "$*" >> "$TEST_POOL_FIXTURE/engine-args"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --prompt-file ]; then
+    [ "$2" != "${AI_REVIEW_BRIEF_FILE:-}" ] || exit 91
+    [ -z "${MUTATE_ORIGINAL_REQUEST:-}" ] || printf 'changed after capture\n' > "$AI_REVIEW_BRIEF_FILE"
+    cp "$2" "$TEST_POOL_FIXTURE/engine-brief"
+    stat -c '%a' "$2" > "$TEST_POOL_FIXTURE/engine-brief-mode"
+    break
+  fi
+  shift
+done
 exit 0
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/engine"
@@ -65,6 +83,23 @@ RC_MUSE=$?
 MUSE_TAG="$(engargs | tr ' ' '\n' | grep -A1 '^--name$' | tail -1)"
 check "pool_muse_session_name_fits_native_limit" "[ '$RC_MUSE' -eq 0 ] && [ -n '$MUSE_TAG' ] && [ '${#MUSE_TAG}' -le 40 ] && [[ '$MUSE_TAG' == pool-muse-* ]]"
 check "pool_muse_argv_omits_max_turns" "engargs | grep -q -- '--provider muse' && ! engargs | grep -q -- '--max-turns'"
+
+# Registered pool doors receive the existing carried question through the
+# engine's prompt-file contract, never a live pointer to the caller's file.
+printf '%s\n' 'CARRIED_QUESTION_1794: literal $(must_not_execute), with spaces.' > "$POOLTMP/expected-question"
+for provider in muse deepseek stepfun; do
+  cp "$POOLTMP/expected-question" "$POOLTMP/question with spaces.md"
+  rm -f "$POOLTMP/engine-args" "$POOLTMP/engine-brief" "$POOLTMP/engine-brief-mode"
+  (cd "$POOLTMP/fakerepo" && export_pool && export AI_REVIEW_BRIEF_FILE="$POOLTMP/question with spaces.md" MUTATE_ORIGINAL_REQUEST=1 && bash "$POOL" "$provider" final-check) > "$POOLTMP/out-carried-$provider" 2>&1
+  RC_CARRIED=$?
+  check "carried_question_reaches_$provider" "[ '$RC_CARRIED' -eq 0 ] && cmp -s '$POOLTMP/expected-question' '$POOLTMP/engine-brief'"
+  check "carried_question_snapshot_is_private_$provider" "[ \"\$(cat '$POOLTMP/engine-brief-mode')\" = 600 ]"
+  check "carried_question_survives_caller_mutation_$provider" "grep -q 'changed after capture' '$POOLTMP/question with spaces.md' && ! grep -q 'changed after capture' '$POOLTMP/engine-brief'"
+done
+rm -f "$POOLTMP/engine-args"
+(cd "$POOLTMP/fakerepo" && export_pool && export AI_REVIEW_BRIEF_FILE="$POOLTMP/missing-question" && bash "$POOL" muse final-check) > "$POOLTMP/out-carried-missing" 2>&1
+RC_CARRIED=$?
+check "missing_question_starts_no_managed_provider" "[ '$RC_CARRIED' -ne 0 ] && [ ! -e '$POOLTMP/engine-args' ]"
 
 rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1
@@ -266,6 +301,11 @@ check "gemini_door_refuses_google_key_fallback" \
 gemini_door AI_GEMINI_KEY=fake-aigem-1427 GEMINI_API_KEY=fake-gem-1427; GD_RC=$?
 check "gemini_door_unsets_ai_gemini_key" \
   "[ '$GD_RC' -eq 0 ] && test -s '$POOLTMP/gd/agy-env' && ! grep -q 'fake-aigem-1427\|fake-gem-1427' '$POOLTMP/gd/agy-env'"
+
+# Installed hosts reach the pool through a /usr/local/bin symlink (#1834).
+mkdir -p "$POOLTMP/link" && ln -s "$POOL" "$POOLTMP/link/ai-review-pool"
+check "pool_loads_capabilities_through_symlink" \
+  "'$POOLTMP/link/ai-review-pool' --help 2>&1 | grep -q '^Usage: ai-review-pool'"
 
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"

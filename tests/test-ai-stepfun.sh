@@ -66,6 +66,7 @@ case "$STUB_MODE" in
   headingprose) printf 'Analysis of the change with plenty of detail in f:1.\n\nSo overall:\n\nREVISE %s\n' "$head" ;;
   headingtwo) printf 'Analysis of the change with plenty of detail in f:1.\nVERDICT: APPROVE %s\n\n## Verdict\n\nREVISE %s\n' "$head" "$head" ;;
   short) printf 'ok\nVERDICT: APPROVE %s\n' "$head" ;;
+  qualified) printf 'Analysis of the change with plenty of detail in f:1.\n\nAPPROVE only after the lint fix lands\n' ;;
   credit) attempt; echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
   write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   rate) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
@@ -83,9 +84,13 @@ case "$STUB_MODE" in
   touchcaller) touch "$CALLER/CALLER_TOUCHED"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
-  # burst: the provider refuses a call that starts within 2s of the previous one.
-  burst) now=$(date +%s); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
-         if [ $((now - last)) -lt 2 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
+  # burst: the provider refuses a call that starts within 1.5s of the previous
+  # one, measured in milliseconds (#1985: whole-second stamps misjudged gaps by
+  # up to 1s). The pacer spaces starts more than 2s apart; the 0.5s margin
+  # absorbs start-up jitter between the pacer and this call, while an unpaced
+  # burst (gaps of milliseconds) is still refused.
+  burst) now=$(( ${EPOCHREALTIME/[.,]/} / 1000 )); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
+         if [ $((now - last)) -lt 1500 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
          echo 'paced answer' ;;
   # json: StepCode --mode json events, two provider calls with usage.
   json) mu(){ jq -cn --arg t "$1" --argjson i "$2" --argjson o "$3" --argjson r "$4" \
@@ -146,6 +151,7 @@ head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
 case "$STUB_MODE" in
   ok) printf '{"type":"text","part":{"text":"STEPFUN-OK"}}\n' ;;
   verdict) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
+  qualified) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nAPPROVE only after the lint fix lands"}}\n' ;;
   impl) printf 'print(1)\n' > "$dir/new.py"; printf '{"type":"text","part":{"text":"Created new.py and ran it."}}\n' ;;
   askok) printf '{"type":"text","part":{"text":"The loop is bounded by RATE_RETRIES."}}\n' ;;
   jsonl429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
@@ -211,6 +217,7 @@ check "a Verdict heading with a bare REVISE naming the head becomes the terminal
 check "a bold Verdict heading with a bold bare APPROVE is normalized" "mode headingbold; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -qx \"VERDICT: APPROVE $HEAD_SHA\""
 check "a bare decision naming another sha is still refused" "mode headingwrong; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "a bare decision under prose (no Verdict heading) is still refused" "mode headingprose; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
+check "a qualified decision line (APPROVE only after ...) is refused" "mode qualified; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "a report that already has a VERDICT line is never rewritten" "mode headingtwo; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
 check "StepCode retains its only verdict-format instructions" "[ \"\$(grep -c '^VERDICT: APPROVE <head sha>' '$STUB_ARGS.prompt')\" = 1 ] && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$STUB_ARGS.prompt'"
 check "StepCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$STUB_ARGS.prompt' | grep -Eq '[0-9a-f]{40}' && tail -n1 '$STUB_ARGS.prompt' | grep -qx 'check f'"
@@ -354,6 +361,44 @@ STUB
     bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
   check "door implement mode writes into the runner's disposable copy" "[ '$drc' = 0 ] && [ -e '$RH/dw/written-by-model' ]"
   rm -f "$RH/dw/written-by-model"
+  # stepfun_extra_decision_never_authorizes (#1783): the prompt forbids any other
+  # decision-opening line, and a report that still carries one is classified by
+  # name with its bytes untouched.
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req; msg="$(jq -r .message <<<"$req")"
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+case "$msg" in *'No other line of the report may begin with APPROVE'*) rule=yes ;; *) rule=no ;; esac
+ans="$(printf 'rule=%s\n**APPROVE** stated before the fix\n- Earlier wording said approve\n\n## Verdict\nREJECT\n' "$rule")"
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "stepfun_prompt_forbids_extra_decision_lines" "[ '$drc' = 0 ] && grep -qx 'rule=yes' '$RH/dreport'"
+  check "stepfun_extra_decision_line_is_classified_not_rewritten" "grep -q 'report-extra-decision-line: 1 non-terminal' '$RH/dout' && grep -qx '\*\*APPROVE\*\* stated before the fix' '$RH/dreport'"
+  # A terminal VERDICT: label (agent-profile shape) must become the recorded
+  ## Verdict block, not a false BLOCKED (edge-dev 20261018T200816Z).
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_settled"}'; read -r _
+ans="$(printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE abc123\n')"
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "stepfun_terminal_verdict_label_becomes_heading" "[ '$drc' = 0 ] && grep -qx APPROVE '$RH/dreport' && grep -q '^## Verdict$' '$RH/dreport' && ! grep -q 'report-extra-decision-line' '$RH/dout'"
+  check "stepfun_terminal_verdict_label_not_recorded_as_blocked" "! grep -qx BLOCKED '$RH/dreport'"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'
@@ -523,7 +568,8 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
-check "OpenCode keeps exactly one verdict-format instruction in either review profile" "[ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
+check "OpenCode refuses a qualified decision line (APPROVE only after ...)" "mode qualified; ! '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' >/dev/null 2>&1"
+check "OpenCode keeps exactly one verdict-format instruction in either review profile" "grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md' && grep -q 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md' && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c 'heading ## Verdict' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
 check "OpenCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' | grep -Eq '[0-9a-f]{40}' && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$TMP/args.oc.prompt' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'check f'"
 cp "$TMP/args.oc.prompt" "$TMP/first-review.prompt"
 mode verdict; "$SCRIPT" review --repo "$TMP/repo" --prompt 'different review request' >/dev/null 2>&1
@@ -573,6 +619,7 @@ N='$OD/n'; MODE="\$(cat '$OD/mode')"
 STUB
 cat >> "$OD/bin/opencode" <<'STUB'
 cat >/dev/null; n=$(cat "$N" 2>/dev/null || echo 0); echo $((n+1)) > "$N"
+env | grep '^OPENCODE_DISABLE_' | sort > "$N.env"; cp "$XDG_CONFIG_HOME/opencode/AGENTS.md" "$N.rules" 2>/dev/null || rm -f "$N.rules"
 if [ "$n" -eq 0 ] && [ "$MODE" = jsonl429 ]; then printf '{"type":"error","error":{"data":{"message":"HTTP 429 Too Many Requests","status":429}}}\n'; exit 1; fi
 if [ "$n" -eq 0 ] && [ "$MODE" = err429 ]; then echo 'RATE_LIMITED: HTTP 429 Too Many Requests' >&2; exit 1; fi
 if [ "$MODE" = textfail ]; then printf '{"type":"text","part":{"text":"quotes HTTP 429 rate_limited"}}\n'; exit 1; fi
@@ -585,6 +632,14 @@ oc_door(){ printf '%s' "$1" > "$OD/mode"; rm -f "$OD/n" "$OD/report"; rm -rf "$O
   DOOR_REPORT_OUT="$OD/report" DOOR_HEAD=abc123 bash "$ROOT/tools/lib/review-doors/stepfun.sh" review > "$OD/out" 2>&1; }
 oc_door ok; drc=$?
 check "OpenCode door turn takes a slot from the shared pacer" "[ $drc = 0 ] && [ \"\$(wc -l < '$OD/state/pace/starts')\" = 1 ]"
+# #1881: a review never sees the owner's ~/.claude/CLAUDE.md or user skill lists.
+check "OpenCode door review loads only the reviewer rules" "cmp -s '$ROOT/templates/system/REVIEWER-global.md' '$OD/n.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\\n' | cmp -s - '$OD/n.env'"
+# #1901: an implement turn keeps the owner rules and skills.
+printf ok > "$OD/mode"; rm -f "$OD/n" "$OD/n.env" "$OD/n.rules"; rm -rf "$OD/state/pace"
+AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$OD/bin/opencode" AI_STEPFUN_STATE_DIR="$OD/state" \
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$OD/w" DOOR_PACKET_DIR="$OD/p" DOOR_PROMPT_FILE="$OD/prompt" \
+  DOOR_REPORT_OUT="$OD/report" DOOR_HEAD=abc123 bash "$ROOT/tools/lib/review-doors/stepfun.sh" implement > "$OD/out" 2>&1
+check "OpenCode door implement keeps owner rules and skills (#1901)" "[ -f '$OD/n' ] && [ ! -s '$OD/n.env' ] && [ ! -e '$OD/n.rules' ]"
 for m in jsonl429 err429; do
   oc_door "$m"; drc=$?
   check "OpenCode door reruns the turn after a $m rate limit, through the shared cooldown" "[ $drc = 0 ] && grep -q STEPFUN-OK '$OD/report' && grep -q 'rate limit reached' '$OD/out' && [ \"\$(cat '$OD/n')\" = 2 ]"

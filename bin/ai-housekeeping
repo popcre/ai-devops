@@ -162,7 +162,10 @@ cmd_schedule() {
   }
   local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
-  trap 'rm -f "$tmp"' EXIT
+  # Expand the path now: $tmp is function-local and is out of scope (unbound
+  # under set -u) by the time an EXIT trap runs after this function returns.
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf '%q' "$tmp")" EXIT
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
   if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
     # Distinguish "no crontab yet" from "unreadable crontab": if the spool
@@ -178,7 +181,7 @@ cmd_schedule() {
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >>"$tmp" || :
   printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >>"$tmp"
   crontab "$tmp" || rc=$?
-  rm -f "$tmp"
+  rm -f "$tmp"; trap - EXIT
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the housekeeping entry" >&2; return 2; }
   log "scheduled daily at $DAILY_AT in the user crontab"
 }
@@ -209,7 +212,10 @@ cmd_unschedule() {
   }
   local tmp rc=0 existing read_rc=0
   tmp="$(mktemp)" || { echo "ai-housekeeping: mktemp failed" >&2; return 2; }
-  trap 'rm -f "$tmp"' EXIT
+  # Expand the path now: $tmp is function-local and is out of scope (unbound
+  # under set -u) by the time an EXIT trap runs after this function returns.
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf '%q' "$tmp")" EXIT
   existing="$(crontab -l 2>/dev/null)" || read_rc=$?
   if [[ "$read_rc" -ne 0 && -z "$existing" ]]; then
     local spool
@@ -222,7 +228,7 @@ cmd_unschedule() {
   fi
   printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF "$CRON_REM" >"$tmp" || :
   crontab "$tmp" || rc=$?
-  rm -f "$tmp"
+  rm -f "$tmp"; trap - EXIT
   [[ "$rc" -eq 0 ]] || { echo "ai-housekeeping: crontab refused the removal" >&2; return 2; }
   log "removed the housekeeping crontab entry"
 }

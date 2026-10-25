@@ -15,7 +15,7 @@ SOURCE_PLATFORM='f55efc859dfcbbf79274c4907b3df89f9767c11d'
 resource.setrlimit(resource.RLIMIT_CORE,(0,0))
 _PASSWORD=os.environ.pop('ORACLE_HETZ_READ_PASSWORD',None)
 _TOKEN=os.environ.pop('ORACLE_COOLIFY_READ_TOKEN',None)
-HELPER_SHA='35173ab9a0422b7f9cbccd13929d83ff568525f2d244ad5af9b14ca451f60754'
+HELPER_SHA='c47c20405626ec19e44298ef02e6882d34ea4153e7bbdfbf931eb109fe833a15'
 def require(ok,message):
     if not ok:raise ValueError(message)
 def file_identity(info):

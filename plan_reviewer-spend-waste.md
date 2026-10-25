@@ -2,7 +2,7 @@
 
 Parent issue: [#1436](https://github.com/popcre/ai-devops/issues/1436) ·
 Source audit: [#1426](https://github.com/popcre/ai-devops/issues/1426) ·
-Handoff: [`HANDOFF.d/2026-10-07T2122Z-edge-dev3-claude-reviewer-spend-waste-plan.md`](HANDOFF.d/2026-10-07T2122Z-edge-dev3-claude-reviewer-spend-waste-plan.md)
+Handoff: `HANDOFF.d/2026-10-07T2122Z-edge-dev3-claude-reviewer-spend-waste-plan.md` (retired; recoverable from git history)
 
 ## STATUS (2026-10-07, 10:10 PM EDT)
 

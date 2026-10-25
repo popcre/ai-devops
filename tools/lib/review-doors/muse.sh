@@ -33,8 +33,10 @@ case "$MODE" in review|implement) ;; *) printf 'muse door: usage: muse.sh review
 # Repository root, for the pinned engine install and the OpenCode profile.
 MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$MU_ROOT/tools/reviewer_event_guard.sh"
+source "$MU_ROOT/tools/lib/review-terminal-verdict.sh"
 
 . "$MU_ROOT/tools/lib/muse-credential-boundary.sh"
+. "$MU_ROOT/tools/lib/reviewer-instructions.sh"
 
 # Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode
 # harness (rollback). Sessions never cross engines: each engine records its
@@ -151,6 +153,8 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT
   if [ -f "$MU_PROFILE_SRC/agent/$MU_AGENT.md" ]; then
     cp "$MU_PROFILE_SRC/agent/$MU_AGENT.md" "$xdg/agent/$MU_AGENT.md"
   fi
+  # A review sees only the reviewer rules, never the owner's (#1881).
+  [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
 
 # Parse the provider envelope into OUR report shape: findings first, verdict
@@ -188,6 +192,8 @@ extract_report() { # extract_report RESULT_FILE DEST HEAD MODE ENGINE
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'
       printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+    elif printf '%s\n' "$text" | rtv_has_terminal_verdict; then
+      printf '%s\n' "$text" | rtv_emit_terminal_verdict
     else
       printf '%s\n' "$text"
       printf '\n## Verdict\nBLOCKED\n'
@@ -214,6 +220,7 @@ main() {
     printf 'Your evidence packet'"'"'s MANIFEST.md path is given under RUN FACTS at the end. Read it first.\n'
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'Quote the full reviewed head SHA given under RUN FACTS in your report.\n\n'
+    printf 'Repository tool-read root is the actual current directory (.). Use repository-relative paths for source reads. Original checkout and snapshot host paths in the manifest or prior conversation are provenance metadata only; never read or retry those host paths.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
     printf '\n## RUN FACTS (muse door)\nEvidence packet: %s/MANIFEST.md\nReviewed head commit: %s\n' "$DOOR_PACKET_DIR" "$DOOR_HEAD"
@@ -260,6 +267,8 @@ main() {
              XDG_DATA_HOME="$(native_path "$xdg/data")" \
              XDG_STATE_HOME="$(native_path "$xdg/state")" \
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
+      # Reviewer-only isolation: an implement turn keeps the owner rules and skills (#1901).
+      [ "$MODE" != review ] || export "${REVIEWER_OPENCODE_ENV[@]}"
       muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
         | reviewer_credit_run muse "$log" "$out.err" --timeout-seconds "$MU_TIMEOUT" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \

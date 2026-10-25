@@ -1,6 +1,6 @@
 ---
 name: deepseek-code-delegation
-description: Hand real implementation work to DeepSeek (V4.1 Flash or V4 Pro) through the ai-deepseek OpenCode harness — DeepSeek edits files, runs builds and tests, and commits on its own branch in a private remote-less clone; the calling agent lands, reviews, and opens the pull request. Use for "have DeepSeek build/implement/fix X", "delegate this to DeepSeek", "let DeepSeek write the code". For a DeepSeek opinion or formal rotation review, use deepseek-second-opinion instead.
+description: "Hand implementation work to DeepSeek (V4.1 Flash or V4 Pro) via the ai-deepseek harness in a private clone; the caller lands and opens the PR. Use for \"have DeepSeek build/implement/fix X\", \"delegate this to DeepSeek\", \"let DeepSeek write the code\". Opinions and reviews go to deepseek-second-opinion."
 ---
 
 # deepseek-code-delegation

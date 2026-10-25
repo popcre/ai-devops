@@ -589,7 +589,6 @@ jobs:
     outputs:
       proof_result: ${{ steps.proof.outputs.proof_result }}
       codex_result: ${{ steps.proof.outputs.codex_result }}
-      grok_result: ${{ steps.proof.outputs.grok_result }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -604,9 +603,9 @@ jobs:
         id: proof
         shell: pwsh
         run: |
-          # Preferred stays serial on one host (same-host exclusion). Each suite
-          # writes its own result so the hosted fallback is per unproved suite,
-          # not a second run of work the preferred host already proved.
+          # Preferred stays serial on one host (same-host exclusion). The one
+          # remaining Windows reviewer-safety suite writes its result so the
+          # hosted fallback only runs when the preferred host did not prove it.
           $bash = 'C:\Program Files\Git\bin\bash.exe'
           $resultFile = Join-Path $env:RUNNER_TEMP 'preferred-suite-results.txt'
           $scriptFile = Join-Path $env:RUNNER_TEMP 'preferred-reviewer-suites.sh'
@@ -614,14 +613,11 @@ jobs:
           @"
           set -uo pipefail
           c=0
-          g=0
           bash tests/test-ai-codex-review.sh || c=`$?
-          bash tests/test-ai-grok-review.sh || g=`$?
           {
             if [ "`$c" -eq 0 ]; then echo 'codex_result=success'; else echo 'codex_result=failure'; fi
-            if [ "`$g" -eq 0 ]; then echo 'grok_result=success'; else echo 'grok_result=failure'; fi
           } > '$resultFilePosix'
-          if [ "`$c" -eq 0 ] && [ "`$g" -eq 0 ]; then
+          if [ "`$c" -eq 0 ]; then
             exit 0
           fi
           exit 1
@@ -638,27 +634,22 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               "codex_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              "grok_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
               exit 0
             }
             "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             "codex_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            "grok_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             Write-Warning 'Preferred reviewer proof reached its 55-minute bound; hosted fallback is required.'
             exit 0
           }
           $codex = 'failure'
-          $grok = 'failure'
           if (Test-Path $resultFile) {
             foreach ($line in Get-Content $resultFile) {
               if ($line -match '^codex_result=(\w+)$') { $codex = $Matches[1] }
-              if ($line -match '^grok_result=(\w+)$') { $grok = $Matches[1] }
             }
           }
           "codex_result=$codex" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "grok_result=$grok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          if ($process.ExitCode -eq 0 -and $codex -eq 'success' -and $grok -eq 'success') {
+          if ($process.ExitCode -eq 0 -and $codex -eq 'success') {
             "proof_result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             "proof_result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -682,9 +673,7 @@ jobs:
       fallback_required: ${{ steps.watch.outputs.fallback_required }}
       preferred_result: ${{ steps.watch.outputs.preferred_result }}
       fallback_codex: ${{ steps.watch.outputs.fallback_codex }}
-      fallback_grok: ${{ steps.watch.outputs.fallback_grok }}
       codex_status: ${{ steps.watch.outputs.codex_status }}
-      grok_status: ${{ steps.watch.outputs.grok_status }}
     steps:
       - name: Bound the self-hosted reviewer lane start
         id: watch
@@ -693,32 +682,26 @@ jobs:
           AVAILABLE: ${{ needs.reviewer-runner-availability.outputs.preferred_available }}
           PROOF_RESULT: ${{ needs.windows-reviewer-preferred.outputs.proof_result }}
           CODEX_RESULT: ${{ needs.windows-reviewer-preferred.outputs.codex_result }}
-          GROK_RESULT: ${{ needs.windows-reviewer-preferred.outputs.grok_result }}
         with:
           script: |
             const available = process.env.AVAILABLE === 'true';
             const proofResult = process.env.PROOF_RESULT || (available ? 'unknown' : 'unavailable');
             const status = (value) => value || (available ? 'unknown' : 'unavailable');
             const codexStatus = status(process.env.CODEX_RESULT);
-            const grokStatus = status(process.env.GROK_RESULT);
             // Per unproved suite: a suite the preferred host already proved (or
             // that left an unclean process tree) never overlaps a hosted twin.
             const needsFallback = (v) => (v === 'success' || v === 'cleanup_failure' ? 'false' : 'true');
             const fallbackCodex = needsFallback(codexStatus);
-            const fallbackGrok = needsFallback(grokStatus);
-            const fallback = fallbackCodex === 'true' || fallbackGrok === 'true' ? 'true' : 'false';
+            const fallback = fallbackCodex === 'true' ? 'true' : 'false';
             core.setOutput('fallback_required', fallback);
             core.setOutput('preferred_result', proofResult);
             core.setOutput('fallback_codex', fallbackCodex);
-            core.setOutput('fallback_grok', fallbackGrok);
             core.setOutput('codex_status', codexStatus);
-            core.setOutput('grok_status', grokStatus);
-            core.info(`Reviewer host available=${available} proof=${proofResult} codex=${codexStatus} grok=${grokStatus}; fallback_codex=${fallbackCodex} fallback_grok=${fallbackGrok}.`);
+            core.info(`Reviewer host available=${available} proof=${proofResult} codex=${codexStatus}; fallback_codex=${fallbackCodex}.`);
 
-  # Hosted Codex and Grok proofs run as independent jobs on separate machines
-  # (P6). Each job covers exactly one unproved suite, so wall time is near
-  # max(individual suites) rather than their sum. Timeouts stay bounded at the
-  # existing 60-minute ceiling - this is not a raised limit.
+  # Hosted Codex proof runs only when the preferred host did not prove it.
+  # Timeouts stay bounded at the existing 60-minute ceiling. Grok is frozen
+  # per popcre/ai-devops#1714 and no longer runs here.
   windows-reviewer-fallback-codex:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
     if: >-
@@ -744,37 +727,12 @@ jobs:
         run: |
           & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-codex-review.sh
 
-  windows-reviewer-fallback-grok:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
-    if: >-
-      always() && !cancelled() && github.event_name != 'merge_group' &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
-      (needs['reviewer-safety-start-deadline'].result != 'success' ||
-       needs['reviewer-safety-start-deadline'].outputs.fallback_grok == 'true')
-    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
-    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
-    # get stuck).
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Grok reviewer safety suite
-        shell: pwsh
-        run: |
-          & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-grok-review.sh
-
   # Stable required result for reviewer safety. The qualified self-hosted lane
-  # remains preferred, but it is not a machine-wide stop: independent hosted
-  # fallbacks that run every identical assertion are equally valid proof. Each
-  # suite is accepted on its own; one unproved suite fails the aggregate.
+  # remains preferred, but it is not a machine-wide stop: the hosted Codex
+  # fallback is an equally valid proof of the only remaining Windows
+  # reviewer-safety suite (Grok is frozen per popcre/ai-devops#1714).
   windows-reviewer-safety:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex, windows-reviewer-fallback-grok]
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -789,14 +747,12 @@ jobs:
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
           WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
           CODEX_PREFERRED: ${{ needs.reviewer-safety-start-deadline.outputs.codex_status }}
-          GROK_PREFERRED: ${{ needs.reviewer-safety-start-deadline.outputs.grok_status }}
           CODEX_FALLBACK: ${{ needs.windows-reviewer-fallback-codex.result }}
-          GROK_FALLBACK: ${{ needs.windows-reviewer-fallback-grok.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s codex_pref=%s grok_pref=%s codex_fb=%s grok_fb=%s\n' \
+          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s codex_pref=%s codex_fb=%s\n' \
             "$EVENT" "$SELECTION_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" \
-            "$CODEX_PREFERRED" "$GROK_PREFERRED" "$CODEX_FALLBACK" "$GROK_FALLBACK"
+            "$CODEX_PREFERRED" "$CODEX_FALLBACK"
 
           # A legitimate skip needs an explicit "reviewer is not selected"
           # verdict from a successful selection, or a manual run that declined
@@ -808,7 +764,7 @@ jobs:
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
             legitimate_skip=true
           fi
-          if [ "$legitimate_skip" = true ] && [ "$CODEX_FALLBACK" = 'skipped' ] && [ "$GROK_FALLBACK" = 'skipped' ]; then
+          if [ "$legitimate_skip" = true ] && [ "$CODEX_FALLBACK" = 'skipped' ]; then
             printf 'windows-reviewer-safety: reviewer work was legitimately skipped.\n'
             exit 0
           fi
@@ -825,19 +781,14 @@ jobs:
               "$CODEX_PREFERRED" "$CODEX_FALLBACK" >&2
             all_ok=false
           fi
-          if ! suite_proved "$GROK_PREFERRED" "$GROK_FALLBACK"; then
-            printf 'windows-reviewer-safety: grok suite unproved (preferred=%s fallback=%s).\n' \
-              "$GROK_PREFERRED" "$GROK_FALLBACK" >&2
-            all_ok=false
-          fi
 
           if [ "$all_ok" = true ]; then
             printf 'windows-reviewer-safety: every reviewer suite is proved.\n'
             exit 0
           fi
 
-          printf 'windows-reviewer-safety: no complete reviewer proof; preferred=%s watchdog=%s codex_fb=%s grok_fb=%s.\n' \
-            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$CODEX_FALLBACK" "$GROK_FALLBACK" >&2
+          printf 'windows-reviewer-safety: no complete reviewer proof; preferred=%s watchdog=%s codex_fb=%s.\n' \
+            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$CODEX_FALLBACK" >&2
           exit 1
 
   # The ruleset requires this one stable context on both pull_request and

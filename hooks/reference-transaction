@@ -1,0 +1,117 @@
+#!/bin/sh
+# ai-devops-managed: installed-checkout main guard (#1836)
+#
+# Accident guardrail, not enforcement. Only the protected installers
+# (update.sh, bin/install-ai-devops-windows.ps1) may move the installed
+# checkout's main. They run every ref-moving git command with core.hooksPath
+# pointed at an empty directory, so this hook never runs for them; a plain
+# `git pull` / `git merge` / `git reset` here runs it and is refused.
+# Anyone can still bypass it (for example `git -c core.hooksPath=... pull`);
+# the post-merge recorder and the ai-task-gates warning remain the second layer.
+#
+# Git resolves hooks through the common dir, so this fires in every linked
+# worktree too. Only refs/heads/main, and an object-id move of HEAD in the
+# primary worktree, are refused; remote-tracking refs, tags, other branches,
+# and linked worktrees' own HEADs are always allowed.
+marker_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || marker_dir=""
+marker="$marker_dir/ai-devops-main-guard-refused"
+if [ "${1:-}" = aborted ]; then
+  cat >/dev/null
+  # git updates the index and files before the ref; put them back so a
+  # refused pull does not leave the old HEAD over new files (#1836).
+  if [ -n "$marker_dir" ] && [ -f "$marker" ]; then
+    read -r to owner < "$marker" || :
+    # Only the git process that was refused (same parent) restores.
+    if [ "${owner:-}" != "$PPID" ]; then
+      # A marker whose refused process is gone is stale; drop it.
+      { [ -n "${owner:-}" ] && kill -0 "$owner" 2>/dev/null; } || rm -f "$marker"
+      exit 0
+    fi
+    rm -f "$marker"
+    from="$(git rev-parse -q --verify HEAD 2>/dev/null)" || from=""
+    if [ -n "$from" ] && [ -n "$to" ] && [ "$from" != "$to" ]; then
+      if git read-tree -m -u "$to" "$from" 2>/dev/null; then
+        echo "ai-devops: restored the checkout's files to its unchanged HEAD." >&2
+      else
+        echo "ai-devops: could not restore files; run: git read-tree -m -u $to HEAD" >&2
+      fi
+    fi
+  fi
+  exit 0
+fi
+if [ "${1:-}" != prepared ]; then
+  cat >/dev/null
+  exit 0
+fi
+
+git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || git_dir=""
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
+primary=0
+if [ -n "$git_dir" ] && [ "$git_dir" = "$common_dir" ]; then
+  # HEAD is guarded only while it is detached or on main; a primary
+  # worktree working on another branch commits normally.
+  head_ref="$(git symbolic-ref -q HEAD 2>/dev/null)" || head_ref=""
+  case "$head_ref" in ''|refs/heads/main) primary=1 ;; esac
+fi
+# Files belong to this worktree; restore is possible here when it is the
+# guarded primary or a linked worktree that has main checked out.
+here_main="$primary"
+[ "$(git symbolic-ref -q HEAD 2>/dev/null)" = refs/heads/main ] && here_main=1
+
+# `git worktree add` (git 2.53) writes the NEW worktree's HEAD without that
+# worktree's GIT_DIR, so it looks like a primary HEAD move. The lock git
+# holds tells them apart: the primary's own move locks $git_dir/HEAD.lock;
+# a new worktree locks only worktrees/<name>/HEAD.lock.
+new_worktree_head() {
+  [ ! -e "$git_dir/HEAD.lock" ] || return 1
+  # Only a lock written in the last minute counts: a stale lock left by an
+  # interrupted `git worktree add` must not reopen primary HEAD moves (#1901).
+  for l in "$git_dir"/worktrees/*/HEAD.lock; do
+    [ -e "$l" ] && [ -n "$(find "$l" -maxdepth 0 -mmin -1 2>/dev/null)" ] && return 0
+  done
+  return 1
+}
+refused=""; to=""
+while read -r old new ref; do
+  # A same-value update (merge --abort, reset --hard HEAD) moves nothing.
+  [ "$old" = "$new" ] && continue
+  case "$ref" in
+    refs/heads/main) refused="$ref"; to="$new" ;;
+    HEAD)
+      # A symbolic HEAD change (branch switch) arrives as "ref:..."; only a
+      # detached move to a commit in the primary worktree is refused.
+      case "$new" in
+        ref:*) ;;
+        *) if [ "$primary" -eq 1 ] && ! new_worktree_head; then refused="HEAD"; [ -n "$to" ] || to="$new"; fi ;;
+      esac ;;
+  esac
+done
+
+[ -z "$refused" ] && exit 0
+# Restore files only for a move to existing history (a commit some ref or
+# FETCH_HEAD already contains, or an ancestor of HEAD:
+# fast-forward pull/merge, reset, checkout). A new commit (local commit,
+# amend, cherry-pick, any merge commit) is never restored: its staged files
+# may be the user's own work. The message then says how to undo by hand.
+restore=0
+case "$here_main$to" in
+  1*[!0-9a-f]*|1|1000000000000000000000000000000000000000|1000000000000000000000000000000000000000000000000000000000000000|0*) ;;
+  *) head_now="$(git rev-parse -q --verify HEAD 2>/dev/null)" || head_now=""
+     fetched="$(git rev-parse -q --verify FETCH_HEAD 2>/dev/null)" || fetched=""
+     if [ -n "$(git for-each-ref --contains "$to" --format='%(refname)' 2>/dev/null)" ]; then restore=1
+     elif [ -n "$fetched" ] && git merge-base --is-ancestor "$to" "$fetched" 2>/dev/null; then restore=1
+     elif [ -n "$head_now" ] && git merge-base --is-ancestor "$to" "$head_now" 2>/dev/null; then restore=1
+     fi ;;
+esac
+[ "$restore" -eq 0 ] || [ -z "$marker_dir" ] || printf '%s %s\n' "$to" "$PPID" > "$marker"
+cat >&2 <<MSG
+ai-devops: refusing to move $refused in the installed toolkit checkout.
+Only the protected installer may advance it: on Linux run update.sh from a
+reviewed candidate; on Windows run bin/install-ai-devops-windows.ps1.
+See docs/deployment.md ("Installed checkout main guard").
+MSG
+[ "$restore" -eq 1 ] || [ "$here_main" -ne 1 ] || cat >&2 <<'MSG'
+Files are not restored for a new commit. If this was a refused merge, undo it
+with 'git merge --abort'; staged work of your own stays as it is.
+MSG
+exit 1

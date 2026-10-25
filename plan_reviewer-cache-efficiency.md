@@ -6,7 +6,7 @@
 the three original items on evidence. See § 7.
 **Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
 **Tracking issue:** [#333](https://github.com/popcre/ai-devops/issues/333)
-**Handoff:** [`HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md`](HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md)
+**Handoff:** `HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md` (retired; recoverable from git history)
 
 ---
 

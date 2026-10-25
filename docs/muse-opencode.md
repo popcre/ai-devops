@@ -29,6 +29,18 @@ or ambiguous terminal evidence stays blocked. If the source moved, reconciliatio
 retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
+For the narrowly recognized OpenCode case where the original turn ended only
+because one to three consecutive read calls were denied permission in the final step, use `ai-muse finalize-failed-turn <name>
+--dry-run` first. It qualifies the original packet, retained bytes, native event
+start/finish, and exact bounded denied-read suffix without changing session state. No text or successful tool may follow the first denial.
+Only a qualified result permits `ai-muse finalize-failed-turn <name>`; this
+archives the original descriptor and records a non-authorizing failure receipt.
+It creates no accepted review, verdict, refund, or billing conclusion. A fresh
+same-session `ask` then follows the ordinary provider path. Any other error,
+verdict text, stop, missing or inconsistent receipt remains fenced; do not use
+this route to recover an incomplete or successful review. Muse Code failures
+remain fenced because they do not have this qualifying OpenCode event stream.
+
 If the source repository changes during a turn, the completed review is rejected as
 stale. The message names the paths that appeared or vanished (capped at 10) and
 points at `reconcile` as the recovery step — the paid review is kept. `delete`
@@ -58,7 +70,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
-  (x86_64: `1.4.7-R6101.1`). `install.sh` runs Meta's official installer when the
+  (x86_64: `1.4.9-R6297.1`). `install.sh` runs Meta's official installer when the
   pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
   SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
   ships a newer build, re-pin both files together. The model catalog appears
@@ -138,3 +150,10 @@ Persistent conversation does not require a permanent process. OpenCode 1.18.12
 supports `run --session <exact-id>` in direct mode. This keeps the working Meta path,
 avoids another port, password, task, service, and crash-recovery loop, and still gives
 Codex the same everyday `new` then `ask` debate flow as GLM.
+
+The bounded denied-read recovery extension is designed in
+[Exact non-authorizing Muse denied-read recovery](muse-denied-read-recovery-design.md)
+(issue #674; recurrence parent #1783). Its multi-denial acceptance requires independent design review before implementation.
+
+Release provenance and live Linux stage result: [October 16 Muse Code pin verification](verification/muse-code-repin-20261016.md).
+Windows 1.4.11 re-pin provenance: [October 21 Muse Code pin verification](verification/muse-code-repin-20261021.md).

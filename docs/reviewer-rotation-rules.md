@@ -1,5 +1,9 @@
 # Reviewer rotation rules
 
+**Scope (owner ruling 2026-10-15):** review is required only in
+`popcre/shared-db`. These rules govern that rotation and any review requested
+by name elsewhere; nothing outside shared-db waits for a review.
+
 Owner rules, 2026-09-22. They exist because GLM was retired in the shared-db
 allocator but stayed registered here, and a session spent an hour trying it.
 
@@ -254,6 +258,16 @@ does not remove the separate suspended-membership restriction.
     skipped. A `small-owner-entry` is a review-*skipping* database override and
     is not a review-requiring gate.
 
+15. **Observation week: fail fast, skip per session, never wait.** Owner
+    request 2026-10-21 (#1948, [plan](../plan_reviewer-observation-week.md)).
+    The shared review core stops a reviewer that prints nothing for five
+    minutes or shows a fatal error, and a reviewer that fails is skipped for
+    the rest of that calling session (`ai-review` exits 77; 75 when all four
+    are skipped). While the window file is live, reviews go out with
+    `--detach`, a sent-but-undecided code head merges as `unreviewed-week`,
+    reviewer code and installs are frozen, and `ai-review-posthoc` drains the
+    queue afterwards. Shared-db and production gates are unchanged.
+
 ---
 
 ## Reviewer lookup table (wrapper → pin → reroute)
@@ -279,7 +293,7 @@ tells Albert in the same session, and rotates (rules 10–11). Muse capacity
 | **Claude** | `ai-claude-review` (legacy name; registry refuses) | n/a — absent from pool | Orchestrator/writer only. Never a formal or assigned review. | n/a — never drawn | Removed 2026-09-30 (owner: "take claude out of the reviewer pool"). `ai-review claude` exits 2 via the registry gate. |
 | **Codex** | `ai-codex-review` (also `ai-review codex <mode>`) | `CODEX_CMD` in `/etc/ai-devops/models.env` (default `codex exec -m gpt-5.6-sol --sandbox read-only -c model_reasoning_effort=medium`). No entry in `config/provider-cli-versions.json`. | Approval-gate wrapper only (one-shot modes). Not a rotation or overflow reviewer. | Not drawn by the allocator. Gate failures fail closed. | Outside allocator (`config/reviewer-membership-scope.json`). shared-db `RETIRED_REVIEWERS` carries `codex-gpt-5.6-sol` since 2026-09-06. |
 | **Grok** (frozen 2026-10-13; not drawn) | `ai-grok-review` (formal); `ai-grok-implement` (isolated edits / investigate) | `config/provider-cli-versions.json`: `supported_version` 1.0.13, `version_match: minimum` (floor, same major). Model pin `grok-4.6` + `dismiss_campaigns`. | Installed, callable by name. Not a maintained rotation reviewer (owner 2026-10-13 #1714; also out of credit 2026-10-13). | n/a — not drawn. | Never call `grok` directly. xAI launch campaigns replace the default model and beat `config.toml`; the installers pin `models.default` and dismiss campaigns. |
-| **Muse** | `ai-muse` | Muse Code `1.4.7-R6101.1` (`config/muse-code/version`, Windows; same build on Linux x86_64). OpenCode fallback `1.18.12` (`config/opencode/version`). Model pin `muse-spark-1.3-contributor`. Not in `provider-cli-versions.json`. | Rotation reviewer. Default pipeline review provider. | Next registered rotation reviewer. Capacity 404 (HTTP 404 `model_not_found`) = capacity: relaunch ≤ `AI_MUSE_CAPACITY_RETRIES` (default 6) with jittered backoff. | Never switch Muse's model or disable it to get past a 404 (rule 9). |
+| **Muse** | `ai-muse` | Muse Code `1.4.11-R6667.1` (`config/muse-code/version`, Windows; Linux x86_64 stays `1.4.9-R6297.1` in `config/muse-code/linux-x86_64/version`). OpenCode fallback `1.18.12` (`config/opencode/version`). Model pin `muse-spark-1.3-contributor`. Not in `provider-cli-versions.json`. | Rotation reviewer. Default pipeline review provider. | Next registered rotation reviewer. Capacity 404 (HTTP 404 `model_not_found`) = capacity: relaunch ≤ `AI_MUSE_CAPACITY_RETRIES` (default 6) with jittered backoff. | Never switch Muse's model or disable it to get past a 404 (rule 9). |
 | **Qwen** (frozen 2026-10-13; not drawn) | `ai-qwen` | `config/provider-cli-versions.json`: `supported_version` null (not pinned; presence sufficient). Model pin `qwen3.8-max`. | Installed, callable by name. Not a maintained rotation reviewer (owner 2026-10-13 #1714). | n/a — not drawn. | Frozen tooling: best-effort, not maintained. Reviews run in a disposable remote-less copy. |
 | **Gemini** (frozen 2026-10-13; not drawn) | `ai-gemini` | `config/provider-cli-versions.json`: not pinned there; `ai-review-preflight` binds live qualification to the exact `agy` version **and hash** (hash-pin). Model pin `gemini-3.8-flash-high`. | Installed, callable by name. Not a maintained rotation reviewer (owner 2026-10-13 #1714). | n/a — not drawn. | Frozen tooling: best-effort, not maintained. Headroom: `ai-gemini-usage`. |
 | **DeepSeek** | `ai-deepseek-agent` (via `ai-review deepseek <mode> --code-only`) | OpenCode `1.18.12` (`config/opencode/version`). Model pin `deepseek-flash` (DeepSeek V4.1 Flash). Not in `provider-cli-versions.json`. | Rotation reviewer. Also freeform multi-turn debate. | Next registered rotation reviewer. | Formal rotation reviews on the read-only `ai-deepseek-agent`. Any other model id is refused before credential use. |

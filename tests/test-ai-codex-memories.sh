@@ -75,9 +75,16 @@ check "missing feature flag is loud" "printf '%s' \"\$out\" | grep -q 'does not 
 
 # --- no Codex installed ------------------------------------------------------
 rm -f "$TMP/bin/codex"
-out="$(PATH="$TMP/bin:/usr/bin:/bin" HOME="$TMP/nohome" USERPROFILE="$TMP/nohome" bash "$SCRIPT" 2>&1)"; rc=$?
+# AI_CODEX_SYSTEM_BIN hides a real /usr/local/bin/codex on the test machine (#1962).
+out="$(PATH="$TMP/bin:/usr/bin:/bin" HOME="$TMP/nohome" USERPROFILE="$TMP/nohome" AI_CODEX_SYSTEM_BIN="$TMP/absent/codex" bash "$SCRIPT" 2>&1)"; rc=$?
 check "no Codex exits 2" "[ $rc -eq 2 ]"
 check "no Codex is informational, not an error" "printf '%s' \"\$out\" | grep -q 'not installed'"
+
+# --- Codex only at the standard system path (not on PATH) --------------------
+mk_stub true 1
+mkdir -p "$TMP/sys"; mv "$TMP/bin/codex" "$TMP/sys/codex"
+out="$(PATH="/usr/bin:/bin" HOME="$TMP/nohome" USERPROFILE="$TMP/nohome" CODEX_HOME="$CODEX_HOME" AI_CODEX_SYSTEM_BIN="$TMP/sys/codex" bash "$SCRIPT" 2>&1)"; rc=$?
+check "Codex at the standard system path is found" "[ $rc -eq 0 ]"
 
 # --- bad usage ---------------------------------------------------------------
 run --nonsense >/dev/null 2>&1; check "unknown option exits 2" "[ $? -eq 2 ]"

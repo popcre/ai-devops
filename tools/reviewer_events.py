@@ -147,6 +147,44 @@ def invocation(directory, provider, run_id, active=False):
     return starts[0]
 
 
+def verify_failed_invocation(directory, provider, run_id, repo, head, caller):
+    """Read-only proof of one exact, terminal unsignaled wrapper failure."""
+    require(re.fullmatch(r"[0-9a-f]{32}", run_id), "invalid invocation identity")
+    _, data = snapshot(directory / "events.jsonl", "jsonl")
+    rows = [json.loads(line) for line in data.splitlines()]
+    require(all(isinstance(row, dict) for row in rows), "invalid event ledger")
+    starts = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "started"]
+    finishes = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "finished"]
+    require(len(starts) == 1 and len(finishes) == 1, "invocation lacks one exact start and finish")
+    start, finish = starts[0], finishes[0]
+    def event_time(row):
+        value = row.get("timestamp")
+        require(isinstance(value, str) and value, "invocation lacks a timestamped process receipt")
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise Blocked("invocation has an invalid process-receipt timestamp") from exc
+        require(parsed.tzinfo is not None and parsed.utcoffset() is not None,
+                "invocation timestamp is not timezone-aware")
+        return parsed
+    started_at, finished_at = event_time(start), event_time(finish)
+    require(finished_at >= started_at, "wrapper finish precedes the original invocation start")
+    require(start.get("provider") == provider and finish.get("provider") == provider and
+            start.get("operation") == "invocation", "invocation is not an original provider call")
+    require(finish.get("exit_code") == 1 and finish.get("wrapper_exit_code") == 1 and
+            finish.get("evidence_state") == "verified", "invocation is not a verified wrapper failure")
+    facts = finish.get("provenance")
+    require(isinstance(facts, dict) and facts.get("phase") == "wrapper-exit" and
+            facts.get("signal") is None, "invocation termination is not a completed unsignaled wrapper exit")
+    require(all(finish.get(key) == start.get(key) for key in
+                ("run_id", "provider", "operation", "repo", "head", "caller")),
+            "finished invocation identity differs from its start")
+    require(physical(start.get("repo", "")) == physical(repo) and
+            start.get("head") == head and start.get("caller") == caller,
+            "failed invocation does not match the retained Muse source and caller")
+    return {"started": start, "finished": finish}
+
+
 def provenance(value=None):
     result = {"source": "unknown", "actor_class": "unknown", "phase": "unknown",
               "last_proven_provider_state": "unknown", "paid_work_may_exist": None, "signal": None}
@@ -1454,9 +1492,9 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
                 row.get("provider") == path.parent.parent.name and
                 row.get("review_mode") == mode):
             continue
-        # A later REJECT (or BLOCKED) on the same source supersedes an older
-        # APPROVE: remember the newest real judgment of any kind.
-        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "BLOCKED"}:
+        # A later REJECT, REVISE, or BLOCKED on the same source supersedes an
+        # older APPROVE: remember the newest real judgment of any kind.
+        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "REVISE", "BLOCKED"}:
             latest_judgment = max(latest_judgment, row.get("finished_at") or "")
         if not (row.get("status") == "completed" and row.get("verdict") == "APPROVE" and
                 row.get("stale") is False and row.get("failure_class") is None):
@@ -1508,7 +1546,70 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
             "review_mode": mode, "head": head, "source_digest": source_digest, "finished_at": best[0]}
 
 
+def tally(args):
+    """Observation-week daily tally: a read of the scoreboard ledger only.
+
+    tally --since ISO [--by provider,failure_class,host]
+    """
+    since, by = "", ["provider", "failure_class", "host"]
+    i = 0
+    while i < len(args):
+        if args[i] == "--since" and i + 1 < len(args):
+            since = args[i + 1]; i += 2
+        elif args[i] == "--by" and i + 1 < len(args):
+            by = [k for k in args[i + 1].split(",") if k]; i += 2
+        else:
+            raise Blocked("tally usage: tally --since ISO [--by provider,failure_class,host]")
+    require(bool(since), "tally requires --since")
+    require(all(k in {"provider", "failure_class", "host", "verdict", "caller_session_id"} for k in by), "unknown tally key")
+    start = datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=datetime.timezone.utc)
+    ledger = os.environ.get("AI_REVIEW_SCOREBOARD_FILE") or os.path.join(
+        os.environ.get("AI_REVIEW_SCOREBOARD_DIR") or os.path.expanduser("~/.local/state/ai-devops/review-scoreboard"),
+        "reviews.jsonl")
+    import socket
+    host = socket.gethostname()
+    groups = {}
+    if os.path.isfile(ledger):
+        with open(ledger, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                stamp = row.get("recorded_at") or row.get("finished_at") or row.get("timestamp") or ""
+                try:
+                    when = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=datetime.timezone.utc)
+                if when < start:
+                    continue
+                values = dict(row, host=host)
+                key = tuple(str(values.get(k)) for k in by)
+                group = groups.setdefault(key, {"runs": 0, "verdicts": {}, "fail_elapsed": [], "sessions": set()})
+                group["runs"] += 1
+                verdict = str(row.get("verdict"))
+                group["verdicts"][verdict] = group["verdicts"].get(verdict, 0) + 1
+                if row.get("failure_class") and isinstance(row.get("elapsed_seconds"), (int, float)):
+                    group["fail_elapsed"].append(row["elapsed_seconds"])
+                if row.get("caller_session_id"):
+                    group["sessions"].add(row["caller_session_id"])
+    out = []
+    for key, group in sorted(groups.items()):
+        elapsed = sorted(group["fail_elapsed"])
+        median = elapsed[len(elapsed) // 2] if elapsed else None
+        out.append(dict(zip(by, key), runs=group["runs"], verdicts=group["verdicts"],
+                        median_seconds_to_fail=median, calling_sessions=len(group["sessions"])))
+    return {"ledger": ledger, "since": since, "host": host, "by": by, "groups": out}
+
+
 def main():
+    if sys.argv[1] == "tally":
+        print(json.dumps(tally(sys.argv[2:]), indent=2))
+        return
     if sys.argv[1] == "find-passing-report":
         # find-passing-report PROVIDER|any MODE HEAD DIGEST REPO_KEY [BASE_SHA] [IMPLEMENTER]
         require(len(sys.argv) in {7, 8, 9}, "find-passing-report requires provider, mode, head, digest and repository key")
@@ -1520,6 +1621,12 @@ def main():
     if sys.argv[1] == "verify-sandbox":
         require(len(sys.argv) == 3, "invalid sandbox evidence verification")
         print(json.dumps({"references": verify_sandbox(location(), sys.argv[2])}))
+        return
+    if sys.argv[1] == "verify-failed-invocation":
+        require(len(sys.argv) == 7, "failed-invocation verification requires provider, run_id, repo, head and caller")
+        provider = sys.argv[2]
+        require(provider == "muse", "failed-invocation verifier is restricted to Muse")
+        print(json.dumps(verify_failed_invocation(location(), provider, *sys.argv[3:])))
         return
     operation, provider = sys.argv[1:3]
     require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen", "stepfun"},

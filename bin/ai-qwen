@@ -100,7 +100,7 @@ allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bi
 unset BAILIAN_CODING_PLAN_API_KEY
 clean_env=("$env_bin" -i "PATH=${PATH:-}" "HOME=$qwen_home" "USERPROFILE=$qwen_home" "QWEN_HOME=$qwen_home"
   "APPDATA=$qwen_home/appdata" "LOCALAPPDATA=$qwen_home/localappdata" "TEMP=$qwen_home/tmp" "TMP=$qwen_home/tmp" "TMPDIR=$qwen_home/tmp")
-for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM; do
+for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX; do
   [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
 done
 if [ "$allow_key" = 1 ]; then
@@ -2059,7 +2059,8 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
   reviewer_event_verify_owner qwen "$owner" || { warn 'implementation evidence cleanup refused; exact owner and worktree preserved.'; return 1; }
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
-  if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
+  # Native Windows Git lists C:/ paths; compare each entry as a place (#1835).
+  if git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r listed; do same_path "$listed" "$wt" && exit 0; done; then
     warn "the throwaway worktree $wt is STILL registered — remove it before continuing."
     return 1
   fi

@@ -80,11 +80,17 @@ SHOW_LOG=false
 KEEP_ORPHANS=false
 ADOPT_GLOBALS=false
 ONLY_SKILLS=()
+SCOPED_REVIEWER_APPROVAL=""
+SCOPED_PLAN=""
+SCOPED_PLAN_SHA=""
+export -n SCOPED_PLAN_SHA
+SCOPED_SOURCE_ROOT="$REPO_ROOT"
 
 usage() {
   cat <<'EOF'
 Usage: ai-install-skills [--dry-run] [--keep-orphans] [--adopt-globals]
 
+  --reviewer-approval REPORT  Exact-source independent installation approval.
   --only NAME      Install this exact skill only (repeat for multiple skills).
                    Skips globals, orphan cleanup, identity and launcher work.
 
@@ -103,6 +109,9 @@ EOF
 
 while (($#)); do
   case "$1" in
+    --reviewer-approval)
+      [[ $# -ge 2 ]] || { echo "ERROR: missing reviewer report." >&2; exit 2; }
+      SCOPED_REVIEWER_APPROVAL="$2"; shift ;;
     --only)
       [[ $# -ge 2 && "$2" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || {
         echo 'ERROR: --only requires an exact skill name.' >&2; exit 2;
@@ -141,6 +150,62 @@ if ((${#ONLY_SKILLS[@]})); then
     done
   done
 fi
+
+if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
+  [[ -n "$SCOPED_REVIEWER_APPROVAL" ]] || { echo 'ERROR: --only installation requires --reviewer-approval.' >&2; exit 3; }
+  [[ "${AI_INSTALL_LOG:-$BASE_HOME/.cache/ai-devops/install-log.tsv}" == "$BASE_HOME/.cache/ai-devops/install-log.tsv" ]] || { echo 'ERROR: scoped audit destination override refused.' >&2; exit 3; }
+  for critical in bin/ai-install-skills bin/ai-task-gates tools/scoped_skills_install.py tools/lib/task-gates.sh config/task-gates.json; do
+    [[ -f "$REPO_ROOT/$critical" && ! -L "$REPO_ROOT/$critical" ]] || exit 3
+    expected="$(git -C "$REPO_ROOT" show "HEAD:$critical" | sha256sum)"
+    actual="$(sha256sum < "$REPO_ROOT/$critical")"
+    [[ "${expected%% *}" == "${actual%% *}" ]] || { echo 'ERROR: scoped entrypoint differs from committed source.' >&2; exit 3; }
+  done
+  python3 "$REPO_ROOT/tools/scoped_skills_install.py" paths "$CLAUDE_HOME" "$CODEX_HOME"
+fi
+
+# All real installs of this version share a per-user writer lock. The first-sync
+# bridge may inherit the descriptor, but every invocation verifies its inode
+# and flocks it; an environment value cannot waive locking or scoped admission.
+if ! $DRY_RUN && ! $SHOW_LOG; then
+  if command -v flock >/dev/null; then
+    if [[ -L "$BASE_HOME/.cache" || -L "$BASE_HOME/.cache/ai-devops" ]]; then
+      echo 'NOTE: full install resolves the existing cache symlink for its writer lock.' >&2
+    fi
+    mkdir -p "$BASE_HOME/.cache/ai-devops"
+    SKILLS_LOCK_PATH="$(cd "$BASE_HOME/.cache/ai-devops" && pwd -P)/skills-install.lock"
+    [[ ! -L "$SKILLS_LOCK_PATH" ]] || { echo 'ERROR: writer lock is a symlink.' >&2; exit 3; }
+    if [[ -e "$SKILLS_LOCK_PATH" ]]; then
+      [[ -f "$SKILLS_LOCK_PATH" && "$(stat -c %h "$SKILLS_LOCK_PATH" 2>/dev/null)" == 1 ]] || { echo 'ERROR: writer lock must be a regular file without hardlinks.' >&2; exit 3; }
+    fi
+    if [[ -n "${AI_INSTALL_SKILLS_LOCK_FD:-}" ]]; then
+      [[ "$AI_INSTALL_SKILLS_LOCK_FD" =~ ^[0-9]+$ && -f "$SKILLS_LOCK_PATH" && -e "/proc/$$/fd/$AI_INSTALL_SKILLS_LOCK_FD" ]] \
+        && [[ "$(stat -Lc '%d:%i' "/proc/$$/fd/$AI_INSTALL_SKILLS_LOCK_FD" 2>/dev/null)" == "$(stat -Lc '%d:%i' "$SKILLS_LOCK_PATH" 2>/dev/null)" ]] \
+        || { echo 'ERROR: inherited skill writer descriptor does not match the canonical lock.' >&2; exit 3; }
+      SCOPED_LOCK="$AI_INSTALL_SKILLS_LOCK_FD"
+    else
+      exec {SCOPED_LOCK}>>"$SKILLS_LOCK_PATH"
+    fi
+    flock -n "$SCOPED_LOCK" || { echo 'ERROR: another installation holds this client lock.' >&2; exit 3; }
+    export AI_INSTALL_SKILLS_LOCK_FD="$SCOPED_LOCK"
+  elif ((${#ONLY_SKILLS[@]})); then
+    echo 'ERROR: scoped installation requires flock.' >&2; exit 3
+  fi
+fi
+
+# The narrow lane always calls its own committed candidate gate and adds no
+# admission bypass. Existing lifecycle-store configuration still applies.
+if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
+  SCOPED_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-scoped-skills.XXXXXX")"
+  trap 'rm -rf -- "$SCOPED_TMP"' EXIT
+  SCOPED_PREPARED="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
+  IFS=$'\t' read -r SCOPED_PLAN SCOPED_PLAN_SHA <<< "$SCOPED_PREPARED"
+  [[ "$SCOPED_PLAN" == "$SCOPED_TMP/plan.json" && "$SCOPED_PLAN_SHA" =~ ^[a-f0-9]{64}$ ]] || exit 3
+  ( cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" check --before scoped-skills-install --scoped-skills-plan "$SCOPED_PLAN" --reviewer-approval "$SCOPED_REVIEWER_APPROVAL" ) | tee "$(dirname "$SCOPED_PLAN")/gate-summary.txt"
+  python3 "$REPO_ROOT/tools/scoped_skills_install.py" validate "$SCOPED_PLAN" "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$SCOPED_PLAN_SHA"
+  SCOPED_RUN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$SCOPED_PLAN")"
+  REPO_ROOT="$(dirname "$SCOPED_PLAN")/source"
+fi
+[[ -z "$SCOPED_REVIEWER_APPROVAL" || ${#ONLY_SKILLS[@]} -gt 0 ]] || { echo 'ERROR: reviewer report is scoped-only.' >&2; exit 2; }
 
 # One-time first-sync bridge for the global-adoption rollout. A sync session
 # loads its installed skill BEFORE `git pull`, so the first run after this
@@ -198,12 +263,31 @@ trim_log() {
   [[ -f "$LOG_FILE" ]] || return 0
   local n; n="$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)"
   ((n > LOG_MAX_LINES)) || return 0
-  tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$LOG_FILE.trim" 2>/dev/null &&
-    mv "$LOG_FILE.trim" "$LOG_FILE" 2>/dev/null || true
+  local trim_stage="$LOG_FILE.trim" trim_inode=""
+  if [[ -n "$SCOPED_PLAN" ]]; then
+    python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" paths "$CLAUDE_HOME" "$CODEX_HOME" || return 3
+    trim_stage="$(mktemp "$(dirname "$LOG_FILE")/.scoped-log.XXXXXXXX")" || return 3
+    trim_inode="$(stat -Lc '%d:%i' "$trim_stage")" || return 3
+    if ! { tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$trim_stage" && mv "$trim_stage" "$LOG_FILE"; }; then
+      # Remove only the private stage this invocation created, never a
+      # substituted path or a legacy .trim file belonging to another run.
+      if [[ -f "$trim_stage" && ! -L "$trim_stage" && "$(stat -Lc '%d:%i' "$trim_stage" 2>/dev/null)" == "$trim_inode" ]]; then
+        rm -f -- "$trim_stage"
+      fi
+      echo "WARN: scoped audit trim failed; reconcile retained stage if present: $trim_stage" >&2
+    fi
+    return 0
+  fi
+  tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$trim_stage" 2>/dev/null &&
+    mv "$trim_stage" "$LOG_FILE" 2>/dev/null || true
 }
 
 # What the skills are being installed FROM, in one field.
 source_revision() {
+  if [[ -n "$SCOPED_PLAN" ]]; then
+    python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print("rev="+p["head"]+" tree=clean repo="+p["source_root"])' "$SCOPED_PLAN"
+    return
+  fi
   local sha branch dirty=clean
   sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
@@ -283,9 +367,13 @@ write_marker() {
 # Copy an installed skill somewhere recoverable before overwriting it.
 backup_skill() {
   local dst="$1" client_home="$2" name="$3" backup="$2/skills-backup/$3"
+  if [[ -n "$SCOPED_PLAN" ]]; then
+    backup="$backup.$SCOPED_RUN_ID"
+    [[ ! -e "$backup" && ! -L "$backup" ]] || return 3
+  fi
   echo "    backup: $dst -> $backup"
   do_write mkdir -p "$client_home/skills-backup"
-  do_write rm -rf "$backup"
+  if [[ -z "$SCOPED_PLAN" ]]; then do_write rm -rf "$backup"; fi
   do_write cp -a "$dst" "$backup"
 }
 
@@ -350,7 +438,13 @@ classify_skill() {
     [[ "${DST_HASHES[$path]:-}" == "${RECORDS[$path]}" ]] || edited=1
   done
   for path in "${!SRC_HASHES[@]}"; do
-    [[ "${DST_HASHES[$path]:-}" == "${SRC_HASHES[$path]}" ]] || CHANGED+=("$path")
+    if [[ "${DST_HASHES[$path]:-}" != "${SRC_HASHES[$path]}" ]]; then
+      CHANGED+=("$path")
+    elif [[ -n "$SCOPED_PLAN" && -f "$dst/$path" ]] \
+      && [[ "$(stat -c %a "$src/$path")" != "$(stat -c %a "$dst/$path")" ]]; then
+      CHANGED+=("$path")
+      edited=1
+    fi
   done
   for path in "${!RECORDS[@]}"; do
     [[ -n "${SRC_HASHES[$path]:-}" ]] && continue
@@ -398,13 +492,13 @@ reconcile_skill() {
       ;;
     local-edits)
       echo "  ! $name ($label) LOCAL EDITS — backing up, then updating: ${CHANGED[*]}" >&2
-      log_event overwrote-local-edits "$label/$name files=${CHANGED[*]} backup=$client_home/skills-backup/$name"
+      log_event overwrote-local-edits "$label/$name files=${CHANGED[*]} backup=$client_home/skills-backup/$name${SCOPED_RUN_ID:+.$SCOPED_RUN_ID}"
       backup_skill "$dst" "$client_home" "$name"
       sync_skill_files "$src" "$dst"
       ;;
     unmanaged)
       echo "  ! $name ($label) exists but ai-devops never installed it — backing up, then adopting" >&2
-      log_event adopted-unmanaged "$label/$name backup=$client_home/skills-backup/$name"
+      log_event adopted-unmanaged "$label/$name backup=$client_home/skills-backup/$name${SCOPED_RUN_ID:+.$SCOPED_RUN_ID}"
       backup_skill "$dst" "$client_home" "$name"
       do_write rm -rf "$dst"
       CHANGED=("${!SRC_HASHES[@]}")
@@ -669,6 +763,9 @@ if ((${#ONLY_SKILLS[@]})); then
       done
     done
   done
+  if [[ -n "$SCOPED_PLAN" ]]; then
+    python3 "$SCOPED_SOURCE_ROOT/tools/scoped_skills_install.py" finish "$SCOPED_PLAN" "$SCOPED_PLAN_SHA"
+  fi
   log_event run-end "completed --only skills=${ONLY_SKILLS[*]}"
   trim_log
   exit 0

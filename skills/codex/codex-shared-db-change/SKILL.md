@@ -52,7 +52,7 @@ one app repo can silently break another. All durable DB **structure** lives in s
 >    branch, migration version from the lane tool where one exists, pull request,
 >    and target proof before every write. Database writes skip the second AI
 >    (owner ruling 2026-10-14). No orchestrator chat, marker, dispatch, or HANDOVER-and-stop.
->    `shared-db-orchestrator` is optional reference for its safety rules only.
+>    Detailed safety rules (binding): `ai-devops/docs/shared-db-structural-safety/`.
 > 3. **Prove which database you are on before every write** — `AGENTS.md` §4.2, an owner
 >    ruling. Immediately before any statement that writes, changes or removes data,
 >    schema or privileges (preview included), read `cat supabase/.temp/project-ref`, and

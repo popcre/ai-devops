@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: One-phrase Claude and Codex end-of-session closer. Use when the user says "wrap up", "wrap it up", "dflow wrap up", "wrap up dflow", "close out this session", "we're done here", "end of session", asks for the full end-of-session documentation update, asks whether the handoff is comprehensive enough for a fresh developer, or asks whether everything is pushed and committed before ending. ANY "wrap up" variant, including project-prefixed ones like "dflow wrap up", routes HERE, not to a ship-only skill. It detects DesignFlow repositories first and assigns their ship step to `dflow-ship`. In a shared-database session it runs the `shared-db-handover` gate. Chains docs update, secrets sweep, handoff-safe state, project-aware shipping, workspace close-out, and a next-session prompt, then gives one plain-English closing report.
+description: "End-of-session closer for Claude and Codex. Use for ANY \"wrap up\" variant (\"wrap it up\", \"dflow wrap up\", \"close out this session\", \"we're done here\", \"end of session\"), a full end-of-session docs update, \"is the handoff comprehensive enough?\", or \"is everything pushed and committed before we end?\". Routes here, not to a ship-only skill; delegates DesignFlow shipping to `dflow-ship` and runs the `shared-db-handover` gate in shared-db sessions."
 ---
 
 # wrap-up
@@ -89,25 +89,29 @@ incomplete, and so is a session that ends holding an unreleased claim.
 
 ### Ownership fallback — verify before ending
 
-Do not treat a handoff note, a closed chat, or `capacity_state: relinquished`
-alone as successful closeout. After `shared-db-handover`, freshly enumerate this
-session's author claims and exclusive stages. Every owned item must be either
-natively released after proven delivery, transferred to the verified successor,
-or preserved with an owner-issued handoff-ready receipt that a successor can
-accept immediately. Verify the actual claim and receipt readbacks. Never leave
-an hours-long reservation requiring a stopped chat to wake up, and never fake
-expiry or delete object/version protection to make a report look complete.
+Do not treat a handoff note, a stopped chat, `capacity_state: relinquished`,
+lease expiry, or an owner-issued handoff-ready receipt as successful closeout.
+They can leave exact-object reservations held and prevent other sessions working.
 
-For unfinished clean source work, run merged shared-db `--stop-author` as this
-session's actual owner; it preserves the work and publishes handoff-ready consent.
-If the successor is known, that actual session accepts the exact ready receipt
-through `--handoff-claim-author`; verify its identity, claim, source and bounded
-permission. No impersonated session IDs. Preserve dirty or remote work through
-the governed recovery route before claiming readiness. Release only this session's
-finished exclusive stages through their supported owned-release operations; a
-still-running stage must finish or be explicitly handed over, never be deleted
-blindly. A refused or unreadable release is an unfinished closeout with exact
-evidence on the same issue, not a successful wrap-up.
+Before ending, verify the following. Every owned item must be either natively
+released or **actually accepted by a verified successor**. If there is no accepted successor, preserve
+and publish source/evidence, park the open PRs without deleting branches, and
+execute native ordinary `--release-claim` as the exact owner. Use the merged
+`--park` option where available; otherwise close preserved PRs with resume notes
+before the ordinary release. Never retire unfinished source, reuse a version,
+remove protection by hand, fake expiry, or claim the application outcome complete.
+For a known successor, that actual session accepts the exact ready receipt.
+Preserve dirty or remote work through the governed recovery route before release.
+`--stop-author` is only an intermediate step during an actual transfer; do not
+end the session with its reservation idle.
+
+After the last ownership operation, run installed
+`ai-shared-db-closeout-check` using this session's actual UUID. Save its JSON
+receipt and require success: zero owned open claims and zero owned preview,
+merge or production stages. The checker rejects relinquished/expired/ready claims
+and fails closed on unreadable data; foreign sessions' reservations are not ours
+to remove. Missing tooling requires supported reviewed installation, not a
+self-written substitute. No successful wrap-up statement before this final check.
 
 While structural work is active, use owner-bound `--check-in-author` every ten
 minutes and before a protected write. Fresh author permission is at most thirty
@@ -237,6 +241,12 @@ successor can open in a browser from anywhere:
   (branch or PR) once it lands. Do not invent a `main` URL for unpushed work.
 
 ## Closing report (plain English, one message)
+
+**Release every claim and lock first.** Before the closing report, release
+every database claim and lock this session holds (shared-db object claims,
+author reservations, migration or preview locks, any app-level advisory lock)
+and prove zero remain with `ai-shared-db-closeout-check`. A claim still held at
+the closing report is a wrap-up failure, not a disclosure item.
 
 ```md
 ## Session closed

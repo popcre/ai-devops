@@ -1,8 +1,8 @@
 # Retirement plan — UNPROVABLE HANDOFF.d batch 2
 
-Tracking: popcre/ai-devops#1661 (comment will carry before/after counts).
-Owner: MiMo housekeeping leftover triage (batch 2). Retire this doc when #1661
-closes and the before/after counts are posted; do not keep it as a second ledger.
+Status: RETIRED tracking plan; historical provenance only. Issue [#1661](https://github.com/popcre/ai-devops/issues/1661) closed on October 13, 2026, at 3:05 PM EDT after its closing note recorded UNATTRIBUTED 8 → 0 and UNPROVABLE 18 → 0. No active work is tracked here. The original retargeting and successor evidence below is retained because restored handover records still cite it; later retirement must re-prove their obligations independently.
+
+Original tracking: popcre/ai-devops#1661. Original owner: MiMo housekeeping leftover triage (batch 2).
 Branch: `mimo/housekeeping-unprovable-batch2`. Owner ruling this session: open a
 real issue for each still-relevant workstream; retire the rest under the
 successor rule, **only with an AI reviewer APPROVE covering these exact files**.
@@ -61,7 +61,7 @@ Successor rule (must all be true; checked here for every file):
 - **(2)** The only open obligation was "make the plan discoverable / approve
   implementation". `plan_repo-housekeeping-visibility.md` STATUS steps 1–8 are
   all ✅ done with artifacts (`bin/ai-housekeeping`, tests, schedule, first
-  supervised run). Leftover triage lives in #1661 and `HANDOFF.d/2026-10-13T1126Z-edge-dev-mimo-housekeeping-leftover-triage.md` (retargeted to #1661).
+  supervised run). Leftover triage lives in #1661 and `HANDOFF.d/2026-10-13T1126Z-edge-dev-mimo-housekeeping-leftover-triage.md` (retired; recoverable from git history) (retargeted to #1661).
 - **(3)** Settled decisions (no `--apply`, no file-count cap, no `git branch
   --merged`, MERGED CANDIDATE rule) are locked in the plan §7/§8 and in
   `skills/shared/handoff-writer/SKILL.md`. Nothing unique remains.
@@ -121,8 +121,8 @@ Successor rule (must all be true; checked here for every file):
   `plan_shared-db-coordination-deletion.md` STATUS steps 0–9 and 11 are ✅ done
   (row 10 residual is a 14d check on the plan, not this file).
 - **(2)** Parent #1061 is closed. Remaining coordination residuals are already
-  in still-open handoffs `HANDOFF.d/2026-09-30T1226Z-edge-dev-mimo-coord-del-residuals.md`
-  and `HANDOFF.d/2026-09-30T1431Z-edge-dev-mimo-coord-del-residuals-closeout.md`
+  in still-open handoffs `HANDOFF.d/2026-09-30T1226Z-edge-dev-mimo-coord-del-residuals.md` (retired; recoverable from git history)
+  and `HANDOFF.d/2026-09-30T1431Z-edge-dev-mimo-coord-del-residuals-closeout.md` (retired; recoverable from git history)
   (both `issue: 1061`) and in the plan.
   Parked-issue tidy is done (plan row 11).
 - **(3)** LOCKED decision (C by deletion) is in the plan §8 and

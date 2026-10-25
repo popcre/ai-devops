@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# Render the ZCode and MiMo global instruction templates from the one Codex
+# body (#1881 phase 3.1).
+#
+#   ai-render-globals          # rewrite templates/system/AGENTS-global-{zcode,mimo}.md
+#   ai-render-globals --check  # exit 1 if a committed rendering differs (hand edit)
+#
+# Edit templates/system/AGENTS-global-codex.md, never the rendered files. The
+# per-engine differences live in templates/system/global-overrides/:
+# <engine>.sed (line substitutions) and optional <engine>.append (appended
+# verbatim). Carriage returns are stripped on read so a Windows CRLF checkout
+# renders and checks the same bytes as Linux.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sys="$root/templates/system"
+body="$sys/AGENTS-global-codex.md"
+overrides="$sys/global-overrides"
+mode="write"
+case "${1:-}" in
+  "") ;;
+  --check) mode="check" ;;
+  -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+  *) echo "ai-render-globals: unknown argument: $1" >&2; exit 2 ;;
+esac
+
+render() {
+  local engine="$1"
+  tr -d '\r' < "$body" | sed -f <(tr -d '\r' < "$overrides/$engine.sed")
+  if [[ -f "$overrides/$engine.append" ]]; then
+    tr -d '\r' < "$overrides/$engine.append"
+  fi
+}
+
+status=0
+for engine in zcode mimo; do
+  target="$sys/AGENTS-global-$engine.md"
+  if [[ "$mode" == "check" ]]; then
+    if ! diff -u <(tr -d '\r' < "$target") <(render "$engine") >/dev/null; then
+      echo "DRIFT: $(basename "$target") differs from the rendered Codex body; edit AGENTS-global-codex.md or global-overrides/$engine.*, then run bin/ai-render-globals" >&2
+      status=1
+    fi
+  else
+    render "$engine" > "$target.tmp.$$"
+    mv "$target.tmp.$$" "$target"
+    echo "rendered $(basename "$target")"
+  fi
+done
+[[ "$mode" == "check" && "$status" -eq 0 ]] && echo "CLEAN: ZCode and MiMo globals match the rendered Codex body"
+exit "$status"

@@ -34,11 +34,8 @@ check "a missing pull request number is refused, not waited on" \
 OUT="$(bash "$CMD" not-a-number 2>&1)"; RC=$?
 check "a non-numeric pull request number is refused" "test '$RC' -eq 3"
 
-# #1183 child 3: explicit deadline only. A waiter is never started without a
-# deadline the caller named — there is no default --timeout-minutes.
-OUT="$(bash "$CMD" 1 --repo popcre/ai-devops 2>&1)"; RC=$?
-check "a missing --timeout-minutes is refused (explicit deadline only)" \
-  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'explicit deadline only'"
+# --timeout-minutes defaults to 60 so a background wait needs no flag.
+check "--timeout-minutes defaults to 60" "grep -q '^TIMEOUT_MINUTES=60$' '$CMD'"
 OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 2>&1)"; RC=$?
 check "--timeout-minutes without a value is refused immediately" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'requires a value'"
@@ -189,6 +186,22 @@ rm -f "$TMP/clock" "$TMP/deadline-called"
 OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/deadline-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
 check "deadline after a proven pending read is not mislabeled as an API failure" \
   "test '$RC' -eq 2 && test \"$(cat "$TMP/deadline-called")\" -eq 1 && printf '%s' \"$OUT\" | grep -q 'still in progress after 1m' && ! printf '%s' \"$OUT\" | grep -q 'could not read PR'"
+
+# Plan #1881 step 2.2: --fit-tool-call caps a long deadline at 9 minutes so one
+# run fits a 10-minute tool call, and its timeout names the exact rerun. The
+# clock jumps 9m30s: past a 9-minute cap, well short of the 30 minutes asked.
+mkdir -p "$TMP/fitbin"
+sed 's/1060/1570/' "$TMP/bin/date" > "$TMP/fitbin/date"; chmod +x "$TMP/fitbin/date"
+rm -f "$TMP/clock" "$TMP/fit-called"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/fit-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/fitbin:$TMP/bin:$PATH" timeout 120 bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 30 --fit-tool-call --interval 60 2>&1)"; RC=$?
+check "--fit-tool-call caps a 30-minute deadline at 9 minutes" \
+  "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'still in progress after 9m'"
+check "--fit-tool-call timeout prints one STILL-WAITING line with the same command" \
+  "test \"\$(printf '%s\n' \"$OUT\" | grep -c '^STILL-WAITING ')\" -eq 1 && printf '%s' \"$OUT\" | grep -qx 'STILL-WAITING pr=1 state=OPEN rerun: ai-pr-wait 1 --repo popcre/ai-devops --timeout-minutes 30 --fit-tool-call --interval 60'"
+rm -f "$TMP/clock" "$TMP/fit-called"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/fit-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+check "without --fit-tool-call there is no STILL-WAITING line" \
+  "test '$RC' -eq 2 && ! printf '%s' \"$OUT\" | grep -q STILL-WAITING"
 
 check "it exits on an ejection instead of waiting" \
   "grep -q 'EJECTED from the merge queue' '$CMD'"

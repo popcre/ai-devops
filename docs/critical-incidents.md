@@ -584,3 +584,19 @@ MemorySwapMax=4G, and `systemd-oomd` is installed and enabled system-wide.
 run large-payload tests under `systemd-run --user --scope -p MemoryMax=2G`.
 Claude sessions cannot sudo (no_new_privs); a root step is launched through
 `systemd-run --user konsole -e <script>` so Albert types the password himself.
+
+## 2026-10-16 — toolkit input failures producing crash reports
+
+**Owner:** [tooling crash repair #1816](https://github.com/popcre/ai-devops/issues/1816).
+
+**Source repairs:** invalid repository input and unreadable Markdown now fail
+the link checker normally; malformed or missing native usage input fails with
+no counters or provider bytes; the private SSH password helper exits nonzero
+when its no-follow open is refused. Secret-file checks and failure exit codes
+remain enforced. Dependent current contract pins follow the corrected helper;
+historical contracts remain unchanged and refused.
+
+**Reviewer evidence:** the current pinned GLM fixture reconstructs all nine
+own-output pages and denies a foreign session. That is offline source proof,
+not #1791 installation or provider acceptance. The historical failed inner
+subprocess output was not retained; its original cause remains unproven.

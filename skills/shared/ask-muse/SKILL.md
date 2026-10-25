@@ -57,6 +57,22 @@ session ID or manual acknowledgment cannot substitute for it. Source movement
 produces a non-authorizing retained report, after which a fresh same-session `ask`
 can review the current source. Never bypass or silently replace an uncertain session.
 
+The only failed-turn recovery currently supported is the OpenCode permission-denial
+path; Muse Code failures remain fenced. First run
+`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse finalize-failed-turn <stable-name> --dry-run`.
+Proceed with the same command without `--dry-run` only when it reports a
+qualified non-authorizing failed turn. This requires exact retained packet and
+byte hashes, the original caller/repository/head, a verified unsignaled wrapper
+exit, and a complete native stream whose only errors are one to three consecutive
+exact denied reads immediately before its final tool-calls finish. No text or
+successful tool may follow the first denial; malformed steps and verdict-like
+text remain fenced. The neutral preliminary phrase "approval evidence" is not
+a verdict.
+It archives the original descriptor; it does not publish an accepted review or
+verdict and says nothing about billing. Then use the normal `ask` flow for a
+fresh same-session turn. If dry-run refuses, leave the session fenced; do not
+infer success from tool calls, text, a session ID, or a wrapper error alone.
+
 For a code review, tell Muse to read the manifest in its evidence packet first.
 The packet directory is named after the session (`.ai-review-muse-<caller>-<name>`),
 not a fixed `.ai-review`, so two reviewers working from one checkout cannot

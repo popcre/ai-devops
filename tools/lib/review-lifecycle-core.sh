@@ -61,6 +61,10 @@ rlc_capture() { # rlc_capture VAR FUNC [args...]
 # paths from here so a caller's argv or working directory cannot retarget the
 # review-critical binaries.
 RLC_CORE_FILE="${BASH_SOURCE[0]}"
+# shellcheck source=review-capabilities.sh
+. "$(dirname "$RLC_CORE_FILE")/review-capabilities.sh"
+# shellcheck source=review-session-skip.sh
+. "$(dirname "$RLC_CORE_FILE")/review-session-skip.sh"
 if command -v readlink >/dev/null 2>&1; then
   _rlc_real="$(readlink -f "$RLC_CORE_FILE" 2>/dev/null || true)"
   [ -z "$_rlc_real" ] || RLC_CORE_FILE="$_rlc_real"
@@ -96,6 +100,7 @@ rlc_init() {
   RLC_SHIPPED_DOORS_JSON="$RLC_ROOT/config/review-runner-doors.json"
   RLC_DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$RLC_SHIPPED_DOORS_JSON}"
   export RLC_STAMP RLC_RUNNER_NAME RLC_VERSION
+  review_export_caller_session_id  # validates an inherited id too
 }
 
 # ---------------------------------------------------------------------------
@@ -298,6 +303,27 @@ rlc_packet_store() { # rlc_packet_store PACKET_DIR -> prints durable path; nonze
   printf '%s\n' "$dest"
 }
 
+# Every core door (Muse, DeepSeek, StepFun, ...) consumes the core packet
+# itself rather than building a second provider packet, so the core is the only
+# publisher of the governed caller's original-source receipt. Only qualified
+# final completion may publish it; preparation and tests stay isolated (#1799).
+# It was Muse-only until #1783: DeepSeek and StepFun governed reviews then
+# completed but could never be recorded (receipt ENOENT).
+rlc_publish_source_receipt() { # PROVIDER PACKET IDENTITY SHA STORED_PACKET
+  local provider="$1" pkt="$2" identity="$3" expected="$4" stored="$5" current durable
+  [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
+  [ -n "$stored" ] && [ -d "$stored" ] || return 1
+  current="$(rlc_packet_sha "$pkt")" || return 1
+  # Retain re-seals its changed custody marker; line four preserves the
+  # ORIGINAL consumed seal. Do not confuse that chain with the retained seal.
+  durable="$(sed -n '4p' "$stored/.ai-review-packet")" || return 1
+  [ "$current" = "$expected" ] && [ "$durable" = "$expected" ] || return 1
+  ( unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$RLC_PACKET" verify-retained "$stored" ) >/dev/null || return 1
+  # Reuse full source/snapshot/patch validation and the immutable receipt writer.
+  # Never reconstruct the identity or rebuild evidence after the provider ran.
+  "$RLC_PACKET" verify "$pkt" --identity "$identity" >/dev/null
+}
+
 # Cleanup AFTER store. If the store did not succeed, skip deletion and warn —
 # the working copy is then the only evidence left.
 rlc_cleanup_after_store() { # rlc_cleanup_after_store STORED_OK REPO TAG PACKET_DIR
@@ -396,6 +422,93 @@ rlc_verdict_bound_to_head() { # FILE HEAD -> 0 when the body names HEAD
 # Door invocation. The door receives provider bits only; every governance
 # surface above stays here.
 # ---------------------------------------------------------------------------
+rlc_native_path() { # PATH -> the spelling a native (Windows) Python accepts
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
+}
+
+# ---------------------------------------------------------------------------
+# Fast-fail watch (plan_reviewer-observation-week step 1). One place for every
+# provider (#1834): doors are untouched. The door runs with a private TMPDIR,
+# so every log it writes there is visible here. The watch kills the door's
+# process tree when:
+#   silent-start  the door prints nothing and no file in its TMPDIR grows
+#                 for AI_REVIEW_FIRST_OUTPUT_SECONDS (default 300) after the
+#                 settle window (its own prompt files); disarmed for good by
+#                 any door output or the first growth after settle, so a
+#                 healthy review that is producing output is never killed
+#                 (the door's own timeout still governs those);
+#   fatal-pattern a known fatal line on the door's STDERR only (stdout may
+#                 carry a diff that merely contains "429").
+# Elapsed time is counted in sleep ticks, never read from a wall clock, so a
+# clock jump cannot fire or suppress the watch. AI_REVIEW_FIRST_OUTPUT_SECONDS=0
+# disables the watch entirely (rollback without a reinstall).
+# ---------------------------------------------------------------------------
+RLC_FAST_FAIL_PATTERN='spawn .*NotFound|E2BIG|: command not found$|(status|HTTP|code|error)[^0-9]{0,4}429([^0-9]|$)|insufficient_quota|allowance (exhausted|exceeded|reached)|project_token_login_failed|(error|Error|ERROR)[: ].*unknown option|not a repository top level|ENOENT.*governed-source'
+RLC_FAST_FAIL_REASON=""
+
+rlc_tree_bytes() { # DIR -> total bytes of regular files below DIR
+  find "$1" -type f -printf '%s\n' 2>/dev/null | awk '{t+=$1} END{print t+0}'
+}
+
+rlc_tree_pids() { # PID -> PID and every descendant, parents first
+  local pid="$1" child
+  printf '%s\n' "$pid"
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do rlc_tree_pids "$child"; done
+  else
+    for child in $(ps -ef 2>/dev/null | awk -v p="$pid" '$3==p{print $2}'); do rlc_tree_pids "$child"; done
+  fi
+}
+
+rlc_kill_tree() { # PID -> best-effort kill of PID and every descendant
+  local pid="$1" child winpid
+  if [ -r "/proc/$pid/winpid" ] && command -v taskkill >/dev/null 2>&1; then
+    winpid="$(cat "/proc/$pid/winpid" 2>/dev/null || true)"
+    [ -z "$winpid" ] || taskkill //F //T //PID "$winpid" >/dev/null 2>&1 || true
+  fi
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do rlc_kill_tree "$child"; done
+  else
+    for child in $(ps -ef 2>/dev/null | awk -v p="$pid" '$3==p{print $2}'); do rlc_kill_tree "$child"; done
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+rlc_fast_fail_watch() { # PID WATCH_DIR STDERR_FILE -> sets RLC_FAST_FAIL_REASON
+  local pid="$1" dir="$2" err="$3"
+  local first="${AI_REVIEW_FIRST_OUTPUT_SECONDS:-300}" poll="${AI_REVIEW_FAST_FAIL_POLL_SECONDS:-5}" settle="${AI_REVIEW_FAST_FAIL_SETTLE_SECONDS:-15}"
+  local ticks=0 armed=1 base="" size
+  RLC_FAST_FAIL_REASON=""
+  case "$first" in ''|*[!0-9]*) first=300 ;; esac
+  case "$poll" in ''|*[!0-9]*|0) poll=5 ;; esac
+  case "$settle" in ''|*[!0-9]*) settle=15 ;; esac
+  [ "$first" -ne 0 ] || return 0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    ticks=$((ticks + 1))
+    [ $((ticks % poll)) -eq 0 ] || continue
+    if [ -s "$err" ] && grep -aEq -- "$RLC_FAST_FAIL_PATTERN" "$err" 2>/dev/null; then
+      RLC_FAST_FAIL_REASON=fatal-pattern; break
+    fi
+    [ "$armed" = 1 ] || continue
+    # Anything the door itself printed is output, however early it came.
+    if [ -s "$dir/door.out" ] || [ -s "$err" ]; then armed=0; continue; fi
+    size="$(rlc_tree_bytes "$dir")"
+    if [ "$ticks" -le "$settle" ] || [ -z "$base" ]; then base="$size"; continue; fi
+    if [ "$size" != "$base" ]; then armed=0; continue; fi
+    if [ "$ticks" -ge $((settle + first)) ]; then RLC_FAST_FAIL_REASON=silent-start; break; fi
+  done
+  if [ -n "$RLC_FAST_FAIL_REASON" ]; then
+    rlc_note "fast-fail: ${RLC_FAST_FAIL_REASON} after ${ticks}s; stopping the reviewer process."
+    local tree; tree="$(rlc_tree_pids "$pid")"
+    rlc_kill_tree "$pid"
+    sleep 1
+    # Descendants that ignored TERM are killed too, never left running.
+    for p in $tree; do kill -KILL "$p" 2>/dev/null || true; done
+  fi
+  return 0
+}
+
 rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPORT_OUT HEAD [MAX_TURNS] [ALLOW_WRITE] [REVIEW_MODE] [OPERATION]
   local mode="$1" door="$2" workdir="$3" packet_dir="$4" prompt_file="$5" report_out="$6" head="$7"
   local max_turns="${8:-}" allow_write="${9:-0}" review_mode="${10:-}" operation="${11:-}" rc=0
@@ -403,8 +516,21 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
   [ -f "$door" ] || rlc_die "door not found: $door"
   [ -f "$prompt_file" ] || rlc_die "prompt file not found: $prompt_file"
   : > "$report_out" || rlc_die "cannot write report destination: $report_out"
+  local ff_dir ff_out ff_err door_pid
+  ff_dir="$(mktemp -d "${TMPDIR:-/tmp}/rlcd.XXXXXX")" || rlc_die 'cannot create the door watch directory.'
+  mkdir -p "$ff_dir/t"
+  ff_out="$ff_dir/door.out"; ff_err="$ff_dir/door.err"
+  : > "$ff_out"; : > "$ff_err"
+  # A reviewer that runs Python inside the immutable snapshot must not leave
+  # __pycache__ there (edge-dev3 Muse, 2026-10-21): suppress bytecode and
+  # redirect any forced write to a per-call cache outside the snapshot (and
+  # outside the watched TMPDIR). The snapshot digest check stays as strict.
+  mkdir -p "$ff_dir/pyc"
   set +e
-  env AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
+  env PYTHONDONTWRITEBYTECODE=1 \
+      PYTHONPYCACHEPREFIX="$(rlc_native_path "$ff_dir/pyc")" \
+      AI_REVIEW_RUNNER_CORE="$RLC_STAMP" \
+      TMPDIR="$ff_dir/t" \
       AI_REVIEW_VIA_RUNNER=1 \
       DOOR_MODE="$mode" \
       DOOR_WORKDIR="$workdir" \
@@ -417,8 +543,23 @@ rlc_call_door() { # rlc_call_door MODE DOOR WORKDIR PACKET_DIR PROMPT_FILE REPOR
       DOOR_ALLOW_WRITE="$allow_write" \
       DOOR_REVIEW_MODE="$review_mode" \
       DOOR_OPERATION="$operation" \
-      bash "$door" "$mode"
+      bash "$door" "$mode" <&0 >"$ff_out" 2>"$ff_err" &
+  door_pid=$!
+  rlc_fast_fail_watch "$door_pid" "$ff_dir" "$ff_err"
+  wait "$door_pid" 2>/dev/null
   rc=$?
+  cat "$ff_out" 2>/dev/null
+  cat "$ff_err" >&2 2>/dev/null
+  rm -rf "$ff_dir" 2>/dev/null
+  if [ -n "$RLC_FAST_FAIL_REASON" ]; then
+    # A verdict the door already wrote before it hung is still the review.
+    if [ -s "$report_out" ] && rlc_parse_verdict "$report_out" >/dev/null 2>&1; then
+      rlc_note "fast-fail: the reviewer had already written a verdict; keeping it."
+      RLC_FAST_FAIL_REASON=""; rc=0
+    else
+      rc=124
+    fi
+  fi
   # Do not re-enable set -e before a possible non-zero return: `return N`
   # under set -e aborts the runner instead of reporting the door status.
   [ "$rc" -eq 0 ] || return "$rc"
@@ -462,6 +603,8 @@ The reviewed head commit is ${head}.
 The source digest is ${digest}.
 BRIEF
   [ -z "$changed_files" ] || printf 'Changed files (the change under review is exactly these):\n%s\n' "$changed_files"
+  # #1834: shared review code must keep one code path for every reviewer.
+  review_shared_code_rule "$changed_files"
   [ -z "$tests_result" ] || printf 'tests command on record: %s\n' "$tests_result"
   } > "$dest"
 }
@@ -602,7 +745,7 @@ $operation_request"
     # custody (diagnostics, report, runner token) to write into (#1562).
     local tests_name; local -a tests_scrub=()
     for tests_name in $(compgen -e); do
-      case "$tests_name" in DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
+      case "$tests_name" in AI_REVIEW_SOURCE_RECEIPT_FILE|DOOR_*|RLC_*|AI_REVIEW_RUNNER_CORE|AI_REVIEW_VIA_RUNNER|AI_REVIEW_RUNNER_NAME)
         tests_scrub+=(-u "$tests_name");; esac
     done
     if ( cd "$review_dir" && env "${tests_scrub[@]}" bash -c "$tests_cmd" ) >"$tests_out" 2>&1; then
@@ -614,8 +757,11 @@ $(tail -n "$tests_tail" "$tests_out")
 \`\`\`"
       tests_sha="$(sha256sum "$tests_out" | cut -d' ' -f1)"
       rm -f "$tests_out"
-      "$RLC_LIFECYCLE" record-tests --state "$state" --command "$tests_cmd" --exit 0 --output-sha256 "$tests_sha" >/dev/null \
-        || rlc_die 'could not record the tests evidence in the review record.'
+      if ! "$RLC_LIFECYCLE" record-tests --state "$state" --command "$tests_cmd" --exit 0 --output-sha256 "$tests_sha" >/dev/null; then
+        rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-evidence-recording-failed
+        rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+        rlc_die 'could not record the tests evidence in the review record; no review was dispatched.'
+      fi
     else
       rm -f "$tests_out"
       rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" tests-command-failed
@@ -630,6 +776,7 @@ $(tail -n "$tests_tail" "$tests_out")
   if [ -n "$prompt_file" ] && [ -f "$prompt_file" ]; then
     cat "$prompt_file" >> "$brief"
   fi
+  review_closing_contract "$prompt_file" >> "$brief"
 
   local door
   rlc_capture door rlc_door_path "$provider"
@@ -640,6 +787,7 @@ $(tail -n "$tests_tail" "$tests_out")
   rlc_call_door review "$door" "$review_dir" "$packet_dir" "$brief" "$body_file" "$head" "$max_turns" 0 "$mode" "$operation" || door_rc=$?
   if [ "$door_rc" -ne 0 ]; then
     local door_failure=provider-failed diagnostic_reason=""
+    [ -z "$RLC_FAST_FAIL_REASON" ] || door_failure="fast-fail-$RLC_FAST_FAIL_REASON"
     # Door diagnostics are private and already durably published outside the
     # sealed packet. Keep the lifecycle reference after session temp cleanup.
     if [ -f "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ] && [ ! -L "$RLC_DOOR_DIAGNOSTICS_DIR/report.md" ]; then
@@ -655,6 +803,7 @@ $(tail -n "$tests_tail" "$tests_out")
         model-mismatch) door_failure=model-mismatch ;;
         no-assistant-text|empty-response-text|report-extraction-failed) door_failure=empty-report ;;
       esac
+      [ -z "$RLC_FAST_FAIL_REASON" ] || door_failure="fast-fail-$RLC_FAST_FAIL_REASON"
     fi
     # Out of credit keeps exit 92 (rotation rule 10), as ai-review-pool does
     # for wrappers; the door has already printed both contract lines.
@@ -703,6 +852,15 @@ $(tail -n "$tests_tail" "$tests_out")
     rm -f "$brief" "$body_file" "$identity_file"
     rlc_die "provider analysis body is below the minimum analysis floor (${MIN_REPORT_CHARS} substantive chars)."
   fi
+  # An approval that omits the requested production-risk block can never be
+  # recorded downstream (#1783); refuse it here, with the report retained.
+  if [ "$verdict" = APPROVE ] && [ -n "$prompt_file" ] && review_requests_risk_block "$prompt_file" \
+    && [ "$(review_risk_block_count "$body_file")" != 1 ]; then
+    rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" risk-block-missing "$body_file" "$packet_dir" "$packet_sha"
+    rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+    rm -f "$brief" "$body_file" "$identity_file"
+    rlc_die 'approval lacks exactly one requested production-risk-assessment block; refusing unrecordable approval.'
+  fi
 
   elapsed="$(( $(date +%s)-started ))"
   report="$repo/.ai/reviews/${provider}-${mode}-${run_id}.md"
@@ -736,6 +894,13 @@ $operation_evidence"
     rlc_note "durable packet store: $stored"
   else
     rlc_note 'durable packet store failed; retaining working packet and sandbox.'
+  fi
+
+  if ! rlc_publish_source_receipt "$provider" "$packet_dir" "$identity_file" "$packet_sha" "$stored"; then
+    rlc_lifecycle_fail "$state" "$elapsed" source-receipt-publication-failed "$report" "${stored:-$packet_dir}" "$packet_sha"
+    rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
+    rm -f "$brief" "$body_file" "$identity_file"
+    rlc_die 'final source receipt could not be published; completed provider report and packet retained.'
   fi
 
   rlc_note "step lifecycle-finish"

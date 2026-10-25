@@ -8,8 +8,8 @@
 # when it failed. Wording alone has not held.
 #
 # This is the mechanical half. When a turn ends on a completion claim, it stops
-# once and makes the session account for the deliverables the request named. It
-# does not veto: the session answers the question and ends the turn normally.
+# once and makes the session account for the deliverables the request named. A
+# future-tense promise with no execution action in the turn exits 2 (hard block).
 #
 # Deliberately cheap and fail-open:
 #   * every turn end runs it, so the no-match path does nothing and exits 0
@@ -212,5 +212,14 @@ jq -nc --arg r "$reason" '{
     permissionDecisionReason: $r
   }
 }' 2>/dev/null || exit 0
+
+# A promise with no action behind it is a hard block, not a nudge (2026-10-21:
+# 206 catches in 94 sessions showed the JSON nudge was being talked past). Exit
+# 2 makes Claude Code stop the turn and feed the reason back on stderr. The
+# re-entry guard above still limits it to once per prompt, so it cannot loop.
+if [[ "$match_kind" == "future" ]]; then
+  printf '%s\n' "$reason" >&2
+  exit 2
+fi
 
 exit 0

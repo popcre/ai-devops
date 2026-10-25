@@ -27,6 +27,22 @@ for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
   break
 done
 [ -n "$GATE_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the task-gate library\n' >&2; exit 1; }
+# Per-session skip list (plan_reviewer-observation-week step 2): every
+# terminal reviewer failure removes that reviewer for the calling session.
+SKIP_LIB="$(dirname "$GATE_LIB")/review-session-skip.sh"
+[ -f "$SKIP_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the session skip library\n' >&2; exit 1; }
+# shellcheck source=../tools/lib/review-session-skip.sh
+. "$SKIP_LIB"
+review_export_caller_session_id  # validates an inherited id too
+session_skip_record(){ # STATE FAILURE -> best effort; never changes the terminal result
+  local state="$1" failure="$2" provider sid
+  skip_failure_counts "$failure" || return 0
+  provider="$(jq -r '.provider // empty' "$state" 2>/dev/null || true)"
+  sid="$(jq -r '.caller_session_id // empty' "$state" 2>/dev/null || true)"
+  [ -n "$sid" ] || sid="$AI_CALLER_SESSION_ID"
+  [ -n "$provider" ] || return 0
+  skip_add "$sid" "$provider" "$failure" 2>/dev/null || true
+}
 # shellcheck source=../tools/lib/task-gates.sh
 . "$GATE_LIB"
 
@@ -300,9 +316,13 @@ begin(){
   identity="$(identity_json "$repo")"; repo="$(jq -r .repository_root <<<"$identity")"
   preflight_repo="$repo"
   if [ -n "$export_root" ]; then
-    [ "$provider" = deepseek ] || die "code-only lifecycle requires DeepSeek."
+    # attachment_only_code_review (#1834): the registry names the provider that
+    # owns the private attachment-only route; never a provider-name branch.
+    # shellcheck source=../tools/lib/review-capabilities.sh
+    . "$REAL_DIR/../tools/lib/review-capabilities.sh" || die "cannot load the review capability reader."
+    review_capability "$REAL_DIR/../config/review-runner-doors.json" "$provider" attachment_only_code_review || die "code-only lifecycle requires DeepSeek."
     case "${AI_REVIEW_GATE_MODE:-}" in diff-review|security-review|final-check) ;; *) die "code-only lifecycle requires a supported explicit review mode.";; esac
-    [ -n "${AI_REVIEW_IMPLEMENTER:-}" ] && [ "${AI_REVIEW_IMPLEMENTER,,}" != deepseek ] || die "code-only lifecycle requires an independent named implementer."
+    [ -n "${AI_REVIEW_IMPLEMENTER:-}" ] && [ "${AI_REVIEW_IMPLEMENTER,,}" != "$provider" ] || die "code-only lifecycle requires an independent named implementer."
     export_root="$(canon "$export_root")"
     export_record="$(python3 "$REAL_DIR/ai-review-code-only.py" verify "$export_root" --assert-head "$(jq -r .head <<<"$identity")")" || die "code-only export binding refused."
     [ "$(jq -r .source_digest <<<"$export_record")" = "$(jq -r .source_digest <<<"$identity")" ] || die "code-only source digest differs."
@@ -340,6 +360,7 @@ begin(){
   row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" --arg rmode "$review_mode" --arg impl "$implementer" \
     '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,review_mode:(if $rmode=="" then null else $rmode end),implementer_engine:(if $impl=="" then null else $impl end),base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
   row="$(jq --arg owner "$owner" --arg start "$owner_start" '.owner_pid=(if $owner=="" then null else ($owner|tonumber) end)|.owner_start=(if $start=="" then null else $start end)' <<<"$row")"
+  row="$(jq --arg csid "$AI_CALLER_SESSION_ID" --arg detach "${AI_REVIEW_DETACH_ID:-}" '.caller_session_id=$csid|.detach_id=(if $detach=="" then null else $detach end)' <<<"$row")"
   row="$(jq --arg export "$export_root" --argjson binding "$export_record" 'if $export!="" then .code_only_export=$export|.code_only=$binding|.evidence_scope="selected-code" else . end' <<<"$row")"
   atomic_json "$state" "$row"
   if [ -n "$action_profile$action_manifest" ]; then
@@ -366,6 +387,7 @@ begin(){
       valid_safe_atom "$held_class" || held_class=""
       row="$(jq --arg now "$(date -u +%FT%TZ)" --arg output "$(tail -20 "$preflight_out")" --argjson rc "$preflight_rc" --arg class "$held_class" '.status="preflight_failed"|.preflight={exit_code:$rc,summary:$output,failure_class:(if $class=="" then null else $class end)}|.failure_class=(if $class=="" then null else $class end)|.updated_at=$now|.finished_at=$now' "$state")"
       rm -f "$preflight_out"; atomic_json "$state" "$row"; release_lock "$state"; BEGIN_LOCK=""; BEGIN_TOKEN=""; trap - EXIT INT TERM
+      session_skip_record "$state" "preflight-${held_class:-failed}"
       die "provider preflight failed${held_class:+ ($held_class)}; terminal state recorded at $state"
     fi
     rm -f "$preflight_out"
@@ -423,7 +445,7 @@ terminal(){ # finish|fail args
   if [ -n "$packet_sha256" ]; then
     printf '%s' "$packet_sha256" | grep -Eq '^[0-9a-f]{64}$' || die "--packet-sha256 must be 64 hex characters."
   fi
-  if [ "$operation" = finish ]; then case "$verdict" in APPROVE|REJECT|BLOCKED) ;; *) die "finish requires APPROVE, REJECT, or BLOCKED.";; esac
+  if [ "$operation" = finish ]; then case "$verdict" in APPROVE|REVISE|REJECT|BLOCKED) ;; *) die "finish requires APPROVE, REVISE, REJECT, or BLOCKED.";; esac
   else verdict=BLOCKED; [ -n "$failure" ] || failure=provider-failed; fi
   if [ "$operation" = finish ] && jq -e '.code_only_export!=null' "$state" >/dev/null; then
     proof="$(python3 "$REAL_DIR/ai-review-code-only.py" lifecycle-proof "$state" "$provider_session" "$report")" || die "native code-only completion proof refused."
@@ -432,7 +454,7 @@ terminal(){ # finish|fail args
     row="$(jq --arg session "$provider_session" --argjson proof "$proof" '.session_id=$session|.code_only_completion=$proof' "$state")"; atomic_json "$state" "$row"
   fi
   if [ -n "$report" ]; then [ -f "$report" ] && [ ! -L "$report" ] || die "report is not a regular file: $report"; report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; report_sha="$(sha256sum "$report"|cut -d' ' -f1)"; fi
-  if [ "$operation" = finish ] && { [ "$verdict" = APPROVE ] || [ "$verdict" = REJECT ]; }; then
+  if [ "$operation" = finish ] && { [ "$verdict" = APPROVE ] || [ "$verdict" = REVISE ] || [ "$verdict" = REJECT ]; }; then
     if [ -z "$report" ]; then verdict=BLOCKED; failure=empty-report
     elif [ "$(report_substance "$report")" -lt "$MIN_REPORT_CHARS" ]; then verdict=BLOCKED; failure=empty-report; fi
   fi
@@ -447,6 +469,7 @@ terminal(){ # finish|fail args
     row="$(jq --arg now "$(date -u +%FT%TZ)" '.status="accounting_failed"|.updated_at=$now' "$state")"; atomic_json "$state" "$row"
     die "terminal result was preserved but scoreboard accounting failed; lock retained: $state"
   fi
+  [ "$verdict" != BLOCKED ] || session_skip_record "$state" "${failure:-blocked}"
   release_lock "$state"; jq . "$state"
 }
 
@@ -456,7 +479,7 @@ join(){
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class,packet_dir,packet_sha256}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle record-tests --state FILE --command CMD --exit 0 --output-sha256 HEX' 'ai-review-lifecycle join <state-file>' 'ai-review-lifecycle sweep [--older-than SECONDS] [--dry-run]'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REVISE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle record-tests --state FILE --command CMD --exit 0 --output-sha256 HEX' 'ai-review-lifecycle join <state-file>' 'ai-review-lifecycle sweep [--older-than SECONDS] [--dry-run]'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;

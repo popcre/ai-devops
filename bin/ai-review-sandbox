@@ -658,18 +658,17 @@ plan_snapshot() { # plan_snapshot ROOT HEAD -> sets SNAP_* arrays and SNAP_DEPTH
       warn "ignoring AI_REVIEW_SANDBOX_BASE='$BASE_HINT': it does not resolve in $root"
     else
       fork="$(git -C "$root" merge-base "$head" "$tip" 2>/dev/null || true)"
-      if [[ "$BASE_HINT" =~ ^[0-9a-f]{40}$ ]] || [[ "$BASE_HINT" == HEAD* ]]; then
-        # A raw SHA or HEAD~N spelling has no ref to recreate; fetching the
-        # object is enough for the packet's rev-parse of the same spelling.
-        SNAP_REFNAMES+=(""); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
-      else
-        case "$BASE_HINT" in
-          refs/*) m="$BASE_HINT" ;;
-          */*)    m="refs/remotes/$BASE_HINT" ;;
-          *)      m="refs/heads/$BASE_HINT" ;;
-        esac
-        SNAP_REFNAMES+=("$m"); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
+      # Recreate only a hint that names a real ref. A SHA (full or short) or a
+      # revision expression such as HEAD~N or abc123~1 has no ref to recreate,
+      # and turning it into refs/heads/abc123~1 makes the fetch refuse an
+      # invalid ref name; fetching the object is enough for the packet's
+      # rev-parse of the same spelling.
+      m=""
+      if ! [[ "$BASE_HINT" =~ ^[0-9a-f]{40}$ ]] && [[ "$BASE_HINT" != HEAD* ]]; then
+        m="$(git -C "$root" rev-parse --symbolic-full-name "$BASE_HINT" 2>/dev/null || true)"
+        case "$m" in refs/*) git check-ref-format "$m" || m="" ;; *) m="" ;; esac
       fi
+      SNAP_REFNAMES+=("$m"); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
     fi
   fi
   for want in origin/main origin/master main master; do

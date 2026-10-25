@@ -1,4 +1,0 @@
-interface:
-  display_name: "Shared DB Orchestrator"
-  short_description: "Keep three safe database work queues moving"
-  default_prompt: "Use $shared-db-orchestrator to keep eligible shared-db structure work moving through three collision-safe author queues and serialized preview and merge."

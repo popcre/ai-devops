@@ -2,7 +2,7 @@
 
 Tracking issue: [popcre/ai-devops#249](https://github.com/popcre/ai-devops/issues/249)
 
-Planning handoff: [`HANDOFF.d/2026-09-03T2143Z-edge-dev-codex-grok-integration-review.md`](HANDOFF.d/2026-09-03T2143Z-edge-dev-codex-grok-integration-review.md)
+Planning handoff: `HANDOFF.d/2026-09-03T2143Z-edge-dev-codex-grok-integration-review.md` (retired; recoverable from git history)
 
 > Planning record only. No reviewer behavior, machine configuration, installation,
 > sandbox, proxy, or live/network canary was changed or run while writing this plan.

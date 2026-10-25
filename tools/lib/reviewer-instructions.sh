@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# reviewer-instructions.sh — minimal instruction profile for OpenCode reviewers
+# (popcre/ai-devops#1881). OpenCode loads the owner's ~/.claude/CLAUDE.md and
+# the ~/.claude and ~/.agents skill lists through HOME, even when its config
+# home is private. Reviewers export REVIEWER_OPENCODE_ENV to turn those sources
+# off and stage templates/system/REVIEWER-global.md as the per-run config
+# home's global AGENTS.md, the same rules bin/ai-codex-review uses. The user's
+# and the managed configuration are never edited.
+# No dirname fork: Muse doctor budgets its process launches (#773).
+REVIEWER_INSTRUCTIONS_ROOT="$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd)"
+REVIEWER_OPENCODE_ENV=(OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1)
+
+# reviewer_opencode_rules DIR: copy the reviewer rules to DIR/AGENTS.md, where
+# DIR is the per-run "$XDG_CONFIG_HOME/opencode". Refuses without the rules.
+reviewer_opencode_rules() {
+  local rules="$REVIEWER_INSTRUCTIONS_ROOT/templates/system/REVIEWER-global.md"
+  [ -f "$rules" ] || { printf 'reviewer instructions are missing: %s\n' "$rules" >&2; return 1; }
+  mkdir -p "$1" && cp "$rules" "$1/AGENTS.md"
+}

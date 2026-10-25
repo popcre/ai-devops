@@ -77,6 +77,25 @@ check "core_owns_store_before_delete" "grep -q 'rlc_packet_store' '$CORE' && gre
 check "core_unifies_tag_and_dir_budgets" "grep -q 'RLC_TAG_MAX=48' '$CORE' && grep -q 'RLC_DIR_MAX=64' '$CORE'"
 check "core_owns_both_contracts" "grep -q 'rlc_run_review' '$CORE' && grep -q 'rlc_run_implement' '$CORE'"
 
+# --- durable report publish (plan step 4) -----------------------------------
+# rlc_write_report must leave a complete report at OUT after the writing
+# process exits: regular file, verdict + head bound, temp cleaned up. This is
+# the Windows-path-safe publish helper every completed review uses.
+. "$CORE"
+DURABLE_HEAD=0123456789abcdef0123456789abcdef01234567
+DURABLE_BODY="$TMP/durable-body.md"
+printf 'Substantive analysis of the reviewed change.\n## Verdict\nAPPROVE\nReviewed commit `%s`\n' "$DURABLE_HEAD" > "$DURABLE_BODY"
+DURABLE_OUT="$TMP/durable-out/report.md"
+mkdir -p "$(dirname "$DURABLE_OUT")"
+rlc_write_report "$DURABLE_OUT" mock diff-review "$TMP/srcrepo" "$DURABLE_HEAD" deadbeefcafe run-durable caller-x 1 "$DURABLE_BODY" "" >/dev/null
+check "durable_report_publish_survives_process_exit" \
+  "[ -f '$DURABLE_OUT' ] && [ ! -L '$DURABLE_OUT' ] && [ -s '$DURABLE_OUT' ] \
+   && grep -q '## Verdict' '$DURABLE_OUT' && grep -q 'APPROVE' '$DURABLE_OUT' \
+   && grep -q '$DURABLE_HEAD' '$DURABLE_OUT' \
+   && [ -z \"\$(find '$TMP/durable-out' -name '.rlc-report.*' 2>/dev/null)\" ]"
+check "durable_report_is_readable_after_writer_exit" \
+  "grep -q 'review-lifecycle-core/1' '$DURABLE_OUT' && grep -q 'reviewed commit' '$DURABLE_OUT'"
+
 # --- tag budget -------------------------------------------------------------
 # shellcheck disable=SC1090
 . "$CORE"
@@ -308,6 +327,16 @@ EOF
           else
             skip 'Pinned StepCode offline catalog proof requires the installed StepCode binary'
           fi
+          # The fixture exits immediately after its final RPC response. Delay
+          # the parent's next read so Bash has reaped the named coprocess: its
+          # original descriptors are gone, but the door must retain the reply.
+          jq() {
+            local jq_rc
+            command jq "$@"; jq_rc=$?
+            [[ "$*" != *get_last_assistant_text* ]] || sleep 0.1
+            return "$jq_rc"
+          }
+          export -f jq
           if AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_STEP_BIN="$TMP/stepfun-door/bin/step" \
             AI_STEPFUN_MODEL=step/step-3.7-flash AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 \
             DOOR_WORKDIR="$TMP/stepfun-door/work" DOOR_PACKET_DIR="$TMP/stepfun-door/packet" \
@@ -317,8 +346,10 @@ EOF
             check 'StepFun door catalog follows an explicit Step model override' \
               "jq -e '.providers.step.models | map(.id) == [\"step-3.7-flash\"]' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
           else
+            cat "$TMP/stepfun-door/override-door.out"
             bad 'StepFun door catalog follows an explicit Step model override'
           fi
+          unset -f jq
         else
           bad 'StepFun door uses supported writable approval and runs step --version'
         fi
@@ -561,14 +592,99 @@ exit 0
 EOF
 chmod +x "$SCOREBOARD_STUB"
 
+# GLM remains on the legacy pool route until it has a registered engine door.
+# Exercise that route offline: lifecycle record-tests must persist the exact
+# test command/output digest before the fake GLM runner can start, and the
+# child test command must not receive the caller's source-receipt path.
+POOL_LIFECYCLE_WRAPPER="$TMP/pool-lifecycle-wrapper"
+cat > "$POOL_LIFECYCLE_WRAPPER" <<'EOF'
+#!/usr/bin/env bash
+set -e
+command_name="${1:-}"
+state=""
+shift || true
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [ "${args[$i]}" = --state ] && [ $((i+1)) -lt ${#args[@]} ]; then state="${args[$((i+1))]}"; fi
+done
+if [ "$command_name" = record-tests ] && [ "${AI_POOL_FAIL_RECORD:-0}" = 1 ]; then
+  printf '%s\n' "$state" > "$AI_POOL_TEST_STATE_FILE"
+  exit 1
+fi
+"$AI_POOL_REAL_LIFECYCLE" "$command_name" "${args[@]}"
+if [ "$command_name" = record-tests ]; then
+  printf '%s\n' "$state" > "$AI_POOL_TEST_STATE_FILE"
+  printf 'record-tests\n' >> "$AI_POOL_ORDER_FILE"
+fi
+EOF
+chmod +x "$POOL_LIFECYCLE_WRAPPER"
+POOL_GLM_STUB="$TMP/pool-glm-stub"
+cat > "$POOL_GLM_STUB" <<'EOF'
+#!/usr/bin/env bash
+printf 'runner\n' >> "$AI_POOL_ORDER_FILE"
+state="$(cat "$AI_POOL_TEST_STATE_FILE")"
+jq -e --arg cmd "$AI_POOL_TEST_COMMAND" '.tests.exit==0 and .tests.command==$cmd and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$state" >/dev/null || exit 88
+exit 99
+EOF
+chmod +x "$POOL_GLM_STUB"
+POOL_TEST_COMMAND="printf '%s' \"\${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}\" > '$TMP/pool-tests-receipt'; printf 'pool-test-evidence\\n'"
+POOL_ORDER_FILE="$TMP/pool-order"
+POOL_TEST_STATE_FILE="$TMP/pool-test-state"
+rm -f "$POOL_ORDER_FILE" "$POOL_TEST_STATE_FILE" "$TMP/pool-tests-receipt"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_GLM="$POOL_GLM_STUB" \
+    AI_POOL_CALLER=codex AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" \
+    AI_POOL_ORDER_FILE="$POOL_ORDER_FILE" AI_POOL_TEST_STATE_FILE="$POOL_TEST_STATE_FILE" \
+    AI_POOL_TEST_COMMAND="$POOL_TEST_COMMAND" AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" \
+    AI_REVIEW_LIFECYCLE_DIR="$TMP/pool-glm-lifecycle" AI_REVIEW_SANDBOX_DIR="$TMP/pool-glm-sandboxes" \
+    AI_REVIEW_SCOREBOARD_DIR="$TMP/pool-glm-scoreboard" AI_REVIEW_SCOREBOARD_FILE="$TMP/pool-glm-scoreboard/reviews.jsonl" \
+    AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json" \
+    AI_REVIEW_EVENT_DIR="$TMP/pool-glm-events" AI_REVIEW_PRIVACY_BASE="$TMP/pool-glm-privacy" \
+    AI_DEVOPS_MODELS_ENV="$TMP/no-models-env" \
+    bash "$POOL" glm diff-review --tests "$POOL_TEST_COMMAND" ) >"$TMP/pool-glm-tests.out" 2>"$TMP/pool-glm-tests.err"
+POOL_GLM_TESTS_RC=$?
+set -e
+check "legacy_glm_records_passing_tests_before_dispatch" \
+  "test '$POOL_GLM_TESTS_RC' -ne 0 && [ \"\$(cat '$POOL_ORDER_FILE')\" = \"\$(printf 'record-tests\\nrunner')\" ] && jq -e '.tests.exit==0 and (.tests.output_sha256|test(\"^[0-9a-f]{64}$\"))' \"\$(cat '$POOL_TEST_STATE_FILE')\" >/dev/null"
+check "legacy_glm_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$TMP/pool-tests-receipt')\" = unset ]"
+check "legacy_glm_test_failure_does_not_claim_provider_success" "grep -q 'glm runner exited nonzero (99)' '$TMP/pool-glm-tests.err'"
+POOL_FAIL_ORDER_FILE="$TMP/pool-fail-order"
+POOL_FAIL_STATE_FILE="$TMP/pool-fail-test-state"
+POOL_FAIL_RUNNER_FILE="$TMP/pool-fail-runner"
+rm -f "$POOL_FAIL_ORDER_FILE" "$POOL_FAIL_STATE_FILE" "$POOL_FAIL_RUNNER_FILE"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_GLM="$POOL_GLM_STUB" \
+    AI_POOL_CALLER=codex AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" \
+    AI_POOL_ORDER_FILE="$POOL_FAIL_ORDER_FILE" AI_POOL_TEST_STATE_FILE="$POOL_FAIL_STATE_FILE" \
+    AI_POOL_TEST_COMMAND="$POOL_TEST_COMMAND" AI_POOL_FAIL_RECORD=1 AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" \
+    AI_REVIEW_LIFECYCLE_DIR="$TMP/pool-glm-failed-record-lifecycle" AI_REVIEW_SANDBOX_DIR="$TMP/pool-glm-failed-record-sandboxes" \
+    AI_REVIEW_SCOREBOARD_DIR="$TMP/pool-glm-failed-record-scoreboard" AI_REVIEW_SCOREBOARD_FILE="$TMP/pool-glm-failed-record-scoreboard/reviews.jsonl" \
+    AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/private-source-receipt.json" \
+    AI_REVIEW_EVENT_DIR="$TMP/pool-glm-failed-record-events" AI_REVIEW_PRIVACY_BASE="$TMP/pool-glm-failed-record-privacy" \
+    AI_DEVOPS_MODELS_ENV="$TMP/no-models-env" \
+    bash "$POOL" glm diff-review --tests "$POOL_TEST_COMMAND" ) >"$TMP/pool-glm-record-fail.out" 2>"$TMP/pool-glm-record-fail.err"
+POOL_GLM_RECORD_FAIL_RC=$?
+set -e
+check "legacy_glm_record_failure_is_terminal_without_dispatch" \
+  "test '$POOL_GLM_RECORD_FAIL_RC' -ne 0 && grep -q 'no review was dispatched' '$TMP/pool-glm-record-fail.err' && test ! -s '$POOL_FAIL_ORDER_FILE' && jq -e '.status==\"failed\" and .failure_class==\"tests-evidence-recording-failed\"' \"\$(cat '$POOL_FAIL_STATE_FILE')\" >/dev/null"
+
 export AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB"
 export AI_REVIEW_SCOREBOARD_BIN="$SCOREBOARD_STUB"
 export AI_REVIEW_DOOR_GROK="$MOCK_DOOR"
 export AI_REVIEW_RUNNER_DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json"
+CORE_TEST_MARKER="$TMP/core-tests-receipt"
+CORE_TEST_COMMAND="printf '%s' \"\${AI_REVIEW_SOURCE_RECEIPT_FILE-unset}\" > '$CORE_TEST_MARKER'; printf 'native-core-test-output\\n'"
+# A governed receipt must live in the source's ignored .ai/reviews; the core
+# publishes it after a qualified final for every core door (#1783).
+mkdir -p "$MREPO/.ai/reviews"
+CORE_RECEIPT="$(cd "$MREPO" && pwd -P)/.ai/reviews/private-source-receipt.json"
+export AI_REVIEW_SOURCE_RECEIPT_FILE="$CORE_RECEIPT"
 
 set +e
 ( cd "$MREPO" && timeout 90 "$ENGINE" review --provider grok --name engine-e2e --repo "$MREPO" \
-    --mode diff-review --caller codex ) >"$TMP/e2e.out" 2>"$TMP/e2e.err"
+    --mode diff-review --caller codex --tests "$CORE_TEST_COMMAND" ) >"$TMP/e2e.out" 2>"$TMP/e2e.err"
 E2E_RC=$?
 set -e
 check "review_contract_succeeds_through_runner" "test '$E2E_RC' -eq 0"
@@ -578,6 +694,57 @@ check "report_records_runner_stamp" "grep -q 'review-lifecycle-core/1' '$REPORT_
 check "report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$REPORT_PATH'"
 check "review_contract_leaves_durable_packet" "test -d '$AI_REVIEW_PACKET_STORE' && find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 check "cleanup_removed_working_sandbox_after_store" "! find '${TMP}' -maxdepth 2 -type d -name '*engine-e2e*' 2>/dev/null | grep -v packet-store | grep -q ."
+# Step 4 (plan_edge-dev-reviewer-repair-no-review): after the engine process
+# has exited the report is still a complete, openable artifact outside every
+# sandbox, and a later orphan sweep cannot take it.
+check "durable_report_openable_after_engine_exit" \
+  "test -s '$REPORT_PATH' && [ -f '$REPORT_PATH' ] && [ ! -L '$REPORT_PATH' ] \
+   && grep -q '## Verdict' '$REPORT_PATH' && grep -q '$HEAD_SHA' '$REPORT_PATH' \
+   && grep -q 'review-lifecycle-core/1' '$REPORT_PATH' \
+   && case '$REPORT_PATH' in '$AI_REVIEW_SANDBOX_DIR'/*) false ;; *) true ;; esac"
+set +e
+"$REPO_ROOT/bin/ai-review-sandbox" sweep-orphans --max-age-seconds 0 --max-removals 32 \
+  >/dev/null 2>&1
+set -e
+check "durable_report_survives_later_orphan_sweep" \
+  "test -s '$REPORT_PATH' && grep -q '## Verdict' '$REPORT_PATH' && grep -q '$HEAD_SHA' '$REPORT_PATH'"
+CORE_TEST_STATE=""
+while IFS= read -r _core_state; do
+  if jq -e '.tests.exit==0 and (.tests.command|contains("core-tests-receipt")) and (.tests.output_sha256|test("^[0-9a-f]{64}$"))' "$_core_state" >/dev/null 2>&1; then CORE_TEST_STATE="$_core_state"; break; fi
+done < <(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' -print 2>/dev/null)
+check "core_test_child_does_not_receive_source_receipt" "[ \"\$(cat '$CORE_TEST_MARKER')\" = unset ] && [ \"\$AI_REVIEW_SOURCE_RECEIPT_FILE\" = '$CORE_RECEIPT' ]"
+check "core_door_final_publishes_governed_receipt" "jq -e '.schema_version==1 and (.packet_sha256|test(\"^[0-9a-f]{64}$\"))' '$CORE_RECEIPT' >/dev/null"
+check "core_tests_are_recorded_with_output_hash" "test -n '$CORE_TEST_STATE' && jq -e '.tests.exit==0 and (.tests.command|contains(\"core-tests-receipt\")) and (.tests.output_sha256|test(\"^[0-9a-f]{64}$\"))' '$CORE_TEST_STATE' >/dev/null"
+unset AI_REVIEW_SOURCE_RECEIPT_FILE
+CORE_NEVER_DOOR="$TMP/core-never-door"
+cat > "$CORE_NEVER_DOOR" <<'EOF'
+#!/usr/bin/env bash
+printf 'called\n' >> "$CORE_DOOR_CALLS"
+exit 99
+EOF
+chmod +x "$CORE_NEVER_DOOR"
+CORE_FAIL_STATE_FILE="$TMP/core-fail-test-state"
+CORE_FAIL_DOOR_CALLS="$TMP/core-fail-door-calls"
+rm -f "$CORE_FAIL_STATE_FILE" "$CORE_FAIL_DOOR_CALLS"
+set +e
+( cd "$MREPO" && env AI_REVIEW_LIFECYCLE_BIN="$POOL_LIFECYCLE_WRAPPER" \
+    AI_POOL_REAL_LIFECYCLE="$REPO_ROOT/bin/ai-review-lifecycle" AI_POOL_FAIL_RECORD=1 \
+    AI_POOL_TEST_STATE_FILE="$CORE_FAIL_STATE_FILE" AI_POOL_ORDER_FILE="$TMP/core-fail-order" \
+    AI_REVIEW_DOOR_GROK="$CORE_NEVER_DOOR" CORE_DOOR_CALLS="$CORE_FAIL_DOOR_CALLS" \
+    AI_REVIEW_PREFLIGHT_BIN="$PREFLIGHT_STUB" AI_REVIEW_LIFECYCLE_DIR="$TMP/core-record-fail-lifecycle" \
+    AI_REVIEW_SANDBOX_DIR="$TMP/core-record-fail-sandboxes" \
+    AI_REVIEW_SCOREBOARD_BIN="$SCOREBOARD_STUB" AI_REVIEW_SCOREBOARD_DIR="$TMP/core-record-fail-scoreboard" \
+    AI_REVIEW_SCOREBOARD_FILE="$TMP/core-record-fail-scoreboard/reviews.jsonl" \
+    AI_REVIEW_EVENT_DIR="$TMP/core-record-fail-events" AI_REVIEW_PRIVACY_BASE="$TMP/core-record-fail-privacy" \
+    AI_REVIEW_RUNNER_DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json" \
+    AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none \
+    "$ENGINE" review --provider grok --name core-record-failure --repo "$MREPO" \
+      --mode diff-review --caller codex --tests "printf 'core failure test\\n'" ) \
+    >"$TMP/core-record-fail.out" 2>"$TMP/core-record-fail.err"
+CORE_RECORD_FAIL_RC=$?
+set -e
+check "core_test_recording_failure_is_terminal_without_door_dispatch" \
+  "test '$CORE_RECORD_FAIL_RC' -ne 0 && grep -q 'no review was dispatched' '$TMP/core-record-fail.err' && test ! -e '$CORE_FAIL_DOOR_CALLS' && jq -e '.status==\"failed\" and .failure_class==\"tests-evidence-recording-failed\"' \"\$(cat '$CORE_FAIL_STATE_FILE')\" >/dev/null"
 
 # Lifecycle terminal carries packet identity (Phase A contract, used by the runner).
 STATE_FILE="$(grep -Rsl '"status": "completed"' "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"
@@ -903,6 +1070,128 @@ check "store_failure_message_is_visible" "grep -qi 'store' '$TMP/storefail.err'"
 # Sandbox copies live under the sandbox state; find any leftover copy for this tag.
 check "store_before_delete_skips_delete_when_store_fails" \
   "grep -qi 'retaining sandbox\|durable store failed\|durable packet store failed' '$TMP/storefail.err'"
+
+# --- governed native Muse final source receipt (real pool/core/packet) --------
+echo '== native Muse final source receipt'
+RF_DOOR="$TMP/receipt-door"
+cat > "$RF_DOOR" <<'DOOR'
+#!/usr/bin/env bash
+set -euo pipefail
+# The provider consumes the same packet later verified by the core. It must
+# never receive an already-published receipt from preparatory verification.
+jq -n --arg snapshot "$DOOR_WORKDIR" --arg packet "$DOOR_PACKET_DIR" \
+  --arg hash "$(cat "$DOOR_PACKET_DIR/MANIFEST.sha256")" \
+  --argjson early "$([ -e "$RF_RECEIPT" ] && printf true || printf false)" \
+  '{snapshot:$snapshot,packet:$packet,hash:$hash,early:$early}' > "$RF_FACTS"
+case "$RF_CASE" in
+  provider-fail) exit 19 ;;
+  packet-drift) printf '\nchanged after provider read\n' >> "$DOOR_PACKET_DIR/MANIFEST.md" ;;
+  source-drift) printf '\nsource moved\n' >> "$RF_SOURCE/a.txt" ;;
+esac
+bash "$RF_MOCK_DOOR" "$@"
+if [ "$RF_CASE" = reject ]; then sed 's/^APPROVE$/REJECT/' "$DOOR_REPORT_OUT" > "$DOOR_REPORT_OUT.new"; mv "$DOOR_REPORT_OUT.new" "$DOOR_REPORT_OUT"; fi
+DOOR
+chmod +x "$RF_DOOR"
+RF_PACKET_WRAPPER="$TMP/receipt-packet-wrapper"
+cat > "$RF_PACKET_WRAPPER" <<'PACKET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" != retain ]; then exec "$RF_REAL_PACKET" "$@"; fi
+stored="$("$RF_REAL_PACKET" "$@")" || exit $?
+case "$RF_CASE" in
+  post-store-source-drift) printf '\nlate source change\n' >> "$RF_SOURCE/a.txt" ;;
+  receipt-race) printf 'late conflicting receipt\n' > "$RF_RECEIPT" ;;
+  retained-drift) printf '\nretained evidence changed\n' >> "$stored/MANIFEST.md" ;;
+  post-store-identical) "$RF_REAL_PACKET" verify "$2" >/dev/null ;;
+esac
+printf '%s\n' "$stored"
+PACKET
+chmod +x "$RF_PACKET_WRAPPER"
+rf_run() {
+  local scenario="$1" provider="${2:-muse}" dir="$TMP/receipt-$1-${2:-muse}" source receipt store rc=0 state expected door_var
+  mkdir -p "$dir"
+  git clone --quiet --no-hardlinks "$MREPO" "$dir/source" || return 1
+  source="$(cd "$dir/source" && pwd -P)"
+  mkdir -p "$source/.ai/reviews"
+  receipt="$source/.ai/reviews/governed.json"; store="$dir/store"
+  case "$scenario" in
+    conflict) printf 'original conflicting receipt\n' > "$receipt" ;;
+    linked) printf 'protected original\n' > "$dir/protected"; ln -s "$dir/protected" "$receipt" || return 1 ;;
+    outside) receipt="$dir/outside.json" ;;
+    store-fail) printf 'not a store\n' > "$dir/store-file"; store="$dir/store-file" ;;
+  esac
+  expected="$("$REPO_ROOT/bin/ai-review-packet" resolve "$source" --base HEAD~1 --assert-head "$HEAD_SHA")" || return 1
+  door_var="AI_REVIEW_DOOR_$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')"
+  ( cd "$source" && env AI_POOL_CALLER=codex "$door_var=$RF_DOOR" \
+      RF_SOURCE="$source" RF_RECEIPT="$receipt" RF_FACTS="$dir/facts.json" RF_CASE="$scenario" RF_MOCK_DOOR="$MOCK_DOOR" \
+      RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
+      AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt" AI_REVIEW_PACKET_STORE="$store" \
+      AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
+      bash "$POOL" "$provider" final-check --base HEAD~1 --assert-head "$HEAD_SHA" \
+      --tests "test -z \"\${AI_REVIEW_SOURCE_RECEIPT_FILE+x}\" && test ! -e '$dir/facts.json'"
+  ) > "$dir/stdout" 2> "$dir/stderr" || rc=$?
+  state="$(find "$dir/lifecycle/runs" -type f -name '*.json' -print 2>/dev/null | head -1)"
+  [ -n "$state" ] || return 1
+  case "$scenario" in
+    approve|reject|post-store-identical)
+      [ "$rc" = 0 ] && [ -s "$receipt" ] || return 1
+      jq -e --argjson expected "$expected" --slurpfile facts "$dir/facts.json" \
+        '.identity==$expected and .packet_sha256==$facts[0].hash and $facts[0].early==false and .identity.repository!=$facts[0].snapshot' "$receipt" >/dev/null || return 1
+      jq -e --arg verdict "$([ "$scenario" = reject ] && printf REJECT || printf APPROVE)" \
+        '.status=="completed" and .verdict==$verdict and (.tests.output_sha256|length==64)' "$state" >/dev/null || return 1
+      local packet; packet="$(jq -r .packet_dir "$state")"
+      [ "$(jq -r .packet_sha256 "$receipt")" = "$(sed -n '4p' "$packet/.ai-review-packet")" ] || return 1
+      "$REPO_ROOT/bin/ai-review-packet" verify-retained "$packet" >/dev/null || return 1
+      ;;
+    *)
+      [ "$rc" != 0 ] || return 1
+      case "$scenario" in
+        conflict) grep -qx 'original conflicting receipt' "$receipt" || return 1 ;;
+        linked) [ -L "$receipt" ] && grep -qx 'protected original' "$dir/protected" || return 1 ;;
+        receipt-race) grep -qx 'late conflicting receipt' "$receipt" || return 1 ;;
+        *) [ ! -e "$receipt" ] || return 1 ;;
+      esac
+      jq -e '.status!="completed"' "$state" >/dev/null || return 1
+      if [ "$scenario" != provider-fail ] && [ "$scenario" != source-drift ]; then
+        if [ "$scenario" = post-store-source-drift ]; then
+          jq -e '.failure_class=="stale-source" and .stale==true' "$state" >/dev/null || return 1
+        else
+          jq -e '.failure_class=="source-receipt-publication-failed"' "$state" >/dev/null || return 1
+        fi
+        local report; report="$(find "$source/.ai/reviews" -maxdepth 1 -name "$provider-final-check-*.md" -print | head -1)"
+        [ -s "$report" ] && grep -q '^APPROVE$' "$report" || return 1
+        [ -d "$(jq -r .packet "$dir/facts.json")" ] || return 1
+      fi
+      ;;
+  esac
+}
+for rf_case in approve reject post-store-identical conflict linked outside store-fail packet-drift retained-drift source-drift post-store-source-drift receipt-race provider-fail; do
+  check "native_muse_final_receipt_${rf_case}" "rf_run '$rf_case'"
+done
+# governed_call_skips_pool_reuse (#1783): after a passing review of this head,
+# a governed call (no --tests) must run fresh and publish its own receipt
+# instead of reusing the cached report.
+rf_reuse() {
+  local dir="$TMP/receipt-approve-muse" source receipt2 rc=0
+  source="$(cd "$dir/source" && pwd -P)"; receipt2="$source/.ai/reviews/governed-second.json"
+  ( cd "$source" && env AI_POOL_CALLER=codex AI_REVIEW_DOOR_MUSE="$RF_DOOR" \
+      RF_SOURCE="$source" RF_RECEIPT="$receipt2" RF_FACTS="$dir/facts2.json" RF_CASE=approve RF_MOCK_DOOR="$MOCK_DOOR" \
+      RF_REAL_PACKET="$REPO_ROOT/bin/ai-review-packet" AI_REVIEW_PACKET_BIN="$RF_PACKET_WRAPPER" \
+      AI_REVIEW_SOURCE_RECEIPT_FILE="$receipt2" AI_REVIEW_PACKET_STORE="$dir/store" \
+      AI_REVIEW_LIFECYCLE_DIR="$dir/lifecycle" AI_REVIEW_SANDBOX_DIR="$dir/sandboxes" \
+      bash "$POOL" muse final-check --base HEAD~1 --assert-head "$HEAD_SHA"
+  ) > "$dir/stdout2" 2> "$dir/stderr2" || rc=$?
+  [ "$rc" = 0 ] && grep -q 'governed source receipt requested; passing-report reuse skipped' "$dir/stderr2" \
+    && ! grep -q 'reusing passing' "$dir/stderr2" && [ -s "$receipt2" ] && [ -s "$dir/facts2.json" ]
+}
+check "governed_call_skips_pool_reuse" "rf_reuse"
+# governed_receipt_published_for_every_core_door (#1783): DeepSeek and StepFun
+# go through the same core and must publish, and still refuse on conflict.
+for rf_provider in deepseek stepfun; do
+  for rf_case in approve reject conflict; do
+    check "core_final_receipt_${rf_provider}_${rf_case}" "rf_run '$rf_case' '$rf_provider'"
+  done
+done
 
 # --- implement contract: worktree + recovery --------------------------------
 echo '== implement contract'
@@ -1296,6 +1585,10 @@ cat > "$STUB_OC" <<EOF
 #!/usr/bin/env bash
 # Offline stub OpenCode: accepts the door's run contract and emits JSONL.
 . "$PATH_ID_SH" || exit 1
+if [ -n "\${DS_STUB_PROFILE_OUT:-}" ]; then
+  env | grep '^OPENCODE_DISABLE_' | sort > "\$DS_STUB_PROFILE_OUT"
+  cp "\$XDG_CONFIG_HOME/opencode/AGENTS.md" "\$DS_STUB_PROFILE_OUT.rules" 2>/dev/null || true
+fi
 out=''
 dir=''
 while [ \$# -gt 0 ]; do
@@ -1338,13 +1631,17 @@ chmod 0700 "$STUB_OC"
 DS_REPORT="$TMP/ds-stub-report.md"
 set +e
 AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
-  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 DS_STUB_PROFILE_OUT="$TMP/ds-stub-profile" \
   DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
   DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_REPORT" \
   DOOR_HEAD="$HEAD_SHA" \
   bash "$DS_DOOR" review >"$TMP/ds-stub-door.out" 2>"$TMP/ds-stub-door.err"
 DS_STUB_RC=$?
 set -e
+# #1881: a DeepSeek review sees only the reviewer rules, never the owner's
+# ~/.claude/CLAUDE.md or the ~/.claude and ~/.agents skill lists.
+check "deepseek_review_loads_only_reviewer_rules" \
+  "cmp -s '$REPO_ROOT/templates/system/REVIEWER-global.md' '$TMP/ds-stub-profile.rules' && printf 'OPENCODE_DISABLE_CLAUDE_CODE=1\nOPENCODE_DISABLE_EXTERNAL_SKILLS=1\n' | cmp -s - '$TMP/ds-stub-profile'"
 check "deepseek_door_parses_opencode_envelope_to_report_shape" \
   "test '$DS_STUB_RC' -eq 0 && grep -q '## Verdict' '$DS_REPORT'"
 check "deepseek_door_report_carries_opencode_metadata" \
@@ -1530,10 +1827,18 @@ for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIG
 done
 /usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
 case "$1" in
-  exec) [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
+  exec) prior=''; prompt_file=''; for arg in "$@"; do [ "$prior" != --prompt-file ] || prompt_file="$arg"; prior="$arg"; done
+    grep -qF 'Repository tool-read root is the actual current directory (.)' "$prompt_file" || exit 79
+    grep -qF 'provenance metadata only; never read or retry those host paths' "$prompt_file" || exit 79
+    [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
     printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
   run) [ "${MODEL_API_KEY:-}" = fake-native-provider ] && [ -z "${META_API_KEY+x}" ] || exit 75
-    cat >/dev/null
+    # #1881: only the reviewer rules, never the owner's CLAUDE.md or user skills.
+    head -1 "$XDG_CONFIG_HOME/opencode/AGENTS.md" | grep -qx '# Reviewer instructions' || exit 80
+    [ "${OPENCODE_DISABLE_CLAUDE_CODE:-}" = 1 ] && [ "${OPENCODE_DISABLE_EXTERNAL_SKILLS:-}" = 1 ] || exit 80
+    prompt_text="$(cat)"
+    printf '%s' "$prompt_text" | grep -qF 'Repository tool-read root is the actual current directory (.)' || exit 79
+    printf '%s' "$prompt_text" | grep -qF 'provenance metadata only; never read or retry those host paths' || exit 79
     printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}';;
   *) exit 76;;
 esac
@@ -1624,6 +1929,8 @@ DS_API_ROOT="$TMP/ds-api"
 mkdir -p "$DS_API_ROOT/tools/lib/review-doors" "$DS_API_ROOT/bin" "$DS_API_ROOT/config/opencode" "$DS_API_ROOT/config/opencode-deepseek"
 cp "$DEEPSEEK_DOOR" "$DS_API_ROOT/tools/lib/review-doors/deepseek.sh"
 cp "$REPO_ROOT/tools/lib/deepseek-opencode.sh" "$DS_API_ROOT/tools/lib/deepseek-opencode.sh"
+cp "$REPO_ROOT/tools/lib/reviewer-instructions.sh" "$DS_API_ROOT/tools/lib/reviewer-instructions.sh"
+cp "$REPO_ROOT/tools/lib/review-terminal-verdict.sh" "$DS_API_ROOT/tools/lib/review-terminal-verdict.sh"
 : > "$DS_API_ROOT/tools/reviewer_event_guard.sh"
 printf 'fixture\n' > "$DS_API_ROOT/config/opencode/version"
 sed -n '/^review_verdict() {/,/^take_governed_head()/p' "$REPO_ROOT/bin/ai-deepseek-agent" | sed '$d' > "$DS_API_ROOT/validator"
@@ -1688,6 +1995,131 @@ check 'attachment_api_preserves_credit_exit' \
   "ds_api_case attachment-api first-managed-install review failure; test \"\$?\" = 92"
 check 'attachment_api_refuses_unknown_engine_before_provider' \
   "! ds_api_case invented first-managed-install review approve && ! test -e '$DS_API_ROOT/args'"
+
+# --- closing report rules and the production-risk block (#1783) -----------
+echo '== closing report rules'
+RISK_DOOR="$TMP/risk-door.sh"
+cat > "$RISK_DOOR" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ] || exit 2
+cp "$DOOR_PROMPT_FILE" "$RISK_BRIEF_COPY"
+{
+  printf 'Reviewed head %s. ' "$DOOR_HEAD"
+  for i in $(seq 1 40); do printf 'The change is additive and every path was checked line by line. '; done
+  printf '\n'
+  if [ "${RISK_WITH_BLOCK:-0}" = 1 ]; then printf '```production-risk-assessment\n{"schema":"x"}\n```\n'; fi
+  printf '\n## Verdict\nAPPROVE\n'
+} > "$DOOR_REPORT_OUT"
+EOF
+chmod +x "$RISK_DOOR"
+printf 'Include exactly one fenced production-risk-assessment block if you approve.\n' > "$TMP/risk-request.md"
+risk_case() { # risk_case WITH_BLOCK TAG -> exit status of the review
+  rm -f "$AI_REVIEW_LIFECYCLE_DIR/runs"/* 2>/dev/null || true
+  ( cd "$MREPO" && timeout 90 env AI_REVIEW_DOOR_GROK="$RISK_DOOR" RISK_WITH_BLOCK="$1" RISK_BRIEF_COPY="$TMP/risk-brief-$2.md" \
+      "$ENGINE" review --provider grok --name "engine-risk-$2" --repo "$MREPO" --mode diff-review --caller codex \
+      --prompt-file "$TMP/risk-request.md" ) >"$TMP/risk-$2.out" 2>"$TMP/risk-$2.err"
+}
+set +e; risk_case 0 missing; RISK_MISSING_RC=$?; risk_case 1 present; RISK_PRESENT_RC=$?; set -e
+check "approval_without_requested_risk_block_is_refused" \
+  "test '$RISK_MISSING_RC' -ne 0 && grep -q 'production-risk-assessment block' '$TMP/risk-missing.err'"
+check "approval_with_requested_risk_block_is_accepted" "test '$RISK_PRESENT_RC' -eq 0"
+check "brief_ends_with_single_decision_rule" \
+  "grep -q 'Do not give an early, provisional or second decision' '$TMP/risk-brief-present.md' && test \"\$(grep -n 'Report rules' '$TMP/risk-brief-present.md' | cut -d: -f1)\" -gt \"\$(grep -n 'fenced production-risk-assessment block if you approve' '$TMP/risk-brief-present.md' | cut -d: -f1)\""
+check "brief_restates_risk_block_rule_when_requested" "grep -q 'MUST contain exactly one fenced block' '$TMP/risk-brief-present.md'"
+check "brief_says_missing_tool_is_not_blocked" "grep -q 'is not by itself grounds for BLOCKED' '$TMP/risk-brief-present.md'"
+
+# --- Python bytecode stays out of the review snapshot (edge-dev3 Muse) -------
+echo '== python bytecode outside snapshot'
+PYC_SNAP="$TMP/pyc-snapshot"
+mkdir -p "$PYC_SNAP"
+printf 'def add(a, b):\n    return a + b\n' > "$PYC_SNAP/calc.py"
+git -C "$PYC_SNAP" init -q
+git -C "$PYC_SNAP" add calc.py
+git -C "$PYC_SNAP" -c user.name=t -c user.email=t@t commit -q -m fixture
+PYC_DOOR="$TMP/pyc-door.sh"
+# The door models a reviewer that imports the fixture's module from inside
+# the snapshot, and records the environment any sandboxed child would see.
+cat > "$PYC_DOOR" <<'EOF'
+cd "$DOOR_WORKDIR" || exit 1
+printf '%s\n%s\n' "${PYTHONDONTWRITEBYTECODE:-}" "${PYTHONPYCACHEPREFIX:-}" > "$PYC_ENV_RECORD"
+py="$(command -v python3 || command -v python)" || exit 0
+"$py" -c 'import calc; assert calc.add(2, 2) == 4' || exit 1
+EOF
+: > "$TMP/pyc-prompt.txt"
+PYC_BEFORE="$("$REPO_ROOT/bin/ai-review-sandbox" digest "$PYC_SNAP")"
+PYC_RC=0
+( unset PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX
+  export PYC_ENV_RECORD="$TMP/pyc-env" AI_REVIEW_RUNNER_CORE="$RLC_STAMP"
+  rlc_call_door review "$PYC_DOOR" "$PYC_SNAP" "$PYC_SNAP" "$TMP/pyc-prompt.txt" "$TMP/pyc-report" deadbeef ) >/dev/null 2>&1 || PYC_RC=$?
+PYC_AFTER="$("$REPO_ROOT/bin/ai-review-sandbox" digest "$PYC_SNAP")"
+PYC_PREFIX="$(sed -n 2p "$TMP/pyc-env" 2>/dev/null)"
+check "door_python_import_leaves_snapshot_digest_unchanged" \
+  "test '$PYC_RC' -eq 0 && test '$PYC_BEFORE' = '$PYC_AFTER' && test ! -e '$PYC_SNAP/__pycache__'"
+check "door_gets_bytecode_off_and_cache_prefix_outside_snapshot" \
+  "test \"\$(sed -n 1p '$TMP/pyc-env')\" = 1 && test -n '$PYC_PREFIX' && case '$PYC_PREFIX' in *pyc-snapshot*) false;; *) true;; esac"
+# The Muse credential boundary scrubs the environment with env -i; the
+# bytecode settings must survive it so Muse's sandboxed shell inherits them.
+( . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/outside/cache
+  XDG_CONFIG_HOME="$TMP/x" XDG_DATA_HOME="$TMP/x" XDG_STATE_HOME="$TMP/x" XDG_CACHE_HOME="$TMP/x"
+  muse_clean_environment "$TMP" muse-code /usr/bin/env 0
+  printf '%s\n' "${clean_env[@]}" ) > "$TMP/muse-clean-env.txt"
+check "muse_clean_environment_keeps_bytecode_settings" \
+  "grep -qx 'PYTHONDONTWRITEBYTECODE=1' '$TMP/muse-clean-env.txt' && grep -qx 'PYTHONPYCACHEPREFIX=/outside/cache' '$TMP/muse-clean-env.txt'"
+
+# --- per-session skip and --detach at the front door (plan_reviewer-observation-week steps 2-3)
+echo '== per-session skip and detached reviews'
+FRONT="$REPO_ROOT/bin/ai-review"
+OW="$TMP/observation-week"; mkdir -p "$OW"
+export AI_REVIEW_SESSION_SKIP_DIR="$OW/skip" AI_REVIEW_DETACH_DIR="$OW/detached"
+OW_POOL="$OW/pool-stub"
+cat > "$OW_POOL" <<'EOF'
+#!/usr/bin/env bash
+# Stands in for ai-review-pool: records what the front door handed it.
+printf '%s\n' "$*" >> "$OW_POOL_LOG"
+[ -z "${AI_REVIEW_DETACH_ID:-}" ] || sleep 3
+d="$AI_REVIEW_LIFECYCLE_DIR/runs/k/$1/c"; mkdir -p "$d" "$(dirname "$AI_REVIEW_SCOREBOARD_FILE")"
+rep="$OW_DIR/report-${AI_REVIEW_DETACH_ID:-sync}.md"
+printf 'Analysis.\n## Verdict\nAPPROVE\n' > "$rep"
+jq -n --arg id "${AI_REVIEW_DETACH_ID:-}" --arg r "$rep" --arg s "$AI_CALLER_SESSION_ID" \
+  '{status:"completed",verdict:"APPROVE",report_path:$r,detach_id:(if $id=="" then null else $id end),caller_session_id:$s}' > "$d/run-${AI_REVIEW_DETACH_ID:-sync}.json"
+printf '{"provider":"%s","detach_id":"%s","caller_session_id":"%s"}\n' "$1" "${AI_REVIEW_DETACH_ID:-}" "$AI_CALLER_SESSION_ID" >> "$AI_REVIEW_SCOREBOARD_FILE"
+printf '%s\n' "$rep"
+EOF
+chmod +x "$OW_POOL"
+export OW_POOL_LOG="$OW/pool.log" OW_DIR="$OW"
+ow_front(){ ( cd "$MREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$OW_POOL" "$FRONT" "$@" ); }
+(
+  . "$REPO_ROOT/tools/lib/review-session-skip.sh"
+  skip_add ow-session-a muse fast-fail-silent-start
+)
+rc=0; AI_CALLER_SESSION_ID=ow-session-a ow_front muse diff-review --force >"$OW/a.out" 2>"$OW/a.err" || rc=$?
+check "skip_excludes_provider_within_session" "[ '$rc' = 77 ] && grep -q 'muse skipped for this session (fast-fail-silent-start' '$OW/a.err' && ! grep -q . '$OW_POOL_LOG' 2>/dev/null"
+rc=0; AI_CALLER_SESSION_ID=ow-session-b ow_front muse diff-review --force >"$OW/b.out" 2>"$OW/b.err" || rc=$?
+check "skip_does_not_leak_to_other_session" "[ '$rc' = 0 ] && grep -q '^muse diff-review' '$OW_POOL_LOG'"
+(
+  . "$REPO_ROOT/tools/lib/review-session-skip.sh"
+  for p in deepseek glm stepfun; do skip_add ow-session-a "$p" provider-failed; done
+)
+rc=0; AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/c.out" 2>"$OW/c.err" || rc=$?
+check "all_skipped_exits_75" "[ '$rc' = 75 ] && grep -q 'all reviewers skipped this session' '$OW/c.err' && grep -lq '\"status\":\"all-skipped\"' '$AI_REVIEW_DETACH_DIR'/s*.json"
+
+rm -f "$AI_REVIEW_DETACH_DIR"/s*.json
+rc=0; AI_REVIEW_REGISTRY_FILE="$OW/missing-registry.json" AI_CALLER_SESSION_ID=ow-session-a ow_front stepfun diff-review --force >"$OW/r.out" 2>"$OW/r.err" || rc=$?
+check "unreadable_roster_never_counts_as_all_skipped" "[ '$rc' = 77 ] && grep -q 'cannot read the rotation roster' '$OW/r.err' && ! ls '$AI_REVIEW_DETACH_DIR'/s*.json >/dev/null 2>&1"
+
+: > "$OW_POOL_LOG"
+SECONDS_BEFORE=$SECONDS
+rc=0; AI_CALLER_SESSION_ID=ow-session-c ow_front muse final-check --force --detach >"$OW/d.out" 2>"$OW/d.err" || rc=$?
+DETACH_SECS=$((SECONDS - SECONDS_BEFORE))
+DETACH_ID="$(tail -1 "$OW/d.out" | tr -d '\r')"
+check "detach_returns_run_id_in_under_10s" "[ '$rc' = 0 ] && [ '$DETACH_SECS' -lt 10 ] && [[ '$DETACH_ID' =~ ^d[0-9A-Za-z-]+$ ]] && grep -q 'ai-review outcome $DETACH_ID' '$OW/d.err'"
+FIRST_OUTCOME="$("$FRONT" outcome "$DETACH_ID" 2>/dev/null | head -1)"
+FINAL_OUTCOME="$("$FRONT" outcome "$DETACH_ID" --wait 60 2>/dev/null | head -1)"
+check "outcome_reports_pending_then_verdict" "[ '$FIRST_OUTCOME' = pending ] && [ '$FINAL_OUTCOME' = APPROVE ]"
+check "detached_run_records_scoreboard_row" "jq -e --arg id '$DETACH_ID' 'select(.detach_id==\$id and .caller_session_id==\"ow-session-c\" and .provider==\"muse\")' '$AI_REVIEW_SCOREBOARD_FILE' >/dev/null && grep -q -- '--force' '$OW_POOL_LOG' && ! grep -q -- '--detach' '$OW_POOL_LOG'"
+check "detached_record_binds_exact_head" "jq -e --arg h \"\$(git -C '$MREPO' rev-parse HEAD)\" '.head==\$h' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.json' >/dev/null && jq -e '.exit_code==0' '$AI_REVIEW_DETACH_DIR/$DETACH_ID.result.json' >/dev/null"
+unset AI_REVIEW_SESSION_SKIP_DIR AI_REVIEW_DETACH_DIR OW_POOL_LOG OW_DIR
 
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'

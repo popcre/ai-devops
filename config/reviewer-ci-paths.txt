@@ -1,20 +1,22 @@
-# Paths whose pull-request changes require the Windows Codex/Grok reviewer lane.
+# Paths whose pull-request changes require the Windows Codex reviewer lane.
 # One repository-relative shell glob per line. Keep this list conservative: the
 # scheduled and manual workflows still run the complete reviewer lane.
 .gitattributes
 bin/ai-codex-review*
-bin/ai-grok-review*
-bin/ai-grok-implement*
 bin/ai-muse*
 bin/ai-process-supervisor*
+bin/ai-release-live-check*
 bin/ai-provider-version*
 bin/ai-review*
+bin/ai-stepfun*
 bin/ai-deepseek*
 bin/windows-private-file.ps1
+bin/windows-job-run.ps1
 config/ci-suite-manifest.json
 config/ci-suites/**
 tools/ci-suites/*
 config/provider-cli-versions.json
+config/reviewer-platform-brief.txt
 config/reviewer-capacity.json
 config/reviewer-registry.json
 config/review-runner-doors.json
@@ -23,20 +25,21 @@ config/review-action-profiles.json
 tools/review_action_profile.py
 bin/ai-repo-policy
 config/repository-policy.json
+config/repository-coverage.json
 config/task-gates.schema.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
-skills/shared/grok-cli/**
 templates/delegation/debate-turn.md
 tests/lib-test-harness.sh
 tests/lib-test-part.sh
 tests/lib-test-timing.sh
 tests/lib-reviewer-events-isolation.sh
-tests/grok-auth-link-cases.sh
 tests/test-all.ps1
 tests/test-all.sh
 tests/test-ai-codex-review.sh
-tests/test-ai-grok-review.sh
+tests/test-windows-job-run.sh
+tests/test-delegation-templates.sh
+tests/test-pool-dispatch-doors.sh
 tests/test-ai-review-code-only.sh
 tests/test-ai-review-engine.sh
 tests/lib-review-public-fixture.sh
@@ -68,16 +71,17 @@ tests/test-ai-review-credit-watch.sh
 tests/test_review_credit_watch.py
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
-tools/lib/grok-paid-keys.sh
 tools/lib/provider-wrapper-common.sh
 tools/lib/opencode-curl-auth.sh
 tools/lib/opencode-maintenance-lock.sh
-tools/lib/gemini-review-contract.sh
-tools/lib/grok-runtime.sh
 tools/lib/deepseek-opencode.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
+tools/lib/review-terminal-verdict.sh
 tools/lib/review-operation.sh
+tools/lib/review-capabilities.sh
+tools/lib/review-session-skip.sh
+tools/lib/observation-week.sh
 tools/lib/stepfun-pace.sh
 tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh
@@ -101,6 +105,7 @@ tools/reviewer_credit_watch.py
 .github/workflows/verify.yml
 
 tools/lib/muse-credential-boundary.sh
+tools/lib/reviewer-instructions.sh
 config/reviewer-membership-scope.json
 tests/test-ai-reviewer-membership-drift.sh
 tests/test-ai-review-doctor.sh
@@ -124,3 +129,19 @@ tools/oracle_native_alternate_guardian.py
 bin/ai-oracle-native-alternate
 tools/oracle_native_alternate_v2_profile.py
 bin/ai-oracle-native-alternate-v2
+
+# Native sandbox source-release proof consumes this managed helper closure.
+bin/ai-gh
+tools/github-requests/**
+tools/application_source_release.py
+
+# Closed public generated-definition native gate (no execution).
+tools/generated_definition_action.py
+config/review-action-profiles.json
+tests/test_generated_definition_action.py
+bin/ai-session-tmp-sweep
+bin/ai-session-tmp-hook
+tools/lib/session-tmp.sh
+tools/glm_output_recovery.py
+tools/glm_formal_profile.py
+templates/system/REVIEWER-global.md

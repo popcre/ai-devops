@@ -356,6 +356,7 @@ def test_review_templates_pin_current_code_and_stay_unadmitted():
         assert c['api'] is None and c['host'] is None and all(v is None for v in c['tailnet'].values())
         assert c['operator_sha256']==hashlib.sha256((ROOT/'inspect_capability.py').read_bytes()).hexdigest()
         assert c['remote_sha256']==hashlib.sha256((ROOT/'remote.py').read_bytes()).hexdigest()
+        assert c['transport_helper_sha256']==m.HELPER_SHA==hashlib.sha256(Path(m.helpers.__file__).read_bytes()).hexdigest()
 
 
 def test_os_binary_mismatch_before_local_lookup(tmp_path,monkeypatch):
@@ -496,7 +497,7 @@ def test_every_managed_link_refuses_tamper_before_git_child(tmp_path,monkeypatch
     original=m.os.lstat
     def root_links(path):
         info=original(path)
-        if Path(path).is_symlink():return SimpleNamespace(st_mode=info.st_mode,st_uid=0,st_nlink=info.st_nlink)
+        if m.stat.S_ISLNK(info.st_mode):return SimpleNamespace(st_mode=info.st_mode,st_uid=0,st_nlink=info.st_nlink)
         return info
     monkeypatch.setattr(m.os,'lstat',root_links);root_fixture_ancestry(monkeypatch)
     c={'installed_gate':{'source_head':head,'launcher_sha256':gh,'manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest()}}

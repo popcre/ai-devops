@@ -14,6 +14,11 @@ Concrete project identifiers are protected configuration. Resolve them with
 `ai-private-config value supabase_shared_preview_ref`; never copy a value into
 this public skill. Prove the live link immediately before every write.
 
+One project serves every app (CRM, DAM, PM-PIM, PLM/DesignFlow runtime logins,
+monitor): there is no per-app project. Its API URL is
+`https://<ref>.supabase.co` with the prod ref above; preview branches use the
+preview ref. Do not re-fetch these from the dashboard or the MCP each session.
+
 `popcre/shared-db` is the canonical repo for the shared supabase.com backend
 (project `<protected-shared-prod-ref>`) used by CRM / DAM / PM-PIM / PLM. Albert had to
 say "pull the repo again and re-read the .md files to see the proper way to make
@@ -29,8 +34,8 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > immediately before every write. Database writes skip the second AI (owner
 > ruling 2026-10-14).
 > Read-only inspection is always allowed (Rule 0); your own application's rows are
-> not gated (Rule 0.5). `shared-db-orchestrator` is optional reference only for its
-> safety rules (claims, exact-object locks, review, live proof). To end or hand
+> not gated (Rule 0.5). The detailed safety reference
+> (`ai-devops/docs/shared-db-structural-safety/`, binding when structural work runs) covers (claims, exact-object locks, review, live proof). To end or hand
 > over a session, use **`shared-db-handover`** (notes on the same issue).
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.

@@ -101,7 +101,35 @@ cd /worksp/ai-devops
    installed wrapper, runtime, or preloader bytes is re-qualified
    automatically (`ai-review-preflight requalify`); a failed requalification
    is recorded with `ai-reviewer-issue record` and printed. A hook without
-   the managed marker is foreign and left untouched. The Windows installer
+   the managed marker is foreign and left untouched.
+
+   **Installed checkout main guard (#1836).** The same step installs the
+   managed `hooks/reference-transaction` hook. In the `prepared` state it
+   refuses any update of `refs/heads/main`, and a commit move of `HEAD` in
+   the primary worktree while it is detached or on `main`, so a plain
+   `git pull`, `merge`, `reset`, or detached `checkout` there fails with
+   guidance naming `update.sh` / `bin/install-ai-devops-windows.ps1`.
+   Git rewrites the index and files before the ref, so when the refused
+   target is existing history (already contained by a ref or FETCH_HEAD,
+   or older than HEAD: fast-forward pull or merge, reset, checkout), the same git process's `aborted` call
+   puts them back (`git read-tree -m -u <refused> HEAD`, keeping untracked
+   files). A refused new commit (local commit, amend, cherry-pick, any merge
+   commit) is never restored, because its staged files may be the user's own
+   work; the message says to undo a refused merge with `git merge --abort`.
+   Git resolves hooks through the common dir, so it also runs in linked
+   worktrees; remote-tracking refs (`git fetch`), tags, other branches, and
+   linked worktrees' own `HEAD` are always allowed, including a new
+   linked worktree's first `HEAD` (git 2.53 writes it from the primary;
+   the hook tells it apart by which `HEAD.lock` git holds). The protected installers
+   are unaffected because they run every ref-moving git command with
+   `core.hooksPath` pointed at an empty temporary directory (update.sh's
+   candidate/advance/rollback commands; the Windows installer's
+   fast-forward), so no hook runs for them. This is an accident guardrail,
+   not enforcement: anyone can bypass it the same way (for example
+   `git -c core.hooksPath=<empty> pull`) or by removing the hook. The
+   `hooks/post-merge` unprotected-advance recorder and the `ai-task-gates`
+   warning stay in place as the second layer. Rollback is a protected
+   install of the prior release; `uninstall.sh` removes the owned hook. The Windows installer
    runs the same script (and its own end-of-run requalify) on its real
    (non-dry-run) path.
 6. Runs the canonical `ai-install-skills` installer so client-specific and shared
@@ -176,6 +204,21 @@ reviewer wrappers and the reviewer-binary version pins (`config/muse-code/**`,
 `config/opencode/version`, `config/provider-cli-versions.json`), because those
 pins choose which reviewer program runs. A release that only re-pins a reviewer
 binary therefore uses this same reviewed install route (#1650).
+
+**Release live review check (#1783).** When the release range changes shared
+review code (the paths in `review_shared_code_paths_regex`,
+`tools/lib/review-capabilities.sh`), `authorize-install` also requires commit
+statuses `ai-devops/live-review/linux` and `ai-devops/live-review/windows` =
+`success`, created by `u2giants`, on the exact target. From an Ubuntu review
+host signed in to `gh` as `u2giants`, run
+`ai-release-live-check fleet --target-head <full SHA>`: it runs one real
+DeepSeek review of a tiny fixture from the candidate's own code on this host
+and on Windows host 4837 (over `ssh 4837`), then posts both statuses. A status is `success` only when that review
+returns APPROVE on the benign fixture; REVISE, REJECT, contradictory `## Verdict` blocks, or no verdict posts
+`failure`. Use
+`--provider muse` during a DeepSeek outage. Never run it on EDGE-ALIEN or Envy.
+`ai-release-live-check verify --target-head <SHA>` shows the recorded result.
+Plan: [plan_release-live-review-check.md](../plan_release-live-review-check.md).
 
 For an update containing reviewer-safety paths, leave the installed checkout
 unchanged while preparing two linked worktrees: a disposable installation
@@ -312,8 +355,39 @@ ai-install-skills --keep-orphans
 ai-install-skills --adopt-globals
 ```
 
-For a narrow refresh, use `ai-install-skills --only shared-db-orchestrator
---only shared-db-handover` (Git Bash on Windows). Repeat `--only` for each exact
+For a narrow refresh, preview with `ai-install-skills --dry-run --only
+shared-db-change --only shared-db-handover`. A real narrow install requires
+an explicit `installation` task in the clean merged candidate worktree and
+`--reviewer-approval REPORT`: the candidate's `scoped-skills-install` action
+validates its own committed gate, installer and helper, exact-source independent
+lifecycle APPROVE, and passing bound tests. It accepts global skills only,
+canonical client homes, exact names, and no audit destination override. The
+current scoped lane is qualified on Linux and requires `flock`; other platforms
+retain the existing full installation route, and unsupported scoped runs fail
+closed.
+The installer retains the prepared plan digest in a non-exported shell variable;
+it refuses changed plan metadata before copying and before issuing a receipt.
+The lane adds no admission bypass; existing lifecycle-store configuration remains
+part of the same-user trust boundary.
+
+It copies verified committed files from a private snapshot under the same
+writer lock used by full installs of this installer version; local changes get a unique recoverable
+backup. A verified scoped receipt under
+`~/.local/state/ai-devops/scoped-skills/` records the full candidate SHA, critical
+source hashes, exact names, absolute destinations, installed file hashes,
+approval identity and report hash, and backup hashes checked against pre-install
+content. Receipt publication re-runs the same exact-source approval gate and
+captures its validated result directly. Audit, lock, trim-stage, receipt and
+selected destination paths reject unsafe symlinks, hardlinks and wrong file
+kinds before scoped writes. Source skills carrying installer-owned managed
+markers are refused before copying. This receipt does not
+advance or attest the full toolkit installation: the primary checkout,
+launchers and full installation manifest stay unchanged. The full route retains
+existing cache symlink support with a diagnostic. Nested first-sync adoption
+reuses an inherited descriptor only after canonical lock-inode validation, and
+every invocation still flocks it; inherited values never waive approval.
+Legacy installer versions do not acquire this lock, so a scoped host operation
+must be serialized against any active legacy installer. Repeat `--only` for each exact
 skill name; unknown names and selected shared/client collisions fail before any
 writes. `--dry-run` previews the same selection. Scoped refresh retains normal
 local-edit backups and the install audit log, but does not touch unrelated
@@ -474,6 +548,11 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
   old tip check gave (install only published, merged code) is unchanged.
 - Pass the review report at the path the review wrote it; a copy elsewhere is
   not accepted.
+- `another installation is active for this checkout` can also be an `op
+  daemon` that an earlier install's `op` call started: it inherited the lock
+  fd and outlived the install (hetz, 2026-10-20). Since #1783 `install.sh` runs every
+  stage with fd 9 closed, so nothing a stage leaves running keeps the lock; for
+  a daemon started before that, stopping it is safe.
 - `another installation is active for this checkout` can be a leftover
   `setup-desktop-apps.sh --claude-only --wait-for-desktop-exit` started by an
   earlier install that inherited the checkout lock and waits until the Claude

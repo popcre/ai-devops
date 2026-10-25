@@ -442,6 +442,12 @@ fi
 LOCK_SCRIPT
   chmod 0700 "$script"
 
+  mkdir -m 0700 "$root/subshell"
+  ( source "$helper"; glm_maintenance_lock_acquire "$root/subshell" exclusive 0 &&
+    ! flock -n -s "$root/subshell/maintenance.lock" true ) >"$root/subshell.log" 2>&1
+  local subshell_rc=$?
+  check 'maintenance lock validates the actual subshell fd and retains exclusion' "test '$subshell_rc' -eq 0"
+
   local dir="$root/parallel" pid1 pid2 acquired=0
   mkdir -p "$dir"; chmod 0700 "$dir"
   HELPER="$helper" LOCK_DIR="$dir" LOCK_MODE=shared LOCK_TIMEOUT=2 MARKER="$root/shared-1" HOLD_FILE="$root/release-1" bash "$script" >"$root/shared-1.log" 2>&1 & pid1=$!
@@ -866,6 +872,17 @@ check "ai-glm never echoes a key"           "! grep -nE 'echo .*(ZHIPU_API_KEY|Z
 check "launcher unsets ZAI_API_KEY"         "grep -q 'unset ZAI_API_KEY' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "launcher guards empty key"           "grep -q 'resolved EMPTY' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "launcher has re-exec guard"          "grep -q 'AI_GLM_LAUNCH_REEXEC' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
+# #1881: the GLM server never loads the owner's ~/.claude/CLAUDE.md or the
+# ~/.claude and ~/.agents skill lists; every launcher turns both off before serve.
+glm_launchers_drop_owner_rules() {
+  local f
+  for f in "$REPO_ROOT/bin/setup-opencode-glm.sh" "$REPO_ROOT/bin/setup-opencode-glm.ps1"; do
+    awk '/^export OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1\r?$/{seen=1} /^exec .* serve --hostname 127.0.0.1/{ok=seen} END{exit !ok}' "$f" || return 1
+  done
+  grep -q '"OPENCODE_DISABLE_CLAUDE_CODE": "true"' "$REPO_ROOT/tools/glm_formal_profile.py" \
+    && grep -q '"OPENCODE_DISABLE_EXTERNAL_SKILLS": "true"' "$REPO_ROOT/tools/glm_formal_profile.py"
+}
+check "launchers keep owner instructions and user skills out of GLM (#1881)" glm_launchers_drop_owner_rules
 check "mcp.env.example keeps ZAI_API_KEY"   "grep -q '^ZAI_API_KEY=op://' '$REPO_ROOT/config/mcp.env.example'"
 check "dead ZAI_ANTHROPIC_BASE_URL gone"    "! grep -q '^ZAI_ANTHROPIC_BASE_URL=' '$REPO_ROOT/config/mcp.env.example'"
 check "dead ZAI_GLM_MODEL gone"             "! grep -q '^ZAI_GLM_MODEL=' '$REPO_ROOT/config/mcp.env.example'"
@@ -2137,5 +2154,49 @@ rm -rf "$PERR_TMP"
 glm_recovery_cases
 check 'original error observation is bound and historical recover never renews a hold' 'glm_original_observation_cases'
 glm_terminal_error_cases
+transcript_diagnostics_cases() {
+  local fixture="$TMP/transcript-diagnostics"
+  mkdir -p "$fixture"
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" bash <<'CASES'
+set -euo pipefail
+source "$AI_GLM_SOURCE"
+CALLER=codex; JSON_OUT=1
+printf '%s' '{"name":"owned","caller":"codex","type":"review","opencode_session_id":"ses_owned"}' > "$FIXTURE/meta"
+find_meta(){ printf '%s' "$FIXTURE/meta"; }
+require_server(){ :; }
+api(){
+  [ "$1" = GET ] && [ "$2" = '/api/session/ses_owned/message?limit=200' ]
+  printf '%s\n' "$*" >> "$FIXTURE/calls"
+  jq -n --arg dir "$HOME/.local/share/ai-devops/opencode/opencode/tool-output/" '
+    {data:[{id:"msg_owned",type:"assistant",content:[
+      {type:"text",text:"SECRET_SOURCE"},
+      {type:"reasoning",text:"SECRET_REASONING"},
+      {type:"tool",id:"call_owned",name:"read",state:{status:"completed",
+       input:{path:($dir+"tool_owned"),key:"SECRET_KEY"},output:"SECRET_OUTPUT",
+       outputPaths:[($dir+"tool_owned"),($dir+"../tool_other"),($dir+"tool_a/b"),
+                    "/other/ai-devops/opencode/opencode/tool-output/tool_forged"]}}]}]}'
+}
+cmd_transcript owned > "$FIXTURE/result"
+jq -e --arg dir "$HOME/.local/share/ai-devops/opencode/opencode/tool-output/" '
+  .schema_version==1 and .session_id=="ses_owned" and
+  (.messages[0].tools|length)==1 and
+  .messages[0].tools[0].output_paths==[($dir+"tool_owned")] and
+  .messages[0].tools[0].input_managed_paths==[($dir+"tool_owned")]
+' "$FIXTURE/result" >/dev/null
+! grep -q SECRET "$FIXTURE/result"
+test "$(wc -l < "$FIXTURE/calls")" -eq 1
+jq '.caller="other"' "$FIXTURE/meta" > "$FIXTURE/changed"
+mv "$FIXTURE/changed" "$FIXTURE/meta"
+if (cmd_transcript owned) > "$FIXTURE/rejected" 2>&1; then exit 1; fi
+test "$(wc -l < "$FIXTURE/calls")" -eq 1
+CASES
+}
+check 'owned-session JSON diagnostics redact content and refuse mismatched identity before API' 'transcript_diagnostics_cases'
+if [ "$(uname -s 2>/dev/null)" = Linux ]; then
+  check 'formal profile and own-output adversarial fixtures (no provider)' \
+    "python3 '$REPO_ROOT/tests/test_glm_own_output_recovery.py' > '$TMP/formal-profile-tests.log' 2>&1"
+  check 'own-output lifecycle never resets authority or publishes the intermediate stop' \
+    "bash '$REPO_ROOT/tests/test-glm-own-output-lifecycle.sh' > '$TMP/formal-lifecycle-tests.log' 2>&1"
+fi
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

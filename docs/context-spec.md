@@ -110,7 +110,7 @@ that class. Opening the route is therefore each private repository's own
 reviewed decision, made once in its own policy file rather than per review.
 
 A second, equally narrow exception is the central `reviewer_release` map
-(#1239). Today it names one entry: `database` for `private-tooling`, released
+(#1239). Its first entry is `database` for `private-tooling`, released
 by the gate `reviewed-private-data-writer`. When the effective class is
 `private-tooling` and the repository's own policy declares that gate, an
 owner-requested row write authored as writer code reaches the reviewer-approval
@@ -118,15 +118,46 @@ step instead of the protected stop: it still needs an assigned AI reviewer's
 lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
 (`--reviewer-approval`). It never releases `private-evidence`, so one licensed
 row in the change set keeps the action sealed, and it opens no other action.
+A further entry names `production` for `infrastructure`, released by the gate
+`reviewed-production-dispatch` (owner ruling 2026-10-20 in his chat: "yes, make
+the change and finish the install"). It is closed to exactly `u2giants/ansible`:
+the canonical origin, the gate declared in a clean consumer file committed at
+HEAD, a clean worktree (ignored files included), and HEAD equal to the real
+GitHub `main` read fresh from the fixed canonical URL with no system, global or
+repository Git config. That `main` is the commit the apply workflow dispatches,
+so the exact-head lifecycle APPROVE names the dispatched resource, and a local
+tracking ref or `insteadOf` rewrite cannot impersonate it. Any other repository,
+a dirty, stale or unpushed head, an uncommitted declaration, an unreachable
+GitHub, or a broadened central entry stays sealed, and the `infrastructure`
+action itself is never opened.
 
 The central `application_source_releases` map is a separate source-only route for
-the single reviewed DesignFlow backend sandbox target. `deploy` can reach its
+four exact DesignFlow sandbox targets: backend (core), tracking, frontend, and
+Item Master (item). `deploy` can reach each application's
 existing Cloud Build branch-source push only with the exact committed central
 manifest, a committed consumer declaration requiring `cloud-build-release-review`,
 and an independent lifecycle-recorded exact-head `final-check` or
 `security-review` APPROVE. It does not authorize manual cloud changes or weaken
 any other protected action; without the explicit target flag, generic refusal
 remains in force.
+
+Backend retains its original admission and platform behavior. The three new
+targets require qualified Linux, actual `sandbox-albert` branch, a recorded base
+equal to the unique merge-base with current `origin/develop`, complete ancestry,
+and no structural/infrastructure/production/private contributors. The native
+`tools/application_source_release.py` proof refuses Git context injection before
+discovery. It reads the canonical GitHub develop ref through the installed,
+provenance-verified `ai-gh` helper and `/usr/bin/gh`, twice around admission;
+network failure, ref drift, source/helper movement or malformed responses refuse
+without a receipt. Existing SSH/proxy/authentication settings remain usable;
+normal fetch is outside the gate. No runtime test override, production target,
+manual cloud mutation, or broader application-workflow is added. Source admission
+is not deployment/live acceptance; DesignFlow's existing no-self-merge and PR
+rules remain unchanged. See the [scoped plan](../plan_exact-designflow-sandbox-source-releases.md).
+For the three new repositories, a consumer requiring `cloud-build-release-review`
+must supply the exact target flag on every deploy, including future releases
+after the declaration is upstream. Generic deploy cannot omit the closed proof;
+other actions and backend's original route remain unchanged.
 
 The separate `application-workflow` action admits only the authenticated HTS
 Alsand sandbox workflow for backend issue94. It requires a clean committed
@@ -163,3 +194,36 @@ refused; they are not a security boundary. Anyone who can set an environment
 variable in the session can already run the provider wrapper directly. Export
 neither by hand: an approval left set in a shell would re-authorize every later
 review in it, each one recorded as if newly approved.
+
+### Closed public generated-definition check
+
+The [DesignFlow generated-fixture gate plan](designflow-generated-fixture-native-gate-plan.md) records the closed scope, qualification gates and retirement conditions.
+
+`generated-definition-boundary-v1` is the sole public generated-only database
+exception for `popcre/designflow-backend` reviewer-safety tasks. Its consumer must
+add `reviewed-generated-definition-fixture-only` without changing any other
+policy. The strongest class and global forbidden defaults remain unchanged.
+`check --before database --action-manifest-stdin --reviewer-approval REPORT`
+accepts only its exact closed descriptor, reviewed nine-path contributor set,
+clean physical source/base, ordinary whole-source independent final review and
+passing test evidence. That review seals protected source; it does not add a
+second AI approval requirement for ordinary application row writes.
+
+The installed public-only validator reuses native no-follow IO and lifecycle
+proofs. It rehashes the exact eight source paths and every entry in the pinned
+OWN dependency and npm inventories, as well as Node, admission bytes and output
+absence. Initial inventories deliberately bind the qualified physical runtime;
+they are not generic portable dependency manifests. Source/runtime files must
+satisfy the existing native custody permission checks. Fixture/runtime pin
+changes require reviewed installed configuration and source qualification.
+Only fixed public generated definitions are in scope; no SQL, Docker, Node
+module, provider, private capture or application process is launched by this
+check. Existing #770 and Oracle routes retain their separate contracts.
+
+Every attempt needs a fresh observed check and coordinator decision. The
+existing task override records immutable source/input audit evidence; repeated
+valid checks may succeed after revalidation. No token, consumption state,
+execution lease or refund is created. Correlation IDs are not credentials and
+no cryptographic control of later same-UID execution is claimed. Existing
+result absence and exclusive output writing still prevent output reuse. A lost
+response requires inspection of actual evidence before execution is decided.

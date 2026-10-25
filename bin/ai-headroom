@@ -11,6 +11,8 @@
 #   ai-headroom status   what am I using, and is the proxy answering?
 #   ai-headroom off      go straight to Anthropic
 #   ai-headroom on       route through the proxy (refuses if it is down)
+#   ai-headroom wrap-remote    force Claude remote workers on this host through it
+#   ai-headroom unwrap-remote  restore those workers to their raw binaries
 #
 # Afterwards: fully quit Claude (tray icon -> Quit) and reopen it. The setting
 # is only read at startup.
@@ -310,6 +312,178 @@ Restore it with:  cp '$backup' '$BASHRC'"
 }
 
 # ---------------------------------------------------------------------------
+# Source 3: Claude Code remote workers on the hetz VPS (~/.claude/remote/ccd-cli).
+# The claude-ssh launcher spawns each worker with
+# ANTHROPIC_BASE_URL=https://api.anthropic.com, which sends those sessions
+# straight to Anthropic and bypasses Headroom no matter what .bashrc says.
+# Measured on hetz 2026-10-20: every ccd-cli process had that value in its
+# environ and held TLS connections to api.anthropic.com, while a fresh CLI from
+# a shell (which inherits the .bashrc export) routed through :8787.
+#
+# The only lever we control is the executable path the launcher execs. We move
+# the real binary aside and install a tiny wrapper that forces the proxy URL,
+# then execs the real one. Running workers keep their old inode, so nothing
+# live is killed — new spawns pick up the wrapper.
+# ---------------------------------------------------------------------------
+
+CCD_DIR="${AI_HEADROOM_CCD_DIR:-$HOME/.claude/remote/ccd-cli}"
+CCD_REAL_SUFFIX=".headroom-real"
+# Claude Desktop (Linux) installs its Claude Code as <ver>/<hash>/claude and
+# also forces ANTHROPIC_BASE_URL=https://api.anthropic.com on it. Each Desktop
+# update drops a new version that bypasses the proxy until it is wrapped.
+DESKTOP_CC_DIR="${AI_HEADROOM_DESKTOP_CC_DIR:-$HOME/.config/Claude/claude-code}"
+CCD_MARK="# Managed by ai-headroom"
+
+is_elf() {
+  # od is POSIX; `file` is not installed on the VPS.
+  local h
+  h="$(dd if="$1" bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  [ "$h" = "7f454c46" ]
+}
+
+is_ccd_wrapper() {
+  [ -f "$1" ] && head -n 1 "$1" 2>/dev/null | grep -q '^#!/' && grep -qF "$CCD_MARK" "$1" 2>/dev/null
+}
+
+ccd_wrap_one() { # ccd_wrap_one <path>
+  local bin="$1" real tmp
+  real="$bin$CCD_REAL_SUFFIX"
+  if is_ccd_wrapper "$bin"; then
+    # Re-wrap: rewrite the baked URL in place.
+    :
+  elif is_elf "$bin"; then
+    [ -e "$real" ] && die "ai-headroom: $real already exists and $bin is still a raw binary. Refusing to overwrite a recovery copy."
+    mv "$bin" "$real" || die "ai-headroom: could not move $bin aside."
+    chmod +x "$real" 2>/dev/null || true
+  else
+    return 0
+  fi
+  tmp="$bin.wrap-tmp.$$"
+  cat > "$tmp" <<EOF
+#!/usr/bin/env bash
+$CCD_MARK
+# Claude Code remote launchers spawn this binary with ANTHROPIC_BASE_URL set to
+# https://api.anthropic.com, which bypasses the Headroom proxy. Force the proxy
+# URL, then exec the real binary. Re-run "ai-headroom on" after a Claude Code
+# update drops a new version into this directory.
+export ANTHROPIC_BASE_URL='$PROXY_URL'
+exec "\$(dirname "\$0")/\$(basename "\$0")$CCD_REAL_SUFFIX" "\$@"
+EOF
+  chmod 755 "$tmp" || { rm -f "$tmp"; die "ai-headroom: could not chmod wrapper"; }
+  mv "$tmp" "$bin" || { rm -f "$tmp"; die "ai-headroom: could not install wrapper at $bin"; }
+}
+
+ccd_unwrap_one() { # ccd_unwrap_one <path>
+  local bin="$1" real
+  real="$bin$CCD_REAL_SUFFIX"
+  is_ccd_wrapper "$bin" || return 0
+  [ -e "$real" ] || { rm -f "$bin"; return 0; }
+  rm -f "$bin" || die "ai-headroom: could not remove wrapper $bin"
+  mv "$real" "$bin" || die "ai-headroom: could not restore $real"
+  chmod +x "$bin" 2>/dev/null || true
+}
+
+ccd_candidates() { # every launcher-execed Claude Code binary path on this host
+  local f
+  if [ -d "$CCD_DIR" ]; then
+    for f in "$CCD_DIR"/*; do printf '%s\n' "$f"; done
+  fi
+  if [ -d "$DESKTOP_CC_DIR" ]; then
+    for f in "$DESKTOP_CC_DIR"/*/*/claude; do
+      # Desktop writes .verified only after the download finishes; never touch
+      # a half-written binary.
+      [ -e "$(dirname "$f")/.verified" ] && printf '%s\n' "$f"
+    done
+  fi
+}
+
+ccd_wrap_all() {
+  local f n=0
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
+    if is_ccd_wrapper "$f" || is_elf "$f"; then
+      ccd_wrap_one "$f"
+      n=$((n + 1))
+    fi
+  done < <(ccd_candidates)
+  [ "$n" -gt 0 ] && printf 'Claude remote workers : wrapped %s binary(ies)\n' "$n"
+  return 0
+}
+
+ccd_unwrap_all() {
+  local f
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
+    ccd_unwrap_one "$f"
+  done < <(ccd_candidates)
+}
+
+ccd_wrap_status() {
+  local f wrapped=0 raw=0
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in *"$CCD_REAL_SUFFIX") continue ;; esac
+    if is_ccd_wrapper "$f"; then wrapped=$((wrapped + 1))
+    elif is_elf "$f"; then raw=$((raw + 1))
+    fi
+  done < <(ccd_candidates)
+  if [ "$wrapped" -gt 0 ] && [ "$raw" -eq 0 ]; then
+    printf 'Claude remote workers : %s wrapped -> Headroom   (new spawns only)\n' "$wrapped"
+  elif [ "$raw" -gt 0 ] && [ "$wrapped" -eq 0 ]; then
+    printf 'Claude remote workers : %s UNWRAPPED -> DIRECT to Anthropic   <- gap\n' "$raw"
+    printf '  Run "ai-headroom on" (or "ai-headroom wrap-remote") after any Claude update.\n'
+  elif [ "$raw" -gt 0 ]; then
+    printf 'Claude remote workers : %s wrapped, %s still DIRECT (new Claude version?)\n' "$wrapped" "$raw"
+    printf '  Re-run "ai-headroom on" to wrap the new binary.\n'
+  fi
+}
+
+# Desktop updates arrive silently, so on a Linux desktop a systemd user timer
+# re-runs wrap-remote every few minutes. Idempotent; a no-op once wrapped.
+AUTOWRAP_UNIT="ai-headroom-autowrap"
+
+autowrap_set() { # autowrap_set on|off
+  local dir="$HOME/.config/systemd/user" self
+  is_windows && return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  if [ "$1" = on ]; then
+    # Only "on" needs Desktop; "off" must clean up the timer even after Desktop is gone.
+    [ -d "$DESKTOP_CC_DIR" ] || return 0
+    self="$(readlink -f "$0")"
+    mkdir -p "$dir" || die "ai-headroom: could not create $dir"
+    printf '[Unit]\nDescription=Re-wrap Claude Desktop Claude Code through Headroom\n\n[Service]\nType=oneshot\nExecStart=%s wrap-remote\n' "$self" > "$dir/$AUTOWRAP_UNIT.service"
+    printf '[Unit]\nDescription=Re-wrap Claude Code after Desktop updates\n\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=5min\n\n[Install]\nWantedBy=timers.target\n' > "$dir/$AUTOWRAP_UNIT.timer"
+    systemctl --user daemon-reload && systemctl --user enable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 \
+      || die "ai-headroom: could not enable $AUTOWRAP_UNIT.timer"
+    printf 'Desktop auto-rewrap    : on (every 5 min)\n'
+  else
+    local i
+    # Never installed here: nothing to stop, even without a user manager.
+    [ -e "$dir/$AUTOWRAP_UNIT.timer" ] || [ -e "$dir/$AUTOWRAP_UNIT.service" ] || return 0
+    systemctl --user disable --now "$AUTOWRAP_UNIT.timer" >/dev/null 2>&1 || true
+    # Idle means systemd itself reports inactive or failed. Activating (a oneshot
+    # rewrap mid-run), active, reloading or any query error is not idle.
+    unit_idle() {
+      case "$(systemctl --user show -p ActiveState --value "$1" 2>/dev/null)" in
+        inactive|failed) return 0 ;; *) return 1 ;;
+      esac
+    }
+    unit_idle "$AUTOWRAP_UNIT.timer" || die "ai-headroom: $AUTOWRAP_UNIT.timer could not be confirmed stopped; not unwrapping"
+    # A rewrap already running is left to finish (killing it mid-move could
+    # strand a binary); wait (60s by default), and refuse to continue if it persists.
+    for i in $(seq "${AI_HEADROOM_AUTOWRAP_WAIT:-60}"); do
+      unit_idle "$AUTOWRAP_UNIT.service" && break
+      sleep 1
+    done
+    unit_idle "$AUTOWRAP_UNIT.service" || die "ai-headroom: $AUTOWRAP_UNIT.service is still running or unreadable; not unwrapping"
+    rm -f "$dir/$AUTOWRAP_UNIT.service" "$dir/$AUTOWRAP_UNIT.timer"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
 
 action="${1:-status}"
 case "$action" in
@@ -333,6 +507,7 @@ case "$action" in
       off\ *) printf 'Shell startup (.bashrc): disabled by ai-headroom
 ' ;;
     esac
+    ccd_wrap_status
     cur="$(json_url)" || die "ai-headroom: could not read $SETTINGS."
     if [ -n "$cur" ]; then
       printf 'settings.json          : has %s -- IGNORED by Claude, run "ai-headroom on" or "off" to remove it
@@ -388,6 +563,8 @@ still works without curl.)"
 Turning it on now would leave Claude unable to connect at all."
     winenv_set "$PROXY_URL"
     bashrc_set on
+    ccd_wrap_all
+    autowrap_set on
     # Capture first: a `die` inside $( ) only kills the subshell, so
     # `[ -n "$(json_url)" ]` silently swallowed a fatal read error and the branch
     # went on to print success. Assign, check status, then act.
@@ -403,6 +580,8 @@ Turning it on now would leave Claude unable to connect at all."
   off)
     winenv_set ""
     bashrc_set off
+    autowrap_set off
+    ccd_unwrap_all
     stale="$(json_url)" || die "ai-headroom: could not read $SETTINGS; refusing to claim success."
     [ -n "$stale" ] && json_set ""
     printf 'Proxy OFF -> Claude goes straight to Anthropic.
@@ -412,7 +591,22 @@ Turning it on now would leave Claude unable to connect at all."
     printf 'sessions keep their old setting until they are restarted.
 '
     ;;
+  wrap-remote)
+    [ -n "$PROXY_URL" ] || die "ai-headroom: protected proxy topology is unavailable; run: ai-private-config sync"
+    ccd_wrap_all
+    ccd_wrap_status
+    printf 'New Claude remote workers will route through Headroom. Existing ones keep
+'
+    printf 'their current path until that session restarts.
+'
+    ;;
+  unwrap-remote)
+    # Stop the auto-rewrap timer first, or it re-wraps within five minutes.
+    autowrap_set off
+    ccd_unwrap_all
+    ccd_wrap_status
+    ;;
   *)
-    die "Usage: ai-headroom [status|on|off]"
+    die "Usage: ai-headroom [status|on|off|wrap-remote|unwrap-remote]"
     ;;
 esac

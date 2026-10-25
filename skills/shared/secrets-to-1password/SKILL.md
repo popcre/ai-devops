@@ -172,6 +172,30 @@ match the good entries' structure, not those legacy ones' category.
 Need a new password rather than storing an existing one? `password_generate`
 (or `password_generate_memorable`) first, then create the item.
 
+## Title index: exact titles of items that exist (vault `vibe_coding`)
+
+Listed 2026-10-21 through the 1Password MCP (titles only). Look here before
+searching. When you create an item, add its exact title to this list in the
+same change. Never add a value, address, or project identifier.
+
+- ScaleDown: `scaledown.ai API key for testing`, `scaledown.ai API key for
+  popdam image tagging`, `scaledown.ai API key for designflow dflow plm`
+- Supabase shared database: `Supabase Runtime Keys - shared POP database
+  (production)`, `Supabase DB Password - shared POP database`, `Supabase CLI
+  Personal Access Token`, `Supabase Preview Branch Credentials - shared POP
+  database (shared-db-schema-rehearsal)`
+- Reviewer/model keys: `deepseek API key for reviewer only`, `GLM z.ai API`,
+  `Meta ai Muse Spark API Key`, `stepfun step5 ai api key`, `qwen coder alibaba
+  token plan api key`, `grok xai x.ai`, `Anthropic Claude API for shared-db`,
+  `ai provider api keys openai deepseek chatgpt qwen`
+- GitHub: `GitHub App - pop-ai-watchers`, `GitHub PAT - u2giants repo push
+  access`, `GitHub PAT ai-devops RUNNER pool read token`
+- Hosting: `Railway API`, `Coolify API Token - Hetz production VPS`,
+  `cloudflare token`, `cloudflare-tunnel-tokens`
+- DesignFlow sandbox test logins: `DesignFlow PLM vendor account test login 1 -
+  alsand sandbox (users.level=vendor)`, `DesignFlow PLM vendor account test
+  login 2 - alsand sandbox (users.level=vendor)`
+
 ## Title format
 
 `<What it is> - <App/scope> (<qualifier>)`

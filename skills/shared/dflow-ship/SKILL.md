@@ -1,6 +1,6 @@
 ---
 name: dflow-ship
-description: Shared Claude and Codex DesignFlow PLM ship step — test, commit, push, PR to develop, verify the sandbox Cloud Build deploy. Use for a pure ship request ("push and commit", "commit and push", "update the PR for my branch sandbox-albert with develop", "is everything pushed and committed?") WHEN WORKING IN A DFLOW REPO (the six popcre designflow-* repos on branch sandbox-albert / albert-2sandbox). For the hetz/Coolify apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw) use `deploy-and-verify` instead. This is NOT the session closer — it does not update docs, sweep secrets, or write a handoff; for "wrap up"/"close out"/"end of session" use `wrap-up`, which detects the repository and delegates its ship step here.
+description: "DesignFlow PLM ship step (test, commit, push, PR to develop, verify sandbox Cloud Build). Use for \"push and commit\", \"commit and push\", \"update the PR for my branch sandbox-albert with develop\", or \"is everything pushed and committed?\" IN A DFLOW REPO (popcre designflow-*, branch sandbox-albert). Hetz/Coolify apps use `deploy-and-verify`; \"wrap up\"/\"end of session\" uses `wrap-up`."
 ---
 
 # dflow-ship

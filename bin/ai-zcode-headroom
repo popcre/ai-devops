@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# ai-zcode-headroom — turn the Z-code / Headroom HTTPS lane ON or OFF for THIS machine.
+#
+# Z-code is NOT like Claude. Z.ai client request signing requires an HTTPS
+# provider baseUrl (`Client signing handshake requires HTTPS.` on http://).
+# The working path is a TLS front on the hetz VPS that compresses model traffic
+# via a second Headroom process while the signing handshake still goes to Z.ai.
+#
+# Default state after toolkit install: OFF (Z-code talks to Z.ai directly).
+# This tool only flips ~/.zcode/v2/provider_config.json. It never starts the
+# VPS services. See docs/zcode-headroom-runbook.md.
+#
+#   ai-zcode-headroom status   what is Z-code using, and is the HTTPS lane up?
+#   ai-zcode-headroom off      go straight to Z.ai (escape hatch; no network needed)
+#   ai-zcode-headroom on       route through the HTTPS Headroom lane (refuses if down)
+#
+# Afterwards: fully quit Z-code (tray icon -> Quit) and reopen it. The provider
+# config is read at app start.
+#
+# headroom wrap/unwrap zcode is a different product surface: wrap prints UI
+# settings and starts a local proxy; it does not write provider_config.json and
+# is not the durable switch. Prefer this tool for the persistent lane.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ZCODE_HOME="${ZCODE_HOME:-$HOME/.zcode}"
+PROVIDER_CONFIG="$ZCODE_HOME/v2/provider_config.json"
+CA_BUNDLE="${AI_ZCODE_HEADROOM_CA_BUNDLE:-$HOME/.config/ai-devops/zcode-ca-bundle.crt}"
+TLS_PORT="${AI_ZCODE_HEADROOM_TLS_PORT:-8443}"
+# HTTPS lane base URL. Override for a rebuilt VPS; default derives the tailnet
+# host from protected headroom_proxy_url and attaches the TLS port + /v1.
+BASE_URL="${AI_ZCODE_HEADROOM_BASE_URL:-}"
+PROXY_URL="${AI_HEADROOM_PROXY_URL:-}"
+if [ -z "$PROXY_URL" ] && [ -x "$ROOT/bin/ai-private-config" ]; then
+  PROXY_URL="$("$ROOT/bin/ai-private-config" value headroom_proxy_url 2>/dev/null || true)"
+fi
+if [ -z "$BASE_URL" ] && [ -n "$PROXY_URL" ]; then
+  host="${PROXY_URL#*://}"
+  host="${host%%:*}"
+  if [ -n "$host" ]; then
+    BASE_URL="https://${host}:${TLS_PORT}/v1"
+  fi
+fi
+
+DIRECT_TMPL="$ROOT/config/zcode-headroom/provider_config.direct.json"
+HEADROOM_TMPL="$ROOT/config/zcode-headroom/provider_config.headroom.json"
+MODEL_ID="${AI_ZCODE_HEADROOM_MODEL_ID:-GLM-5.3}"
+PROVIDER_ID="account:zai-individual-coding-plan"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+# Python is used only to rewrite JSON. `off` must still work without it when
+# the template is copied verbatim (direct template is already valid).
+PY=""
+for c in python3 python py; do
+  command -v "$c" >/dev/null 2>&1 || continue
+  if "$c" -c 'import json,sys' >/dev/null 2>&1; then PY="$c"; break; fi
+done
+
+HAVE_CURL=1
+command -v curl >/dev/null 2>&1 || HAVE_CURL=0
+
+current_mode() {
+  if [ ! -f "$PROVIDER_CONFIG" ]; then
+    printf 'unknown (no provider_config.json)\n'
+    return
+  fi
+  if grep -q "$BASE_URL" "$PROVIDER_CONFIG" 2>/dev/null; then
+    printf 'headroom\n'
+    return
+  fi
+  if grep -q 'http://.*/8788' "$PROVIDER_CONFIG" 2>/dev/null; then
+    printf 'BROKEN-http-8788 (legacy; Z.ai signing will refuse)\n'
+    return
+  fi
+  if [ -n "$PY" ]; then
+    "$PY" - "$PROVIDER_CONFIG" <<'PY'
+import json,sys
+p=sys.argv[1]
+try:
+    d=json.load(open(p,encoding="utf-8"))
+    rules=(d.get("config") or {}).get("providerConfigRules",{}).get("providerRules") or []
+except Exception:
+    print("unreadable")
+    raise SystemExit
+if not rules:
+    print("direct")
+else:
+    url=""
+    for r in rules:
+        if r.get("providerId")== "account:zai-individual-coding-plan":
+            url=(((r.get("config") or {}).get("api") or {}).get("baseUrl") or "")
+    print("headroom" if url else "custom")
+PY
+  else
+    if grep -q '"providerRules": \[\]' "$PROVIDER_CONFIG" 2>/dev/null; then
+      printf 'direct\n'
+    else
+      printf 'custom\n'
+    fi
+  fi
+}
+
+lane_healthy() {
+  [ -n "$BASE_URL" ] || return 1
+  health="${BASE_URL%/v1}/health"
+  # /health is unauthenticated. Windows curl (schannel) and OpenSSL 3.13+
+  # both reject our private CA for different verify reasons (revocation;
+  # CA keyUsage). A -k probe of /health is sufficient to prove the lane is up
+  # and sends no credentials. `on` still requires the CA file to exist.
+  if [ "$HAVE_CURL" -eq 1 ]; then
+    curl -sk -m 8 "$health" 2>/dev/null | grep -q '"status":"healthy"'
+    return
+  fi
+  [ -n "$PY" ] || return 1
+  "$PY" -c 'import ssl,sys,urllib.request; ctx=ssl._create_unverified_context(); body=urllib.request.urlopen(sys.argv[1],context=ctx,timeout=8).read(4096).decode("utf-8","replace"); raise SystemExit(0 if "\"status\":\"healthy\"" in body else 1)' "$health" 2>/dev/null
+}
+
+cmd_status() {
+  printf 'Z-code provider config : %s\n' "$PROVIDER_CONFIG"
+  printf 'Mode                   : %s\n' "$(current_mode)"
+  if [ -z "$BASE_URL" ]; then
+    printf 'HTTPS lane URL         : UNRESOLVED (set AI_ZCODE_HEADROOM_BASE_URL or install ai-private-config)\n'
+    printf 'Lane health            : unknown\n'
+  else
+    printf 'HTTPS lane URL         : %s\n' "$BASE_URL"
+    if lane_healthy; then
+      printf 'Lane health            : reachable and healthy\n'
+    else
+      if [ "$HAVE_CURL" -eq 0 ]; then
+        printf 'Lane health            : curl missing (cannot check)\n'
+      elif [ ! -f "$CA_BUNDLE" ]; then
+        printf 'Lane health            : CA bundle missing (%s)\n' "$CA_BUNDLE"
+      else
+        printf 'Lane health            : NOT REACHABLE. Do not switch on until fixed.\n'
+      fi
+    fi
+  fi
+  printf 'CA bundle              : %s\n' "$CA_BUNDLE"
+  printf '\nAfter on/off: fully quit Z-code (tray -> Quit) and reopen it.\n'
+  printf 'Off switch that needs no network: ai-zcode-headroom off\n'
+}
+
+write_config() {
+  local src="$1"
+  [ -f "$src" ] || die "ai-zcode-headroom: missing template $src"
+  mkdir -p "$(dirname "$PROVIDER_CONFIG")"
+  if [ -n "$PY" ]; then
+    "$PY" - "$src" "$PROVIDER_CONFIG" "$BASE_URL" "$PROVIDER_ID" "$MODEL_ID" <<'PY'
+import json,sys
+src,dst,base,pid,mid=sys.argv[1:6]
+d=json.load(open(src,encoding="utf-8"))
+rules=(d.setdefault("config",{}).setdefault("providerConfigRules",{}).setdefault("providerRules",[]))
+if rules:
+    for r in rules:
+        if r.get("providerId")==pid:
+            api=r.setdefault("config",{}).setdefault("api",{})
+            api["type"]="anthropic-messages"
+            api["baseUrl"]=base
+d.setdefault("config",{}).setdefault("defaultModelSelection",{})
+d["config"]["defaultModelSelection"]={"providerId":pid,"modelId":mid}
+import os,shutil
+if os.path.exists(dst):
+    shutil.copy2(dst,dst+".bak")
+tmp=dst+".tmp"
+with open(tmp,"w",encoding="utf-8") as f:
+    json.dump(d,f,indent=2)
+    f.write("\n")
+if os.path.exists(dst):
+    shutil.copymode(dst,tmp)
+os.replace(tmp,dst)
+PY
+  elif [ "$src" = "$HEADROOM_TMPL" ]; then
+    die "ai-zcode-headroom: python is required to write the HTTPS lane URL into the config"
+  else
+    [ -f "$PROVIDER_CONFIG" ] && cp -f "$PROVIDER_CONFIG" "$PROVIDER_CONFIG.bak"
+    cp -f "$src" "$PROVIDER_CONFIG.tmp"
+    [ -f "$PROVIDER_CONFIG" ] && chmod --reference="$PROVIDER_CONFIG" "$PROVIDER_CONFIG.tmp" 2>/dev/null
+    mv -f "$PROVIDER_CONFIG.tmp" "$PROVIDER_CONFIG"
+  fi
+}
+
+cmd_off() {
+  write_config "$DIRECT_TMPL"
+  printf 'Z-code now goes DIRECT to Z.ai.\n'
+  printf 'Fully quit and reopen Z-code.\n'
+}
+
+cmd_on() {
+  if [ -z "$BASE_URL" ]; then
+    die "ai-zcode-headroom: cannot resolve HTTPS lane URL. Set AI_ZCODE_HEADROOM_BASE_URL or install ai-private-config."
+  fi
+  case "$BASE_URL" in
+    https://*) ;;
+    *) die "ai-zcode-headroom: Z.ai signing requires an https:// baseUrl (got $BASE_URL)" ;;
+  esac
+  [ -f "$CA_BUNDLE" ] || die "ai-zcode-headroom: missing CA bundle $CA_BUNDLE (see docs/zcode-headroom-runbook.md)"
+  if ! lane_healthy; then
+    die "ai-zcode-headroom: HTTPS lane not healthy at $BASE_URL — not switching. Fix the VPS lane first."
+  fi
+  write_config "$HEADROOM_TMPL"
+  printf 'Z-code now routes through the HTTPS Headroom lane (%s).\n' "$BASE_URL"
+  printf 'Fully quit and reopen Z-code.\n'
+}
+
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,28p' "$0"
+    ;;
+  status) cmd_status ;;
+  off) cmd_off ;;
+  on) cmd_on ;;
+  *)
+    die "usage: ai-zcode-headroom status|on|off"
+    ;;
+esac

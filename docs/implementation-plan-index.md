@@ -13,6 +13,7 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
+| [`plan_glm_own_output_recovery.md`](../plan_glm_own_output_recovery.md) | [#1791](https://github.com/popcre/ai-devops/issues/1791), Oracle coordinator / Codex source lane | Source diagnostic partial; isolated formal-profile architecture decision before B–D; no installation or actual capability proof |
 | [`plan_review-scope-reduction.md`](../plan_review-scope-reduction.md) | [#1714](https://github.com/popcre/ai-devops/issues/1714) | Steps 0–5 landed (shared-db#4272 + this repo); Step 6 live proof open |
 | [`Windows render admission plan`](plans/windows-render-production-admission-20261011.md) | [#1455](https://github.com/popcre/ai-devops/issues/1455), Root coordinator | Step 0 STOP: supported ephemeral structurally read-only reviewer qualification not proved; no allowance/code/live action implemented; PopDAM #162 retains application acceptance |
 | [`plan_blockerwatch-reliability-repair.md`](../plan_blockerwatch-reliability-repair.md) | [#632](https://github.com/popcre/ai-devops/issues/632) | Step 0; comprehensive audit/repair plan written, no implementation started |

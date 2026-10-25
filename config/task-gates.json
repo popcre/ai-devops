@@ -28,6 +28,7 @@
     "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
+    "scoped-skills-install",
     "application-workflow",
     "review",
     "code-only-review",
@@ -59,9 +60,13 @@
     }
   },
   "reviewer_release": {
+    "production": {
+      "infrastructure": "reviewed-production-dispatch"
+    },
     "database": {
       "private-tooling": "reviewed-private-data-writer",
-      "private-evidence": "synthetic-fixtures-only"
+      "private-evidence": "synthetic-fixtures-only",
+      "reviewer-safety": "reviewed-generated-definition-fixture-only"
     }
   },
   "application_source_releases": {
@@ -76,6 +81,45 @@
         "project": "lithe-breaker-323913",
         "region": "us-east4",
         "service": "popcre-albert-core-sandbox"
+      }
+    },
+    "popcre/designflow-tracking": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox"
+      }
+    },
+    "popcre/designflow-frontend": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-frontend",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-frontend-sandbox"
+      }
+    },
+    "popcre/designflow-item-master": {
+      "manifest_path": ".ai-devops/application-release-target.json",
+      "required_consumer_gate": "cloud-build-release-review",
+      "target": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-item-master",
+        "route": "cloud-build-branch-push",
+        "branch": "sandbox-albert",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-item-sandbox"
       }
     }
   },
@@ -425,6 +469,10 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/windows-job-run.ps1",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-task-gates",
           "class": "reviewer-safety"
         },
@@ -434,6 +482,21 @@
         },
         {
           "glob": "tools/lib/task-gates.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-install-skills",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-ai-install-skills.sh",
+          "class": "reviewer-safety"
+        },        {
+          "glob": "tools/scoped_skills_install.py",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test-scoped-skills-install.py",
           "class": "reviewer-safety"
         },
         {
@@ -478,6 +541,14 @@
         },
         {
           "glob": "bin/ai-oracle-native-alternate-v2",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/generated_definition_action.py",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tests/test_generated_definition_action.py",
           "class": "reviewer-safety"
         }
       ],

@@ -410,6 +410,7 @@ class AccessContext(unittest.TestCase):
                  "--wait-seconds", "4", "--age-file", str(self.base / f"age-{index}"),
                  "--source-file", str(self.base / f"source-{index}"),
                  "--", sys.executable, str(source)], capture_output=True, check=False,
+                env=dict(os.environ, AI_GH_STATE_DIR=str(self.base / "gh-state")),
             )
             self.assertEqual(process.returncode, 0, process.stderr)
             self.assertEqual((self.base / f"source-{index}").read_text(), "upstream")

@@ -1,0 +1,83 @@
+# In-house tool cheat sheet
+
+Exact usage lines, copied from each tool's own usage text on 2026-10-21. Read
+this instead of running `--help`. If a line here fails, the tool changed: rerun
+its help and update this page in the same pull request.
+
+## ai-review (`bin/ai-review`)
+
+```text
+ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force] [--additional-reviewer]
+ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]
+ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]
+ai-review doctor
+```
+
+`--implementer ENGINE` records the implementing engine; `final-check` needs a
+real `--tests` command. Pick the reviewer per `docs/reviewer-rotation-rules.md`.
+
+## ai-task-gates (`bin/ai-task-gates`)
+
+```text
+ai-task-gates start --class CLASS [--reason TEXT] [--base REF]
+ai-task-gates check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT] [--target-head SHA]
+ai-task-gates explain [--json] [--base REF]
+ai-task-gates status | end
+```
+
+ACTION: `review code-only-review pr-wait ship deploy database infrastructure
+production shared-db-promotion application-workflow`. Classes are listed in the
+global rules.
+
+## ai-muse (`bin/ai-muse`; needs `AI_MUSE_CALLER=claude` or `codex`)
+
+```text
+ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin
+ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin
+ai-muse implement <name> [--base REF] --prompt TEXT|--prompt-file FILE|stdin
+ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor
+```
+
+## ai-pr-wait (`bin/ai-pr-wait`)
+
+```text
+ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--repo OWNER/NAME] [--reviewer-approval REPORT]
+```
+
+`--timeout-minutes` defaults to 60 (owner ruling 2026-10-21, #1962); run the wait
+in the background rather than a `sleep` loop.
+On `STILL-WAITING` rerun the printed command. Prose-only PRs do not wait for
+checks unless `--reviewer-approval` is given.
+
+## ai-doc-safety (`bin/ai-doc-safety`)
+
+```text
+ai-doc-safety [tree]
+```
+
+Exit 0 = both doc invariants hold; required before a prose-only admin merge.
+
+## ai-blocker-watch (`bin/ai-blocker-watch`)
+
+```text
+ai-blocker-watch find <words...> [--all]
+ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
+ai-blocker-watch list | cancel <wait-id> | reap [--dry-run] | alarm [--dry-run]
+```
+
+`wait` and `has-wait` are inert: use `ai-pr-wait` or leave the issue as the card.
+
+## shared-db scripts (in a `popcre/shared-db` checkout, run with `node`)
+
+These have no `--help`; an unknown flag prints the supported list. The lane
+lines are the most-used ones in shared-db's own docs; recovery flags are in
+that repository's runbooks.
+
+```text
+node scripts/run-governed-review.mjs --issue N --pr N --head-sha SHA --reviewer NAME [--wrapper W] [--worktree PATH] [--review-slot S] [--tests CMD] [--skip-doctor]
+node scripts/manage-migration-author-lanes.mjs --queue-audit
+node scripts/manage-migration-author-lanes.mjs --audit | --abandonment-audit | --reviewer-capacity
+node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue> [--admit-issue <issue> --pr <pr>]
+node scripts/manage-migration-author-lanes.mjs --return-issue <n>
+node scripts/manage-migration-author-lanes.mjs --release-duplicate-claim <claim> --owner <exact-owner> --confirm-finished
+```

@@ -51,7 +51,7 @@ In: edge-dev3 `/tmp` placement; a session-owned temp root for every engine launc
 NOT in this plan:
 - Windows review sandboxes (done by `plan_agent-self-cleanup.md`; extension in issue #1018).
 - Git worktree cleanup (skill `cleanup-worktree`).
-- Orphan review sandbox reconciliation (issue #1420, owner MiMo, `HANDOFF.d/2026-10-07T1908Z-edge-dev-mimo-orphan-sandbox-cleanup.md`) — do not touch its paths.
+- Orphan review sandbox reconciliation (issue #1420, owner MiMo, `HANDOFF.d/2026-10-07T1908Z-edge-dev-mimo-orphan-sandbox-cleanup.md` (retired; recoverable from git history)) — do not touch its paths.
 - Using edge-dev3 as a CI runner (separate follow-up once memory is freed).
 - Other Linux hosts (hetz etc.) — roll out after edge-dev3 is proven, as a follow-up child.
 

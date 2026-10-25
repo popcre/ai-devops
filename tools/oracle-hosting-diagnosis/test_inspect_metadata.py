@@ -103,14 +103,15 @@ class TestInspector(unittest.TestCase):
             c=dict(C,known_hosts_sha256=hashlib.sha256(hosts.read_bytes()).hexdigest())
             def fake_run(args,**kwargs):
                 helper=Path(kwargs['env']['SSH_ASKPASS']);secret=helper.parent/'password'
-                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.DEVNULL,env=kwargs['env'])
+                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.PIPE,env=kwargs['env'])
                 self.assertEqual(result.stdout,b'fixture-credential')
                 # An accidental link cannot make the helper read another file.
                 other=helper.parent/'foreign';other.write_text('foreign-fixture')
                 secret.unlink();secret.symlink_to(other)
-                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.DEVNULL,env=kwargs['env'])
-                self.assertNotEqual(result.returncode,0)
+                result=real_run([str(helper)],stdout=m.subprocess.PIPE,stderr=m.subprocess.PIPE,env=kwargs['env'])
+                self.assertEqual(result.returncode,3)
                 self.assertEqual(result.stdout,b'')
+                self.assertEqual(result.stderr,b'')
                 kwargs['stdout'].write(json.dumps([row()]).encode())
                 return type('R',(),{'returncode':0})()
             with patch.dict(os.environ,{'ORACLE_HETZ_READ_PASSWORD':'fixture-credential'}),patch.object(m.subprocess,'run',fake_run):m.read_remote(c,hosts)

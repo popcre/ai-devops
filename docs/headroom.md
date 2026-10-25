@@ -25,8 +25,10 @@ Goal: **fewer input tokens per request → lower Claude token usage.**
   sessions, not a trend. The like-for-like historical `token`-mode baseline was
   4.22%; the current mode preserves slightly better provider-cache behaviour.
 - It does **not** break the prompt cache; that was measured, not assumed (§5b).
-- Installed version: **0.37.0** (pipx package `headroom-ai`, upgraded from
-  0.30.0 on 2026-08-31).
+- Since 2026-10-19 both lanes also trim **output** tokens via the output
+  shaper, verbosity pinned at level 2 (§5d).
+- Installed version: **0.41.0** (pipx package `headroom-ai`, upgraded from
+  0.37.0 on 2026-10-19; see §2 for the bind acknowledgment that version needs).
 
 > ⚖️ **Standing decision: if it is not clearly worth it, we pull it.** This is a
 > trial. After real sessions run through it, read the savings (§6). If the token
@@ -54,8 +56,9 @@ HEADROOM_HOST="${HEADROOM_URL#http://}"; HEADROOM_HOST="${HEADROOM_HOST%%:*}"
 | Install method | `pipx`, under Linux user **`ai`** |
 | Binary | `/home/ai/.local/bin/headroom` |
 | Data / logs dir | `/home/ai/.headroom/` |
-| systemd unit | `/etc/systemd/system/headroom.service` |
+| systemd unit | `/etc/systemd/system/headroom.service` (Claude lane) |
 | Listen address | **`$HEADROOM_HOST:8787`** — the **private Tailscale interface only** |
+| Second instance | `headroom-zcode.service` on **`$HEADROOM_HOST:8788`** — ZCode / Z.ai lane, own ledger under `/home/ai/.headroom-zcode-home/` (§2b) |
 
 ### The service
 
@@ -67,17 +70,145 @@ Wants=network-online.target tailscaled.service      # waits for Tailscale on boo
 [Service]
 User=ai
 ExecStart=/home/ai/.local/bin/headroom proxy --port 8787 --host $HEADROOM_HOST
+Environment=HEADROOM_OUTPUT_SHAPER=1                    # output trimming (§5d)
+Environment=HEADROOM_VERBOSITY_LEVEL=2
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/ai/.headroom/logs/proxy.log
 StandardError=append:/home/ai/.headroom/logs/proxy.log
 ```
 
+#### The bind acknowledgment (required since 0.41.0)
+
+0.41.0 refuses to bind a non-loopback address unless the operator explicitly
+acknowledges it, because tailnet peers get unauthenticated data-plane access.
+The acknowledgment lives in a drop-in
+(`/etc/systemd/system/headroom.service.d/unauth-bind.conf`):
+
+```ini
+[Service]
+Environment=HEADROOM_ALLOW_UNAUTHENTICATED_BIND=1
+```
+
+Without it the service crash-loops with
+`Error: Refusing to bind '<tailnet-ip>'` on every start. This preserves the
+original posture from §3: bind is the tailnet address only, never
+`0.0.0.0`, never reachable from the public internet. Do not "fix" the error
+by binding `127.0.0.1` — that would break every remote client — or by adding
+`HEADROOM_PROXY_TOKEN`, which would require reconfiguring every client.
+
+### 2b. The second instance — the ZCode / Z.ai lane (added 2026-10-19)
+
+One headroom **process** forwards each wire protocol to exactly **one**
+upstream: `--anthropic-api-url` (env `ANTHROPIC_TARGET_API_URL`) sets the
+single Anthropic-protocol target. Claude and ZCode both speak the Anthropic
+protocol but to different servers (`api.anthropic.com` vs
+`api.z.ai/api/anthropic`), so the Claude-lane instance on 8787 cannot also
+serve ZCode. The same pipx installation runs a **second process** on 8788:
+
+```ini
+# /etc/systemd/system/headroom-zcode.service  (key lines)
+[Unit]
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+[Service]
+User=ai
+Environment=HOME=/home/ai/.headroom-zcode-home   # own ledger: two writers on
+                                                 # one proxy_savings.json
+                                                 # would corrupt it
+Environment=HEADROOM_ALLOW_UNAUTHENTICATED_BIND=1
+Environment=HEADROOM_OUTPUT_SHAPER=1                    # output trimming (§5d)
+Environment=HEADROOM_VERBOSITY_LEVEL=2
+ExecStart=/home/ai/.local/bin/headroom proxy --port 8788 --host $HEADROOM_HOST --mode cache --anthropic-api-url https://api.z.ai/api/anthropic
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=append:/home/ai/.headroom-zcode-home/.headroom/logs/proxy.log
+StandardError=append:/home/ai/.headroom-zcode-home/.headroom/logs/proxy.log
+```
+
+Same security posture as §3: tailnet bind only, client auth passed through
+unchanged (the Z.ai coding-plan key is not stored on the VPS). Verified live
+before wiring: a request through 8788 with a dummy key returns a **Z.ai-format**
+error while 8787 returns an Anthropic-format error for the same probe —
+proof the two lanes target different upstreams.
+
+**Clients cannot talk to 8788 directly.** Z.ai signing requires HTTPS; 8788 is
+plain HTTP. In front of it sits `zcode-headroom-tls.service` on **8443**
+(path split: `/api/paas/*` → Z.ai handshake, else → 8788). Full procedure:
+[`zcode-headroom-runbook.md`](zcode-headroom-runbook.md).
+
 Health check (from any machine on the tailnet, or the VPS itself):
 
 ```bash
 curl -s "$HEADROOM_URL/health"      # -> {"status":"healthy","ready":true,...}
 ```
+
+### Upgrade runbook (learned the hard way on 2026-10-19)
+
+The 0.37.0 → 0.41.0 upgrade took ~1.5 hours instead of minutes. The package
+itself installs in seconds; everything that went wrong was around it. Follow
+this order so it does not repeat.
+
+**1. Declare the task before doing anything** — `ai-task-gates start --class
+production` in the checkout you will actually run gate checks from. The gates
+evaluate the change set of the checkout where they are invoked: the canonical
+landing checkout carries other sessions' diffs (a ship check there demanded
+reviewer-safety for files this task never touched), so run ship checks in
+your own task worktree.
+
+**2. Get the reviewer approval before touching the VPS.** The gate
+(`check --before production`) needs an exact-head APPROVE plus passing local
+test evidence. What cost the time here:
+
+- **The brief must match what the packet actually contains.** The packet is
+  HEAD's diff against its base — whatever landed most recently (here: an
+  unrelated stepfun fix). A brief that claims "repo change set: none" gets an
+  automatic REJECT for prompt/packet mismatch. Say plainly that the tip
+  commit is unrelated, already merge-queue-reviewed, and its role is only to
+  bind the exact head; carry the resource, action, verification, rollback
+  and blast radius in the brief itself (`AI_REVIEW_BRIEF_FILE=<file>` — the
+  brief is the only carrier of the off-repo resource, see
+  `docs/configuration.md`).
+- **Use a fast focused suite for `--tests`:**
+  `bash tests/test-action-taxonomy.sh` (4 s, 29 checks).
+  `tests/test-ai-task-gates.sh` is a 1,889-line suite that ran 30+ minutes
+  on this Windows host and stalled two review attempts — it is a full suite,
+  not review evidence (see `docs/development.md` on the focused-suite
+  convention).
+- **A killed review does not die.** A tool timeout kills only the outer
+  wrapper; the pool, engine and test children keep running and the next
+  attempt queues behind them. Before retrying, kill the whole process tree
+  (`taskkill /PID <pid> /T /F` on the pool/engine/test PIDs).
+- Pick any in-rotation reviewer whose engine differs from yours; after a
+  REJECT caused by a bad brief, fix the brief first — do not just retry.
+
+**3. Upgrade on the VPS:** `ssh vps2-direct`, as user `ai`:
+`pipx upgrade headroom-ai`. Nothing under `/etc/systemd/system/` is touched
+by pipx.
+
+**4. Before restarting, confirm the bind drop-in exists** (see "The bind
+acknowledgment" above). Without it every 0.40+ start refuses to bind and the
+service crash-loops (`systemctl` shows `activating`, `proxy.log` fills with
+`Error: Refusing to bind ...`). That is exactly what happened here — about
+two minutes of Claude traffic failing — and the fix was adding the drop-in,
+`daemon-reload`, restart.
+
+**5. Verify from a client machine, not just on the VPS:**
+`curl -s "$HEADROOM_URL/health"` must return HTTP 200 with `"version":"<new>"`,
+and `ai-headroom status` must say healthy. Two false alarms to ignore: the
+`kompress` check reports `degraded` for ~10 s after start while the ONNX
+model warms (re-check before treating it as a fault), and `headroom --version`
+is not on PATH in a non-login ssh shell — call
+`/home/ai/.local/bin/headroom --version`.
+
+**6. Rollback if health does not come back:**
+`pipx install --force headroom-ai==0.37.0` as user `ai`, restart, re-verify.
+The savings ledger in `/home/ai/.headroom/` survives both directions.
+
+**7. Update this file** (the §1 version bullet and anything new learned),
+then ship the docs change prose-only through the doc-safety admin lane.
 
 ## 3. Security posture (important)
 
@@ -134,6 +265,59 @@ export ANTHROPIC_BASE_URL="$HEADROOM_URL"
 The VPS reaches its own Tailscale IP locally, so this needs no tunnel. This is
 the workflow that produced the only real savings we have so far (2026-07-07).
 
+### Workflow A′ — Claude Code remote workers on the VPS (`ccd-cli`)
+
+The `.bashrc` export covers CLIs started from a shell. It does **not** cover the
+Claude Code workers the `claude-ssh` / remote launcher spawns under
+`~/.claude/remote/ccd-cli/<version>`. Those are exec'd with
+`ANTHROPIC_BASE_URL=https://api.anthropic.com` baked into their environment, so
+every remote session on hetz talked straight to Anthropic while the shell CLI
+was proxied.
+
+Measured on hetz 2026-10-20: all 17 live `ccd-cli` processes had
+`ANTHROPIC_BASE_URL=https://api.anthropic.com` in `/proc/<pid>/environ` and held
+TLS connections to `api.anthropic.com`; a fresh `claude -p` from a shell routed
+through `:8787` in the same window.
+
+**The fix is a wrapper on the executable path the launcher execs** — the same
+lever edge-dev3 used when Claude Desktop forced `api.anthropic.com` on its
+Claude Code children (Workflow B′ trap 4). `ai-headroom wrap-remote` (also run
+by `ai-headroom on`) moves each versioned binary to `<name>.headroom-real` and
+installs a tiny script that forces the proxy URL and execs the real one. Running
+workers keep their old inode — nothing live is killed. New spawns pick up the
+wrapper.
+
+```bash
+ai-headroom wrap-remote    # or: ai-headroom on
+ai-headroom status         # must say "wrapped -> Headroom"
+```
+
+Claude Code updates drop a **new** versioned binary next to the old ones. After
+any update, run `ai-headroom on` again (or `wrap-remote`) — `status` flags an
+unwrapped binary as a gap. Escape hatch: `ai-headroom unwrap-remote` (or
+`ai-headroom off`) restores the raw binaries.
+
+Also clear any inert `settings.json` `env.ANTHROPIC_BASE_URL` entry
+(`ai-headroom on`/`off` does this) — it is accepted and ignored (Workflow B)
+and only makes status displays lie.
+
+**Prove routing the edge-dev3 way (Workflow B′):** do not trust
+`/proc/<pid>/environ` alone. The decisive check is `proxy.log` on hetz
+(`grep path=/v1/messages /home/ai/.headroom/logs/proxy.log | tail`) — look for
+`status=200` and `client=claude-code` after a turn from the wrapped binary.
+Live proof 2026-10-20 10:55 AM / 11:00 AM EDT.
+
+Ubuntu notes from edge-dev3 that do **not** apply to this VPS lane (and why):
+no DietCode/Scaledown `claude` wrapper here (`~/.local/bin/claude` is a real
+ELF), and there is no KDE desktop — `environment.d` is for GUI apps, not
+`claude-ssh` workers.
+
+Offline tests: `tests/test-ai-headroom-remote-wrap.sh`.
+
+**Full session record** (investigation, measurements, edge-dev3 lesson map, live
+proof, operator checklist):
+[`headroom-hetz-claude-remote-wrap.md`](headroom-hetz-claude-remote-wrap.md).
+
 ### Workflow B — Claude running **locally on a Windows machine** (clone-and-code mode)
 
 > **`settings.json` DOES NOT WORK for this, and never did.** Measured on Claude
@@ -169,6 +353,131 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 > the protected SSH template's Headroom forward. If Tailscale-direct is ever undesirable,
 > a local Claude can instead use `http://localhost:8787` while an `ssh vps2`
 > session is open. This is a fallback, not the primary path.
+
+### Workflow B′ — Linux desktop (KDE) pointers (edge-dev3, 2026-10-19)
+
+Ubuntu + Claude Desktop + Claude Code. Same proxy (8787). Five traps that
+cost real time — read before wiring another Linux desktop.
+
+1. **`ai-headroom on` covers terminals only.** It writes
+   `export ANTHROPIC_BASE_URL=` in `~/.bashrc` **above** the non-interactive
+   `case $-` guard (Claude Code SSH sessions are non-interactive). GUI apps
+   started from KDE never read `.bashrc`.
+2. **Desktop apps need `~/.config/environment.d/50-headroom.conf`** with
+   `ANTHROPIC_BASE_URL=<proxy url>`, plus `systemctl --user set-environment`
+   for the current session. Confirm with
+   `systemctl --user show-environment | grep ANTHROPIC_BASE_URL`. Do **not**
+   use `/etc/environment` (machine-wide; hits the CI runner).
+3. **DietCode / Scaledown `claude` wrapper stomps the URL.** On edge-dev3
+   `~/.local/bin/claude` is a wrapper that rewrites `ANTHROPIC_BASE_URL` to
+   `http://127.0.0.1:8788` whenever `~/.scaledown/config.json` exists. Chain
+   it: `export SCALEDOWN_PROXY_UPSTREAM=<proxy url>` (also above the bashrc
+   guard and in `environment.d`), then restart the DietCode proxy. Otherwise
+   terminal Claude silently bypasses Headroom.
+4. **Claude Desktop forces `ANTHROPIC_BASE_URL=https://api.anthropic.com` on
+   Claude Code children**, overriding the session env. Wrap the desktop's
+   Claude Code binary (`…/claude-code/<ver>/<hash>/claude` → `claude-real`
+   plus a tiny script that re-exports the proxy URL and `exec`s the real
+   ELF). New chats pick it up; already-open Claude Code chats need a restart.
+5. **Electron clears `/proc/<pid>/environ`.** Do not use that to verify
+   routing. Check the systemd unit `Environment=`, child helper processes, or
+   — always decisive — Headroom `/stats` `proxy_inbound.by_path["/v1/messages"]`
+   and the `proxy.log` request lines on hetz (`ssh vps2`).
+
+**What Headroom covers on a desktop box:** Claude Code (terminal and
+desktop-spawned). **What it does not:** the Claude Desktop *chat UI*
+(claude.ai backend — different protocol). Albert uses only the desktop app on
+edge-dev3, so Headroom applies to its Claude Code sessions, not plain chats.
+
+**Subscription CLI auth:** `~/.claude/.credentials.json` (`claudeAiOauth`).
+The desktop holds a live `CLAUDE_CODE_OAUTH_TOKEN` in its Claude Code child
+`environ`; that token can seed the CLI credentials file (machine-local login
+state — never in this repo). Live proof used subscription OAuth
+(`authorization: [REDACTED]` in `proxy.log`), not an API key.
+
+Issue with acceptance evidence: [#1869](https://github.com/popcre/ai-devops/issues/1869).
+
+**How to tell traffic is really going through Headroom** (health alone is
+worthless — see §6):
+
+1. Note `/stats` `proxy_inbound.by_path["/v1/messages"]` (and `total`).
+2. Send one Claude Code message from the client you just wired.
+3. Read `/stats` again. The count must rise. If it does not, the client is
+   not using the proxy (wrapper stomped the URL, or desktop forced
+   `api.anthropic.com`).
+4. For a named request line: `ssh vps2` then
+   `grep path=/v1/messages /home/ai/.headroom/logs/proxy.log | tail`
+   — look for your tailnet client IP, `user-agent: claude-cli/…`, and
+   `status=200`. Live dashboard: `$HEADROOM_URL/dashboard`.
+
+### Workflow C — ZCode running locally on a Windows machine (added 2026-10-19)
+
+**Full incident, architecture, and off-ramp:
+[`zcode-headroom-runbook.md`](zcode-headroom-runbook.md).** Read that before
+changing this lane.
+
+ZCode's GLM coding-plan provider speaks the **Anthropic Messages protocol**
+(`api.type: anthropic-messages`, vendor default
+`https://api.z.ai/api/anthropic`) — the same proxy family can serve it.
+ZCode does **not** read `ANTHROPIC_BASE_URL` (that variable is for Claude on
+8787).
+
+**Z.ai client signing requires `https://` on the provider baseUrl.** A plain
+`http://…:8788` address fails every turn with
+`Client signing handshake requires HTTPS.` The working path is:
+
+```text
+ZCode baseUrl https://$HEADROOM_HOST:8443/v1
+  → zcode-headroom-tls.service :8443  (TLS; /api/paas/* → Z.ai handshake)
+  → headroom-zcode.service :8788
+  → https://api.z.ai/api/anthropic
+```
+
+The redirect is ZCode's **personal provider config**,
+`~/.zcode/v2/provider_config.json`, read when the app starts:
+
+```json
+{
+  "schemaVersion": 1,
+  "config": {
+    "providerConfigRules": {
+      "providerRules": [
+        {
+          "providerId": "account:zai-individual-coding-plan",
+          "config": {
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://$HEADROOM_HOST:8443/v1"
+            }
+          }
+        }
+      ]
+    },
+    "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] },
+    "defaultModelSelection": { "providerId": "account:zai-individual-coding-plan", "modelId": "GLM-5.3" }
+  }
+}
+```
+
+Windows trust: a **combined** CA bundle (private CA + public roots) at
+`%USERPROFILE%\.config\ai-devops\zcode-ca-bundle.crt`, wired via
+`ZCODE_AGENT_CA_CERT` / `AGENT_CA_CERT` / `NODE_EXTRA_CA_CERTS` /
+`~/.zcode/cli/config.json` `network.caCertFile`. Never point `SSL_CERT_FILE`
+at the private CA alone (it replaces the public trust store).
+
+Durable switch (toolkit, installed with every machine, **default OFF**):
+`ai-zcode-headroom status|on|off` (see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md)).
+Legacy bat wrappers live in `C:\Users\ahazan\headroom-zcode\` on edge-dev:
+`headroom-zcode-off.bat` (back to direct Z.ai) and `headroom-zcode-on.bat`
+(refuses unless the HTTPS lane answers `/health`), each followed by a full quit
+and reopen of ZCode. The same directory holds both config variants. Keep a
+pre-change backup next to the live file
+(`provider_config.json.bak-pre-headroom-20261019`).
+
+Known gap (2026-10-19): the headless ZCode CLI broke independently of this
+lane — `project_token_login_failed` before any model call, while the desktop
+app works. Until that is fixed, `ai-zcode` cannot prove this lane; live proof
+is a desktop turn (confirmed 2026-10-19).
 
 ### Which machines are actually wired (as of 2026-07-14)
 
@@ -295,6 +604,76 @@ narrative figures in §6.
 > drops rows — the first version of this recorder lost a third of the data while
 > looking correct. The current parser anchors on a full regex.
 
+## 5d. Output trimming — the output shaper (enabled 2026-10-19)
+
+Headroom also reduces **output** tokens: an output shaper that (a) steers
+verbosity through a small block appended to the system-prompt tail and (b)
+routes effort / thinking budget through request parameters. It ships **off by
+default**. Albert asked for it on 2026-10-19 ("enable output trimming on
+headroom"); both lanes now carry in `[Service]`:
+
+```ini
+Environment=HEADROOM_OUTPUT_SHAPER=1
+Environment=HEADROOM_VERBOSITY_LEVEL=2
+```
+
+**Why the level is pinned.** Both lanes run `--mode cache`. Unpinned steering
+would move the system-prompt tail as the level changes — that rewrites the
+provider prefix-cache key, trading the ~90% prefix-cache discount for a small
+output saving — so headroom hard-disables *unpinned* steering in cache mode.
+A level **fixed before startup** is written into turn 1's prefix and never
+moves, so an explicitly pinned `HEADROOM_VERBOSITY_LEVEL` passes the gate by
+design. Level 2 "only forbids ceremony and restatement" (vendor measurement:
+−30% output tokens on a long explain-with-code turn, no visible content loss);
+level 3 starts dropping content and was deliberately not chosen. Effort
+routing and the thinking budget ride request parameters outside the cache key
+and keep saving in cache mode regardless.
+
+**Measure it** (output tokens are counterfactual — the proxy never sees what
+the model *would* have emitted unshaped):
+
+```bash
+sudo -u ai /home/ai/.local/bin/headroom output-savings
+```
+
+Without a holdout this reports the **estimated** (synthetic-control) figure
+with a 95% confidence band. An honest **measured** A/B needs
+`HEADROOM_OUTPUT_HOLDOUT>0` (a fraction of conversations left unshaped as
+control). We did **not** enable a holdout: every held-out conversation is
+savings deliberately forgone, and the point of the trial is to save. Revisit
+if the estimate is ever disputed.
+
+**Baseline seed (2026-10-20).** Until this day `output-savings` said
+"Baseline: 0 samples" — the shaper was writing treatment rows but never
+learned the per-stratum unshaped distribution, so every report was empty.
+Fixed on edge-dev3, where the real session history lives:
+
+```bash
+# headroom CLI on edge-dev3 (uv tool, Python 3.13)
+export PATH="$HOME/.local/bin:$PATH"
+cd /home/ahazan/repos/ai-devops
+headroom learn --verbosity --apply
+# → ~/.headroom/verbosity.json (level 2, high confidence)
+# → ~/.headroom/output_savings.json (baseline: 7609 samples, 13 strata)
+```
+
+Signals from 40 ai-devops sessions / 738 human turns: 0.3% interrupts, 20%
+fast-skips on long answers → **L2** (drop ceremony and echo). That matches
+the pinned `HEADROOM_VERBOSITY_LEVEL=2`. Merge the learned `baseline` object
+into the proxy's `/home/ai/.headroom/output_savings.json` on hetz (keep any
+existing `treatment`/`control` rows); `learn --apply` writes only the machine
+it runs on.
+
+**First working estimate (2026-10-20, after the seed):** 100 shaped
+requests, 39,975 output tokens expected unshaped, 9,439 saved —
+**23.6% reduction (95% CI 13.1% … 34.1%)**. Re-run `learn --verbosity`
+from the repo that carries the traffic if the work mix changes; do not
+overwrite a live treatment ledger with a fresh empty file.
+
+**Revert:** remove the two `Environment=` lines from both units,
+`systemctl daemon-reload`, restart both services. Unit backups sit next to
+the originals as `*.service.bak-2026-10-19-shaper`.
+
 ## 6. How to see whether it is actually helping
 
 On the VPS (`ssh hetzner`, or via the `devops-mcp` MCP):
@@ -335,9 +714,26 @@ retain the documented instant bypass for outages.
 | Machine | Wired? | Evidence |
 |---|---|---|
 | hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
+| hetz VPS Claude remote workers (Workflow A′) | ✅ wrapped 2026-10-20 | `ai-headroom wrap-remote` on `~/.claude/remote/ccd-cli/*`; new spawns forced through 8787. Live proof 2026-10-20 10:55 AM EDT. Re-wrap after a Claude Code update. |
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
 | 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
+| **edge-dev3** (Workflow B′, Ubuntu KDE) | ✅ yes (2026-10-19) | `ai-headroom on` + `environment.d` + DietCode `SCALEDOWN_PROXY_UPSTREAM` chain + desktop Claude Code binary wrapper; subscription CLI and desktop Claude Code proven in `proxy.log` ([#1869](https://github.com/popcre/ai-devops/issues/1869)). Chat UI is out of scope. |
 | AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
+| **edge-dev ZCode** (Workflow C) | ✅ wired 2026-10-19, desktop live proof done | provider baseUrl `https://$HEADROOM_HOST:8443/v1` via TLS front; see [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md) |
+
+### 6b. Dashboards and the daily savings monitor (added 2026-10-19)
+
+Each proxy serves its own live dashboard on its own port, openable from any
+tailnet machine: `$HEADROOM_URL/dashboard` (Claude lane) and the 8788
+equivalent (ZCode lane). `/stats` on each port is machine-readable JSON.
+
+A daily scheduled automation (9:00 AM EST, ZCode workspace on edge-dev)
+reads both `/stats` endpoints, diffs them against
+`C:\Users\ahazan\.zcode\headroom-monitor\snapshot.json`, reports one line
+per lane, and alerts on: a proxy down, the 8788 total still at zero (silent
+disuse — the §6 warning), or totals decreasing (ledger reset). Gap: the
+hourly `perf.csv` recorder (§5c) parses only the 8787 log directory, so
+like-for-like CSV measurement does not yet cover the ZCode lane.
 
 ### What Headroom does NOT explain (measured 2026-08-27)
 
@@ -374,11 +770,13 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   ai-headroom status   # what am I using, and is the proxy answering?
   ai-headroom off      # go straight to Anthropic
   ai-headroom on       # route through the proxy again
+  ai-headroom wrap-remote    # Claude remote workers on this host (hetz)
   ```
 
   `off` takes about ten seconds, plus a full quit-and-reopen of Claude. `on`
   refuses to run if the proxy is not answering, so it cannot strand you. Every
   change backs up the file it touches first. Works on Windows (Git Bash) and Ubuntu.
+  `off` also unwraps the `ccd-cli` binaries (Workflow A′); `on` re-wraps them.
 
   **How it reaches every machine:** `bin/ai-headroom` is registered in
   `config/machine-tools.tsv`, so `bin/install-machine-tools.ps1` (Windows) /
@@ -395,6 +793,10 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   it is the persistent USER environment variable. `ai-headroom` manages whichever
   applies, deletes any stale `settings.json` entry, and warns when the shell you
   are standing in has drifted from the persistent setting.
+- **ZCode has the same no-fallback exposure** (Workflow C): if the VPS, the
+  8788 lane, or Tailscale is down, ZCode cannot reach the model until
+  `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` restores the direct
+  config and ZCode is fully restarted.
 - **Extra hop / latency.** Local-Windows requests now go
   laptop → VPS → Anthropic instead of straight to Anthropic.
 - **Unofficial posture.** Routing a Claude *subscription* through a modifying
@@ -432,6 +834,10 @@ systemctl stop headroom.service
 systemctl disable headroom.service     # also prevent it starting on boot
 ```
 
+**Turn off output trimming only (keep compression):** remove the two
+`Environment=` shaper lines from both units (§5d), `systemctl daemon-reload`,
+restart both services.
+
 **Remove it completely.** `/home/ai/.headroom` holds the entire savings ledger
 and proxy logs — the only record of whether this experiment paid off. Archive it
 before deleting, so a later "was Headroom worth it?" question is still answerable:
@@ -455,10 +861,17 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
 | Durable perf record | `/home/ai/headroom-perf/perf.csv` (hourly cron, §5c) |
 | Optimization mode | `cache` (prefix freeze strict) — set in the unit, §5b |
+| Output trimming | ON since 2026-10-19, both lanes — shaper + pinned level 2 (§5d) |
+| Output savings | `headroom output-savings` — 23.6% estimated after 2026-10-20 baseline seed (§5d) |
+| Baseline re-learn | on edge-dev3: `headroom learn --verbosity --apply` in the traffic repo, then merge `baseline` into the proxy ledger (§5d) |
 | Unit backup | `/etc/systemd/system/headroom.service.bak-2026-08-31` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
+| Claude remote workers on hetz | `ai-headroom wrap-remote` (Workflow A′); re-run after Claude Code updates |
+| Off switch for remote workers | `ai-headroom unwrap-remote` (or `off`) |
 | Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
+| ZCode lane proxy | `headroom-zcode.service` :8788 behind `zcode-headroom-tls.service` :8443 (§2b, [`zcode-headroom-runbook.md`](zcode-headroom-runbook.md)) |
+| ZCode off switch | `C:\Users\ahazan\headroom-zcode\headroom-zcode-off.bat` + fully restart ZCode |
 
 ---
 
@@ -478,3 +891,12 @@ Wiring Codex would mean pointing its API base at the proxy the same way Claude's
 is pointed. Treat it as a fresh experiment with its own measurement, not as
 something already known to work — and note that Codex sign-in flows are fussier
 about a rewritten base URL than Claude's are.
+
+**One upstream per protocol per instance.** A single proxy process forwards
+all Anthropic-protocol traffic to one upstream and all OpenAI-protocol
+traffic to one upstream (`--anthropic-api-url` /
+`ANTHROPIC_TARGET_API_URL`; `--openai-api-url` / `OPENAI_TARGET_API_URL`).
+Clients that share a protocol but not a server — Claude (Anthropic) and
+ZCode (Z.ai) — need one process each (§2b). That is one process per lane,
+not a second installation.
+

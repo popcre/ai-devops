@@ -6,7 +6,7 @@ Written 2026-09-20 on `916-alien` by Codex from `origin/main`
 - Owner: [popcre/ai-devops#632](https://github.com/popcre/ai-devops/issues/632)
 - Predecessor: [#617](https://github.com/popcre/ai-devops/issues/617)
 - Stranded live proof: [#655](https://github.com/popcre/ai-devops/issues/655)
-- Handoff: [`HANDOFF.d/2026-09-20T1847Z-916-codex-blockerwatch-reliability-plan.md`](HANDOFF.d/2026-09-20T1847Z-916-codex-blockerwatch-reliability-plan.md)
+- Handoff: `HANDOFF.d/2026-09-20T1847Z-916-codex-blockerwatch-reliability-plan.md` (retired; recoverable from git history)
 
 ## STATUS
 
