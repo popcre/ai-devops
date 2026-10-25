@@ -22,8 +22,11 @@ export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
 command -v jq >/dev/null 2>&1 || { printf 'jq is required for this suite\n' >&2; exit 1; }
 
 # rc <expected> <dir> <args...> — run ai-task-gates in <dir> and compare status.
-rc(){ local want="$1" dir="$2" got; shift 2; ( cd "$dir" && "$GATES" "$@" ) >/dev/null 2>&1; got=$?; [ "$got" -eq "$want" ]; }
-out(){ local dir="$1"; shift; ( cd "$dir" && "$GATES" "$@" ) 2>&1; }
+# Ordinary helpers isolate from any live host observation-week window so a
+# real freeze never rewrites unrelated expectations; the ow_* helpers set
+# their own window file.
+rc(){ local want="$1" dir="$2" got; shift 2; ( cd "$dir" && AI_OBSERVATION_WEEK_FILE="$TMP/no-observation-week.json" "$GATES" "$@" ) >/dev/null 2>&1; got=$?; [ "$got" -eq "$want" ]; }
+out(){ local dir="$1"; shift; ( cd "$dir" && AI_OBSERVATION_WEEK_FILE="$TMP/no-observation-week.json" "$GATES" "$@" ) 2>&1; }
 
 # appr <dir> <action> [head] [overrides-jq] — mint an allocator-assigned AI
 # reviewer APPROVE record bound to the exact action, repository, and head

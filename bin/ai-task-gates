@@ -1403,9 +1403,9 @@ cmd_explain(){
 
   if [ "$as_json" = true ]; then
     local observed_privacy="public"
-    case "${OBSERVED_CLASS:-none}" in
-      private-evidence|private-tooling) observed_privacy="private" ;;
-    esac
+    if privacy_observed_private "${CHANGED_PATHS:-}"; then
+      observed_privacy="private"
+    fi
     local declared_covers="true"
     case "${declared:-}" in
       private-evidence|private-tooling) ;;
