@@ -9,6 +9,11 @@
 # StepFun run of this user, and a cooldown that a 429 sets for everyone.
 # It never limits how many turns or steps a run may take; it only spaces them.
 #
+# Slot gaps are measured at the moment the slot is granted — the caller's call
+# start — on a monotonic fractional clock. Whole-second date +%s stamps let two
+# grants labeled 2s apart be only ~1s of real time apart, and post-grant launch
+# latency then collapses the gap the provider observes at call start to 1s.
+#
 # State (owner-only): <state dir>/pace/{starts,cooldown,lock}.
 
 STEPFUN_PACE_RPM="${AI_STEPFUN_RPM:-10}"
@@ -18,22 +23,45 @@ STEPFUN_PACE_WINDOW="${AI_STEPFUN_PACE_WINDOW:-60}"
 
 _stepfun_pace_dir(){ printf '%s/pace' "${1:-${AI_STEPFUN_STATE_DIR:-$HOME/.local/state/ai-devops/stepfun}}"; }
 
+# _stepfun_pace_now: fractional seconds on a monotonic clock (/proc/uptime on
+# Linux), falling back to a fractional wall clock, then whole seconds. Never
+# truncates to whole seconds — the gap math needs sub-second resolution.
+_stepfun_pace_now(){
+  if [ -r /proc/uptime ]; then
+    awk '{printf "%.3f", $1}' /proc/uptime 2>/dev/null && return 0
+  fi
+  local t
+  t="$(date +%s.%N 2>/dev/null)" && [ "${t#*.}" != "$t" ] && { printf '%s\n' "$t"; return 0; }
+  date +%s
+}
+
 # _stepfun_pace_slot DIR: one locked decision. Prints 0 and records the start
 # when a slot is free now; otherwise prints the seconds to wait.
 _stepfun_pace_slot(){
   local d="$1" now cool=0 oldest count
-  now="$(date +%s)"
+  now="$(_stepfun_pace_now)"
   [ ! -s "$d/cooldown" ] || IFS= read -r cool < "$d/cooldown" || true
-  [[ "$cool" =~ ^[0-9]+$ ]] || cool=0
-  if [ "$now" -lt "$cool" ]; then printf '%s' "$((cool - now))"; return 0; fi
+  [[ "$cool" =~ ^[0-9]+(\.[0-9]+)?$ ]] || cool=0
+  # Cooldown is a deadline on the same monotonic clock. A deadline more than a
+  # day away is garbage from a previous clock (e.g. an old epoch stamp).
+  if awk -v n="$now" -v c="$cool" 'BEGIN{exit !(c > 0 && n < c && c - n < 86400)}'; then
+    awk -v c="$cool" -v n="$now" 'BEGIN{w = c - n; if (w < 0.05) w = 0.05; printf "%.3f", w}'
+    return 0
+  fi
   touch "$d/starts"
-  awk -v min="$((now - STEPFUN_PACE_WINDOW))" '$1 ~ /^[0-9]+$/ && $1 > min' "$d/starts" > "$d/starts.new" && mv -f "$d/starts.new" "$d/starts"
+  # Prune the sliding window. Drop stamps from a previous boot (the monotonic
+  # clock resets to 0; stale stamps would otherwise sit in the window forever).
+  awk -v now="$now" -v win="$STEPFUN_PACE_WINDOW" \
+      'BEGIN{min = now - win}
+       $1 ~ /^[0-9]+([.][0-9]+)?$/ && $1 + 0 > min && $1 + 0 <= now + 0' \
+      "$d/starts" > "$d/starts.new" && mv -f "$d/starts.new" "$d/starts"
   count="$(wc -l < "$d/starts" | tr -d ' ')"
   if [ "$count" -lt "$STEPFUN_PACE_RPM" ]; then
     printf '%s\n' "$now" >> "$d/starts"; printf 0; return 0
   fi
   oldest="$(head -n1 "$d/starts")"
-  printf '%s' "$(( oldest + STEPFUN_PACE_WINDOW - now > 0 ? oldest + STEPFUN_PACE_WINDOW - now : 1 ))"
+  awk -v o="$oldest" -v win="$STEPFUN_PACE_WINDOW" -v n="$now" \
+      'BEGIN{w = o + win - n; if (w < 0.05) w = 0.05; printf "%.3f", w}'
 }
 
 # stepfun_pace_wait [STATE_DIR]: blocks until this turn may start, then
@@ -49,8 +77,8 @@ stepfun_pace_wait(){
     else
       wait="$(_stepfun_pace_slot "$d")" || wait=""
     fi
-    [[ "$wait" =~ ^[0-9]+$ ]] || { printf 'stepfun pace: pacer error; starting unpaced\n' >&2; return 0; }
-    [ "$wait" -gt 0 ] || return 0
+    [[ "$wait" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { printf 'stepfun pace: pacer error; starting unpaced\n' >&2; return 0; }
+    [ "$wait" = 0 ] && return 0
     printf 'stepfun pace: waiting %ss for a StepFun request slot (limit %s per %ss)\n' "$wait" "$STEPFUN_PACE_RPM" "$STEPFUN_PACE_WINDOW" >&2
     sleep "$wait"
   done
@@ -59,10 +87,13 @@ stepfun_pace_wait(){
 # stepfun_pace_cooldown SECONDS [STATE_DIR]: after an HTTP 429, every StepFun
 # run of this user waits SECONDS before its next turn starts.
 stepfun_pace_cooldown(){
-  local secs="${1:-0}" d until cur=0
+  local secs="${1:-0}" d until cur=0 now
   [[ "$secs" =~ ^[0-9]+$ ]] && [ "$secs" -gt 0 ] || return 0
   d="$(_stepfun_pace_dir "${2:-}")"; mkdir -p "$d" 2>/dev/null || return 0
-  until="$(( $(date +%s) + secs ))"
+  now="$(_stepfun_pace_now)"
+  until="$(awk -v n="$now" -v s="$secs" 'BEGIN{printf "%.3f", n + s}')"
   [ ! -s "$d/cooldown" ] || IFS= read -r cur < "$d/cooldown" || true
-  [[ "$cur" =~ ^[0-9]+$ ]] && [ "$cur" -ge "$until" ] || printf '%s\n' "$until" > "$d/cooldown"
+  [[ "$cur" =~ ^[0-9]+(\.[0-9]+)?$ ]] || cur=0
+  if awk -v c="$cur" -v u="$until" 'BEGIN{exit !(c > 0 && c >= u)}'; then return 0; fi
+  printf '%s\n' "$until" > "$d/cooldown"
 }

@@ -84,9 +84,11 @@ case "$STUB_MODE" in
   touchcaller) touch "$CALLER/CALLER_TOUCHED"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
-  # burst: the provider refuses a call that starts within 2s of the previous one.
-  burst) now=$(date +%s); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
-         if [ $((now - last)) -lt 2 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
+  # burst: the provider refuses a call that starts within 2s of the previous
+  # one. Measured at call start on a monotonic fractional clock: whole-second
+  # stamps hide a ~1s real gap behind labels that look 2s apart.
+  burst) now=$(awk '{printf "%.3f", $1}' /proc/uptime); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
+         if awk -v n="$now" -v l="$last" 'BEGIN{exit !(n - l < 2)}'; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
          echo 'paced answer' ;;
   # json: StepCode --mode json events, two provider calls with usage.
   json) mu(){ jq -cn --arg t "$1" --argjson i "$2" --argjson o "$3" --argjson r "$4" \
@@ -181,15 +183,22 @@ rm -f "$STUB_ARGS.calls"; mode ok
 "$SCRIPT" doctor --live > "$TMP/doctor-one.out" 2>&1; rc=$?
 check "doctor_single_paid_call" "[ $rc = 0 ] && grep -q 'live=verified' '$TMP/doctor-one.out' && grep -q 'review door answered' '$TMP/doctor-one.out' && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 1 ]"
 
-# Pacer (#1432): three concurrent asks against a provider that refuses any call
+# Pacer (#1432): five concurrent asks against a provider that refuses any call
 # within 2s of the previous one. With a limit of 1 per 2s they wait, never 429.
+# A start barrier maximizes the race window; the stub measures call-start gaps
+# on a monotonic fractional clock.
 rm -f "$STUB_ARGS.calls" "$STUB_ARGS.starts"; rm -rf "$AI_STEPFUN_STATE_DIR/pace"; mode burst
-for i in 1 2 3; do
-  AI_STEPFUN_RPM=1 AI_STEPFUN_PACE_WINDOW=2 "$SCRIPT" ask --repo "$TMP/repo" x > "$TMP/burst.$i.out" 2> "$TMP/burst.$i.err" &
+rm -f "$TMP/go"
+for i in 1 2 3 4 5; do
+  ( while [ ! -e "$TMP/go" ]; do sleep 0.05; done
+    AI_STEPFUN_RPM=1 AI_STEPFUN_PACE_WINDOW=2 "$SCRIPT" ask --repo "$TMP/repo" x > "$TMP/burst.$i.out" 2> "$TMP/burst.$i.err" ) &
 done
+sleep 1
+touch "$TMP/go"
 wait
 pace_failures_before=$FAIL
-check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer')\" = 3 ] && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 3 ] && cat '$TMP'/burst.*.err | grep -q 'stepfun pace: waiting' && ! cat '$TMP'/burst.*.err | grep -q 'rate limit reached'"
+check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer')\" = 5 ] && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 5 ] && cat '$TMP'/burst.*.err | grep -q 'stepfun pace: waiting' && ! cat '$TMP'/burst.*.err | grep -q 'rate limit reached'"
+check "paces_before_call_2s_gap_at_call_start" "[ \"\$(wc -l < '$STUB_ARGS.starts')\" = 5 ] && ! awk 'NR>1 && \$1 - prev < 2 {exit 1} {prev = \$1}' '$STUB_ARGS.starts'"
 if [ "$FAIL" -gt "$pace_failures_before" ]; then
   printf 'paces_before_call synthetic failure diagnostics\n' >&2
   for pace_file in "$TMP"/burst.*.out "$TMP"/burst.*.err "$STUB_ARGS.calls" "$STUB_ARGS.starts"; do
