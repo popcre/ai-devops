@@ -73,6 +73,10 @@ $CodexMarker = "# Managed by ai-devops bin/write-project-mcp.ps1 (#705). Rewritt
 function ConvertTo-TomlValue($Value) {
   if ($Value -is [int] -or $Value -is [long]) { return [string]$Value }
   if ($Value -is [bool]) { return $(if ($Value) { "true" } else { "false" }) }
+  if ($Value -is [System.Array]) {
+    $items = @($Value | ForEach-Object { ConvertTo-TomlValue $_ })
+    return "[" + ($items -join ", ") + "]"
+  }
   $text = [string]$Value
   if ($text.Contains("'")) { throw "Cannot write a TOML literal containing a single quote." }
   return "'$text'"
