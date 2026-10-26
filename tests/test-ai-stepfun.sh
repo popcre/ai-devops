@@ -198,7 +198,7 @@ touch "$TMP/go"
 wait
 pace_failures_before=$FAIL
 check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer')\" = 5 ] && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 5 ] && cat '$TMP'/burst.*.err | grep -q 'stepfun pace: waiting' && ! cat '$TMP'/burst.*.err | grep -q 'rate limit reached'"
-check "paces_before_call_2s_gap_at_call_start" "[ \"\$(wc -l < '$STUB_ARGS.starts')\" = 5 ] && ! awk 'NR>1 && \$1 - prev < 2 {exit 1} {prev = \$1}' '$STUB_ARGS.starts'"
+check "paces_before_call_2s_gap_at_call_start" "[ \"\$(wc -l < '$STUB_ARGS.starts')\" = 5 ] && awk 'NR>1 && \$1 - prev < 2 {exit 1} {prev = \$1}' '$STUB_ARGS.starts'"
 if [ "$FAIL" -gt "$pace_failures_before" ]; then
   printf 'paces_before_call synthetic failure diagnostics\n' >&2
   for pace_file in "$TMP"/burst.*.out "$TMP"/burst.*.err "$STUB_ARGS.calls" "$STUB_ARGS.starts"; do
