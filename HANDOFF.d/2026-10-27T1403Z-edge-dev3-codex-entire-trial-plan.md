@@ -42,6 +42,11 @@ real-record deletion, named acceptance procedures, access-discovery rules,
 protocol freeze, confound handling, complete restore inventory, non-file
 capture tests and honest untested-hosted dispositions. Both response registers
 are in the plan; no runtime acceptance is inferred from either review.
+DeepSeek's second/final critique also returned REVISE; final corrections split
+local/hosted dependencies, require owned pre-upload sanitization, reconcile CI
+evidence export, and remove creator-discovery overclaim. Those final edits were
+not reviewed a third time; no DeepSeek approval is claimed. The two-round cap
+ends the critique, not the requirement to correct valid findings.
 Check #2022 for the revision's actual merge and review disposition before
 continuing. No runtime trial work, account connection,
 installation, upload, CI change or deployment has started. Owner is the Codex

@@ -175,7 +175,7 @@ all proof stays on #2022; planning does not authorize trial execution.
 
 Trial defaults, adjustable only before **any baseline collection** with a reason
 and protocol digest recorded on #2022: ten business days maximum after
-step 2 qualification; at least
+the first enabled qualification (2a local or 2b hosted); at least
 five real task histories, two fresh sessions, two branches and ten paired
 retrieval questions; one extension of at most five business days only if useful
 evidence is insufficient and no safety failure occurred. No artificial commits
@@ -198,7 +198,10 @@ protocol deviation: retain old and new protocol/digests, invalidate the utility
 signal, and report correctness/feasibility only unless a separately authorized
 fresh experiment is run. Discovery in step 1 is bounded to two working days;
 report precise blockers on #2022 rather than extending discovery silently.
-The ten-business-day clock starts after step 2's synthetic qualification passes.
+The ten-business-day clock starts after the first enabled qualification passes,
+2a for a local-only trial or 2b if only hosted work is enabled; later enabling
+another feature does not restart it. No available candidate means stop after
+discovery and report not tested, rather than starting an empty trial clock.
 
 ## 9. Ordered execution plan
 
@@ -285,9 +288,9 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
       values in the manifest. If no workspace exists, only a named owner with
       existing Albert-delegated account-creation authority may create a $0
       workspace after cost/data qualification. Otherwise hosted features are
-      not tested; local/public-source qualification continues. This does not
-      require an inaccessible workspace to identify who can create it, nor
-      confer new account authority on the coordinator.
+      not tested; local/public-source qualification continues. If no delegated
+      creator is identifiable from existing records/admin views, do not invent
+      one or ask Albert for credentials; record hosted features not tested.
 
    d. **Vendor/data manifest**: before capture/sharing, record sourced current
       retention, deletion method and timeline, backup retention, training/data
@@ -298,19 +301,39 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
       Step 6 tests synthetic-record deletion and records any backup deadline
       that cannot be verified immediately.
 
-   e. **Publication checklist**: name the coordinator as checker in the
-      manifest. Before every public posting inspect credentials, business text,
+   e. **Publication and upload checklist**: name the coordinator as checker in
+      the manifest. Before every public posting **or hosted upload of real trial
+      content**, inspect the exact pending payload for credentials, business text,
       names/emails/faces, private URLs, local paths, identifiers, metadata and
       hidden screenshot content. Allow only necessary public-repo identifiers
       and synthetic labels. Keep originals private, record checklist and digest,
       and fail closed on uncertainty. Never upload first and redact later.
+      Record destination, allowlist, checker, time and payload digest in a
+      pre-upload receipt. Synthetic canary success never replaces real-payload
+      checking. Disable automatic real-content upload if it cannot be paused
+      for inspection; use exclusively public/synthetic hosted content instead.
 
    Gate: each output names an actual owner, source and receipt or a blocked
    capability. No sensitive evidence or billable connection precedes its
    prerequisite; unknown account/store state is never presented as qualified.
 
-2. **Connect only the isolated mirror; qualify the privacy boundary.** Depends
-   on 1. Use existing authenticated access or supported sign-in under standing
+2. **Qualify local isolation separately from hosted connection.** Dependencies
+   are feature-scoped, not a requirement that every hosted gate must pass.
+
+   **2a — local qualification, no account required.** Depends on step 1's
+   protocol, recoverable settings, local install authority and applicable local
+   custody; cloud account/data/billing prerequisites do not gate public-source
+   or synthetic-only local work. Pin and isolate CLI/graph/brain if supported;
+   prove local canaries, capture channels and restore of local settings without
+   networking. Verify unrelated profiles unchanged. If even local tooling
+   requires unavailable authority, mark it not tested and continue report and
+   GitHub-only checks without pretending the feature ran.
+
+   **2b — mirror and hosted qualification.** Depends on 2a and actual passed
+   access, cost, vendor-data and upload-receipt gates in step 1. Otherwise mark
+   hosted features not tested; 2a's local results remain usable. The remainder
+   of step 2 describes 2b, with local safeguards from 2a retained.
+   Use existing authenticated access or supported sign-in under standing
    authority; scope connection to this one repo, never all organization repos.
    Keep GitHub `origin`; use a separate Entire remote. Do not initialize private
    submodules, bulk-import chats or enable global hooks. Install/capture only in
@@ -362,7 +385,10 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
 ### Phase B — memory and task coordination
 
 3. **Prove session continuity, graph, brain and search separately.** Depends
-   on 2; create `fixtures/questions.md`, `fixtures/answers.md` and sanitized
+   on 2a for available local/synthetic work; hosted sharing/search requires 2b
+   plus per-payload step-1e receipts. Without 2b, compare GitHub/docs with
+   available local graph/brain only, label the arm local, and leave hosted
+   results not tested. Create `fixtures/questions.md`, `fixtures/answers.md` and sanitized
    `memory-results.md` within the verification directory. Run each frozen
    question against GitHub/docs alone and Entire using the same caller model,
    prompt, code snapshot, limits and clean context; counterbalance order and do not
@@ -388,8 +414,11 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    commits; hosted sharing works or is explicitly unproved. Keep existing
    Markdown/portable memory intact. No edits to generated Codex memory files.
 
-4. **Run one real task as a Trail across two branches.** Depends on 2; may
+4. **Run one real task as a Trail across two branches.** Depends on 2b; may
    overlap step 3 after privacy qualification. `docs/entire-trial.md` records
+   hosted unavailability as not tested with owner/reason, without blocking
+   step-3 local work or step-6 cleanup. Do not invent a local Trail substitute.
+   When enabled, it records
    exact Trail ID/URL, GitHub issue/PR links and authoritative landing route.
    Add goal, scope, acceptance conditions, linked new sessions and branches;
    update one branch so findings/checks refer to the latest exact commit.
@@ -409,7 +438,7 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
 
 ### Phase C — optional acceleration, mandatory departure
 
-5. **Optional shadow Linux CI.** Depends on step 2 and the recoverable step-1
+5. **Optional shadow Linux CI.** Depends on step 2b and the recoverable step-1
    settings snapshot, not step 6; can run alongside 3–4. Inspect current Depot
    and Buildkite capabilities and free/account entitlements; choose one only
    if it meets this scope without a new paid commitment. Default to Depot if
@@ -433,10 +462,19 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    credits or compatibility prevent this, mark CI not tested with evidence;
    memory/Trails evaluation continues, with no CI improvement claimed.
 
-6. **Rehearse departure before final recommendation.** Depends on 2–4, and
-   5 if enabled. Export Entire-only branch commits, captured sanitized sessions,
+6. **Rehearse departure before final recommendation.** Requires dispositions
+   for steps 2–5 and recovery of whatever was actually enabled, not success of
+   unavailable hosted features. In local-only mode restore local state and
+   prove GitHub-only completion; vendor deletion/hosted export are not tested
+   because no hosted records exist. In hosted mode perform every export,
+   real-record deletion and departure gate below. Export Entire-only branch commits, captured sanitized sessions,
    memory facts with provenance, Trail text/discussions/findings and check
-   results; record unsupported export fields explicitly. Fetch objects into a
+   results; record unsupported export fields explicitly. Include CI logs and
+   durable output artifacts needed to reproduce outcomes before deleting them.
+   Classify rebuildable caches as non-required operational data, record that
+   disposition, and delete trial-owned caches without a recovery copy; if a
+   cache contains unique evidence, preserve that evidence first. Attachments
+   follow their owning record's export/deletion rules. Fetch objects into a
    protected recovery clone and verify reachable refs and commit identities.
    A Git bundle preserves reachable Git objects, not hosted Trail metadata;
    use actual vendor export or a verified manual structured export for that.
@@ -476,7 +514,8 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    records open and support continuation. Inability to preserve required
    records is a failed reversibility test, not successful removal.
 
-7. **Evaluate, publish and leave a precise disposition.** Depends on 3–6.
+7. **Evaluate, publish and leave a precise disposition.** Depends on completed
+   dispositions for 3–6, including not-tested features and cleanup of enabled ones.
    Populate the final scorecard in `report.md` with separate results for
    sessions, local/hosted memory, graph language coverage, search, Trails,
    hosting/sync and CI. Use thresholds below; show denominators, missing data,
@@ -706,6 +745,19 @@ record, not a claim that DeepSeek approved unreviewed changes.
 | P9 source anchors drifted | §5 uses owning router row titles and STATUS heading |
 | P10 prose baseline excluded | Step 1 collects prose separately and explains queue/non-queue strata |
 
+DeepSeek's second/final critique of `f35951c3` also returned REVISE. It confirmed
+the ten earlier corrections but found four additional text gaps. I conceded
+these findings and made the following final corrections; they have **not**
+received a third DeepSeek review (the skill caps the conversation at two rounds).
+No DeepSeek APPROVE is claimed or required for this prose-only publication.
+
+| Final-round finding | Final correction |
+|---|---|
+| Local fallback contradicted absolute dependencies | Steps 2a/2b and 3–7 now explicitly branch on enabled features; hosted unavailability never blocks local cleanup/reporting |
+| Real hosted upload review unowned | Step 1e names checker and requires exact-payload allowlist/digest receipt before hosted upload; otherwise public/synthetic-only |
+| CI evidence export/deletion mismatch | Step 6 exports needed logs/artifacts and explicitly dispositions rebuildable caches |
+| Workspace-creator discoverability overclaimed | Step 1c records hosted not tested when existing records cannot identify an authorized creator |
+
 Document checklist dimensions pass: thirteen sections; goal and conflict rule (§1);
 application/history/source state (§§2–6); rejections (§7); locked/open decisions
 (§8); concrete ordered steps and gates (§9); adversarial cases (§9 table);
@@ -725,5 +777,6 @@ uncertainty (§13); linked OPEN handoff and discovery routes.
 3. Is the goal sufficient for judgment when a step fails? Yes: §1 prioritizes
    useful correct delivery and recoverability, §§8–10 define safe alternatives
    and acceptance, and §13 permits partial adoption or stopping without false
-   completion. This audit is a drafting assessment; DeepSeek's requested
-   independent critique must be evaluated separately before publication.
+   completion. This audit is a drafting assessment. Both independent critiques
+   and the final unreviewed corrections are disclosed above; runtime proof is
+   still entirely open.
