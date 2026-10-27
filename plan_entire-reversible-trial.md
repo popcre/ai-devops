@@ -22,7 +22,12 @@ ownership on #2022, and keeps all acceptance and `live proof` there.
 Fresh session: start at step 1; read this entire document, then its linked
 sources only as required. Re-read downstream phases before each phase, refresh
 vendor capabilities, and use the fresh-session skill at a context boundary.
-Session handoff: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
+Session handoff: [closeout handoff](HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
+Earlier planning context: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
+Closeout verification, October 27, 2026, 2:22 PM EDT: original planning PR #2023
+and revised planning PR #2024 are MERGED. The latter landed at
+`79848d666c055bc3c38bdeb47f102b01c8fa8b59`; all runtime steps below remain open.
+Issue #2022 has the current plan, both review dispositions and acceptance list.
 Revision: Muse returned REVISE. This version addresses its eight readiness
 findings and four improvements. No trial worker is running. Documentation
 completeness and independent review are not proof of qualified vendor behavior.
@@ -90,10 +95,13 @@ multiple branches within this repo are enough for this bounded trial.
 
 ## 5. Current state and exact source anchors
 
-Planning fetch verified HEAD and origin/main both at
+Historical original planning fetch verified HEAD and origin/main both at
 `b8053f62066d` (full identifier can be resolved with `git rev-parse`); working
 tree was clean. Planning branch: `codex/entire-reversible-trial-plan`.
-The plan is new; none of its runtime outcomes is delivered by publication.
+The plan and review corrections are published through PRs #2023/#2024; do not
+redo planning or request a third DeepSeek critique as a prerequisite. No
+runtime outcome is delivered by publication. Original exact-head doc-safety
+passed over 505 Markdown files; final revisions matched fetched origin/main.
 
 Source anchors at that baseline (line numbers drift; re-find by heading):
 
