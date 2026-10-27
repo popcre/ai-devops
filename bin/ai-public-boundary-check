@@ -79,7 +79,20 @@ tailnet_host_pattern='([A-Za-z0-9-]+\.){2}ts\.net'
 # pattern contains the literal "ts.net", so that pass is a superset — and the
 # exact pattern is then applied by grep's DFA engine, which is linear in the
 # line length. The hit set is identical to the previous single regex scan.
-tailnet_host_matches="$(git -C "$root" grep -ahF 'ts.net' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null | grep -aE "$tailnet_host_pattern" 2>/dev/null || true)"
+# The external matcher runs under LC_ALL=C because in UTF-8 locales it can
+# match non-ASCII collation lookalikes the Git matcher never matches (PR #1988
+# Linux shard 4). An error or signal in either stage is an incomplete scan and
+# fails the check; it must never read as an empty passing result (PR #1988).
+if tailnet_host_matches="$(
+  git -C "$root" grep -ahF 'ts.net' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null \
+    | LC_ALL=C grep -aE "$tailnet_host_pattern" 2>/dev/null
+  tailnet_stage_status=("${PIPESTATUS[@]}")
+  [ "${tailnet_stage_status[0]}" -le 1 ] && [ "${tailnet_stage_status[1]}" -le 1 ]
+)"; then
+  :
+else
+  echo 'BOUNDARY FAIL: tailnet hostname scan incomplete (error or signal; refusing to report a clean result)' >&2; failed=1
+fi
 if [ -n "$tailnet_host_matches" ]; then
   echo 'BOUNDARY FAIL: protected tailnet hostname found' >&2; failed=1
 fi
