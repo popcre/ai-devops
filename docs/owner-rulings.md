@@ -99,3 +99,17 @@ sandbox (alsand) — and the AI opens the PR from that branch to `develop`
 without merging it. This supersedes the earlier "DesignFlow goes from Albert's
 sandbox branch to develop, never self-merged" insofar as it waited on Albert:
 nothing waits on him; the develop PR simply stays open.
+
+## 2026-10-27 — on-machine secret exposure: redact, do not rotate
+
+Verbatim, from Albert's chat: "if the keys were not published outside of
+this computer then no need to rotate, just redact them from where they
+appeared."
+
+Current rule: when a secret's only exposure is the local AI session
+transcript on this machine (no GitHub, logs, or third-party systems received
+the value), the remedy is in-place redaction of every occurrence on this
+machine, not credential rotation. Applied 2026-10-27 to the PopDAM session
+transcript on hetz (one Supabase sb_secret value; 7 occurrences redacted,
+zero remaining); rotation plan `plan_credential_rotation_20261027.md` in
+u2giants/popdam3 was cancelled by this ruling (issue #551).
