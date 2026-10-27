@@ -21,6 +21,26 @@ git -C "$TMP/repo" reset -q HEAD tailnet.txt; rm -f "$TMP/repo/tailnet.txt"
 printf 'Tailscale cannot issue ts.net certs here.\n' > "$TMP/repo/prose.txt"; git -C "$TMP/repo" add prose.txt
 bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null || { echo 'FAIL: bare ts.net prose rejected'; exit 1; }
 git -C "$TMP/repo" reset -q HEAD prose.txt; rm -f "$TMP/repo/prose.txt"
+# PR #1988: in UTF-8 locales an external matcher can read non-ASCII collation
+# lookalikes (U+212A Kelvin sign, U+017F long s, U+0131 dotless i, accented
+# letters) as [A-Za-z] where the Git matcher never does. The external stage
+# runs under LC_ALL=C, so these lines must stay clean exactly as the Git
+# matcher leaves them, while the ASCII form above still fails.
+printf '\xe2\x84\xaa.\xe2\x84\xaa.ts.net \xc5\xbf.\xc5\xbf.ts.net \xc4\xb3.\xc4\xb3.ts.net \xc3\xa9.\xc3\xb6.ts.net x.y.TS.NET\n' > "$TMP/repo/lookalike.txt"
+git -C "$TMP/repo" add lookalike.txt
+bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1 || { echo 'FAIL: non-ASCII lookalike tailnet labels rejected'; exit 1; }
+git -C "$TMP/repo" reset -q HEAD lookalike.txt; rm -f "$TMP/repo/lookalike.txt"
+# PR #1988: an erroring or interrupted scan must never report as an empty
+# passing result. A matcher error in the tailnet scan fails the check and
+# names the incomplete scan.
+mkdir -p "$TMP/shim"
+REALGIT="$(command -v git)"
+printf '#!/usr/bin/env bash\nfor arg in "$@"; do [ "$arg" = grep ] && exit 3; done\nexec "%s" "$@"\n' "$REALGIT" > "$TMP/shim/git"
+chmod +x "$TMP/shim/git"
+if PATH="$TMP/shim:$PATH" bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >"$TMP/incomplete.out" 2>&1; then
+  echo 'FAIL: erroring tailnet scan reported as a clean pass'; exit 1
+fi
+grep -q 'tailnet hostname scan incomplete' "$TMP/incomplete.out" || { echo 'FAIL: incomplete-scan refusal is not named'; exit 1; }
 printf 'project-ref abcdefghijklmnopqrst\n' > "$TMP/repo/project.txt"; git -C "$TMP/repo" add project.txt
 if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: seeded project identifier fixture passed'; exit 1; fi
 git -C "$TMP/repo" reset -q HEAD project.txt; rm -f "$TMP/repo/project.txt"

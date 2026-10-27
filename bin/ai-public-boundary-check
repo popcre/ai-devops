@@ -71,7 +71,28 @@ fi
 # A tailnet MagicDNS name (<host>.<tailnet>.ts.net) identifies the same
 # topology as the address it resolves to. Bare "ts.net" prose stays allowed.
 tailnet_host_pattern='([A-Za-z0-9-]+\.){2}ts\.net'
-tailnet_host_matches="$(git -C "$root" grep -anE "$tailnet_host_pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null || true)"
+# git 2.55's bundled ERE engine backtracks catastrophically on very long
+# single-line files when the pattern carries adjacent quantified runs
+# (reviewer issue 20261027T171913Z-edge-dev-task-gates-1852237: the scan of
+# u2giants/theoracle blocked on a 1.1 MB one-line JUnit XML). Candidate lines
+# are therefore selected with fixed-string git grep — every match of this
+# pattern contains the literal "ts.net", so that pass is a superset — and the
+# exact pattern is then applied by grep's DFA engine, which is linear in the
+# line length. The hit set is identical to the previous single regex scan.
+# The external matcher runs under LC_ALL=C because in UTF-8 locales it can
+# match non-ASCII collation lookalikes the Git matcher never matches (PR #1988
+# Linux shard 4). An error or signal in either stage is an incomplete scan and
+# fails the check; it must never read as an empty passing result (PR #1988).
+if tailnet_host_matches="$(
+  git -C "$root" grep -ahF 'ts.net' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' 2>/dev/null \
+    | LC_ALL=C grep -aE "$tailnet_host_pattern" 2>/dev/null
+  tailnet_stage_status=("${PIPESTATUS[@]}")
+  [ "${tailnet_stage_status[0]}" -le 1 ] && [ "${tailnet_stage_status[1]}" -le 1 ]
+)"; then
+  :
+else
+  echo 'BOUNDARY FAIL: tailnet hostname scan incomplete (error or signal; refusing to report a clean result)' >&2; failed=1
+fi
 if [ -n "$tailnet_host_matches" ]; then
   echo 'BOUNDARY FAIL: protected tailnet hostname found' >&2; failed=1
 fi

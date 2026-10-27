@@ -218,6 +218,14 @@ def uv_spans(text):
 def main():
     root = pathlib.Path(sys.argv[1]).resolve()
     cache = {}
+    # Hit lines are raw file bytes (UTF-8), and this script runs under -I where
+    # PYTHONUTF8 cannot reach stdio; locale decoding would corrupt non-ASCII
+    # lines and silently defeat the span comparison below.
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     for raw in sys.stdin:
         hit = raw.rstrip("\n")
         path, separator, rest = hit.partition(":")
