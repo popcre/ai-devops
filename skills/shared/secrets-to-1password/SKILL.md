@@ -82,6 +82,11 @@ op read "op://vibe_coding/<item>/<field>" | ssh host 'umask 077; cat > /path/fil
   right".
 - Running any of this under `set -x`, a verbose/debug HTTP mode, or through a
   consumer that echoes stdin. A pipe is not safe if something downstream prints.
+- Calling `op item edit` from a non-interactive subprocess that inherits a
+  pipe on stdin — the CLI tries to read a JSON template from stdin and fails
+  with `invalid JSON provided` even though the arguments are correct. Always
+  run it with stdin redirected from `/dev/null` (learned 2026-10-27 on hetz;
+  cost three failed writes before diagnosis).
 
 **Verify by fingerprint, never by printing**
 
