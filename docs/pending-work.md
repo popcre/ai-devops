@@ -2,6 +2,10 @@
 
 Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 phase 4). Read the linked plan STATUS first.
 
+Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-reversible-trial.md)
+STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); planning only,
+execution not started. Includes continuous memory, Trails, sessions/search and optional CI.
+
 Ruleset trim and enforcement: read the [ruleset plan](../plan_ruleset-trim-and-enforce.md) STATUS first ([#1881](https://github.com/popcre/ai-devops/issues/1881)); evidence is private and stays out of Git.
 
 Reviewer observation week (fast-fail, per-session skip, non-blocking reviews, 7-day repair freeze): read the [observation week plan](../plan_reviewer-observation-week.md) STATUS first; sibling repair programmes (#1783, #1822, #1678) pause for the week.
