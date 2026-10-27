@@ -102,6 +102,16 @@ When adding a narrow scope to an existing capture, union by exact `detail_href`.
 
 The result counter displays `100 out of 100+ files` rather than an exact total. Continue paging to a short or empty page. The 2026-08-09 entitled directory produced 108,133 unique asset detail paths across 43 authorized scopes; large examples included Jurassic, Woody Woodpecker, Gabby's movie, Trolls, Minions/Despicable Me, and Fast & Furious. Use durable 2,000-row chunks with four concurrent 100-row reads. A single long sequential franchise request exceeded the browser control limit.
 
+## Speed, scoping and staying signed in (2026-10-26 re-capture)
+
+This is a text scrape: index pages and detail pages are HTML, and no asset or rendition is downloaded. When a run is slow, check these first:
+
+- **A broken scope silently crawls the whole catalog.** Some `paths` values (seen for top-level folders such as `universal/jurassic`, `dreamworks/shrek`, `illumination/minions`, and `dreamworks-television/gabbys-dollhouse/film`), including links on the portal's own home directory, are ignored by search, which then returns the entire catalog. Deep offsets then take 5-15 s per page and fail often. Before paging any path, fetch offset 0 and require that the returned asset paths sit inside that folder. If none do, drop the path and use exact Property-tag searches for that family instead (tag values from the `caf-tags:property/` inputs on the search page; each tag has its own input name, so read it from the DOM every run). While paging a path, filter each page to in-folder assets and stop at the first page with none.
+- **Deep offsets cost.** Keep each query small (one folder or one Property tag) so no query pages past a few thousand. Never page an unscoped search.
+- `search.results.html` is no lighter than `search.html` (~1.1 MB per 100 rows), and `p.limit` above 100 is ignored.
+- **Silent sign-in renewal.** The portal session lasts about an hour. Loading `/conf/caf/services/redirect-oauth` in a hidden same-origin iframe renews it without user action while the outside sign-in is still valid. Renew every 40 minutes and on any sign-out, then resume from the checkpoint. Ask the user to sign in only if renewal fails three times.
+- Checkpoint into page IndexedDB (`lsdcap`) and save each finished scope or detail chunk as a browser download; resume skips finished keys. The working script is `nbcu/scripts/browser-capture.js` in `u2giants/licensor-source-data`.
+
 ## Asset detail metadata
 
 Build the detail URL from the exact asset path:
