@@ -1,7 +1,7 @@
 ---
 issue: 2022
 status: OPEN
-owner: codex/entire-reversible-trial-plan
+owner: codex/entire-trial-muse-revisions
 ---
 
 # Entire trial planning handoff
@@ -37,6 +37,11 @@ Muse then returned REVISE. Albert explicitly requested plan corrections followed
 by DeepSeek review. The current revision resolves Muse's findings through
 bounded preflight ownership, zero-spend enforcement, vendor data terms,
 synthetic export proof, non-circular steps and pilot-only conclusions.
+DeepSeek's first-pass critique returned REVISE; the successor revision adds
+real-record deletion, named acceptance procedures, access-discovery rules,
+protocol freeze, confound handling, complete restore inventory, non-file
+capture tests and honest untested-hosted dispositions. Both response registers
+are in the plan; no runtime acceptance is inferred from either review.
 Check #2022 for the revision's actual merge and review disposition before
 continuing. No runtime trial work, account connection,
 installation, upload, CI change or deployment has started. Owner is the Codex

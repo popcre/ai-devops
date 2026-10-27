@@ -26,6 +26,8 @@ Session handoff: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-e
 Revision: Muse returned REVISE. This version addresses its eight readiness
 findings and four improvements. No trial worker is running. Documentation
 completeness and independent review are not proof of qualified vendor behavior.
+DeepSeek's first critique also returned REVISE; its corrections are recorded
+with the response register below. Runtime prerequisites remain unproved.
 No Entire installation, account connection, upload, Trail, memory index, CI run,
 subscription, or rollback has been executed by this planning task.
 
@@ -99,13 +101,14 @@ Source anchors at that baseline (line numbers drift; re-find by heading):
   cancels superseded PR work, preserving queue runs; `:82–91`: 90-second PR
   quiet window. `:165` selects changed suites. Windows jobs also exist;
   inspect all `runs-on` entries rather than assuming a Linux-only pipeline.
-- `docs/task-router.md:48–49`: workflow-efficiency and evidence/Jujutsu work;
-  `:84–95`: request traffic and runner/minutes routes. Reuse their owners.
+- `docs/task-router.md` rows titled “Throughput, slow CI”, “Evidence-only
+  commit churn”, “GitHub API limits” and “GitHub Actions minutes” route existing
+  efficiency/request/runner work. Reuse their owners; locate by row text.
 - `plan_workflow-efficiency.md:3` STATUS contains mixed landed/open acceptance;
   it does not establish that every historical slowdown persists.
 - `plan_github-request-reduction.md:3` STATUS records incomplete live acceptance;
   preserve its ownership and privacy boundaries.
-- `plan_actions-minutes-reduction.md:7`: owner cancelled a cost-only programme.
+- `plan_actions-minutes-reduction.md` STATUS: owner cancelled a cost-only programme.
   Do not restart it under the Entire trial.
 - `HANDOFF.md:1` is a static pointer. `AGENTS.md` governs publishing and the
   public/private boundary; `docs/pending-work.md` indexes active plans.
@@ -170,8 +173,9 @@ capabilities; include memory, Trails, sessions/search and reversibility; use
 only new, deliberately sanitized trial content; no historical transcript import;
 all proof stays on #2022; planning does not authorize trial execution.
 
-Trial defaults, adjustable only before baseline is frozen with a reason on
-#2022: ten business days maximum after first successful connection; at least
+Trial defaults, adjustable only before **any baseline collection** with a reason
+and protocol digest recorded on #2022: ten business days maximum after
+step 2 qualification; at least
 five real task histories, two fresh sessions, two branches and ten paired
 retrieval questions; one extension of at most five business days only if useful
 evidence is insufficient and no safety failure occurred. No artificial commits
@@ -189,7 +193,10 @@ resumptions and ten paired retrieval questions. These are pilot floors, not
 statistical power calculations. Fewer histories means insufficient evidence;
 do not manufacture unrelated tasks. Optional CI can be inconclusive separately.
 Freeze question IDs, exclusions, timing boundaries and extension criteria
-before inspecting results. Discovery in step 1 is bounded to two working days;
+before collecting any baseline or candidate measurement. A later change is a
+protocol deviation: retain old and new protocol/digests, invalidate the utility
+signal, and report correctness/feasibility only unless a separately authorized
+fresh experiment is run. Discovery in step 1 is bounded to two working days;
 report precise blockers on #2022 rather than extending discovery silently.
 The ten-business-day clock starts after step 2's synthetic qualification passes.
 
@@ -218,11 +225,23 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    worktree create `docs/entire-trial.md` with exact version, allowed paths,
    remote/ref inventory, hooks/settings checksums, installed-agent configuration,
    runner/protection snapshot, account permissions, pricing and a stop date.
+   The restore inventory must enumerate actual paths and ownership for local
+   and global Git config, remotes/refspecs, hooks/core.hooksPath, credential
+   helper configuration (never credential values), agent/MCP settings, the
+   isolated profile, CLI/plugin binaries/version/install path, environment
+   changes and integration/token IDs. Use read-only `git config --show-origin
+   --name-only --list` and redacted remote/ref inventory as discovery aids;
+   never print credential-bearing values. Document exact restore/remove
+   commands for each trial-owned entry and before/after digests privately.
+   Prohibited global changes stay unchanged but are still checked afterwards.
    Keep sensitive inventory private. Fetch existing GitHub history through
    `bin/ai-gh`, not new polling loops: last 20 completed non-prose PRs if
    available, elapsed request-to-merge and execution versus queue/wait time,
    failure/cancellation reasons, runner OS and known cost. Mark missing data
-   unknown; do not launch tests just to fill a baseline. Freeze ten retrieval
+   unknown. Non-prose PRs measure the queue path; collect up to 20 prose PRs
+   separately for the admin/document route and never pool the two timings.
+   If insufficient, report each denominator rather than extrapolating.
+   Do not launch tests just to fill a baseline. Freeze ten retrieval
    questions and ground-truth answers with exact source refs before indexing.
    Verification: report baseline identifies commits/runs, sample exclusions,
    planned cases, private custody and recovery snapshot; configuration restore
@@ -259,6 +278,16 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
       are excluded. Do not invent identities or broad rights. Missing authority
       blocks connection until a session with existing authority owns the step;
       posting an issue is not the grant. Qualify CI access separately in step 5.
+      Discovery order: the named #2022 coordinator checks existing approved
+      account/config records and `vibe_coding` item metadata through the secrets
+      skill, then available GitHub organization/installation admin views.
+      Record the real discovered grant holder and exact route; never put secret
+      values in the manifest. If no workspace exists, only a named owner with
+      existing Albert-delegated account-creation authority may create a $0
+      workspace after cost/data qualification. Otherwise hosted features are
+      not tested; local/public-source qualification continues. This does not
+      require an inaccessible workspace to identify who can create it, nor
+      confer new account authority on the coordinator.
 
    d. **Vendor/data manifest**: before capture/sharing, record sourced current
       retention, deletion method and timeline, backup retention, training/data
@@ -293,6 +322,14 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    First inspect exclusions/redaction locally with network sharing disabled;
    if pre-upload inspection is unavailable, never send a sensitive canary.
    Inspect hosted behavior with allowlisted public/synthetic material only.
+   Capture qualification must also cover synthetic markers in environment
+   variables, command arguments, stdout/stderr, simulated clipboard/browser
+   content, and a second isolated agent session. Never read the user's real
+   clipboard, browser session or environment to build these cases. Document
+   captured channels and exclusions; a channel with no supported isolation or
+   observable pre-upload boundary blocks real capture. If a channel is not
+   supported/captured, prove that exclusion or mark it unverified and restrict
+   the trial to public/synthetic-only sessions.
    Before real trial histories, create one synthetic Trail/session/memory and
    perform `qualification-export-roundtrip`. Record actual supported endpoint,
    CLI/UI action and exact command/click sequence, version, export schema and
@@ -305,6 +342,8 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    export is absent, manual JSON/Markdown plus attachments is allowed only if
    restored and understood offline. A missing required field blocks real writes
    to that feature. This is a small qualification, not full step-6 departure.
+   Label manual export as continuity/read-back proof, not native feature
+   re-import or recreation of vendor scoring/approval semantics.
 
    Freeze mirror ref pairs and compare the returned IDs using
    `git ls-remote <remote> <fully-qualified-ref>`. Sample each of the first five
@@ -325,10 +364,15 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
 3. **Prove session continuity, graph, brain and search separately.** Depends
    on 2; create `fixtures/questions.md`, `fixtures/answers.md` and sanitized
    `memory-results.md` within the verification directory. Run each frozen
-   question against GitHub/docs alone and Entire using the same model, prompt,
-   code snapshot, limits and clean context; counterbalance order and do not
+   question against GitHub/docs alone and Entire using the same caller model,
+   prompt, code snapshot, limits and clean context; counterbalance order and do not
    expose answers to either arm. Capture accuracy, source correctness, elapsed
-   time, steps, tokens and cost when available. Missing token accounting cannot
+   time and actual caller/retrieval model versions and paths. If a model cannot
+   be held constant or a retrieval model is opaque, label the pair confounded:
+   correctness/feasibility remains measurable, but suppress the 20% utility
+   claim and report model/cost attribution unknown. Never make the whole local
+   correctness exercise depend on model-selection controls the vendor lacks.
+   Capture steps, tokens and cost when available. Missing token accounting cannot
    count as savings. Include code relationships in Bash and PowerShell, past
    rejected choices, an intentionally superseded decision, an unknown fact and
    the policy distinction between review and production gates. Record partial
@@ -400,12 +444,27 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    disabling only trial-owned capture. Remove trial integrations/credentials
    through supported controls after backing up exact owned state; do not revoke
    shared credentials or uninstall another session's capability. Keep recovery
-   data until acceptance. Disable Entire access in the isolated profile and
+   data until acceptance. Reconcile every inventory entry: local/global Git
+   config, credential-helper config, remotes/refspecs, hooks, agent/MCP config,
+   profile, environment and CLI/plugins. Remove the trial-only mirror remote
+   and disable/uninstall trial-owned CLI/plugins by the supported route while
+   preserving pre-existing installations. Record exact commands, ownership,
+   before/after diff and any approved retained recovery artifacts. Unexplained
+   changes fail `restore-preservation`; do not silently waive them.
+   Disable Entire access in the isolated profile and
    finish one normal GitHub-only task with required checks and ordinary merge;
    prove source, protections and original installed toolkit remain intact.
    In an isolated clean profile restore exported memory/Trail records and
    recover a task goal, prior decision and unresolved finding without Entire.
-   Run `vendor-deletion` on synthetic qualification records with step 1d's
+   Run `vendor-deletion` on synthetic qualification records and **all hosted
+   real trial records** after their approved recovery copies are secured.
+   Inventory every session, memory fact/index, Trail/discussion/finding,
+   attachment and CI log/cache/artifact created by this trial, as applicable;
+   preserve shared or pre-existing records. For each actual record class,
+   exercise deletion and retrieval checks on at least one real sanitized record
+   and reconcile the complete inventory to receipts or named pending retention.
+   If only synthetic hosting was allowed, explicitly mark real-record deletion
+   not tested and make no real-data-departure claim. Use step 1d's
    procedure: retain receipt, confirm records cannot be retrieved through
    account/API access, and disclose remaining vendor backup-retention deadline.
    UI absence alone is not backup deletion. An unconfirmed required deletion
@@ -455,6 +514,7 @@ it owns with the repository's existing harness.
 | Vendor storage | Deleted UI record remains retrievable or in backups | `vendor-deletion`: receipt, retrieval test and backup-retention disposition |
 | Export format | Missing author, supersession or tested commit | `qualification-export-roundtrip`: required fields restored before real history |
 | Billing | Free quota expires or automatic overage is enabled | `zero-spend`: effective hard stop proven before capability is enabled |
+| Non-file capture | Fake env/argv/stdout/stderr, simulated clipboard/browser and sibling-session markers | `capture-channels`: pre-upload exclusion/redaction or public/synthetic-only restriction |
 
 ## 10. Tests and acceptance measurements
 
@@ -466,6 +526,22 @@ Trial qualification requires all named cases above plus `cold-session-resume`,
 `paired-retrieval`, `trail-latest-head`, `github-only-completion` and
 `export-reimport`. Record each as pass/fail/not tested with artifact identifiers.
 No live claim is justified by a fixture-only result.
+
+Named acceptance procedures below use the step-1 frozen protocol. Save actual
+commands/actions, IDs, timestamps and sanitized outcomes in the named report
+section; originals remain in qualified custody. A test name alone is no proof.
+
+| Test | Setup/input | Pass criterion | Required artifact and failure action |
+|---|---|---|---|
+| `cold-session-resume` | Two new isolated contexts with no planning chat, prior output or answer key; same allowed docs in both arms | Each recovers a prior decision, its source commit and correct next action without an owner prompt | `memory-results.md#cold-session-resume` records context/model/source IDs; failed retrieval fails continuity; unavailable hosted access is not tested |
+| `paired-retrieval` | Ten frozen questions/ground truth withheld from both arms; same caller/snapshot/prompt/limits; counterbalanced order | Correctness scored against source before timing analysis; §10 accuracy criterion met; only unconfounded complete pairs qualify for directional utility | `memory-results.md#paired-retrieval` contains every scored pair, versions, timings and exclusions; model mismatch suppresses utility, wrong answers count as failures |
+| `trail-latest-head` | Synthetic wrong-goal/failing-check branch followed by repaired newer commit | Displayed finding/check and task status resolve to latest commit; older green never substitutes for new failure/pending | `report.md#trail-latest-head` records Trail/commit/check IDs and sanitized screenshots; stale acceptance fails Trails; unavailable hosted Trail is not tested |
+| `github-only-completion` | Entire integration/profile disabled after step-6 restore; one existing authorized normal GitHub task | Required GitHub checks including applicable Windows checks pass and ordinary merge completes, original toolkit unchanged | `report.md#github-only-completion` links PR/landing commit and restore diff; failure prevents exit acceptance until original capability repaired |
+| `export-reimport` | Synthetic step-2 export, then actual step-6 inventory, opened in clean offline profile without Entire | All required fields and source objects readable; fresh agent recovers goal, decision and unresolved finding; native re-import only claimed if actually supported/tested | `report.md#export-reimport` gives schema/field inventory, digests and private custody ID; missing field fails recovery; manual read-back labelled continuity only |
+
+Hosted absence does not turn synthetic-only or local results into proof of
+hosted readiness. Record each feature as passed, failed, not tested or
+inconclusive and use the corresponding limited disposition in §13.
 
 Pilot criteria, frozen before baseline collection. These distinguish functional
 qualification from directional utility; they do not establish a general
@@ -518,8 +594,11 @@ direct main push, no force-push. Prose-only landing uses exact-head
 normal checks and queue. GitHub-only does not mean weakening any required check.
 
 Public repo means sessions need explicit allowlisting even when keys redact.
-No raw `.jsonl`, private memory, licensed material or `.env` enters public Git
-or a new service. Never submit review verdicts or transcripts to a compressor.
+No unsanitized raw `.jsonl`, private-data-bearing memory, licensed material or
+`.env` enters public Git or a new service. Only deliberately sanitized trial
+sessions/memory may be shared after steps 1d and 2 qualify that boundary;
+public Git still receives sanitized summaries, never raw session archives.
+Never submit review verdicts or transcripts to a compressor.
 Secrets belong only in `vibe_coding` under the secrets skill, never arguments,
 logs or artifacts. Preserve existing secret consumers and shared credentials.
 Use screenshots for hosted UI proof, with sanitized public excerpts only.
@@ -554,8 +633,11 @@ No runtime deployment is applicable to planning. The trial remains OPEN.
 Trial completion requires:
 
 - [ ] Steps 1–7 dispositioned with artifacts, explicit unknowns and actual dates.
-- [ ] Memory, sessions, search and Trails exercised; optional CI either proved
-  or marked not tested without preventing a conclusion on other features.
+- [ ] Memory, sessions, search and Trails have explicit per-feature dispositions.
+  Exercise local/synthetic capability where available. If cost, access or data
+  terms block hosted Trails/memory, mark those not tested, record the exact
+  blocker/owner and recommend no hosted adoption; never pretend local Trails
+  exist if unsupported. Optional CI may independently be not tested.
 - [ ] Safety cases, export/custody and GitHub-only rollback demonstrated live.
 - [ ] GitHub protections, required checks, Windows route and original toolkit
   still work; code/document changes pass applicable checks and land normally.
@@ -605,6 +687,24 @@ the live trial is ready:
 | Mirror method unspecified | Step 2 named refs, ID comparison, five updates and bounded deadline |
 | Screenshot sanitization weak | Step 1e assigned checker and publication checklist |
 | Self-audit overstates readiness | This audit certifies planning structure, not live prerequisites |
+
+DeepSeek first-pass recommendation: REVISE (session
+`20261027-102522-1566132`, reviewing revision `191cc446`). I conceded the
+remaining actionable gaps and corrected them as follows. This is a response
+record, not a claim that DeepSeek approved unreviewed changes.
+
+| DeepSeek finding | Correction |
+|---|---|
+| P1 real-record deletion missing | Step 6 inventories/deletes all trial-owned hosted records; real-class receipts and pending backup retention are explicit |
+| P2 five tests named only | §10 defines setup, pass criteria, artifact and failure disposition for each |
+| P3 workspace authority discovery | Step 1c names coordinator discovery route and actual grant-holder requirement; no workspace authority means hosted not tested |
+| P4 protocol freeze loophole | §8 freezes before any measurements; later change invalidates utility signal |
+| P5 same-model constraint | Step 3 records caller/retrieval models, marks opaque/mismatched pairs confounded, suppresses utility claims |
+| P6 rollback inventory too vague | Steps 1/6 enumerate configs, helpers, remotes, profiles, environment, CLI/plugins and before/after reconciliation |
+| P7 capture/privacy ambiguity | Step 2 and `capture-channels` cover non-file/sibling capture; §11 explicitly distinguishes sanitized trial material |
+| P8 hosted tests may be unavailable | §13 permits honest not-tested hosted dispositions without adoption claim; safety/exit remain mandatory for enabled features |
+| P9 source anchors drifted | §5 uses owning router row titles and STATUS heading |
+| P10 prose baseline excluded | Step 1 collects prose separately and explains queue/non-queue strata |
 
 Document checklist dimensions pass: thirteen sections; goal and conflict rule (§1);
 application/history/source state (§§2–6); rejections (§7); locked/open decisions
