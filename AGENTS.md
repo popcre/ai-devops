@@ -168,6 +168,10 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
+Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
+[`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
+[#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
+
 Low-frequency and specialized tasks live in [`docs/task-router.md`](docs/task-router.md); load only the matching row.
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
