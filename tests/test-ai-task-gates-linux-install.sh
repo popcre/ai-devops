@@ -79,16 +79,19 @@ git -C "$TMP/candidate" commit -qm ordinary
 ordinary="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
-expect_stop 'ordinary update requires an assigned AI reviewer approval' gate preflight "$TMP/candidate" "$ordinary"
-expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" grok)"
-expect_stop 'ordinary update refuses an approval for another head' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$old")"
+(cd "$TMP/candidate" && bin/ai-task-gates end) >/dev/null
+expect_stop 'ordinary update needs a declared installation task' gate preflight "$TMP/candidate" "$ordinary"
+(cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
+expect_stop 'install-verify no longer accepts --reviewer-approval (#2041)' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval /dev/null
 # The real preflight accepts a pinned target behind a later origin/main merge,
 # but still refuses a target that is not in fetched origin/main history.
 git -C "$TMP/installed" update-ref refs/remotes/origin/main "$old"
-expect_stop 'ordinary update refuses a target outside fetched origin/main' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+expect_stop 'ordinary update refuses a target outside fetched origin/main' gate preflight "$TMP/candidate" "$ordinary"
 later="$(git -C "$TMP/installed" commit-tree "$ordinary^{tree}" -p "$ordinary" -m 'later merge')"
 git -C "$TMP/installed" update-ref refs/remotes/origin/main "$later"
-expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+expect_ok 'ordinary update preflight records transaction without a reviewer verdict' gate preflight "$TMP/candidate" "$ordinary"
+jq -e '.authorization|test("no-reviewer-gate")' "$TMP/state/install-authorizations/$ordinary.json.ordinary" >/dev/null \
+  && echo 'PASS: ordinary transaction records declared-task authorization' || { echo 'FAIL: ordinary transaction authorization'; exit 1; }
 git -C "$TMP/installed" update-ref refs/remotes/origin/main "$ordinary"
 git -C "$TMP/installed" merge -q --ff-only "$ordinary"
 expect_ok 'ordinary updated checkout resumes' gate resume "$TMP/installed" "$ordinary"
@@ -98,13 +101,13 @@ expect_stop 'finalize requires exact required-stage receipt' gate finalize "$TMP
 stage_path="$(stage_report "$ordinary")"
 expect_ok 'ordinary required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'ordinary update finalizes with completed receipt' gate finalize "$TMP/installed" "$ordinary"
-expect_stop 'same-source reinstall needs task and reviewer approval' gate resume "$TMP/installed" "$ordinary"
+expect_stop 'same-source reinstall needs a declared installation task' gate resume "$TMP/installed" "$ordinary"
 (cd "$TMP/installed" && bin/ai-task-gates start --class installation) >/dev/null
-expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary" "" "$TMP/installed")"
+expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary"
 expect_ok 'same-source required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'trusted same-source reinstall finalizes' gate finalize "$TMP/installed" "$ordinary"
 for crash_point in completion authority marker; do
-  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary" "" "$TMP/installed")"
+  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary"
   expect_ok "ordinary stages bind before $crash_point interruption" gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
   export AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER="$crash_point"
   expect_stop "ordinary finalize is interrupted after $crash_point" gate finalize "$TMP/installed" "$ordinary"
@@ -126,7 +129,10 @@ git -C "$TMP/candidate" commit -qm protected
 protected="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
-expect_stop 'provider wrapper needs reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+expect_ok 'provider wrapper release installs as ordinary without reviewed authority (#2041)' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+# The legacy reviewed-authority route below is still honored when an issued
+# authority exists; drop the ordinary transaction so it can be exercised.
+rm -f -- "$TMP/state/install-authorizations/$protected.json.ordinary"
 git -C "$TMP/installed" worktree add -q --detach "$TMP/reviewed" "$protected"
 printf '.ai/reviews/\n' >> "$(git -C "$TMP/installed" rev-parse --path-format=absolute --git-path info/exclude)"
 mkdir -p "$TMP/reviewed/.ai/reviews" "$TMP/review-lifecycle"
@@ -162,7 +168,6 @@ git -C "$TMP/installed" merge -q --ff-only "$protected"
 expect_ok 'protected install resumes with reviewed pending authority' gate resume "$TMP/installed" "$protected"
 manifest "$protected"
 mv "$auth.consuming" "$TMP/pending-backup"
-expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --reviewer-approval "$(appr "$protected" "" "$TMP/installed")"
 expect_stop 'finalize refuses missing protected transaction' gate finalize "$TMP/installed" "$protected"
 mv "$TMP/pending-backup" "$auth.consuming"
 stage_path="$(stage_report "$protected")"
@@ -208,7 +213,8 @@ for crash_point in completion authority marker; do
   fi
   expect_ok 'completed protected finalize remains idempotent after cleanup' gate finalize "$TMP/installed" "$protected"
   [ ! -e "$auth.consuming" ] && [ ! -e "$TMP/state/install-stages/$protected.json" ] || { echo 'FAIL: recovered protected cleanup left a transaction'; exit 1; }
-  expect_stop 'completed protected authority cannot reopen preflight' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+  expect_ok 'completed install permits a fresh ordinary same-source preflight, never the consumed authority (#2041)' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+  [ ! -e "$auth" ] && [ ! -e "$auth.consuming" ] || { echo 'FAIL: consumed authority reopened'; exit 1; }
 done
 rm -rf -- "$TMP/state"
 cp -a "$TMP/state-after-protected-finalize" "$TMP/state"
@@ -245,7 +251,7 @@ mkdir -p "$TMP/activation-home/.local/state/ai-devops/task-gates"
 activation_lock="$TMP/activation-home/.local/state/ai-devops/task-gates/install-$(printf '%s' "$TMP/installed" | sha256sum | cut -c1-16).lock"
 activation_attempt(){
   env HOME="$TMP/activation-home" bash "$TMP/candidate/update.sh" --installed-checkout "$TMP/installed" \
-    --expected-head "$1" --reviewer-approval "$report" --activate-glm-formal --activation-only \
+    --expected-head "$1" --owner-authorization 'Albert: activate GLM formal' --activate-glm-formal --activation-only \
     > "$TMP/activation-output" 2>&1
 }
 (
@@ -332,11 +338,10 @@ git -C "$TMP/installed" remote set-url origin "file://$TMP/origin.git"
 # No network is reachable, and activation-only must never fetch.
 git -C "$TMP/installed" config 'url.https://github.com/popcre/ai-devops.git.insteadOf' "file://$TMP/origin.git"
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
-activation_report="$(appr "$protected" codex "$TMP/candidate")"
 # This exact canonical alias is accepted only for the same fixture inode.
 expect_ok 'actual activation-only updater publishes through real installer ownership' namespace env HOME="$TMP/activation-home" \
   bash "$TMP/candidate/update.sh" --installed-checkout "$TMP/installed" --expected-head "$protected" \
-  --reviewer-approval "$activation_report" --activate-glm-formal --activation-only
+  --owner-authorization 'Albert: activate GLM formal' --activate-glm-formal --activation-only
 [ -f "$TMP/activation-home/.config/ai-devops/glm-formal/activation.json" ] || { echo 'FAIL: updater did not publish activation'; exit 1; }
 ! grep -E 'Fetching origin main|Running installer|Running installation' "$TMP/last-output" >/dev/null || { echo 'FAIL: activation-only fetched/installed'; exit 1; }
 [ "$completion_before" = "$(sha256sum "$TMP/state/install-completions/last.json")" ] || { echo 'FAIL: successful activation changed completion'; exit 1; }
@@ -397,7 +402,8 @@ drifted="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
 git -C "$TMP/installed" merge -q --ff-only "$drifted"
-expect_stop 'stale manifest without reviewed recovery stops' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+expect_ok 'stale manifest proceeds through the ordinary update without review (#2041)' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+rm -f -- "$TMP/state/install-authorizations/$drifted.json.ordinary"
 git -C "$TMP/installed" worktree add -q --detach "$TMP/drift-reviewed" "$drifted"
 mkdir -p "$TMP/drift-reviewed/.ai/reviews"
 drift_digest="$("$TMP/candidate/bin/ai-review-sandbox" digest "$TMP/candidate")"

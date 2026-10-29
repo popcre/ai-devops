@@ -116,19 +116,15 @@ fi
 
 REQUIRE_SECRETS=auto
 AUTHORIZATION_TEST_ONLY=0
-reviewer_approval=""
 ACTIVATE_GLM_FORMAL=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --require-secrets) REQUIRE_SECRETS=yes; shift ;;
     --skip-secrets) REQUIRE_SECRETS=no; shift ;;
     --activate-glm-formal) ACTIVATE_GLM_FORMAL=1; shift ;;
-    --reviewer-approval)
-      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
-      reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
-      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--reviewer-approval REPORT] [--activate-glm-formal]"
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--activate-glm-formal]"
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -186,7 +182,6 @@ if [ -f "$issued_auth" ]; then
 fi
 resume_args=(install-verify --phase resume --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher "$install_launcher")
-[ -z "$reviewer_approval" ] || resume_args+=(--reviewer-approval "$reviewer_approval")
 resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}")" || {
   warn 'installation authorization refused before any machine changes'; exit 1;
 }
@@ -560,17 +555,7 @@ run_stage required "Configuration migration and validation" migrate_configuratio
 # First prune symlinks that point into this repo's bin/ but whose target is gone.
 # Without this, a retired command (e.g. ai-glm-agent.ps1) leaves a dangling link on
 # PATH forever: the loop below skips it because there is no source file to link from.
-protect_review_enforcement() {
-  local relative source
-  for relative in tools/review_action_profile.py config/review-action-profiles.json bin/ai-review-code-only.py bin/ai-task-gates; do
-    source="$REPO_ROOT/$relative"
-    [ -f "$source" ] && [ ! -L "$source" ] && [ "$(realpath -- "$source")" = "$source" ] || return 1
-    chmod go-w "$source" || return 1
-  done
-}
-
 install_entrypoints() {
-  protect_review_enforcement || return 1
   local dest target src name conflicts=0
   for dest in "$BIN_TARGET"/*; do
     [ -L "$dest" ] || continue

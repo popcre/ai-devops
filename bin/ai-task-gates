@@ -114,7 +114,7 @@ usage: ai-task-gates <command> [options]
 
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
-  check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
+  check --before ACTION [--acknowledge TEXT]
         [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install] [--application-release-target MANIFEST]
@@ -127,7 +127,7 @@ usage: ai-task-gates <command> [options]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|stages-complete|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned] [--reviewer-approval REPORT] [--stage-report PATH]
+        [--caller-pinned] [--stage-report PATH]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -183,28 +183,35 @@ validate_action_gates(){
     valid_action "$action" || fail_closed "action_gates names undeclared action '$action'."
     valid_class "$class" || fail_closed "action_gates names undeclared class '$class' for action '$action'."
   done < <(jqr '.action_gates // {} | to_entries[] | .key as $a | (.value.require_gate // {}) | keys[] | [$a,.] | @tsv' "$POLICY_FILE")
-  # A reviewer release names an action, a protected class, and the gate a
+  # An owner release names an action, a protected class, and the gate a
   # repository must declare for that class. Each part must be real, or a typo
-  # would silently leave the release unreachable or mis-scoped (#1239).
+  # would silently leave the release unreachable or mis-scoped. It opens only
+  # with an explicit owner authorization; no AI reviewer verdict (#2041).
   local gate
   while IFS=$'\t' read -r action class gate; do
     [ -n "$action" ] || continue
-    valid_action "$action" || fail_closed "reviewer_release names undeclared action '$action'."
-    valid_class "$class" || fail_closed "reviewer_release names undeclared class '$class' for action '$action'."
-    if [ "$class" = private-evidence ]; then
-      [ "$action" = database ] && [ "$gate" = synthetic-fixtures-only ] \
-        || fail_closed "reviewer_release cannot broaden the closed private-evidence database boundary."
-    fi
-    if [ "$class" = reviewer-safety ]; then
-      [ "$action" = database ] && [ "$gate" = reviewed-generated-definition-fixture-only ] \
-        || fail_closed 'reviewer_release cannot broaden the closed generated reviewer-safety boundary.'
-    fi
+    valid_action "$action" || fail_closed "owner_release names undeclared action '$action'."
+    valid_class "$class" || fail_closed "owner_release names undeclared class '$class' for action '$action'."
+    case "$class" in
+      private-evidence|reviewer-safety) fail_closed "owner_release cannot open the sealed '$class' class." ;;
+    esac
     if [ "$class" = infrastructure ]; then
       [ "$action" = production ] && [ "$gate" = reviewed-production-dispatch ] \
-        || fail_closed 'reviewer_release cannot broaden the closed u2giants/ansible production boundary.'
+        || fail_closed 'owner_release cannot broaden the closed u2giants/ansible production boundary.'
     fi
-    [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
-  done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
+    [ -n "$gate" ] || fail_closed "owner_release for '$action'/'$class' names no gate."
+  done < <(jqr '.owner_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
+  # The two closed DesignFlow native fixture-profile routes cannot broaden.
+  while IFS=$'\t' read -r action class gate; do
+    [ -n "$action" ] || continue
+    case "$action/$class/$gate" in
+      database/private-evidence/synthetic-fixtures-only) ;;
+      database/reviewer-safety/reviewed-generated-definition-fixture-only) ;;
+      */private-evidence/*) fail_closed "native_profile_release cannot broaden the closed private-evidence database boundary." ;;
+      */reviewer-safety/*) fail_closed 'native_profile_release cannot broaden the closed generated reviewer-safety boundary.' ;;
+      *) fail_closed "native_profile_release names an unsupported route '$action/$class'." ;;
+    esac
+  done < <(jqr '.native_profile_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
 
 # The class table is read once. Classification asks for a rank on every rule of
@@ -720,7 +727,7 @@ application_release_contributor_gates(){
 validate_application_release_policy(){
   jq -e --argjson services "$APP_RELEASE_SERVICES" '
     .application_source_releases as $r
-    | .reviewer_release as $rr
+    | .owner_release as $rr
     | ($r|type=="object") and (($r|keys)==($services|keys))
     and all($services|to_entries[]; . as $entry | $r[$entry.key]
       | type=="object"
@@ -839,28 +846,17 @@ application_release_validate_target(){ # SUPPLIED_PATH EFFECTIVE_CLASS
   fi
 }
 
-application_release_finish(){ # REPORT EFFECTIVE_CLASS
-  local report="$1" effective="$2" head summary summary_after reason state
-  # local-tests: decide the evidence requirement from this release class's own
-  # gates before either approval call; the approval is mandatory here.
-  decide_local_tests_required deploy "$(merged_gate "$IDENTITY" "$effective" | sed -n 's/^required\t//p' | paste -sd, -)" 1
-  [ -n "$report" ] || ! reviews_required \
-    || blocked 'ai-task-gates: STOP. Application source release requires --reviewer-approval with an independent final-check or security-review APPROVE.'
+application_release_finish(){ # EFFECTIVE_CLASS
+  local effective="$1" head summary reason state
+  # No AI reviewer verdict gates an application source release (#2041).
   head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null)" \
     || blocked 'ai-task-gates: STOP. Application release source HEAD is unavailable.'
   [ "$head" = "$APP_RELEASE_HEAD" ] \
     || blocked 'ai-task-gates: STOP. Application source changed after target validation.'
-  summary="waived-outside-shared-db(owner-ruling-2026-10-15)"
-  [ -z "$report" ] || summary="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
-    || approval_refused deploy $? 'ai-task-gates: STOP. Application release needs an independent lifecycle-recorded final-check or security-review APPROVE bound to this exact repository, HEAD, worktree digest, and deploy action.'
+  summary="no-reviewer-gate(#2041)"
   application_release_validate_target "$APP_RELEASE_MANIFEST_PATH" "$effective"
   [ "$APP_RELEASE_HEAD" = "$head" ] \
     || blocked 'ai-task-gates: STOP. Application source moved during release proof validation.'
-  summary_after="$summary"
-  [ -z "$report" ] || summary_after="$(reviewer_approval_summary "$report" deploy "$head" "$TOPLEVEL")" \
-    || approval_refused deploy $? 'ai-task-gates: STOP. Application approval became invalid during release proof validation.'
-  [ "$summary_after" = "$summary" ] \
-    || blocked 'ai-task-gates: STOP. Application approval evidence changed during release proof validation.'
   reason="head=$head manifest_blob=$APP_RELEASE_MANIFEST_BLOB consumer_blob=$APP_RELEASE_CONSUMER_BLOB approval=$summary"
   if [ "$IDENTITY" != popcre/designflow-backend ]; then
     reason="$reason repository=$IDENTITY target=$APP_RELEASE_EXPECTED_TARGET proof=$APP_RELEASE_PROOF"
@@ -871,14 +867,14 @@ application_release_finish(){ # REPORT EFFECTIVE_CLASS
       '.overrides | any(.kind=="application-source-release" and .action=="deploy" and .observed_class==$c and .reason==$r)' \
       "$state" >/dev/null 2>&1 \
     || blocked 'ai-task-gates: STOP. The exact application source-release proof could not be recorded; nothing was released.'
-  printf 'ai-task-gates: application source release may start only through the reviewed Cloud Build branch-source push: %s\n' "$summary"
+  printf 'ai-task-gates: application source release may start only through the Cloud Build branch-source push: %s\n' "$summary"
   printf 'ai-task-gates: recorded exact application source-release override for HEAD %s and manifest blob %s.\n' "$head" "$APP_RELEASE_MANIFEST_BLOB"
 }
 
 # Ordinary application-owned rows use an authenticated application workflow,
 # never the SQL/structure or cloud-action gates. This is deliberately one target.
-application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
-  local manifest="$1" report="$2" effective="$3" head blob summary summary_again reason state py
+application_workflow_finish(){ # MANIFEST EFFECTIVE_CLASS
+  local manifest="$1" effective="$2" head blob summary reason state py
   [ "$IDENTITY" = popcre/designflow-backend ] \
     || blocked 'ai-task-gates: STOP. Application workflow requires canonical popcre/designflow-backend.'
   case "$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null)" in
@@ -898,12 +894,8 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
   blob="$(application_release_file_blob "$manifest")" \
     || blocked 'ai-task-gates: STOP. Application workflow manifest must be clean and committed at HEAD.'
   head="$(git -C "$TOPLEVEL" rev-parse HEAD)"
-  # local-tests: this function runs before cmd_check's gate split and returns
-  # early, so decide the evidence requirement from this class's own gates
-  # before either approval call; the approval is mandatory here.
-  decide_local_tests_required application-workflow "$(merged_gate "$IDENTITY" "$effective" | sed -n 's/^required\t//p' | paste -sd, -)" 1
-  summary="$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" \
-    || approval_refused application-workflow $? 'ai-task-gates: STOP. Application workflow requires independent lifecycle-recorded exact-head final-check or security-review APPROVE.'
+  # No AI reviewer verdict gates the application workflow (#2041).
+  summary="no-reviewer-gate(#2041)"
   reason="head=$head manifest_blob=$blob approval=$summary"
   state_record_override application-workflow application-workflow "$reason" "$effective" \
     && state="$(state_path)" \
@@ -913,11 +905,7 @@ application_workflow_finish(){ # MANIFEST REPORT EFFECTIVE_CLASS
     && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
     && [ "$(application_release_file_blob "$manifest")" = "$blob" ] \
     || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
-  summary_again="$(reviewer_approval_summary "$report" application-workflow "$head" "$TOPLEVEL")" \
-    || approval_refused application-workflow $? 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
-  [ "$summary_again" = "$summary" ] \
-    || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
-  printf 'ai-task-gates: reviewed authenticated HTS sandbox workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
+  printf 'ai-task-gates: authenticated HTS sandbox workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
 }
 
 # A small owner-requested entry is optional history only (owner ruling
@@ -1047,16 +1035,14 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
 # Gates this tool actually checks. Anything else a policy lists is recorded
 # and printed under "not checked by this tool"; it is never claimed as satisfied
 # or enforced here. Keep this list in step with the enforcement code paths.
-GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|reviewed-toolkit-installation|oracle-native-alternate(-v2)?-descriptor-only-admission|reviewed-generated-definition-fixture-only)$'
+GATE_ENFORCED_RE='^(never-open-raw-transcript-archives|current-chat-resource-and-action-authorization|synthetic-fixtures-only|reviewed-private-data-writer|production-promotion-authorization|oracle-native-alternate(-v2)?-descriptor-only-admission)$'
 # split_required_gates CSV -> REQUIRED_CHECKED (enforced here) and REQUIRED_UNCHECKED
-# Owner ruling 2026-10-15 (#1960): "we turned off reviewing in all repos aside
-# from shared-db." Outside popcre/shared-db a PR/code-review gate a policy
-# lists is not required; it is reported as waived and never enforced. The
-# production-mutation gate (exact-resource-and-action-ai-reviewer-approval) is
-# NOT a PR review: the standing safety rule "the assigned AI reviewer's explicit
-# APPROVE gates every technical production action" was not repealed, so it
-# stays enforced in every repository (#1962, DeepSeek REJECT of 5cc973dd).
-REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-head-independent-review)$'
+# Owner ruling 2026-10-29 (#2041, "skinny" review): review is advice, never a
+# gate. No class requires an AI reviewer verdict in any repository. A reviewer
+# gate that a policy (or an older consumer declaration) still lists is
+# reported as waived and never enforced. Production keeps its owner
+# authorization gate (current-chat-resource-and-action-authorization).
+REVIEWER_GATE_RE='^(assigned-ai-reviewer-approval|exact-head-independent-review|exact-resource-and-action-ai-reviewer-approval|release-marker-review|reviewed-toolkit-installation|reviewed-generated-definition-fixture-only)$'
 # Identity aliases come from config/repository-coverage.json ("aliases" per
 # repository): a checkout whose origin still reads the pre-transfer name
 # u2giants/shared-db is the same repository and keeps the same gates (#1962).
@@ -1065,21 +1051,11 @@ canonical_identity(){
   [ -f "$coverage" ] && canonical="$(jq -r --arg id "$IDENTITY" '[.repositories[]? | select((.aliases // []) | index($id)) | .identity][0] // empty' "$coverage" 2>/dev/null | tr -d '\r')"
   printf '%s' "${canonical:-$IDENTITY}"
 }
-reviews_required(){ [ "$(canonical_identity)" = popcre/shared-db ]; }
 split_required_gates(){
   local all="$1" checked
-  REQUIRED_WAIVED=""
-  if ! reviews_required; then
-    REQUIRED_WAIVED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$REVIEWER_GATE_RE" | paste -sd, - || true)"
-    all="$(printf '%s\n' "$all" | tr ',' '\n' | grep -vE "$REVIEWER_GATE_RE" | grep -v '^$' | paste -sd, - || true)"
-  fi
+  REQUIRED_WAIVED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$REVIEWER_GATE_RE" | paste -sd, - || true)"
+  all="$(printf '%s\n' "$all" | tr ',' '\n' | grep -vE "$REVIEWER_GATE_RE" | grep -v '^$' | paste -sd, - || true)"
   checked="$(printf '%s\n' "$all" | tr ',' '\n' | grep -E "$GATE_ENFORCED_RE" || true)"
-  # local-tests is enforced only where a reviewer approval is required: the review
-  # record then carries the passing test evidence. Elsewhere it stays unchecked.
-  if printf '%s\n' "$all" | tr ',' '\n' | grep -Eq '^(assigned-ai-reviewer-approval|exact-resource-and-action-ai-reviewer-approval|exact-head-independent-review)$' \
-     && printf '%s\n' "$all" | tr ',' '\n' | grep -qx local-tests; then
-    checked="$(printf '%s\nlocal-tests\n' "$checked")"
-  fi
   REQUIRED_CHECKED="$(printf '%s\n' "$checked" | grep -v '^$' | paste -sd, - || true)"
   REQUIRED_UNCHECKED="$(printf '%s\n' "$all" | tr ',' '\n' | grep -v '^$' | grep -vxF "$(printf '%s\n' "$REQUIRED_CHECKED" | tr ',' '\n')" | paste -sd, - || true)"
 }
@@ -1462,10 +1438,10 @@ cmd_check(){
   fi
   [ -z "$scoped_skills_plan" ] || die '--scoped-skills-plan requires scoped-skills-install.'
   if [ "$action" = application-workflow ] || [ -n "$application_workflow_target" ]; then
-    [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] && [ -n "$reviewer_approval" ] \
+    [ "$action" = application-workflow ] && [ -n "$application_workflow_target" ] \
       && [ -z "$base$acknowledge$small_entry$application_release_target$target_head$installed_checkout$installed_launcher" ] \
       && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
-      || blocked 'ai-task-gates: STOP. Application workflow needs only its committed target and independent review; alternate action, base or bypass arguments are refused.'
+      || blocked 'ai-task-gates: STOP. Application workflow needs only its committed target; alternate action, base or bypass arguments are refused.'
   fi
   if [ "$action" = deploy ]; then
     resolve_repo
@@ -1498,15 +1474,8 @@ cmd_check(){
   refuse_raw_archives "$action" "${RAW_ARCHIVE_PATHS:-}"
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
-    [ -n "$reviewer_approval" ] || ! reviews_required || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
-    # local-tests: this route runs BEFORE the gate split below, so decide the
-    # evidence requirement here; installation gates require both local-tests
-    # and the reviewer approval this branch demands unconditionally.
-    decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
-    if [ -n "$reviewer_approval" ]; then
-      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
-        || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
-    fi
+    # No AI reviewer verdict gates a toolkit installation (#2041); the
+    # declared installation task and the exact-source checks below remain.
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
     [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
     local same_root same_head expected_launcher
@@ -1646,7 +1615,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
 
   if [ "$action" = application-workflow ]; then
-    application_workflow_finish "$application_workflow_target" "$reviewer_approval" "$effective"
+    application_workflow_finish "$application_workflow_target" "$effective"
     return 0
   fi
   if [ -n "$application_release_target" ]; then
@@ -1668,7 +1637,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   done
   [ "$declared" = reviewer-safety ] && reviewer_release=1
   if [ "$action" = deploy ] && [ "$reviewer_release" -eq 1 ] && [ "$application_release_ready" -eq 0 ]; then
-    blocked 'ai-task-gates: STOP. Reviewer-safety changes cannot use the generic deploy action; use a separate reviewed installation task.'
+    blocked 'ai-task-gates: STOP. Reviewer-safety changes cannot use the generic deploy action; use a separate installation task.'
   fi
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
@@ -1685,14 +1654,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   local required_full="" unchecked_required=""
   required_full="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"; split_required_gates "$required_full"; required="$REQUIRED_CHECKED"; unchecked_required="$REQUIRED_UNCHECKED"
   # local-tests evidence must be decided BEFORE the first approval call site in
-  # this function's gate sections: the offline-native route and the protected
-  # reviewer release below both call reviewer_approval_summary, and a release
-  # taken through either must not skip the evidence check (flagged in review of
-  # d4ebbf1c). The same-source installation branch above decided it for itself
-  # because it runs before this split. review, code-only-review, and pr-wait
-  # PRODUCE or wait on the approval; they are not gated here.
-  local reviewer_gated_action=1
-  case "$action" in review|code-only-review|pr-wait) reviewer_gated_action=0 ;; esac
+  # this function's gate sections: the closed offline-native route below calls
+  # reviewer_approval_summary and must not skip the evidence check.
   decide_local_tests_required "$action" "$required_full"
   observation_week_check "$action" "$effective"
   if [ "$action" = offline-private-capture-transform ]; then
@@ -1718,37 +1681,49 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     # A protected forbidden action stays sealed unless the central policy names
-    # a reviewer release for exactly this action and EFFECTIVE class, and the
+    # an owner release for exactly this action and EFFECTIVE class, and the
     # merged gates for that class declare the release gate (the repository's
-    # own declaration, as for code-only-review). The release only reaches the
-    # reviewer-approval step below; it never lets the action start without an
-    # assigned AI reviewer's exact-head APPROVE (#1239).
-    local release_gate=""
+    # own declaration, as for code-only-review). The release opens only with an
+    # explicit owner authorization (--acknowledge); no AI reviewer verdict is
+    # ever required (#2041).
+    local release_gate="" native_release=0
     if [ "$protected" = true ]; then
-      release_gate="$(jqr --arg a "$action" --arg c "$effective" '.reviewer_release[$a][$c] // empty' "$POLICY_FILE")"
+      release_gate="$(jqr --arg a "$action" --arg c "$effective" '.owner_release[$a][$c] // empty' "$POLICY_FILE")"
+      if [ -z "$release_gate" ]; then
+        # Two closed DesignFlow native fixture-profile routes (#770 isolated
+        # timing profile, generated-definition fixture) are admitted only by a
+        # native action-profile receipt bound to bounded stdin. They are not a
+        # class review requirement: without the receipt the action stays
+        # sealed exactly as every other protected forbidden action. Retired
+        # with the old reviewer code in phase F of #2041.
+        release_gate="$(jqr --arg a "$action" --arg c "$effective" '.native_profile_release[$a][$c] // empty' "$POLICY_FILE")"
+        [ -z "$release_gate" ] || native_release=1
+      fi
       if [ -n "$release_gate" ] && ! printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -qx -- "$release_gate"; then
-        release_gate=""
+        release_gate=""; native_release=0
       fi
     fi
-    # This release retains the protected class. Stdin forces the existing
-    # selected-code/native profile validator below, which accepts only the
-    # closed isolated #770 descriptor and publishes both stage receipts.
-    # Ordinary reviews and every owner/acknowledgement shortcut stay sealed.
-    if [ "$effective" = private-evidence ]; then
+    if [ "$native_release" -eq 1 ] && [ "$effective" = private-evidence ]; then
       [ "$action" = database ] && [ "$release_gate" = synthetic-fixtures-only ] \
         && [ "$IDENTITY" = popcre/designflow-backend ] \
         && [ "$action_manifest_stdin" -eq 1 ] && [ -z "$small_entry" ] \
         && [ -z "$acknowledge" ] \
-        || release_gate=""
+        || { release_gate=""; native_release=0; }
+    fi
+    if [ "$native_release" -eq 1 ] && [ "$effective" = reviewer-safety ]; then
+      [ "$action" = database ] && [ "$release_gate" = reviewed-generated-definition-fixture-only ] \
+        && [ "$IDENTITY" = popcre/designflow-backend ] && [ "$declared" = reviewer-safety ] \
+        && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
+        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] && [ "$first_install" -eq 0 ] \
+        && python3 "$REAL_DIR/../tools/review_action_profile.py" generated-select < "$action_manifest_file" >/dev/null 2>&1 \
+        || { release_gate=""; native_release=0; }
     fi
     # The infrastructure production release is pinned to the one repository
     # whose owner ruling opened it (u2giants/ansible, 2026-10-20): canonical
     # origin, a clean declaration committed at HEAD, and a clean HEAD equal to
     # the real GitHub main the apply workflow dispatches. That main is read
     # fresh from the fixed canonical URL with no system, global, or repository
-    # Git config (so no insteadOf rewrite or local ref can stand in for it);
-    # matching it binds the exact-head approval to the dispatched commit and
-    # to the real repository rather than to a self-asserted origin string.
+    # Git config (so no insteadOf rewrite or local ref can stand in for it).
     if [ "$effective" = infrastructure ] && [ -n "$release_gate" ]; then
       local infra_origin infra_head infra_main infra_status
       infra_origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
@@ -1768,21 +1743,28 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         && infra_status="$(git -C "$TOPLEVEL" status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
         && [ -z "$infra_status" ] \
         && [ -n "$infra_head" ] && [ "$infra_head" = "$infra_main" ] \
-        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] \
+        && [ -z "$small_entry$target_head$installed_checkout$installed_launcher" ] \
         && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
         || release_gate=""
     fi
-    if [ "$effective" = reviewer-safety ] && [ -n "$release_gate" ]; then
-      [ "$action" = database ] && [ "$release_gate" = reviewed-generated-definition-fixture-only ] \
-        && [ "$IDENTITY" = popcre/designflow-backend ] && [ "$declared" = reviewer-safety ] \
-        && [ "$action_manifest_stdin" -eq 1 ] && [ "$action_stage" = initial-forward ] \
-        && [ -z "$small_entry$acknowledge$target_head$installed_checkout$installed_launcher" ] && [ "$first_install" -eq 0 ] \
-        && python3 "$REAL_DIR/../tools/review_action_profile.py" generated-select < "$action_manifest_file" >/dev/null 2>&1 \
-        || release_gate=""
-    fi
     if [ "$protected" = true ] && [ -z "$release_gate" ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path outside its closed owner release.\nNarrow the change set out of protected paths, or change this policy through its own path.' \
         "$action" "$effective" "$IDENTITY")"
+    fi
+    if [ "$native_release" -eq 1 ]; then
+      [ -n "$reviewer_approval" ] \
+        || blocked "$(printf 'ai-task-gates: STOP. "%s" for "%s" in %s opens only with its native action-profile receipt (--reviewer-approval with --action-manifest-stdin).' "$action" "$effective" "$IDENTITY")"
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
+        || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP. The native action-profile receipt for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action.' "$action")"
+      state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
+        && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+        || blocked 'ai-task-gates: STOP. Native reviewer receipt was not persisted; bounded action admission was not issued.'
+      local admission_summary
+      admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
+        || approval_refused "$action" $? 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
+      [ "$admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Bounded approval changed during native admission.'
+      printf 'ai-task-gates: "%s" admitted by its native action-profile receipt: %s\n' "$action" "$approval_summary"
+      return 0
     fi
     if [ "$action" = database ] && [ "$protected" != true ]; then
       # owner ruling 2026-10-14: "Our own safety rules require a second AI to
@@ -1799,24 +1781,50 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       fi
       return 0
     fi
-    if [ -z "$reviewer_approval" ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
+    # A toolkit installation of ai-devops itself is the declared installation
+    # task's own action: it passed the exact-source checks above and waits for
+    # no reviewer verdict and no further owner text (#2041).
+    if [ "$action" = deploy ] && [ "$protected" != true ] && [ "$declared" = installation ] \
+       && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
+      [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
+        || blocked 'ai-task-gates: STOP. Candidate checkout has local changes; install only an exact committed target.'
+      [ -z "$target_head" ] || [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] \
+        || blocked 'ai-task-gates: STOP. The named target differs from the candidate HEAD.'
+      if [ -n "$installed_checkout" ]; then
+        local inst_root
+        inst_root="$(cd "$installed_checkout" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout path is unavailable.'
+        [ -z "$(git -C "$inst_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
+          || blocked 'ai-task-gates: STOP. Installed checkout has local changes.'
+        [ "$(git -C "$inst_root" rev-parse HEAD 2>/dev/null)" = "$(state_field start_head)" ] \
+          || blocked 'ai-task-gates: STOP. Installed checkout moved since the installation task was declared.'
+      fi
+      state_record_override declared-installation "$action" "toolkit installation for declared installation task" "$effective"
+      printf 'ai-task-gates: "%s" allowed as a toolkit installation for the declared installation task (no reviewer gate, #2041).\n' "$action"
+      return 0
+    fi
+    # The verification actions (review, pr-wait, code-only-review) mutate
+    # nothing; a lifecycle-recorded APPROVE the caller already holds may still
+    # lift them on an unprotected class, as an option, never a requirement.
+    if [ -z "$acknowledge" ] && [ -n "$reviewer_approval" ] && [ "$protected" != true ] && [ "$action_manifest_stdin" -eq 0 ]; then
+      case "$action" in
+        review|pr-wait|code-only-review)
+          approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
+            || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action.' "$action")"
+          state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
+          printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
+          return 0 ;;
+      esac
+    fi
+    if [ -z "$acknowledge" ]; then
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, the owner must authorize this exact action and resource; re-run with --acknowledge "<owner authorization>". No AI reviewer verdict is required (#2041).' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
-      || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
-    if [ "$action_manifest_stdin" -eq 1 ]; then
-      state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
-        && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
-        || blocked 'ai-task-gates: STOP. Native reviewer receipt was not persisted; bounded action admission was not issued.'
-      local admission_summary
-      admission_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage" 1)" \
-        || approval_refused "$action" $? 'ai-task-gates: STOP. Final native bounded action admission refused after receipt persistence.'
-      [ "$admission_summary" = "$approval_summary" ] || blocked 'ai-task-gates: STOP. Bounded approval changed during native admission.'
-    else
-      state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
-    fi
-    printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
+    [ "$action_manifest_stdin" -eq 0 ] \
+      || blocked "$(printf 'ai-task-gates: STOP before "%s". A bounded stdin action cannot take the owner-authorization route.' "$action")"
+    state_record_override owner-authorization "$action" "$acknowledge" "$effective" \
+      && jq -e --arg r "$acknowledge" --arg a "$action" '.overrides | map(select(.kind=="owner-authorization" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+      || blocked 'ai-task-gates: STOP. The owner authorization could not be recorded in the task state; nothing was released.'
+    printf 'ai-task-gates: "%s" allowed by owner authorization: %s\n' "$action" "$acknowledge"
     return 0
   fi
 
@@ -1834,52 +1842,35 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       "$action" "$needs_gate" "$effective" "$IDENTITY")"
   fi
 
-  # 4. A required reviewer-approval gate (for example
-  # exact-resource-and-action-ai-reviewer-approval on production, or
-  # assigned-ai-reviewer-approval on installation) is enforced here for every
-  # action the policy does not forbid. Listing the gate is not satisfying it:
-  # without a --reviewer-approval report that binds an independent APPROVE to
-  # this exact head and source, the release action is refused. The small owner
-  # entry, which the database action alone may use, is the one other exemption.
-  # review, code-only-review, and pr-wait are the verification actions that
-  # produce or wait on the approval (ai-review and ai-pr-wait preflight them
-  # before any reviewer exists), so they are not gated here; they mutate nothing.
-  # LOCAL_TESTS_REQUIRED was already set with the gate split above, before every
-  # approval call site in this function.
-  if [ "$application_release_ready" -eq 0 ] && [ "$reviewer_gated_action" -eq 1 ] && printf '%s\n' "$required" | tr ',' '\n' | grep -Eq '(reviewer-approval|exact-head-independent-review)$'; then
-    if [ -n "$small_entry" ]; then
-      [ "$action" = database ] && [ "$action_manifest_stdin" -eq 0 ] \
-        || blocked "$(printf 'ai-task-gates: STOP before "%s". The required gates for "%s" in %s are: %s\nA small owner entry applies only to a row-data database write; this action needs --reviewer-approval.' "$action" "$effective" "$IDENTITY" "$required")"
-      approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$effective")" || exit "$EX_BLOCKED"
-      state_record_override small-owner-entry "$action" "$approval_summary" "$effective" \
-        && jq -e --arg r "$approval_summary" '.overrides | map(select(.kind=="small-owner-entry" and .reason==$r)) | length > 0' "$(state_path)" >/dev/null 2>&1 \
-        || blocked 'ai-task-gates: STOP. The small owner entry could not be recorded in the task state; nothing was released.'
-      printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
-      return 0
-    fi
-    if [ -z "$reviewer_approval" ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s". The "%s" class in %s requires an assigned AI reviewer APPROVE of this exact head and resource, and none was supplied.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (implementer must differ from the reviewer) and re-run with --reviewer-approval <that report>.' \
-        "$action" "$effective" "$IDENTITY" "$required")"
-    fi
-    [ "$action_manifest_stdin" -eq 0 ] \
-      || blocked "$(printf 'ai-task-gates: STOP before "%s". A bounded stdin action cannot take this reviewer route; re-declare it through its own closed action.' "$action")"
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL" "$action_manifest_file" "$action_stage")" \
-      || approval_refused "$action" $? "$(printf 'ai-task-gates: STOP before "%s". The reviewer approval is not a lifecycle-recorded independent APPROVE for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
-    state_record_override reviewer-approval "$action" "$approval_summary" "$effective" \
-      && jq -e --arg r "$approval_summary" --arg a "$action" '.overrides | map(select(.kind=="reviewer-approval" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
-      || blocked 'ai-task-gates: STOP. The reviewer approval could not be recorded in the task state; nothing was released.'
-    printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
-    return 0
+  # 4. Production owner authorization (#2041). Where the merged gates require
+  # current-chat-resource-and-action-authorization (the production class and
+  # the infrastructure repositories), every action except the read-only
+  # verification actions needs the owner's explicit authorization of this exact
+  # resource and action, passed with --acknowledge and recorded in task state.
+  # This replaced the former AI reviewer APPROVE; no reviewer verdict applies.
+  if [ "$application_release_ready" -eq 0 ] \
+     && printf '%s\n' "$required" | tr ',' '\n' | grep -qx current-chat-resource-and-action-authorization; then
+    case "$action" in
+      review|code-only-review|pr-wait) ;;
+      *)
+        [ -n "$acknowledge" ] || blocked "$(printf 'ai-task-gates: STOP before "%s". The "%s" class in %s requires the owner'\''s explicit authorization of this exact resource and action, and none was supplied.\nRequired gates for this class: %s\nTo proceed, re-run with --acknowledge "<owner authorization>". No AI reviewer verdict is required (#2041).' \
+          "$action" "$effective" "$IDENTITY" "$required")"
+        state_record_override owner-authorization "$action" "$acknowledge" "$effective" \
+          && jq -e --arg r "$acknowledge" --arg a "$action" '.overrides | map(select(.kind=="owner-authorization" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
+          || blocked 'ai-task-gates: STOP. The owner authorization could not be recorded in the task state; nothing was released.'
+        printf 'ai-task-gates: "%s" allowed by owner authorization: %s\n' "$action" "$acknowledge"
+        return 0 ;;
+    esac
   fi
 
   [ -z "$small_entry" ] || printf 'ai-task-gates: note: "%s" is not reviewer-gated here; --small-owner-entry was not needed and was not recorded.\n' "$action" >&2
   if [ "$application_release_ready" -eq 1 ]; then
-    application_release_finish "$reviewer_approval" "$effective"
+    application_release_finish "$effective"
     return 0
   fi
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
-  [ -z "${REQUIRED_WAIVED:-}" ] || printf 'waived outside popcre/shared-db (owner ruling 2026-10-15): %s\n' "$REQUIRED_WAIVED"
+  [ -z "${REQUIRED_WAIVED:-}" ] || printf 'waived, review is advisory only (owner ruling 2026-10-29, #2041): %s\n' "$REQUIRED_WAIVED"
   [ -z "${unchecked_required:-}" ] || printf 'not checked by this tool: %s\n' "$unchecked_required"
   return 0
 }
@@ -2075,7 +2066,7 @@ linux_stage_marker_valid(){
 }
 
 cmd_install_verify(){
-  local phase='' target='' installed='' launcher='' caller_pinned=0 reviewer_approval='' approval_summary='' stage_report='' installed_head candidate_root common origin_url
+  local phase='' target='' installed='' launcher='' caller_pinned=0 approval_summary='' stage_report='' installed_head candidate_root common origin_url
   local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation='' class_base='' stale_recovery=0 stage_marker='' staged_ok=0 transaction=''
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2084,7 +2075,6 @@ cmd_install_verify(){
       --installed-checkout) need_value "$@"; installed="$2"; shift 2 ;;
       --installed-launcher) need_value "$@"; launcher="$2"; shift 2 ;;
       --caller-pinned) caller_pinned=1; shift ;;
-      --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
       --stage-report) need_value "$@"; stage_report="$2"; shift 2 ;;
       *) die "unknown option for install-verify: $1" ;;
     esac
@@ -2232,18 +2222,16 @@ cmd_install_verify(){
     else
       transaction="$ordinary"
       jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
-        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
       old="$(jq -r .installed_head "$ordinary")"
       if [ -n "$completed_head" ]; then
         [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
-      else
-        [ "$old" != "$target" ] || blocked 'ai-task-gates: STOP. An uncompleted first install cannot be finalized as ordinary.'
       fi
       classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Ordinary transaction range cannot be classified.'
       refuse_release_raw_archives 'install-verify' "$old" "$target"
       while IFS=$'\t' read -r cls protected_flag; do
         [ -n "$cls" ] || continue
-        [ "$protected_flag" != true ] || blocked 'ai-task-gates: STOP. Protected release cannot finalize as ordinary.'
+        [ "$protected_flag" != true ] || [ "$cls" = reviewer-safety ] || blocked 'ai-task-gates: STOP. Protected release cannot finalize as ordinary.'
       done <<< "$classes"
     fi
     if [ "$phase" = stages-complete ]; then
@@ -2283,7 +2271,7 @@ cmd_install_verify(){
     printf 'ai-task-gates: Linux install verified at %s.\n' "$target"; return 0
   fi
   if [ "$phase" = preflight ]; then
-    [ "$installed_head" != "$target" ] || [ -e "$issued" ] || [ -e "$pending" ] || [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Unreceipted same-source install needs reviewed migration.'
+    :
   else
     [ "$installed_head" = "$target" ] || blocked 'ai-task-gates: STOP. Installed checkout is not at pinned target.'
   fi
@@ -2306,9 +2294,6 @@ cmd_install_verify(){
     [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Staged Linux manifest differs from target.'
     staged_ok=1
   fi
-  if [ "$phase" = resume ] && [ "$old" = "$target" ] && [ -z "$completed_head" ] && [ ! -e "$pending" ]; then
-    blocked 'ai-task-gates: STOP. Same-source Linux maintenance lacks a completed install receipt; use reviewed migration.'
-  fi
   if [ -n "$completed_head" ] && [ "$old" != "$completed_head" ]; then
     stale_completed_baseline_ok "$auth" "$completed_head" "$old" "$target" "$installed" ||
       blocked 'ai-task-gates: STOP. Installation baseline differs from last completed release.'
@@ -2321,18 +2306,19 @@ cmd_install_verify(){
   if [ "$stale_recovery" -eq 1 ]; then class_base="$receipt"; fi
   classes="$(install_release_classes "$class_base" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Could not classify Linux release.'
   refuse_release_raw_archives 'install-verify' "$class_base" "$target"
+  # No install or update waits for an AI reviewer verdict (#2041). A release
+  # touching reviewer code installs through the ordinary declared-installation
+  # transaction; any other protected class still needs its own stronger gate.
+  # A previously issued reviewed authority (authorize-install) is still honored
+  # so an interrupted reviewed install can finish, but none is ever required.
   local protected_flag
   while IFS=$'\t' read -r cls protected_flag; do
     [ -n "$cls" ] || continue
     if [ "$protected_flag" = true ]; then
       [ "$cls" = reviewer-safety ] || blocked "ai-task-gates: STOP. '$cls' needs its own stronger installation gate."
-      protected=1
     fi
   done <<< "$classes"
-  if [ -z "$receipt" ] || [ "$stale_recovery" -eq 1 ]; then protected=1; fi
-  if [ -n "$receipt" ] && [ "$receipt" != "$installed_head" ] && [ -z "$completed_head" ] && [ "$stale_recovery" -ne 1 ] && [ ! -e "$pending" ] && [ ! -e "$ordinary" ]; then
-    blocked 'ai-task-gates: STOP. Installed Linux manifest is stale; use reviewed stale-manifest recovery.'
-  fi
+  if [ -e "$issued" ] || [ -e "$pending" ]; then protected=1; fi
   if [ "$phase" = preflight ]; then
     [ "$declared_installation" = installation ] || blocked 'ai-task-gates: STOP. Linux update needs a declared installation task.'
   fi
@@ -2346,15 +2332,11 @@ cmd_install_verify(){
   else
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
-      [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
-      # local-tests: the ordinary install approval is mandatory; decide the
-      # evidence requirement from the installation gates before the call.
-      decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
-      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" "$candidate_root")" \
-        || approval_refused deploy $? 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+      [ "$declared_installation" = installation ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task.'
+      approval_summary="declared-installation-task(no-reviewer-gate,#2041)"
     else
       jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
-        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
     fi
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install state.'
@@ -2363,7 +2345,7 @@ cmd_install_verify(){
       ordinary_stage="$(mktemp "$auth_dir/.ordinary.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
       chmod 0600 "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
       jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg request "$approval_summary" --arg id "$(cat /proc/sys/kernel/random/uuid)" \
-        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,reviewer_approval:$request,transaction_id:$id}' > "$ordinary_stage" &&
+        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,authorization:$request,transaction_id:$id}' > "$ordinary_stage" &&
         ln -- "$ordinary_stage" "$ordinary" && rm -- "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
 
     fi
@@ -2452,9 +2434,14 @@ cmd_authorize_install(){
     done <<< "$legacy_classes"
   fi
   if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
-    [ "$OBSERVED_CLASS" = reviewer-safety ] || blocked "ai-task-gates: STOP. Release class is '$OBSERVED_CLASS'; use its own gate."
+    # Legacy reviewed route, now optional (#2041): reviewer code is ordinary
+    # code, so any unprotected or reviewer-safety release may use it; a
+    # stronger protected class still needs its own gate.
+    case "$OBSERVED_CLASS" in
+      reviewer-safety|installation|code|prose|none) ;;
+      *) blocked "ai-task-gates: STOP. Release class is '$OBSERVED_CLASS'; use its own gate." ;;
+    esac
   fi
-  printf '%s\n' "$(merged_gate "$IDENTITY" reviewer-safety)" | grep -qx $'required\treviewed-toolkit-installation' || blocked 'ai-task-gates: STOP. Repository lacks reviewed toolkit install opt-in.'
   origin_url="$(git -C "$TOPLEVEL" config --get remote.origin.url 2>/dev/null || true)"
   case "$origin_url" in
     https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;

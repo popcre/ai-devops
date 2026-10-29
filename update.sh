@@ -14,7 +14,7 @@ same_path() { ai_same_path "$@"; }
 
 expected_head=""
 installed_checkout=""
-reviewer_approval=""
+owner_authorization=""
 activate_glm_formal=0
 activation_only=0
 install_args=()
@@ -26,14 +26,14 @@ while [ "$#" -gt 0 ]; do
     --installed-checkout)
       [ "$#" -ge 2 ] || { warn '--installed-checkout needs a path'; exit 2; }
       installed_checkout="$2"; shift 2 ;;
-    --reviewer-approval)
-      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
-      reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
+    --owner-authorization)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-authorization needs the owner authorization text'; exit 2; }
+      owner_authorization="$2"; shift 2 ;;
     --activation-only) activation_only=1; shift ;;
     --activate-glm-formal) activate_glm_formal=1; install_args+=("$1"); shift ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets] [--activate-glm-formal [--activation-only]]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--require-secrets|--skip-secrets] [--activate-glm-formal [--activation-only --owner-authorization TEXT]]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac
@@ -41,8 +41,8 @@ done
 if [ "$activation_only" -eq 1 ] && [ "$(uname -s)" != Linux ]; then
   warn 'activation-only is a Linux formal-profile operation'; exit 2
 fi
-if [ "$activation_only" -eq 1 ] && { [ "$activate_glm_formal" -ne 1 ] || [ -z "$expected_head" ] || [ -z "$reviewer_approval" ]; }; then
-  warn '--activation-only requires --activate-glm-formal, --expected-head and --reviewer-approval'; exit 2
+if [ "$activation_only" -eq 1 ] && { [ "$activate_glm_formal" -ne 1 ] || [ -z "$expected_head" ] || [ -z "$owner_authorization" ]; }; then
+  warn '--activation-only requires --activate-glm-formal, --expected-head and --owner-authorization'; exit 2
 fi
 if [ "$activate_glm_formal" -eq 1 ]; then source "$SOURCE_ROOT/tools/lib/opencode-maintenance-lock.sh"; fi
 if [ -n "$expected_head" ] && ! [[ "$expected_head" =~ ^[0-9a-f]{40}$ ]]; then
@@ -117,7 +117,7 @@ if [ "$activation_only" -eq 1 ]; then
     warn 'activation-only requires the exact already installed source'; exit 1;
   }
   (cd "$SOURCE_ROOT" && "$SOURCE_ROOT/bin/ai-task-gates" check --before infrastructure \
-    --reviewer-approval "$reviewer_approval") || exit 1
+    --acknowledge "$owner_authorization") || exit 1
   (cd "$SOURCE_ROOT" && "$SOURCE_ROOT/bin/ai-task-gates" install-verify --phase activation \
     --target-head "$expected_head" --installed-checkout "$REPO_ROOT" \
     --installed-launcher /usr/local/bin/ai-task-gates) || exit 1
@@ -181,7 +181,6 @@ declaration_reason="Pinned installation candidate for $target_head"
 gate_args=(install-verify --phase preflight --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$expected_head" ] || gate_args+=(--caller-pinned)
-[ -z "$reviewer_approval" ] || gate_args+=(--reviewer-approval "$reviewer_approval")
 preflight_output="$(cd "$candidate" && "$candidate/bin/ai-task-gates" "${gate_args[@]}")" || {
   warn 'installation preflight refused; installed checkout was not advanced'
   exit 1

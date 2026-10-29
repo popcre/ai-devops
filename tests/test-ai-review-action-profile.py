@@ -643,35 +643,11 @@ class InstalledActionEvidenceTests(unittest.TestCase):
         r = self.run_helper()
         self.assertEqual((r.returncode, r.stdout), (3, b""))
 
-    def test_installer_preserves_execution_and_removes_external_writes(self):
+    def test_installer_no_longer_protects_review_enforcement_files(self):
+        # #2041: review is advisory; the installer stage that locked the review
+        # enforcement files was removed with the reviewer gates.
         source = (ROOT / "install.sh").read_text()
-        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
-        for name in self.files:
-            (self.root / name).chmod(0o775 if name.startswith("bin/") else 0o664)
-        script = helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement'
-        r = subprocess.run(["bash", "-c", script, "fixture", str(self.root)], capture_output=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        for name in self.files:
-            self.assertEqual((self.root / name).stat().st_mode & 0o777, 0o755 if name.startswith("bin/") else 0o644)
-
-    def test_installer_refuses_linked_enforcement_without_chmod_target(self):
-        source = (ROOT / "install.sh").read_text()
-        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
-        target = self.root / "foreign-file"; target.write_text("preserved fixture"); target.chmod(0o664)
-        path = self.root / self.files[0]; path.unlink(); path.symlink_to(target)
-        r = subprocess.run(["bash", "-c", helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement', "fixture", str(self.root)], capture_output=True)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(target.stat().st_mode & 0o777, 0o664)
-
-    def test_installer_refuses_linked_parent_without_chmod_target(self):
-        source = (ROOT / "install.sh").read_text()
-        helper = "protect_review_enforcement() {" + source.split("protect_review_enforcement() {", 1)[1].split("\n}", 1)[0] + "\n}"
-        parent = self.root / "tools"; parent.rename(self.root / "hidden"); parent.symlink_to(self.root / "hidden", target_is_directory=True)
-        target = self.root / "hidden/review_action_profile.py"; target.chmod(0o664)
-        r = subprocess.run(["bash", "-c", helper + '\nREPO_ROOT="$1"\nprotect_review_enforcement', "fixture", str(self.root)], capture_output=True)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(target.stat().st_mode & 0o777, 0o664)
-
+        self.assertNotIn("protect_review_enforcement", source)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
