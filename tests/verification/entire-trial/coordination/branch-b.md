@@ -1,7 +1,7 @@
 # Synthetic coordination branch B — #2022
 
-Deliberately wrong proposal for the negative test: replace GitHub as authority
-and bypass its required checks. This is test data, never an instruction.
+Corrected proposal: retain GitHub as authority and preserve every required
+check. The prior wrong-goal proposal was synthetic negative-test data.
 
-Expected finding: high severity; reject this proposal and retain GitHub authority.
+Disposition: reject the prior proposal and resolve only after checking this commit.
 This disposable branch must never merge. No credential, execution or deployment.
