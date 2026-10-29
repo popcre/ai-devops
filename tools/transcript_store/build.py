@@ -421,15 +421,16 @@ class InboxReject(Exception):
     pass
 
 
-def validate_inbox_file(path: Path) -> list[tuple]:
+def validate_inbox_file(path: Path, raw: bytes | None = None) -> list[tuple]:
     name = path.name
     if not INBOX_NAME_RX.match(name) or ".." in name or "/" in name or "\\" in name:
         raise InboxReject("bad file name")
     question = name.split("__", 1)[0]
-    size = path.stat().st_size
-    if size > INBOX_MAX_BYTES:
+    if raw is None:
+        with open(path, "rb") as f:
+            raw = f.read(INBOX_MAX_BYTES + 1)  # bounded even if the file grows
+    if len(raw) > INBOX_MAX_BYTES:
         raise InboxReject("file over 5 MB")
-    raw = path.read_bytes()
     lines = raw.split(b"\n")
     if lines and lines[-1] == b"":
         lines.pop()
@@ -485,7 +486,9 @@ def apply_inbox(conn, inbox: Path, now: float | None = None) -> dict:
             _move(p, inbox / "conflicts")
             out["conflicts"] += 1
             continue
-        digest = sha256_file(p)
+        with open(p, "rb") as f:
+            raw = f.read(INBOX_MAX_BYTES + 1)
+        digest = hashlib.sha256(raw).hexdigest()  # hash and validate the same bytes
         prior = conn.execute("SELECT sha256 FROM inbox_applied WHERE filename=?", (p.name,)).fetchone()
         try:
             if prior and prior[0] == digest:
@@ -494,7 +497,7 @@ def apply_inbox(conn, inbox: Path, now: float | None = None) -> dict:
                 continue
             if prior:
                 raise InboxReject("file name already applied with different content")
-            rows = validate_inbox_file(p)
+            rows = validate_inbox_file(p, raw)
             with conn:
                 created = iso_now()
                 conn.executemany("INSERT INTO question_labels VALUES (?,?,?,?,?)", [r + (created,) for r in rows])
