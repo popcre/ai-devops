@@ -1,7 +1,7 @@
 # Plan — simple reviewer rebuild (4 reviewers, run in CI, stateless)
 
 Issue: popcre/ai-devops#2041. Evidence: [docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md) (#1948).
-Handoff: [HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md](HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md).
+Handoff: [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
 
 ## STATUS (read first)
 
