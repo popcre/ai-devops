@@ -97,7 +97,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 
 **PR #2057** (branch `reviewer-gate-removal-phase-b`, open):
 - changes `config/task-gates.json`, its schema, `bin/ai-task-gates`, `.ai-devops/task-gates.json`, `install.sh`, `update.sh`, the Windows installer, and the gate tests;
-- CI fails on `windows-offline-section (3, section-self-hosted)`, cause not yet read. The `ai-review` and `Entire Gates` failures are not required and can be ignored.
+- CI fails on `windows-offline-section (3, section-self-hosted)`, cause not yet read. The `ai-review` and `Entire Gates` failures were not required checks on 2026-10-29. Re-confirm that against `config/merge-queue-expected.json` before ignoring them.
 
 **shared-db (done):**
 - `scripts/check-exact-head-approval.mjs` is no longer called by `merge-queue-gate.yml`, `guarded-migration-merge.yml`, `shared-supabase-migrations.yml`, `designflow-sandbox-migrations.yml` or `shared-db-4060-observation.yml`.
@@ -152,7 +152,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 5. **On REJECT or REVISE,** the workflow opens a `review-finding` issue. An automatic fixer agent decides whether each finding is real. Real ones get a fix PR on branch `review-fix/<issue>` that closes the issue. Invalid ones get the agent's reasoning and the issue is closed as not planned. Fix PRs are never reviewed, to prevent loops.
    - **Fixer safety:** findings text is untrusted input.
      - The fixer job runs with no reviewer provider keys: a separate job, with the opencode secrets directory and key env vars unset or unmounted.
-     - It may not edit `.github/workflows/**`, `install.sh`, `update.sh`, `bin/install-ai-devops-windows.ps1`, `config/task-gates.json` or `bin/ai-task-gates`, enforced by a path check before the PR is opened.
+     - It may not edit `.github/workflows/**`, `install.sh`, `update.sh`, `bin/install-ai-devops-windows.ps1`, `config/task-gates.json` or `bin/ai-task-gates`, enforced by a step in `review-fixer.yml` that runs after the agent and outside it: `git diff --name-only origin/main...HEAD` against the denylist, refusing to push or open the PR on any match. Run `codex exec` in its workspace-write sandbox with no secrets in its environment; only the workflow step that opens the PR holds `GH_TOKEN`.
      - Its PRs go through normal CI and the merge queue.
      - Closing a finding as "not planned" requires a comment quoting evidence. Such an issue still blocks production promotion for 24 hours after closing.
 6. **Production is promoted automatically by an AI agent** when all of these hold:
@@ -162,6 +162,10 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
    - no blocking `review-finding` issue references the change.
 
    "References" means an issue labelled `review-finding` whose body contains the PR URL; the workflow writes this. Blocking means open, or closed as not planned within the last 24 hours. The apply job runs this query live, immediately before the apply step, not at merge time.
+
+   **Trigger:** the promotion workflow runs on `push` to main touching migration paths, and hourly on a schedule as a backstop. No session or person starts it.
+
+   **Manual production commands outside that workflow stay refused.** In `config/task-gates.json`, the `production` class's `required` list becomes `automated-promotion-workflow-only`, replacing the reviewer-approval gate. It is never left empty.
    Nothing ever asks Albert.
 7. All other reviewer gates, hooks, instructions, installer stages, jobs and code are removed. Safety checks unrelated to review stay: secrets, privacy, worktree guard, install target-identity proof, migration ordering, leases and tests. Stages B and G must list in their PR descriptions which non-review checks they kept.
 
@@ -179,7 +183,8 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Live proof, then delete the throwaway branches and PRs:
   1. A throwaway PR with a planted off-by-one bug in a new test helper gets exactly one reviewer comment and a non-failure check, then a `review-finding` issue, then a fixer PR that passes CI.
   2. A docs-only PR shows "review not needed".
-- **Done when:** both are proven, with run IDs and links posted on #2070.
+- Delete the `requeue` job (the `sleep 3600` delayed re-run in current `ai-review.yml`) and the `workflow_dispatch` re-run input.
+- **Done when:** both proofs are posted on #2070 with run IDs, the requeue job is gone, and a link shows `verify.yml` running the test suite on a PR and in the merge queue.
 
 **B — Finish PR #2057.**
 - Read the `windows-offline-section (3)` failure log (`gh run view <id> --log-failed`; strip ANSI). Fix it, or re-run once if it is flaky. Before ignoring any failing check, re-confirm it is not required: today only `verification-closure` is required (`config/merge-queue-expected.json`).
@@ -189,7 +194,9 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
   - `bash tests/test-ai-task-gates.sh` is green;
   - the change is installed on all 5 hosts, using the normal `update.sh`, or the Windows installer on Windows hosts.
 
-**B deadline:** the freeze window ends 2026-11-12 14:56Z. If #2071 is not merged and installed by 2026-11-10, the session working the plan extends the window file on all 5 hosts by 14 days, the same way as on 2026-10-29, and notes it on #2071. Do not let gating return.
+*(Stage C, the shared-db merge gate, is done; see STATUS.)*
+
+**B deadline:** the freeze window ends 2026-11-12 14:56Z. If #2071 is not merged and installed by 2026-11-10, extend the window file's `end` by 14 days on all 5 hosts. The file is `/etc/ai-devops/observation-week.json` on Linux and `C:\ProgramData\ai-devops\observation-week.json` on Windows; the JSON shape is in `tools/lib/observation-week.sh`. Write it with the same privileged mechanism the installer uses for `/etc/ai-devops`. The first step of stage B is to post this dated action and procedure as a comment on #2071, so it does not depend on any one session. Do not let gating return.
 
 **D — Instructions and skills** (inventory rows 17–20 done in shared-db; rows 51–59 here).
 - Rewrite `templates/system/CLAUDE-global.md` and `AGENTS-global-codex.md`, plus the mimo and zcode variants: remove "assigned AI reviewers gate technical actions", the `ai-review` / rotation / observation-week paragraphs, and "exact-head APPROVE".
@@ -207,7 +214,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Remove the Windows `machine-tools.tsv` rows and the `reviewer-start-watch` config.
 - Disable `reviewer-membership-drift.yml`.
 - Remove the observation-week block in `bin/ai-task-gates` (~58-92) and `tools/lib/observation-week.sh`.
-- Delete the window file on 5 hosts. edge-dev3 needs sudo: use the 1Password `vibe_coding` item "edge-dev3 ahazan sudo password", piped and never printed.
+- Make the normal installer (`install.sh` / `update.sh` and the Windows installer) delete the window file during the reviewed reinstall, so no hand-run privileged command or credential extraction is needed.
 - **Done when:**
   - `crontab -l`, the scheduled tasks and the timers on each host show no reviewer jobs;
   - the window file is absent on all 5 hosts;
@@ -222,7 +229,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
   - `check-exact-head-approval.mjs`
   - `config/owner-no-reviewer-policy.json`
   - `config/review-carry-forward-stored-hashes-v1.json`
-- Delete the about 8,900 `refs/db-review-*` refs, after saving a list of them to the child issue.
+- Delete the about 8,900 `refs/db-review-*` refs, after saving their list as a workflow artifact or private gist linked from #2074.
 - Fix the production catalog recovery path that still reads a stored verdict, as part of stage G.
 - Use one PR per area.
 - **Done when:** `git grep -lE "ai-review-engine|review-doors|check-exact-head-approval"` is empty in both repos, and all suites are green.
@@ -238,7 +245,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 
 ### 10. Tests
 
-- **A:** `tests/test_ai_review_rule.py` covers rotation (PR n mod 4), fall-through on exit 3, never-failure conclusion, and the docs-only classifier: `plan_x.md` is reviewed, `docs/a.md` is skipped, `HANDOFF.d/x.md` is skipped, and `.md` mixed with `.py` is reviewed. `tests/test_ai_review_simple.py` stays green.
+- **A:** `tests/test_ai_review_rule.py` covers rotation (PR n mod 4), fall-through on exit 3, NO fall-through on exit 2 (a refusal), never-failure conclusion, and the docs-only classifier: `plan_x.md` is reviewed, `docs/a.md` is skipped, `HANDOFF.d/x.md` is skipped, and `.md` mixed with `.py` is reviewed. `tests/test_ai_review_simple.py` stays green.
 - **B:** `tests/test-ai-task-gates.sh`, `test-ai-task-gates-bulk.sh`, `test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`, `test-task-gates-phase5-acceptance.sh`, `test-windows-source-gate.ps1` assert that no review approval is required, and that the secrets, privacy and worktree gates are still enforced.
 - **E/F:** `bash tests/test-all.sh --changed-since origin/main`, plus `tests/test-installer-parity.sh` and `test-workflow-policy.sh`.
 - **G:** a shared-db workflow test that promotion is refused while an open `review-finding` issue references the head, and allowed after it closes.
@@ -299,6 +306,7 @@ Muse returned REVISE in session `skinny-plan-critique`. Fixes applied:
 - the B deadline step is added;
 - `ai-process-supervisor` is no longer deleted (`ai-pr-wait` uses it);
 - the exit-2 no-fall-through rule is added;
+- round 2 added: the fixer enforcement step, the promotion trigger, the production gate content, the requeue deletion, the B-deadline procedure, the window removal through the installer, the refs list storage and the exit-2 test;
 - the runner, credit and time-zone facts are corrected;
 - stage A has two proofs, and D greps the repo.
 
