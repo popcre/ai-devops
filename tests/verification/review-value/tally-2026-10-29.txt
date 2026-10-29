@@ -1,0 +1,49 @@
+reviews with verdict 6128
+
+== repo (n, caught-real%, wrong%)
+shared-db                                 2725  15.2%  1.4%
+ai-devops                                 1506  19.9%  1.3%
+other                                      833  29.7%  0.2%
+popdam                                     382  27.2%  1.3%
+dflow                                      380  15.5%  0.3%
+theoracle                                  302   7.0%  0.7%
+
+== work type (n, caught-real%, wrong%)
+config/infra                              1780  17.5%  1.1%
+other                                     1524  13.8%  1.2%
+db-migration/schema                        922  22.7%  1.1%
+bugfix                                     451  27.5%  1.1%
+code-feature                               435  18.4%  0.2%
+implementation-plan                        324  23.8%  0.9%
+investigation                              269  19.7%  3.3%
+docs/prose                                 144  17.4%  0.7%
+review-only                                 90  23.3%  0.0%
+tooling-scripts                             86  11.6%  2.3%
+ci/workflow                                 60  20.0%  0.0%
+
+== mode (n, caught-real%, wrong%)
+final-check                               2565  11.3%  0.8%
+diff-review                               1770  29.1%  1.1%
+plan-review                                663  24.7%  0.3%
+implementation                             296  13.5%  2.7%
+draft-review                               236  27.5%  0.8%
+investigation                              226  17.7%  3.5%
+unknown                                    168   4.2%  3.6%
+security-review                             58   8.6%  3.4%
+
+== shared-db? x work (n, caught-real%, wrong%)
+(False, 'config/infra')                   1070  19.6%  0.5%
+(False, 'other')                           915  16.6%  1.0%
+(True, 'config/infra')                     710  14.4%  2.1%
+(True, 'db-migration/schema')              688  15.7%  1.2%
+(True, 'other')                            609   9.7%  1.5%
+(False, 'bugfix')                          292  27.1%  1.4%
+(False, 'code-feature')                    265  18.5%  0.0%
+(False, 'db-migration/schema')             234  43.2%  0.9%
+(False, 'implementation-plan')             192  26.0%  0.5%
+(True, 'code-feature')                     170  18.2%  0.6%
+(False, 'investigation')                   160  19.4%  3.8%
+(True, 'bugfix')                           159  28.3%  0.6%
+(True, 'implementation-plan')              132  20.5%  1.5%
+(True, 'investigation')                    109  20.2%  2.8%
+(False, 'docs/prose')                       93  19.4%  1.1%

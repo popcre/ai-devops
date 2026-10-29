@@ -126,8 +126,11 @@ The observation-week freeze is still ON. Its window file is on all 5 hosts (see 
 - Exact timeouts. Start at 20 minutes per reviewer, and 30 minutes for DeepSeek.
 - Comment formatting.
 
-**Open for Albert:**
-- Whether shared-db PRs use the same rule, from the earlier handoff §0. Until he answers, shared-db uses the same rule.
+**Decided 2026-10-29 from the review-value scan**
+- Evidence: [docs/review-value-by-repo-vs-work-2026-10-29.md](docs/review-value-by-repo-vs-work-2026-10-29.md).
+- Albert handed this decision to the AI.
+- **Every repo uses the same rule, shared-db included.** Review is decided by the change, not the repository.
+- **One review round per head.** Repeated final-check re-reviews are dropped.
 
 ## Part 3 — How to build it
 
