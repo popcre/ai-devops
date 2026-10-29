@@ -193,6 +193,12 @@ Codex-specific repeated workflows now live in `skills/codex/`; see
 [`docs/codex-skills-usage-guide.md`](docs/codex-skills-usage-guide.md) and
 [`docs/codex-chat-analysis.md`](docs/codex-chat-analysis.md).
 
+Shared skills live in `skills/shared/` and install to every machine on the
+next `bin/ai-install-skills` run; the "say this → skill" trigger table is
+[`docs/skills-map.md`](docs/skills-map.md). For example,
+[`transcript-dropbox-upload`](skills/shared/transcript-dropbox-upload/SKILL.md)
+backs the private transcript archive up to Dropbox as a verified delta copy.
+
 Shared token-waste rules and the optional ScaleDown compress path for
 pasted/retrieved documents are recorded in
 [`docs/compression-and-process-fixes.md`](docs/compression-and-process-fixes.md).
