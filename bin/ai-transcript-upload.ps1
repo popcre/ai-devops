@@ -129,13 +129,19 @@ foreach ($m in $Map) {
         $got = (New-Object System.IO.FileInfo $part).Length
         $now2 = (New-Object System.IO.FileInfo $srcL).Length
         if ($got -eq $want -and $now2 -eq $want) {
-          if ([System.IO.File]::Exists($dest)) { [System.IO.File]::Replace($part, $dest, $null) } else { [System.IO.File]::Move($part, $dest) }
+          # File.Replace rejects \\?\ paths on .NET Framework; replace = delete the old copy, then rename.
+          if ([System.IO.File]::Exists($dest)) { [System.IO.File]::Delete($dest) }
+          [System.IO.File]::Move($part, $dest)
           $done = $true; $copied++
         } else {
           [System.IO.File]::Delete($part); $want = $now2
         }
       }
-    } catch { $errors++ }
+    } catch {
+      $errors++
+      New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+      Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} {1}: {2}" -f [DateTime]::UtcNow.ToString('s'), $f.FullName, $_.Exception.Message) -Encoding UTF8
+    }
   }
 }
 
