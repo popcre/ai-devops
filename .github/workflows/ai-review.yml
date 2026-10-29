@@ -26,7 +26,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ai-review:
+  # The job is named `review` so the only `ai-review` check is the advisory
+  # one recorded below. Every step tolerates errors: the job never fails.
+  review:
     # Same-repository PRs only: the runners hold provider keys. Fixer PRs
     # (review-fix/*) are never reviewed, so findings cannot loop.
     if: >-
@@ -60,6 +62,7 @@ jobs:
           persist-credentials: false
       - name: Classify the change
         id: classify
+        continue-on-error: true
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' > "$RUNNER_TEMP/files.txt"
@@ -81,6 +84,7 @@ jobs:
           path: pr
           persist-credentials: false
       - name: Review with one rotating reviewer
+        continue-on-error: true
         if: steps.classify.outputs.docs_only != 'true'
         run: |
           set -uo pipefail
@@ -97,10 +101,13 @@ jobs:
           done
           exit 0
       - name: Comment, record the check, open a finding issue
+        continue-on-error: true
         if: steps.classify.outputs.docs_only != 'true' && !cancelled()
         run: |
           set -euo pipefail
           script=toolkit/bin/ai-review-simple
+          mkdir -p results
+          [ -s results/order ] || printf '%s\n' muse > results/order
           files=(); while read -r p; do files+=("results/$p.json"); done < results/order
           summary="$(python3 "$script" --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
           echo "$summary"
