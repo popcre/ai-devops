@@ -14,7 +14,7 @@ Handoff: [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HAN
 | 4 Lift freeze, switch gate | 🟡 superseded by REVISION phases A–E; window extended to 2026-11-12 on 5 hosts | `/etc/ai-devops/observation-week.json` |
 | 5 Roll out to other repos | ⬜ open | — |
 | 6 Delete the old machinery | ⬜ open (= REVISION phase F) | — |
-| REVISION A advisory/skinny workflow | ⬜ open, after #2044 merges | — |
+| REVISION A advisory/skinny workflow | 🟡 2026-10-29 built: one rotating reviewer, advisory check, docs-only skip, review-finding issues + review-fixer.yml; live proof pending | phase A PR |
 | REVISION B remove ai-task-gates review gates | 🟡 2026-10-29 subagent PR in progress | — |
 | REVISION C shared-db merge gate off | 🟡 2026-10-29 subagent issue/PR in progress | — |
 | REVISION D–F instructions, installers, delete old code | ⬜ open | inventory doc |
