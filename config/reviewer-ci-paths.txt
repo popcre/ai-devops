@@ -145,3 +145,4 @@ tools/lib/session-tmp.sh
 tools/glm_output_recovery.py
 tools/glm_formal_profile.py
 templates/system/REVIEWER-global.md
+templates/review-prompt-simple.md
