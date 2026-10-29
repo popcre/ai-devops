@@ -18,14 +18,13 @@
     "that class, so opening the route is each private repository's own reviewed",
     "decision. The formal review action stays forbidden for both private classes.",
     "",
-    "reviewer_release (#1239) lets one protected class reach the reviewer-approval step for one named",
-    "action, only while the EFFECTIVE class is named there AND that repository declares the named gate",
-    "for that class in its own .ai-devops/task-gates.json. It never starts the action without an",
-    "assigned AI reviewer exact-head final-check or security-review APPROVE, and it can never",
-    "release ordinary private-evidence actions. The sole private-evidence database exception requires",
-    "DesignFlow's synthetic boundary plus native stdin admission for the closed #770 isolated timing",
-    "profile; generic approvals, acknowledgements, and small owner entries cannot open it.",
-    "application_source_releases is one closed central exception for a reviewed Cloud Build branch-source push, never a manual cloud mutation."
+    "owner_release lets one protected class reach one named forbidden action, only while the",
+    "EFFECTIVE class is named there AND that repository declares the named gate for that class in",
+    "its own .ai-devops/task-gates.json. It never starts the action without an explicit owner",
+    "authorization (--acknowledge). No class or action waits for an AI reviewer verdict (#2041).",
+    "native_profile_release keeps two closed DesignFlow fixture routes that open only with their",
+    "native action-profile receipt over bounded stdin; without it they stay sealed (retired in phase F).",
+    "application_source_releases is one closed central exception for a Cloud Build branch-source push, never a manual cloud mutation."
   ],
   "actions": [
     "scoped-skills-install",
@@ -59,12 +58,16 @@
       }
     }
   },
-  "reviewer_release": {
+  "owner_release": {
     "production": {
       "infrastructure": "reviewed-production-dispatch"
     },
     "database": {
-      "private-tooling": "reviewed-private-data-writer",
+      "private-tooling": "reviewed-private-data-writer"
+    }
+  },
+  "native_profile_release": {
+    "database": {
       "private-evidence": "synthetic-fixtures-only",
       "reviewer-safety": "reviewed-generated-definition-fixture-only"
     }
@@ -137,7 +140,7 @@
     "installation": {
       "rank": 25,
       "protected": false,
-      "description": "Toolkit installers, machine setup, and local command catalogs requiring an assigned AI reviewer's exact-head APPROVE before installation."
+      "description": "Toolkit installers, machine setup, and local command catalogs installed through the declared installation task."
     },
     "reviewer-safety": {
       "rank": 30,
@@ -271,8 +274,7 @@
       },
       "installation": {
         "required": [
-          "local-tests",
-          "assigned-ai-reviewer-approval"
+          "local-tests"
         ],
         "forbidden_actions": [
           "deploy",
@@ -284,8 +286,7 @@
       },
       "reviewer-safety": {
         "required": [
-          "local-tests",
-          "exact-head-independent-review"
+          "local-tests"
         ],
         "forbidden_actions": [
           "deploy",
@@ -323,8 +324,7 @@
       },
       "deployment": {
         "required": [
-          "local-tests",
-          "assigned-ai-reviewer-approval"
+          "local-tests"
         ],
         "forbidden_actions": [
           "database",
@@ -336,7 +336,6 @@
       "infrastructure": {
         "required": [
           "local-tests",
-          "assigned-ai-reviewer-approval",
           "read-only-by-default"
         ],
         "forbidden_actions": [
@@ -347,7 +346,7 @@
       },
       "production": {
         "required": [
-          "exact-resource-and-action-ai-reviewer-approval"
+          "current-chat-resource-and-action-authorization"
         ],
         "forbidden_actions": [
           "shared-db-promotion"
@@ -390,166 +389,166 @@
       "paths": [
         {
           "glob": "bin/ai-review",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-review-*",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-claude-review",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-codex-review",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-grok-review",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-deepseek-agent",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-stepfun*",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-gemini*",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-glm",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-kimi",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-muse",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-qwen",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-reviewer-issue",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-reviewer-logs-sync",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/reviewer-logs-archive.crt",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-reviewer-logs-sync.cmd",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tests/test-ai-reviewer-logs-sync.sh",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/lib/local-watch.sh",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-gh",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/windows-private-file.ps1",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/windows-job-run.ps1",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-task-gates",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-process-supervisor",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/lib/task-gates.sh",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-install-skills",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tests/test-ai-install-skills.sh",
-          "class": "reviewer-safety"
+          "class": "code"
         },        {
           "glob": "tools/scoped_skills_install.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tests/test-scoped-skills-install.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/task-gates.json",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/reviewer_*",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/review-action-profiles.json",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/muse-code/**",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/opencode/version",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "config/provider-cli-versions.json",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/review_action_profile.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/application_workflow_target.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/oracle_native_alternate_*.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-oracle-native-alternate",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "bin/ai-oracle-native-alternate-v2",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tools/generated_definition_action.py",
-          "class": "reviewer-safety"
+          "class": "code"
         },
         {
           "glob": "tests/test_generated_definition_action.py",
-          "class": "reviewer-safety"
+          "class": "code"
         }
       ],
       "gates": {}
@@ -669,9 +668,7 @@
       ],
       "gates": {
         "deployment": {
-          "required": [
-            "release-marker-review"
-          ],
+          "required": [],
           "forbidden_actions": []
         },
         "production": {
@@ -803,7 +800,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-ai-reviewer-approval"
+            "current-chat-resource-and-action-authorization"
           ],
           "forbidden_actions": [
             "production"
@@ -830,7 +827,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-ai-reviewer-approval"
+            "current-chat-resource-and-action-authorization"
           ],
           "forbidden_actions": [
             "production"

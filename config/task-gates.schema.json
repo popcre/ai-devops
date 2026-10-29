@@ -37,8 +37,17 @@
         }
       }
     },
-    "reviewer_release": {
-      "description": "Central only (#1239): action name to {protected class: gate}. A forbidden action for that protected EFFECTIVE class reaches the assigned-AI-reviewer-approval step (never starts without it) only while the class's merged required gates contain the named gate, i.e. the repository declared it. private-evidence permits only database/synthetic-fixtures-only; the runtime additionally requires the closed DesignFlow #770 native stdin profile and refuses owner shortcuts.",
+    "owner_release": {
+      "description": "Central only (#2041): action name to {protected class: gate}. A forbidden action for that protected EFFECTIVE class opens with an explicit owner authorization (--acknowledge) only while the class's merged required gates contain the named gate, i.e. the repository declared it. private-evidence and reviewer-safety are never released.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": { "type": "string", "minLength": 1 }
+      }
+    },
+    "native_profile_release": {
+      "description": "Central only: the two closed DesignFlow native fixture-profile database routes (private-evidence synthetic-fixtures-only, reviewer-safety reviewed-generated-definition-fixture-only). They open only with a native action-profile receipt over bounded stdin; otherwise the action stays sealed.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
@@ -47,7 +56,7 @@
       }
     },
     "application_source_releases": {
-      "description": "Central only: a closed exact-target admission for a reviewed application source push through its existing Cloud Build route. It grants no manual cloud action.",
+      "description": "Central only: a closed exact-target admission for an application source push through its existing Cloud Build route. It grants no manual cloud action.",
       "type": "object",
       "required": ["popcre/designflow-backend", "popcre/designflow-tracking", "popcre/designflow-frontend", "popcre/designflow-item-master"],
       "additionalProperties": false,
@@ -147,7 +156,7 @@
       }
     },
     "change_classes": {
-      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged away, and is reviewer-approved past a forbidden action only through an explicit reviewer_release.",
+      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged away, and passes a forbidden action only through an explicit owner_release with owner authorization.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {

@@ -380,8 +380,9 @@ try {
   git -C $declaration.Repo commit -m narrow-policy | Out-Null
   git -C $declaration.Repo push origin main | Out-Null
   git -C $declaration.Repo reset --hard $declarationBefore | Out-Null
-  Invoke-Gate $declaration -ExpectFailure -FailureContains 'Reviewer safety or legacy update'
-  Assert ((git -C $declaration.Repo rev-parse HEAD).Trim() -eq $declarationBefore) 'central reviewer declaration change advanced source'
+  # #2041: the merged target declaration decides; retiring a reviewer rule is an ordinary update.
+  Invoke-Gate $declaration
+  Assert ((git -C $declaration.Repo rev-parse HEAD).Trim() -ne $declarationBefore) 'central reviewer declaration retirement did not install as ordinary'
 
   $tampered=New-Fixture tampered
   (Get-Content -LiteralPath $tampered.Launcher) -replace '^# source-hash=', '# source-hash=0' | Set-Content -LiteralPath $tampered.Launcher -Encoding ASCII
