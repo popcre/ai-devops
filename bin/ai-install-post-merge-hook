@@ -114,5 +114,7 @@ manage_hook() { # NAME MARKER DESCRIPTION
   esac
 }
 
-manage_hook post-merge '^# ai-devops-managed: reviewer auto-requalification' 'reviewer auto-requalification'
+# The reviewer auto-requalification post-merge hook is retired (#2073, skinny
+# review): every mode removes our owned copy; foreign hooks stay untouched.
+MODE=remove manage_hook post-merge '^# ai-devops-managed: reviewer auto-requalification' 'reviewer auto-requalification'
 manage_hook reference-transaction '^# ai-devops-managed: installed-checkout main guard' 'installed-checkout main guard'
