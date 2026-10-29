@@ -105,7 +105,7 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       PR: ${{ github.event.pull_request.number }}
       PYTHONDONTWRITEBYTECODE: '1'
-      AI_GH_SIGNATURE: Posted by ai-review workflow run ${{ github.run_id }} attempt ${{ github.run_attempt }} on ${{ runner.name }}
+      AI_GH_SIGNATURE: Posted by ai-review workflow run ${{ github.run_id }} attempt ${{ github.run_attempt }} on edge-dev3
     steps:
       - name: Check out the review toolkit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
