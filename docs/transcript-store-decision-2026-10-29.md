@@ -79,7 +79,7 @@ Every new question pays the full cost again, and so does every re-cut of an old 
 ## Risks
 
 - **Disk:** the index is several GB, against about 1 TB free on edge-dev3.
-- **Privacy:** the store must never be committed. It lives outside every repo and is not synced.
+- **Privacy:** the store must never be committed. It lives outside every repo. (Superseded by the revision below: the published copy is shared through Albert's private Dropbox, and nowhere else.)
 - **Stale labels:** ScaleDown labels are approximate and tied to the prompt that made them. Store the prompt text with each label set, so a better prompt can relabel later.
 
 ## Revision (Albert, 2026-10-29): shared across machines, topic-cut, no raw dumps
@@ -94,8 +94,8 @@ Albert asked for three things:
 A live SQLite file opened by several machines at once over Dropbox or an SMB share corrupts. Neither Dropbox nor SMB over Tailscale gives SQLite the locking it needs. The design below is safe:
 
 1. **One writer.** edge-dev3 builds and updates the database.
-2. **Published copy.** After each update it writes a finished read-only copy to `Dropbox/ai/transcript-store/store.db` in a single replace, so no reader ever sees a half-written file.
-3. **Readers.** Every machine opens its local Dropbox copy read-only. That works offline, and nothing new is installed.
+2. **Published copy.** After each update it writes a finished read-only copy under a new dated file name in `Dropbox/ai/transcript-store/db/`, then updates a small pointer file last. Readers copy the named file to local temp and check it before opening, so no reader opens a half-synced file. The exact protocol is in the plan, step 4.
+3. **Readers.** Every machine reads its local Dropbox copy read-only, through a local temp copy. That works offline, and nothing new is installed.
 4. **Writes from elsewhere.** A machine that produces new labels drops a small file into `Dropbox/ai/transcript-store/inbox/`. The writer merges it on its next run.
 5. **Privacy.** The same as the transcripts today: Albert's private Dropbox only. Never a repo, and never shared-db.
 
@@ -105,7 +105,7 @@ A Postgres server on edge-dev3 reached over Tailscale was considered. It allows 
 
 - **`segments`**, the main table: one row per topic section. Columns: conversation, machine, repo, time, topic, subject, and the ScaleDown-cleaned text.
 - **`questions`:** stored answers from earlier studies, such as the review labels.
-- **Raw text:** kept only as a pointer to the Dropbox transcript file, for drill-down. The raw text is never copied in.
+- **Raw text:** kept only as a pointer to the Dropbox transcript file. Drill-down reads that raw file from the reader's own Dropbox copy of the archive; the raw text is never copied into the database.
 
 ### Topic extraction prototype (2026-10-29)
 
@@ -128,11 +128,11 @@ A Postgres server on edge-dev3 reached over Tailscale was considered. It allows 
 
 - **Volume.** The text in the about 25 GB archive is roughly 15% of the file size. After de-duplicating forked conversations, that is roughly 3–4 G characters, or about 90,000 ScaleDown calls.
 - **Time.** About 15 hours at 8 in parallel, run once in the background. After that, daily runs process only new conversations.
-- **Cost.** ScaleDown spend for the full run is unmeasured. Measure it on the first 1,000 calls and stop if it is out of line.
+- **Cost.** Not a criterion: Albert ruled ScaleDown cost irrelevant (2026-10-29). The first 1,000 calls are a quality and failure-rate check only (plan step 5).
 
 ## Topic list and mining checks (Albert, 2026-10-29)
 
-**Topics.** Each ScaleDown section gets one or more of these. Every section also carries its app or repository as a separate field.
+**Topics.** Each ScaleDown section gets one to three of these. The plan (§8) adds decision rules for the overlapping ones. Every section also carries its app or repository as a separate field.
 - CI issues
 - reviewer model quality
 - reviewer tooling
