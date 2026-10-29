@@ -157,6 +157,20 @@ background service or cleanup process is promised.
 
 ## github-only-completion
 
+First report PR [#2033](https://github.com/popcre/ai-devops/pull/2033) landed as
+`b317196b09bce8a49d1fbd7bb3a64c5dba10e458`. Its GitHub documentation job
+failed because the two new fixtures lacked discoverable links, despite passing
+the narrower local boundary/link check. The follow-up adds real topic links and
+tests reachability against the original trial base as well. This failed first
+delivery remains disclosed; GitHub-only acceptance requires the corrected
+delivery receipt on #2022, not merely the first merge.
+
+The pre-existing App also published an `Entire Gates` status: initially failed,
+then neutral in the subsequent completed-state view. No Trail result or cause
+was available locally. This is observed pre-existing integration activity,
+not a tested Trail or a trial-created hosted integration. Its billing effect
+cannot be established without the unavailable account meter.
+
 This report is the existing authorized normal documentation task used for
 GitHub-only delivery after local capture disable and trial removal. Exact-head
 doc-safety, PR/landing commit, original-state comparison and post-merge source
@@ -167,8 +181,10 @@ Windows executable run; broader Windows runtime parity remains untested.
 
 ## Costs, stop and ownership
 
-No paid API or hosted Agent call, subscription, top-up or CI provider was
-enabled. Observed incremental trial spend is $0. Local qualification passed
+No direct paid API/hosted Agent call, subscription, top-up or CI provider was
+enabled by this session. Local qualification made no model calls; incremental
+hosted charges from the pre-existing automatic App are unknown, not asserted
+as $0. Local qualification passed
 containment October 29, 2026, 5:58 AM EDT; no multi-day pilot or background
 capture is running. Discovery remains bounded by November 2, 2026, 5:00 PM EST.
 The hosted blocker does not justify an empty running trial.

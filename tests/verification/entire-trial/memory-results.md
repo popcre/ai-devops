@@ -34,7 +34,8 @@ counting as proof.
 
 ## paired-retrieval
 
-The frozen ten questions and scoring key are in `fixtures/`. Two fresh contexts
+The [frozen ten retrieval questions](fixtures/questions.md) and
+[withheld scoring key](fixtures/answers.md) are published separately. Two fresh contexts
 used the same inherited caller model setting, source snapshot and source access
 limits; the key was withheld. Exact underlying model version and token counts
 were not exposed. Baseline used ordinary source search. Candidate used Entire
