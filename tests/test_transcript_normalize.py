@@ -143,6 +143,12 @@ class Parsing(unittest.TestCase):
             self.assertEqual(len(r["turns"]), 2)
             self.assertFalse(r["truncated_tail"])
 
+    def test_complete_bad_last_line_is_bad_not_truncated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = normalize.parse_file(write(tmp, "c.jsonl", [claude_line("user", LONG), "{broken"]))
+            self.assertFalse(r["truncated_tail"])
+            self.assertEqual(r["bad_lines"], 1)
+
     def test_truncated_last_line_not_consumed(self):
         with tempfile.TemporaryDirectory() as tmp:
             full = claude_line("assistant", LONG + " second")

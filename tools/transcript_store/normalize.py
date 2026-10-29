@@ -229,7 +229,7 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             bytes_parsed = end
             continue
         if obj is None:
-            if is_last:
+            if is_last and no_newline:  # an upload caught mid-write
                 truncated = True
                 break  # bytes_parsed stays before it; re-read next run
             bad += 1

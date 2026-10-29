@@ -157,6 +157,10 @@ class Budget:
             return True
 
 
+class BudgetExhausted(segment.ScaleDownError):
+    no_retry = True
+
+
 class Runner:
     def __init__(self, conn, call, prompt_version="v1", threads=6, budget=None,
                  now=None, sleep=time.sleep, tables=None):
@@ -315,13 +319,23 @@ class Runner:
         return all_ok
 
     def _send(self, todo):
+        def budgeted(system, user):
+            # --limit-calls counts every ScaleDown HTTP call (retries, re-asks)
+            if not self.budget.take():
+                raise BudgetExhausted("call budget exhausted")
+            return self.call(system, user)
+
         def one(item):
             cid, text = item
-            if not self.budget.take():
+            if self.budget.limit is not None and self.budget.used >= self.budget.limit:
                 return cid, None
             try:
-                return cid, segment.label_chunk(text, self.call, self.prompt, self.aliases, sleep=self.sleep)
+                return cid, segment.label_chunk(text, budgeted, self.prompt, self.aliases, sleep=self.sleep)
+            except BudgetExhausted:
+                return cid, None
             except segment.ScaleDownError as exc:
+                if "budget exhausted" in str(exc):
+                    return cid, None
                 return cid, exc
         with ThreadPoolExecutor(max_workers=max(1, self.threads)) as pool:
             return list(pool.map(one, todo))
@@ -343,7 +357,8 @@ def run_archive(conn, archive: Path, runner: Runner, newest_first=True):
 
 def relabel(conn, archive: Path, call, prompt_version: str, threads=6, budget=None, now=None, sleep=time.sleep) -> bool:
     """Re-chunk and relabel every lineage under ``prompt_version`` in side
-    tables; swap them in one transaction once every chunk is ``ok``. A run
+    tables; swap them in one transaction once no chunk is ``sending`` or
+    ``failed`` (a short live tail stays ``pending`` for a later run). A run
     stopped by ``--limit-calls`` resumes from the side tables. Returns True
     when swapped."""
     for base in ("chunks", "segments", "seen_turns"):
@@ -548,10 +563,11 @@ def publish(db_path: Path, store_root: Path, now: float | None = None, stage_dir
     os.replace(incoming, final)
     pointer = {"file": f"db/store-{stamp}.db", "sha256": digest, "size": size,
                "built": edt_now(), "schema": SCHEMA_VERSION}
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", dir=stage_dir) as tmp:
-        json.dump(pointer, tmp)
-    shutil.copyfile(tmp.name, store_root / "CURRENT.json")
-    os.unlink(tmp.name)
+    # Write a dot-named sibling readers never follow, then rename it over the
+    # old pointer so a reader never sees a half-written CURRENT.json.
+    incoming_ptr = store_root / f".incoming-CURRENT-{stamp}.json"
+    incoming_ptr.write_text(json.dumps(pointer), encoding="utf-8")
+    os.replace(incoming_ptr, store_root / "CURRENT.json")
     staged.unlink()
     # publish history for the 24 h retention rule
     hist_path = db_path.parent / "publish-history.json"

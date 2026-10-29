@@ -215,6 +215,8 @@ def call_with_retry(call, system: str, user: str, retries: int = RETRIES, sleep=
                 raise ScaleDownError("empty reply")
             return reply
         except ScaleDownError as exc:
+            if getattr(exc, "no_retry", False):
+                raise
             last = exc
         except Exception as exc:  # network errors from the real client
             last = ScaleDownError(f"{type(exc).__name__}: {exc}")

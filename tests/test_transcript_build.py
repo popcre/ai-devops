@@ -147,6 +147,22 @@ class Incremental(Base):
         self.assertEqual(sd.calls, 3)
         self.assertEqual(self.count("SELECT count(*) FROM chunks WHERE status='ok'"), 3)
 
+    def test_limit_calls_counts_reasks(self):
+        class Bad(FakeSD):
+            def __call__(self, system, user):
+                self.calls += 1
+                return "### TOPIC: weather | off list label here | repo=x\nb"
+        for i in range(3):
+            self.session(f"m1/s{i}.jsonl", [line("user", f"session {i} request text", sid=f"s{i}")], mtime=OLD + i)
+        sd = Bad()
+        self.run_build(sd, limit=3)
+        self.assertEqual(sd.calls, 3)  # each chunk costs 2 calls (ask + re-ask)
+
+    def test_publish_pointer_replaced_atomically(self):
+        build.publish(self.dbp, self.store, now=1_800_000_000, stage_dir=self.root / "stage")
+        self.assertFalse(list(self.store.glob(".incoming-*")))
+        self.assertIn("sha256", json.loads((self.store / "CURRENT.json").read_text()))
+
     def test_live_short_tail_pending(self):
         now = time.time()
         self.session("m1/a.jsonl", [line("user", "short live conversation turn")], mtime=now - 60)
