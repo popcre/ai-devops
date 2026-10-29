@@ -179,6 +179,17 @@ No original workflow, required check, Windows route, remote, protection or
 installed toolkit was changed. A prose-only landing does not prove a fresh
 Windows executable run; broader Windows runtime parity remains untested.
 
+Reconciled October 29, 2026, 10:28 AM EDT: corrective
+[PR #2034](https://github.com/popcre/ai-devops/pull/2034) is merged as
+[d65cf177](https://github.com/popcre/ai-devops/commit/d65cf1776cf963a947707f55c342abbab62f74ff).
+GitHub verification-closure, doc-safety and applicable Windows summary checks
+completed SUCCESS; individual executable lanes were skipped for prose. Entire
+Gates completed NEUTRAL. Together with the preserved restore receipts, this
+passes the limited local GitHub-only prose route. It supersedes the earlier
+pending-check observation; hosted trial acceptance and full live proof remain
+open. The [continuation handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md)
+audits every remaining phase through plan-end.
+
 ## Costs, stop and ownership
 
 No direct paid API/hosted Agent call, subscription, top-up or CI provider was

@@ -31,9 +31,11 @@ private content. No global hooks, installed toolkit changes, subscriptions,
 automatic extraction, daemon or hosted synchronization are authorized implicitly.
 Incremental spending limit is $0.
 
-## Qualification record
+## Initial qualification record — historical
 
 Entire CLI release discovered: v0.12.2. Installation has not yet occurred.
+This initial observation predates the execution receipts below; it is not the
+current installation state. The trial binaries were later tested and removed.
 The official installation reference supports direct Linux archive extraction;
 config and managed plugins have documented directory overrides.
 
@@ -144,3 +146,17 @@ evidence; classify them as rebuildable, never as a substitute for exported facts
 Compare original-profile hashes and complete the report through GitHub alone.
 No real user credential, App installation or other session's capability is
 removed. Final restore/landing receipts remain on #2022.
+
+## Fresh-session reconciliation
+
+October 29, 2026, 10:28 AM EDT: PR #2034 is merged; verification-closure,
+doc-safety and applicable Windows summary checks completed SUCCESS. Individual
+Windows executable lanes were skipped for prose. Entire Gates completed NEUTRAL.
+The earlier pending-check receipt is superseded on #2022. This completes the
+limited local GitHub-only prose delivery proof, not hosted trial acceptance.
+All 61 retained synthetic/public recovery files still match the manifest;
+private raw-evidence custody remains unqualified. No trial process is running.
+
+Continue with the [whole-plan handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
+Re-read all downstream phases through step 7 and report drift at every phase
+end. New context or later hosted activation does not reset the original clock.

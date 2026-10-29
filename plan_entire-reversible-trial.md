@@ -18,14 +18,19 @@ No hosted trial worker or background capture is running. Keep acceptance and
 | 3. Sessions, graph, brain and search | Authored-memory resume passed; full pilot inconclusive | [Memory results](tests/verification/entire-trial/memory-results.md); captured sessions not tested |
 | 4. Trails and failure handling | Blocked / not tested | Authenticated workspace and effective zero-spend boundary unqualified |
 | 5. Optional shadow CI | Omitted / not tested | Hosted prerequisites unavailable; original CI preserved |
-| 6. Rollback rehearsal | Native local export/import passed; final departure receipt on #2022 | GitHub-only landing and restore comparison recorded after execution |
+| 6. Rollback rehearsal | Local export/import, restoration and corrected GitHub prose check closure passed | Receipt on #2022; hosted departure and new Windows executable run remain unproved |
 | 7. Decision and closeout | No adoption; full trial remains open | Hosted Trails/live proof and valid captured-history pilot unproved |
 
 Fresh session: reconcile the execution report and #2022, then resume only the
 remaining feature-scoped gates; read this entire document, then its linked
 sources only as required. Re-read downstream phases before each phase, refresh
 vendor capabilities, and use the fresh-session skill at a context boundary.
-Session handoff: [closeout handoff](HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
+At the end of **every** phase, re-read all remaining downstream phases through
+step 7 and report any drift on #2022. Update affected assumptions, identifiers,
+dependencies and gates before transferring work; never hand forward an implicit
+change learned only in chat.
+Session handoff: [execution continuation](HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
+Earlier execution-unstarted record: [planning closeout](HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
 Earlier planning context: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
 Historical planning closeout, October 27, 2026, 2:22 PM EDT: original planning PR #2023
 and revised planning PR #2024 are MERGED. The latter landed at
@@ -38,6 +43,19 @@ DeepSeek's first critique also returned REVISE; its corrections are recorded
 with the response register below. Runtime prerequisites remain unproved.
 No Entire installation, account connection, upload, Trail, memory index, CI run,
 subscription, or rollback has been executed by this planning task.
+
+Execution refresh, October 29, 2026, 10:28 AM EDT: corrected delivery PR #2034
+is merged; GitHub `verification-closure`, documentation and applicable Windows
+summary checks all completed successfully. `Entire Gates` completed neutral.
+The local restored system completed the normal GitHub-only prose route; this
+does not establish hosted Trails or a new Windows executable test. The earlier
+pending-check receipt on #2022 is superseded by the continuation receipt.
+Hosted access/cost/custody gates and full live proof remain open. The original
+trial clock is not restarted by transfer: local containment first passed
+October 29, 2026, 5:58 AM EDT. Applying ten subsequent weekdays, with no separate
+holiday calendar specified, gives a conservative stop of November 12, 2026,
+5:58 AM EST. Discovery still ends November 2, 2026, 5:00 PM EST. Any earlier
+applicable stop wins. No extension has been used and no background worker runs.
 
 ## 1. Ultimate goal — business outcome
 
