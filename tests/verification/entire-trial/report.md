@@ -7,6 +7,13 @@ Execution authorized October 29, 2026; started from public source
 
 ## Decision
 
+The [October 29 repair](#captured-memory-repair-and-scoped-departure)
+supersedes the captured-retrieval and individual-login failures in the
+historical paragraphs below. Captured conversation retrieval now passes
+narrowly using an exact official upstream candidate in the isolated Linux
+trial. Full hosted Trails, deletion/retention, private-data qualification and
+metered-Agent $0 protection remain open. **No adoption recommendation.**
+
 Online continuation, October 29, 2026: authenticated access now passes after
 Albert explicitly authorized terms acceptance. Free synthetic Trail creation,
 API export and closure worked. One new public-source research session was
@@ -99,18 +106,18 @@ pre-push hook was preserved and still executed after disable.
 | Feature/case | Disposition | Evidence or limit |
 |---|---|---|
 | Local authored memories | pass, limited | Persistence and two corrected fresh-context source checks |
-| Captured-session continuous memory | failed in new bounded research case | New session explicitly attached/exported; extraction zero facts and conversation retrieval empty |
+| Captured-session continuous memory | conversation retrieval repaired, limited | Official upstream candidate; original capture and new automatic checkpoint restored; extraction/pilot still inconclusive |
 | Local graph/search | functional, utility inconclusive | Partial Bash parsing; no PowerShell semantics; heavy fallback |
 | Ten matched retrieval pairs | inconclusive | 10/10 combined answers in both arms; deviations and no timing |
 | Hosted brain sharing | not tested | Authenticated workspace/cost/data gates unqualified |
 | Mirror and divergence | not tested | No trial remote or hosted ref created |
 | Trails/latest-head/stale-green | synthetic intent/export/closure only; full test not passed | New Trail 113; complete field recovery, two branches and automated findings not qualified |
 | Optional shadow Linux CI | omitted, not tested | Hosted prerequisites unavailable; no provider configured |
-| Local export/reimport | pass for authored records and new captured transcript | Session-inclusive bundle restored byte-for-byte offline; memory retrieval still failed |
+| Local export/reimport | pass for authored records and captured conversation, limited | Separate offline store returned identical new conversation identity/text; full hosted export unproved |
 | Capture channels/redaction | not tested | No env/argv/stdout/clipboard/browser/sibling capture exercised |
 | Network/profile isolation | pass | Kernel network boundary and inaccessible host agent homes |
 | Unknown/stale/injection | limited pass | Exact cases and limits in memory-results.md |
-| Hosted deletion/backup retention | not passed | Trial 113 remains retrievable after closing; existing App preserved; individual remote login revocation unproved |
+| Hosted deletion/backup retention | not passed; narrow support request submitted | Trial 113 closing is not deletion; both owned logins selectively revoked, six pre-existing sessions preserved |
 
 Full receipts and failed attempts: [memory-results.md](memory-results.md).
 
@@ -399,10 +406,140 @@ full-trial/live-proof closure. Discovery remains November 2, 2026, 5:00 PM EST;
 trial stop remains November 12, 2026, 5:58 AM EST. No extension, new clock,
 background pilot or promised monitor exists.
 
+## Captured-memory repair and scoped departure
+
+October 29, 2026; same coordinator and #2022, fresh continuation branch
+`codex/entire-trial-unblock-20261029`. Public starting source
+`24cb1bb8872d6e625b06f1137b0ee337265e24ea`; reconciled with current upstream
+`13a35ade` before publication. Earlier failures remain evidence, not erased.
+
+The official `entireio/entire-brain` main commit
+`f8deab174b8f08fda2176683a2f7ccc7bce062b5` already contains compact ETF
+conversation/history parsing and pre-ETF cache invalidation missing from the
+tested v0.4.0 release. No local vendor code modification was needed. An
+isolated official Go 1.27.3 toolchain built that exact source; focused
+`CompactETF|PreETF|CanonicalTranscript|Conversation` CLI-package tests passed.
+Candidate reports `dev`; binary SHA256
+`abfe6e483566bf952932d6928981b30aab462f25f88bdd98b39c9d78223d9f2c`.
+It was installed only in the disposable Linux trial, never globally or on
+Windows. No released-version, cross-platform or fleet recommendation follows.
+
+Reimporting the original session-inclusive bundle and rebuilding projections
+returned actual conversation
+`conversation:145b211e5bb0eabb76dec396a32e2772`, from original captured session
+`01a188a0-e5fc-7e73-9ef9-4524f2871720`. Two new cold consumers queried that
+captured source before consulting its original Git source. No authored fact
+or prewritten replacement was substituted. Original source commit
+`071bc68337b287f169afa3c0f79c41d612ff0f9f` was made resolvable offline.
+The earlier zero-fact extraction is still zero; this repair qualifies
+conversation retrieval, not semantic fact extraction.
+
+Native Codex tools then ran under a named restricted filesystem profile:
+root denied, minimal runtime read-only, explicit disposable workspace writes,
+network disabled, original agent homes/toolkit secrets denied, and the
+isolated model authentication file separately denied to tools. Denial was
+tested using actual file opens, including an existing synthetic auth canary.
+Capture hooks ran in a separate networkless namespace, with model auth masked
+and only this isolated public/synthetic session profile available. The
+previous nested-namespace file-tool failure was retained; no full-access or
+sandbox bypass was used. Normal inspected-hook trust was recorded.
+
+New real qualification task session `01a1890b-6299-72c1-8603-329b202be020`
+read the candidate/test/report sources and wrote a bounded qualification
+decision. Pending capture showed one turn/one touched file. Ordinary Git
+commit `b3d79e40bfad1eb597af7983cf48ee62e9845208` automatically acquired
+checkpoint `01M64GR8ZCJYQYF02QHX7FK2J8`; no manual session attach was used.
+The checkpoint list calls this a logs-only checkpoint; it is not proof of
+complete code attribution. Refresh exported one session, four history records,
+zero decisions and two tool calls; one session remains undistilled.
+Conversation identity is `conversation:667dbd1e93ceb4d520563190b8a26348`.
+Session-inclusive bundle SHA256:
+`05e32b0254d034d517793686294ca1366774bd1509cd29f03ba589efb6e10cf3`.
+A separate clean clone/store imported it offline: one result, identical
+conversation ID and text. Source bundle verification passed, including the
+task commits/checkpoint and exact vendor source ref.
+
+Two additional independent fresh consumers searched captured conversation
+before opening the result document, cited the exact candidate and task source,
+and reconciled a deliberately retained stale departure statement against
+newer committed `current-state.json` at
+`96757aced630a0e6c120200245bf913b39413783`. Both correctly identified the
+already-submitted deletion request as pending, preserved GitHub authority and
+both deadlines, and avoided repeating revocation/global logout. One consumer
+explicitly disclosed that the vendor Git object was not yet available in its
+checkout; that source object/ref was subsequently preserved and bundle
+verification passed. Parent verified the original task source and traces.
+These are correctness/feasibility checks, not five natural histories or valid
+matched utility pairs. Large context use, no counterbalanced timing and no
+cost attribution prevent any savings claim.
+
+Official CLI source `524e424d2010b6702a5285654e7721642e1fb1bb` documents
+auth-host `DELETE /api/auth/tokens/<exact-id>`. Through the supported native
+CLI API transport, old trial session `01M649HX4P0VJBVHEEV22NDYVX` was removed.
+Before/after inventories were exactly eight versus seven: every other session
+was preserved, including the separately owned repair login. Broad logout was
+not used. Account-wide session metadata remains private.
+
+Current OpenAPI still offers no delete for this branchless project Trail;
+legacy per-repository numbering is not interchangeable. No ambiguous deletion
+was attempted. Albert explicitly authorized: “Send the narrowly scoped
+request.” The Contact Support form submitted the reviewed exact request on
+October 29 at 2:59 PM EDT: delete only Trail 113
+(`01M649FRW992NFFS0HYCYTF3NP`) and confirm retrieval absence/backup retention,
+preserving the account, mirror, all other records, integrations and logins.
+Observed Send → Sending → closed form, no visible error; no durable ticket
+number or reply was established. A unique-ID mailbox search found no matching
+acknowledgment; this neither proves delivery failure nor permits resending.
+Entire support owns the external deletion/retention response; Codex retains
+follow-through on #2022. No claim of active vendor work or completed deletion.
+
+Refreshed billing documentation still states in-flight usage can exceed zero
+and be invoiced. No metered Agent was enabled or free trial clock started;
+free manual metadata remains the only hosted trial feature. No payment,
+overage-cap increase, new CI, integration grant or private-history upload.
+Existing GitHub installation `175665854` permissions/scope/suspension and
+repository rulesets compare unchanged against the preceding receipts.
+Original Git/Codex/Claude/Entire profile hashes also compare unchanged.
+
+An additional fresh consumer continued from preserved JSON with Entire absent
+from PATH and tools network disabled. It recovered the captured goal, narrow
+prior decision, current next action and synthetic unresolved latest-commit
+association text. That text is in the manually authored Trail body, not an
+automated finding object. The consumer disclosed `isPossiblyPartial: true` and
+missing decision/test documents rather than claiming full export. This is a
+limited offline continuation pass, not complete hosted-field recovery.
+
+Both owned trial logins are now individually removed: after removing the
+repair login, the API inventory contains exactly the six pre-existing session
+IDs from the baseline. The isolated online token store and copied model auth
+were removed. Supported local uninstall removed Git hooks/session states and
+Entire settings; supported plugin removal removed brain/graph registrations.
+Custom trial-owned capture wrappers were removed explicitly after the native
+uninstaller did not recognize the wrapper form. Only exact owned paths and
+rebuildable caches were removed; original profiles compare unchanged. No
+active capture, daemon or hosted Agent remains. Recovery contains the source
+bundle's full/normalized checkpoint transcript, portable brain bundle,
+candidate binary, traces and receipts. Forty-seven retained public/synthetic
+files verified against manifest SHA256
+`41d1b13b2588ef20b4277fd0753e8d9a2e2a8adae766167f7e35856e185c349e`.
+Account-wide metadata and credentials are not manifest members. Publication
+and GitHub-only landing receipts belong on #2022 after the normal prose route.
+
+Downstream phases 4–7 were reread and reconciled: hosted two-branch automated
+findings/latest-head tests remain unproved, optional CI omitted, hosted
+departure pending vendor deletion, and the full pilot/utility result
+inconclusive. Do not replace hosted findings with a local imitation or call a
+neutral Gate green. No adoption, private-data permission or full live-proof
+closure. Discovery remains November 2, 2026, 5:00 PM EST; stop remains November
+12, 2026, 5:58 AM EST. Recovery ID `entire-trial-unblock-20261029` holds only
+approved public/synthetic qualification artifacts; private account metadata
+and authentication are excluded from its publication manifest.
+
 ## Official sources
 
 - [Installation](https://docs.entire.com/installation)
 - [Memory](https://docs.entire.com/guides/brain/overview)
 - [Plugin management](https://docs.entire.com/cli-reference/plugin)
 - [Billing](https://docs.entire.com/billing)
+- [Upstream compact-transcript repair](https://github.com/entireio/entire-brain/commit/f8deab174b8f08fda2176683a2f7ccc7bce062b5)
 - [Privacy](https://entire.com/privacy) and [terms](https://entire.com/terms)

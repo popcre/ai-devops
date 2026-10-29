@@ -13,14 +13,36 @@ real-data/capture qualification and full hosted departure remain unproved.
 No hosted trial worker or background capture is running. Keep acceptance and
 `live proof` on #2022; the full requested trial is not complete.
 
+October 29 repair continuation supersedes the retrieval and individual-login
+failure statements below: the official upstream brain candidate at
+`f8deab174b8f08fda2176683a2f7ccc7bce062b5` reads the actual compact captured
+transcript, and two fresh consumers recovered and source-checked it. A new
+coding session completed with restricted native tools, formed an automatic
+local checkpoint, and survived session-inclusive export/import with identical
+conversation identity/text. Two further fresh consumers reconciled a stale
+departure statement against a newer committed source. These are narrow Linux
+candidate results, not released/fleet qualification, extraction success,
+five natural histories, utility savings or full acceptance.
+The old trial login was individually revoked; the other seven sessions were
+preserved at that boundary. Albert authorized the narrowly scoped support
+request, submitted October 29 at 2:59 PM EDT, to delete only synthetic Trail
+113 and confirm backup retention. No ticket number or vendor reply was
+established. Closing the Trail still does not prove deletion. Metered Agents
+remain disabled: current billing documentation still permits overrun beyond
+zero. Shared installation and GitHub rulesets compare unchanged. See the
+[repair receipts](tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure).
+Current continuation branch: `codex/entire-trial-unblock-20261029`; source
+`24cb1bb8872d6e625b06f1137b0ee337265e24ea`, reconciled with `13a35ade`.
+All original deadlines remain unchanged.
+
 | Step | State (October 29, 2026 EDT) | Evidence / remaining acceptance |
 |---|---|---|
 | 1. Scope, access, baseline and recovery inventory | Authenticated access passed; free-metadata boundary observed; Agent/data gates open | [Operating record](docs/entire-trial.md), [baseline](tests/verification/entire-trial/baseline.md); no card/no Agent/zero non-final metered spend |
 | 2. Isolated GitHub mirror and privacy qualification | Existing mirror observed; trial writes scoped to ai-devops; full capture/export qualification incomplete | [Online report](tests/verification/entire-trial/report.md#online-qualification-and-departure); one synthetic Trail created and closed |
-| 3. Sessions, graph, brain and search | Authored-memory pass retained; new captured research exported/restored, retrieval failed | [Memory results](tests/verification/entire-trial/memory-results.md#captured-session-continuation); zero distilled facts; coding-subject sandbox failure; full pilot inconclusive |
+| 3. Sessions, graph, brain and search | Authored-memory pass retained; captured conversation retrieval repaired narrowly | [Repair receipts](tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure); official unreleased Linux candidate; new coding capture/export restored; extraction/pilot inconclusive |
 | 4. Trails and failure handling | Synthetic intent/export/closure passed narrowly; two-branch/latest-head/automated findings not tested | API export possibly partial; complete required-field recovery and safe metered Agent boundary unproved |
 | 5. Optional shadow CI | Omitted / not tested | Hosted prerequisites unavailable; original CI preserved |
-| 6. Rollback rehearsal | Captured transcript restored byte-for-byte offline; local profiles preserved; hosted departure incomplete | Synthetic Trail remains retrievable after closing; single-session remote revocation unproved; global logout would affect other machines |
+| 6. Rollback rehearsal | Captured transcript restored offline; profiles preserved; both owned logins selectively revoked | Six pre-existing logins preserved; Trail deletion/backup retention awaits authorized narrow support request |
 | 7. Decision and closeout | No adoption; full trial remains open | Hosted Trails/live proof and valid captured-history pilot unproved |
 
 Online continuation: [full receipts and downstream drift](tests/verification/entire-trial/report.md#online-qualification-and-departure),
