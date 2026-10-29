@@ -61,6 +61,7 @@ the others live where noted.
 | Skill | What it does | Say this |
 |---|---|---|
 | ⚙ `claude-transcript-backup` | Finds all Claude Code transcripts on the machine, backs them up to claude_chats/<machine>. | "back up my Claude transcripts" |
+| ⚙ `transcript-dropbox-upload` | One-way delta backup of the private ai-devops-transcripts archive to Albert's Dropbox: refreshes the repo, maps repo layouts to the Dropbox folders, copies only what is missing or older (decompressing .jsonl.xz collections), and verifies completeness. Shared by Claude and Codex. | "upload the transcripts to Dropbox" / "back up transcripts to Dropbox" / "upload new transcripts" |
 | ⚙ `ai-development-pipeline` | The staged 7-step multi-model workflow (Opus plans/reviews, Codex implements/tests). | "run this through the pipeline" |
 | ⚙ `codex-handoff` | Hand a build/ops/verification task to Codex (GPT-5.x): self-contained brief → run autonomously (background) → verify its work. Falls back to `codex exec` when the codex-cli MCP can't find the binary. | "use codex to…" / "have codex do X" |
 | ⚙ `codex-second-opinion` | A debate, not a delegation: Claude commits to its own position first, Codex judges the material independently (read-only), Claude reports both and where it agrees — and on real disagreement argues back for one round and reports who moved. Ends in Agreed / Codex conceded / Claude conceded / Still split (with the crux). | "run this by codex and tell me if you agree" / "what does codex think" |
