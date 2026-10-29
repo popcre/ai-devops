@@ -10,6 +10,46 @@ CLI 0.12.2; brain v0.4.0; graph v0.6.0. All candidate execution was inside
 an isolated Linux filesystem and network namespace, with no model credentials,
 host agent homes, automatic extraction, watcher or hosted connection.
 
+## Independent matched retrieval
+
+October 29, 2026; same frozen ten questions/key and source
+`534493c047cd7dd9ebde38b25071918744901cf3`. Twenty fresh native Codex contexts
+used identical `gpt-6.1-sol`, low effort, read-only source, disabled tool network,
+120-second limit and four-call instruction. Odd questions ran baseline first,
+even questions Entire first; runs were sequential. Key/prior answers were
+unavailable to subjects. Entire used the unchanged official candidate from the
+repair receipt, with a fresh deterministic index; direct verification/fallback
+was permitted and disclosed. Protocol was saved before measurements; parent
+graded after all twenty completed. No retakes or lowered thresholds.
+
+| Measurement | Ordinary source lookup | Entire-assisted |
+|---|---:|---:|
+| Correct against frozen binary key | 10/10 | 8/10 |
+| Median elapsed seconds | 14.919 | 16.222 |
+| Median reported input tokens | 82,321 | 93,190.5 |
+| Total reported input tokens | 857,058 | 904,869 |
+| Declared source fallbacks | 0 | 6 |
+
+Candidate Q04 was incomplete: it omitted exact-head eligibility and labelled
+the answer unknown. Q07 selected inode/device identity from an unrelated
+Oracle test instead of the toolkit's path-identity policy. Other answers
+matched the key. Even giving partial credit for Q04 would not remove the
+accuracy regression. The ≥9/10 and no-regression adoption criteria did not
+pass. No speed/token saving or general reliability claim follows.
+
+Reported input counts include repeated/cached common context, not unique
+retrieval tokens or dollar cost. Q10's common safe prompt explicitly rejected
+stored instructions: that is a behaviour pass under instructions, not an
+independent prompt-injection-resistance result. Source fallback remains part
+of combined answer correctness, not pure Entire recall. Five natural captured
+histories and extraction quality are still unestablished; failed accuracy and
+capture qualification stop adoption rather than justify additional private
+capture. Earlier inconclusive results remain historical below.
+
+Recovery `entire-independent-20261029` retains protocol, twenty answers/event
+traces, timings/usage, grading and failures. See the
+[free-feature test report](report.md#independent-zero-spend-tests).
+
 ## October 29 captured-memory repair
 
 The [repair receipts](report.md#captured-memory-repair-and-scoped-departure)
