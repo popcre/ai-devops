@@ -102,27 +102,19 @@ pipeline. The recovery procedure lives in
 - This repository is public. Never open or commit raw transcript `.jsonl`,
   licensed data, secrets, or private artifacts. The private `transcripts/`
   submodule and ignored chat archives stay outside normal AI context.
-- Production and shared cloud infrastructure are read-only by default. Run `terraform apply`,
-  `terraform destroy`, or mutating production `gcloud` commands only with the
-  assigned AI reviewer's explicit APPROVE of the exact action and
-  resource; never ask Albert to approve (owner ruling 2026-09-28). Where
-  `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
-  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
-  that review with `ai-review --implementer <your engine>` unless you are Claude
-  Code or Codex.
-  The sole exception is the separately activated `shared-db` automatic migration
-  workflow after exact structural admission, guarded merge, and merged-main
-  preview proof; it authorizes no manual production command or other infrastructure
-  mutation and fails closed to an engineer on any absent or ambiguous evidence.
-  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
-  permanently"): an AI session may launch its merged-preview run for an
-  approved, merged change after `ai-task-gates check --before shared-db-promotion`.
+- Production and shared cloud infrastructure are read-only by default; never
+  ask Albert to approve (owner rulings 2026-09-28 and 2026-10-29). AI review
+  is advice only and gates nothing. Shared-db migrations reach production only
+  through its automatic promotion workflow (preview rehearsal, tests, no
+  blocking `review-finding` issue); no manual production command. Until
+  #2071 removes the old approval checks from `ai-task-gates`, a refusal there
+  is reported `Blocked —` on #2071, never worked around.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.
 - **Never run `git pull` or merge in the installed checkout** (`/worksp/ai-devops`). It
   advances only through the protected install: a candidate worktree at the reviewed merged commit,
-  its `update.sh` with the exact-head APPROVE, per `docs/deployment.md`. A plain pull is recorded by
+  its `update.sh`, per `docs/deployment.md`. A plain pull is recorded by
   the post-merge detector and warned about by `ai-task-gates`.
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
@@ -132,13 +124,12 @@ pipeline. The recovery procedure lives in
   ruling 2026-10-15 limits required review to `popcre/shared-db`.
 - **Two operating systems, one toolkit** (#1783): reviewer tooling runs on Ubuntu (hetz, edge-dev3) and Windows (4837/al8960ofc, 916, edge-dev). Before changing it, write down the OS the problem happened on and every OS the change will run on; design for both, prove both, install on both by each OS's route. Brief: [`config/reviewer-platform-brief.txt`](config/reviewer-platform-brief.txt) (printed by `ai-task-gates start` and `ai-reviewer-issue show`).
 - **One code path for every reviewer** (#1834): in shared review code, a step that decides whether evidence, a receipt, a record, cleanup or qualification happens never branches on a provider name — declare the exception as a capability in `config/review-runner-doors.json` (inventory: [`docs/reviewer-harness-consolidation.md`](docs/reviewer-harness-consolidation.md)).
-- **AI review is required only in `popcre/shared-db`** (owner 2026-10-15,
-  superseding 2026-10-13 #1714; see `docs/owner-rulings.md`). No other
-  repository's work waits for a review; a review stays available on request
-  by name. The rotation pool is Muse, DeepSeek, GLM, and StepFun. Other
-  wrappers stay installed and callable by name but are frozen (best-effort,
-  not maintained). Rules: [`docs/reviewer-rotation-rules.md`](docs/reviewer-rotation-rules.md)
-  13–14; plan [`plan_review-scope-reduction.md`](plan_review-scope-reduction.md).
+- **AI review is advice only** (owner ruling 2026-10-29, #2041; see
+  `docs/owner-rulings.md`). CI's `ai-review` check runs one rotating reviewer
+  (Muse, GLM, DeepSeek, StepFun) once per code or plan PR, never fails, and
+  skips docs-only PRs; REJECT/REVISE findings open a `review-finding` issue
+  for the automatic fixer. No work waits for a review. Wrappers stay callable
+  by name for second opinions. Plan: [`plan_skinny-review.md`](plan_skinny-review.md).
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
   recheck the real change set first and refuse an action the work does not

@@ -61,7 +61,7 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - Albert owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** **Never ask a human to approve:** ask Albert only a
-  business-meaning question; assigned AI reviewers gate technical actions.
+  business-meaning question; AI review is advice only and never blocks.
   Authority the AI cannot obtain is reported `Blocked —`, never worked around.
 - **Never ask Albert to type, click, or create a credential.** If a
   permission setting blocks the step, name the setting and change it, or route
@@ -101,27 +101,23 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
   output, logs, or commits; serialize 1Password access and load
   `secrets-to-1password`. A leak is
-  compromised; the AI rotates them itself (skill); only a `popcre/shared-db` credential waits for an assigned AI reviewer's APPROVE of the rotation plan.
+  compromised; the AI rotates them itself (skill).
 - **Destructive actions:** make each recoverable first (details).
 - **Production:** read-only by default; no human approval is ever requested.
-  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE gates `terraform apply` and every technical production
-  action; database writes skip it; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required) (details). The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
-  which re-proves the one open structural work issue; this exception authorizes no manual production command (rulings: owner-rulings.md).
+  No review approval gates it (owner ruling 2026-10-29) (details). Shared-db
+  migrations reach production only through its automatic promotion workflow
+  (preview rehearsal, tests, no open `review-finding` issue); no manual
+  production command (rulings: owner-rulings.md).
 - **Shared database:** STRUCTURE changes and curated Master Data loads start
   in `popcre/shared-db`; load `shared-db-change` first. Structural work is
   claim-first: claim exact objects on the existing issue and start.
 - **Sign everything posted to GitHub** with `$AI_GH_SIGNATURE` (format in details).
-- **Reviews:** required only in `popcre/shared-db` (owner ruling
-  2026-10-15); no other repository waits for a review. There, pick an
-  in-rotation reviewer via `ai-review`; first read `docs/reviewer-rotation-rules.md`.
-- **Observation week** (while the window file is live, #1948): send reviews
-  with `--detach` and read them with `ai-review outcome`. Never retry a
-  reviewer that failed or was reported skipped this session. When
-  `ai-task-gates check --before ship` prints `MERGE-UNREVIEWED`, merge on green
-  CI, add label `unreviewed-week`, and continue. Shared-db, production,
-  infrastructure and deployment still wait for an exact-head APPROVE. No
-  reviewer-repair PRs or toolkit installs; log failures with
-  `ai-reviewer-issue`. Allowed operations: `plan_reviewer-observation-week.md` §11.
+- **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
+  advisory AI review per code or plan PR and never blocks a merge; findings
+  become `review-finding` issues that an automatic fixer handles. Never wait
+  on, request, or gate on a review; second opinions stay optional. When
+  `ai-task-gates` prints `MERGE-UNREVIEWED`, merge on green CI and add label
+  `unreviewed-week`.
 - **Route every successor from its own work,** never a predecessor's.
 - **Synology:** NAS reads over 25 s load `synology-long-running-operations`.
 

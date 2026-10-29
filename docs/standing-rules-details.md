@@ -4,6 +4,14 @@ The always-loaded client globals keep the short rule. This file holds the long
 procedure behind each one. Load it when the task needs the detail — it is not
 startup context.
 
+> **Owner ruling 2026-10-29 (#2041) supersedes every reviewer-approval rule
+> below:** AI review is advice only and never gates any action — code,
+> installation, deployment, infrastructure, production, secret rotation or
+> shared-db. CI runs one advisory reviewer per PR; findings become
+> `review-finding` issues for the automatic fixer. Shared-db migrations reach
+> production only through the automatic promotion workflow. Older paragraphs
+> that mention an APPROVE are history until #2072 and #2074 remove them.
+
 ## BlockerWatch (waiting on anything machine-checkable)
 
 **Registration is no longer required.** Use bounded `ai-pr-wait` while you
@@ -184,16 +192,14 @@ and points here.
   outgrew the class, redeclare and say so. private-evidence is read-only
   analysis.
 - **Secrets:** values move only through pipes or protected files. Rotation
-  of a `popcre/shared-db` credential needs an assigned AI reviewer's APPROVE of
-  the rotation plan (exact credential, provider, and consumers); elsewhere the
-  AI rotates without review. Never rotate a credential under a standing
+  is done by the AI with a written plan (exact credential, provider, and
+  consumers) on the tracking issue; no review gates it. Never rotate a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or
   reviewed preview. No broad staging or destructive Git over unreviewed work,
   another session's files, a repository root, or a machine-local overlay.
-- **Production:** in `popcre/shared-db` the reviewer's APPROVE is on the exact
-  inputs; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database
-  writes skip that APPROVE but keep every other gate (see "Database writes").
+- **Production:** no review approval gates it (owner ruling 2026-10-29).
+  Database writes keep every other gate (see "Database writes").
   The automatic `shared-db` migration promotion exception re-proves the one
   open structural work issue or stops for an engineer; it authorizes no manual
   production command or bypass.

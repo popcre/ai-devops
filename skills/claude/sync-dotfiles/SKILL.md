@@ -328,8 +328,8 @@ clone + `./install.sh` (Ubuntu) first.
    `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, register it yourself. Never register an unattended job that EDITS
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
-   reports; every memory edit needs an assigned AI reviewer's APPROVE of the exact
-   edits before it is applied — never an unattended job, never self-approved, and
+   reports; every memory edit is applied as an exact, recorded edit
+   with a backup before it is applied — never an unattended job, never self-approved, and
    never a request for Albert's approval.
 7. **Capture and publish local memory transactionally:**
    `bin/ai-memory-sync sync-if-stale`. This command alone owns the private clone,

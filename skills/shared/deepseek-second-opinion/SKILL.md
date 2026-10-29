@@ -1,6 +1,6 @@
 ---
 name: deepseek-second-opinion
-description: Rotation reviewer since 2026-09-23 (DeepSeek V4.1 Flash, model pin deepseek-flash, repository tools over a disposable remote-less copy) and a second-opinion debater. Take formal reviews only when the allocator assigns DeepSeek. Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
+description: DeepSeek V4.1 Flash second-opinion debater (model pin deepseek-flash, repository tools over a disposable remote-less copy). Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
 ---
 
 # deepseek-second-opinion

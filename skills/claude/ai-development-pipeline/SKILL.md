@@ -36,11 +36,10 @@ of forcing resume.
 - A registered pool reviewer (default Muse) independently reviews the plan, diff,
   security, and final state. Claude is out of the reviewer pool and is never the
   reviewer.
-- `ai-review <registered-provider> ...` is the approval-capable front door.
-  Other model wrappers are advisory or quarantined and cannot replace a required
-  approval.
-- Any `REJECT`, `BLOCKED`, missing verdict, provider failure, source change, or
-  lifecycle-accounting failure stops later stages.
+- Review is advice only (owner ruling 2026-10-29): a `REJECT` or `REVISE`
+  finding is fixed or answered with evidence; it never needs an approval to
+  continue. A source change or lifecycle-accounting failure still stops later
+  stages.
 
 The run manifest under `.ai/runs/` is the durable record. Each stage consumes
 the prior named artifact, records its hashes and source digest, and publishes a

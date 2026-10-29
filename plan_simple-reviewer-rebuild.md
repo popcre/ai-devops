@@ -1,5 +1,9 @@
 # Plan — simple reviewer rebuild (4 reviewers, run in CI, stateless)
 
+> **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory
+> review model in [`plan_skinny-review.md`](plan_skinny-review.md) (owner ruling
+> 2026-10-29: review is advice only). Kept as history; do not follow.
+
 Issue: popcre/ai-devops#2041. Evidence: [docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md) (#1948).
 Handoff: [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
 

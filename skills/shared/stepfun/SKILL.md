@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: "StepFun Step 5 (step-5-preview) via ai-stepfun: rotation reviews with a VERDICT line, second opinions, and isolated implementation runs (refused on Windows). Use for \"ask StepFun\", \"StepFun review\", \"Step 5\", \"have StepFun implement this\", or a StepFun second opinion."
+description: "StepFun Step 5 (step-5-preview) via ai-stepfun: reviews with a VERDICT line, second opinions, and isolated implementation runs (refused on Windows). Use for \"ask StepFun\", \"StepFun review\", \"Step 5\", \"have StepFun implement this\", or a StepFun second opinion."
 ---
 
 # stepfun
@@ -28,7 +28,7 @@ Every turn runs against a disposable, remote-less copy or clone. StepCode turns
 additionally run under bubblewrap: the model sees only its own folder, with an
 empty home, /tmp and /run and a cleared environment; OpenCode turns on Linux get the
 same sandbox. Windows turns are not mount-isolated: see the owner-accepted
-Windows residual in `docs/reviewer-rotation-rules.md` rule 12. OpenCode turns run against
+Windows residual in the archived reviewer rules (rule 12). OpenCode turns run against
 the same disposable copy with a per-run profile and the key exported only into
 the child environment.
 
@@ -60,10 +60,9 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 ## Membership
 
-`stepfun` is registered in `config/reviewer-registry.json` and is an active
-shared-db allocator reviewer (shared-db#3657). The allocator draws it only on a
-machine where `ai-review-preflight usable stepfun` passes. Also use it when
-Albert asks for StepFun.
+`stepfun` is one of the four reviewers CI's advisory `ai-review` check rotates
+through (owner ruling 2026-10-29: review is advice only and gates nothing).
+Also use it for second opinions or when Albert asks for StepFun.
 
 ## Failures
 

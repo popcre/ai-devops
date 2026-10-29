@@ -223,7 +223,7 @@ clone + `./install.sh` on Ubuntu).
    when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
-   register it yourself. Every memory edit needs an assigned AI reviewer's APPROVE of the exact edits
+   register it yourself. Every memory edit is applied as an exact, recorded edit with a backup
    (never self-approved, never Albert's approval). Never schedule anything that EDITS memory
    unattended: tombstoned deletions propagate to every machine and survive a later
    pull, so a wrong automated delete cannot be undone.

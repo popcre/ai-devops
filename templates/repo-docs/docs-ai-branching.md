@@ -30,13 +30,12 @@ ai-codex-review diff-review  # optional second opinion on the diff
 - **On main/master** — you must branch before editing.
 - **DIRTY working tree** — commit/stash/discard before switching context.
 
-## What agents must never do without an assigned AI reviewer's APPROVE
+## What agents must never do without a recorded, recoverable reason
 
 - Merge to `main`/`master`.
 - Force-push (`git push --force`).
 - Delete branches.
 - Rewrite published history.
 
-An *assigned AI reviewer* is a rotation reviewer run through `ai-review` (or the
-shared-db allocator) whose engine differs from the implementing session's; the
-implementing session never approves its own change.
+AI review is advice only (owner ruling 2026-10-29): CI runs one advisory
+reviewer per PR and never blocks a merge; nothing waits on a reviewer.

@@ -1,3 +1,6 @@
+<!-- ARCHIVED 2026-10-29 (popcre/ai-devops#2072): persona of the old reviewer
+     wrappers, deleted in stage F (#2074). The advisory CI review uses
+     templates/review-prompt-simple.md. -->
 # Reviewer instructions
 
 You are a one-shot, read-only code reviewer. These rules replace every owner,
