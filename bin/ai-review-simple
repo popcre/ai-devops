@@ -93,7 +93,7 @@ or VERDICT: REVISE.
 # Anchored to a status/code word so "line 429" or a bare "quota" is not credit.
 CREDIT_RE = re.compile(
     r"\b(?:status|code|http|error)[\"' :=]{0,4}(?:402|429|1113)\b|insufficient[ _]balance|"
-    r"out of credits?|(?:quota|allowance)\s+(?:exceeded|exhausted|used up)|"
+    r"out of credits?|exceeded your current quota|(?:quota|allowance)\s+(?:exceeded|exhausted|used up)|"
     r"rate[ _-]?limit(?:ed| exceeded)|payment required", re.I)
 SECRET_RE = re.compile(r"(?i)\b(\w*(?:API_KEY|TOKEN|SECRET|PASSWORD)\w*)(\s*[=:]\s*)[\"']?[^\s\"',}]+"
                        r"|\bBearer\s+[A-Za-z0-9._~+/=-]+")

@@ -70,10 +70,8 @@ jobs:
         run: |
           set -uo pipefail
           script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
-          if [ ! -f "$script" ] && [ "$GITHUB_REPOSITORY" = popcre/ai-devops ]; then
-            # Bootstrap only: before the script reaches main, the PR that adds it runs its own copy.
-            script="$GITHUB_WORKSPACE/pr/bin/ai-review-simple"
-          fi
+          # Never run PR-supplied code next to provider keys: no main script, no review.
+          [ -f "$script" ] || { echo "::error::toolkit script missing on the toolkit ref"; exit 1; }
           base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
           rc=0
           python3 "$script" --provider "${{ matrix.provider }}" --repo pr \
@@ -114,13 +112,6 @@ jobs:
           ref: ${{ inputs.toolkit_ref || 'main' }}
           path: toolkit
           persist-credentials: false
-      - name: Bootstrap script from the PR head (ai-devops, before it reaches main)
-        if: hashFiles('toolkit/bin/ai-review-simple') == '' && github.repository == 'popcre/ai-devops'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          persist-credentials: false
       - name: Download results
         # Zero artifacts must still reach the combine step, which reports
         # missing results as unavailable (neutral) instead of staying silent.
@@ -135,7 +126,6 @@ jobs:
           set -euo pipefail
           files=(); for p in muse glm deepseek stepfun; do files+=("results/$p.json"); done
           script=toolkit/bin/ai-review-simple
-          [ -f "$script" ] || script=pr/bin/ai-review-simple
           summary="$(python3 "$script" --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
           echo "$summary"
           state="$(jq -r .state <<<"$summary")"
@@ -147,6 +137,9 @@ jobs:
           # The check is recorded first, so a failed comment never hides it.
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md || \
             echo "::warning::could not post the review comment"
+          if [ "$state" != neutral ]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label unreviewed >/dev/null 2>&1 || true
+          fi
           if [ "$state" = neutral ]; then
             gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label unreviewed || \
               echo "::warning::could not add label 'unreviewed'"
@@ -180,8 +173,7 @@ jobs:
           # cancel it through the per-PR concurrency group.
           read -r sha branch < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --json headSha,headBranch --jq '"\(.headSha) \(.headBranch)"')
-          enc="$(jq -rn --arg b "$branch" '$b|@uri')"
-          now="$(gh api "repos/$GITHUB_REPOSITORY/branches/$enc" --jq .commit.sha 2>/dev/null || true)"
+          now="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha 2>/dev/null || true)"
           if [ "$now" != "$sha" ]; then
             echo "Branch $branch moved ($sha -> ${now:-gone}); skipping the re-run."
             exit 0
