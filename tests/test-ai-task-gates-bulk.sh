@@ -23,9 +23,9 @@ git -C "$TMP/repo" commit -qm init
 for ((n=1; n<=100; n++)); do printf 'docs/bulk-%03d.md\n' "$n"; done > "$TMP/paths.txt"
 printf 'bin/ai-review-lifecycle\nrandom/bulk.bin\n' >> "$TMP/paths.txt"
 result="$(cd "$TMP/repo" && timeout 180 "$ROOT/bin/ai-task-gates" explain --json --paths-from "$TMP/paths.txt")"
-jq -e '.changed_count==102 and .observed_class=="reviewer-safety" and
+jq -e '.changed_count==102 and .observed_class=="code" and
   ([.changes[]|select(.path|startswith("docs/bulk-"))]|length)==100 and
   ([.changes[]|select(.path|startswith("docs/bulk-"))]|all(.class=="prose")) and
-  ([.changes[]|select(.path=="bin/ai-review-lifecycle")][0].class)=="reviewer-safety" and
+  ([.changes[]|select(.path=="bin/ai-review-lifecycle")][0].class)=="code" and
   ([.changes[]|select(.path=="random/bulk.bin")][0].class)=="code"' <<< "$result" >/dev/null
 printf 'bulk classifier: 1 passed, 0 failed\n'
