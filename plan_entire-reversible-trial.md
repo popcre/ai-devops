@@ -23,12 +23,23 @@ also failed after family removal. Local credentials were destroyed; immediate
 issued-token invalidation is **not** proved. No broad logout or shared access
 change was attempted. Remaining external limits stay on #2022. Discovery
 November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST are unchanged.
-Current continuation: `codex/entire-trial-tests-20261029`, starting source
+Latest test execution: `codex/entire-trial-tests-20261029`, starting source
 `dcb7d2172df249b5be19024f7fee8b7bae8fdf07`, reconciled to `57d02039`.
+Current coordination owner remains Codex chat
+`01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3, on #2022.
+
+Cost scope correction: zero observed spend refers to Entire's non-final meter,
+not a certified all-in total. Existing GitHub CI on report PR #2081 invoked
+Muse, GLM and DeepSeek reviews; StepFun was unavailable. Their provider charges
+were not measured. Existing integrations were preserved, not disabled. Do not
+claim the whole experiment cost $0 or initiate further unqualified metered
+calls. The label/cost erratum uses an ordinary fork contribution, for which
+the existing review workflow explicitly skips its provider jobs; no policy or
+required check is weakened.
 
 Execution authorized by Albert October 29, 2026. Tracking and single acceptance
 issue: [#2022](https://github.com/popcre/ai-devops/issues/2022).
-Current owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f` on edge-dev3,
+Historical online-execution owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f` on edge-dev3,
 continuation branch `codex/entire-trial-online-20261029`, source
 `071bc68337b287f169afa3c0f79c41d612ff0f9f`. Earlier local qualification ran
 against `534493c047cd7dd9ebde38b25071918744901cf3`. Authenticated access now
@@ -55,7 +66,7 @@ established. Closing the Trail still does not prove deletion. Metered Agents
 remain disabled: current billing documentation still permits overrun beyond
 zero. Shared installation and GitHub rulesets compare unchanged. See the
 [repair receipts](tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure).
-Current continuation branch: `codex/entire-trial-unblock-20261029`; source
+Historical repair branch: `codex/entire-trial-unblock-20261029`; source
 `24cb1bb8872d6e625b06f1137b0ee337265e24ea`, reconciled with `13a35ade`.
 All original deadlines remain unchanged.
 

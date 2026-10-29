@@ -33,7 +33,7 @@ session could not execute its file tools. Full Trails qualification and hosted
 departure also remain open. **No adoption recommendation.** The original
 discovery and trial deadlines are unchanged.
 
-Current owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3.
+Historical online-execution owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3.
 Source: `071bc68337b287f169afa3c0f79c41d612ff0f9f`.
 Continuation branch: `codex/entire-trial-online-20261029`.
 See [online qualification](#online-qualification-and-departure) and
@@ -654,6 +654,14 @@ support message was authorized/sent; no request for133 or other topic was sent.
 Repository runners remained disabled and Agents empty. Billing/trial still
 `not_started`, observed spend zero cents, meter non-final. No card, purchase,
 new grant, global configuration change or private import. Optional CI omitted.
+
+That zero observation covers **Entire only**. The pre-existing GitHub review
+workflow ran provider calls on publication PR #2081: Muse/GLM approved,
+DeepSeek requested a current-label correction, StepFun was unavailable.
+Provider charges were not measured; an all-in $0 total cannot be certified.
+This cost boundary should have been checked before publication. The current
+label/cost correction uses the workflow's existing external-fork path, which
+skips provider jobs; no integration, rule or required check was disabled.
 
 The new owned login's refresh family was individually removed, and all six
 pre-existing session IDs remained. **Important narrower revocation result:**
