@@ -138,3 +138,14 @@ and skips docs-only PRs. Every other reviewer gate, hook, instruction and job
 is removed per the REVISION section of `plan_simple-reviewer-rebuild.md`.
 Production keeps owner authorization only. This supersedes earlier rulings
 that require an exact-head APPROVE.
+
+## 2026-10-29 (evening) — production promotion is automatic, never the owner's
+
+Verbatim, from Albert's chat: "the owner (me) is non-technical and not
+qualified to authorize promotion to production. That has to be done
+automatically by the ai agent."
+
+Current rule:
+- No step anywhere may wait for Albert to authorize production.
+- An AI agent promotes merged shared-db changes to production automatically once the preview rehearsal and tests pass and the advisory review has no open real findings (any `review-finding` issue on that change is resolved).
+- This is the only point where a review result is checked. Merging still never waits.

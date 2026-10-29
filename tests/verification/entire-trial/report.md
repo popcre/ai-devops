@@ -7,6 +7,15 @@ Execution authorized October 29, 2026; started from public source
 
 ## Decision
 
+Independent free-feature testing is finished with negative/limited results:
+[new receipts](#independent-zero-spend-tests). Matched retrieval regressed from
+10/10 to 8/10, and raw capture retained synthetic sensitive-channel content.
+Manual two-branch Trail coordination/current-head checks and structured
+offline continuation worked. **Stop/no adoption of the current full feature
+set.** Immediate issued-token invalidation, hosted deletion/backup retention,
+private capture and paid automated review are not qualified. Local rollback
+and preserved existing integrations do not establish full hosted departure.
+
 The [October 29 repair](#captured-memory-repair-and-scoped-departure)
 supersedes the captured-retrieval and individual-login failures in the
 historical paragraphs below. Captured conversation retrieval now passes
@@ -24,7 +33,7 @@ session could not execute its file tools. Full Trails qualification and hosted
 departure also remain open. **No adoption recommendation.** The original
 discovery and trial deadlines are unchanged.
 
-Current owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3.
+Historical online-execution owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3.
 Source: `071bc68337b287f169afa3c0f79c41d612ff0f9f`.
 Continuation branch: `codex/entire-trial-online-20261029`.
 See [online qualification](#online-qualification-and-departure) and
@@ -108,20 +117,24 @@ pre-push hook was preserved and still executed after disable.
 | Local authored memories | pass, limited | Persistence and two corrected fresh-context source checks |
 | Captured-session continuous memory | conversation retrieval repaired, limited | Official upstream candidate; original capture and new automatic checkpoint restored; extraction/pilot still inconclusive |
 | Local graph/search | functional, utility inconclusive | Partial Bash parsing; no PowerShell semantics; heavy fallback |
-| Ten matched retrieval pairs | inconclusive | 10/10 combined answers in both arms; deviations and no timing |
+| Ten matched retrieval pairs | new pilot negative | Twenty fresh runs: baseline10/10, Entire8/10; six fallbacks; measured time/tokens show no benefit |
 | Hosted brain sharing | not tested | Authenticated workspace/cost/data gates unqualified |
-| Mirror and divergence | not tested | No trial remote or hosted ref created |
-| Trails/latest-head/stale-green | synthetic intent/export/closure only; full test not passed | New Trail 113; complete field recovery, two branches and automated findings not qualified |
+| Mirror and divergence | bounded ref/lag test passed; full reliability unproved | A2/B2 refs matched; A3 matched at scheduled recheck; no five-sample or conflict proof |
+| Trails/latest-head/stale-green | manual/free two-branch check sequence passed | Trail133, two branches, manual source-bound finding and exact-head CI transitions; no paid automation/private acceptance |
 | Optional shadow Linux CI | omitted, not tested | Hosted prerequisites unavailable; no provider configured |
 | Local export/reimport | pass for authored records and captured conversation, limited | Separate offline store returned identical new conversation identity/text; full hosted export unproved |
-| Capture channels/redaction | not tested | No env/argv/stdout/clipboard/browser/sibling capture exercised |
+| Capture channels/redaction | private qualification failed | Raw local checkpoint retained synthetic channel/ignored-file values; no canary upload |
 | Network/profile isolation | pass | Kernel network boundary and inaccessible host agent homes |
 | Unknown/stale/injection | limited pass | Exact cases and limits in memory-results.md |
-| Hosted deletion/backup retention | not passed; narrow support request submitted | Trial 113 closing is not deletion; both owned logins selectively revoked, six pre-existing sessions preserved |
+| Hosted deletion/backup retention | not passed | Closed113/133 remain retrievable; only113 support request sent; session removal did not immediately invalidate issued bearer |
 
 Full receipts and failed attempts: [memory-results.md](memory-results.md).
 
 ## trail-latest-head
+
+Historical paragraph below is superseded for free/manual coordination by the
+[new two-branch check sequence](#independent-zero-spend-tests). Paid automated
+review and full private/session qualification remain unproved.
 
 Full test not performed. New synthetic Trail 113 has intent/export/closure and
 a hosted screenshot, but no two-branch association, automated finding, CI gate
@@ -534,6 +547,148 @@ closure. Discovery remains November 2, 2026, 5:00 PM EST; stop remains November
 12, 2026, 5:58 AM EST. Recovery ID `entire-trial-unblock-20261029` holds only
 approved public/synthetic qualification artifacts; private account metadata
 and authentication are excluded from its publication manifest.
+
+## Independent zero-spend tests
+
+October 29, 2026; same coordinator/#2022, fresh branch
+`codex/entire-trial-tests-20261029`, public source
+`dcb7d2172df249b5be19024f7fee8b7bae8fdf07`, reconciled to `57d02039`.
+Albert explicitly directed continuation of tests independent of support.
+No waiting for a vendor answer was used as a gate for these free tests.
+
+**Memory.** The [twenty-run comparison](memory-results.md#independent-matched-retrieval)
+used clean per-question contexts, pinned caller/effort, frozen source/key,
+alternating arm order and measured time/tokens. Baseline 10/10; Entire-assisted
+8/10 with six fallbacks. Median seconds 14.919/16.222; median reported input
+tokens 82,321/93,190.5. Q04 missed the exact-head condition; Q07 retrieved an
+unrelated identity policy. This is a negative pilot; no savings/adoption claim.
+Original captured-conversation repair remains a narrow functional pass;
+zero-fact extraction and five-history/hosted reliability remain unproved.
+
+**Capture/scope.** An actual native Codex session exercised only synthetic
+environment, argument, stdout/stderr and simulated clipboard/browser files
+under restricted tools and separate networkless capture hooks. Original
+profiles, real clipboard/browser/environment and unrelated sessions were not
+read. Native commit `052aba9` formed checkpoint
+`01M64PTD2DTHZAVMCGP6ANKVNX`; exact source/checkpoint refs were bundled.
+Its raw `full.jsonl` retained environment/output/simulated-file/explicitly-read
+ignored-file markers and a deliberately fake low-entropy token. Event-type
+inspection placed those values in tool output; some argument/output literals
+also occurred in the test prompt. Compact transcript omitted tool-output
+values but retained prompt literals. This is not proof of ambient OS capture
+or of every real-secret redactor pattern. It disproves a blanket assumption
+that ignored files or compact export protect raw sessions. No canary upload.
+Private capture remains off.
+
+At pre-capture source `6bab24a`, ignored/raw-transcript/opaque-submodule,
+escaping-symlink and sibling-profile content markers were absent from the
+local store and exact doc-result content. A README query returned one positive
+control. Doc index reported seven chunks/seven files; graph two symbols/two
+relations. This is bounded fixture exclusion, not universal graph coverage.
+Explicitly reading an ignored file later put its content into raw capture.
+
+**Free Trails.** Synthetic project Trail133
+`01M64PD4C7YM37N7GHYABNY6JG` linked two ai-devops branches, Changes35 and37.
+The existing integration automatically created backing PRs
+[#2066](https://github.com/popcre/ai-devops/pull/2066) and
+[#2068](https://github.com/popcre/ai-devops/pull/2068); both were signed,
+marked disposable and closed **unmerged**. No Entire merge or direct-main
+write was attempted. Five necessary source revisions were made, not five
+separate natural task histories:
+
+| Revision | Exact commit | Observed result |
+|---|---|---|
+| A initial valid prose | `6a3393078e9e6590c01271ed2e7e5acda07f207a` | GitHub doc-safety success; Entire checks gate passed |
+| B wrong-goal synthetic proposal | `62449a70dbdd5db0c95553fe2d7ae3f92ce9aaf5` | Manual high finding blocked its findings gate |
+| A newer broken documentation link | `1a3aa0d27b8aad7942a0393df383d324a07269a2` | GitHub doc-safety/closure failure and Entire failed checks at this SHA |
+| B correction | `a78d64550722ed8808159d6ddd8337db8bfad718` | Source corrected; explicit manual resolution, gate passed |
+| A repaired documentation link | `ee11b07c41ec380096de9f49a914d666af9655d8` | Initially pending, then GitHub doc-safety/closure and Entire checks passed at this SHA |
+
+Older green did not replace newer pending/failure. Approvals/up-to-date gates
+continued blocking merge; they were not weakened. UI's 23/23 passed includes
+skipped GitHub lanes, not 23 executed tests. Existing Gates remained advisory
+to the preserved GitHub route. Hosted runner setting stayed false, Agents
+empty and billing/trial unstarted. No paid automated intent/security finding
+was run or imitated: the finding above is explicitly **manual synthetic**.
+
+Finding `01M64PKQT8FTWST3FF9SWS66DZ` retained severity high, author/time,
+source codeVersion `01M64PKQPVS3WTKN3XEVD0MNBC` and original B SHA. Review
+snapshot supplied the codeVersion→commit mapping. After correction/manual
+resolution it was resolved/stale, not silently moved to the new commit.
+Requested file/line did not survive as a location: returned whole-change/null
+location remains a fidelity limitation. Codex CLI refused human-only Trail
+discussions; that refusal was retained, not bypassed through UI/API.
+
+Git `ls-remote` compared frozen branch refs without modifying origin or shared
+scope. A2/B2 matched immediately. A3 initially lagged; a single recheck started
+at the scheduled 300-second boundary and both reads completed after 304.344
+seconds with matching IDs. This bounds observation, not exact event latency.
+Earlier updates were not all sampled by this protocol: no five-update mirror
+reliability claim. Both owned remote branches were removed only after a fresh
+recovery clone resolved their exact commits from the owned-ref bundle.
+
+**Export.** Raw project summary alone was insufficient. Project and repository
+detail, complete known finding lifecycle/freshness list, review codeVersion,
+GitHub/Entire exact-head checks, empty discussion inventory/timeline, native
+local facts/provenance/retraction and prior captured conversation were saved.
+First offline consumer correctly exposed missing source/deadline/association
+fields. Added actual source documents, current issue receipt, original Git
+commit proof and local session/checkpoint/source association. A second fresh
+consumer, Entire absent from PATH and tools network disabled, recovered both
+branches/commits, current versus historical checks/findings, GitHub authority,
+no-merge next action, original deadlines and v1-retracted/v2-active facts.
+It rejected the hostile fact as quoted data and distinguished authored facts
+from captured extraction. No original-source fallback was available.
+
+This is a 22-file **manual continuity export**, not native Trail reimport,
+recreated approvals/scoring or hosted session import. Project response retains
+`isPossiblyPartial:true`: complete coverage is claimed only for our known two
+Changes and one finding, not the whole project. Native hosted session linkage,
+human discussion creation/recovery and automated findings were not exercised.
+The earlier local captured session association is Git-verified and explicitly
+local. Full real/private feature qualification therefore remains unpassed.
+
+**Departure/cost.** Trail133 is closed but remains retrievable; it joins113
+in the exact pending synthetic-record inventory. Only the original narrow113
+support message was authorized/sent; no request for133 or other topic was sent.
+Repository runners remained disabled and Agents empty. Billing/trial still
+`not_started`, observed spend zero cents, meter non-final. No card, purchase,
+new grant, global configuration change or private import. Optional CI omitted.
+
+That zero observation covers **Entire only**. The pre-existing GitHub review
+workflow ran provider calls on publication PR #2081: Muse/GLM approved,
+DeepSeek requested a current-label correction, StepFun was unavailable.
+Provider charges were not measured; an all-in $0 total cannot be certified.
+This cost boundary should have been checked before publication. The current
+label/cost correction uses the workflow's existing external-fork path, which
+skips provider jobs; no integration, rule or required check was disabled.
+
+The new owned login's refresh family was individually removed, and all six
+pre-existing session IDs remained. **Important narrower revocation result:**
+a direct data read with the already-issued bearer still succeeded afterward;
+the supported `/current` deletion then failed while the bearer still worked.
+Its claimed remaining validity was hours, and expiry rejection was not
+observed. Do not infer immediate access-token invalidation from session-list
+absence or earlier selective-revocation receipts. Local token material was
+destroyed, with no credential values retained in evidence. Broad logout and
+shared credential revocation were not used.
+
+Owned capture/hooks/settings/plugins/executables, copied model credentials,
+mirror remote and rebuildable caches were removed after exact source exports.
+Original profile digests, shared installation175665854 permissions/scope and
+GitHub rulesets compare unchanged. Local rollback passes; immediate hosted
+credential invalidation and complete hosted deletion do not. Recovery
+`entire-independent-20261029` verified 211 public/synthetic evidence files,
+manifest SHA256 `9680fbe6ff3757b6067bc260aaa30ce6aa44ff4b6b7a3a645c528e3f9669655e`.
+Raw synthetic canary content stays in owner-only recovery, never GitHub/Entire.
+Account-wide session metadata and all credential values are excluded.
+
+Downstream phases 4–7 were reread: independent free tests are dispositioned,
+including negative outcomes; paid/private capabilities are not enabled to
+force completion. Stop/no full-feature adoption, no deadline extension, no
+background worker. Codex owns unresolved departure/live proof on #2022;
+support owns only the sent 113 deletion/backup request. Discovery November 2,
+2026, 5:00 PM EST; trial stop November 12, 2026, 5:58 AM EST, unchanged.
 
 ## Official sources
 

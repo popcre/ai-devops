@@ -8,17 +8,37 @@
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Daily upload from every machine | ⬜ open | — |
-| 2 Normalizer and tool-call capture | ⬜ open | — |
-| 3 ScaleDown clean + topic segmenter | ⬜ open | — |
-| 4 Store schema, writer and Dropbox publish | ⬜ open | — |
-| 5 Cost check: first 1,000 calls | ⬜ open | — |
+| 1 Daily upload from every machine | 🔄 in progress | #2059 (stage A) |
+| 2 Normalizer and tool-call capture | 🔄 in progress | #2060 (stage B) |
+| 3 ScaleDown clean + topic segmenter | 🔄 in progress | #2060 (stage B) |
+| 4 Store schema, writer and Dropbox publish | 🔄 in progress | #2060 (stage B) |
+| 5 Smoke batch: first 1,000 calls | ⬜ open | — |
 | 6 Full backfill (about 15 h, background) | ⬜ open | — |
 | 7 Daily timer on edge-dev3 | ⬜ open | — |
 | 8 Reader helper and `transcript-query` skill | ⬜ open | — |
 | 9 Mining checks | ⬜ open | — |
 
-**A fresh session starts at step 1.** Steps 1 and 2–4 can run in parallel. Step 5 gates step 6.
+**A fresh session starts with Stage B (steps 2–4) and Stage D (step 8), which need no installs.** Step 1 writes and tests its scripts at once, but installing them on hosts waits while the observation-week freeze window file (#1948) is present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocks B or D. Step 5 is a quality check before step 6.
+
+**Order:** environment check (§12) → B → (D in parallel) → A install when unfrozen → C → E.
+
+**Stages, as GitHub child issues of #2050:**
+
+| Stage | Plan steps | What it covers |
+|---|---|---|
+| A | 1 | upload |
+| B | 2–4 | pipeline |
+| C | 5–7 | backfill and timer |
+| D | 8 | reader and skill |
+| E | 9 | mining |
+
+Child issues: A #2059, B #2060, C #2061, D #2062, E #2063.
+
+> **Owner rulings (Albert, 2026-10-29), apply to every step:**
+> - **ScaleDown cost does not matter.** He said: "scaledown is close to free. don't worry about scaledown costs." There is no cost gate for ScaleDown.
+> - **Minimize LLM use.** He said: "we only have to keep an eye on costs when it comes to LLMs, which we absolutely want to minimize use of in favor of Scaledown.ai in every way possible and in every place possible." Any reading, cleaning, labelling, summarizing or extraction of transcript text uses ScaleDown, never Claude, Codex or another LLM. The implementing session's own context should touch only counts, schemas and small samples.
+> - **Single writer, Dropbox, ScaleDown-only text processing, fixed 19-slug topic list** are also locked. Do not reopen them.
+> - **Reviewers never block.** He said: "disregard reviewers for now. do what you need to do without worrying about it getting reviewed. if the reviewers work, great, get the review. if they don't, don't let it hold you back." Merge on green CI. If the `ai-review` check or any reviewer fails or is unavailable, merge anyway and note it on the PR.
 
 ---
 
@@ -42,16 +62,19 @@ The store must have these properties:
 
 `popcre/ai-devops` is Albert's AI toolkit. It holds scripts in `bin/` and `tools/`, skills in `skills/`, an installer, and tests in `tests/`. The repository is **public**, so this plan's code goes there, but **no transcript content ever does**.
 
-**Machines:**
+**Host inventory.** This table is the single list of hosts. Every other section says "every active host in this table", never a number.
 
-| Machine | Operating system |
-|---|---|
-| edge-dev3 | Linux. The always-on build host and the store writer. |
-| hetz | Linux |
-| edge-dev | Windows |
-| 4837 | Windows |
-| 916 | Windows |
-| al8960ofc | Linux. Also seen as hostname edge-dev3 in some contexts; check `hostname`. |
+| Archive folder (`chat_transcripts/<folder>`) | Live `hostname` | OS | Role | Last file in archive (2026-10-29 check) |
+|---|---|---|---|---|
+| `edge-dev3` | `edge-dev3` | Linux (Ubuntu) | active: uploader and the store writer | 2026-10-29 |
+| `hetz` | `hetz` | Linux | active uploader | 2026-10-29 |
+| `edge-dev` | `edge-dev` | Windows | active uploader | 2026-10-29 |
+| `4837` | `4837` | Windows | active uploader | 2026-09-06 |
+| `916` | `916` | Windows | active uploader | 2026-09-06 |
+| `al8960ofc` | to verify | Linux | to verify (see below) | 2026-10-07 |
+| `compshop`, `seafile`, `t16` | none known | — | archive-only: ingest, never upload | 2026-09-06 |
+
+**Verify every "to verify" row before step 1 installs anything:** run `hostname` on edge-dev3 (it printed `edge-dev3` on 2026-10-29) and on each SSH alias in `~/.ssh/ai-devops.conf`. If no live host prints `al8960ofc`, mark the row archive-only: it is an older name for a machine whose new uploads now land under its current hostname. If one does, it is an active uploader. Record the result in this table in the same PR. The upload script always writes to `chat_transcripts/<live hostname>/`, so one host never feeds two folders. Archive-only folders are still ingested by step 4; `--stats` reports each folder separately.
 
 **Transcript sources on each machine:**
 - Claude Code: `~/.claude/projects/**.jsonl`
@@ -77,7 +100,7 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 ### 4. Scope
 
 **In:**
-- Daily automatic upload of transcripts from all 5 machines to Dropbox.
+- Daily automatic upload of transcripts from every active host in §2's table to Dropbox.
 - Normalizing Claude and Codex `.jsonl` transcripts.
 - ScaleDown cleaning and topic segmentation.
 - A SQLite store built on edge-dev3 and published read-only to Dropbox.
@@ -145,9 +168,7 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 | Concurrency | 6–8 threads worked. Retry each call up to 3 times. |
 | Known failure | about 10 of 392 calls failed transiently once; a re-run fixed them |
 
-**The API key** comes from 1Password vault `vibe_coding`, item `scaledown.ai API key for testing` (item id `b2ismrxfonoqigu7yht7o5rnya`, field `credential`).
-- On edge-dev3, `op` has no signed-in account. Export `OP_SERVICE_ACCOUNT_TOKEN` from `~/.config/ai-devops/op-service-account` first.
-- Never print the key.
+**The API key:** see the `scaledown-compress` skill (`skills/shared/scaledown-compress/SKILL.md`) for the key location and how to load it. Never print the key, and never write its 1Password item name or id into this public repo.
 
 **Text extraction from the `.jsonl`:**
 - Each line is JSON.
@@ -157,21 +178,41 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 
 **Duplicates:**
 - Claude desktop forks one conversation into several `.jsonl` files. In one sample, 16 of 57 were copies.
-- De-duplicate by a hash of each turn's text, so a shared opening is processed once.
+- De-duplicate **per conversation lineage only**, never globally. Two unrelated sessions that both say "continue" must both keep it. The lineage rules are in step 2.
 
 **Prefiltering:**
 - Keyword prefiltering made the earlier studies affordable.
 - For this store, do **not** prefilter by topic: every conversation must be labelled.
 - Do skip turns under 20 characters, and cap each turn at 6,000 characters before segmenting.
 
-**Secrets redaction.** Apply this regex to all text before anything is stored:
-`(sk-[A-Za-z0-9_-]{16,}|gh[psou]_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_.-]+|(?i:(api[_-]?key|token|password|secret)["\s:=]+)[^\s"]{12,})`.
+**Secrets redaction.** Redaction runs in `normalize.py`, **before any text is sent to ScaleDown** and before anything is stored. Each match becomes `[REDACTED:<kind>]`. Patterns (Python `re`, all applied):
+
+Each line is `kind<TAB>pattern`; the alternations use real `|`:
+
+```text
+anthropic	sk-ant-[A-Za-z0-9_-]{20,}
+openai-style	sk-[A-Za-z0-9_-]{16,}
+github	gh[psour]_[A-Za-z0-9]{20,}
+github-pat	github_pat_[A-Za-z0-9_]{20,}
+aws-key-id	(AKIA|ASIA)[A-Z0-9]{16}
+aws-secret	(?i)aws.{0,20}secret.{0,20}[=:\s"']+[A-Za-z0-9/+=]{40}
+dropbox	sl\.[A-Za-z0-9_-]{100,}
+jwt	eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_.-]+
+pem	-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----
+op-ref	op://[^\s"'<>]+
+bearer	(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}
+key-value	(?i)(api[_-]?key|token|password|secret|passwd)["'\s:=]+[^\s"']{12,}
+```
+
+Store them in `tools/transcript_store/redact_patterns.tsv`; `normalize.py` and the inbox reader both load that one file. Apply `anthropic` before `openai-style`.
+
+`op://` references are not secrets, but they map the vault, so they are redacted too. The test suite has one synthetic positive and one near-miss negative per kind. A redaction count per session is kept in `sessions.redactions`; it is never posted publicly.
 
 **Archive freshness.** The Dropbox archive held nothing newer than Oct 21–22 for several machines until hand uploads. Upload is therefore the first dependency.
 
 **Edge cases:**
 - On edge-dev, `C:\Users\ahazan\.claude\projects` and `.codex\sessions` are symlinks into `D:\ai-data\...`. Copy from the target folder; `find` and robocopy on the symlink path see 0 files.
-- On hetz, transcripts exist under both `/root` and `/home/ai`.
+- On hetz, transcripts exist under both `/root` and `/home/ai`. The exact path map is in step 1.
 
 ### 7. Rejected approaches
 
@@ -206,7 +247,7 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 - Every other machine only uploads raw transcripts to Dropbox and reads the published copy.
 - The published store is a read-only SQLite file in Albert's private Dropbox.
 - Remote writes go through an inbox folder.
-- ScaleDown cleans and topic-labels every portion of every conversation. The store keeps cleaned segments plus a pointer to the raw file, never raw text.
+- ScaleDown cleans and topic-labels every portion of every conversation. The store keeps cleaned segments plus a pointer to the raw file, never raw text. Drill-down reads the raw file from the **reader's own Dropbox** archive copy through that pointer; a reader that has no local copy (Smart Sync online-only) lets Dropbox download that one file on open. Raw text never enters the DB.
 - Tool-call names and counts are kept per segment, because the anti-pattern mining needs the sequence.
 - The topic list is fixed (below).
 - Hallucinations fold into "AI mistakes".
@@ -235,8 +276,19 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 | `ai-interaction-ideas` | other ideas for working better with AI |
 | `other` | anything else |
 
+**Topic decision rules** (put verbatim in the prompt and in the parser's tests):
+- **Multi-topic syntax:** 1–3 slugs, comma-separated, no spaces, most important first: `ci,ai-mistakes`. More than 3 keeps the first 3.
+- `agent-loop` = the agent **acts** repeatedly (same command, same edit, same retry) without progress. `agent-stuck-waiting` = the agent **does nothing** while believing something is happening (waiting on a dead job, a reviewer that never answers). `idle-waiting` = legitimate or human-caused waiting (CI queue, a long build, waiting on Albert). Tie-break: action repeated → `agent-loop`; agent unaware → `agent-stuck-waiting`; otherwise `idle-waiting`.
+- `token-waste-process` = waste from how the work was run (re-reading files, redoing work, oversized context). `token-waste-tools` = waste caused by a tool's output or behaviour (huge dumps, verbose logs, a tool that loops). Tie-break: a tool's own output caused it → `token-waste-tools`.
+- `reviewer-model` = what a reviewer said (quality, wrong findings, missed bugs). `reviewer-tooling` = whether the review ran (wrappers, timeouts, install, auth). Tie-break: no verdict was produced → `reviewer-tooling`.
+- `ai-devops-process` vs `machines-setup`: toolkit scripts, skills, globals → `ai-devops-process`; one machine's OS, install, network → `machines-setup`.
+- `owner-decision` is added alongside the subject topic whenever Albert rules on something.
+- `other` only when nothing else fits; never alongside another slug.
+- **Subject:** 3–8 words. The parser truncates to 8 words and accepts a shorter one; it never re-asks for length.
+- **Repo:** the derived `repo` from step 2 is authoritative. The model's `repo=` is kept as `repo_hint` only and used when the derived repo is `unknown`.
+
 **Each segment carries:**
-- one or more topics;
+- one to three topics;
 - a specific 3–8 word subject;
 - the app or repository (from `cwd`, or from the text), so "reviewer issues in DesignFlow" needs no extra topic.
 
@@ -262,24 +314,36 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 
 ### 9. Steps
 
-#### Step 1 — Daily upload on all 5 machines
+#### Step 1 — Daily upload on every active host
 
 **What to build:**
-- **Linux:** `bin/ai-transcript-upload`. It copies new or changed files from the sources in §2 into `~/Dropbox/ai/chat_transcripts/<hostname>/{claude,codex}/<relative path>`. It copies only what is missing or older, never deletes, and never reads contents.
-- **Windows:** `bin/ai-transcript-upload.ps1`, plus the `.cmd` twin the repo requires for `bin/` scripts. It uses robocopy `/XO`, without `/MIR` or `/PURGE`.
-- **Install:** schedule it daily with the existing patterns: a systemd user timer like `bin/ai-install-session-tmp` on Linux, and `Register-ScheduledTask` like `bin/ai-housekeeping` on Windows.
-- **Machine-specific paths:**
-  - edge-dev: copy from `D:\ai-data\...`, the symlink targets.
-  - hetz: copy from both `/root` and `/home/ai`.
+- **Linux:** `bin/ai-transcript-upload`. **Windows:** `bin/ai-transcript-upload.ps1` plus the `.cmd` twin the repo requires for `bin/` scripts (the twin only calls the `.ps1` with the same arguments). Both never delete in the destination and never read file contents.
+- **Copy rules (both OSes):**
+  1. **Skip hot files:** skip any source file modified in the last 15 minutes; the next daily run takes it.
+  2. **Copy through a temp name outside the read path:** copy to `chat_transcripts/<host>/.partial/<same relative path>`, check the copied size equals the source size, then rename into place. The writer ignores `.partial/`. If the size changed during the copy, discard and retry once; on a second mismatch, skip the file this run.
+  3. **Re-copy rule:** copy when the destination is missing, or its size differs from the source, or the source mtime is newer. Size wins over mtime, so Dropbox mtime changes and clock skew cannot block a copy. On Windows, use a per-file PowerShell loop with `Copy-Item`, not robocopy `/XO`.
+  4. Renamed or deleted sources are left as they are in Dropbox.
+  5. Each run writes a one-line log `~/.local/state/ai-devops/transcript-upload.log` (Windows: `%LOCALAPPDATA%\ai-devops\transcript-upload.log`) with the EDT time, files scanned, copied, skipped-hot, and errors. It also writes the same line to `chat_transcripts/<host>/.upload-last.txt`, so edge-dev3 can read every host's last run.
+- **Exact source → destination map** (`<D>` = `Dropbox/ai/chat_transcripts/<live hostname>`):
+
+| Host | Runs as | Source | Destination |
+|---|---|---|---|
+| edge-dev3 | `ahazan` | `/home/ahazan/.claude/projects/`, `/home/ahazan/.codex/sessions/`, `/home/ahazan/.codex/archived_sessions/` | `<D>/claude/`, `<D>/codex/sessions/`, `<D>/codex/archived_sessions/` |
+| hetz | `root` (reads both homes) | `/root/.claude/projects/`, `/root/.codex/sessions/`, `/home/ai/.claude/projects/`, `/home/ai/.codex/sessions/` | `<D>/root/claude/`, `<D>/root/codex/`, `<D>/ai/claude/`, `<D>/ai/codex/` |
+| edge-dev | `ahazan` | `D:\ai-data\` targets of the `C:\Users\ahazan\.claude\projects` and `.codex\sessions` symlinks; resolve with `(Get-Item <link>).Target` at run time | `<D>\claude\`, `<D>\codex\` |
+| 4837, 916 | `ahazan` | `%USERPROFILE%\.claude\projects\`, `%USERPROFILE%\.codex\sessions\`, `%USERPROFILE%\.codex\archived_sessions\` (resolve symlinks the same way) | `<D>\claude\`, `<D>\codex\` |
+
+  hetz has Dropbox only if `~/Dropbox` exists for the run user. If it does not, the hetz upload instead runs from edge-dev3 as a pull: `rsync -a` over SSH into `<D>`, using the same hot-file and `.partial` rules.
+- **Install:** schedule it daily: a systemd user timer like `bin/ai-install-session-tmp` on Linux, and `Register-ScheduledTask` like `bin/ai-housekeeping` on Windows (task runs as `ahazan`, only when logged on is not required).
 - **Skill:** update `skills/claude/claude-transcript-backup/SKILL.md` to say it is now automatic and the skill is the manual fallback.
 
 **Done when:**
-- `tests/test-ai-transcript-upload.sh` passes. It must cover: copies new; skips identical; never deletes in the destination; follows the symlink target.
-- On each of the 5 machines the scheduled task exists and has run once.
-- `find ~/Dropbox/ai/chat_transcripts/<m> -newermt today` is non-empty for each machine, checked from edge-dev3.
+- `tests/test-ai-transcript-upload.sh` passes. It must cover: copies new; skips identical; re-copies on a size change; skips a file modified within 15 minutes; never deletes in the destination; never leaves a file outside `.partial/` with a wrong size; follows the symlink target.
+- On every active host in §2's table the scheduled task exists.
+- For every active host, `chat_transcripts/<host>/.upload-last.txt` shows a run today with 0 errors, read from edge-dev3. A quiet day with 0 files copied passes; new files are not required.
 - The proof is posted on #2050 with times in EDT.
 
-**Installing on machines** is the `installation` task class. Run `ai-task-gates start --class installation` first. The observation-week freeze window file (#1948) refuses installation while it is present: check whether it is still on each host, and if so wait for #2041 step 4 to lift it.
+**Installing on machines** is the `installation` task class. Run `ai-task-gates start --class installation` first. The observation-week freeze window file (#1948) refuses installation while it is present on a host. Merge the scripts and tests anyway, install on every unfrozen host, and leave the frozen hosts' rows open in STATUS; install there once #2041 step 4 lifts the freeze. Steps 2–8 do not wait for this: until uploads run, they use the archive as it is.
 
 #### Step 2 — `tools/transcript_store/normalize.py`
 
@@ -287,34 +351,56 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 
 **Output:** an ordered list of turns. Each turn is `{ts, role, text, tools: [tool names called in this turn]}`.
 - Tool names come from the `tool_use` blocks' `name` (Claude) or the function-call `name` (Codex).
-- Plus the session metadata `{machine, path, cwd, repo, first_ts, last_ts}`. The repo is the last part of `cwd`, with worktree suffixes removed: for example `-worksp-popdam--claude-worktrees-x` becomes `popdam`, and `/home/ahazan/repos/ai-devops/.claude/worktrees/x` becomes `ai-devops`.
+- Plus the session metadata `{machine, path, cwd, repo, session_id, parent_session_id, first_ts, last_ts}`.
+
+**Repo derivation rules**, in order; the first match wins:
+1. Normalize `cwd`: replace `\` with `/`, lower-case a Windows drive letter, strip a trailing `/`.
+2. If it contains `/.claude/worktrees/`, `/.codex/worktrees/` or `/worktrees/`, cut from there.
+3. If the remaining path has a component directly after `repos/`, `worksp/` or `src/`, that component is the repo (`C:/Users/ahazan/repos/ai-devops` → `ai-devops`; `/home/ahazan/repos/designflow-frontend` → `designflow-frontend`).
+4. For the Claude project-folder form (`-home-ahazan-repos-ai-devops--claude-worktrees-x`, `-worksp-popdam--claude-worktrees-x`): cut at `--claude-worktrees`, then take the part after the last `-repos-` or `-worksp-`.
+5. A home folder, `/tmp`, `/var/tmp`, a scratchpad or anything else → `unknown`. The model's `repo_hint` is then used for display, but `repo` stays `unknown`.
+6. An umbrella session that works across several repos keeps its `cwd` repo for all segments; the model's per-section `repo_hint` lets "reviewer issues in DesignFlow" still match by `repo = ? OR repo_hint = ?`.
+
+**Conversation lineage (for de-duplication):**
+- `session_id` is the Claude `sessionId` field, or the Codex session id in the file's first `session_meta` line.
+- A Claude fork repeats its parent's turns at the top of a new file. Two files are in the same lineage when their first 3 kept turns have the same `turn_hash` values. The lineage id is the `session_id` of the earliest file (by `first_ts`) in that group.
+- `turn_hash = sha256(role + "\x00" + text)`, computed **after** redaction and the 6,000-character cap, with text whitespace-normalized (runs of whitespace → one space, trimmed).
+- `turn_key = (lineage_id, turn_hash, occurrence_no)`, where `occurrence_no` counts identical hashes within that lineage, so repeated "continue" turns all survive.
 
 **Rules:**
 - Apply the redaction regex from §6.
 - Skip turns under 20 characters.
 - Cap each turn at 6,000 characters.
-- Compute `turn_hash = sha256(text)` for de-duplication.
+- Compute `turn_hash` and the lineage as above.
 
 **Done when:** `tests/test_transcript_normalize.py` passes. It must cover:
 - Claude and Codex fixtures. These are tiny **synthetic** `.jsonl` files written in the test, never real transcripts.
 - A redaction case.
 - Signature fields skipped.
 - Tool names captured.
-- Repo derived from the worktree path.
+- Repo derived from each rule in the list above, including a Windows `C:\` path, a project-folder name and a non-repo `cwd` giving `unknown`.
+- Two forks in one lineage share their opening; two unrelated sessions with an identical "continue" turn both keep it.
+- Every redaction kind: one positive, one near-miss negative.
 
 #### Step 3 — `tools/transcript_store/segment.py`
 
 **What it does:**
-1. Groups a session's not-yet-seen turns (by `turn_hash`) into chunks of at most 40 K characters, cut on turn boundaries.
+1. Takes the turns of a lineage whose `turn_key` is not yet in `seen_turns`, in order, and groups them into chunks of at most 40 K characters, cut on turn boundaries.
+   - **Stable chunk id:** `chunk_id = sha256(lineage_id + first turn_key + last turn_key)`. A chunk never changes once it is `ok`.
+   - **Append:** when a file grows, only turns after the last `ok` chunk's last turn are chunked. A trailing chunk under 4 K characters whose session was modified in the last 24 h is held as `pending` and not sent, so a live conversation is not cut mid-topic each day; it is sent once the session is quiet for 24 h or grows past 40 K.
+   - **Resume:** a crash leaves chunks `sending` or `failed`; the next run re-sends exactly those chunk ids with the same turn range. It never re-chunks turns that already belong to a chunk row.
+   - **Rechunk** happens only with `build.py --relabel` (step 4), which builds new chunk ids under a new `prompt_version` and leaves the old rows until the swap.
 2. Calls ScaleDown once per chunk, with the system prompt from step 3a.
 3. Parses each `### TOPIC: <slugs> | <subject> | repo=<repo>` header and the body under it.
 4. Validates every slug against §8. If any is invalid, it re-asks once with "use only these slugs: …". If still invalid, the slug becomes `other`.
-5. Attaches the chunk's tool-name counts to every section from that chunk.
+5. Tool data: ScaleDown never sees tool output, so tool calls are stored per **chunk**, not per section: `chunks.tool_seq_json` is the ordered list of tool names per turn. Each segment links to its `chunk_id`. Mining reads chunks; it never attributes a chunk's counts to one section.
 
 **Step 3a — the system prompt.** Store it as `tools/transcript_store/prompt_v1.txt`. It has three parts:
 - "Remove all fluff (tool output dumps, file listings, repeated text, narration). Split what remains into topic sections."
-- The exact slug list from §8.
-- The output format above. Keep exact error strings, decisions, outcomes and dates.
+- The exact slug list from §8 **and the topic decision rules from §8**, verbatim.
+- The output format above, with the multi-topic syntax. Keep exact error strings, decisions, outcomes and dates.
+
+**Invalid slugs:** the parser first maps known near-misses (case, `_` vs `-`, plurals, and a fixed alias table in `tools/transcript_store/aliases.json`, for example `reviewer-quality` → `reviewer-model`, `git/pr-workflow` → `ai-devops-process`, `database/shared-db` → `database`). Only a slug still invalid after aliasing is re-asked once; then `other`. The alias table is reviewed after step 5.
 
 The prompt version is stored with every row (see risks).
 
@@ -326,7 +412,9 @@ The prompt version is stored with every row (see risks).
 **Done when:**
 - `tests/test_transcript_segment.py` passes with a fake ScaleDown, an injected function. It must cover:
   - header parsing
-  - an invalid slug re-asked, then mapped to `other`
+  - an alias-mapped slug; an invalid slug re-asked, then mapped to `other`
+  - multi-topic parsing, more than 3 slugs truncated, `other` mixed with another slug dropped
+  - resume re-sends only `sending`/`failed` chunk ids; a grown file chunks only the new tail; a short live tail is held `pending`
   - a JSON-wrapped reply
   - a failed chunk recorded as failed
 - One live run on a real edge-dev3 session gives sections with valid slugs. Record its numbers in `tests/verification/transcript-store/live-segment-<date>.txt` as counts and sizes only, with no content.
@@ -340,51 +428,84 @@ The prompt version is stored with every row (see risks).
 
 | Table | Columns |
 |---|---|
-| `sessions` | `path PK, machine, repo, cwd, first_ts, last_ts, mtime, size, status` |
-| `segments` | `id, path, chunk_no, topic_slugs, subject, repo, text, tool_counts_json, prompt_version, created` |
+| `sessions` | `path PK, machine, session_id, lineage_id, repo, cwd, first_ts, last_ts, mtime, size, bytes_parsed, redactions, status (new/partial/ok/failed)` |
+| `chunks` | `chunk_id PK, lineage_id, path, first_turn_key, last_turn_key, chars, tool_seq_json, status (pending/sending/ok/failed), attempts, error, prompt_version, created` |
+| `segments` | `id PK, chunk_id, section_no, path, topic_slugs, subject, repo, repo_hint, text, prompt_version, created`; `id = sha256(chunk_id + section_no + prompt_version)` |
 | `segments_fts` | FTS5 over `subject, text` |
-| `seen_turns` | `turn_hash PK` |
-| `chunks` | `path, chunk_no, status (ok/failed), error, created` |
-| `question_labels` | `question, src, fields_json, created` |
-| `inbox_applied` | `filename PK` |
+| `seen_turns` | `lineage_id, turn_hash, occurrence_no, chunk_id`; PK on the first three |
+| `question_labels` | `question, src, prompt_version, fields_json, created` |
+| `inbox_applied` | `filename PK, sha256, applied` |
+| `meta` | `key PK, value` (schema version, last build time, published file name) |
 
-**Import:** `labels.db` `review_labels` goes into `question_labels`, with `question='review-value-2026-10-29'`.
+**Import:** `labels.db` `review_labels(src, repo, work, mode, reviewer, verdict, value, why)` → `question_labels` with `question='review-value-2026-10-29'`, `src=src`, `prompt_version='review-value-v0'`, `fields_json` = JSON of `{repo, work, mode, reviewer, verdict, value, why}`, `created` = the import time. The test checks a row count of 6,490 and one round-tripped row.
+
+**Shrunk or rotated file:** if a session's current `size` is less than its `bytes_parsed`, the file was rewritten. Drop that lineage's `seen_turns`, chunks and segments in one transaction and reprocess the whole lineage from byte 0.
+
+**Writer scan excludes helper files:** anything under a `.partial/` folder, `.upload-last.txt`, any `conflicted copy` file, and any file not ending in `.jsonl`.
+
+**Truncated last lines:** a `.jsonl` line that is not valid JSON is skipped only if it is the file's last line (an upload caught mid-write); `bytes_parsed` stops before it, so the next run re-reads from there. A bad line elsewhere is skipped and counted.
 
 **Flow:**
 1. Scan the archive.
 2. For every session whose `mtime` or `size` changed: normalize, then segment the new turns, then insert.
-3. Apply each file in `Dropbox/ai/transcript-store/inbox/*.json` exactly once. Each file is JSON lines of `question_labels`. Validate fields; a bad file goes to `inbox/rejected/`.
+3. Apply each file in `Dropbox/ai/transcript-store/inbox/*.jsonl` exactly once (keyed by file name and sha256).
 
-**Publish:**
-1. `sqlite3 store.db ".backup <tmp>"`.
-2. Run `PRAGMA integrity_check` on the copy.
-3. Copy it to `Dropbox/ai/transcript-store/store.db.tmp`.
-4. Rename it to `store.db` in a single atomic step.
+**Inbox schema:**
+- File name matches `^[a-z0-9-]{1,40}__[0-9]{8}T[0-9]{6}Z__[a-z0-9-]{1,30}\.jsonl$` (question, UTC time, host, separated by `__`). A question slug may not contain `__`, so the split is unambiguous. Anything else, including `..` or a `/`, is rejected. Files whose name contains `conflicted copy` are moved to `inbox/conflicts/`, never deleted.
+- At most 5 MB and 20,000 lines per file; each line at most 8 KB.
+- Each line is a JSON object with exactly these keys: `question` (string, same as the file's question part), `src` (string: a raw-archive path relative to `chat_transcripts/`, no `..`), `prompt_version` (string ≤ 40), `fields` (flat object, at most 30 keys, string/number/bool values ≤ 2,000 characters each).
+- Every string value in each line is passed through the same redaction patterns as transcripts before it is stored.
+- The inbox is not authenticated: only Albert's own Dropbox can write it, which is the trust boundary. A whole file is applied in one transaction or not at all.
+- A bad file moves to `inbox/rejected/` with a sibling `.reason.txt`. `rejected/` and `applied/` keep 90 days, then the writer deletes files older than that **only** in those two folders.
+
+**Publish protocol** (no temp file is ever created in a Dropbox read path):
+1. `sqlite3 store.db ".backup ~/.local/share/ai-devops/transcript-store/stage/store-<UTC stamp>.db"` — local disk, outside Dropbox.
+2. Run `PRAGMA integrity_check` and `PRAGMA journal_mode=DELETE` on that copy; abort on anything but `ok`.
+3. Copy it into Dropbox as `Dropbox/ai/transcript-store/db/.incoming-store-<UTC stamp>.db` (a name readers never follow), compare its size and sha256 with the local copy, then rename it to its final versioned name `db/store-<UTC stamp>.db`.
+4. **Last**, write the pointer `Dropbox/ai/transcript-store/CURRENT.json` = `{"file": "db/store-<stamp>.db", "sha256": …, "size": …, "built": <EDT time>, "schema": 1}`. The pointer is written to a local temp file and copied over the old pointer; it is under 1 KB.
+5. Keep the newest 3 versioned files; delete older ones in `db/` only after the pointer names a newer one for at least 24 h.
+6. **Conflicted copies:** if any `conflicted copy` file appears under `transcript-store/`, the writer never deletes it. It moves it to `transcript-store/conflicts/` and reports it in the run log and `--stats`.
+7. **Detection instead of "never while syncing":** the writer is the only process that writes these paths, and it never edits a published file in place; each publish is a new name. No sync-state detection is needed.
+
+**Read protocol** (step 8 implements it):
+1. Read `CURRENT.json`. If it is unparsable, wait 5 s and re-read up to 3 times (Dropbox may be mid-replace). If it is still missing, unparsable or a Smart Sync placeholder (0 bytes or not readable), print "store not available locally; open Dropbox and make `ai/transcript-store` available offline" and stop.
+2. Copy the named file to the local temp folder, verify size and sha256, then open the local copy with `?mode=ro`. A mismatch means Dropbox is still syncing: wait 30 s and retry once, then fall back to the newest older file in `db/` that verifies.
+3. Reuse the local copy while its sha256 matches the pointer; delete it when a newer one is fetched.
 
 **Done when:** `tests/test_transcript_build.py` passes. It must cover:
 - incremental rebuild skips an unchanged file;
-- changed file re-processed only for new turns;
-- an inbox file applied once;
-- a bad inbox file rejected;
-- the published copy passes the integrity check and opens read-only.
+- a grown file is processed only for new turns;
+- a truncated last line is skipped and re-read next run;
+- the `labels.db` import mapping;
+- an inbox file applied once; a bad, oversized, traversal or conflicted inbox file handled as above;
+- publish writes a versioned file then the pointer; a conflicted copy is moved, not deleted;
+- a reader given a pointer to a wrong-size file falls back to the previous version.
 
-#### Step 5 — Cost check
+#### Step 5 — Smoke batch
 
 - Run `build.py --limit-calls 1000` on the newest sessions.
-- Record the wall time, calls, failures and the ScaleDown spend in `tests/verification/transcript-store/cost-check-<date>.txt`. Get the spend from Albert's ScaleDown account usage if an API exposes it; otherwise from the response headers or usage fields; otherwise say "unmeasured".
-- **Stop and report on #2050** if the projected full cost is above $200 or the failure rate is above 5%. The $200 threshold is the default; Albert may change it.
+- Record the wall time, calls, failures, the alias-mapped rate, the re-ask rate and the final `other` rate in `tests/verification/transcript-store/smoke-<date>.txt`, counts only. Cost is not a criterion (owner ruling, 2026-10-29).
+- **Label validation gate:** draw 50 random segments. The implementing session reads only their `subject` (3–8 words) and the topic slugs, plus a ScaleDown one-line summary of the source chunk, never the chunk text, and marks each label right or wrong. It records only the counts.
 
-**Done when:** the file exists, and a comment on #2050 states the projection.
+**Gate (all must hold before step 6):**
+- ScaleDown failure rate ≤ 5% after retries;
+- re-ask rate ≤ 10% of sections (after aliasing);
+- `other` ≤ 25% of sections;
+- hand-check: ≥ 40 of 50 segments have a correct first slug.
+
+If one fails, change the prompt, decision rules or alias table, bump `prompt_version`, and re-run a fresh 1,000-call batch.
+
+**Done when:** the file exists with all four numbers passing, and a comment on #2050 states the numbers and the projection.
 
 #### Step 6 — Full backfill
 
 - Run `build.py` over the whole archive in the background: `systemd-run --user` or `nohup`. Expect about 15 h: about 90,000 calls at 8 threads.
-- It must resume after a crash: chunks marked `ok` are skipped.
+- It must resume after a crash using the chunk rules in step 3.
 
 **Done when:**
 - every session is `status=ok` or has listed `failed` chunks, and the failed ones are under 1% and retried once;
-- the published `Dropbox/ai/transcript-store/store.db` exists;
-- `select topic_slugs, count(*) from segments group by 1` is posted on #2050.
+- `Dropbox/ai/transcript-store/CURRENT.json` names a `db/store-<stamp>.db` file whose size and sha256 match the pointer;
+- the per-topic segment counts are posted on #2050, without the `secrets` count, which stays in the private run log.
 
 #### Step 7 — Daily timer on edge-dev3
 
@@ -393,12 +514,13 @@ The prompt version is stored with every row (see risks).
 
 **Done when:**
 - `systemctl --user list-timers | grep ai-transcript-store` shows it;
-- the next day, the published file's mtime is fresh, and the segment count grew if new sessions arrived.
+- the next day, `CURRENT.json` names a file built today, and the run log shows 0 errors (a day with no new sessions passes).
 
 #### Step 8 — Reader helper and skill
 
 **The helper, `bin/ai-transcript-query`** (with a `.cmd` twin):
-- Opens the local Dropbox `store.db` read-only. It uses the SQLite URI `?mode=ro&immutable=1` so Dropbox never sees writes.
+- Follows the read protocol in step 4: pointer, local temp copy, verify, open read-only. It never opens a file inside the Dropbox folder with SQLite.
+- **Drill-down:** `--raw <segment id>` prints the raw-file path from the reader's own Dropbox archive (`chat_transcripts/<path>`) and the turn range; it does not copy raw text anywhere.
 - **Search mode:** `--topic reviewer-tooling --repo designflow --since 2026-10-01 --text "402"`. It prints segment subjects and text, capped.
 - **Statistics mode:** `--stats` prints counts by topic and repo.
 - **Inbox mode:** `--add-labels <file>` validates a labels file and writes it to the inbox.
@@ -415,27 +537,37 @@ The prompt version is stored with every row (see risks).
 - Link this plan from `docs/task-router.md`, the transcript row.
 
 **Done when:**
-- `tests/test-ai-transcript-query.sh` passes against a synthetic store;
+- `tests/test-ai-transcript-query.sh` passes against a synthetic store and pointer, including a placeholder pointer and a size mismatch;
 - on a Windows machine (edge-dev), `ai-transcript-query --stats` reads the Dropbox copy.
+- Stage D can start before the real store exists: it is tested against a synthetic store, and the live Windows check waits for step 6.
 
 #### Step 9 — Mining checks
 
 `tools/transcript_store/mine.py`, one subcommand per check, each writing a report:
 
-| Check | How |
-|---|---|
-| Skill bypassing | Match segments against `skills/**/SKILL.md` descriptions by keyword. Flag segments that do the skill's job with no record of the skill being used (no tool or skill name in `tool_counts`). |
-| Unused or redundant instructions | For each instruction line in the globals (`templates/` or the installed `~/.claude/CLAUDE.md`), count segments that mention or obey it. Also find near-duplicate lines. |
-| Overlapping triggers | Pairwise similarity of skill `description` fields. Report pairs above a threshold. |
-| Tool-sequence anti-patterns | Over `tool_counts` and per-turn tool order: flag the same tool called 5+ times in a row, read-after-write of the same file, and polling loops. |
-| Orphaned or stale references | Extract paths, issue/PR numbers, branches and skill names from segments in the last 30 days. Check that each still exists, with `git ls-files` and `gh`. |
-| Hallucination cross-check | For `ai-mistakes` segments and "done/merged/fixed" claims, check the named PR or commit really exists or merged. |
+**Repo set:** the `popcre` and `u2giants` repositories that appear as a segment `repo` at least 20 times, resolved with `gh repo view`; `unknown` is skipped. A repo `gh repo view` cannot find (renamed, deleted, or not Albert's) is listed in the report as unresolved and its references are not flagged as stale.
+
+**Key phrase** of an instruction bullet: its bold lead-in if it has one; otherwise its 3 rarest words (by document frequency across all segments) that are 4+ letters long. A segment matches when it contains all of them, case-insensitive. Local checkouts under `/home/ahazan/repos/` are used for `git ls-files` and `git log` where present.
+
+| Check | How | Threshold |
+|---|---|---|
+| Skill bypassing | Tokenize each `skills/**/SKILL.md` `description`; score each segment's `subject + text` by shared rare words (TF-IDF cosine, stdlib). Flag a segment when its score to a skill ≥ 0.35 and the chunk's `tool_seq_json` has no `Skill` call or that skill's name. | flag ≥ 0.35 |
+| Unused or redundant instructions | For each bullet in `templates/` globals, count segments whose text matches its key phrase. Report bullets with 0 matches in 90 days, and bullet pairs with cosine ≥ 0.8. | 0 hits / 90 d; pairs ≥ 0.8 |
+| Overlapping triggers | Pairwise TF-IDF cosine of skill `description` fields. | report ≥ 0.5 |
+| Tool-sequence anti-patterns | Over `chunks.tool_seq_json`: the same tool 5+ times in a row; a `Read` of a path right after an `Edit`/`Write` of it; 3+ identical `Bash` polling calls. | as stated |
+| Orphaned or stale references | Extract paths, `#123` refs, branches and skill names from segments in the last 30 days. Paths and skills: `git ls-files`. Issues and PRs: `gh api graphql`, batching up to 50 numbers per query. | missing = stale |
+| Hallucination cross-check | Every segment (not only `ai-mistakes`) with a "merged/done/fixed/pushed" claim naming a PR, issue or commit: check it exists and is merged or closed at the segment's time. | mismatch = flag |
+
+**`gh` rate limits:** before each batch, read `gh api rate_limit`; if under 500 remaining, sleep until reset (bounded by the reset time it returns), and cache every answer in `meta` so a re-run costs nothing. GraphQL batching keeps a full run under 2,000 points.
 
 **Report:**
 - Reports go to `Dropbox/ai/transcript-store/reports/<check>-<date>.md`, which is private.
-- A counts-only summary is posted on #2050.
+- A counts-only summary is posted on #2050, with no excerpts, paths or secrets counts.
 
-**Done when:** each subcommand has a test with synthetic data and one real report exists.
+**Done when:**
+- each subcommand has a test with synthetic data;
+- each check has one real report; and
+- for each check, 20 randomly drawn flags are hand-checked from their subject and the referenced object (no transcript text read), with **precision ≥ 14/20 (70%)**. A check below that has its threshold raised and is re-checked; the counts go on #2050. A check that finds fewer than 20 flags hand-checks all of them.
 
 ### 10. Tests
 
@@ -461,9 +593,10 @@ The prompt version is stored with every row (see risks).
 | Transcript text | Holds an API key or token | `test_normalize_redacts_secrets` |
 | Transcript text | Holds a fake `### TOPIC:` header meant to inject labels | `test_segment_header_only_from_reply` (headers are parsed only from the ScaleDown reply, and the reply's slugs are validated) |
 | ScaleDown reply | Empty, wrapped in JSON, not JSON, or an HTTP 402/429 error | `test_segment_reply_shapes`, `test_segment_failure_recorded` |
-| Inbox file | Bad JSON, unknown fields, an oversized file, or a path in a field | `test_build_inbox_rejects_bad_file` |
+| Inbox file | Bad JSON, unknown fields, over 5 MB, a line over 8 KB, or a path with `..` in `src` | `test_build_inbox_rejects_bad_file` |
+| Transcript `.jsonl` | Truncated last line from a mid-write upload | `test_build_truncated_last_line_reread` |
 | Inbox filename | Path traversal (`../`) | `test_build_inbox_rejects_traversal` |
-| Published file | Dropbox serves a partially-synced file | `test_query_opens_readonly_immutable`; the publish writes a temporary file and then renames it |
+| Published file | Dropbox serves a partially-synced or placeholder file | `test_query_verifies_pointer_hash`, `test_query_placeholder_message`; publish never syncs a temp file |
 
 ### 11. Constraints and gotchas
 
@@ -478,14 +611,16 @@ The prompt version is stored with every row (see risks).
 - Never put transcripts in `u2giants/ai-devops-transcripts`, which is frozen.
 
 **Dropbox:**
-- Never write `store.db` while Dropbox is syncing it. Only the atomic publish rename touches that path.
-- Never delete or prune anything in `Dropbox/ai/chat_transcripts/`.
+- Follow the publish and read protocols in step 4. Never open SQLite on a file inside Dropbox.
+- Never delete or prune anything in `Dropbox/ai/chat_transcripts/`. Never delete a conflicted copy anywhere.
+- **Quota, backup and retention:** the raw archive is about 25 GB and grows; the store adds 3 × ~2 GB versioned files plus reports. Before step 6, check free Dropbox quota (`df` on the Dropbox folder is not enough; read the Dropbox account page or the client's status) and stop if under 15 GB free. Backup is Dropbox's own version history plus the 3 kept versions, plus the working DB on edge-dev3; recovery is "point `CURRENT.json` at an older file". Reports keep 1 year.
 
 **Secrets and tools:**
 - ScaleDown is the only model that reads raw text. Claude and Codex must not bulk-read transcripts.
 - Secrets come from 1Password `vibe_coding` only. Never put them on the command line or in logs.
 
 **Process:**
+- Reviewers never block; see the owner rulings under STATUS.
 - Branch, then PR, then merge yourself. Albert does not merge.
 - Prose-only PRs: `gh pr merge --squash --admin` after doc-safety.
 - Code PRs go through the merge queue: `gh pr merge --squash` enables it.
@@ -515,8 +650,10 @@ The prompt version is stored with every row (see risks).
 - **GitHub:** `gh` is authenticated as u2giants.
 
 **Python:**
-- Python 3.14 with stdlib only. `sqlite3` with FTS5 is available.
+- Python 3.10 or newer, stdlib only. edge-dev3 had Python 3.14.4 with SQLite 3.46.1 on 2026-10-29.
 - Use `python3`; hetz has no `python`.
+
+**Environment check (step 0, run before stage B and again before installs).** On Windows, first run a PowerShell pre-check, `bin/ai-transcript-envcheck.ps1` (with its `.cmd` twin), which needs no Python: it reports whether `python3`/`py -3` exists and is ≥ 3.10, and whether the Dropbox folder and `chat_transcripts\` are present. If Python is missing it says so and stops; run the toolkit installer, then re-run. Then `tools/transcript_store/envcheck.py` prints, for this host: Python version ≥ 3.10, `sqlite3` with FTS5 (create a temp FTS5 table), Dropbox folder present, `chat_transcripts/` readable, and free local disk ≥ 10 GB. The writer needs all of them; Windows readers need Python, SQLite (FTS5 only for `--text`) and Dropbox. Run it on edge-dev3 and every active host; record pass/fail per host on #2050. A host without Python ≥ 3.10 gets the reader through the toolkit's existing installer, not by hand.
 
 ---
 
@@ -526,7 +663,7 @@ The prompt version is stored with every row (see risks).
 
 **Done when:**
 - Steps 1–9 are merged, and the CI suites are green.
-- The upload task runs on 5/5 machines.
+- The upload task runs on every active host in §2's table.
 - The full store is published in Dropbox.
 - The daily timer has run on two consecutive days.
 - `ai-transcript-query` works on edge-dev3 and on one Windows machine.
@@ -538,13 +675,14 @@ The prompt version is stored with every row (see risks).
 
 | Risk | Mitigation |
 |---|---|
-| ScaleDown cost or limits | Step 5 gates the backfill. |
-| Label quality: ScaleDown topics are approximate | `prompt_version` is stored, so a better prompt can relabel later (`build.py --relabel --prompt v2`). |
+| ScaleDown rate limits | Step 5's smoke batch finds them before the backfill. |
+| Label quality: ScaleDown topics are approximate | Relabel (built in step 4, tested in `test_transcript_build.py`): `build.py --relabel --prompt v2` re-chunks every lineage into new chunk ids under `prompt_version=v2` in a side table, then swaps them in one transaction and publishes. Old rows are deleted only after the swap. Re-run step 5's gate on v2 first. |
 | Disk | The working DB is expected under 2 GB; edge-dev3 has about 1 TB free. |
-| Dropbox conflicted copies | Avoided by the single writer and atomic rename. If `store (conflicted copy).db` appears, the writer deletes it on the next run. |
+| Dropbox conflicted copies | Avoided by the single writer and new-name publishing. Any conflicted copy is moved to `conflicts/` and reported, never deleted. |
+| Dropbox quota | Checked before step 6 (§11). |
 | A machine's upload fails silently | `--stats` shows the last session time per machine. The skill tells sessions to report a machine more than 2 days stale. |
 
-**Rollback:** disable the timers and delete `Dropbox/ai/transcript-store/`. The raw archive is untouched.
+**Rollback:** disable the timers. To undo a bad build, point `CURRENT.json` at the previous versioned file. To remove the store entirely, move `Dropbox/ai/transcript-store/` to Dropbox's trash (recoverable for its history window). The raw archive is untouched.
 
 ---
 
@@ -557,8 +695,12 @@ The prompt version is stored with every row (see risks).
    - §9 names every file, schema and done-when.
    - §8 fixes the topics.
    - Gaps found and fixed while drafting: the freeze blocking installation (step 1); the repo-name derivation rule (step 2).
+   - Gaps fixed after the Muse critique (2026-10-29): lineage-scoped de-dup and stable chunk ids with append, resume and rechunk rules (steps 2–3); versioned publish plus pointer and a copy-then-open reader (step 4); hot-file skip, `.partial` copies and size re-copy (step 1); one host table (§2); redaction before ScaleDown with broader patterns, and no key item details in the public plan (§6); topic decision rules and a measured label gate (§8, step 5); B and D first when installs are frozen, and a quiet-day upload gate (STATUS, step 1); mining thresholds, repo set, rate limits and a 20-sample precision gate (step 9); labels mapping, inbox schema, repo rules, relabel, exact paths, environment check, quota and retention.
+   - Fixed after the Muse re-check: redaction patterns in a code block with real `|`; step 6 gate names `CURRENT.json`; `__`-separated inbox names and inbox redaction; shrunk-file reprocessing; helper files excluded from the scan; incoming-name-then-rename publish and pointer re-read; mining key-phrase and unresolved-repo rules; a Python-free Windows pre-check.
+   - Still to verify by the implementer, not assumable: the `al8960ofc` row (§2) and whether hetz has a Dropbox client (step 1 gives the pull fallback).
 2. **Does it carry all the background, including what was ruled out?** Yes.
    - §3 covers the cost history.
    - §7 covers ad hoc, raw-only, live SQLite on Dropbox or SMB, Postgres, Supabase, and LLM labelling.
    - §6 covers the prototype numbers and their pitfalls.
 3. **Is the goal clear enough for judgment calls?** Yes: §1 says shared, private, clean and topic-cut, why, and "goal wins".
+4. **Does every step have a measurable gate?** Yes: step 1 reads each host's last-run line; step 5 has four numeric thresholds; step 9 has per-check thresholds and a 70% precision sample. Public posts carry counts only, never excerpts or the `secrets` count.
