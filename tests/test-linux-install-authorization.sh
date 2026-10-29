@@ -6,7 +6,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # install.sh --test-authorization-only accepts only a /tmp fixture, even when
 # the runner exports a session-owned TMPDIR.
 TMP="$(mktemp -d /tmp/ai-install-auth.XXXXXX)"
-printf '{"schema_version":1,"verdict":"APPROVE"}\n' > "$TMP/approval.json"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TEST_LOG="$TMP/gate.log"
 mkdir -p "$HOME" "$TMP/src/bin"
@@ -22,14 +21,13 @@ if [ "${1:-}" = start ]; then
   exit 0
 fi
 phase=''
-owner=''
 caller_pinned=0
 stage_report=''
 target=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase) phase="$2"; shift 2 ;;
-    --reviewer-approval) owner="$2"; shift 2 ;;
+    --reviewer-approval) exit 42 ;;
     --caller-pinned) caller_pinned=1; shift ;;
     --stage-report) stage_report="$2"; shift 2 ;;
     --target-head) target="$2"; shift 2 ;;
@@ -52,14 +50,8 @@ fi
 if [ "$phase" = stages-complete ]; then
   [ -f "$stage_report" ] && [ "$(stat -c %a "$stage_report")" = 600 ] || exit 49
 fi
-if [ "$phase" = resume ] && [ "${TEST_REQUIRE_OWNER:-0}" = 1 ]; then
-  [ -n "$owner" ] || exit 42
-fi
 if [ "$phase" = preflight ] && [ "${TEST_REQUIRE_PIN:-0}" = 1 ]; then
   [ "$caller_pinned" = 1 ] || exit 43
-fi
-if [ "$phase" = preflight ] && [ "${TEST_REQUIRE_OWNER_PREFLIGHT:-0}" = 1 ]; then
-  [ -n "$owner" ] || exit 44
 fi
 GATE
 chmod +x "$TMP/src/bin/ai-task-gates"
@@ -89,15 +81,14 @@ fi
 check_head "$before"
 [ "$(cat "$TEST_LOG")" = resume ] || fail 'direct installer did not check resume'
 
-# Same-source maintenance forwards its assigned AI reviewer approval; the gate decides.
-if TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --test-authorization-only >/dev/null 2>&1; then
-  fail 'same-source install accepted missing reviewer approval'
+# Same-source maintenance needs no reviewer approval and forwards none (#2041).
+if "$TMP/installed/install.sh" --reviewer-approval /dev/null --test-authorization-only >/dev/null 2>&1; then
+  fail 'installer still accepts --reviewer-approval'
 fi
-TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --reviewer-approval "$TMP/approval.json" \
-  --test-authorization-only >/dev/null
+TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --test-authorization-only >/dev/null
 (
   umask 022
-  TEST_CAPTURE_UMASK_FILE="$TMP/installer-umask" "$TMP/installed/install.sh" --reviewer-approval "$TMP/approval.json" \
+  TEST_CAPTURE_UMASK_FILE="$TMP/installer-umask" "$TMP/installed/install.sh" \
     --test-authorization-only >/dev/null
 )
 [ "$(cat "$TMP/installer-umask")" = 0022 ] || fail 'installer leaked private lock umask into later stages'
@@ -187,11 +178,6 @@ if TEST_REQUIRE_PIN=1 "$TMP/installed/update.sh" >/dev/null 2>&1; then
 fi
 check_head "$before"
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight' ] || fail 'unpinned update passed preflight'
-: > "$TEST_LOG"
-if TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/installed/update.sh" --expected-head "$target" \
-  >/dev/null 2>&1; then fail 'ordinary preflight accepted missing reviewer approval'; fi
-check_head "$before"
-
 # If the installer proves that it restored protected state, the updater returns
 # to the prior clean source. The pending grant remains available for retry.
 : > "$TEST_LOG"
@@ -233,8 +219,7 @@ if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; 
 : > "$TEST_LOG"
 (
   umask 022
-  TEST_CAPTURE_UMASK_FILE="$TMP/updater-umask" "$TMP/installed/update.sh" --expected-head "$target" \
-    --reviewer-approval "$TMP/approval.json" >/dev/null
+  TEST_CAPTURE_UMASK_FILE="$TMP/updater-umask" "$TMP/installed/update.sh" --expected-head "$target" >/dev/null
 )
 [ "$(cat "$TMP/updater-umask")" = 0022 ] || fail 'updater leaked private lock umask into installation stages'
 check_head "$target"
@@ -255,9 +240,8 @@ if "$TMP/first-candidate/update.sh" --installed-checkout "$TMP/installed" \
   --expected-head "$target" >/dev/null 2>&1; then fail 'foreign Git common directory was accepted'; fi
 [ "$(git -C "$TMP/installed" rev-parse HEAD)" = "$target" ] || fail 'foreign candidate moved checkout'
 : > "$TEST_LOG"
-TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/first-candidate/update.sh" \
-  --installed-checkout "$TMP/first" --expected-head "$target" \
-  --reviewer-approval "$TMP/approval.json" >/dev/null
+"$TMP/first-candidate/update.sh" \
+  --installed-checkout "$TMP/first" --expected-head "$target" >/dev/null
 [ "$(git -C "$TMP/first" rev-parse HEAD)" = "$target" ] ||
   fail 'candidate updater did not advance named installed checkout'
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
@@ -279,9 +263,8 @@ if "$TMP/moved-candidate/update.sh" --installed-checkout "$TMP/moved" \
 [ "$(git -C "$TMP/moved" rev-parse HEAD)" = "$before" ] || fail 'unmerged pin moved installed checkout'
 git -C "$TMP/moved-candidate" checkout -q --detach "$target"
 : > "$TEST_LOG"
-TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/moved-candidate/update.sh" \
-  --installed-checkout "$TMP/moved" --expected-head "$target" \
-  --reviewer-approval "$TMP/approval.json" >/dev/null ||
+"$TMP/moved-candidate/update.sh" \
+  --installed-checkout "$TMP/moved" --expected-head "$target" >/dev/null ||
   fail 'pinned merged SHA behind origin/main was refused'
 [ "$(git -C "$TMP/moved" rev-parse HEAD)" = "$target" ] ||
   fail 'installed checkout did not advance exactly to the pinned SHA'

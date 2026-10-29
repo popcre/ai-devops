@@ -63,14 +63,14 @@ code_json="$(explain "$TMP/code" app.js)"
 check 'ordinary code retains local tests' "jq -e '.observed_class==\"code\" and ((.required_gates + .unchecked_gates)|index(\"local-tests\")!=null)' <<<\"\$code_json\""
 check 'ordinary code keeps the normal ship path' "rc '$TMP/code' 0 check --before ship"
 
-# 4. Reviewer-safety work retains exact-head independent review.
+# 4. Reviewer code is ordinary code; no reviewer verdict is required (#2041).
 new_repo "$TMP/reviewer" popcre/ai-devops
 cp -R "$ROOT/.ai-devops" "$TMP/reviewer/.ai-devops"
 git -C "$TMP/reviewer" add .ai-devops && git -C "$TMP/reviewer" commit -qm policy
-start "$TMP/reviewer" reviewer-safety
+start "$TMP/reviewer" code
 review_json="$(explain "$TMP/reviewer" bin/ai-review)"
-check 'reviewer-safety code retains exact-head independent review' "jq -e '.observed_class==\"reviewer-safety\" and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-head-independent-review\")!=null)' <<<\"\$review_json\""
-check 'reviewer-safety work may enter the guarded review path' "rc '$TMP/reviewer' 0 check --before review"
+check 'reviewer code is classed as code with no review gate' "jq -e '.observed_class==\"code\" and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-head-independent-review\")==null)' <<<\"\$review_json\""
+check 'reviewer code ships without a reviewer verdict' "rc '$TMP/reviewer' 0 check --before ship"
 
 # 5. DesignFlow UI work retains no-self-merge, visual, and authenticated proof.
 new_repo "$TMP/ui" popcre/designflow-frontend
@@ -84,8 +84,8 @@ new_repo "$TMP/db" popcre/shared-db
 write_policy "$TMP/db" '{"schema_version":1,"paths":[{"glob":"supabase/**","class":"shared-db"}],"gates":{"shared-db":{"required":["repository-branch-and-pr","exact-head-independent-review","target-database-proof-before-write"],"forbidden_actions":[]}}}'
 start "$TMP/db" shared-db
 db_json="$(explain "$TMP/db" supabase/migrations/001.sql)"
-check 'shared-db structure retains branch, review, and target proof' "jq -e '.observed_class==\"shared-db\" and ([\"repository-branch-and-pr\",\"exact-head-independent-review\",\"target-database-proof-before-write\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$db_json\""
-check 'shared-db structure is refused a database write without an exact-head independent review' "rc '$TMP/db' 3 check --before database"
+check 'shared-db structure retains branch and target proof; review is waived' "jq -e '.observed_class==\"shared-db\" and ([\"repository-branch-and-pr\",\"target-database-proof-before-write\"]- (.required_gates + .unchecked_gates)|length==0) and (.waived_gates|index(\"exact-head-independent-review\")!=null)' <<<\"\$db_json\""
+check 'shared-db structure no longer waits for a reviewer verdict before a database write (#2041)' "rc '$TMP/db' 0 check --before database"
 
 # 7. A raw-evidence consumer explicitly forbids review transmission. Private
 # code review is allowed centrally; this stricter artifact policy remains binding.
@@ -112,21 +112,15 @@ write_policy "$TMP/oracle" '{"schema_version":1,"paths":[{"glob":".github/workfl
 start "$TMP/oracle" production
 oracle_json="$(explain "$TMP/oracle" .github/workflows/release.yml)"
 check 'Oracle production intent dominates the observed deployment path' "jq -e '.declared_class==\"production\" and .observed_class==\"deployment\" and .effective_class==\"production\"' <<<\"\$oracle_json\""
-check 'Oracle production retains exact resource-and-action authorization' "jq -e '(.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null' <<<\"\$oracle_json\""
+check 'Oracle production retains owner resource-and-action authorization' "jq -e '(.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null) and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")==null)' <<<\"\$oracle_json\""
 check 'Oracle production also retains deployment release review and owner authorization' "jq -e '([\"managed-platform-release-review\",\"exact-owner-action-authorization\",\"local-tests\"]- (.required_gates + .unchecked_gates)|length==0)' <<<\"\$oracle_json\""
-# #1962: the production-mutation APPROVE is not a PR review; the 2026-10-15
-# ruling (#1960) waives only PR/code-review gates, so this stays refused.
-check 'Oracle fixture is refused production without an AI reviewer approval outside shared-db (#1962)' "rc '$TMP/oracle' 3 check --before production"
+# #2041: production waits for the owner's authorization, never a reviewer.
+check 'Oracle fixture is refused production without owner authorization' "rc '$TMP/oracle' 3 check --before production"
+check 'Oracle fixture opens production with owner authorization, no reviewer' "rc '$TMP/oracle' 0 check --before production --acknowledge 'Albert: run the release'"
 
-# Non-protected reviewer-approved overrides are recorded, never silent (#996).
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
-export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
-LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
-appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
-docs_approval="$(appr_file "$TMP/docs" review "$GATE")"
-check 'assigned AI reviewer approval is accepted for prose review' "rc '$TMP/docs' 0 check --before review --reviewer-approval '$docs_approval'"
-docs_status="$(cd "$TMP/docs" && "$GATE" status)"
-check 'reviewer-approval override is audited' "jq -e '[.overrides[].kind]|index(\"reviewer-approval\")!=null' <<<\"\$docs_status\""
+# Owner-authorized overrides are recorded, never silent (#996).
+oracle_status="$(cd "$TMP/oracle" && "$GATE" status)"
+check 'owner-authorization override is audited' "jq -e '[.overrides[].kind]|index(\"owner-authorization\")!=null' <<<\"\$oracle_status\""
 
 END_MS="$(date +%s%3N)"
 ELAPSED_MS=$((END_MS - START_MS))

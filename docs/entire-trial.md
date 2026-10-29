@@ -1,6 +1,10 @@
 # Entire trial operating record — #2022
 
-Current continuation owner: Codex chat
+Latest result: [independent free tests](#independent-free-feature-tests) finished
+with negative memory/private-capture outcomes and limited manual Trails/export
+passes. See that section before the historical continuation receipts below.
+
+Historical online-execution owner: Codex chat
 `01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3, branch
 `codex/entire-trial-online-20261029`, source
 `071bc68337b287f169afa3c0f79c41d612ff0f9f`. Authenticated access now works after
@@ -266,3 +270,32 @@ into an invoice. GitHub installation/rulesets and original profile hashes
 compare unchanged. [Exact receipts and limits](../tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure).
 Original discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026,
 5:58 AM EST remain unchanged. Historical failures above remain historical.
+
+## Independent free-feature tests
+
+The [new test report](../tests/verification/entire-trial/report.md#independent-zero-spend-tests)
+supersedes earlier untested paired retrieval/two-branch rows. Twenty fresh
+matched runs scored ordinary lookup 10/10 versus Entire-assisted 8/10, with no
+speed/token benefit. Raw local capture retained synthetic tool/ignored-file
+content, so private capture remains off. Free Trail133 tested two branches,
+manual finding severity/source/resolution, newer failing checks and repaired
+exact-head success. Hosted paid automated review stayed off; existing runner
+setting stayed false. Both backing PRs2066/2068 closed unmerged; exact owned
+branches removed after recovery. Native hosted sessions/discussions were not
+recreated; a 22-file manual export passed fresh offline continuation with
+explicit scope/semantics limits.
+
+Trail133 is closed/retrievable; deletion/backup retention remains separate
+from the authorized support request for113. No additional support message.
+The new refresh session was removed with six original logins preserved, but
+its already-issued bearer still accepted a data read; immediate invalidation
+is not proved. Local credentials were destroyed, evidence excludes them.
+Original settings, GitHub protections and shared integration compare unchanged.
+Observed vendor spend remains zero, non-final; billing/trial unstarted.
+This means Entire only: GitHub's existing publication review invoked provider
+calls whose charges were not recorded. No all-in $0 claim is supported.
+The label/cost erratum uses the existing fork-PR skip condition for optional
+provider jobs, preserving the review integration and all required checks.
+Independent free testing is finished with failures/limits, not full adoption
+or hosted-departure acceptance. Original discovery November 2, 2026, 5:00 PM EST
+and stop November 12, 2026, 5:58 AM EST remain unchanged.

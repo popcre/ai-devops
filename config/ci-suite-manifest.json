@@ -531,6 +531,49 @@
       ],
       "bin/ai-transcript-upload.ps1": [
         "test-ai-transcript-upload.sh"
+      ],
+      "bin/ai-transcript-envcheck": [
+        "test-transcript-store.sh"
+      ],
+      "bin/ai-transcript-envcheck.cmd": [
+        "test-transcript-store.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "bin/ai-transcript-envcheck.ps1": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/aliases.json": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/build.py": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/envcheck.py": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/normalize.py": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v1.txt": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/reader.py": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/redact_patterns.tsv": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/segment.py": [
+        "test-transcript-store.sh"
+      ],
+      "tests/test_transcript_build.py": [
+        "test-transcript-store.sh"
+      ],
+      "tests/test_transcript_normalize.py": [
+        "test-transcript-store.sh"
+      ],
+      "tests/test_transcript_segment.py": [
+        "test-transcript-store.sh"
       ]
     },
     "companion_suites": {

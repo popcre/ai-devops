@@ -380,8 +380,9 @@ try {
   git -C $declaration.Repo commit -m narrow-policy | Out-Null
   git -C $declaration.Repo push origin main | Out-Null
   git -C $declaration.Repo reset --hard $declarationBefore | Out-Null
-  Invoke-Gate $declaration -ExpectFailure -FailureContains 'Reviewer safety or legacy update'
-  Assert ((git -C $declaration.Repo rev-parse HEAD).Trim() -eq $declarationBefore) 'central reviewer declaration change advanced source'
+  # #2041: the merged target declaration decides; retiring a reviewer rule is an ordinary update.
+  Invoke-Gate $declaration
+  Assert ((git -C $declaration.Repo rev-parse HEAD).Trim() -ne $declarationBefore) 'central reviewer declaration retirement did not install as ordinary'
 
   $tampered=New-Fixture tampered
   (Get-Content -LiteralPath $tampered.Launcher) -replace '^# source-hash=', '# source-hash=0' | Set-Content -LiteralPath $tampered.Launcher -Encoding ASCII
@@ -713,8 +714,8 @@ try {
     'legacy setup must locate and require the guarded installer beside the helper'
   $localClasses=Get-Content -Raw (Join-Path $root '.ai-devops\task-gates.json') | ConvertFrom-Json
   foreach ($protectedPath in @('bin/setup_dev_computer_internal.ps1','bin/run_me_setup_dev_comp.bat')) {
-    Assert (@($localClasses.paths | Where-Object { $_.glob -ceq $protectedPath -and $_.class -ceq 'reviewer-safety' }).Count -eq 1) `
-      "legacy setup path lacks reviewer-safety classification: $protectedPath"
+    Assert (@($localClasses.paths | Where-Object { $_.glob -ceq $protectedPath -and $_.class -ceq 'code' }).Count -eq 1) `
+      "legacy setup path lacks code classification (#2041): $protectedPath"
   }
   Write-Host 'PASS: Windows source gate rejects hostile source, moved targets, unpinned protected updates, stale receipts, and pre-advanced checkout'
 } finally {
