@@ -2,29 +2,32 @@
 
 ## STATUS — read first
 
-Planning baseline: October 27, 2026, 10:03 AM EDT. Tracking and single acceptance
+Execution authorized by Albert October 29, 2026. Tracking and single acceptance
 issue: [#2022](https://github.com/popcre/ai-devops/issues/2022).
-Owner: Codex Entire trial coordinator, currently the planning session; no trial
-worker is running. This request authorizes publishing the plan, not executing
-the trial. A successor starts only on an implementation instruction, takes
-ownership on #2022, and keeps all acceptance and `live proof` there.
+Owner: Codex chat `01a18710-9230-7801-95f9-aebc53f9c409` on edge-dev3,
+execution branch `codex/entire-trial-20261029`. Local qualification ran against
+source `534493c047cd7dd9ebde38b25071918744901cf3`; hosted work is blocked on
+authenticated workspace, scope, zero-spend and data/custody qualification.
+No hosted trial worker or background capture is running. Keep acceptance and
+`live proof` on #2022; the full requested trial is not complete.
 
-| Step | State (2026-10-27 EDT) | Acceptance artifact required |
+| Step | State (October 29, 2026 EDT) | Evidence / remaining acceptance |
 |---|---|---|
-| 1. Scope, access, baseline and recovery inventory | ⬜ open | Private manifest and sanitized baseline |
-| 2. Isolated GitHub mirror and privacy qualification | ⬜ open | Matching refs and privacy-case receipts |
-| 3. Sessions, graph, brain and search | ⬜ open | Paired benchmark and cold-session receipts |
-| 4. Trails and failure handling | ⬜ open | Trail export, screenshots and negative checks |
-| 5. Optional shadow CI | ⬜ open | Same-commit paired results or justified omission |
-| 6. Rollback rehearsal | ⬜ open | Restored-state manifest and GitHub-only completion |
-| 7. Decision and closeout | ⬜ open | Final scorecard, owner and same-issue live proof |
+| 1. Scope, access, baseline and recovery inventory | Local/public qualification; hosted gates open | [Operating record](docs/entire-trial.md), [baseline](tests/verification/entire-trial/baseline.md) |
+| 2. Isolated GitHub mirror and privacy qualification | Local containment passed; mirror/capture channels not tested | [Report](tests/verification/entire-trial/report.md); no hosted records created |
+| 3. Sessions, graph, brain and search | Authored-memory resume passed; full pilot inconclusive | [Memory results](tests/verification/entire-trial/memory-results.md); captured sessions not tested |
+| 4. Trails and failure handling | Blocked / not tested | Authenticated workspace and effective zero-spend boundary unqualified |
+| 5. Optional shadow CI | Omitted / not tested | Hosted prerequisites unavailable; original CI preserved |
+| 6. Rollback rehearsal | Native local export/import passed; final departure receipt on #2022 | GitHub-only landing and restore comparison recorded after execution |
+| 7. Decision and closeout | No adoption; full trial remains open | Hosted Trails/live proof and valid captured-history pilot unproved |
 
-Fresh session: start at step 1; read this entire document, then its linked
+Fresh session: reconcile the execution report and #2022, then resume only the
+remaining feature-scoped gates; read this entire document, then its linked
 sources only as required. Re-read downstream phases before each phase, refresh
 vendor capabilities, and use the fresh-session skill at a context boundary.
 Session handoff: [closeout handoff](HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
 Earlier planning context: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
-Closeout verification, October 27, 2026, 2:22 PM EDT: original planning PR #2023
+Historical planning closeout, October 27, 2026, 2:22 PM EDT: original planning PR #2023
 and revised planning PR #2024 are MERGED. The latter landed at
 `79848d666c055bc3c38bdeb47f102b01c8fa8b59`; all runtime steps below remain open.
 Issue #2022 has the current plan, both review dispositions and acceptance list.
