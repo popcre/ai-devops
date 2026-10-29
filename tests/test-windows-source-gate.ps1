@@ -714,8 +714,8 @@ try {
     'legacy setup must locate and require the guarded installer beside the helper'
   $localClasses=Get-Content -Raw (Join-Path $root '.ai-devops\task-gates.json') | ConvertFrom-Json
   foreach ($protectedPath in @('bin/setup_dev_computer_internal.ps1','bin/run_me_setup_dev_comp.bat')) {
-    Assert (@($localClasses.paths | Where-Object { $_.glob -ceq $protectedPath -and $_.class -ceq 'reviewer-safety' }).Count -eq 1) `
-      "legacy setup path lacks reviewer-safety classification: $protectedPath"
+    Assert (@($localClasses.paths | Where-Object { $_.glob -ceq $protectedPath -and $_.class -ceq 'code' }).Count -eq 1) `
+      "legacy setup path lacks code classification (#2041): $protectedPath"
   }
   Write-Host 'PASS: Windows source gate rejects hostile source, moved targets, unpinned protected updates, stale receipts, and pre-advanced checkout'
 } finally {
