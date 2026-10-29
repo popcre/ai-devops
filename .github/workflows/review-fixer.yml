@@ -1,0 +1,73 @@
+name: review-fixer
+
+# Automatic fixer for `review-finding` issues opened by ai-review.yml
+# (plan_simple-reviewer-rebuild.md REVISION phase A). A headless Codex run on
+# edge-dev3 judges each finding, fixes the real ones on review-fix/<issue> and
+# opens a PR, or closes the issue as not planned. Fix PRs are never reviewed
+# (ai-review skips review-fix/* heads), so this cannot loop. Agent credentials
+# stay in the runner user's own login, never here.
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: review-finding issue number (empty = every pending one)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-fixer-${{ github.event.issue.number || inputs.issue || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.event_name != 'issues' || github.event.label.name == 'review-finding'
+    runs-on: [self-hosted, ai-devops-linux]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      AI_GH_SIGNATURE: Posted by review-fixer workflow run ${{ github.run_id }}
+    steps:
+      - name: Check out the fixer (trusted main)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          path: toolkit
+          persist-credentials: false
+      - name: Fix pending review findings
+        run: |
+          set -uo pipefail
+          if [ -n "$ISSUE" ]; then
+            todo="$ISSUE"
+          else
+            todo="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label review-finding \
+              --limit 20 --json number,labels \
+              --jq '.[] | select([.labels[].name] | index("fixer-done") or index("fixer-failed") | not) | .number')"
+          fi
+          status=0
+          for n in $todo; do
+            labels="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state,labels \
+              --jq '.state + " " + ([.labels[].name] | join(","))')"
+            case "$labels" in
+              OPEN\ *review-finding*) ;;
+              *) echo "#$n: not an open review-finding issue; skipped"; continue ;;
+            esac
+            case "$labels" in *fixer-done*|*fixer-failed*) echo "#$n: already handled"; continue ;; esac
+            echo "::group::issue #$n"
+            bash toolkit/tools/ci/review-fixer.sh "$n" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"

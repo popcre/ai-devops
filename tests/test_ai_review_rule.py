@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the ai-review merge rule (plan_simple-reviewer-rebuild.md section 8)."""
+"""Tests for the ai-review advisory rule, rotation and docs-only classifier (plan REVISION phase A)."""
 import importlib.machinery
 import importlib.util
 import json
@@ -25,29 +25,53 @@ def r(provider, verdict, head=HEAD):
 
 
 class RuleTests(unittest.TestCase):
-    def test_two_approve_one_reject_passes(self):
-        s = ars.combine([r("muse", "APPROVE"), r("glm", "APPROVE"), r("deepseek", "REJECT"), r("stepfun", None)], HEAD)
-        self.assertEqual(s["state"], "pass")
-        self.assertTrue(s["lone_reject"])
+    def test_approve_passes(self):
+        s = ars.combine([r("glm", "APPROVE")], HEAD)
+        self.assertEqual((s["state"], s["reviewer"]), ("pass", "glm"))
 
-    def test_one_approve_two_reject_fails(self):
-        s = ars.combine([r("muse", "APPROVE"), r("glm", "REJECT"), r("deepseek", "REJECT"), r("stepfun", None)], HEAD)
-        self.assertEqual(s["state"], "fail")
+    def test_reject_and_revise_are_findings_never_fail(self):
+        for v in ("REJECT", "REVISE"):
+            s = ars.combine([r("muse", None), r("glm", v)], HEAD)
+            self.assertEqual((s["state"], s["reviewer"]), ("findings", "glm"))
+        for rows in ([], [r("muse", None)], [r("muse", "REJECT"), r("glm", "REJECT")]):
+            self.assertIn(ars.combine(rows, HEAD)["state"], ("pass", "findings", "neutral"))
 
-    def test_one_finished_is_neutral(self):
-        s = ars.combine([r("muse", "APPROVE"), r("glm", None), r("deepseek", None), r("stepfun", None)], HEAD)
-        self.assertEqual((s["state"], s["finished"]), ("neutral", 1))
-        stale = ars.combine([r("muse", "APPROVE"), r("glm", "APPROVE", head="b" * 40)], HEAD)
-        self.assertEqual(stale["state"], "neutral")
+    def test_unavailable_or_stale_is_neutral(self):
+        self.assertEqual(ars.combine([r("muse", None)], HEAD)["state"], "neutral")
+        self.assertEqual(ars.combine([r("muse", "REJECT", head="b" * 40)], HEAD)["state"], "neutral")
 
-    def test_revise_counts_as_reject(self):
-        s = ars.combine([r("muse", "APPROVE"), r("glm", "REVISE"), r("deepseek", "REVISE"), r("stepfun", "APPROVE")], HEAD)
-        self.assertEqual((s["state"], s["reject"]), ("fail", 2))
+    def test_first_finished_verdict_decides(self):
+        s = ars.combine([r("deepseek", None), r("stepfun", "APPROVE"), r("muse", "REJECT")], HEAD)
+        self.assertEqual((s["state"], s["reviewer"]), ("pass", "stepfun"))
+
+    def test_rotation_is_pr_mod_4_with_fallthrough(self):
+        self.assertEqual(ars.rotation(8), ["muse", "glm", "deepseek", "stepfun"])
+        self.assertEqual(ars.rotation(2045), ["glm", "deepseek", "stepfun", "muse"])
+        self.assertEqual(ars.rotation(3)[0], "stepfun")
+        out = subprocess.run([sys.executable, SCRIPT, "--rotation", "6"], capture_output=True,
+                             text=True, check=True).stdout.split()
+        self.assertEqual(out, ["deepseek", "stepfun", "muse", "glm"])
+
+    def test_docs_only_classifier(self):
+        yes = [["README.md"], ["docs/x.json", "HANDOFF.d/a.txt", "a/b/NOTES.md"], ["docs/plan_x.md"]]
+        no = [[], ["plan_simple-reviewer-rebuild.md"], ["IMPLEMENTATION-PLAN.md"],
+              ["README.md", "bin/x"], ["sub/plan_y.md"], [".github/workflows/a.yml"]]
+        for paths in yes:
+            self.assertTrue(ars.is_docs_only(paths), paths)
+        for paths in no:
+            self.assertFalse(ars.is_docs_only(paths), paths)
+        with tempfile.TemporaryDirectory() as t:
+            lst = os.path.join(t, "files")
+            with open(lst, "w") as fh:
+                fh.write("README.md\ndocs/a.md\n")
+            out = subprocess.run([sys.executable, SCRIPT, "--docs-only", lst], capture_output=True,
+                                 text=True, check=True).stdout.strip()
+            self.assertEqual(out, "true")
 
     def test_combine_cli_and_comment(self):
         with tempfile.TemporaryDirectory() as t:
             paths = []
-            for row in (r("muse", "APPROVE"), r("glm", "APPROVE"), r("deepseek", "REVISE")):
+            for row in (r("muse", None), r("glm", "REVISE")):
                 p = os.path.join(t, row["provider"] + ".json")
                 with open(p, "w") as fh:
                     json.dump(row, fh)
@@ -57,17 +81,14 @@ class RuleTests(unittest.TestCase):
             out = subprocess.run([sys.executable, SCRIPT, "--combine", *paths, "--head", HEAD,
                                   "--comment-out", comment], capture_output=True, text=True,
                                  env=dict(os.environ, AI_GH_SIGNATURE="-- sig"), check=True)
-            self.assertEqual(json.loads(out.stdout)["state"], "pass")
+            summary = json.loads(out.stdout)
+            self.assertEqual((summary["state"], summary["reviewer"]), ("findings", "glm"))
             with open(comment) as fh:
                 body = fh.read()
             self.assertIn("| stepfun | unavailable |", body)
-            self.assertIn("| Reviewer | Verdict | Time |", body)
-            self.assertNotIn("Note", body)
-            self.assertIn("<details><summary>stepfun: unavailable</summary>", body)
             self.assertIn("Unavailable: result missing", body)
-            self.assertEqual(body.count("<details>"), 4)
-            self.assertIn("**Outcome: pass.**", body)
-            self.assertFalse(body.lstrip().startswith("{"))
+            self.assertIn("**Outcome: findings.** Review is advisory", body)
+            self.assertIn("review-finding", body)
             self.assertTrue(body.rstrip().endswith("-- sig"))
 
     def test_comment_findings_cannot_close_details_or_leak(self):

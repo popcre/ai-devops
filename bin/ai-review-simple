@@ -3,10 +3,14 @@
 
   ai-review-simple --provider {muse,glm,deepseek,stepfun} --repo DIR --base SHA --head SHA --out FILE.json
   ai-review-simple --combine [--head SHA] [--comment-out FILE] RESULT.json...
+  ai-review-simple --rotation PR_NUMBER
+  ai-review-simple --docs-only FILE_LIST
 
 Review exits 0 for a verdict, 3 unavailable, 2 refused. The verdict comes from
-the reviewer's own words only. Combine applies the plan section 8 merge rule,
-prints {state: pass|fail|neutral, ...} and exits 0.
+the reviewer's own words only. Review is advisory (plan REVISION rule 1):
+combine reports the first finished verdict as {state: pass|findings|neutral}
+and never fails. --rotation prints the provider try order for a PR;
+--docs-only prints "true" when every listed path is docs (REVISION rule 4).
 """
 import argparse
 import json
@@ -359,14 +363,42 @@ def review(args):
     return finish(0 if verdict else 3)
 
 
+ROTATION = ("muse", "glm", "deepseek", "stepfun")
+
+
+def rotation(pr):
+    """REVISION rule 2: one reviewer per PR, PR number mod 4, then fall through."""
+    start = int(pr) % len(ROTATION)
+    return list(ROTATION[start:] + ROTATION[:start])
+
+
+def is_docs_path(path):
+    path = path.strip().lstrip("./")
+    if path.startswith(("docs/", "HANDOFF.d/")):
+        return True
+    name = path.rsplit("/", 1)[-1]
+    if not name.endswith(".md"):
+        return False
+    return not (name.startswith("plan_") or name == "IMPLEMENTATION-PLAN.md")
+
+
+def is_docs_only(paths):
+    """REVISION rule 4. An empty list is not docs-only: review it."""
+    paths = [p for p in paths if p.strip()]
+    return bool(paths) and all(is_docs_path(p) for p in paths)
+
+
 def combine(results, head=None):
-    """Plan section 8 rule: pass needs >=2 APPROVE and <=1 REJECT (REVISE
-    counts as REJECT); fewer than 2 finished verdicts is neutral."""
-    rows, approve, reject = [], 0, 0
+    """Advisory rule: the first finished verdict for this head decides.
+    APPROVE is pass, REJECT or REVISE is findings, none is neutral.
+    No state is ever a failure."""
+    rows, approve, reject, state = [], 0, 0, "neutral"
     for r in results:
         v = (r.get("verdict") or "").upper()
         if v not in VERDICTS or (head and r.get("head") != head):
             v = ""
+        if v and state == "neutral":
+            state = "pass" if v == "APPROVE" else "findings"
         if v == "APPROVE":
             approve += 1
         elif v:
@@ -374,15 +406,9 @@ def combine(results, head=None):
         rows.append({"provider": r.get("provider", "?"), "verdict": v or "unavailable",
                      "error": r.get("error") if not v else None,
                      "elapsed": r.get("elapsed"), "findings": r.get("findings") or ""})
-    finished = approve + reject
-    if finished < 2:
-        state = "neutral"
-    elif approve >= 2 and reject <= 1:
-        state = "pass"
-    else:
-        state = "fail"
-    return {"state": state, "approve": approve, "reject": reject, "finished": finished,
-            "lone_reject": state == "pass" and reject == 1, "rows": rows}
+    reviewer = next((x["provider"] for x in rows if x["verdict"] != "unavailable"), None)
+    return {"state": state, "approve": approve, "reject": reject,
+            "finished": approve + reject, "reviewer": reviewer, "rows": rows}
 
 
 def _cell(text):
@@ -393,8 +419,8 @@ def render_comment(summary, head):
     """Markdown comment: verdict table, one collapsible block per reviewer,
     the merge-rule outcome line, then the signature."""
     state = summary["state"]
-    title = {"pass": "passed", "fail": "failed",
-             "neutral": "neutral (reviewers unavailable)"}[state]
+    title = {"pass": "approved", "findings": "has findings",
+             "neutral": "unavailable (no reviewer answered)"}[state]
     out = [f"## AI review {title}", "", f"Head `{head or '?'}`", "",
            "| Reviewer | Verdict | Time |", "|---|---|---|"]
     for r in summary["rows"]:
@@ -406,11 +432,9 @@ def render_comment(summary, head):
         body = body[:MAX_FINDINGS].replace("</details>", "&lt;/details&gt;")
         out += ["", f"<details><summary>{_cell(r['provider'])}: {_cell(r['verdict'])}</summary>",
                 "", body, "", "</details>"]
-    out += ["", f"**Outcome: {state}.** {summary['approve']} approve, {summary['reject']} reject "
-            f"(REVISE counts as reject), {summary['finished']} of {len(summary['rows'])} finished. "
-            "Pass needs at least 2 APPROVE and at most 1 REJECT; fewer than 2 finished is neutral."]
-    if summary["lone_reject"]:
-        out += ["", "One reviewer rejected. This does not block; please read its findings."]
+    out += ["", f"**Outcome: {state}.** Review is advisory and never blocks a merge."]
+    if state == "findings":
+        out += ["", "The reviewer asked for changes. A `review-finding` issue tracks them."]
     sig = os.environ.get("AI_GH_SIGNATURE")
     if sig:
         out += ["", sig]
@@ -425,7 +449,16 @@ def main(argv=None):
     for name in ("--comment-out", "--base", "--head", "--out"):
         ap.add_argument(name)
     ap.add_argument("--timeout", type=int)
+    ap.add_argument("--rotation", type=int, metavar="PR")
+    ap.add_argument("--docs-only", metavar="FILE_LIST")
     args = ap.parse_args(argv)
+    if args.rotation is not None:
+        print(" ".join(rotation(args.rotation)))
+        return 0
+    if args.docs_only:
+        with open(args.docs_only, encoding="utf-8") as fh:
+            print("true" if is_docs_only(fh.read().splitlines()) else "false")
+        return 0
     if args.combine:
         results = []
         for path in args.combine:
