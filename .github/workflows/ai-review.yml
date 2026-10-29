@@ -17,6 +17,10 @@ on:
         description: popcre/ai-devops ref that supplies the review script
         type: string
         default: main
+      runner_labels:
+        description: JSON list of runner labels for the review job (a self-hosted runner holding the provider keys)
+        type: string
+        default: '["self-hosted", "ai-devops-linux"]'
 
 permissions:
   contents: read
@@ -35,7 +39,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.draft &&
       !startsWith(github.event.pull_request.head.ref, 'review-fix/')
-    runs-on: [self-hosted, ai-devops-linux]
+    runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     timeout-minutes: 120
     permissions:
       contents: read
@@ -88,6 +92,7 @@ jobs:
         if: steps.classify.outputs.docs_only != 'true'
         run: |
           set -uo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
           script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
           base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
           mkdir -p results; : > results/order

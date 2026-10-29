@@ -18,6 +18,18 @@ on:
         description: review-finding issue number (empty = every pending one)
         required: false
         type: string
+  # Other repositories call this workflow from their own review-fixer.yml
+  # (stage G of plan_skinny-review.md), passing their issue and runner labels.
+  workflow_call:
+    inputs:
+      issue:
+        description: review-finding issue number (empty = every pending one)
+        required: false
+        type: string
+      runner_labels:
+        description: JSON list of runner labels (a self-hosted runner where Codex is logged in)
+        type: string
+        default: '["self-hosted", "ai-devops-linux"]'
 
 permissions:
   contents: read
@@ -29,7 +41,7 @@ concurrency:
 jobs:
   fix:
     if: github.event_name != 'issues' || github.event.label.name == 'review-finding'
-    runs-on: [self-hosted, ai-devops-linux]
+    runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -41,15 +53,17 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       AI_GH_SIGNATURE: Posted by review-fixer workflow run ${{ github.run_id }}
     steps:
-      - name: Check out the fixer (trusted main)
+      - name: Check out the fixer (trusted popcre/ai-devops main, never the caller)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          repository: popcre/ai-devops
           ref: main
           path: toolkit
           persist-credentials: false
       - name: Fix pending review findings
         run: |
           set -uo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
           if [ -n "$ISSUE" ]; then
             todo="$ISSUE"
           else
