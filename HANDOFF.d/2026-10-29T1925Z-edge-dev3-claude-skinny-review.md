@@ -43,3 +43,22 @@ Albert's ruling (2026-10-29 afternoon): review is advice only and never blocks a
 - **Can a newcomer continue?** Yes: the plan's REVISION section, the inventory and this file give the state, rules and next steps.
 - **Is it detailed enough?** Yes: PR numbers, the window-file path and date, and how to find the B and C work are listed.
 - **Is every detail included?** Yes, with one known gap: the B and C PR numbers were not yet known when this was written. The search commands above find them.
+
+## Update — implementation stopped here (2026-10-29 evening)
+
+Albert said this session was for planning only. All implementation helpers were stopped mid-work. A new session must resume them.
+
+**Exact state:**
+- **Phase C (shared-db): done.**
+  - popcre/shared-db#5055 is merged and #5054 is closed.
+  - Proof: shared-db#5057 merged through the queue with no review.
+  - Leftovers for phase F: the production catalog recovery still reads a stored verdict; inventory rows 6, 11 and 19 remain; about 8,900 `refs/db-review-*` refs.
+- **Phase A: PR #2058** (branch `review-phase-a`) is OPEN and unmerged.
+  - It adds an advisory one-reviewer workflow, a docs-only skip, `review-finding` issues, and `review-fixer.yml`, which uses Codex because Claude's login on edge-dev3 is revoked.
+  - Next: get CI green, merge via the queue, then live-prove it: a code PR, a planted bug that leads to an issue and then a fix PR, and a docs-only PR. Clean up the throwaway PRs afterwards.
+- **Phase B: PR #2057** (branch `reviewer-gate-removal-phase-b`) is OPEN and unmerged.
+  - It removes the APPROVE requirements from `config/task-gates.json`, `bin/ai-task-gates`, `install.sh` and `update.sh`.
+  - Next: check its CI and the local test selection, fix any failures, and merge.
+- **Phases D, E and F:** not started. Use the inventory doc.
+
+**Prompt for the new session:** "Resume popcre/ai-devops#2041 from this HANDOFF.d file's 'Update — implementation stopped here' section. Finish PRs #2058 and #2057, then do phases D–F."
