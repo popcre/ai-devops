@@ -125,3 +125,16 @@ DeepSeek and StepFun. Reviews run in CI on the PR head, not from chat
 sessions, and carry no lease, budget, allowlist or provenance layer. Patching
 the old path (#1993, #2000) is dropped. The observation-week freeze lifts at
 the plan's step 4.
+
+## 2026-10-29 (afternoon) — review is advisory, never a gate
+
+Verbatim, from Albert's chat: "this past week where i didn't have to deal
+with reviewer errors was the first time in 10 months where things actually
+got done ... you need to find a way to cut more reviewer 'fat'."
+
+Current rule: review is advisory and never blocks a merge. One reviewer per
+PR rotates through Muse, GLM, DeepSeek and StepFun. It runs once per PR in CI
+and skips docs-only PRs. Every other reviewer gate, hook, instruction and job
+is removed per the REVISION section of `plan_simple-reviewer-rebuild.md`.
+Production keeps owner authorization only. This supersedes earlier rulings
+that require an exact-head APPROVE.

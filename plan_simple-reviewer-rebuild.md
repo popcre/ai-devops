@@ -17,6 +17,35 @@ Handoff: [HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md
 
 **A fresh session starts at step 1.**
 
+
+## REVISION 2026-10-29 4:30 PM EDT — "skinny" review (overrides §8 and steps 2–6 where they differ)
+
+**Albert's words (verbatim):** "this past week where i didn't have to deal with reviewer errors was the first time in 10 months where things actually got done ... you need to find a way to cut more reviewer 'fat'."
+
+**Goal (wins over everything below):** review must never slow work down. A review is advice, never a gate.
+
+**Locked rules:**
+
+1. **Advisory only.** The `ai-review` check always ends success or neutral, never failure, and it is never a required check. Findings go in one PR comment. The author session reads the comment and fixes real problems in a follow-up commit or PR. Merging never waits for the review.
+2. **One reviewer per PR, not four.** The reviewer is picked by rotation from Muse, GLM, DeepSeek and StepFun (`hash(pr) mod 4`). If it is unavailable, it falls through to the next one, up to 4 tries. Albert's "4 reviewers" ruling is kept: all four are in the pool.
+3. **One look per PR.** The review runs on `opened` and `ready_for_review` only, not on every push.
+4. **Skip docs-only PRs.** A PR is skipped when every changed path is `*.md` other than `plan_*.md` / `IMPLEMENTATION-PLAN.md`, or is under `HANDOFF.d/`, or is under `docs/`. A skipped PR shows "review not needed".
+5. **No reviewer machinery anywhere else.** Delete or disable every gate, hook, instruction, installer stage and scheduled job in the inventory below. `ai-task-gates` keeps its non-review safety checks (secrets, production, owner authorization). Every `*reviewer-approval*` / `exact-head-independent-review` requirement is removed from them.
+6. **Production and shared-db production applies** use owner authorization only, which already exists as `OWNER-OVERRIDE`. They do not wait for a reviewer verdict.
+
+**Stopgap in force:** the observation-week window file was extended to 2026-11-12 14:56Z on all 5 hosts at about 4:25 PM EDT on 2026-10-29. Code and prose PRs keep merging unreviewed until rule 5 lands. Delete the window file when rule 5 is done.
+
+**Order of work** (each phase is one PR; review is advisory throughout):
+
+- **A.** Make `ai-review.yml` advisory and skinny (rules 1–4). *Done when:* a code PR gets one reviewer comment and a green or neutral check; a docs PR shows "not needed".
+- **B.** Remove the review requirements from `config/task-gates.json` and `bin/ai-task-gates` (inventory rows 22–36 and 41–42). Reclassify the `reviewer-safety` path maps as code (rows 21, 37, 38). *Done when:* `ai-task-gates check --before ship` for an installation-class change passes without `--reviewer-approval`, and `tests/test-ai-task-gates.sh` is green.
+- **C.** shared-db: drop the review contexts from ruleset 25808522, and stop the approval step in `merge-queue-gate.yml`, `guarded-migration-merge.yml` and `shared-supabase-migrations.yml` (rows 1–7). Disable the reviewer cron workflows (rows 14–16). This needs the `shared-db-change` skill and its own issue under #2041. *Done when:* a shared-db PR merges through the queue with no verdict recorded.
+- **D.** Rewrite the instructions and skills. Edit the globals templates (rows 51–52) and reinstall on 5 hosts. Edit `AGENTS.md` in each repo. Archive `docs/reviewer-rotation-rules.md`. Edit the skills (rows 53–59). *Done when:* `grep -ri "exact-head APPROVE\|assigned AI reviewer" ~/.claude/CLAUDE.md ~/.codex/AGENTS.md` is empty on every host.
+- **E.** Remove the installer stages and scheduled jobs (rows 40, 43–46, 48–49). Delete the window file.
+- **F.** Delete the old reviewer code (rows 8–13 and 47). This is the old step 6.
+
+**Inventory:** see [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md). It has 59 rows and is the checklist for phases B–F. Its "could not check" list must be resolved during phase C/E.
+
 ## Part 1 — Why
 
 ### 1. Ultimate goal
