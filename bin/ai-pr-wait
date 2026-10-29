@@ -298,6 +298,7 @@ say() {
 WAS_QUEUED=0
 QUEUED_HEAD=''
 LAST=''
+LAST_ADVISORY=''
 API_STDERR=/dev/null
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
   API_STDERR="$AI_PR_WAIT_TEST_TRACE.stderr"
@@ -360,7 +361,7 @@ set_event_evidence(){
     MERGED) PR_WAIT_EVENT_KIND=pr_merged; iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergedAt // empty')"; PR_WAIT_ELIGIBLE_UTC_MS="$(iso_ms "$iso")"; [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown ;;
     CLOSED) PR_WAIT_EVENT_KIND=pr_closed; iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.closedAt // empty')"; PR_WAIT_ELIGIBLE_UTC_MS="$(iso_ms "$iso")"; [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown ;;
     CHECKS)
-      iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [$commit.statusCheckRollup.contexts.nodes[]?] as $c | ([ $c[] | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or (.conclusion=="CANCELLED" and (.isRequired != false or ($pr.headRefOid | type) != "string" or $pr.headRefOid == "" or $commit.oid != $pr.headRefOid)))) | .completedAt]) as $f | if (any($c[]; ((.conclusion==null) and (.state=="FAILURE" or .state=="ERROR"))) or ($f|length == 0) or ([ $f[] | type ] | any(. != "string"))) then empty else $f[] end')"
+      iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [$commit.statusCheckRollup.contexts.nodes[]?] as $c | ([ $c[] | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED") and (.isRequired != false or ((($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid) | not))) | .completedAt]) as $f | if (any($c[]; ((.conclusion==null) and (.state=="FAILURE" or .state=="ERROR") and (.isRequired != false or ((($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid) | not)))) or ($f|length == 0) or ([ $f[] | type ] | any(. != "string"))) then empty else $f[] end')"
       valid=1
       [ -n "$iso" ] || valid=0
       while IFS= read -r candidate; do
@@ -493,10 +494,12 @@ while :; do
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
   ROLLUP="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE"')"
-  # Only GitHub's explicit current-PR requirement result can establish an
-  # advisory cancellation. Unknown policy or an unbound commit stays terminal.
-  # Other failure conclusions retain their existing treatment.
-  FAILED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or (.conclusion=="CANCELLED" and (.isRequired != false or ($pr.headRefOid | type) != "string" or $pr.headRefOid == "" or $commit.oid != $pr.headRefOid)) or .state=="FAILURE" or .state=="ERROR") | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
+  # Only GitHub's explicit current-PR requirement result (isRequired == false
+  # on the PR head commit) makes a failure advisory: it is reported, and the
+  # wait continues to merge, ejection, close, or timeout. Unknown policy or an
+  # unbound commit stays terminal.
+  FAILED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and (.isRequired != false or ((($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid) | not))) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
+  ADVISORY="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and .isRequired == false and (($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid)) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
 
   if [ "$STATE" = "MERGED" ]; then
     set_event_evidence MERGED
@@ -540,6 +543,14 @@ while :; do
     emit_workflow_evidence
     exit 1
     fi
+  fi
+
+  if [ -n "$ADVISORY" ] && [ "$ADVISORY" != "$LAST_ADVISORY" ]; then
+    say "PR #$PR non-required checks failed (advisory; still waiting):"
+    while IFS=$'\t' read -r aname aconc; do
+      [ -n "$aname" ] && say "  - $aname ($aconc)  required=false"
+    done <<<"$ADVISORY"
+    LAST_ADVISORY="$ADVISORY"
   fi
 
   if [ -n "$FAILED" ]; then

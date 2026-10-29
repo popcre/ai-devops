@@ -677,7 +677,11 @@ done
 for outcome in FAILURE TIMED_OUT; do
   rm -f "$TMP/cancel-$outcome-called"
   OUT="$(CANCEL_REQUIRED=false CANCEL_CONCLUSION="$outcome" AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-$outcome-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-$outcome-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
-  check "advisory $outcome retains existing terminal behavior" "test '$RC' -eq 1"
+  check "non-required $outcome is reported but the queued PR waits until merged" \
+    "test '$RC' -eq 0 && test \"$(cat "$TMP/cancel-$outcome-called")\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'advisory; still waiting' && printf '%s' \"$OUT\" | grep -q MERGED"
+  rm -f "$TMP/req-$outcome-called"
+  OUT="$(CANCEL_REQUIRED=true CANCEL_CONCLUSION="$outcome" AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/req-$outcome-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/req-$outcome-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+  check "required $outcome stays terminal" "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'will not merge'"
 done
 rm -f "$TMP/cancel-unbound-called"
 OUT="$(CANCEL_REQUIRED=false CANCEL_OID=h2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-unbound-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-unbound-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
