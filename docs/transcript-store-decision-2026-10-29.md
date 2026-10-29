@@ -129,3 +129,36 @@ A Postgres server on edge-dev3 reached over Tailscale was considered. It allows 
 - **Volume.** The text in the about 25 GB archive is roughly 15% of the file size. After de-duplicating forked conversations, that is roughly 3–4 G characters, or about 90,000 ScaleDown calls.
 - **Time.** About 15 hours at 8 in parallel, run once in the background. After that, daily runs process only new conversations.
 - **Cost.** ScaleDown spend for the full run is unmeasured. Measure it on the first 1,000 calls and stop if it is out of line.
+
+## Topic list and mining checks (Albert, 2026-10-29)
+
+**Topics.** Each ScaleDown section gets one or more of these. Every section also carries its app or repository as a separate field.
+- CI issues
+- reviewer model quality
+- reviewer tooling
+- ai-devops process and tooling
+- database and shared-db
+- machines, setup and installs
+- vendor credit and quota
+- secrets and credential incidents
+- AI mistakes, rework and unverified claims, including hallucinations and a false "done"
+- agent loops: repeating the same action without progress
+- agent stuck waiting without realizing it
+- waiting and idle time
+- token waste in the working process
+- token waste in tools
+- repeated work that should be a skill
+- owner decisions and rulings
+- business rules
+- other ideas for working better with AI
+- other
+
+**Mining checks.** These run after labeling, across many sessions, together with the skill and instruction files. They are not per-section topics.
+- **Skill bypassing:** sections doing by hand what an existing skill covers.
+- **Unused or redundant instructions:** instruction text that never shows up in behaviour, or is duplicated.
+- **Overlapping trigger phrasing:** skill descriptions that compete for the same request.
+- **Tool-sequence anti-patterns:** repeated or wasteful tool-call chains.
+  - These need the sequence of tool calls, which ScaleDown's cleanup removes.
+  - The store therefore also keeps per-section tool-call names and counts, without their output.
+- **Orphaned resources and stale references:** paths, issues, branches or skills that are referenced but no longer exist.
+- **Hallucination and verification checks:** claims in sections tagged "AI mistakes" are cross-checked against Git and GitHub.
