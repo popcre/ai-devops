@@ -1,5 +1,16 @@
 # Entire trial operating record — #2022
 
+Current continuation owner: Codex chat
+`01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3, branch
+`codex/entire-trial-online-20261029`, source
+`071bc68337b287f169afa3c0f79c41d612ff0f9f`. Authenticated access now works after
+Albert's explicit terms-acceptance instruction. Captured research export and
+offline restoration passed narrowly; captured-memory retrieval failed. Trails
+and full hosted departure are not accepted. Read
+[the continuation receipts](../tests/verification/entire-trial/report.md#online-qualification-and-departure)
+and [case dispositions](../tests/verification/entire-trial/adversarial-results.md).
+Earlier sections below retain the initial execution history.
+
 Execution authorized October 29, 2026. Coordinator: Codex chat
 `01a18710-9230-7801-95f9-aebc53f9c409`, edge-dev3 (Ubuntu).
 GitHub remains authoritative. Source snapshot:
@@ -160,3 +171,78 @@ private raw-evidence custody remains unqualified. No trial process is running.
 Continue with the [whole-plan handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
 Re-read all downstream phases through step 7 and report drift at every phase
 end. New context or later hosted activation does not reset the original clock.
+
+## Online continuation operating limits
+
+The $0 limit permits no incremental charge. Personal/POP account UI showed no
+card/no usage; billing API reported not started, and POP metered spend was zero
+but non-final. The repository had no configured Agents. Only documented free,
+manual Trail metadata was exercised. Do not infer a hard Agent cap from these
+observations: billing permits in-flight overshoot. No hosted Agent, payment,
+top-up or provider was enabled.
+
+Existing mirrored GitHub work remains: Trail 103 identifies PR #2038 as merged.
+GitHub main protections and existing integrations were preserved. The shared
+App scope was not changed to satisfy a trial-only one-repository allowlist.
+All writes named ai-devops explicitly; no other repository content was tested.
+
+The pinned local versions remained CLI 0.12.2, brain v0.4.0 and graph v0.6.0.
+Use the published directory overrides for isolated configuration/plugin/data
+roots. The capture namespace must not expose original agent homes, installed
+toolkit settings or online Entire credentials. Codex subscription authentication
+was supplied only to its isolated runtime and its copy removed after testing;
+it was never in the evidence export. No global daemon or capture was installed.
+
+The normal Codex hook-review screen was needed to trust the seven official
+project hooks. Do not bypass hook trust. Codex CLI 0.165.0-alpha.1.2 could not
+execute nested file-tool sandboxes in this namespace; do not disable either
+boundary to manufacture a successful coding capture. A public-only research
+session completed, but required the documented explicit `session attach` route
+to form a checkpoint. Preserve a Git bundle before any unpublished local
+trailer rewrite; never rewrite a shared commit or push a raw session.
+
+`brain distill` on that exact session used `--agent codex`, model
+`gpt-6.1-sol`, effort `low`, concurrency 1 and a 90-second chunk bound. Its
+receipt contained zero facts. Conversation-only queries remained empty even
+after projection rebuild. Source-document hits cannot be credited as captured
+memory retrieval. No manually authored replacement was added.
+
+For captured sessions, use `brain bundle export --include-sessions`; default
+exports omit them. The archive produced here was a POSIX tar despite its
+chosen `.tar.gz` filename: use format autodetection rather than assuming gzip.
+Import the bundle in a clean offline profile with its verified SHA256; check
+the manifest's exact transcript member against the original bytes. Native
+restore and manual readback worked; memory search did not. Keep those verdicts
+separate. Session-inclusive bundle digest and restored transcript digest are
+in the linked report.
+
+Trail 113 is synthetic and trial-owned. Purpose-built `trail show --json` plus
+supported `api` GETs preserved intent, timeline and empty inventories. The API
+marks the result possibly partial; branch/check/finding/session fields have
+not been roundtripped. Native Trail reimport is unproved. Closing via
+`trail update --status closed` succeeded but the record remains retrievable.
+The current project-Trail API has no qualified deletion action; legacy
+repository-Trail numbers are a different identity space. Never delete by a
+matching number without proving the exact target. Pending deletion/backup
+retention stays on #2022 with the coordinator; no vendor request was sent.
+
+Read logout semantics before removing trial access. In this version,
+`entire logout` ends every CLI session on the login server, including other
+machines; `--context` does not narrow it. Do not run it to remove one trial
+session. The local trial credential/context files were removed, preserving
+other sessions; remote revocation remains unproved. The exact trial-session
+ID/expiry is retained privately under opaque recovery ID
+`entire-trial-online-20261029`. Its expiry is not a trial-clock extension.
+
+After preserving public/synthetic exports, disable owned capture, remove only
+owned hooks/settings and use `plugin remove` for the three isolated profiles
+(online, capture and clean restore). Remove their extracted executables after
+release recovery. Compare original profile hashes, retain existing App and
+all original integration settings, and publish only sanitized summaries.
+Public/synthetic local recovery does not qualify private-business custody.
+
+Original discovery: November 2, 2026, 5:00 PM EST. Original stop: November 12,
+2026, 5:58 AM EST. No extension, new baseline, broader grant, hosted real
+history, optional CI or background pilot was authorized by this continuation.
+All downstream steps through step 7 were reconciled in the linked report;
+unmet gates and full live proof remain open on #2022.
