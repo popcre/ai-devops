@@ -103,7 +103,7 @@ From the transcripts (al8960ofc): minor issues only.
 
 ## 8. Access and environment
 
-- **edge-dev3:** `ahazan@192.168.3.42`, ssh key `916-alien`. For op_run, use `-F none -o HostKeyAlias=edge-dev3`. Checkout: `/home/ahazan/repos/ai-devops`.
+- **edge-dev3:** user `ahazan`, LAN address in 1Password `vibe_coding`, ssh key `916-alien`. For op_run, use `-F none -o HostKeyAlias=edge-dev3`. Checkout: `/home/ahazan/repos/ai-devops`.
 - **hetz:** `ssh -i ~/.ssh/916-alien root@hetz`. Checkout: `/worksp/ai-devops`. Use `python3`.
 - **916:** checkout on `D:`.
 - **Secrets:** 1Password `vibe_coding` only.
