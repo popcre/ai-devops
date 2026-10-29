@@ -2,6 +2,8 @@
 
 ## STATUS — read first; do not re-derive
 
+> **Superseded 2026-10-29** by [plan_simple-reviewer-rebuild.md](plan_simple-reviewer-rebuild.md) (#2041). Steps 8 (report: [docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md)) done; freeze lift moves to the new plan step 4.
+
 | Step | Status | Evidence / where a fresh session starts |
 |---|---|---|
 | 0. Register issue, plan, handoff; declare freeze start | ✅ done 2026-10-21 | [#1948](https://github.com/popcre/ai-devops/issues/1948); pending-work and task-router rows already present |
