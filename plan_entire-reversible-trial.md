@@ -4,22 +4,37 @@
 
 Execution authorized by Albert October 29, 2026. Tracking and single acceptance
 issue: [#2022](https://github.com/popcre/ai-devops/issues/2022).
-Owner: Codex chat `01a18710-9230-7801-95f9-aebc53f9c409` on edge-dev3,
-execution branch `codex/entire-trial-20261029`. Local qualification ran against
-source `534493c047cd7dd9ebde38b25071918744901cf3`; hosted work is blocked on
-authenticated workspace, scope, zero-spend and data/custody qualification.
+Current owner: Codex chat `01a18887-e521-7e50-8b25-cd87775c567f` on edge-dev3,
+continuation branch `codex/entire-trial-online-20261029`, source
+`071bc68337b287f169afa3c0f79c41d612ff0f9f`. Earlier local qualification ran
+against `534493c047cd7dd9ebde38b25071918744901cf3`. Authenticated access now
+passes after Albert's explicit terms acceptance. Metered-Agent $0 protection,
+real-data/capture qualification and full hosted departure remain unproved.
 No hosted trial worker or background capture is running. Keep acceptance and
 `live proof` on #2022; the full requested trial is not complete.
 
 | Step | State (October 29, 2026 EDT) | Evidence / remaining acceptance |
 |---|---|---|
-| 1. Scope, access, baseline and recovery inventory | Local/public qualification; hosted gates open | [Operating record](docs/entire-trial.md), [baseline](tests/verification/entire-trial/baseline.md) |
-| 2. Isolated GitHub mirror and privacy qualification | Local containment passed; mirror/capture channels not tested | [Report](tests/verification/entire-trial/report.md); no hosted records created |
-| 3. Sessions, graph, brain and search | Authored-memory resume passed; full pilot inconclusive | [Memory results](tests/verification/entire-trial/memory-results.md); captured sessions not tested |
-| 4. Trails and failure handling | Blocked / not tested | Authenticated workspace and effective zero-spend boundary unqualified |
+| 1. Scope, access, baseline and recovery inventory | Authenticated access passed; free-metadata boundary observed; Agent/data gates open | [Operating record](docs/entire-trial.md), [baseline](tests/verification/entire-trial/baseline.md); no card/no Agent/zero non-final metered spend |
+| 2. Isolated GitHub mirror and privacy qualification | Existing mirror observed; trial writes scoped to ai-devops; full capture/export qualification incomplete | [Online report](tests/verification/entire-trial/report.md#online-qualification-and-departure); one synthetic Trail created and closed |
+| 3. Sessions, graph, brain and search | Authored-memory pass retained; new captured research exported/restored, retrieval failed | [Memory results](tests/verification/entire-trial/memory-results.md#captured-session-continuation); zero distilled facts; coding-subject sandbox failure; full pilot inconclusive |
+| 4. Trails and failure handling | Synthetic intent/export/closure passed narrowly; two-branch/latest-head/automated findings not tested | API export possibly partial; complete required-field recovery and safe metered Agent boundary unproved |
 | 5. Optional shadow CI | Omitted / not tested | Hosted prerequisites unavailable; original CI preserved |
-| 6. Rollback rehearsal | Local export/import, restoration and corrected GitHub prose check closure passed | Receipt on #2022; hosted departure and new Windows executable run remain unproved |
+| 6. Rollback rehearsal | Captured transcript restored byte-for-byte offline; local profiles preserved; hosted departure incomplete | Synthetic Trail remains retrievable after closing; single-session remote revocation unproved; global logout would affect other machines |
 | 7. Decision and closeout | No adoption; full trial remains open | Hosted Trails/live proof and valid captured-history pilot unproved |
+
+Online continuation: [full receipts and downstream drift](tests/verification/entire-trial/report.md#online-qualification-and-departure),
+[adversarial dispositions](tests/verification/entire-trial/adversarial-results.md).
+No new Agent, payment, integration grant, private import or required-check change.
+Only documented free synthetic metadata was hosted; the new captured transcript
+stayed local. Supported session-inclusive export/import worked, but zero-fact
+extraction and empty conversation retrieval do not pass continuity. Existing
+GitHub merge reflection was observed, not a new latest-head test. Trail closure
+is not deletion. Do not run broad logout to retire a single trial session.
+All remaining acceptance stays on #2022, owned by this coordinator. The original
+discovery deadline (November 2, 2026, 5:00 PM EST) and trial stop (November 12,
+2026, 5:58 AM EST) remain unchanged; no extension is used. No background worker
+is running or promised.
 
 Fresh session: reconcile the execution report and #2022, then resume only the
 remaining feature-scoped gates; read this entire document, then its linked

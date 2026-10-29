@@ -1,5 +1,10 @@
 # Local memory and retrieval results — #2022
 
+The initial results below are historical local authored-memory qualification.
+For the new captured-session attempt, see
+[captured-session continuation](#captured-session-continuation). It did not
+pass memory continuity and does not replace the earlier failed receipts.
+
 October 29, 2026. Source: `534493c047cd7dd9ebde38b25071918744901cf3`.
 CLI 0.12.2; brain v0.4.0; graph v0.6.0. All candidate execution was inside
 an isolated Linux filesystem and network namespace, with no model credentials,
@@ -94,3 +99,63 @@ These are locate smoke checks, not verified complete call graphs.
 Capabilities declare Bash semantic parsing; PowerShell and `.ps1` are absent.
 A PowerShell-related search result does not prove PowerShell semantic analysis.
 Result: usable local index with material coverage limits; utility inconclusive.
+
+## Captured-session continuation
+
+October 29, 2026. Coordinator: Codex chat
+`01a18887-e521-7e50-8b25-cd87775c567f`, edge-dev3. Public source snapshot:
+`071bc68337b287f169afa3c0f79c41d612ff0f9f`. Versions: CLI 0.12.2,
+brain v0.4.0, graph v0.6.0, Codex CLI 0.165.0-alpha.1.2,
+`gpt-6.1-sol`, effort `low`. No hosted Agent or API-key authentication was used.
+Local research and extraction consumed existing ChatGPT subscription usage;
+no monetary or comparative saving is claimed.
+
+The new coding subject could not read/write its sources: its tools failed with
+`bwrap: No permissions to create a new namespace`. Seven official capture hooks
+were trusted through the normal interactive review screen, without a trust
+bypass. The failed attempt remains evidence; neither inner nor outer sandbox
+was removed to obtain a successful write. Original profiles remained outside
+the capture namespace. Hosted sync, automatic checkpoint pushing, backfill,
+agent-end extraction and the background daemon were not enabled.
+
+A newly generated public-source research session completed a useful audit of
+the trial's cost/custody/clock prerequisites. Its supplied sources were the
+public plan and operating record, not historical/private chats. Session
+`01a188a0-e5fc-7e73-9ef9-4524f2871720` had one turn and zero automatic
+checkpoints. Hooks tracked it; supported explicit attachment then created
+checkpoint `01M64A340ZE3VZ3AY8SBBKCDDD`. The unpublished local commit changed
+from `fd77d340ae5d05a0f5a6b4092b1e576cdb514fc2` to
+`81c252b78e7758851e89e1006aeae0b7ec17b38d` after a source bundle was preserved.
+No shared branch or GitHub history changed. This is captured research plus
+manual attachment, not an automatic code-change checkpoint.
+
+`brain distill --session` targeted that exact session, with concurrency 1,
+one chunk, model/effort above and a 90-second per-chunk bound. The completed
+receipt reported one extraction call, 29,802 input tokens, 30 output tokens,
+8,064 cached input tokens, zero facts, zero authored memories and zero
+distilled chunks. Tokens are the receipt's categories, not additive savings.
+No `remember` command was used to manufacture a positive result.
+
+`recall` returned an empty fact set. Ordinary query retrieved source documents;
+that does not count as captured-session recall. Conversation-only query
+`free credit balance`, restricted to the exact captured session, returned no
+matches. After a deterministic projection rebuild, conversation-only `GitHub`
+also returned none. No further model extraction was rerun to hide that result.
+**Captured-memory continuity failed for this qualification case.**
+
+The native export included sessions explicitly and preserved three normalized
+user/assistant records. Bundle SHA256:
+`222f049448782e75ed71699e3d94e9b248c91110c2632a43ed6d75127f3897b7`.
+A clean profile imported 27 entries while kernel networking was disabled.
+The restored transcript was byte-identical to its bundle member, SHA256
+`ece4ce4f779f9e8fc924a5064fcfcffaf4533929070573bac325224bceaa90e6`.
+Offline manual readback recovered the goal, cost decision, source references,
+clock and unresolved proof; conversation retrieval remained empty. Native
+transcript restoration passes narrowly; cold memory retrieval does not.
+
+These are not five natural task histories, two successful cold consumers or
+new ten-pair utility measurements. No missing gate was waived, no original
+question/key changed and no deadline reset. Further real/history capture stays
+restricted by the [report's access, privacy, recovery and cost gates](report.md#online-qualification-and-departure).
+Public/synthetic originals remain in opaque recovery ID
+`entire-trial-online-20261029`; no raw session archive is published here.
