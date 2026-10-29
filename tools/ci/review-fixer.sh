@@ -65,8 +65,14 @@ Do this:
 1. Read the code each finding points at and decide whether it is real.
 2. Fix every real finding with the smallest correct change. Do not touch
    anything unrelated. Do not commit, push, or open PRs; the caller does that.
-3. Run the relevant tests (see AGENTS.md and the tests/ folder) and make sure
-   they pass. Use PYTHONDONTWRITEBYTECODE=1 for Python.
+3. Run only the tests that exercise the files you changed (see the tests/
+   folder) and make sure they pass. Use PYTHONDONTWRITEBYTECODE=1 for Python.
+   You run in a sandbox with no network and no installed toolkit, so suites
+   that need either cannot run here; do not run them, and never count their
+   setup errors as a failure of your fix. Full CI runs on the PR afterwards.
+   If no test covers the changed files, say so and treat the fix as tested.
+   Ignore any personal or global instructions about reply format; end exactly
+   as step 4 says.
 4. End your final message with exactly one line:
    DECISION: FIXED   (you changed files and the tests pass)
    DECISION: INVALID (every finding is wrong; explain why above that line)
