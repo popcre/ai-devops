@@ -126,8 +126,10 @@ function Get-ReviewerSafetyGlobs([string]$Path, [string]$Revision) {
         if (-not $rule.match -or -not ([System.Management.Automation.WildcardPattern]::new($rule.match, 'IgnoreCase').IsMatch('popcre/ai-devops'))) { continue }
         $globs += @($rule.paths | Where-Object { $_.class -eq 'reviewer-safety' } | ForEach-Object { $_.glob })
     }
-    if ($globs.Count -eq 0 -or @($globs | Where-Object { -not $_ -or $_ -isnot [string] }).Count -ne 0) {
-        throw "Missing reviewer safety rules at $Revision."
+    # No reviewer-safety paths is valid since #2041: reviewer code is ordinary
+    # code and installs without a reviewed authority.
+    if (@($globs | Where-Object { -not $_ -or $_ -isnot [string] }).Count -ne 0) {
+        throw "Malformed reviewer safety rules at $Revision."
     }
     return $globs
 }
@@ -244,8 +246,9 @@ function Test-ProtectedUpdate([string]$Path, [string]$CurrentHead, [string]$Targ
     if ($CurrentHead -eq $TargetHead) { return $false }
     $changed = @(Invoke-GitCommand @('-C', $Path, 'diff', '--no-renames', '--name-only', $CurrentHead, $TargetHead))
     if ($script:LastGitExitCode -ne 0) { throw 'Could not classify incoming ai-devops source changes.' }
-    # Use both declarations: an update may remove or narrow its own safety rule.
-    $globs = @(Get-ReviewerSafetyGlobs -Path $Path -Revision $CurrentHead) + @(Get-ReviewerSafetyGlobs -Path $Path -Revision $TargetHead)
+    # The merged target's declaration decides (#2041): review is advisory, so a
+    # release that retires reviewer-safety paths installs as an ordinary update.
+    $globs = @(Get-ReviewerSafetyGlobs -Path $Path -Revision $TargetHead)
     foreach ($file in $changed) {
         foreach ($glob in $globs) {
             if ([System.Management.Automation.WildcardPattern]::new($glob, 'IgnoreCase').IsMatch($file)) {

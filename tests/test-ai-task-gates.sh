@@ -115,34 +115,34 @@ tools/ci/helper.sh|code
 build.ps1|code
 skills/shared/x/SKILL.md|code
 .github/workflows/verify.yml|code
-bin/ai-review-lifecycle|reviewer-safety
-bin/ai-task-gates|reviewer-safety
-bin/ai-install-skills|reviewer-safety
-tests/test-ai-install-skills.sh|reviewer-safety
-tools/lib/task-gates.sh|reviewer-safety
-tools/application_workflow_target.py|reviewer-safety
-config/task-gates.json|reviewer-safety
-config/review-action-profiles.json|reviewer-safety
-config/muse-code/version|reviewer-safety
-config/muse-code/sha256|reviewer-safety
-config/muse-code/linux-x86_64/sha256|reviewer-safety
-config/opencode/version|reviewer-safety
-config/provider-cli-versions.json|reviewer-safety
+bin/ai-review-lifecycle|code
+bin/ai-task-gates|code
+bin/ai-install-skills|code
+tests/test-ai-install-skills.sh|code
+tools/lib/task-gates.sh|code
+tools/application_workflow_target.py|code
+config/task-gates.json|code
+config/review-action-profiles.json|code
+config/muse-code/version|code
+config/muse-code/sha256|code
+config/muse-code/linux-x86_64/sha256|code
+config/opencode/version|code
+config/provider-cli-versions.json|code
 config/opencode/opencode.json|code
-tools/review_action_profile.py|reviewer-safety
-bin/ai-process-supervisor|reviewer-safety
+tools/review_action_profile.py|code
+bin/ai-process-supervisor|code
 services/api/Dockerfile|deployment
 infra/main.tf|infrastructure
 db/migrations/001_init.sql|shared-db
 TABLE
 
 mixed="$(printf 'docs/a.md\nbin/ai-review-lifecycle\ntools/x.sh\n' | ( cd "$TMP/class" && "$GATES" explain --json --paths-from - ))"
-check 'mixed change set takes the strongest class' "jq -e '.observed_class==\"reviewer-safety\"' <<<\"\$mixed\""
+check 'mixed change set takes the strongest class' "jq -e '.observed_class==\"code\"' <<<\"\$mixed\""
 check 'every changed path is still classified individually' "jq -e '.changes|length==3' <<<\"\$mixed\""
-# #1650: a Muse runtime re-pin release (pins + its test + docs) is reviewer-safety,
-# so the reviewed toolkit install route accepts it.
+# #1650/#2041: a Muse runtime re-pin release (pins + its test + docs) is
+# ordinary code and installs through the ordinary update.
 repin="$(printf 'config/muse-code/version\nconfig/muse-code/sha256\ntests/test-ai-muse-code.sh\ndocs/muse-opencode.md\n' | ( cd "$TMP/class" && "$GATES" explain --json --paths-from - ))"
-check 'reviewer-binary re-pin release is reviewer-safety' "jq -e '.observed_class==\"reviewer-safety\"' <<<\"\$repin\""
+check 'reviewer-binary re-pin release is code (#2041)' "jq -e '.observed_class==\"code\"' <<<\"\$repin\""
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 
@@ -168,15 +168,15 @@ check 'redirected shared-db identity may launch the promotion run' \
   "rc 0 '$TMP/db-redirected' check --before shared-db-promotion"
 check 'the promotion launch never unlocks a manual production action' \
   "! rc 0 '$TMP/db-canonical' check --before production"
-# #1962: the pre-transfer identity is the same repository; its reviewer gates
-# are required, never waived, so a manual production action stays refused.
+# #1962/#2041: the pre-transfer identity is the same repository; a manual
+# production action stays refused without the owner's authorization.
 check 'the redirected shared-db identity never unlocks a manual production action' \
   "! rc 0 '$TMP/db-redirected' check --before production"
 ( cd "$TMP/db-redirected" && "$GATES" start --class production ) >/dev/null
-check 'a declared production task in the redirected shared-db identity keeps its reviewer gate required, not waived' \
-  "out '$TMP/db-redirected' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|length)==0'"
-check 'a redirected shared-db production refusal names the missing reviewer approval' \
-  "rc 3 '$TMP/db-redirected' check --before production && out '$TMP/db-redirected' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
+check 'a declared production task in the redirected shared-db identity requires owner authorization, no reviewer gate' \
+  "out '$TMP/db-redirected' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null) and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null)'"
+check 'a redirected shared-db production refusal names the missing owner authorization' \
+  "rc 3 '$TMP/db-redirected' check --before production && out '$TMP/db-redirected' check --before production | grep -q 'requires the owner'"
 newrepo "$TMP/db-app" u2giants/licensor-source-data
 mkdir -p "$TMP/db-app/db/migrations"; printf 'select 1;\n' > "$TMP/db-app/db/migrations/001.sql"
 git -C "$TMP/db-app" add -A; git -C "$TMP/db-app" commit -qm migration
@@ -193,31 +193,27 @@ check 'a reviewer approval cannot carry the launch to a non-shared-db class' \
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
 cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'
-{"schema_version":1,"paths":[{"glob":"bin/ai-review-lifecycle","class":"prose"},{"glob":"docs/runbook.md","class":"deployment"}]}
+{"schema_version":1,"paths":[{"glob":"db/migrations/001_init.sql","class":"prose"},{"glob":"docs/runbook.md","class":"deployment"}]}
 EOF
-check 'a local rule cannot downgrade a protected class' "[ \"\$(class_of 'bin/ai-review-lifecycle')\" = reviewer-safety ]"
+check 'a local rule cannot downgrade a protected class' "[ \"\$(class_of 'db/migrations/001_init.sql')\" = shared-db ]"
 check 'a local rule may strengthen a class' "[ \"\$(class_of 'docs/runbook.md')\" = deployment ]"
 
-# The first real consumer declaration is this repository's own. It must retain
-# the central reviewer-safety class even if a second local rule tries to lower
-# it, and it must strengthen installer paths without disabling installation.
+# The first real consumer declaration is this repository's own. Since #2041
+# it classes reviewer and gate paths as ordinary code (review is advisory) and
+# keeps installer paths in the installation class.
 cp "$ROOT/.ai-devops/task-gates.json" "$TMP/class/.ai-devops/task-gates.json"
-check 'the ai-devops pilot retains reviewer-safety for the review front door' \
-  "[ \"\$(class_of 'bin/ai-review')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects the pull-request wait gate' \
-  "[ \"\$(class_of 'bin/ai-pr-wait')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects the policy validator' \
-  "[ \"\$(class_of 'tools/ci/validate-task-gates.py')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects its own declaration' \
-  "[ \"\$(class_of '.ai-devops/task-gates.json')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects Windows launcher receipt stamping' \
-  "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects Windows source gate and bootstrap' \
-  "[ \"\$(class_of 'bin/install-ai-devops-windows.ps1')\" = reviewer-safety ] && [ \"\$(class_of 'bin/bootstrap-windows-dev.ps1')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects its Windows source gate test' \
-  "[ \"\$(class_of 'tests/test-windows-source-gate.ps1')\" = reviewer-safety ]"
-check 'the ai-devops pilot protects Linux installation routing and its tests' \
-  "[ \"\$(class_of 'install.sh')\" = reviewer-safety ] && [ \"\$(class_of 'update.sh')\" = reviewer-safety ] && [ \"\$(class_of 'tests/test-linux-install-authorization.sh')\" = reviewer-safety ]"
+check 'the ai-devops declaration classes the review front door as code' \
+  "[ \"\$(class_of 'bin/ai-review')\" = code ]"
+check 'the ai-devops declaration classes the pull-request wait and policy validator as code' \
+  "[ \"\$(class_of 'bin/ai-pr-wait')\" = code ] && [ \"\$(class_of 'tools/ci/validate-task-gates.py')\" = code ] && [ \"\$(class_of '.ai-devops/task-gates.json')\" = code ]"
+check 'the ai-devops declaration keeps Windows installers in the installation class' \
+  "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = installation ] && [ \"\$(class_of 'bin/install-ai-devops-windows.ps1')\" = installation ] && [ \"\$(class_of 'bin/bootstrap-windows-dev.ps1')\" = installation ]"
+check 'the ai-devops declaration keeps Linux installation routing in the installation class' \
+  "[ \"\$(class_of 'install.sh')\" = installation ] && [ \"\$(class_of 'update.sh')\" = installation ] && [ \"\$(class_of 'tests/test-linux-install-authorization.sh')\" = code ]"
+check 'no ai-devops path is classed reviewer-safety any more (#2041)' \
+  "! jq -e '.paths[] | select(.class==\"reviewer-safety\")' '$ROOT/.ai-devops/task-gates.json' >/dev/null && ! jq -e '.rules[] | select(.match==\"*/ai-devops\") | .paths[] | select(.class==\"reviewer-safety\")' '$ROOT/config/task-gates.json' >/dev/null"
+check 'no central class requires a reviewer verdict (#2041)' \
+  "! jq -e '[.default.gates[]?.required[]?, .rules[]?.gates[]?.required[]?] | map(select(test(\"reviewer-approval|exact-head-independent-review|release-marker-review|reviewed-toolkit-installation\"))) | length > 0' '$ROOT/config/task-gates.json' >/dev/null && ! jq -e 'has(\"reviewer_release\")' '$ROOT/config/task-gates.json' >/dev/null"
 # Platform brief at task start (#1783), in its own scratch copy so the pilot's
 # recorded task state below is untouched.
 git clone -q "$TMP/class" "$TMP/brief" 2>/dev/null
@@ -279,12 +275,12 @@ check 'stale target cannot issue install authority' \
 check 'an unlanded candidate cannot claim the toolkit installation route' \
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
-check 'reviewer-safety installation needs an assigned AI reviewer approval' \
-  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
-check 'reviewer-safety installation keeps independent review and routing proof' \
-  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates + .waived_gates) | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
-check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
-  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
+check 'reviewer code installation needs no reviewer approval (#2041)' \
+  "rc 0 '$TMP/class-candidate' check --before deploy $class_proof"
+check 'reviewer code installation carries no reviewer gate (#2041)' \
+  "out '$TMP/class-candidate' explain --json | jq -e '(.required_gates + .unchecked_gates + .waived_gates) | index(\"exact-head-independent-review\") == null'"
+check 'a toolkit installation refuses a target that is not the candidate HEAD' \
+  "rc 3 '$TMP/class-candidate' check --before deploy --target-head \"\$(git -C '$TMP/class' rev-parse HEAD)\" --installed-checkout '$TMP/class' --installed-launcher '$class_launcher'"
 class_state="$(state_file_for "$TMP/class-candidate")"
 jq '.declared_class="reviewer-safety"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
 check 'a protected task cannot issue installation authority' \
@@ -661,7 +657,7 @@ git -C "$TMP/deleted-reviewer" update-ref refs/remotes/origin/main "$deleted_tar
 deleted_report="$(make_approved_report "$TMP/deleted-candidate" "$deleted_target")"
 deleted_proof="--target-head $deleted_target --installed-checkout $TMP/deleted-reviewer --installed-launcher $class_launcher"
 check 'deployment sees a reviewer path deleted after the recorded host HEAD' \
-  "out '$TMP/deleted-candidate' explain --json --base '$installed_head' | jq -e '.changes[] | select(.path==\"bin/ai-review\" and .class==\"reviewer-safety\")'"
+  "out '$TMP/deleted-candidate' explain --json --base '$installed_head' | jq -e '.changes[] | select(.path==\"bin/ai-review\" and .class==\"code\")'"
 check 'a deleted reviewer path still uses the protected installation route' \
   "rc 0 '$TMP/deleted-candidate' authorize-install $deleted_proof --review-report '$deleted_report' --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$deleted_target.json"
@@ -701,10 +697,10 @@ saved_home="$HOME"; saved_path="$PATH"; saved_programfiles="${PROGRAMFILES:-}"; 
 export HOME="$TMP/empty-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$PATH" USERPROFILE="$TMP/empty-home"
 export PROGRAMFILES='C:\Program Files'
 empty_launcher="$HOME/.local/bin/ai-task-gates"
-empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher --reviewer-approval $(appr "$TMP/empty-release" deploy)"
+empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher"
 check 'first install requires an explicit first-install claim' \
   "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
-check 'first-time toolkit installation retains the reviewer-approved route' \
+check 'first-time toolkit installation needs no reviewer approval (#2041)' \
   "rc 0 '$TMP/empty-release' check --before deploy --first-install $empty_proof"
 empty_sha="$(git -C "$TMP/empty-release" rev-parse HEAD)"
 empty_hash="$(sha256sum "$TMP/empty-release/bin/ai-task-gates" | cut -d' ' -f1)"
@@ -815,21 +811,21 @@ git -C "$TMP/mixed-explain" commit -qm 'toolkit declaration'
 ( cd "$TMP/mixed-explain" && "$GATES" start --class deployment ) >/dev/null
 printf '#!/bin/sh\n' > "$TMP/mixed-explain/bin/ai-review"
 printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
-check 'explain includes reviewer proofs inside a stronger mixed class' \
-  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
+check 'explain carries no reviewer proof inside a stronger mixed class (#2041)' \
+  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and ((.required_gates + .unchecked_gates + .waived_gates)|index(\"exact-head-independent-review\")==null)'"
 
 printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
-check 'installation refuses deployment without a reviewer approval' \
+check 'installation deploy refuses an uncommitted candidate even without a reviewer gate' \
   "rc 3 '$TMP/class' check --before deploy"
-check 'an assigned AI reviewer approval preserves the supported installation path' \
-  "rc 0 '$TMP/class' check --before deploy --reviewer-approval \"\$(appr '$TMP/class' deploy)\""
+check 'a reviewer approval cannot stand in for a committed installation candidate' \
+  "rc 3 '$TMP/class' check --before deploy --reviewer-approval \"\$(appr '$TMP/class' deploy)\""
 rm -f "$TMP/class/bin/install-fixture"
 jq '.paths += [{"glob":"bin/ai-review","class":"prose"}]' \
   "$TMP/class/.ai-devops/task-gates.json" > "$TMP/class/.ai-devops/task-gates.tmp"
 mv "$TMP/class/.ai-devops/task-gates.tmp" "$TMP/class/.ai-devops/task-gates.json"
-check 'the ai-devops pilot cannot weaken the central reviewer class' \
-  "[ \"\$(class_of 'bin/ai-review')\" = reviewer-safety ]"
+check 'the ai-devops pilot cannot weaken the central class below code' \
+  "[ \"\$(class_of 'bin/ai-review')\" = code ]"
 # A corrupt local declaration must stop the run, not silently drop the stricter
 # local rules and carry on with the central ones.
 printf 'not json at all
@@ -845,13 +841,13 @@ newrepo "$TMP/set"
 
 printf 'x\n' > "$TMP/set/docs.md"
 check 'untracked prose keeps a prose task' "rc 0 '$TMP/set' check --before ship"
-mkdir -p "$TMP/set/bin"; printf '#!/bin/sh\n' > "$TMP/set/bin/ai-review-lifecycle"
-check 'an untracked reviewer file blocks the declared prose task' "rc 3 '$TMP/set' check --before ship"
+mkdir -p "$TMP/set/services/api"; printf 'FROM scratch\n' > "$TMP/set/services/api/Dockerfile"
+check 'an untracked deployment file blocks the declared prose task' "rc 3 '$TMP/set' check --before ship"
 check 'the protected escalation cannot be acknowledged away' \
   "rc 3 '$TMP/set' check --before ship --acknowledge 'in scope'"
 check 'the block names the file that escalated the class' \
-  "out '$TMP/set' check --before ship | grep -Fq 'bin/ai-review-lifecycle'"
-rm -rf "$TMP/set/bin"
+  "out '$TMP/set' check --before ship | grep -Fq 'services/api/Dockerfile'"
+rm -rf "$TMP/set/services"
 
 git -C "$TMP/set" add -A >/dev/null 2>&1; git -C "$TMP/set" commit -qm docs
 mkdir -p "$TMP/set/db/migrations"; printf 'select 1;\n' > "$TMP/set/db/migrations/001.sql"
@@ -901,26 +897,29 @@ printf 'x\n' > "$TMP/detached/note.md"
 check 'a detached HEAD still classifies the working tree' \
   "[ \"\$( out '$TMP/detached' explain --json | jq -r .observed_class )\" = prose ]"
 
-# Owner ruling 2026-10-15 (#1960): outside popcre/shared-db no PR waits for a
-# code review. The production-mutation APPROVE is not a PR review and stays
-# enforced everywhere (#1962: DeepSeek REJECT of 5cc973dd).
+# Owner ruling 2026-10-29 (#2041): review is advisory everywhere. Production
+# waits for the owner's explicit authorization, never for a reviewer verdict.
 newrepo "$TMP/noreview"
 ( cd "$TMP/noreview" && "$GATES" start --class production ) >/dev/null
-check 'outside shared-db a production task is still refused without a reviewer approval' \
+check 'a production task is refused without owner authorization' \
   "rc 3 '$TMP/noreview' check --before production"
-check 'outside shared-db the production-mutation gate stays required, never waived' \
-  "out '$TMP/noreview' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|length)==0'"
-check 'outside shared-db a valid exact-head APPROVE still opens the production path' \
-  "rc 0 '$TMP/noreview' check --before production --reviewer-approval \"\$(appr '$TMP/noreview' production)\""
-# Reviewer regression case: u2giants/ansible, production class, no approval.
+check 'the production owner-authorization gate is required and no reviewer gate remains' \
+  "out '$TMP/noreview' explain --json | jq -e '(.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null) and (.required_gates + .unchecked_gates + .waived_gates | index(\"exact-resource-and-action-ai-reviewer-approval\"))==null'"
+check 'a reviewer APPROVE no longer opens production by itself' \
+  "rc 3 '$TMP/noreview' check --before production --reviewer-approval \"\$(appr '$TMP/noreview' production)\""
+check 'owner authorization opens the production path without a reviewer' \
+  "rc 0 '$TMP/noreview' check --before production --acknowledge 'Albert: apply the change'"
+check 'the owner authorization is recorded in task state' \
+  "jq -e '.overrides | any(.kind==\"owner-authorization\" and .action==\"production\")' \"\$(state_file_for '$TMP/noreview')\""
+# Regression case: u2giants/ansible, production class, no authorization.
 newrepo "$TMP/ansible" u2giants/ansible
 ( cd "$TMP/ansible" && "$GATES" start --class production ) >/dev/null
-check 'u2giants/ansible production without an approval fails closed (rc 3)' \
+check 'u2giants/ansible production without owner authorization fails closed (rc 3)' \
   "rc 3 '$TMP/ansible' check --before production"
-check 'u2giants/ansible production refusal names the missing reviewer approval' \
-  "out '$TMP/ansible' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
-check 'u2giants/ansible reports the production gate required, not waived' \
-  "out '$TMP/ansible' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null) and (.waived_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null)'"
+check 'u2giants/ansible production refusal names the missing owner authorization' \
+  "out '$TMP/ansible' check --before production | grep -q 'requires the owner'"
+check 'u2giants/ansible reports the owner-authorization gate required, no reviewer gate' \
+  "out '$TMP/ansible' explain --json | jq -e '.effective_class==\"production\" and (.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null) and (.required_gates + .unchecked_gates + .waived_gates | index(\"exact-resource-and-action-ai-reviewer-approval\"))==null'"
 ( cd "$TMP/noreview" && "$GATES" start --class deployment ) >/dev/null
 check 'outside shared-db a deployment-class check opens without a reviewer approval' \
   "rc 0 '$TMP/noreview' check --before ship"
@@ -929,29 +928,27 @@ check 'no changes at all allows the action' "rc 0 '$TMP/clean' check --before sh
 check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/clean' check --before production"
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
 check 'a declared production task retains its production gate with no file change' \
-  "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
-check 'a declared production task is refused without an AI reviewer approval' \
+  "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null)'"
+check 'a declared production task is refused without owner authorization' \
   "rc 3 '$TMP/clean' check --before production"
-check 'a production refusal names the missing reviewer approval' \
-  "out '$TMP/clean' check --before production | grep -q 'requires an assigned AI reviewer APPROVE'"
-check 'a production task refuses a reviewer report path that does not exist' \
-  "rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/no-such-report.json'"
-check 'a production task with a valid exact-head AI APPROVE may enter its guarded path' \
-  "rc 0 '$TMP/clean' check --before production --reviewer-approval \"\$(appr '$TMP/clean' production)\""
-check 'a production task may still dispatch its review (the approval producer is not gated)' \
+check 'a production refusal names the missing owner authorization' \
+  "out '$TMP/clean' check --before production | grep -q 'requires the owner'"
+check 'a production task with owner authorization may enter its guarded path' \
+  "rc 0 '$TMP/clean' check --before production --acknowledge 'Albert: run it'"
+check 'a production task may still dispatch an advisory review' \
   "rc 0 '$TMP/clean' check --before review"
-check 'a production task may still wait on its pull request without a reviewer report' \
+check 'a production task may still wait on its pull request' \
   "rc 0 '$TMP/clean' check --before pr-wait"
-check 'a production task may still run code-only review without a reviewer report' \
+check 'a production task may still run code-only review' \
   "rc 0 '$TMP/clean' check --before code-only-review"
-check 'a production task refuses ship without an AI reviewer approval' \
+check 'a production task refuses ship without owner authorization' \
   "rc 3 '$TMP/clean' check --before ship"
 # The pre-rename identity u2giants/shared-db (a redirected remote) is the same
-# repository and keeps the reviewer requirement.
+# repository and keeps the owner-authorization requirement.
 newrepo "$TMP/clean-alias" u2giants/shared-db
 ( cd "$TMP/clean-alias" && "$GATES" start --class production ) >/dev/null
-check 'a redirected u2giants/shared-db production task is refused without an AI reviewer approval'   "rc 3 '$TMP/clean-alias' check --before production"
-check 'a redirected u2giants/shared-db keeps the reviewer gate required, not waived'   "out '$TMP/clean-alias' explain --json | jq -e '(.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
+check 'a redirected u2giants/shared-db production task is refused without owner authorization'   "rc 3 '$TMP/clean-alias' check --before production"
+check 'a redirected u2giants/shared-db keeps the owner gate required and no reviewer gate'   "out '$TMP/clean-alias' explain --json | jq -e '(.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null) and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")==null)'"
 newrepo "$TMP/rs" popcre/shared-db
 ( cd "$TMP/rs" && "$GATES" start --class reviewer-safety ) >/dev/null
 newrepo "$TMP/unchecked"
@@ -960,8 +957,8 @@ check 'an unenforced gate is never printed as required' \
   "out '$TMP/unchecked' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
 check 'explain names the gates this tool does not check' \
   "out '$TMP/unchecked' explain | grep -q 'not checked by this tool'"
-check 'local-tests is a checked gate where a reviewer approval is required' \
-  "out '$TMP/rs' explain --json | jq -e '.required_gates | index(\"local-tests\") != null'"
+check 'local-tests stays an unchecked gate now that no reviewer approval is required (#2041)' \
+  "out '$TMP/rs' explain --json | jq -e '(.required_gates | index(\"local-tests\") == null) and (.unchecked_gates | index(\"local-tests\") != null)'"
 newrepo "$TMP/rawarchive"
 ( cd "$TMP/rawarchive" && "$GATES" start --class code ) >/dev/null
 mkdir -p "$TMP/rawarchive/transcripts" && printf '{}\n' > "$TMP/rawarchive/transcripts/session.jsonl"
@@ -1023,17 +1020,9 @@ check 'a historical archive outside the change set does not block code-only-revi
   "rc 0 '$TMP/rawhistory' check --before code-only-review"
 check 'a historical archive outside the change set does not block ship' \
   "rc 0 '$TMP/rawhistory' check --before ship"
-check 'a reviewer-safety task refuses ship without an exact-head independent review' \
-  "rc 3 '$TMP/rs' check --before ship"
-check 'a reviewer-gated release refuses an approval that carries no passing test evidence' \
-  "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\""
-check 'the local-tests refusal names the missing test evidence' \
-  "out '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\" | grep -q 'local-tests'"
-check 'a refused local-tests release records no reviewer approval in task state' \
-  "rc 3 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship '' '.tests=null')\" && state=\"\$(state_file_for '$TMP/rs')\" && jq -e '((.overrides // []) | map(select(.kind==\"reviewer-approval\")) | length) == 0' \"\$state\""
-check 'a reviewer-safety task ships with a valid exact-head AI APPROVE' \
-  "rc 0 '$TMP/rs' check --before ship --reviewer-approval \"\$(appr '$TMP/rs' ship)\""
-check 'a production task refuses a report that is not an AI APPROVE for this head' \
+check 'a reviewer-safety task ships without a reviewer verdict (#2041)' \
+  "rc 0 '$TMP/rs' check --before ship"
+check 'a production task refuses a reviewer report in place of owner authorization' \
   "printf '{}' > '$TMP/fake-report.json'; rc 3 '$TMP/clean' check --before production --reviewer-approval '$TMP/fake-report.json'"
 # The evidence requirement must be decided BEFORE every approval call site: a
 # LOCAL_TESTS_REQUIRED assigned after the call would never be seen by
@@ -1131,9 +1120,9 @@ check 'the reviewer approval is recorded in the intent state' \
 ( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a stronger declared class supplies the effective gates' \
-  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and ((.required_gates+.waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
+  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null)'"
 check 'a stronger declared class does not drop observed-class required proof' \
-  "out '$TMP/gate' explain --json | jq -e '(.required_gates+.waived_gates)|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null'"
+  "out '$TMP/gate' explain --json | jq -e '.required_gates|index(\"current-chat-resource-and-action-authorization\")!=null'"
 rm -f "$TMP/gate/note.md"
 ( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 mkdir -p "$TMP/gate/bin"; printf '#!/bin/sh\n' > "$TMP/gate/bin/ai-review-lifecycle"
@@ -1200,12 +1189,14 @@ check 'the declaration PR itself is private-tooling and reaches code-only review
 git -C "$TMP/writer" add -A && git -C "$TMP/writer" commit -qm declare
 ( cd "$TMP/writer" && "$GATES" start --class private-tooling --base HEAD ) >/dev/null
 printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
-check 'a declared writer reaches the reviewer-approval step for database' \
-  "out '$TMP/writer' check --before database | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
-check 'and is still refused without that approval' \
+check 'a declared writer reaches the owner-authorization step for database (#2041)' \
+  "out '$TMP/writer' check --before database | grep -Fq 'the owner must authorize'"
+check 'and is still refused without that authorization' \
   "rc 3 '$TMP/writer' check --before database"
-check 'an approval that is not an exact-head lifecycle APPROVE is refused' \
-  "out '$TMP/writer' check --before database --reviewer-approval '$TMP/writer/.ai-devops/task-gates.json' | grep -Fq 'not a lifecycle-recorded'"
+check 'a reviewer report alone does not open it' \
+  "out '$TMP/writer' check --before database --reviewer-approval '$TMP/writer/.ai-devops/task-gates.json' | grep -Fq 'the owner must authorize'"
+check 'owner authorization opens the declared writer database action' \
+  "rc 0 '$TMP/writer' check --before database --acknowledge 'Albert: load the reconciliation rows'"
 check 'the release never opens production for the same writer' \
   "out '$TMP/writer' check --before production --reviewer-approval \"\$(appr '$TMP/writer' production)\" | grep -Fq 'no reviewer-approval'"
 check 'the release never opens a formal review' \
@@ -1215,7 +1206,7 @@ check 'one licensed row keeps database sealed despite the declaration' \
   "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
 rm -rf "$TMP/writer"
 
-printf 'infrastructure production reviewer release stays pinned, declared and reviewer-gated\n'
+printf 'infrastructure production owner release stays pinned, declared and owner-authorized\n'
 infra_decl='{"schema_version":1,"paths":[{"glob":"**","class":"infrastructure"}],"gates":{"infrastructure":{"required":["reviewed-production-dispatch"],"forbidden_actions":["infrastructure","production"]}}}'
 infra_repo(){ # <dir> <identity> — declared, committed, clean; local origin/main forged to HEAD
   newrepo "$1" "$2"
@@ -1240,7 +1231,7 @@ check 'an insteadOf-rewritten origin cannot impersonate the ansible repository' 
 infra_repo "$TMP/infra-foreign" 'u2giants/hiclaw'
 check 'another repository with the same declaration keeps production sealed' \
   "out '$TMP/infra-foreign' check --before production --reviewer-approval \"\$(appr '$TMP/infra-foreign' production)\" | grep -Fq 'no reviewer-approval'"
-jq '.reviewer_release.production.infrastructure="anything"' "$ROOT/config/task-gates.json" > "$TMP/broad-infra.json"
+jq '.owner_release.production.infrastructure="anything"' "$ROOT/config/task-gates.json" > "$TMP/broad-infra.json"
 check 'central policy cannot broaden the infrastructure production release' \
   "AI_TASK_GATES_FILE='$TMP/broad-infra.json' out '$TMP/infra-foreign' check --before production | grep -Fq 'closed u2giants/ansible production boundary'"
 rm -rf "$TMP/infra" "$TMP/infra-undeclared" "$TMP/infra-foreign" "$TMP/broad-infra.json"
@@ -1252,12 +1243,12 @@ if git clone -q --depth 1 https://github.com/u2giants/ansible.git "$TMP/ansible-
   && grep -q reviewed-production-dispatch "$TMP/ansible-real/.ai-devops/task-gates.json"; then
   git -C "$TMP/ansible-real" config user.name T; git -C "$TMP/ansible-real" config user.email t@e
   ( cd "$TMP/ansible-real" && "$GATES" start --class infrastructure --base HEAD ) >/dev/null
-  check 'the real ansible main reaches the reviewer-approval step for production' \
-    "out '$TMP/ansible-real' check --before production | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
-  check 'and is still refused without that approval' \
+  check 'the real ansible main reaches the owner-authorization step for production' \
+    "out '$TMP/ansible-real' check --before production | grep -Fq 'the owner must authorize'"
+  check 'and is still refused without that authorization' \
     "rc 3 '$TMP/ansible-real' check --before production"
-  check 'and starts with an exact-head AI reviewer APPROVE' \
-    "rc 0 '$TMP/ansible-real' check --before production --reviewer-approval \"\$(appr '$TMP/ansible-real' production)\""
+  check 'and starts with the owner authorization, no reviewer (#2041)' \
+    "rc 0 '$TMP/ansible-real' check --before production --acknowledge 'Albert: apply the playbook'"
   printf 'x\n' > "$TMP/ansible-real/untracked.txt"
   check 'a dirty checkout keeps production sealed' \
     "out '$TMP/ansible-real' check --before production --reviewer-approval \"\$(appr '$TMP/ansible-real' production)\" | grep -Fq 'no reviewer-approval'"
@@ -1411,7 +1402,7 @@ if ln -s "$ROOT/bin/ai-task-gates" "$LINKDIR/ai-task-gates" 2>/dev/null && [ -L 
   check 'the gate still runs when invoked through its installed symlink' \
     "env -u AI_TASK_GATES_FILE '$LINKDIR/ai-task-gates' version >/dev/null"
   check 'the gate still classifies when invoked through its installed symlink' \
-    "( cd '$TMP/class' && printf 'bin/ai-review-lifecycle\n' | env -u AI_TASK_GATES_FILE '$LINKDIR/ai-task-gates' explain --json --paths-from - ) | jq -e '.observed_class==\"reviewer-safety\"' >/dev/null"
+    "( cd '$TMP/class' && printf 'bin/ai-review-lifecycle\n' | env -u AI_TASK_GATES_FILE '$LINKDIR/ai-task-gates' explain --json --paths-from - ) | jq -e '.observed_class==\"code\"' >/dev/null"
 else
   printf '  skip symlink cases (this filesystem does not make real symlinks)\n'
 fi
@@ -1453,7 +1444,7 @@ jq '.action_gates = {"teleport": {"require_gate": {"prose": "whatever"}}}' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-action.json"
 jq '.action_gates["code-only-review"].require_gate["made-up-class"] = "whatever"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-class.json"
-jq '.reviewer_release.database["private-evidence"] = "whatever"' \
+jq '.native_profile_release.database["private-evidence"] = "whatever"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-release.json"
 jq '.application_source_releases["popcre/designflow-backend"].target.project = "wrong-project"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-application-target.json"
@@ -1570,18 +1561,10 @@ check 'the exact committed application source target records its independent app
   "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
 check 'outside shared-db the application source route records its release without a reviewer approval' \
   "rc 0 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json"
-check 'application source route rejects a reviewer REJECT' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.verdict=\"REJECT\"')\""
-check 'application source route rejects plan-review for a live action' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$APP' plan-review '$APP_HEAD')\""
-check 'application source route rejects a self-provider approval' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.provider=\"claude\"')\""
-check 'application source route rejects a stale approval' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.stale=true')\""
-check 'application source route rejects an approval for another source digest' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.source_digest=\"foreign\"')\""
-check 'application source route rejects an approval for another repository' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.repository_key=\"foreign\"')\""
+# #2041: the application source route waits for no reviewer verdict; a
+# supplied report (even a REJECT) is ignored, never required.
+check 'application source route ignores a reviewer REJECT (review is advisory)' \
+  "rc 0 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval \"\$(appr '$APP' deploy '$APP_HEAD' '.verdict=\"REJECT\"')\""
 check 'application source target cannot be used for another action' \
   "rc 3 '$APP' check --before review --application-release-target .ai-devops/application-release-target.json"
 check 'application source target cannot override an explicit comparison base' \
@@ -1594,7 +1577,7 @@ check 'application source target cannot combine with small-owner entry' \
   "rc 3 '$APP' check --before deploy --small-owner-entry https://github.com/popcre/designflow-backend/issues/1 --row-count 1 --owner-quote request --application-release-target .ai-devops/application-release-target.json"
 check 'application source target rejects a noncanonical manifest path' \
   "rc 3 '$APP' check --before deploy --application-release-target cloudbuild.yaml --reviewer-approval '$APP_APPROVAL'"
- jq '.reviewer_release.deploy={deployment:"generic-release"}' "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/generic-deployment-release.json"
+ jq '.owner_release.deploy={deployment:"generic-release"}' "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/generic-deployment-release.json"
 check 'application source route fails closed if central policy adds a generic protected deployment release' \
   "AI_TASK_GATES_FILE='$SCHEMA_TMP/generic-deployment-release.json' rc 4 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL'"
 check 'application source override is persisted with its exact head and manifest blob' \
@@ -1630,8 +1613,6 @@ printf 'source moved after review\n' >> "$APP/README.md"
 git -C "$APP" add README.md && git -C "$APP" commit -qm 'move source after prior approval'
 APP_HEAD="$(git -C "$APP" rev-parse HEAD)"
 APP_APPROVAL="$(appr "$APP" deploy "$APP_HEAD")"
-check 'application source route rejects an approval for the previous source HEAD' \
-  "rc 3 '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_OLD_APPROVAL'"
 APP_STATE="$(state_file_for "$APP")"
 APP_STATE_BEFORE="$TMP/app-state-before-publication-failure.json"
 cp "$APP_STATE" "$APP_STATE_BEFORE"
@@ -1829,8 +1810,8 @@ check 'explain cache returns the uncached answer byte for byte' "[ -n '$first' ]
 cp "$XP" "$XP.copy"
 check 'the same inventory in a fresh temporary file reuses the answer' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP.copy')\" = '$first' ] && [ \"\$(xc_count)\" = '$before' ]"
 check 'explain cache never applies to an explain without --paths-from FILE' "[ \"\$(cd '$XC' && '$GATES' explain --json | jq -r .effective_class)\" != '' ] && [ \"\$(xc_count)\" = '$before' ]"
-printf 'bin/ai-review-lifecycle\n' > "$XP"
-check 'a changed path inventory is classified afresh' "[ \"\$(xc_class)\" = reviewer-safety ]"
+printf 'services/api/Dockerfile\n' > "$XP"
+check 'a changed path inventory is classified afresh' "[ \"\$(xc_class)\" = deployment ]"
 printf 'docs/a.md\n' > "$XP"
 ( cd "$XC" && "$GATES" start --class private-evidence >/dev/null 2>&1 )
 check 'a newly recorded task class is honoured over a cached answer' "[ \"\$(xc_class)\" = private-evidence ]"
@@ -1918,14 +1899,9 @@ WF_WRITE_OUT="$(cd "$WF" && PATH="$TMP/app-mv-fail:$PATH" AI_TEST_ATOMIC_TARGET=
 check 'workflow fails closed without a durable receipt' "[ '$WF_WRITE_RC' -eq 3 ] && printf '%s' \"\$WF_WRITE_OUT\" | grep -q 'receipt could not be persisted' && cmp -s '$WF_STATE' '$TMP/wf-state-before'"
 check 'ordinary database action remains sealed' "rc 3 '$WF' check --before database --reviewer-approval '$WF_APPROVAL'"
 check 'workflow cannot omit explicit target' "rc 3 '$WF' check --before application-workflow --reviewer-approval '$WF_APPROVAL'"
-check 'workflow cannot omit review' "rc 3 '$WF' check $WF_ARGS"
 check 'workflow cannot override base' "rc 3 '$WF' check $WF_ARGS --base HEAD --reviewer-approval '$WF_APPROVAL'"
-check 'workflow cannot use plan review' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$WF' plan-review '$WF_HEAD')\""
-check 'workflow refuses stale approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.stale=true')\""
-check 'workflow refuses foreign digest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.source_digest=\"foreign\"')\""
-check 'workflow refuses non-independent approval' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.provider=.implementer_engine')\""
-check 'workflow refuses an approval that carries no passing test evidence' "rc 3 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
-check 'workflow local-tests refusal names the missing test evidence' "out '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\" | grep -q 'local-tests'"
+check 'workflow needs no reviewer approval (#2041)' "rc 0 '$WF' check $WF_ARGS"
+check 'workflow ignores a non-independent or untested report (review is advisory)' "rc 0 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
 cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"
 python3 - "$ROOT" "$WF" <<'PY'
 import importlib.util, json, pathlib, sys
@@ -1992,7 +1968,7 @@ check 'generated selector cannot authorize missing runtime, malformed envelope o
   "printf '%s' '{\"fixture_id\":\"generated-definition-boundary-v1\"}' | rc 3 '$GEN' check --before database --action-manifest-stdin --reviewer-approval '$GEN_APPROVAL'"
 check 'generated route cannot borrow original restoration stage' \
   "printf '%s' '{\"fixture_id\":\"generated-definition-boundary-v1\"}' | rc 3 '$GEN' check --before database --action-manifest-stdin --action-stage original-restoration --reviewer-approval '$GEN_APPROVAL'"
-jq '.reviewer_release.database["reviewer-safety"]="generic-database"' "$ROOT/config/task-gates.json" > "$TMP/bad-generated-policy.json"
+jq '.native_profile_release.database["reviewer-safety"]="generic-database"' "$ROOT/config/task-gates.json" > "$TMP/bad-generated-policy.json"
 check 'central generated release refuses a broadened reviewer-safety gate name' \
   "AI_TASK_GATES_FILE='$TMP/bad-generated-policy.json' rc 4 '$GEN' check --before database"
 
