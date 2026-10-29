@@ -25,8 +25,27 @@ set -u
 self="${BASH_SOURCE[0]}"
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)
-    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$(dirname "$self")/ai-transcript-upload.ps1")" "$@" ;;
+    # Translate this script's options to the PowerShell twin's parameters.
+    ps_args=()
+    while (($#)); do
+      case "$1" in
+        --dropbox) ps_args+=(-DropboxRoot "$(cygpath -w "$2")"); shift 2 ;;
+        --host) ps_args+=(-HostName "$2"); shift 2 ;;
+        --hot-minutes) ps_args+=(-HotMinutes "$2"); shift 2 ;;
+        --map) ps_args+=(-Map "$2"); shift 2 ;;
+        --install) ps_args+=(-Install); shift ;;
+        --check) ps_args+=(-Check); shift ;;
+        --remove) ps_args+=(-Remove); shift ;;
+        -h|--help) sed -n '2,24p' "$self"; exit 0 ;;
+        *) echo "ai-transcript-upload: $1 is not supported on Windows" >&2; exit 2 ;;
+      esac
+    done
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$(dirname "$self")/ai-transcript-upload.ps1")" "${ps_args[@]}" ;;
 esac
+
+# A folder or relative destination must stay inside chat_transcripts/.
+safe_name() { case "$1" in ''|*/*|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac; }
+safe_rel() { case "/$1/" in //*|*/../*|*/./*) return 1 ;; esac; case "$1" in *[!A-Za-z0-9._/-]*) return 1 ;; esac; }
 
 dropbox="${HOME}/Dropbox"; host="$(hostname 2>/dev/null || uname -n)"; host="${host%%.*}"
 hot_min=15; maps=(); pull=""; mode=run; with_pull=""
@@ -46,6 +65,14 @@ while (($#)); do
   esac
 done
 case "$hot_min" in ''|*[!0-9]*) echo "ai-transcript-upload: --hot-minutes needs a whole number" >&2; exit 2 ;; esac
+for v in "$host" ${pull:+"$pull"} ${with_pull:+"$with_pull"}; do
+  safe_name "$v" || { echo "ai-transcript-upload: unsafe host name: $v" >&2; exit 2; }
+done
+for m in ${maps[@]+"${maps[@]}"}; do
+  [ "$m" = none ] && continue
+  case "$m" in *=*) ;; *) echo "ai-transcript-upload: --map needs SRC=DESTREL: $m" >&2; exit 2 ;; esac
+  safe_rel "${m#*=}" || { echo "ai-transcript-upload: unsafe destination in --map: ${m#*=}" >&2; exit 2; }
+done
 
 state_dir="${AI_TRANSCRIPT_UPLOAD_STATE_DIR:-$HOME/.local/state/ai-devops}"
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -74,8 +101,8 @@ if [ "$mode" = install ]; then
     && mv -f "$cfg_dir/transcript-upload.tmp.$$" "$cfg_dir/transcript-upload" || exit 1
   {
     printf '[Unit]\nDescription=Copy AI session transcripts to Dropbox (ai-devops)\n\n[Service]\nType=oneshot\n'
-    printf 'ExecStart=-/usr/bin/env bash "%%h/.config/ai-devops/transcript-upload"\n'
-    [ -n "$with_pull" ] && printf 'ExecStart=-/usr/bin/env bash "%%h/.config/ai-devops/transcript-upload" --pull %s --map none\n' "$with_pull"
+    printf 'ExecStart=-/usr/bin/env bash "%s/transcript-upload"\n' "$cfg_dir"
+    [ -n "$with_pull" ] && printf 'ExecStart=-/usr/bin/env bash "%s/transcript-upload" --pull %s --map none\n' "$cfg_dir" "$with_pull"
   } > "$unit_dir/$unit.service"
   printf '[Unit]\nDescription=Daily AI transcript upload to Dropbox\n\n[Timer]\nOnCalendar=*-*-* 06:30:00\nRandomizedDelaySec=900\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' > "$unit_dir/$unit.timer"
   "$systemctl_cmd" --user daemon-reload || exit 1

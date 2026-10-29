@@ -71,6 +71,8 @@ bash "$up" --dropbox "$db" --host hostx --map "$work/link=codex/sessions" >/dev/
 check "follows the symlink target" 'cmp -s "$work/real/r/l.jsonl" "$D/codex/sessions/r/l.jsonl"'
 
 check "missing Dropbox folder fails clearly" '! bash "$up" --dropbox "$work/nodb" --host hostx --map "$src/p=x" >/dev/null 2>&1'
+check "rejects a host name that leaves chat_transcripts/" '! bash "$up" --dropbox "$db" --host .. --map "$src/p=x" >/dev/null 2>&1 && ! bash "$up" --dropbox "$db" --pull "a/b" --map none >/dev/null 2>&1'
+check "rejects a --map destination with .. or an absolute path" '! bash "$up" --dropbox "$db" --host hostx --map "$src/p=../esc" >/dev/null 2>&1 && ! bash "$up" --dropbox "$db" --host hostx --map "$src/p=/abs" >/dev/null 2>&1 && [ ! -e "$db/ai/esc" ]'
 check "missing source folder is not an error" 'bash "$up" --dropbox "$db" --host hostx --map "$work/absent=x" >/dev/null'
 
 # Pull mode (hetz has no Dropbox): rsync from a local stand-in root.
@@ -109,6 +111,7 @@ if command -v pwsh >/dev/null 2>&1; then
   printf 'keep\n' > "$W/claude/projects/dest-only.jsonl"
   out="$(LOCALAPPDATA="$work/lad" pwsh -NoProfile -File "$here/../bin/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=claude/projects" 2>&1)"
   check "ps1: skips identical and never deletes" 'printf "%s" "$out" | grep -q "copied=0" && [ -e "$W/claude/projects/dest-only.jsonl" ]'
+  check "ps1: rejects an unsafe -Map destination" '! LOCALAPPDATA="$work/lad" pwsh -NoProfile -File "$here/../bin/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=../esc" >/dev/null 2>&1 && [ ! -e "$wdb/ai/esc" ]'
 else
   skip "ps1 checks" "pwsh not installed"
 fi

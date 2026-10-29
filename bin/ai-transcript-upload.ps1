@@ -39,6 +39,7 @@ if ($Check) {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   if (-not $t) { "ERROR scheduled task $TaskName not registered"; $rc = 1 }
   elseif ($t.State -eq 'Disabled') { "ERROR scheduled task $TaskName is disabled"; $rc = 1 }
+  elseif ("$($t.Principal.LogonType)" -notin @('S4U','Password')) { "ERROR scheduled task $TaskName runs only while logged on ($($t.Principal.LogonType))"; $rc = 1 }
   if ($rc -eq 0) { "OK transcript upload task installed ($($t.Principal.UserId), $($t.Principal.LogonType))" }
   exit $rc
 }
@@ -59,7 +60,8 @@ if ($Install) {
   } catch {
     $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Daily AI transcript copy to Dropbox (ai-devops; never deletes)' -Force | Out-Null
-    $mode = 'Interactive (S4U refused: ' + $_.Exception.Message + ')'
+    "WARN S4U refused ($($_.Exception.Message)); task registered Interactive and runs only while $me is logged on"
+    exit 3
   }
   "OK transcript upload task $TaskName registered daily at $At as $me, logon $mode"; exit 0
 }
@@ -71,6 +73,13 @@ if (-not $DropboxRoot) {
   if (-not $DropboxRoot) { $DropboxRoot = Join-Path $env:USERPROFILE 'Dropbox' }
 }
 if (-not $HostName) { $HostName = (& hostname).Trim() }
+# Folder and destination names must stay inside chat_transcripts\.
+if ($HostName -notmatch '^[A-Za-z0-9._-]+$' -or $HostName -in @('.','..')) { Write-Error "ai-transcript-upload: unsafe host name: $HostName"; exit 2 }
+foreach ($m in $Map) {
+  if ($m.IndexOf('=') -lt 1) { Write-Error "ai-transcript-upload: -Map needs SRC=DESTREL: $m"; exit 2 }
+  $rel = $m.Substring($m.IndexOf('=') + 1)
+  if ($rel -notmatch '^[A-Za-z0-9._-]+([\\/][A-Za-z0-9._-]+)*$' -or ($rel -split '[\\/]') -contains '..' -or ($rel -split '[\\/]') -contains '.') { Write-Error "ai-transcript-upload: unsafe destination in -Map: $rel"; exit 2 }
+}
 $Root = Join-Path $DropboxRoot 'ai\chat_transcripts'
 if (-not (Test-Path -LiteralPath $Root)) { Write-Error "ai-transcript-upload: $Root not found (Dropbox missing?)"; exit 1 }
 if ($Map.Count -eq 0) {
