@@ -45,7 +45,7 @@ For ten months, review gates held work for days or weeks. The freeze week, when 
 
 `popcre/shared-db` holds the shared Supabase database's migrations and workflows. Other repos that use the toolkit include u2giants/theoracle and u2giants/popdam3; DesignFlow repos are out of scope.
 
-CI uses the self-hosted runners `edge-dev3-linux` (1–4), label `ai-devops-linux`. These are GitHub's free runner program on Albert's machine, so GitHub charges nothing. The reviewers run there through `opencode`, using provider keys held in runner-local config.
+CI uses the self-hosted runners `edge-dev3-linux` (1–4), label `ai-devops-linux`. They are GitHub's runner agent installed on Albert's own machine; GitHub bills no Actions minutes for self-hosted runners. The reviewers run there through `opencode`, using provider keys held in runner-local config.
 
 ### 3. What triggered this
 
@@ -82,7 +82,7 @@ CI uses the self-hosted runners `edge-dev3-linux` (1–4), label `ai-devops-linu
 ### 5. Current state
 
 **On main (merged in #2044):**
-- `bin/ai-review-simple` (stdlib Python, under 400 lines). One provider reviews `base...head` through `opencode` in a read-only clone and writes `{provider, head, verdict, findings, elapsed, error}` JSON. It exits 0 on a verdict and 3 when the reviewer is unavailable. HTTP 402/429 and "exceeded your current quota" are classed as out-of-credit.
+- `bin/ai-review-simple` (stdlib Python, under 400 lines). One provider reviews `base...head` through `opencode` in a read-only clone and writes `{provider, head, verdict, findings, elapsed, error}` JSON. It exits 0 on a verdict and 3 when the reviewer is unavailable. The out-of-credit classifier matches 402, 429 and 1113, insufficient balance, rate limit, payment required and "exceeded your current quota" (`bin/ai-review-simple` ~93-97). It returns exit 2 for a refusal such as a head mismatch (`review()` ~327-329). Exit 2 must **not** fall through to the next provider.
 - `--combine` mode.
 - `.github/workflows/ai-review.yml`, currently the *old* 4-reviewer blocking rule. It refuses to run if `bin/ai-review-simple` is missing on the toolkit ref, so PR code never runs next to the keys.
 - Tests `tests/test_ai_review_simple.py`, `tests/test_ai_review_rule.py`, wrapper `tests/test-ai-review-simple.sh`.
@@ -147,15 +147,23 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 1. Review is advice only and never blocks a merge. The `ai-review` check is success or neutral only, and is never a required check.
 2. **One reviewer per PR.** The reviewer is picked by `PR number mod 4` over [muse, glm, deepseek, stepfun]. If it is unavailable, fall through to the next, up to 4 tries.
 3. **Runs once,** on `opened`, `reopened` and `ready_for_review`. No re-review on every push.
-4. **Docs-only PRs are skipped.** That means every changed file is `*.md` and none is `plan_*.md` or `IMPLEMENTATION-PLAN.md`, or the file is under `HANDOFF.d/` or `docs/`. A skipped PR gets a success check titled "review not needed (docs only)".
+4. **Docs-only PRs are skipped.** A PR is docs-only only when **every** changed file passes this test: it is `*.md`, or it is under `HANDOFF.d/` or `docs/`, AND it is not named `plan_*.md` or `IMPLEMENTATION-PLAN.md` in any directory. A single non-doc file or plan file means the PR is reviewed. A skipped PR gets a success check titled "review not needed (docs only)".
+4a. **What still gates merge:** the required `verification-closure` check (`config/merge-queue-expected.json` ~39) and CI tests on the merged commit. Stage A must confirm that `verify.yml` still runs the test suite on every PR and in the merge queue.
 5. **On REJECT or REVISE,** the workflow opens a `review-finding` issue. An automatic fixer agent decides whether each finding is real. Real ones get a fix PR on branch `review-fix/<issue>` that closes the issue. Invalid ones get the agent's reasoning and the issue is closed as not planned. Fix PRs are never reviewed, to prevent loops.
+   - **Fixer safety:** findings text is untrusted input.
+     - The fixer job runs with no reviewer provider keys: a separate job, with the opencode secrets directory and key env vars unset or unmounted.
+     - It may not edit `.github/workflows/**`, `install.sh`, `update.sh`, `bin/install-ai-devops-windows.ps1`, `config/task-gates.json` or `bin/ai-task-gates`, enforced by a path check before the PR is opened.
+     - Its PRs go through normal CI and the merge queue.
+     - Closing a finding as "not planned" requires a comment quoting evidence. Such an issue still blocks production promotion for 24 hours after closing.
 6. **Production is promoted automatically by an AI agent** when all of these hold:
    - the change is merged;
-   - the preview rehearsal passed;
+   - the preview rehearsal passed and cannot be skipped;
    - the tests passed;
-   - no open `review-finding` issue references the change.
+   - no blocking `review-finding` issue references the change.
+
+   "References" means an issue labelled `review-finding` whose body contains the PR URL; the workflow writes this. Blocking means open, or closed as not planned within the last 24 hours. The apply job runs this query live, immediately before the apply step, not at merge time.
    Nothing ever asks Albert.
-7. All other reviewer gates, hooks, instructions, installer stages, jobs and code are removed. Safety checks unrelated to review (secrets, privacy, worktree guard, migration ordering and leases, tests) stay.
+7. All other reviewer gates, hooks, instructions, installer stages, jobs and code are removed. Safety checks unrelated to review stay: secrets, privacy, worktree guard, install target-identity proof, migration ordering, leases and tests. Stages B and G must list in their PR descriptions which non-review checks they kept.
 
 **Open for the implementer:**
 - Fixer engine choice if Codex fails. Claude needs a re-login on edge-dev3; Albert can't type credentials, so prefer Codex.
@@ -167,20 +175,21 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 ### 9. Stages (one PR per stage; one child issue per stage)
 
 **A — Finish and prove PR #2058.**
-- Merge via the queue: `gh pr merge 2058 --squash`, then wait with `bin/ai-pr-wait 2058 --timeout-minutes 60` in the background.
+- Enter the merge queue using the repo's documented command (`gh pr merge 2058 --squash` worked for #2044 on 2026-10-29; check `config/merge-queue-expected.json` first). Wait with `bin/ai-pr-wait 2058 --timeout-minutes 60` in the background.
 - Live proof, then delete the throwaway branches and PRs:
-  1. A throwaway code PR gets exactly one reviewer comment and a non-failure check.
-  2. A throwaway PR with a planted off-by-one bug in a new test helper produces a `review-finding` issue, then a fixer PR.
-  3. A docs-only PR shows "review not needed".
-- **Done when:** all three are proven, with run IDs and links posted on the child issue.
+  1. A throwaway PR with a planted off-by-one bug in a new test helper gets exactly one reviewer comment and a non-failure check, then a `review-finding` issue, then a fixer PR that passes CI.
+  2. A docs-only PR shows "review not needed".
+- **Done when:** both are proven, with run IDs and links posted on #2070.
 
 **B — Finish PR #2057.**
-- Read the `windows-offline-section (3)` failure log (`gh run view <id> --log-failed`; strip ANSI). Fix it, or re-run once if it is flaky.
+- Read the `windows-offline-section (3)` failure log (`gh run view <id> --log-failed`; strip ANSI). Fix it, or re-run once if it is flaky. Before ignoring any failing check, re-confirm it is not required: today only `verification-closure` is required (`config/merge-queue-expected.json`).
 - Merge.
 - **Done when:**
   - `ai-task-gates check --before ship` for an installation-class change passes without `--reviewer-approval`;
   - `bash tests/test-ai-task-gates.sh` is green;
   - the change is installed on all 5 hosts, using the normal `update.sh`, or the Windows installer on Windows hosts.
+
+**B deadline:** the freeze window ends 2026-11-12 14:56Z. If #2071 is not merged and installed by 2026-11-10, the session working the plan extends the window file on all 5 hosts by 14 days, the same way as on 2026-10-29, and notes it on #2071. Do not let gating return.
 
 **D — Instructions and skills** (inventory rows 17–20 done in shared-db; rows 51–59 here).
 - Rewrite `templates/system/CLAUDE-global.md` and `AGENTS-global-codex.md`, plus the mimo and zcode variants: remove "assigned AI reviewers gate technical actions", the `ai-review` / rotation / observation-week paragraphs, and "exact-head APPROVE".
@@ -188,8 +197,8 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Archive `docs/reviewer-rotation-rules.md` and `templates/system/REVIEWER-global.md`.
 - Edit the skills in inventory rows 57–59. Keep second-opinion uses, and drop the gate and rotation wording.
 - Reinstall the globals on 5 hosts.
-- Edit theoracle and popdam3 docs if they mention the gate.
-- **Done when:** `grep -riE "exact-head APPROVE|assigned AI reviewer|reviewer-rotation" ~/.claude/CLAUDE.md ~/.codex/AGENTS.md` is empty on each host.
+- Edit theoracle and popdam3 docs if they mention the gate. Close #1948 and #1996 as superseded, and archive `plan_simple-reviewer-rebuild.md` and `plan_reviewer-observation-week.md`.
+- **Done when:** `git grep -iE "exact-head APPROVE|assigned AI reviewer|reviewer-rotation" templates/ AGENTS.md skills/` is empty, and the normal reinstall reports success on 5 hosts.
 
 **E — Installer stages and scheduled jobs** (inventory rows 39–46 and 48).
 - Remove the post-merge requalification hook stage.
@@ -199,14 +208,13 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Disable `reviewer-membership-drift.yml`.
 - Remove the observation-week block in `bin/ai-task-gates` (~58-92) and `tools/lib/observation-week.sh`.
 - Delete the window file on 5 hosts. edge-dev3 needs sudo: use the 1Password `vibe_coding` item "edge-dev3 ahazan sudo password", piped and never printed.
-- Check Windows scheduled tasks and ansible timers.
 - **Done when:**
   - `crontab -l`, the scheduled tasks and the timers on each host show no reviewer jobs;
   - the window file is absent on all 5 hosts;
   - a code PR still merges.
 
 **F — Delete old code and data** (inventory rows 8–13, 47 and 50; leftovers from shared-db stage C).
-- In ai-devops, remove `bin/ai-review*` (except `ai-review-simple`), `ai-reviewer-*`, `ai-*-review`, `ai-review-posthoc`, `ai-release-live-check`, `tools/lib/review-doors/`, `tools/reviewer_events.py`, `bin/ai-process-supervisor` (if it is only used by reviews), their tests, `.cmd` twins, installer entries, and `verify.yml` `windows-reviewer-safety`.
+- In ai-devops, remove `bin/ai-review*` (except `ai-review-simple`), `ai-reviewer-*`, `ai-*-review`, `ai-review-posthoc`, `ai-release-live-check`, `tools/lib/review-doors/`, `tools/reviewer_events.py`, their tests, `.cmd` twins, installer entries, and `verify.yml` `windows-reviewer-safety`.
 - In shared-db, remove:
   - `scripts/lib/lanes/review-*`
   - `review-verdict*`
@@ -224,6 +232,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 2. In shared-db, change production promotion (`shared-supabase-migrations.yml` promotion/apply jobs; `production_apply_review_evidence.py`; `production_review_allowlist.py`; the `OWNER-OVERRIDE` path; workflow `production-apply-review-evidence.yml`) so that an agent-run workflow promotes automatically when rule 8.6 holds. Remove every step that waits for owner authorization or a stored verdict, and the catalog-recovery verdict read.
 3. Load the `shared-db-change` skill first, and work on a shared-db issue linked to the G child issue.
 - **Done when:**
+  - a test proves the preview rehearsal job runs for every promoted change and cannot be skipped;
   - a real shared-db migration PR merges, gets one advisory review, and is promoted to production by the workflow with no human step, with the run ID posted;
   - a planted review finding on a shared-db PR holds that change out of production until its fix merges.
 
@@ -242,7 +251,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Never use hand-written PR polling loops; a hook blocks them. Use `bin/ai-pr-wait`.
 - Commit only as Albert's verified identity (`git var GIT_COMMITTER_IDENT`). Add the co-author trailer.
 - Sign GitHub posts with `$AI_GH_SIGNATURE`.
-- Quote times in EDT.
+- Quote times in New York time (EDT until 2026-11-01, then EST).
 - Secrets stay in 1Password `vibe_coding` only. Never put keys in workflow YAML.
 - Never run PR-supplied code on a runner that holds provider keys.
 - Set `PYTHONDONTWRITEBYTECODE=1` for tests on edge-dev3.
@@ -268,8 +277,6 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - The inventory doc has every row resolved.
 - The window file is gone from 5 hosts.
 - #2041 and the child issues are closed, each with the `- [ ] live proof` box ticked with a link.
-- #1948 and #1996 are closed as superseded.
-- `plan_simple-reviewer-rebuild.md` and `plan_reviewer-observation-week.md` are archived.
 
 **Risks:**
 - **The fixer makes a bad change.** Fix PRs go through normal CI; a bad fix is reverted like any change.
@@ -281,6 +288,19 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 **Uncertain:**
 - Whether u2giants repos can use popcre runners. Check in stage G.
 - Whether Claude can be re-logged on edge-dev3. Not needed if Codex works.
+
+## Muse critique (2026-10-29)
+
+Muse returned REVISE in session `skinny-plan-critique`. Fixes applied:
+- the docs-only rule is now precise;
+- the production promotion reference and its live query are defined;
+- the fixer has a safety block;
+- what still gates merge is stated;
+- the B deadline step is added;
+- `ai-process-supervisor` is no longer deleted (`ai-pr-wait` uses it);
+- the exit-2 no-fall-through rule is added;
+- the runner, credit and time-zone facts are corrected;
+- stage A has two proofs, and D greps the repo.
 
 ## Self-audit
 
