@@ -10,6 +10,27 @@ CLI 0.12.2; brain v0.4.0; graph v0.6.0. All candidate execution was inside
 an isolated Linux filesystem and network namespace, with no model credentials,
 host agent homes, automatic extraction, watcher or hosted connection.
 
+## October 29 captured-memory repair
+
+The [repair receipts](report.md#captured-memory-repair-and-scoped-departure)
+supersede the later historical empty-conversation result. Official upstream
+brain candidate `f8deab174b8f08fda2176683a2f7ccc7bce062b5`, built unchanged
+with focused compatibility tests passing, reads the original compact captured
+session. Two fresh consumers retrieved it before original-source verification.
+No `remember` replacement was introduced. Candidate is unreleased `dev`,
+isolated Linux only; original zero-fact extraction remains unpassed.
+
+A new coding task completed under restricted native tools with separate
+networkless capture hooks. Ordinary commit automatically formed checkpoint
+`01M64GR8ZCJYQYF02QHX7FK2J8` for actual session
+`01a1890b-6299-72c1-8603-329b202be020`; checkpoint listing labels it logs-only.
+Session-inclusive export/import into a separate offline store preserved
+conversation `conversation:667dbd1e93ceb4d520563190b8a26348` and exact text.
+Two more fresh consumers retrieved before reading the task result, verified
+the current committed sources, and correctly superseded the old login-removal
+status. No five-history, full extraction, hosted-sharing or utility pass is
+claimed; earlier protocol deviations and failures remain below.
+
 ## cold-session-resume
 
 Two manually authored, source-backed decisions were stored with

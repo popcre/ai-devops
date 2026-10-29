@@ -246,3 +246,24 @@ Original discovery: November 2, 2026, 5:00 PM EST. Original stop: November 12,
 history, optional CI or background pilot was authorized by this continuation.
 All downstream steps through step 7 were reconciled in the linked report;
 unmet gates and full live proof remain open on #2022.
+## October 29 repair continuation
+
+Captured conversation retrieval now passes narrowly with an unchanged official
+upstream candidate in the isolated Linux trial. A new coding session formed
+an automatic local checkpoint; session-inclusive offline restoration preserved
+conversation identity/text. Four fresh consumers across the original and new
+captures retrieved before checking source; two reconciled stale departure
+status correctly. This does not prove extraction, five natural histories,
+utility savings, Windows candidate support or permanent adoption.
+
+The old trial CLI login was individually revoked while every other login was
+preserved at that boundary. Albert authorized a narrow support request to
+delete only synthetic Trail 113 and confirm backup retention; submitted October
+29 at 2:59 PM EDT, no durable ticket/reply established. Current project API has
+no qualified delete for that branchless record. Closing it remains insufficient.
+Metered Agents stay disabled because documented credit exhaustion can overrun
+into an invoice. GitHub installation/rulesets and original profile hashes
+compare unchanged. [Exact receipts and limits](../tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure).
+Original discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026,
+5:58 AM EST remain unchanged. Historical failures above remain historical.
+
