@@ -178,7 +178,7 @@ The observation-week freeze is still ON. Its window file is on all 5 hosts (see 
 - Usage: `ai-review-simple --provider {muse,glm,deepseek,stepfun} --repo <dir> --base <sha> --head <sha> --out <json>`.
 - What it does:
   - Verifies `git rev-parse HEAD == head`.
-  - Builds one prompt from `templates/review-prompt-simple.md`, which you create. The prompt holds the diff `base...head` and asks for a final line `VERDICT: APPROVE|REJECT|REVISE` plus findings.
+  - Builds one prompt from [the simple review prompt template](templates/review-prompt-simple.md), which you create. The prompt holds the diff `base...head` and asks for a final line `VERDICT: APPROVE|REJECT|REVISE` plus findings.
   - Runs `opencode run` with that provider's model or agent (copy the model IDs and env from the existing doors) in a fresh read-only clone, with a wall-clock timeout.
   - Parses the last `VERDICT:` line from the reviewer's own output.
   - Writes `{provider, head, verdict, findings, elapsed, error}` to `--out`.

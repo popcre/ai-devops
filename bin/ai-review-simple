@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""ai-review-simple: review one PR head with one reviewer, statelessly (#2041).
+
+  ai-review-simple --provider {muse,glm,deepseek,stepfun} --repo DIR --base SHA --head SHA --out FILE.json
+  ai-review-simple --combine [--head SHA] [--comment-out FILE] RESULT.json...
+
+Review exits 0 for a verdict, 3 unavailable, 2 refused. The verdict comes from
+the reviewer's own words only. Combine applies the plan section 8 merge rule,
+prints {state: pass|fail|neutral, ...} and exits 0.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+TEMPLATE = os.path.join(ROOT, "templates", "review-prompt-simple.md")
+VERDICTS = ("APPROVE", "REJECT", "REVISE")
+MAX_DIFF, MAX_STAT, MAX_FINDINGS = 300_000, 20_000, 4000
+
+# Provider facts copied from tools/lib/review-doors/{muse,deepseek,stepfun}.sh,
+# config/opencode-*/opencode.json and bin/ai-glm. GLM uses OpenCode's built-in
+# zai-coding-plan provider (no custom block), keyed by ZHIPU_API_KEY.
+PROVIDERS = {
+    "muse": {
+        "model": "meta-model-api/muse-spark-1.3-contributor",
+        "key_file": "muse-api-key", "key_env": "MODEL_API_KEY",
+        "override": "AI_MUSE_KEY", "timeout": 1200,
+        "provider": {"meta-model-api": {
+            "npm": "@ai-sdk/openai", "name": "Meta Model API",
+            "options": {"baseURL": "https://api.meta.ai/v1",
+                        "apiKey": "{env:MODEL_API_KEY}"},
+            "models": {"muse-spark-1.3-contributor": {
+                "name": "Muse Spark 1.3 Contributor",
+                "limit": {"context": 1048576, "output": 65536}}}}},
+    },
+    "deepseek": {
+        "model": "deepseek-api/deepseek-flash",
+        "key_file": "deepseek-api-key", "key_env": "DEEPSEEK_API_KEY",
+        "override": "DEEPSEEK_API_KEY", "timeout": 1800,
+        "provider": {"deepseek-api": {
+            "npm": "@ai-sdk/openai-compatible", "name": "DeepSeek",
+            "options": {"baseURL": "https://api.deepseek.com/v1",
+                        "apiKey": "{env:DEEPSEEK_API_KEY}"},
+            "models": {"deepseek-flash": {
+                "name": "DeepSeek V4.1 Flash", "tool_call": True,
+                "limit": {"context": 131072, "output": 32768}}}}},
+    },
+    "stepfun": {
+        "model": "stepfun-api/step-5-preview",
+        "key_file": "stepfun-api-key", "key_env": "STEPFUN_API_KEY",
+        "override": "AI_STEPFUN_KEY", "timeout": 1200,
+        "provider": {"stepfun-api": {
+            "npm": "@ai-sdk/openai-compatible", "name": "StepFun",
+            "options": {"baseURL": "https://api.stepfun.ai/v1",
+                        "apiKey": "{env:STEPFUN_API_KEY}"},
+            "models": {"step-5-preview": {
+                "name": "StepFun Step 5 Preview", "tool_call": True,
+                "limit": {"context": 131072, "output": 32768}}}}},
+    },
+    "glm": {
+        "model": "zai-coding-plan/glm-5.3",
+        "key_file": "zai-coding-plan-key.json", "key_env": "ZHIPU_API_KEY",
+        "override": "ZAI_API_KEY", "timeout": 1200, "provider": {},
+    },
+}
+
+AGENT = """---
+description: Read-only simple reviewer
+mode: primary
+tools:
+  write: false
+  edit: false
+  patch: false
+  bash: false
+  webfetch: false
+  task: false
+---
+
+You are a read-only independent code reviewer. Inspect local files and report
+concrete findings with paths. Never change files or claim that you ran
+anything. End with exactly one final line: VERDICT: APPROVE, VERDICT: REJECT
+or VERDICT: REVISE.
+"""
+
+# Anchored to a status/code word so "line 429" or a bare "quota" is not credit.
+CREDIT_RE = re.compile(
+    r"\b(?:status|code|http|error)[\"' :=]{0,4}(?:402|429|1113)\b|insufficient[ _]balance|"
+    r"out of credits?|exceeded your current quota|(?:quota|allowance)\s+(?:exceeded|exhausted|used up)|"
+    r"rate[ _-]?limit(?:ed| exceeded)|payment required", re.I)
+SECRET_RE = re.compile(r"(?i)\b(\w*(?:API_KEY|TOKEN|SECRET|PASSWORD)\w*)(\s*[=:]\s*)[\"']?[^\s\"',}]+"
+                       r"|\bBearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def redact(text, key=None):
+    """Mask credential-shaped text before it reaches the artifact or the PR."""
+    if key and len(key) >= 6:
+        text = text.replace(key, "[REDACTED]")
+    return SECRET_RE.sub(lambda m: (m.group(1) + m.group(2) + "[REDACTED]") if m.group(1)
+                         else "Bearer [REDACTED]", text)
+# A lone leading space is a diff context line, never the reviewer's own verdict.
+VERDICT_RE = re.compile(r"^(?! \S)[\s>*_#`]*VERDICT\s*:\s*\**\s*(APPROVE|REJECT|REVISE)\b", re.I)
+
+
+def parse_verdict(text):
+    """Return the last VERDICT outside code fences, or None."""
+    verdict, fenced = None, False
+    for line in (text or "").splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = VERDICT_RE.match(line)
+        if m:
+            verdict = m.group(1).upper()
+    return verdict
+
+
+def is_credit_error(text):
+    return bool(text and CREDIT_RE.search(text))
+
+
+def read_events(stdout):
+    """Split OpenCode JSON events into (all text, final message, error text).
+
+    The final message is the text after the reviewer's last step or tool
+    call: its report, without the narration that came before it."""
+    texts, errors, current, final = [], [], [], []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "text":
+            part = ev.get("part") or {}
+            if isinstance(part, dict) and part.get("text"):
+                texts.append(part["text"])
+                current.append(part["text"])
+                final = current
+        elif ev.get("type") == "error":
+            errors.append(json.dumps(ev.get("error", ev))[:2000])
+        elif ev.get("type") in ("step_start", "tool_use"):
+            current = []
+    return "\n".join(texts), "\n".join(final), "\n".join(errors)
+
+
+def final_report(final, full):
+    """The findings to publish: the final message without VERDICT lines, capped."""
+    text = final if parse_verdict(final) or not parse_verdict(full) else full
+    lines = [ln for ln in (text or "").splitlines() if not VERDICT_RE.match(ln)]
+    out = redact("\n".join(lines).strip())
+    return out if len(out) <= MAX_FINDINGS else out[:MAX_FINDINGS] + "\n[findings truncated]"
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace").stdout
+
+
+def resolve_opencode():
+    override = os.environ.get("AI_REVIEW_SIMPLE_OPENCODE")
+    if override:
+        return override
+    try:
+        with open(os.path.join(ROOT, "config", "opencode", "version")) as fh:
+            ver = fh.read().strip()
+        pinned = os.path.expanduser(
+            f"~/.local/lib/ai-devops/opencode/{ver}/node_modules/opencode-ai/bin/opencode.exe")
+        if os.access(pinned, os.X_OK):
+            return pinned
+    except OSError:
+        pass
+    return shutil.which("opencode")
+
+
+def read_key(name):
+    spec = PROVIDERS[name]
+    if os.environ.get(spec["override"]):
+        return os.environ[spec["override"]]
+    secrets = os.environ.get("AI_REVIEW_SIMPLE_SECRETS_DIR",
+                             os.path.expanduser("~/.config/ai-devops/secrets"))
+    try:
+        with open(os.path.join(secrets, spec["key_file"])) as fh:
+            raw = fh.read().strip()
+    except OSError:
+        return None
+    if spec["key_file"].endswith(".json"):
+        try:
+            return json.loads(raw).get("key") or None
+        except (ValueError, AttributeError):
+            return None
+    return raw.splitlines()[0] if raw else None
+
+
+def build_prompt(repo, base, head):
+    with open(TEMPLATE) as fh:
+        tpl = fh.read()
+    diff = git(repo, "diff", f"{base}...{head}")
+    if len(diff) > MAX_DIFF:
+        diff = diff[:MAX_DIFF] + "\n[diff truncated; read the files directly]\n"
+    stat_text = git(repo, "diff", "--stat", f"{base}...{head}")
+    if len(stat_text) > MAX_STAT:
+        stat_text = stat_text[:MAX_STAT] + "\n[stat truncated]\n"
+    # A fence longer than any backtick run in the diff, so PR text cannot close it.
+    runs = [len(m) for m in re.findall(r"`{3,}", diff)]
+    fence = "`" * max([3] + [n + 1 for n in runs])
+    for k, v in (("{fence}", fence), ("{base}", base), ("{head}", head), ("{stat}", stat_text)):
+        tpl = tpl.replace(k, v)
+    return tpl.replace("{diff}", diff)  # last, so diff text is never rescanned
+
+
+def _force_rmtree(path):
+    def onerror(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IRWXU)
+            os.chmod(os.path.dirname(p), stat.S_IRWXU)
+            func(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onerror=onerror)
+
+
+def make_workspace(repo, head, provider, tmp):
+    work = os.path.join(tmp, "work")
+    subprocess.run(["git", "clone", "--quiet", "--no-checkout", "--no-hardlinks", repo, work],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", work, "checkout", "--quiet", "--detach", head],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", work, "remote", "remove", "origin"], capture_output=True)
+    for d, _dirs, files in os.walk(work):
+        for f in files:
+            p = os.path.join(d, f)
+            if not os.path.islink(p):
+                os.chmod(p, stat.S_IRUSR | stat.S_IRGRP)
+    cfg_dir = os.path.join(tmp, "xdg", "config", "opencode")
+    os.makedirs(os.path.join(cfg_dir, "agent"))
+    spec = PROVIDERS[provider]
+    cfg = {"$schema": "https://opencode.ai/config.json", "model": spec["model"],
+           "share": "disabled", "autoupdate": False}
+    if spec["provider"]:
+        cfg["provider"] = spec["provider"]
+    with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
+        json.dump(cfg, fh, indent=1)
+    with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w") as fh:
+        fh.write(AGENT)
+    home = os.path.join(tmp, "home")
+    os.makedirs(home)
+    return work, home
+
+
+def run_once(provider, prompt, work, home, tmp, key, timeout):
+    """One attempt. Returns (verdict, text, error)."""
+    spec = PROVIDERS[provider]
+    oc = resolve_opencode()
+    if not oc:
+        return None, "", "local: opencode binary not found"
+    xdg = os.path.join(tmp, "xdg")
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home,
+           "XDG_CONFIG_HOME": os.path.join(xdg, "config"),
+           "XDG_DATA_HOME": os.path.join(xdg, "data"),
+           "XDG_STATE_HOME": os.path.join(xdg, "state"),
+           "XDG_CACHE_HOME": os.path.join(xdg, "cache"),
+           "OPENCODE_DISABLE_CLAUDE_CODE": "1", "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+           "PYTHONDONTWRITEBYTECODE": "1", spec["key_env"]: key}
+    env.update({n: os.environ[n] for n in ("LANG", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE") if os.environ.get(n)})
+    cmd = [oc, "run", "--agent", "simple-review", "--auto", "--format", "json",
+           "--model", spec["model"], "--dir", work]
+    proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:  # Windows
+                proc.kill()
+        except OSError:
+            pass
+        proc.communicate()
+        return None, "", f"timeout after {timeout}s"
+    full, final, ev_err = read_events(out)
+    text = final_report(final, full)
+    verdict = parse_verdict(final) or parse_verdict(full)
+    if verdict:
+        return verdict, text, None
+    problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
+    if is_credit_error(problem):
+        return None, text, "out-of-credit: " + problem[:500]
+    return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip()
+
+
+def review(args):
+    start = time.monotonic()
+    result = {"provider": args.provider, "head": args.head, "verdict": None,
+              "findings": "", "elapsed": 0, "error": None}
+
+    def finish(code):
+        result["elapsed"] = round(time.monotonic() - start, 1)
+        with open(args.out, "w") as fh:
+            json.dump(result, fh, indent=1)
+        print(json.dumps({k: result[k] for k in ("provider", "verdict", "elapsed", "error")}))
+        return code
+
+    try:
+        actual = git(args.repo, "rev-parse", "HEAD").strip()
+        head = git(args.repo, "rev-parse", "--verify", args.head + "^{commit}").strip()
+        base = git(args.repo, "rev-parse", "--verify", args.base + "^{commit}").strip()
+    except subprocess.CalledProcessError as exc:
+        result["error"] = "refused: " + (exc.stderr or "git failed").strip()[:300]
+        return finish(2)
+    if actual != head:
+        result["error"] = f"refused: head mismatch (checkout {actual}, requested {head})"
+        return finish(2)
+    result["head"] = head
+    key = read_key(args.provider)
+    if not key:
+        result["error"] = "local: credential missing"
+        return finish(3)
+    timeout = args.timeout or PROVIDERS[args.provider]["timeout"]
+    tmp = None
+    try:
+        prompt = build_prompt(args.repo, base, head)
+        tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{args.provider}-")
+        work, home = make_workspace(args.repo, head, args.provider, tmp)
+        for _attempt in range(2):  # retry once, never on credit or timeout
+            verdict, text, error = run_once(args.provider, prompt, work, home, tmp, key, timeout)
+            if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")):
+                break
+    except (subprocess.CalledProcessError, OSError, UnicodeError) as exc:
+        detail = getattr(exc, "stderr", None) or str(exc)
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        result["error"] = "local: " + redact(f"{type(exc).__name__}: {detail}".strip(), key)[:300]
+        return finish(3)
+    finally:
+        if tmp:
+            _force_rmtree(tmp)
+    result["findings"] = text
+    result["verdict"], result["error"] = verdict, error
+    if error and error.startswith("out-of-credit"):
+        result["error"] = "out-of-credit"
+        result["detail"] = error[len("out-of-credit: "):]
+    return finish(0 if verdict else 3)
+
+
+def combine(results, head=None):
+    """Plan section 8 rule: pass needs >=2 APPROVE and <=1 REJECT (REVISE
+    counts as REJECT); fewer than 2 finished verdicts is neutral."""
+    rows, approve, reject = [], 0, 0
+    for r in results:
+        v = (r.get("verdict") or "").upper()
+        if v not in VERDICTS or (head and r.get("head") != head):
+            v = ""
+        if v == "APPROVE":
+            approve += 1
+        elif v:
+            reject += 1
+        rows.append({"provider": r.get("provider", "?"), "verdict": v or "unavailable",
+                     "error": r.get("error") if not v else None,
+                     "elapsed": r.get("elapsed"), "findings": r.get("findings") or ""})
+    finished = approve + reject
+    if finished < 2:
+        state = "neutral"
+    elif approve >= 2 and reject <= 1:
+        state = "pass"
+    else:
+        state = "fail"
+    return {"state": state, "approve": approve, "reject": reject, "finished": finished,
+            "lone_reject": state == "pass" and reject == 1, "rows": rows}
+
+
+def _cell(text):
+    return (text or "").replace("|", "/").replace("\n", " ").strip()
+
+
+def render_comment(summary, head):
+    """Markdown comment: verdict table, one collapsible block per reviewer,
+    the merge-rule outcome line, then the signature."""
+    state = summary["state"]
+    title = {"pass": "passed", "fail": "failed",
+             "neutral": "neutral (reviewers unavailable)"}[state]
+    out = [f"## AI review {title}", "", f"Head `{head or '?'}`", "",
+           "| Reviewer | Verdict | Time |", "|---|---|---|"]
+    for r in summary["rows"]:
+        secs = f"{r['elapsed']:.0f}s" if isinstance(r["elapsed"], (int, float)) else "-"
+        out.append(f"| {_cell(r['provider'])} | {_cell(r['verdict'])} | {secs} |")
+    for r in summary["rows"]:
+        body = r["findings"] or (f"Unavailable: {redact(r['error'])}" if r["error"]
+                                 else "No findings recorded.")
+        body = body[:MAX_FINDINGS].replace("</details>", "&lt;/details&gt;")
+        out += ["", f"<details><summary>{_cell(r['provider'])}: {_cell(r['verdict'])}</summary>",
+                "", body, "", "</details>"]
+    out += ["", f"**Outcome: {state}.** {summary['approve']} approve, {summary['reject']} reject "
+            f"(REVISE counts as reject), {summary['finished']} of {len(summary['rows'])} finished. "
+            "Pass needs at least 2 APPROVE and at most 1 REJECT; fewer than 2 finished is neutral."]
+    if summary["lone_reject"]:
+        out += ["", "One reviewer rejected. This does not block; please read its findings."]
+    sig = os.environ.get("AI_GH_SIGNATURE")
+    if sig:
+        out += ["", sig]
+    return "\n".join(out) + "\n"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="ai-review-simple", description=__doc__.split("\n")[0])
+    ap.add_argument("--combine", nargs="+", metavar="JSON")
+    ap.add_argument("--provider", choices=sorted(PROVIDERS))
+    ap.add_argument("--repo", default=".")
+    for name in ("--comment-out", "--base", "--head", "--out"):
+        ap.add_argument(name)
+    ap.add_argument("--timeout", type=int)
+    args = ap.parse_args(argv)
+    if args.combine:
+        results = []
+        for path in args.combine:
+            try:
+                with open(path) as fh:
+                    results.append(json.load(fh))
+            except (OSError, ValueError):
+                results.append({"provider": os.path.basename(path).split(".")[0],
+                                "error": "result missing"})
+        summary = combine(results, args.head)
+        if args.comment_out:
+            with open(args.comment_out, "w") as fh:
+                fh.write(render_comment(summary, args.head))
+        print(json.dumps({k: v for k, v in summary.items() if k != "rows"}))
+        return 0
+    if not (args.provider and args.base and args.head and args.out):
+        ap.error("--provider, --base, --head and --out are required")
+    return review(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

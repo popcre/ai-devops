@@ -519,6 +519,15 @@
       ],
       "tests/test_reviewer_credit_stream.py": [
         "test-reviewer-credit-stream.sh"
+      ],
+      "templates/review-prompt-simple.md": [
+        "test-ai-review-simple.sh"
+      ],
+      "tests/test_ai_review_simple.py": [
+        "test-ai-review-simple.sh"
+      ],
+      "tests/test_ai_review_rule.py": [
+        "test-ai-review-simple.sh"
       ]
     },
     "companion_suites": {

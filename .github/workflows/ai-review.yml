@@ -1,0 +1,181 @@
+name: ai-review
+
+# Simple stateless AI review (#2041, plan_simple-reviewer-rebuild.md step 2).
+# Four reviewers review the PR head in parallel on the edge-dev3 runners; one
+# combine step applies the merge rule, posts one PR comment and records an
+# `ai-review` check run (success, failure or neutral). Not a required check
+# until plan step 4. Provider keys stay in runner-local config, never here.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+    inputs:
+      toolkit_ref:
+        description: popcre/ai-devops ref that supplies the review script
+        type: string
+        default: main
+  workflow_dispatch:
+    inputs:
+      rerun_run_id:
+        description: ai-review run to re-run one hour later (set by the combine job)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  review:
+    # Same-repository PRs only: the runners hold provider keys.
+    if: >-
+      github.event_name != 'workflow_dispatch' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: [self-hosted, ai-devops-linux]
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [muse, glm, deepseek, stepfun]
+    # StepFun allows 10 requests per minute: one StepFun review at a time
+    # across all PRs. Other providers get a unique, non-blocking group.
+    concurrency:
+      group: ${{ matrix.provider == 'stepfun' && 'ai-review-stepfun' || format('ai-review-{0}-{1}-{2}', matrix.provider, github.run_id, github.run_attempt) }}
+      cancel-in-progress: false
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr
+          persist-credentials: false
+      - name: Check out the review toolkit (trusted ref, never the PR head)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: popcre/ai-devops
+          ref: ${{ inputs.toolkit_ref || 'main' }}
+          path: toolkit
+          persist-credentials: false
+      - name: Review with ${{ matrix.provider }}
+        run: |
+          set -uo pipefail
+          script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
+          # Never run PR-supplied code next to provider keys: no main script, no review.
+          [ -f "$script" ] || { echo "::error::toolkit script missing on the toolkit ref"; exit 1; }
+          base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
+          rc=0
+          python3 "$script" --provider "${{ matrix.provider }}" --repo pr \
+            --base "$base" --head "$HEAD_SHA" --out "$RUNNER_TEMP/${{ matrix.provider }}.json" || rc=$?
+          echo "ai-review-simple exit $rc (0 verdict, 3 unavailable, 2 refused)"
+          [ -f "$RUNNER_TEMP/${{ matrix.provider }}.json" ] || exit 1
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ai-review-${{ matrix.provider }}
+          path: ${{ runner.temp }}/${{ matrix.provider }}.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ai-review:
+    needs: review
+    if: ${{ !cancelled() && needs.review.result != 'skipped' }}
+    runs-on: [self-hosted, ai-devops-linux]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      issues: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR: ${{ github.event.pull_request.number }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      AI_GH_SIGNATURE: Posted by ai-review workflow run ${{ github.run_id }} attempt ${{ github.run_attempt }} on edge-dev3
+    steps:
+      - name: Check out the review toolkit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: popcre/ai-devops
+          ref: ${{ inputs.toolkit_ref || 'main' }}
+          path: toolkit
+          persist-credentials: false
+      - name: Download results
+        # Zero artifacts must still reach the combine step, which reports
+        # missing results as unavailable (neutral) instead of staying silent.
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ai-review-*
+          path: results
+          merge-multiple: true
+      - name: Apply merge rule, comment, record check
+        run: |
+          set -euo pipefail
+          files=(); for p in muse glm deepseek stepfun; do files+=("results/$p.json"); done
+          script=toolkit/bin/ai-review-simple
+          summary="$(python3 "$script" --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
+          echo "$summary"
+          state="$(jq -r .state <<<"$summary")"
+          case "$state" in pass) conclusion=success ;; fail) conclusion=failure ;; *) conclusion=neutral ;; esac
+          jq -n --arg sha "$HEAD_SHA" --arg c "$conclusion" --arg s "$summary" --rawfile body comment.md \
+            '{name: "ai-review", head_sha: $sha, status: "completed", conclusion: $c,
+              output: {title: ("ai-review: " + ($s|fromjson|.state)), summary: $body[0:60000]}}' \
+            | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
+          # The check is recorded first, so a failed comment never hides it.
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md || \
+            echo "::warning::could not post the review comment"
+          if [ "$state" != neutral ]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label unreviewed >/dev/null 2>&1 || true
+          fi
+          if [ "$state" = neutral ]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label unreviewed || \
+              echo "::warning::could not add label 'unreviewed'"
+            if [ "$GITHUB_RUN_ATTEMPT" = 1 ] && [ "$GITHUB_REPOSITORY" = "${GITHUB_WORKFLOW_REF%%/.github/*}" ]; then
+              wf="${GITHUB_WORKFLOW_REF#*/.github/workflows/}"; wf="${wf%%@*}"
+              gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" -f rerun_run_id="$GITHUB_RUN_ID" || \
+                echo "::warning::could not queue the one-hour re-run"
+            fi
+          fi
+          echo "ai-review: $state" >> "$GITHUB_STEP_SUMMARY"
+
+  requeue:
+    # One delayed re-run of a neutral review (plan section 8). Runs on a hosted
+    # runner so the hour of waiting never holds an edge-dev3 runner.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Wait one hour, then re-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.rerun_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "bad run id"; exit 1; }
+          sleep 3600
+          # A newer push has its own review; re-running the old one would
+          # cancel it through the per-PR concurrency group.
+          read -r sha branch < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json headSha,headBranch --jq '"\(.headSha) \(.headBranch)"')
+          now="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha 2>/dev/null || true)"
+          if [ "$now" != "$sha" ]; then
+            echo "Branch $branch moved ($sha -> ${now:-gone}); skipping the re-run."
+            exit 0
+          fi
+          gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY"
