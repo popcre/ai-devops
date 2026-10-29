@@ -139,6 +139,12 @@ and manifest on edge-dev3; do not infer a new private repository from existence.
 8. First local doc safety omitted added-document reachability; GitHub caught
    unlinked question/answer fixtures. Correction preserved the check and added
    descriptive topic links. Run both checks for successor documentation.
+9. The handoff phase initially inherited the earlier task's frozen base, so
+   shipping appeared to include an unrelated upstream skill change and refused.
+   The actual current-upstream-to-head range contained only four owned prose
+   files. Declaring that real base explicitly corrected classification; no
+   stronger class, acknowledgement or gate bypass was used. New phases must
+   declare their own verified base rather than inherit a predecessor range.
 
 ## 5. Findings and whole-plan drift audit
 
@@ -198,7 +204,8 @@ never restart clocks by opening another chat or enabling another feature.
 
 1. Claim continuation on #2022 with the real chat/machine; fetch main and create
    an owned current-upstream trial worktree. Read the plan end to end and this
-   handoff; reconcile any later issue comments/PRs. **Gate:** actual source,
+   handoff; reconcile any later issue comments/PRs. Declare the honest task
+   class with that explicit current-upstream base. **Gate:** actual source,
    ownership, open checklist and discovery/trial deadlines recorded; no old
    check-state assumption survives without a new observation.
 2. Inspect existing approved account/config metadata and supported authenticated
