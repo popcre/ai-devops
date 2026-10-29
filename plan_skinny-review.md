@@ -214,7 +214,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Remove the Windows `machine-tools.tsv` rows and the `reviewer-start-watch` config.
 - Disable `reviewer-membership-drift.yml`.
 - Remove the observation-week block in `bin/ai-task-gates` (~58-92) and `tools/lib/observation-week.sh`.
-- Make the normal installer (`install.sh` / `update.sh` and the Windows installer) delete the window file during the reviewed reinstall, so no hand-run privileged command or credential extraction is needed.
+- Make the normal installer (`install.sh` / `update.sh` and the Windows installer) delete the window file during the normal installer run, so no hand-run privileged command or credential extraction is needed.
 - **Done when:**
   - `crontab -l`, the scheduled tasks and the timers on each host show no reviewer jobs;
   - the window file is absent on all 5 hosts;
@@ -248,7 +248,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - **A:** `tests/test_ai_review_rule.py` covers rotation (PR n mod 4), fall-through on exit 3, NO fall-through on exit 2 (a refusal), never-failure conclusion, and the docs-only classifier: `plan_x.md` is reviewed, `docs/a.md` is skipped, `HANDOFF.d/x.md` is skipped, and `.md` mixed with `.py` is reviewed. `tests/test_ai_review_simple.py` stays green.
 - **B:** `tests/test-ai-task-gates.sh`, `test-ai-task-gates-bulk.sh`, `test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`, `test-task-gates-phase5-acceptance.sh`, `test-windows-source-gate.ps1` assert that no review approval is required, and that the secrets, privacy and worktree gates are still enforced.
 - **E/F:** `bash tests/test-all.sh --changed-since origin/main`, plus `tests/test-installer-parity.sh` and `test-workflow-policy.sh`.
-- **G:** a shared-db workflow test that promotion is refused while an open `review-finding` issue references the head, and allowed after it closes.
+- **G:** a shared-db workflow test that promotion is refused while an open `review-finding` issue references the change, refused for 24 hours after a close-as-not-planned, and allowed after a fixed close.
 - **Always:** `verify.yml` green; `bin/ai-doc-safety .` for prose.
 
 ### 11. Constraints and gotchas
@@ -298,7 +298,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 
 ## Muse critique (2026-10-29)
 
-Muse returned REVISE in session `skinny-plan-critique`. Fixes applied:
+Muse session `skinny-plan-critique`: REVISE, REVISE, then **APPROVE** in round 3 (2026-10-29). Fixes applied:
 - the docs-only rule is now precise;
 - the production promotion reference and its live query are defined;
 - the fixer has a safety block;
