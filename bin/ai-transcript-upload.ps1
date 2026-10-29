@@ -82,6 +82,12 @@ $D = Join-Path $Root $HostName
 $now = [DateTime]::UtcNow
 $scanned = 0; $copied = 0; $hot = 0; $errors = 0
 
+function LongPath([string]$p) {
+  if ($env:OS -ne 'Windows_NT' -or $p.StartsWith('\\?\')) { return $p }
+  if ($p.StartsWith('\\')) { return '\\?\UNC\' + $p.Substring(2) }
+  return '\\?\' + $p
+}
+
 function Resolve-Source([string]$p) {
   # Follow a symlink or junction to its target (find on the link sees 0 files).
   for ($i = 0; $i -lt 8; $i++) {
@@ -108,20 +114,25 @@ foreach ($m in $Map) {
     try {
       $r = $f.FullName.Substring($srcFull.Length).TrimStart('\')
       if (($now - $f.LastWriteTimeUtc).TotalMinutes -lt $HotMinutes) { $hot++; continue }
-      $dest = Join-Path $destDir $r
-      $di = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
-      if ($di -and $di.Length -eq $f.Length -and $f.LastWriteTimeUtc -le $di.LastWriteTimeUtc) { continue }
-      $part = Join-Path $partDir $r
-      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $part), (Split-Path -Parent $dest) | Out-Null
+      # .NET calls with \\?\ paths, so destinations over 260 characters work in PowerShell 5.1.
+      $dest = LongPath (Join-Path $destDir $r)
+      $srcL = LongPath $f.FullName
+      $di = New-Object System.IO.FileInfo $dest
+      if ($di.Exists -and $di.Length -eq $f.Length -and $f.LastWriteTimeUtc -le $di.LastWriteTimeUtc) { continue }
+      $part = LongPath (Join-Path $partDir $r)
+      [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($part))
+      [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($dest))
       $want = $f.Length; $done = $false
       for ($try = 1; $try -le 2 -and -not $done; $try++) {
-        Copy-Item -LiteralPath $f.FullName -Destination $part -Force
-        $got = (Get-Item -LiteralPath $part -Force).Length
-        $now2 = (Get-Item -LiteralPath $f.FullName -Force).Length
+        [System.IO.File]::Copy($srcL, $part, $true)
+        [System.IO.File]::SetLastWriteTimeUtc($part, $f.LastWriteTimeUtc)
+        $got = (New-Object System.IO.FileInfo $part).Length
+        $now2 = (New-Object System.IO.FileInfo $srcL).Length
         if ($got -eq $want -and $now2 -eq $want) {
-          Move-Item -LiteralPath $part -Destination $dest -Force; $done = $true; $copied++
+          if ([System.IO.File]::Exists($dest)) { [System.IO.File]::Replace($part, $dest, $null) } else { [System.IO.File]::Move($part, $dest) }
+          $done = $true; $copied++
         } else {
-          Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue; $want = $now2
+          [System.IO.File]::Delete($part); $want = $now2
         }
       }
     } catch { $errors++ }
