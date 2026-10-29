@@ -8,10 +8,10 @@
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Daily upload from every machine | ⬜ open | — |
-| 2 Normalizer and tool-call capture | ⬜ open | — |
-| 3 ScaleDown clean + topic segmenter | ⬜ open | — |
-| 4 Store schema, writer and Dropbox publish | ⬜ open | — |
+| 1 Daily upload from every machine | 🔄 in progress | #2059 (stage A) |
+| 2 Normalizer and tool-call capture | 🔄 in progress | #2060 (stage B) |
+| 3 ScaleDown clean + topic segmenter | 🔄 in progress | #2060 (stage B) |
+| 4 Store schema, writer and Dropbox publish | 🔄 in progress | #2060 (stage B) |
 | 5 Smoke batch: first 1,000 calls | ⬜ open | — |
 | 6 Full backfill (about 15 h, background) | ⬜ open | — |
 | 7 Daily timer on edge-dev3 | ⬜ open | — |
