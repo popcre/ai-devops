@@ -2,6 +2,8 @@
 
 Read this first, then open only the document named for the current task.
 
+- Reviewer system: advisory, one rotating CI reviewer (owner ruling 2026-10-29). Plan + STATUS: [plan_simple-reviewer-rebuild.md](plan_simple-reviewer-rebuild.md); checklist: [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md).
+
 ## Project summary
 
 `popcre/ai-devops` is Albert's public recovery toolkit for a multi-model AI

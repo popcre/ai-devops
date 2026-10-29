@@ -8,14 +8,18 @@ Handoff: [HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md
 | Step | State | Evidence |
 |---|---|---|
 | 0 Owner ruling recorded | ✅ 2026-10-29 | `docs/owner-rulings.md` 2026-10-29 entry |
-| 1 `ai-review-simple` script | ⬜ open | — |
-| 2 Reusable CI workflow | ⬜ open | — |
+| 1 `ai-review-simple` script | 🟡 2026-10-29 in merge queue | PR #2044; live run of all 4 providers on edge-dev3 (actions run 40911611071 artifacts) |
+| 2 Reusable CI workflow | 🟡 2026-10-29 in merge queue | PR #2044; four reviewer jobs + combine proven in run 40911611071 |
 | 3 Pilot on ai-devops PRs | ⬜ open | — |
-| 4 Lift freeze, switch gate | ⬜ open | — |
+| 4 Lift freeze, switch gate | 🟡 superseded by REVISION phases A–E; window extended to 2026-11-12 on 5 hosts | `/etc/ai-devops/observation-week.json` |
 | 5 Roll out to other repos | ⬜ open | — |
-| 6 Delete the old machinery | ⬜ open | — |
+| 6 Delete the old machinery | ⬜ open (= REVISION phase F) | — |
+| REVISION A advisory/skinny workflow | ⬜ open, after #2044 merges | — |
+| REVISION B remove ai-task-gates review gates | 🟡 2026-10-29 subagent PR in progress | — |
+| REVISION C shared-db merge gate off | 🟡 2026-10-29 subagent issue/PR in progress | — |
+| REVISION D–F instructions, installers, delete old code | ⬜ open | inventory doc |
 
-**A fresh session starts at step 1.**
+**A fresh session starts at the REVISION section.** Confirm #2044 is merged, then do phase A. Check the B and C PRs before redoing them.
 
 
 ## REVISION 2026-10-29 4:30 PM EDT — "skinny" review (overrides §8 and steps 2–6 where they differ)
