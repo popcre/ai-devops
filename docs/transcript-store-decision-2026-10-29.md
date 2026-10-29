@@ -161,4 +161,4 @@ A Postgres server on edge-dev3 reached over Tailscale was considered. It allows 
   - These need the sequence of tool calls, which ScaleDown's cleanup removes.
   - The store therefore also keeps per-section tool-call names and counts, without their output.
 - **Orphaned resources and stale references:** paths, issues, branches or skills that are referenced but no longer exist.
-- **Hallucination and verification checks:** claims in sections tagged "AI mistakes" are cross-checked against Git and GitHub.
+- **Hallucination and verification checks:** every section with a "merged, done, fixed or pushed" claim naming a PR, issue or commit (not only sections tagged "AI mistakes") is cross-checked against Git and GitHub. See the plan, step 9.
