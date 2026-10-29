@@ -119,7 +119,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          path: toolkit
+          path: pr
           persist-credentials: false
       - name: Download results
         # Zero artifacts must still reach the combine step, which reports
@@ -134,15 +134,19 @@ jobs:
         run: |
           set -euo pipefail
           files=(); for p in muse glm deepseek stepfun; do files+=("results/$p.json"); done
-          summary="$(python3 toolkit/bin/ai-review-simple --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
+          script=toolkit/bin/ai-review-simple
+          [ -f "$script" ] || script=pr/bin/ai-review-simple
+          summary="$(python3 "$script" --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
           echo "$summary"
           state="$(jq -r .state <<<"$summary")"
           case "$state" in pass) conclusion=success ;; fail) conclusion=failure ;; *) conclusion=neutral ;; esac
-          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
           jq -n --arg sha "$HEAD_SHA" --arg c "$conclusion" --arg s "$summary" --rawfile body comment.md \
             '{name: "ai-review", head_sha: $sha, status: "completed", conclusion: $c,
               output: {title: ("ai-review: " + ($s|fromjson|.state)), summary: $body[0:60000]}}' \
             | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
+          # The check is recorded first, so a failed comment never hides it.
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md || \
+            echo "::warning::could not post the review comment"
           if [ "$state" = neutral ]; then
             gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label unreviewed || \
               echo "::warning::could not add label 'unreviewed'"
@@ -162,6 +166,7 @@ jobs:
     timeout-minutes: 75
     permissions:
       actions: write
+      contents: read
     steps:
       - name: Wait one hour, then re-run
         env:
@@ -175,7 +180,8 @@ jobs:
           # cancel it through the per-PR concurrency group.
           read -r sha branch < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --json headSha,headBranch --jq '"\(.headSha) \(.headBranch)"')
-          now="$(gh api "repos/$GITHUB_REPOSITORY/branches/$branch" --jq .commit.sha 2>/dev/null || true)"
+          enc="$(jq -rn --arg b "$branch" '$b|@uri')"
+          now="$(gh api "repos/$GITHUB_REPOSITORY/branches/$enc" --jq .commit.sha 2>/dev/null || true)"
           if [ "$now" != "$sha" ]; then
             echo "Branch $branch moved ($sha -> ${now:-gone}); skipping the re-run."
             exit 0

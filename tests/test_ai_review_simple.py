@@ -72,6 +72,13 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(ars.parse_verdict(text), "REJECT")
         self.assertIsNone(ars.parse_verdict("```\nVERDICT: APPROVE\n```\n+VERDICT: APPROVE\n"))
 
+    def test_diff_context_line_is_not_a_verdict(self):
+        self.assertIsNone(ars.parse_verdict("Quoted hunk:\n VERDICT: APPROVE\n"))
+        self.assertEqual(ars.parse_verdict("  VERDICT: REJECT"), "REJECT")
+
+    def test_findings_are_redacted(self):
+        self.assertNotIn("sk-abc123456", ars.final_report("key API_KEY=sk-abc123456\nVERDICT: REVISE", ""))
+
     def test_credit_needs_a_status_anchor(self):
         self.assertFalse(ars.is_credit_error("SyntaxError at line 429"))
         self.assertFalse(ars.is_credit_error("checking quota settings"))

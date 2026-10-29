@@ -105,7 +105,8 @@ def redact(text, key=None):
         text = text.replace(key, "[REDACTED]")
     return SECRET_RE.sub(lambda m: (m.group(1) + m.group(2) + "[REDACTED]") if m.group(1)
                          else "Bearer [REDACTED]", text)
-VERDICT_RE = re.compile(r"^[\s>*_#`]*VERDICT\s*:\s*\**\s*(APPROVE|REJECT|REVISE)\b", re.I)
+# A lone leading space is a diff context line, never the reviewer's own verdict.
+VERDICT_RE = re.compile(r"^(?! \S)[\s>*_#`]*VERDICT\s*:\s*\**\s*(APPROVE|REJECT|REVISE)\b", re.I)
 
 
 def parse_verdict(text):
@@ -160,7 +161,7 @@ def final_report(final, full):
     """The findings to publish: the final message without VERDICT lines, capped."""
     text = final if parse_verdict(final) or not parse_verdict(full) else full
     lines = [ln for ln in (text or "").splitlines() if not VERDICT_RE.match(ln)]
-    out = "\n".join(lines).strip()
+    out = redact("\n".join(lines).strip())
     return out if len(out) <= MAX_FINDINGS else out[:MAX_FINDINGS] + "\n[findings truncated]"
 
 
@@ -285,7 +286,10 @@ def run_once(provider, prompt, work, home, tmp, key, timeout):
         out, err = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:  # Windows
+                proc.kill()
         except OSError:
             pass
         proc.communicate()
@@ -336,7 +340,7 @@ def review(args):
         work, home = make_workspace(args.repo, head, args.provider, tmp)
         for _attempt in range(2):  # retry once, never on credit or timeout
             verdict, text, error = run_once(args.provider, prompt, work, home, tmp, key, timeout)
-            if verdict or error.startswith(("out-of-credit", "timeout", "local:")):
+            if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")):
                 break
     except (subprocess.CalledProcessError, OSError, UnicodeError) as exc:
         detail = getattr(exc, "stderr", None) or str(exc)
