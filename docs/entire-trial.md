@@ -266,4 +266,3 @@ into an invoice. GitHub installation/rulesets and original profile hashes
 compare unchanged. [Exact receipts and limits](../tests/verification/entire-trial/report.md#captured-memory-repair-and-scoped-departure).
 Original discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026,
 5:58 AM EST remain unchanged. Historical failures above remain historical.
-
