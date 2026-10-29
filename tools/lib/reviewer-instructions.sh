@@ -17,3 +17,14 @@ reviewer_opencode_rules() {
   [ -f "$rules" ] || { printf 'reviewer instructions are missing: %s\n' "$rules" >&2; return 1; }
   mkdir -p "$1" && cp "$rules" "$1/AGENTS.md"
 }
+
+# reviewer_opencode_verdict_stop DIR: copy the shared verdict-stop plugin
+# (config/opencode-plugins/verdict-stop.js) to DIR/plugin/, where DIR is the
+# per-run "$XDG_CONFIG_HOME/opencode". Pinned OpenCode keeps compaction.auto
+# on in every reviewer profile; the plugin declines the post-compaction
+# auto-continue once the session has written its verdict. Refuses without it.
+reviewer_opencode_verdict_stop() {
+  local plugin="$REVIEWER_INSTRUCTIONS_ROOT/config/opencode-plugins/verdict-stop.js"
+  [ -f "$plugin" ] || { printf 'verdict-stop plugin is missing: %s\n' "$plugin" >&2; return 1; }
+  mkdir -p "$1/plugin" && cp "$plugin" "$1/plugin/verdict-stop.js"
+}

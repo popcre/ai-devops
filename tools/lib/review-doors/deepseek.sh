@@ -117,6 +117,11 @@ install_profile() { # install_profile XDG_ROOT
   if [ -f "$PROFILE_SRC/agent/$DS_AGENT.md" ]; then
     cp "$PROFILE_SRC/agent/$DS_AGENT.md" "$xdg/agent/$DS_AGENT.md"
   fi
+  # Verdict stop: no post-verdict compaction auto-continue (both OSes).
+  reviewer_opencode_verdict_stop "$xdg" || {
+    printf 'deepseek door: local_dependency_unavailable: verdict-stop plugin\n' >&2
+    return 127
+  }
   # A review sees only the reviewer rules, never the owner's (#1881).
   [ "$MODE" != review ] || reviewer_opencode_rules "$xdg"
 }
