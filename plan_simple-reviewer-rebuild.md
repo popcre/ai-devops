@@ -19,7 +19,7 @@ Handoff: [HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md
 | REVISION C shared-db merge gate off | 🟡 2026-10-29 subagent issue/PR in progress | — |
 | REVISION D–F instructions, installers, delete old code | ⬜ open | inventory doc |
 
-**A fresh session starts at the REVISION section.** Confirm #2044 is merged, then do phase A. Check the B and C PRs before redoing them.
+**Superseded 2026-10-29 by [plan_skinny-review.md](plan_skinny-review.md); execute that plan instead.**
 
 
 ## REVISION 2026-10-29 4:30 PM EDT — "skinny" review (overrides §8 and steps 2–6 where they differ)
