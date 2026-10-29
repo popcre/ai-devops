@@ -113,3 +113,15 @@ machine, not credential rotation. Applied 2026-10-27 to the PopDAM session
 transcript on hetz (one Supabase sb_secret value; 7 occurrences redacted,
 zero remaining); rotation plan `plan_credential_rotation_20261027.md` in
 u2giants/popdam3 was cancelled by this ruling (issue #551).
+
+## 2026-10-29 — reviewer system rebuilt simply, four reviewers
+
+Verbatim, from Albert's chat: "rebuild it simply, but with 4 reviewers, not
+2."
+
+Current rule: the reviewer system is rebuilt per
+`plan_simple-reviewer-rebuild.md` (issue #2041). The reviewers are Muse, GLM,
+DeepSeek and StepFun. Reviews run in CI on the PR head, not from chat
+sessions, and carry no lease, budget, allowlist or provenance layer. Patching
+the old path (#1993, #2000) is dropped. The observation-week freeze lifts at
+the plan's step 4.
