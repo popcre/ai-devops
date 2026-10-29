@@ -35,7 +35,7 @@ Handoff: [HANDOFF.d/2026-10-29T1900Z-edge-dev3-claude-simple-reviewer-rebuild.md
 3. **One look per PR.** The review runs on `opened` and `ready_for_review` only, not on every push.
 4. **Skip docs-only PRs.** A PR is skipped when every changed path is `*.md` other than `plan_*.md` / `IMPLEMENTATION-PLAN.md`, or is under `HANDOFF.d/`, or is under `docs/`. A skipped PR shows "review not needed".
 5. **No reviewer machinery anywhere else.** Delete or disable every gate, hook, instruction, installer stage and scheduled job in the inventory below. `ai-task-gates` keeps its non-review safety checks (secrets, production, owner authorization). Every `*reviewer-approval*` / `exact-head-independent-review` requirement is removed from them.
-6. **Production and shared-db production applies** use owner authorization only, which already exists as `OWNER-OVERRIDE`. They do not wait for a reviewer verdict.
+6. **Production (superseded the same evening; see owner-rulings 2026-10-29 evening).** Albert never authorizes production. An AI agent promotes a merged change automatically once the preview rehearsal and tests pass and every `review-finding` issue for that change is closed. This is the one place a review result is checked. Add it as **phase G:** connect the advisory review to popcre/shared-db, and change its production promotion workflow (`shared-supabase-migrations.yml`, the `OWNER-OVERRIDE` path) to this automatic rule.
 
 **Stopgap in force:** the observation-week window file was extended to 2026-11-12 14:56Z on all 5 hosts at about 4:25 PM EDT on 2026-10-29. Code and prose PRs keep merging unreviewed until rule 5 lands. Delete the window file when rule 5 is done.
 
