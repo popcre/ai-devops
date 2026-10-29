@@ -12,13 +12,30 @@
 | 2 Normalizer and tool-call capture | ⬜ open | — |
 | 3 ScaleDown clean + topic segmenter | ⬜ open | — |
 | 4 Store schema, writer and Dropbox publish | ⬜ open | — |
-| 5 Cost check: first 1,000 calls | ⬜ open | — |
+| 5 Smoke batch: first 1,000 calls | ⬜ open | — |
 | 6 Full backfill (about 15 h, background) | ⬜ open | — |
 | 7 Daily timer on edge-dev3 | ⬜ open | — |
 | 8 Reader helper and `transcript-query` skill | ⬜ open | — |
 | 9 Mining checks | ⬜ open | — |
 
-**A fresh session starts at step 1.** Steps 1 and 2–4 can run in parallel. Step 5 gates step 6.
+**A fresh session starts at step 1.** Steps 1 and 2–4 can run in parallel. Step 5 is a quality check before step 6.
+
+**Stages, as GitHub child issues of #2050:**
+
+| Stage | Plan steps | What it covers |
+|---|---|---|
+| A | 1 | upload |
+| B | 2–4 | pipeline |
+| C | 5–7 | backfill and timer |
+| D | 8 | reader and skill |
+| E | 9 | mining |
+
+Child issues: A #2059, B #2060, C #2061, D #2062, E #2063.
+
+> **Owner rulings (Albert, 2026-10-29), apply to every step:**
+> - **ScaleDown cost does not matter.** He said: "scaledown is close to free. don't worry about scaledown costs." There is no cost gate for ScaleDown.
+> - **Minimize LLM use.** He said: "we only have to keep an eye on costs when it comes to LLMs, which we absolutely want to minimize use of in favor of Scaledown.ai in every way possible and in every place possible." Any reading, cleaning, labelling, summarizing or extraction of transcript text uses ScaleDown, never Claude, Codex or another LLM. The implementing session's own context should touch only counts, schemas and small samples.
+> - **Reviewers never block.** He said: "disregard reviewers for now. do what you need to do without worrying about it getting reviewed. if the reviewers work, great, get the review. if they don't, don't let it hold you back." Merge on green CI. If the `ai-review` check or any reviewer fails or is unavailable, merge anyway and note it on the PR.
 
 ---
 
@@ -368,11 +385,11 @@ The prompt version is stored with every row (see risks).
 - a bad inbox file rejected;
 - the published copy passes the integrity check and opens read-only.
 
-#### Step 5 — Cost check
+#### Step 5 — Smoke batch
 
 - Run `build.py --limit-calls 1000` on the newest sessions.
-- Record the wall time, calls, failures and the ScaleDown spend in `tests/verification/transcript-store/cost-check-<date>.txt`. Get the spend from Albert's ScaleDown account usage if an API exposes it; otherwise from the response headers or usage fields; otherwise say "unmeasured".
-- **Stop and report on #2050** if the projected full cost is above $200 or the failure rate is above 5%. The $200 threshold is the default; Albert may change it.
+- Record the wall time, calls, failures, and the slug-validity rate in `tests/verification/transcript-store/smoke-<date>.txt`. Cost is not a criterion (owner ruling, 2026-10-29).
+- If the failure rate is above 5% or more than 10% of slugs are invalid, fix the prompt or parser before step 6.
 
 **Done when:** the file exists, and a comment on #2050 states the projection.
 
@@ -486,6 +503,7 @@ The prompt version is stored with every row (see risks).
 - Secrets come from 1Password `vibe_coding` only. Never put them on the command line or in logs.
 
 **Process:**
+- Reviewers never block; see the owner rulings under STATUS.
 - Branch, then PR, then merge yourself. Albert does not merge.
 - Prose-only PRs: `gh pr merge --squash --admin` after doc-safety.
 - Code PRs go through the merge queue: `gh pr merge --squash` enables it.
@@ -538,7 +556,7 @@ The prompt version is stored with every row (see risks).
 
 | Risk | Mitigation |
 |---|---|
-| ScaleDown cost or limits | Step 5 gates the backfill. |
+| ScaleDown rate limits | Step 5's smoke batch finds them before the backfill. |
 | Label quality: ScaleDown topics are approximate | `prompt_version` is stored, so a better prompt can relabel later (`build.py --relabel --prompt v2`). |
 | Disk | The working DB is expected under 2 GB; edge-dev3 has about 1 TB free. |
 | Dropbox conflicted copies | Avoided by the single writer and atomic rename. If `store (conflicted copy).db` appears, the writer deletes it on the next run. |
