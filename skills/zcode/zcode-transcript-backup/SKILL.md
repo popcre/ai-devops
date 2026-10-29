@@ -8,6 +8,10 @@ description: Back up ZCode's SQLite + rollout-JSONL session store to the PRIVATE
 > **STOP — transcripts belong only in the private transcript repository.**
 > Before any copy, run `ai-transcript-destination-check <checkout>`. A missing
 > validator or nonzero result stops the backup.
+>
+> **Exception (owner ruling 2026-10-29):** on `hetz`, ZCode transcripts go to
+> Dropbox instead — see `skills/zcode/transcript-to-dropbox`. Nothing from hetz
+> is pushed to the GitHub repo.
 
 Unlike Claude and Codex, ZCode keeps its session history in a **relational
 SQLite store**, so this skill does NOT convert anything into a JSONL pile: it

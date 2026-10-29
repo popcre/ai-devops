@@ -168,6 +168,8 @@ STATUS first.
 For the proposed Jev decision pilot that must prove actual paid model savings,
 read the [measured Jev spend-reduction plan](plan_typesafe-jev-spend-reduction.md)
 STATUS first.
+For the reviewer observation window (#1948), interim findings are collected in
+[docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md).
 
 | Stage | Model | Role |
 |-------|-------|------|
