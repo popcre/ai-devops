@@ -17,7 +17,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # Runs the hook on a Bash tool payload; prints the exit status.
 fire() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash "$HOOK" 2>"$TMP/err" >/dev/null; echo $?; }
 CASES=()
-blocks() { CASE="$2"; CASES+=("$2"); check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> --timeout-minutes N' \"$TMP/err\""; }
+blocks() { CASE="$2"; CASES+=("$2"); check "blocks: $1" "[ \"\$(fire \"\$CASE\")\" = 2 ] && grep -q 'ai-pr-wait <pr> run in the background' \"$TMP/err\""; }
 allows() { CASE="$2"; CASES+=("$2"); check "allows: $1" "[ \"\$(fire \"\$CASE\")\" = 0 ]"; }
 
 # --- every polling shape in the plan is blocked --------------------------------

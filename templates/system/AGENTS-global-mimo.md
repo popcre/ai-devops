@@ -127,8 +127,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production:** read-only by default; no human approval is ever requested.
-  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE on the exact inputs gates every
-  technical production action; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database writes skip that APPROVE but keep every other gate. Before production or database work, read
+  In every repository the assigned AI reviewer's explicit APPROVE on the exact inputs gates every
+  technical production action; the 2026-10-15 ruling waives only PR and code-review gates outside `popcre/shared-db`, never this APPROVE. Database writes skip that APPROVE but keep every other gate. Before production or database work, read
   `docs/standing-rules-details.md`. (rulings: docs/owner-rulings.md)
   The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
   which re-proves the one open structural work issue or stops for an engineer;
