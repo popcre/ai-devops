@@ -122,6 +122,9 @@ jobs:
           path: toolkit
           persist-credentials: false
       - name: Download results
+        # Zero artifacts must still reach the combine step, which reports
+        # missing results as unavailable (neutral) instead of staying silent.
+        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: ai-review-*
@@ -168,4 +171,13 @@ jobs:
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "bad run id"; exit 1; }
           sleep 3600
+          # A newer push has its own review; re-running the old one would
+          # cancel it through the per-PR concurrency group.
+          read -r sha branch < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json headSha,headBranch --jq '"\(.headSha) \(.headBranch)"')
+          now="$(gh api "repos/$GITHUB_REPOSITORY/branches/$branch" --jq .commit.sha 2>/dev/null || true)"
+          if [ "$now" != "$sha" ]; then
+            echo "Branch $branch moved ($sha -> ${now:-gone}); skipping the re-run."
+            exit 0
+          fi
           gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY"

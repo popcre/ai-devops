@@ -23,7 +23,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TEMPLATE = os.path.join(ROOT, "templates", "review-prompt-simple.md")
 VERDICTS = ("APPROVE", "REJECT", "REVISE")
-MAX_DIFF, MAX_FINDINGS = 300_000, 6000
+MAX_DIFF, MAX_STAT, MAX_FINDINGS = 300_000, 20_000, 4000
 
 # Provider facts copied from tools/lib/review-doors/{muse,deepseek,stepfun}.sh,
 # config/opencode-*/opencode.json and bin/ai-glm. GLM uses OpenCode's built-in
@@ -90,9 +90,21 @@ anything. End with exactly one final line: VERDICT: APPROVE, VERDICT: REJECT
 or VERDICT: REVISE.
 """
 
+# Anchored to a status/code word so "line 429" or a bare "quota" is not credit.
 CREDIT_RE = re.compile(
-    r"\b(402|429)\b|insufficient[ _]balance|out of credit|quota|allowance|"
-    r"\b1113\b|rate[ _-]?limit|billing|payment required", re.I)
+    r"\b(?:status|code|http|error)[\"' :=]{0,4}(?:402|429|1113)\b|insufficient[ _]balance|"
+    r"out of credits?|(?:quota|allowance)\s+(?:exceeded|exhausted|used up)|"
+    r"rate[ _-]?limit(?:ed| exceeded)|payment required", re.I)
+SECRET_RE = re.compile(r"(?i)\b(\w*(?:API_KEY|TOKEN|SECRET|PASSWORD)\w*)(\s*[=:]\s*)[\"']?[^\s\"',}]+"
+                       r"|\bBearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def redact(text, key=None):
+    """Mask credential-shaped text before it reaches the artifact or the PR."""
+    if key and len(key) >= 6:
+        text = text.replace(key, "[REDACTED]")
+    return SECRET_RE.sub(lambda m: (m.group(1) + m.group(2) + "[REDACTED]") if m.group(1)
+                         else "Bearer [REDACTED]", text)
 VERDICT_RE = re.compile(r"^[\s>*_#`]*VERDICT\s*:\s*\**\s*(APPROVE|REJECT|REVISE)\b", re.I)
 
 
@@ -116,8 +128,11 @@ def is_credit_error(text):
 
 
 def read_events(stdout):
-    """Split OpenCode JSON events into (assistant text, error text)."""
-    texts, errors = [], []
+    """Split OpenCode JSON events into (all text, final message, error text).
+
+    The final message is the text after the reviewer's last step or tool
+    call: its report, without the narration that came before it."""
+    texts, errors, current, final = [], [], [], []
     for line in (stdout or "").splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -132,14 +147,26 @@ def read_events(stdout):
             part = ev.get("part") or {}
             if isinstance(part, dict) and part.get("text"):
                 texts.append(part["text"])
+                current.append(part["text"])
+                final = current
         elif ev.get("type") == "error":
             errors.append(json.dumps(ev.get("error", ev))[:2000])
-    return "\n".join(texts), "\n".join(errors)
+        elif ev.get("type") in ("step_start", "tool_use"):
+            current = []
+    return "\n".join(texts), "\n".join(final), "\n".join(errors)
+
+
+def final_report(final, full):
+    """The findings to publish: the final message without VERDICT lines, capped."""
+    text = final if parse_verdict(final) or not parse_verdict(full) else full
+    lines = [ln for ln in (text or "").splitlines() if not VERDICT_RE.match(ln)]
+    out = "\n".join(lines).strip()
+    return out if len(out) <= MAX_FINDINGS else out[:MAX_FINDINGS] + "\n[findings truncated]"
 
 
 def git(repo, *args):
-    return subprocess.run(["git", "-C", repo, *args], check=True,
-                          capture_output=True, text=True).stdout
+    return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace").stdout
 
 
 def resolve_opencode():
@@ -184,7 +211,12 @@ def build_prompt(repo, base, head):
     if len(diff) > MAX_DIFF:
         diff = diff[:MAX_DIFF] + "\n[diff truncated; read the files directly]\n"
     stat_text = git(repo, "diff", "--stat", f"{base}...{head}")
-    for k, v in (("{base}", base), ("{head}", head), ("{stat}", stat_text)):
+    if len(stat_text) > MAX_STAT:
+        stat_text = stat_text[:MAX_STAT] + "\n[stat truncated]\n"
+    # A fence longer than any backtick run in the diff, so PR text cannot close it.
+    runs = [len(m) for m in re.findall(r"`{3,}", diff)]
+    fence = "`" * max([3] + [n + 1 for n in runs])
+    for k, v in (("{fence}", fence), ("{base}", base), ("{head}", head), ("{stat}", stat_text)):
         tpl = tpl.replace(k, v)
     return tpl.replace("{diff}", diff)  # last, so diff text is never rescanned
 
@@ -258,11 +290,12 @@ def run_once(provider, prompt, work, home, tmp, key, timeout):
             pass
         proc.communicate()
         return None, "", f"timeout after {timeout}s"
-    text, ev_err = read_events(out)
-    verdict = parse_verdict(text)
+    full, final, ev_err = read_events(out)
+    text = final_report(final, full)
+    verdict = parse_verdict(final) or parse_verdict(full)
     if verdict:
         return verdict, text, None
-    problem = "\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip())
+    problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
     if is_credit_error(problem):
         return None, text, "out-of-credit: " + problem[:500]
     return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip()
@@ -295,19 +328,26 @@ def review(args):
     if not key:
         result["error"] = "local: credential missing"
         return finish(3)
-    prompt = build_prompt(args.repo, base, head)
     timeout = args.timeout or PROVIDERS[args.provider]["timeout"]
-    tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{args.provider}-")
+    tmp = None
     try:
+        prompt = build_prompt(args.repo, base, head)
+        tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{args.provider}-")
         work, home = make_workspace(args.repo, head, args.provider, tmp)
         for _attempt in range(2):  # retry once, never on credit or timeout
             verdict, text, error = run_once(args.provider, prompt, work, home, tmp, key, timeout)
             if verdict or error.startswith(("out-of-credit", "timeout", "local:")):
                 break
+    except (subprocess.CalledProcessError, OSError, UnicodeError) as exc:
+        detail = getattr(exc, "stderr", None) or str(exc)
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        result["error"] = "local: " + redact(f"{type(exc).__name__}: {detail}".strip(), key)[:300]
+        return finish(3)
     finally:
-        _force_rmtree(tmp)
-    lines = [ln for ln in text.splitlines() if not VERDICT_RE.match(ln)]
-    result["findings"] = "\n".join(lines).strip()[:MAX_FINDINGS]
+        if tmp:
+            _force_rmtree(tmp)
+    result["findings"] = text
     result["verdict"], result["error"] = verdict, error
     if error and error.startswith("out-of-credit"):
         result["error"] = "out-of-credit"
@@ -341,23 +381,32 @@ def combine(results, head=None):
             "lone_reject": state == "pass" and reject == 1, "rows": rows}
 
 
+def _cell(text):
+    return (text or "").replace("|", "/").replace("\n", " ").strip()
+
+
 def render_comment(summary, head):
+    """Markdown comment: verdict table, one collapsible block per reviewer,
+    the merge-rule outcome line, then the signature."""
+    state = summary["state"]
     title = {"pass": "passed", "fail": "failed",
-             "neutral": "neutral (reviewers unavailable)"}[summary["state"]]
-    out = [f"## AI review {title}", "",
-           f"Head `{head or '?'}`: {summary['approve']} approve, {summary['reject']} reject, "
-           f"{summary['finished']} of {len(summary['rows'])} finished.", "",
-           "| Reviewer | Verdict | Time | Note |", "|---|---|---|---|"]
+             "neutral": "neutral (reviewers unavailable)"}[state]
+    out = [f"## AI review {title}", "", f"Head `{head or '?'}`", "",
+           "| Reviewer | Verdict | Time |", "|---|---|---|"]
     for r in summary["rows"]:
-        note = (r["error"] or "").replace("|", "/").replace("\n", " ")[:120]
         secs = f"{r['elapsed']:.0f}s" if isinstance(r["elapsed"], (int, float)) else "-"
-        out.append(f"| {r['provider']} | {r['verdict']} | {secs} | {note} |")
+        out.append(f"| {_cell(r['provider'])} | {_cell(r['verdict'])} | {secs} |")
+    for r in summary["rows"]:
+        body = r["findings"] or (f"Unavailable: {redact(r['error'])}" if r["error"]
+                                 else "No findings recorded.")
+        body = body[:MAX_FINDINGS].replace("</details>", "&lt;/details&gt;")
+        out += ["", f"<details><summary>{_cell(r['provider'])}: {_cell(r['verdict'])}</summary>",
+                "", body, "", "</details>"]
+    out += ["", f"**Outcome: {state}.** {summary['approve']} approve, {summary['reject']} reject "
+            f"(REVISE counts as reject), {summary['finished']} of {len(summary['rows'])} finished. "
+            "Pass needs at least 2 APPROVE and at most 1 REJECT; fewer than 2 finished is neutral."]
     if summary["lone_reject"]:
         out += ["", "One reviewer rejected. This does not block; please read its findings."]
-    for r in summary["rows"]:
-        if r["findings"]:
-            out += ["", f"<details><summary>{r['provider']}: {r['verdict']}</summary>", "",
-                    r["findings"][:MAX_FINDINGS], "", "</details>"]
     sig = os.environ.get("AI_GH_SIGNATURE")
     if sig:
         out += ["", sig]

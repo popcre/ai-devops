@@ -31,6 +31,6 @@ only on that last line.
 
 ## Diff ({base}...{head})
 
-```diff
+{fence}diff
 {diff}
-```
+{fence}

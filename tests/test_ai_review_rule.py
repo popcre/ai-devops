@@ -61,7 +61,24 @@ class RuleTests(unittest.TestCase):
             with open(comment) as fh:
                 body = fh.read()
             self.assertIn("| stepfun | unavailable |", body)
+            self.assertIn("| Reviewer | Verdict | Time |", body)
+            self.assertNotIn("Note", body)
+            self.assertIn("<details><summary>stepfun: unavailable</summary>", body)
+            self.assertIn("Unavailable: result missing", body)
+            self.assertEqual(body.count("<details>"), 4)
+            self.assertIn("**Outcome: pass.**", body)
+            self.assertFalse(body.lstrip().startswith("{"))
             self.assertTrue(body.rstrip().endswith("-- sig"))
+
+    def test_comment_findings_cannot_close_details_or_leak(self):
+        row = r("muse", None)
+        row["error"] = "no verdict: API_KEY=sk-live-123456 Bearer abc.def"
+        bad = r("glm", "REVISE")
+        bad["findings"] = "x</details><b>escape</b>"
+        body = ars.render_comment(ars.combine([row, bad], HEAD), HEAD)
+        self.assertNotIn("sk-live-123456", body)
+        self.assertNotIn("abc.def", body)
+        self.assertEqual(body.count("</details>"), 2)
 
 
 if __name__ == "__main__":
