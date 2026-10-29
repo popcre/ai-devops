@@ -76,12 +76,18 @@ you did, suitable for a PR body.
 EOF
 
 last="$root/last.txt"
+# The agent reads untrusted findings text, so it runs with no GitHub token and
+# no reviewer provider keys in its environment (plan section 8.5). Codex's
+# workspace-write sandbox also has no network access.
+scrub=(env -u GH_TOKEN -u GITHUB_TOKEN -u MODEL_API_KEY -u AI_MUSE_KEY
+  -u DEEPSEEK_API_KEY -u STEPFUN_API_KEY -u AI_STEPFUN_KEY -u ZHIPU_API_KEY
+  -u ZAI_API_KEY -u AI_REVIEW_SIMPLE_SECRETS_DIR -u OP_SERVICE_ACCOUNT_TOKEN)
 case "$agent" in
   codex)
-    timeout 40m codex exec -C "$work" -s workspace-write --skip-git-repo-check \
+    timeout 40m "${scrub[@]}" codex exec -C "$work" -s workspace-write --skip-git-repo-check \
       -o "$last" - < "$prompt" > "$root/agent.log" 2>&1 ;;
   claude)
-    (cd "$work" && timeout 40m claude -p --permission-mode acceptEdits < "$prompt" > "$last" 2> "$root/agent.log") ;;
+    (cd "$work" && timeout 40m "${scrub[@]}" claude -p --permission-mode acceptEdits < "$prompt" > "$last" 2> "$root/agent.log") ;;
   *) fail "unknown REVIEW_FIXER_AGENT '$agent'" ;;
 esac
 rc=$?
@@ -95,6 +101,11 @@ case "$decision" in
   FIXED)
     git -C "$work" add -A
     git -C "$work" diff --cached --quiet && fail "the agent reported FIXED but changed no files"
+    # Enforced outside the agent: a fix may never touch workflows, installers
+    # or the task gates (plan section 8.5).
+    denied="$(git -C "$work" diff --cached --name-only | grep -E \
+      '^(\.github/workflows/|install\.sh$|update\.sh$|bin/install-ai-devops-windows\.ps1$|config/task-gates\.json$|bin/ai-task-gates$)' || true)"
+    [ -z "$denied" ] || fail "the fix touched protected files, refusing to push: $(tr '\n' ' ' <<<"$denied")"
     git -C "$work" commit -q -m "Fix review finding #$issue" \
       -m "Automatic fix by review-fixer ($agent)." || fail "commit failed"
     git -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
