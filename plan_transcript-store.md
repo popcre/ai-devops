@@ -187,19 +187,24 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 
 **Secrets redaction.** Redaction runs in `normalize.py`, **before any text is sent to ScaleDown** and before anything is stored. Each match becomes `[REDACTED:<kind>]`. Patterns (Python `re`, all applied):
 
-| Kind | Pattern |
-|---|---|
-| anthropic | `sk-ant-[A-Za-z0-9_-]{20,}` |
-| openai-style | `sk-[A-Za-z0-9_-]{16,}` |
-| github | `gh[psour]_[A-Za-z0-9]{20,}` and `github_pat_[A-Za-z0-9_]{20,}` |
-| aws-key-id | `(AKIA\|ASIA)[A-Z0-9]{16}` |
-| aws-secret | `(?i)aws.{0,20}secret.{0,20}[=:\s"']+[A-Za-z0-9/+=]{40}` |
-| dropbox | `sl\.[A-Za-z0-9_-]{100,}` |
-| jwt | `eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_.-]+` |
-| pem | `-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----` |
-| op-ref | `op://[^\s"'<>]+` |
-| bearer | `(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}` |
-| key-value | `(?i)(api[_-]?key\|token\|password\|secret\|passwd)["'\s:=]+[^\s"']{12,}` |
+Each line is `kind<TAB>pattern`; the alternations use real `|`:
+
+```text
+anthropic	sk-ant-[A-Za-z0-9_-]{20,}
+openai-style	sk-[A-Za-z0-9_-]{16,}
+github	gh[psour]_[A-Za-z0-9]{20,}
+github-pat	github_pat_[A-Za-z0-9_]{20,}
+aws-key-id	(AKIA|ASIA)[A-Z0-9]{16}
+aws-secret	(?i)aws.{0,20}secret.{0,20}[=:\s"']+[A-Za-z0-9/+=]{40}
+dropbox	sl\.[A-Za-z0-9_-]{100,}
+jwt	eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_.-]+
+pem	-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----
+op-ref	op://[^\s"'<>]+
+bearer	(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}
+key-value	(?i)(api[_-]?key|token|password|secret|passwd)["'\s:=]+[^\s"']{12,}
+```
+
+Store them in `tools/transcript_store/redact_patterns.tsv`; `normalize.py` and the inbox reader both load that one file. Apply `anthropic` before `openai-style`.
 
 `op://` references are not secrets, but they map the vault, so they are redacted too. The test suite has one synthetic positive and one near-miss negative per kind. A redaction count per session is kept in `sessions.redactions`; it is never posted publicly.
 
@@ -434,6 +439,10 @@ The prompt version is stored with every row (see risks).
 
 **Import:** `labels.db` `review_labels(src, repo, work, mode, reviewer, verdict, value, why)` → `question_labels` with `question='review-value-2026-10-29'`, `src=src`, `prompt_version='review-value-v0'`, `fields_json` = JSON of `{repo, work, mode, reviewer, verdict, value, why}`, `created` = the import time. The test checks a row count of 6,490 and one round-tripped row.
 
+**Shrunk or rotated file:** if a session's current `size` is less than its `bytes_parsed`, the file was rewritten. Drop that lineage's `seen_turns`, chunks and segments in one transaction and reprocess the whole lineage from byte 0.
+
+**Writer scan excludes helper files:** anything under a `.partial/` folder, `.upload-last.txt`, any `conflicted copy` file, and any file not ending in `.jsonl`.
+
 **Truncated last lines:** a `.jsonl` line that is not valid JSON is skipped only if it is the file's last line (an upload caught mid-write); `bytes_parsed` stops before it, so the next run re-reads from there. A bad line elsewhere is skipped and counted.
 
 **Flow:**
@@ -442,23 +451,24 @@ The prompt version is stored with every row (see risks).
 3. Apply each file in `Dropbox/ai/transcript-store/inbox/*.jsonl` exactly once (keyed by file name and sha256).
 
 **Inbox schema:**
-- File name matches `^[a-z0-9-]{1,40}-[0-9]{8}T[0-9]{6}Z-[a-z0-9-]{1,30}\.jsonl$` (question, UTC time, host). Anything else, including `..` or a `/`, is rejected. Files whose name contains `conflicted copy` are moved to `inbox/conflicts/`, never deleted.
+- File name matches `^[a-z0-9-]{1,40}__[0-9]{8}T[0-9]{6}Z__[a-z0-9-]{1,30}\.jsonl$` (question, UTC time, host, separated by `__`). A question slug may not contain `__`, so the split is unambiguous. Anything else, including `..` or a `/`, is rejected. Files whose name contains `conflicted copy` are moved to `inbox/conflicts/`, never deleted.
 - At most 5 MB and 20,000 lines per file; each line at most 8 KB.
 - Each line is a JSON object with exactly these keys: `question` (string, same as the file's question part), `src` (string: a raw-archive path relative to `chat_transcripts/`, no `..`), `prompt_version` (string ≤ 40), `fields` (flat object, at most 30 keys, string/number/bool values ≤ 2,000 characters each).
+- Every string value in each line is passed through the same redaction patterns as transcripts before it is stored.
 - The inbox is not authenticated: only Albert's own Dropbox can write it, which is the trust boundary. A whole file is applied in one transaction or not at all.
 - A bad file moves to `inbox/rejected/` with a sibling `.reason.txt`. `rejected/` and `applied/` keep 90 days, then the writer deletes files older than that **only** in those two folders.
 
 **Publish protocol** (no temp file is ever created in a Dropbox read path):
 1. `sqlite3 store.db ".backup ~/.local/share/ai-devops/transcript-store/stage/store-<UTC stamp>.db"` — local disk, outside Dropbox.
 2. Run `PRAGMA integrity_check` and `PRAGMA journal_mode=DELETE` on that copy; abort on anything but `ok`.
-3. Copy it into Dropbox under its **final, versioned name**: `Dropbox/ai/transcript-store/db/store-<UTC stamp>.db`. Then compare its size and sha256 with the local copy.
+3. Copy it into Dropbox as `Dropbox/ai/transcript-store/db/.incoming-store-<UTC stamp>.db` (a name readers never follow), compare its size and sha256 with the local copy, then rename it to its final versioned name `db/store-<UTC stamp>.db`.
 4. **Last**, write the pointer `Dropbox/ai/transcript-store/CURRENT.json` = `{"file": "db/store-<stamp>.db", "sha256": …, "size": …, "built": <EDT time>, "schema": 1}`. The pointer is written to a local temp file and copied over the old pointer; it is under 1 KB.
 5. Keep the newest 3 versioned files; delete older ones in `db/` only after the pointer names a newer one for at least 24 h.
 6. **Conflicted copies:** if any `conflicted copy` file appears under `transcript-store/`, the writer never deletes it. It moves it to `transcript-store/conflicts/` and reports it in the run log and `--stats`.
 7. **Detection instead of "never while syncing":** the writer is the only process that writes these paths, and it never edits a published file in place; each publish is a new name. No sync-state detection is needed.
 
 **Read protocol** (step 8 implements it):
-1. Read `CURRENT.json`. If it is missing, unparsable or a Smart Sync placeholder (0 bytes or not readable), print "store not available locally; open Dropbox and make `ai/transcript-store` available offline" and stop.
+1. Read `CURRENT.json`. If it is unparsable, wait 5 s and re-read up to 3 times (Dropbox may be mid-replace). If it is still missing, unparsable or a Smart Sync placeholder (0 bytes or not readable), print "store not available locally; open Dropbox and make `ai/transcript-store` available offline" and stop.
 2. Copy the named file to the local temp folder, verify size and sha256, then open the local copy with `?mode=ro`. A mismatch means Dropbox is still syncing: wait 30 s and retry once, then fall back to the newest older file in `db/` that verifies.
 3. Reuse the local copy while its sha256 matches the pointer; delete it when a newer one is fetched.
 
@@ -494,7 +504,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 
 **Done when:**
 - every session is `status=ok` or has listed `failed` chunks, and the failed ones are under 1% and retried once;
-- the published `Dropbox/ai/transcript-store/store.db` exists;
+- `Dropbox/ai/transcript-store/CURRENT.json` names a `db/store-<stamp>.db` file whose size and sha256 match the pointer;
 - the per-topic segment counts are posted on #2050, without the `secrets` count, which stays in the private run log.
 
 #### Step 7 — Daily timer on edge-dev3
@@ -535,7 +545,9 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 
 `tools/transcript_store/mine.py`, one subcommand per check, each writing a report:
 
-**Repo set:** the `popcre` and `u2giants` repositories that appear as a segment `repo` at least 20 times, resolved with `gh repo view`; `unknown` is skipped. Local checkouts under `/home/ahazan/repos/` are used for `git ls-files` and `git log` where present.
+**Repo set:** the `popcre` and `u2giants` repositories that appear as a segment `repo` at least 20 times, resolved with `gh repo view`; `unknown` is skipped. A repo `gh repo view` cannot find (renamed, deleted, or not Albert's) is listed in the report as unresolved and its references are not flagged as stale.
+
+**Key phrase** of an instruction bullet: its bold lead-in if it has one; otherwise its 3 rarest words (by document frequency across all segments) that are 4+ letters long. A segment matches when it contains all of them, case-insensitive. Local checkouts under `/home/ahazan/repos/` are used for `git ls-files` and `git log` where present.
 
 | Check | How | Threshold |
 |---|---|---|
@@ -641,7 +653,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 - Python 3.10 or newer, stdlib only. edge-dev3 had Python 3.14.4 with SQLite 3.46.1 on 2026-10-29.
 - Use `python3`; hetz has no `python`.
 
-**Environment check (step 0, run before stage B and again before installs):** `tools/transcript_store/envcheck.py` prints, for this host: Python version ≥ 3.10, `sqlite3` with FTS5 (create a temp FTS5 table), Dropbox folder present, `chat_transcripts/` readable, and free local disk ≥ 10 GB. The writer needs all of them; Windows readers need Python, SQLite (FTS5 only for `--text`) and Dropbox. Run it on edge-dev3 and every active host; record pass/fail per host on #2050. A host without Python ≥ 3.10 gets the reader through the toolkit's existing installer, not by hand.
+**Environment check (step 0, run before stage B and again before installs).** On Windows, first run a PowerShell pre-check, `bin/ai-transcript-envcheck.ps1` (with its `.cmd` twin), which needs no Python: it reports whether `python3`/`py -3` exists and is ≥ 3.10, and whether the Dropbox folder and `chat_transcripts\` are present. If Python is missing it says so and stops; run the toolkit installer, then re-run. Then `tools/transcript_store/envcheck.py` prints, for this host: Python version ≥ 3.10, `sqlite3` with FTS5 (create a temp FTS5 table), Dropbox folder present, `chat_transcripts/` readable, and free local disk ≥ 10 GB. The writer needs all of them; Windows readers need Python, SQLite (FTS5 only for `--text`) and Dropbox. Run it on edge-dev3 and every active host; record pass/fail per host on #2050. A host without Python ≥ 3.10 gets the reader through the toolkit's existing installer, not by hand.
 
 ---
 
@@ -684,6 +696,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
    - §8 fixes the topics.
    - Gaps found and fixed while drafting: the freeze blocking installation (step 1); the repo-name derivation rule (step 2).
    - Gaps fixed after the Muse critique (2026-10-29): lineage-scoped de-dup and stable chunk ids with append, resume and rechunk rules (steps 2–3); versioned publish plus pointer and a copy-then-open reader (step 4); hot-file skip, `.partial` copies and size re-copy (step 1); one host table (§2); redaction before ScaleDown with broader patterns, and no key item details in the public plan (§6); topic decision rules and a measured label gate (§8, step 5); B and D first when installs are frozen, and a quiet-day upload gate (STATUS, step 1); mining thresholds, repo set, rate limits and a 20-sample precision gate (step 9); labels mapping, inbox schema, repo rules, relabel, exact paths, environment check, quota and retention.
+   - Fixed after the Muse re-check: redaction patterns in a code block with real `|`; step 6 gate names `CURRENT.json`; `__`-separated inbox names and inbox redaction; shrunk-file reprocessing; helper files excluded from the scan; incoming-name-then-rename publish and pointer re-read; mining key-phrase and unresolved-repo rules; a Python-free Windows pre-check.
    - Still to verify by the implementer, not assumable: the `al8960ofc` row (§2) and whether hetz has a Dropbox client (step 1 gives the pull fallback).
 2. **Does it carry all the background, including what was ruled out?** Yes.
    - §3 covers the cost history.
