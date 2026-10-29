@@ -17,8 +17,10 @@ evidence, review verdicts, secrets, or private transcripts.
 
 ## How
 
-1. Resolve the key only from 1Password vault `vibe_coding`, item
-   `scaledown.ai API key`. Never print it. Prefer `op read` piped into env.
+1. Resolve the key only from 1Password vault `vibe_coding`: the ScaleDown
+   API key item (find it by searching item titles for "scaledown"; never
+   write its exact title or id into this public repo). Never print the key.
+   Prefer `op read` piped into env.
 2. `POST https://api.scaledown.xyz/compress/raw/` with:
    - `context`: the pasted/retrieved text (after secret redaction)
    - `prompt`: the user's actual question (kept intact by the API)
@@ -35,6 +37,13 @@ evidence, review verdicts, secrets, or private transcripts.
 - This is third-party processing: code and conversations may leave the machine.
   Owner accepted that for ScaleDown; secrets still must not.
 - Compression never replaces independent review or a safety gate.
+
+## Transcripts
+
+Questions about past AI sessions go to the transcript store first
+(`transcript-query` skill, `ai-transcript-query`), which already holds
+ScaleDown-labelled segments. Send raw transcript ranges to ScaleDown only when
+the stored segments can't answer, and never to an LLM.
 
 ## Reference
 
