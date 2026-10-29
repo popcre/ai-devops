@@ -1,0 +1,30 @@
+Transcript store step 3 live check (popcre/ai-devops#2060). Counts and sizes only; no content.
+Host: edge-dev3. Run: 2026-10-29 5:17 PM EDT.
+Command: tools/transcript_store/segment.py --live-check <one real edge-dev3 Claude session>
+Prompt: prompt_v1.txt. ScaleDown model: summarize. Threads: 6.
+
+file_bytes            2396225
+turns_kept            141
+turn_chars            114858
+redactions            9
+tool_calls            70
+chunks                3
+scaledown_calls       3
+failed_chunks         0
+sections              3
+section_chars         1979   (58x smaller than turn_chars)
+invalid_slugs_final   0
+aliased_sections      0
+reasked_sections      0
+other_sections        0
+multi_topic_sections  3
+wall_seconds          1.9
+
+Earlier probe on a 408768-byte subagent session: 13 turns, 1 chunk, 1 call,
+3 sections, all slugs valid. It exposed a reply whose header and body were
+flattened onto one line (body length 0); parse_reply now recovers that shape
+(test_flattened_header_body_recovered).
+
+Result: PASS (every section carries only valid slugs).
+Envcheck on edge-dev3 (role writer): RESULT PASS (Python 3.14.4, SQLite 3.46.1
+with FTS5, Dropbox and chat_transcripts readable, 1054 GB free).

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# ai-transcript-envcheck — transcript-store environment check (popcre/ai-devops#2050 §12).
+# Runs tools/transcript_store/envcheck.py with the first Python >= 3.10 found.
+# On Windows, bin/ai-transcript-envcheck.ps1 is the Python-free pre-check.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+script="$here/../tools/transcript_store/envcheck.py"
+for py in python3 python "py -3"; do
+  # shellcheck disable=SC2086
+  if $py -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    exec $py "$script" "$@"
+  fi
+done
+echo "FAIL python>=3.10: no python3/python/py -3 of 3.10 or newer found; run the toolkit installer, then re-run" >&2
+echo "RESULT FAIL"
+exit 1
