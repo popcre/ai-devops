@@ -537,6 +537,8 @@ and authentication are excluded from its publication manifest.
 
 ## Official sources
 
+Disposable #2022 qualification: [synthetic branch B](coordination/branch-b.md).
+
 - [Installation](https://docs.entire.com/installation)
 - [Memory](https://docs.entire.com/guides/brain/overview)
 - [Plugin management](https://docs.entire.com/cli-reference/plugin)
