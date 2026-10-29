@@ -648,8 +648,9 @@ git init -q -b main "$FIXTURE"
 git -C "$FIXTURE" config user.name Test; git -C "$FIXTURE" config user.email t@example.com
 printf 'x\n' > "$FIXTURE/x"; git -C "$FIXTURE" add x; git -C "$FIXTURE" commit -qm one
 check "dry-run install writes nothing" "'$HOOK_INSTALL' --repo '$FIXTURE' --dry-run && test ! -e '$FIXTURE/.git/hooks/post-merge'"
-check "install places an executable managed hook" "'$HOOK_INSTALL' --repo '$FIXTURE' && test -x '$FIXTURE/.git/hooks/post-merge' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
-check "reinstall over a managed hook is idempotent" "'$HOOK_INSTALL' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
+mkdir -p "$FIXTURE/.git/hooks"; cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"; chmod +x "$FIXTURE/.git/hooks/post-merge"
+check "install retires an owned managed hook (#2073)" "'$HOOK_INSTALL' --repo '$FIXTURE' && test ! -e '$FIXTURE/.git/hooks/post-merge'"
+check "reinstall with no hook stays a no-op" "'$HOOK_INSTALL' --repo '$FIXTURE' && test ! -e '$FIXTURE/.git/hooks/post-merge'"
 printf '#!/bin/sh\n# local customization\ntrue\n' > "$FIXTURE/.git/hooks/post-merge"
 check "a foreign hook is never touched" "'$HOOK_INSTALL' --repo '$FIXTURE' && grep -q 'local customization' '$FIXTURE/.git/hooks/post-merge'"
 cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"
@@ -664,7 +665,8 @@ check "a non-repository target is refused for install" "! '$HOOK_INSTALL' --repo
 check "a non-repository target has nothing to remove" "'$HOOK_INSTALL' --remove --repo '$TMP/not-a-repo'"
 ln -s "$HOOK_INSTALL" "$TMP/bin/hook-tool-link" 2>/dev/null || true
 if [ -L "$TMP/bin/hook-tool-link" ]; then
-  check "the installer resolves a PATH symlink to its shipped hook" "'$TMP/bin/hook-tool-link' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
+  cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"; chmod +x "$FIXTURE/.git/hooks/post-merge"
+  check "the installer resolves a PATH symlink to its shipped hook" "'$TMP/bin/hook-tool-link' --repo '$FIXTURE' && test ! -e '$FIXTURE/.git/hooks/post-merge'"
 else
   echo "SKIP: the installer resolves a PATH symlink to its shipped hook (ln -s cannot create symlinks here; readlink contract unexercised)"
 fi
