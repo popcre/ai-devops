@@ -110,7 +110,10 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   `tests/verification/zcode-windows-2026-09-17/README.md`.
 - **Transcripts:** ZCode keeps sessions in SQLite (`~/.zcode/cli/db/`) +
   rollout JSONL; back them up and mine them by SQL with the
-  `zcode-transcript-backup` skill (private repo destination only).
+  `zcode-transcript-backup` skill (private repo destination only;
+  on `hetz` the owner ruled 2026-10-29 that all transcripts go to
+  Dropbox instead — see
+  [skills/zcode/transcript-to-dropbox](../skills/zcode/transcript-to-dropbox/SKILL.md)).
 
 ## MiMo (Windows)
 
