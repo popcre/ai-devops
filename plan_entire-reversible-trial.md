@@ -2,6 +2,45 @@
 
 ## STATUS — read first
 
+Closeout update, October 29, 2026: start with the
+[fresh continuation handoff](HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
+Do not restart the experiment or reset either deadline. Cost attribution and
+billing investigation were removed from scope by Albert; historical observations
+below are not pending deliverables. This does not authorize purchases.
+
+| Step | Final disposition at this closeout | Next boundary |
+|---|---|---|
+| 1 baseline/containment | partial; public/synthetic isolation and recovery proved | Raw capture privacy failed; private capture remains off |
+| 2 local/online access | partial; access and mirror tests passed narrowly | Immediate issued-access invalidation unproved |
+| 3 memory/graph/search | tested, negative/limited | Frozen pairs remain baseline 10/10, Entire 8/10; five natural histories and extraction quality unqualified |
+| 4 Trails | partial; manual two-branch and exact-head transitions passed | Automated findings/native hosted round-trip unproved |
+| 5 optional shadow CI | omitted with disposition | Existing GitHub checks/integrations preserved |
+| 6 departure/recovery | partial; local restore and new corruption tests passed | Vendor deletion/retention and issued-access semantics remain with Entire |
+| 7 publication | earlier reports delivered; this closeout supplies latest records | Full live proof stays unchecked on #2022; no adoption |
+
+The scoped support follow-up for only disposable Trail133 and only the removed
+trial login's remaining issued access was authorized and submitted through
+ContactSupport at 7:19 PM EDT, October 29; the original Trail113 request remains
+unchanged. The form showed Sending and closed without error. No durable ticket,
+vendor reply, deletion or backup-retention deadline was established. Nothing was
+sent from a mailbox. Preserve all other records/logins, mirror, GitHub and integrations.
+
+Additional independent recovery proof: 258/258 original evidence files still
+match checksums; three fresh Git archive restorations passed strict object
+checks. Altered/truncated memory exports and a damaged Git archive were rejected.
+The intact memory export restored 26 entries at the original repository identity;
+an unrelated repository was refused. This local-key export is identity/path bound,
+not an arbitrary-directory portable import. See the
+[exact receipts](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6511564275).
+
+Preservation correction: Git config, Claude settings and absent Entire global
+config still matched baseline at 8:08 PM EDT. Codex settings changed at 7:57:59 PM
+EDT before that test run; metadata inspection found no Entire references. They
+were preserved, not reset. Current whole-profile equality is not claimed.
+
+The paragraphs below describe earlier execution boundaries; their support and
+profile statements must not override this closeout update.
+
 Independent testing continued October 29 without waiting for support. The
 [finished free-feature tests](tests/verification/entire-trial/report.md#independent-zero-spend-tests)
 supersede the earlier not-tested memory-pair and two-branch dispositions:
@@ -14,7 +53,7 @@ not enabled. Existing runners remain disabled, integrations/protections and
 original profiles unchanged. PRs #2066/#2068 closed unmerged; owned branches
 removed after verified recovery. Synthetic Trail 133 is closed, still
 retrievable and inventoried separately from the authorized Trail113 support
-request. No further support message was sent.
+request at that earlier boundary; the scoped follow-up is recorded above.
 
 Remote departure is narrower than earlier wording: exact login-session removal
 preserved all six pre-existing logins, but a direct data request with the

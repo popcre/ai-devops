@@ -1,11 +1,69 @@
 # Entire reversible trial execution report — #2022
 
+## Final independent recovery and closeout
+
+October 29, 2026: Albert removed cost attribution and all billing work from
+scope. Do not resume those investigations or treat them as acceptance blockers.
+No purchase or paid-service authorization follows from that scope change.
+The original discovery and stop deadlines remain unchanged.
+
+Support follow-up was explicitly authorized and submitted through Entire's
+ContactSupport form at 7:19 PM EDT for only synthetic Trail133 deletion/backup
+retention and only the removed trial CLI login's remaining issued access.
+The original Trail113 request at 2:59 PM EDT remains unchanged. The form showed
+Sending then closed without error; no ticket/reply/completed deletion established.
+No mailbox was used. All other records, account, GitHub/mirror and logins were
+explicitly preserved. Receipt: [updated issue](https://github.com/popcre/ai-devops/issues/2022).
+
+At 8:08 PM EDT, independent offline fault tests established:
+
+- Original recovery manifests: 211 independent-test files and 47 captured-memory
+  repair files all matched, 258/258. These files were not rewritten.
+- Native official candidate import rejected a one-byte-altered capture archive
+  and a truncated archive with checksum mismatch. The unchanged archive was
+  refused in an unrelated repository, then imported successfully in a fresh
+  source clone mapped to the original local repository identity: 26 entries,
+  seed/docs/sessions/history/patterns. No identity guard or archive was altered.
+  Recovery must preserve the local repository identity/path; arbitrary-directory
+  portability is not established. Network isolation and empty trial homes applied.
+- Fresh bare restoration of coordination, captured-task and synthetic-canary
+  Git bundles each passed strict full object verification. Both final branch
+  heads and the captured-task source commit remained present. A one-byte-damaged
+  coordination bundle failed with a pack checksum mismatch.
+- New test clones/damaged copies were removed after receipts were preserved.
+  No global install, capture watcher, model call or integration mutation occurred.
+
+Preservation qualification: Git config, Claude settings and absent Entire config
+matched the original baseline. Codex config was modified at 7:57:59 PM EDT,
+before the 8:06 PM EDT test run; metadata-only inspection found no Entire
+references. Ownership/cause is unestablished. It was preserved rather than reset;
+the earlier whole-profile equality claim is historical, not a current assertion.
+
+[Independent receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6511564275):
+15 retained result/metadata files, manifest SHA256
+`920262e8f0eab5b39af181b317dd0e2a622963c5827aa08bdffb115f18dd792e`.
+Earlier immutable manifests remain intact. A prior free diagnostic also found
+official generated guidance describing hybrid/vector search while the same
+candidate's help/README say semantic retrieval was removed. Official setup and
+natural query variants did not establish a retrieval repair; the frozen 8/10
+score was not changed. The current full feature set remains **no adoption**.
+
+For exact cold continuation, ownership, failed attempts, access boundaries and
+verification gates, use the
+[closeout handoff](../../../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
+Keep full live proof unchecked on #2022.
+
 Coordinator: Codex chat `01a18710-9230-7801-95f9-aebc53f9c409`, edge-dev3.
 Execution authorized October 29, 2026; started from public source
 `534493c047cd7dd9ebde38b25071918744901cf3` on
 `codex/entire-trial-20261029`.
 
 ## Decision
+
+Latest closeout: [support and independent recovery receipts](#final-independent-recovery-and-closeout)
+supersede the earlier support-message and whole-profile preservation statements.
+Cost/billing investigation is no longer in scope. The negative retrieval and
+capture findings remain unchanged; no full acceptance or adoption is claimed.
 
 Independent free-feature testing is finished with negative/limited results:
 [new receipts](#independent-zero-spend-tests). Matched retrieval regressed from
