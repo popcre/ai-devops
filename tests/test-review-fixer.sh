@@ -6,13 +6,23 @@ set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
+git init -q -b main "$tmp/source"
+git -C "$tmp/source" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+export STUB_HEAD="$(git -C "$tmp/source" rev-parse HEAD)" STUB_SOURCE="$tmp/source"
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
 case "$1 $2" in
-  "issue view") echo "PR: none" ;;
-  "repo clone") mkdir -p "$4" && git -C "$4" init -q -b main && git -C "$4" commit -q --allow-empty -m init ;;
+  "api repos/o/r/issues/7") printf '{"number":7,"state":"open","labels":[{"name":"review-finding"}],"body":"PR: https://github.com/o/r/pull/2\\nHead SHA: `%s`"}\n' "$STUB_HEAD" ;;
+  "api repos/o/r/pulls/2")
+    sha="$STUB_HEAD"; [ -f "$STUB_LOG.moved" ] && sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    printf '{"number":2,"state":"open","user":{"login":"owner"},"head":{"ref":"main","sha":"%s","repo":{"full_name":"o/r"}},"base":{"ref":"main"}}\n' "$sha" ;;
+  "api repos/o/r/git/ref/heads/main") printf '{"object":{"sha":"%s"}}\n' "$STUB_HEAD" ;;
+  "api --paginate") echo '[[]]' ;;
+  "issue view") printf 'PR: https://github.com/o/r/pull/2\nHead SHA: `%s`\n' "$STUB_HEAD" ;;
+  "repo clone") git clone -q "$STUB_SOURCE" "$4" ;;
   "auth token") exit 1 ;;
+  "pr create") echo https://github.com/o/r/pull/9 ;;
 esac
 exit 0
 GH
@@ -20,8 +30,11 @@ cat > "$tmp/bin/codex" <<'CX'
 #!/usr/bin/env bash
 out=""; dir=""
 while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -C) dir="$2"; shift ;; esac; shift; done
+echo "agent called" >> "$STUB_LOG"
 case "$STUB_DECISION" in
   FIXED-WORKFLOW) mkdir -p "$dir/.github/workflows"; echo x > "$dir/.github/workflows/a.yml"; d=FIXED ;;
+  FIXED|MOVED) echo x > "$dir/safe.py"; d=FIXED; [ "$STUB_DECISION" = MOVED ] && touch "$STUB_LOG.moved" ;;
+  BAD-EXIT) printf 'summary\nDECISION: INVALID\n' > "$out"; exit 9 ;;
   *) d="$STUB_DECISION" ;;
 esac
 printf 'summary\nDECISION: %s\n' "$d" > "$out"
@@ -30,7 +43,9 @@ chmod +x "$tmp/bin/"*
 fail=0
 run() {
   : > "$tmp/log"
+  rm -f "$tmp/log.moved"
   STUB_LOG="$tmp/log" STUB_DECISION="$1" PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=o/r GH_TOKEN=x \
+    AI_GH_STATE_DIR="$tmp/throttle" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
     WORK_ROOT="$tmp/w" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
     bash "$root/tools/ci/review-fixer.sh" 7 > "$tmp/out" 2>&1
 }
@@ -47,5 +62,15 @@ check "a fix touching a workflow is refused" '[ $rc = 1 ] && grep -q "touched pr
 check "a refused fix is labelled fixer-failed" 'grep -q "add-label fixer-failed" "$tmp/log"'
 
 run INVALID; rc=$?
-check "INVALID closes as not planned" 'grep -q "issue close 7 --repo o/r --reason not planned" "$tmp/log"'
+check "INVALID closes as not planned with explicit evidence" 'grep -q "issue close 7 --repo o/r --reason not planned" "$tmp/log" && grep -q "review-fixer-invalid:v1" "$tmp/log" && grep -q "add-label fixer-invalid" "$tmp/log"'
+
+run FIXED; rc=$?
+check "genuine current fix still commits pushes and opens a usable PR" '[ $rc = 0 ] && grep -q "pr create.*--base main --head review-fix/7" "$tmp/log" && grep -q "review-fixer:v1" "$tmp/log" && git -C "$tmp/source" show review-fix/7:safe.py >/dev/null'
+
+run MOVED; rc=$?
+check "source movement during model call stops publication and leaves finding open" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
+
+run BAD-EXIT; rc=$?
+check "failed model cannot publish an invalid disposition" '[ $rc = 1 ] && ! grep -q "issue close" "$tmp/log" && ! grep -q "add-label fixer-invalid" "$tmp/log"'
+PYTHONDONTWRITEBYTECODE=1 python3 "$root/tests/test_review_fixer_state.py" || fail=1
 [ "$fail" = 0 ] && echo "PASS: review-fixer decisions" || exit 1
