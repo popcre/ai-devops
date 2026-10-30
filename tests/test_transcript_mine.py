@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +103,62 @@ class Base(unittest.TestCase):
 
 
 class TestMine(Base):
+    def test_refs_branches(self):
+        demo = self.home / "demo"
+        subprocess.run(["git", "-C", str(demo), "branch", "feature/present"], check=True)
+        subprocess.run(["git", "-C", str(demo), "update-ref", "refs/remotes/origin/remote-only",
+                        self.sha], check=True)
+        conn = make_store(self.tmp / "s.db", [
+            ("branches", "branch `feature/present`, branch remote-only, branch `feature/gone`.",
+             "demo", RECENT, []),
+            ("old", "branch `old/gone`", "demo", OLD, [])] + self.filler())
+        flags, stats = mine.check_refs(mine.segments(conn), self.ctx(conn), 0)
+        self.assertEqual([f["object"] for f in flags], ["popcre/demo:branch feature/gone"])
+        self.assertEqual(stats["branches"], 3)
+        with patch.object(mine, "tracked_branches", return_value=None):
+            flags, stats = mine.check_refs(mine.segments(conn), self.ctx(conn), 0)
+        self.assertEqual(flags, [])
+        self.assertEqual(stats["branches_unchecked"], 3)
+
+    def test_runner_failures_leave_lookups_unchecked_and_retryable(self):
+        conn = make_store(self.tmp / "s.db", [
+            ("claims", "pushed commit abc1234ff", "demo", RECENT, [])] + self.filler())
+        ctx = self.ctx(conn)
+        for exc in (FileNotFoundError("missing"), subprocess.TimeoutExpired(["git"], 120)):
+            with self.subTest(exc=type(exc).__name__), patch.object(subprocess, "run", side_effect=exc):
+                self.assertEqual(mine.run(["git"]).returncode, 127)
+                self.assertIsNone(mine.tracked_files(self.home / "demo"))
+                flags, stats = mine.check_claims(mine.segments(conn), ctx, 20)
+                self.assertEqual(flags, [])
+                self.assertEqual(stats["commits_unchecked"], 1)
+                gh = mine.GH(mine.Cache(self.tmp / "fail.db"))
+                self.assertIsNone(gh.repo("demo"))
+                self.assertEqual(gh.numbers("popcre/demo", [10]), {})
+                self.assertIsNone(gh.cache.get("mine:repo:demo"))
+                self.assertIsNone(gh.cache.get("mine:num:popcre/demo#10"))
+            gh.runner = FakeGH()
+            self.assertEqual(gh.repo("demo"), "popcre/demo")
+            self.assertEqual(gh.numbers("popcre/demo", [10])[10]["state"], "MERGED")
+            gh.cache.conn.execute("DELETE FROM meta")
+            gh.cache.conn.commit()
+
+    def test_timestamp_fallback_for_all_time_sensitive_checks(self):
+        conn = make_store(self.tmp / "s.db", [
+            ("fallback", "bin/gone-tool fixed #99 quote every time in zebra format", "demo", ts, [])
+            for ts in (None, "invalid", OLD)] + self.filler())
+        conn.execute("UPDATE segments SET created=?", (RECENT,))
+        segs = mine.segments(conn)
+        self.assertEqual([s["ts"] for s in segs[:3]],
+                         [mine.parse_ts(RECENT), mine.parse_ts(RECENT), mine.parse_ts(OLD)])
+        ctx = self.ctx(conn)
+        flags, _ = mine.check_refs(segs, ctx, 0)
+        self.assertEqual({f["segment"] for f in flags}, {"g0", "g1"})
+        flags, _ = mine.check_claims(segs, ctx, 20)
+        self.assertEqual({f["segment"] for f in flags}, {"g0", "g1", "g2"})
+        flags, stats = mine.check_instructions(segs, ctx, 0.8)
+        self.assertEqual(stats["recent_segments"], 22)
+        self.assertFalse(any("zebra" in f["object"] for f in flags))
+
     def test_skill_bypass_flags_only_without_skill_call(self):
         text = "merge split rotate watermark pdf documents pages"
         segs = [("pdf work", text, "demo", RECENT, ["Bash"]),
@@ -182,9 +239,10 @@ class TestMine(Base):
     def test_main_writes_reports_without_text(self):
         segs = [("pdf work", "merge split rotate watermark pdf documents pages SECRETWORD", "demo", RECENT,
                  ["Bash"])] + self.filler()
-        make_store(self.tmp / "s.db", segs).close()
+        db = self.tmp / "store #1? percent%.db"
+        make_store(db, segs).close()
         out = self.tmp / "reports"
-        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s.db"), "--reports", str(out), "--cache",
+        rc = mine.main(["skill-bypass", "--db", str(db), "--reports", str(out), "--cache",
                         str(self.tmp / "c.db"), "--repo-root", str(self.root), "--now", NOW.isoformat(),
                         "--date", "2026-10-30"])
         self.assertEqual(rc, 0)
