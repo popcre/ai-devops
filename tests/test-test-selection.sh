@@ -81,7 +81,7 @@ check 'a deleted or unknown test file fails closed to every suite' \
 ALL_SUITES=($(cd "$ROOT/tests" && ls test-*.sh))
 ALL_LIST="$(printf '%s\n' "${ALL_SUITES[@]}" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 raff() { printf '%s\n' "$1" | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" | tr '\n' ' ' | sed 's/ $//'; }
-mapped() { jq -r --arg p "$1" '.affected_suite_rules.path_suites[$p][]' "$ROOT/config/ci-suite-manifest.json" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+mapped() { jq -r --arg p "$1" '.affected_suite_rules.path_suites[$p][]' "$ROOT/config/ci-suite-manifest.json" | tr -d '\r' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
 so_sel="$(raff 'bin/ai-second-opinion')"
 check 'a mapped second-opinion tool selects its declared suites, not every suite' \
   "$(mapped 'bin/ai-second-opinion')" "$so_sel"
