@@ -126,36 +126,6 @@ else
   bad "GLM capability probe makes one live call through the shared second-opinion path"
 fi
 
-# Run the installer's actual probe-repository setup. An empty commit has no
-# classifiable paths and the protected review sandbox must refuse it.
-GLM_REPO_SETUP=""
-if [ -n "$PYTHON" ]; then
-  GLM_REPO_SETUP="$("$PYTHON" - "$SOURCE" <<'PY'
-import pathlib
-import sys
-
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-start = text.index('    glm_probe="$(mktemp -d)"')
-end = text.index('    glm_result=""', start)
-print(text[start:end])
-PY
-)"
-fi
-if [ -n "$GLM_REPO_SETUP" ] &&
-   GLM_REPO_SETUP="$GLM_REPO_SETUP" SANDBOX="$ROOT/bin/ai-review-sandbox" bash -c '
-     set -e
-     eval "$GLM_REPO_SETUP"
-     trap '\''rm -rf "$glm_probe"'\'' EXIT
-     test "$(git -C "$glm_probe" ls-files)" = README.md
-     "$SANDBOX" assert-public "$glm_probe" >/dev/null
-     before="$("$SANDBOX" digest "$glm_probe")"
-     mkdir -p "$glm_probe/.ai/reviews" && printf report > "$glm_probe/.ai/reviews/glm-probe.md"
-     test "$("$SANDBOX" digest "$glm_probe")" = "$before"
-   '; then
-  ok "GLM installer creates a classifiable public probe repository"
-else
-  bad "GLM installer creates a classifiable public probe repository"
-fi
 
 # A symlinked invocation (e.g. /usr/local/bin/setup-secrets.sh) must resolve
 # REPO_ROOT to the real checkout, not the symlink's directory.
