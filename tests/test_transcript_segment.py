@@ -56,6 +56,35 @@ class Parsing(unittest.TestCase):
         secs = segment.parse_reply("### TOPIC: ci | one two three four five six seven eight nine ten | repo=x\nb")
         self.assertEqual(secs[0]["subject"].split(), "one two three four five six seven eight".split())
 
+    def test_header_without_topic_word(self):
+        secs = segment.parse_reply("### ci,owner-decision | Billing lock blocks CI\nbody one\n\n### machines-setup | Timer on edge-dev3\nbody two")
+        self.assertEqual([s["raw_slugs"] for s in secs], [["ci", "owner-decision"], ["machines-setup"]])
+        self.assertEqual(secs[1]["subject"], "Timer on edge-dev3")
+        self.assertEqual(segment.parse_reply("### plain markdown heading\nx"), [])
+
+    def test_header_case_and_bare_forms(self):
+        secs = segment.parse_reply("### Topic: Database,ci | Ledger drift guard | repo=x\nbody")
+        self.assertEqual(secs[0]["raw_slugs"], ["Database", "ci"])
+        secs = segment.parse_reply("ci,ai-mistakes | Flaky runner retried | repo=ai-devops\nbody")
+        self.assertEqual(secs[0]["raw_slugs"], ["ci", "ai-mistakes"])
+        self.assertEqual(segment.parse_reply("note | not a header without repo\nx"), [])
+
+    def test_no_section_reply_asked_once_more(self):
+        replies = iter(["just prose, no header", "### TOPIC: ci | Second try works | repo=x\nbody"])
+        res = segment.label_chunk("t", lambda a, b: next(replies), "p", {}, sleep=lambda s: None)
+        self.assertEqual(res.calls, 2)
+        self.assertEqual(res.sections[0]["topic_slugs"], ["ci"])
+
+    def test_refine_slugs_decision_rules(self):
+        r = segment.refine_slugs
+        self.assertEqual(r(["ai-devops-process", "owner-decision"], "Kimi reviewer lock fix", "")[0], ["reviewer-tooling", "ai-devops-process", "owner-decision"])
+        self.assertEqual(r(["database"], "Sega relationships complete", "")[0][0], "business-rules")
+        self.assertEqual(r(["ai-devops-process"], "Orchestrator closeout", "migration applied")[0][0], "database")
+        self.assertEqual(r(["ai-devops-process"], "Review queue refresh in ERP", "")[0], ["other"])
+        self.assertEqual(r(["owner-decision", "ci"], "Merge rule", "")[0], ["ci", "owner-decision"])
+        self.assertEqual(r(["ci", "ai-mistakes"], "Flaky runner", ""), (["ci", "ai-mistakes"], False))
+        self.assertEqual(r(["other"], "Kimi", ""), (["other"], False))
+
     def test_flattened_header_body_recovered(self):
         secs = segment.parse_reply("### TOPIC: ci | a b c d e f g h then the body text follows")
         self.assertEqual(secs[0]["subject"], "a b c d e f g h")

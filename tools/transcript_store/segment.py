@@ -47,7 +47,17 @@ QUIET_SECONDS = 24 * 3600
 ENDPOINT = "https://api.scaledown.xyz/v1/chat/completions"
 TIMEOUT = 300
 RETRIES = 3
-HEADER_RX = re.compile(r"^###\s*TOPIC:\s*(.*)$", re.MULTILINE)
+# ScaleDown often drops the literal "TOPIC:" and writes "### slug,slug | subject";
+# accept both, but only when a lowercase slug list is followed by "|".
+HEADER_RX = re.compile(r"^#{2,4}[ \t]*(?:TOPIC:[ \t]*)?([a-z][a-z-]*(?:[ \t]*,[ \t]*[a-z][a-z-]*)*[ \t]*\|.*)$",
+                       re.MULTILINE)
+# Reply parsing is wider than HEADER_RX (which also neutralizes headers inside
+# turn text): any case, 1-4 '#', and a bare "slugs | subject | repo=x" line.
+_SLUGLIST = r"[A-Za-z][A-Za-z0-9_-]*(?:[ \t]*,[ \t]*[A-Za-z][A-Za-z0-9_-]*)*"
+REPLY_HEADER_RX = re.compile(
+    r"^(?:#{1,4}[ \t]*(?:[a-z]+:[ \t]*)?(" + _SLUGLIST + r"[ \t]*\|.*)"
+    r"|(?:topic:[ \t]*)?(" + _SLUGLIST + r"[ \t]*\|[^|\n]*\|[ \t]*repo=.*))$",
+    re.MULTILINE | re.IGNORECASE)
 
 
 class ScaleDownError(Exception):
@@ -56,7 +66,10 @@ class ScaleDownError(Exception):
         self.status = status
 
 
-def load_prompt(version: str = "v1") -> str:
+DEFAULT_PROMPT = "v5"
+
+
+def load_prompt(version: str = DEFAULT_PROMPT) -> str:
     return (HERE / f"prompt_{version}.txt").read_text(encoding="utf-8")
 
 
@@ -138,12 +151,12 @@ def unwrap_reply(content) -> str:
 def parse_reply(content) -> list[dict]:
     """Sections ``{raw_slugs, subject, repo_hint, text}`` from a reply."""
     text = unwrap_reply(content)
-    matches = list(HEADER_RX.finditer(text))
+    matches = list(REPLY_HEADER_RX.finditer(text))
     sections = []
     for i, m in enumerate(matches):
         body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[m.end():body_end].strip()
-        parts = [p.strip() for p in m.group(1).split("|")]
+        parts = [p.strip() for p in (m.group(1) or m.group(2)).split("|")]
         raw_slugs = [s.strip() for s in parts[0].split(",") if s.strip()] if parts else []
         subject = parts[1] if len(parts) > 1 else ""
         repo_hint = None
@@ -163,6 +176,45 @@ def parse_reply(content) -> list[dict]:
         sections.append({"raw_slugs": raw_slugs, "subject": subject,
                          "repo_hint": repo_hint, "text": body})
     return sections
+
+
+# Deterministic first-slug rules (step 5 "decision rules"). ScaleDown is a
+# summarizer and does not follow a priority order reliably; these rules run
+# on its own subject and cleaned text, never on raw transcript text.
+_RX = lambda p: re.compile(p, re.IGNORECASE)
+REVIEWER_RX = _RX(r"\b(reviewers?|ai-review|kimi|grok|glm|qwen|muse|deepseek|stepfun|gemini|review wrapper|exact-head review)\b")
+BUSINESS_RX = _RX(r"\b(warner|paramount|sega|coca-cola|universal|nbcu|licensor|coldlion|mg0[1-9]|mgcategory|merch(andise)? group|"
+                  r"property codes?|style.?guides?|entitlements?|business[- ]rules?)\b")
+DATABASE_RX = _RX(r"\b(shared-db|supabase|migrations?|schema|postgres|rls|production apply|preview (lane|apply|capture)|"
+                  r"orchestrator|sql)\b")
+APP_RX = _RX(r"\b(designflow|popdam|poppim|popcrm|erp|item library|crawler|search results?|frontend|ui)\b")
+SOFT_FIRST = {"ai-devops-process", "owner-decision", "ci", "database"}
+
+
+def refine_slugs(slugs: list[str], subject: str, text: str) -> tuple[list[str], bool]:
+    """Re-order or replace a weak first slug; returns (slugs, changed)."""
+    if not slugs or slugs == ["other"]:
+        return slugs, False
+    out = list(slugs)
+    head = subject + "\n" + text[:1500]
+    first = out[0]
+    want = None
+    if first in SOFT_FIRST and REVIEWER_RX.search(subject):
+        want = "reviewer-tooling" if "reviewer-model" not in out else "reviewer-model"
+    elif first in SOFT_FIRST and BUSINESS_RX.search(head):
+        want = "business-rules"
+    elif first in ("ai-devops-process", "owner-decision") and DATABASE_RX.search(head):
+        want = "database"
+    elif first in ("ai-devops-process", "owner-decision") and APP_RX.search(head):
+        want = "other"
+    if want == "other":
+        return ["other"], True
+    if want:
+        out = [want] + [x for x in out if x != want]
+    if out[0] == "owner-decision" and len(out) > 1:
+        out = out[1:2] + ["owner-decision"] + out[2:]
+    out = out[:3]
+    return out, out != slugs
 
 
 def map_slug(raw: str, aliases: dict[str, str]) -> tuple[str | None, bool]:
@@ -234,6 +286,11 @@ def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=tim
     res.calls += 1
     sections = parse_reply(reply)
     if not sections:
+        # ScaleDown's header format drifts between calls: ask once more
+        reply = call_with_retry(call, prompt, text, sleep=sleep)
+        res.calls += 1
+        sections = parse_reply(reply)
+    if not sections:
         raise ScaleDownError("reply had no TOPIC sections")
     resolved = [(s, *resolve_slugs(s["raw_slugs"], aliases)) for s in sections]
     if any(inv or not slugs for _, slugs, inv, _ in resolved):
@@ -256,6 +313,9 @@ def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=tim
         if not slugs:
             slugs = ["other"]
             flags.append("forced-other")
+        slugs, refined = refine_slugs(slugs, s["subject"], s["text"])
+        if refined:
+            flags.append("refined")
         body, _ = normalize.redact(s["text"])
         subject, _ = normalize.redact(s["subject"])
         res.sections.append({"section_no": i, "topic_slugs": slugs, "subject": subject,
@@ -300,7 +360,7 @@ def live_check(path: str, threads: int = 6) -> dict:
     records = [(turn_key_str(lineage, t), t) for t in parsed["turns"]]
     chunks = make_chunks(lineage, records, "v1")
     call = scaledown_call(api_key_from_env())
-    prompt, aliases = load_prompt("v1"), load_aliases()
+    prompt, aliases = load_prompt(DEFAULT_PROMPT), load_aliases()
     stats = {"file_bytes": os.path.getsize(path), "turns": len(parsed["turns"]),
              "turn_chars": sum(len(t["text"]) for t in parsed["turns"]),
              "redactions": parsed["redactions"], "chunks": len(chunks), "calls": 0,

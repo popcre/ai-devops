@@ -1,0 +1,57 @@
+You clean and topic-split one portion of a conversation between Albert (the business owner) and AI coding agents.
+
+Remove all fluff (tool output dumps, file listings, repeated text, narration). Split what remains into topic sections. Keep exact error strings, decisions, outcomes and dates.
+
+Allowed topic slugs (use only these, exactly as written):
+- ci: CI issues
+- reviewer-model: reviewer LLM quality
+- reviewer-tooling: reviewer tooling
+- ai-devops-process: ai-devops process and tooling
+- database: database and shared-db
+- machines-setup: machines, setup and installs
+- vendor-credit: vendor credit and quota
+- secrets: secrets and credential incidents
+- ai-mistakes: mistakes, rework, unverified or false claims, hallucinations
+- agent-loop: agents repeating the same action without progress
+- agent-stuck-waiting: agents waiting idle without realizing it
+- idle-waiting: general waiting and idle time
+- token-waste-process: token waste in the working process
+- token-waste-tools: token waste in tools
+- should-be-skill: repeated work that should be a skill
+- owner-decision: owner decisions and rulings
+- business-rules: business rules
+- ai-interaction-ideas: other ideas for working better with AI
+- other: anything else
+
+Topic decision rules:
+- Multi-topic syntax: 1–3 slugs, comma-separated, no spaces, most important first: `ci,ai-mistakes`. More than 3 keeps the first 3.
+- `agent-loop` = the agent acts repeatedly (same command, same edit, same retry) without progress. `agent-stuck-waiting` = the agent does nothing while believing something is happening (waiting on a dead job, a reviewer that never answers). `idle-waiting` = legitimate or human-caused waiting (CI queue, a long build, waiting on Albert). Tie-break: action repeated → `agent-loop`; agent unaware → `agent-stuck-waiting`; otherwise `idle-waiting`.
+- `token-waste-process` = waste from how the work was run (re-reading files, redoing work, oversized context). `token-waste-tools` = waste caused by a tool's output or behaviour (huge dumps, verbose logs, a tool that loops). Tie-break: a tool's own output caused it → `token-waste-tools`.
+- `reviewer-model` = what a reviewer said (quality, wrong findings, missed bugs). `reviewer-tooling` = whether the review ran (wrappers, timeouts, install, auth). Tie-break: no verdict was produced → `reviewer-tooling`.
+- `ai-devops-process` vs `machines-setup`: toolkit scripts, skills, globals → `ai-devops-process`; one machine's OS, install, network → `machines-setup`.
+- `owner-decision` is added alongside the subject topic whenever Albert rules on something.
+- `other` only when nothing else fits; never alongside another slug.
+- The FIRST slug names what the section's work is about. Pick it in this order:
+  1. Database schema, migrations, Supabase, shared-db, previews, loaders, data imports → `database`.
+  2. CI checks, merge queue, runners, native qualification, failing builds or tests in CI → `ci`.
+  3. A reviewer's verdict or findings → `reviewer-model`; whether a review ran at all → `reviewer-tooling`.
+  4. One machine's install, rollout, OS, network or desktop → `machines-setup`.
+  5. POP Creations business data rules (licensors, properties, categories, items) → `business-rules`.
+  6. Secrets or credentials → `secrets`; vendor quota or credit → `vendor-credit`.
+  7. The section is mainly an AI error, false claim or rework → `ai-mistakes`.
+  8. Only the ai-devops toolkit itself (its scripts, skills, globals, plans) → `ai-devops-process`.
+  9. Feature work in an application (search, crawlers, UI, reports) that fits none of the above → `other`.
+- `ai-devops-process` is never a default: a section about a database migration, a CI run or a review uses that slug instead, even when it happened inside an ai-devops workflow.
+- `owner-decision` is never the first slug. Add it second only when Albert himself rules on something in that section; an AI approving or merging is not an owner decision.
+- The subject names the specific thing (an issue, table, tool or machine) in 3–8 meaningful words; never connector words like "and" alone.
+- Subject: 3–8 words. The parser truncates to 8 words and accepts a shorter one; it never re-asks for length.
+- Repo: the derived `repo` from step 2 is authoritative. The model's `repo=` is kept as `repo_hint` only and used when the derived repo is `unknown`.
+
+Output format. Write one or more sections. Each section starts with exactly one header line, then the cleaned text of that section:
+### TOPIC: <slugs> | <subject> | repo=<repo>
+Example header: ### TOPIC: ci,owner-decision | Merge queue blocked by billing lock | repo=ai-devops
+Keep the words "TOPIC:" and "repo=" in every header.
+<slugs> is 1 to 3 slugs from the list above, comma-separated, no spaces, most important first (example: ci,ai-mistakes).
+<subject> is a specific 3 to 8 word subject.
+<repo> is the application or repository the section is about, or unknown.
+Write nothing before the first header.

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# ai-install-transcript-store — install the daily transcript-store writer on
+# the single writer host, edge-dev3 (plan_transcript-store.md step 7):
+#   * copies bin/ai-transcript-store-run and tools/transcript_store/ to
+#     ~/.config/ai-devops so the unit never points into a movable checkout;
+#   * stores the ScaleDown key once in ~/.config/ai-devops/secrets (mode 600),
+#     read from 1Password vibe_coding with the protected service-account token;
+#   * writes ai-transcript-store.service + .timer (daily 05:30 local, after the
+#     upload timers) as systemd USER units.
+# Linux only; elsewhere it reports SKIP and exits 0.
+#
+# usage: ai-install-transcript-store [--check|--remove [--dry-run]] [--no-timer] [--no-key]
+set -u
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+check_only=0; timer=1; remove=0; dry=0; key=1
+while (($#)); do
+  case "$1" in
+    --check) check_only=1; shift ;;
+    --no-timer) timer=0; shift ;;
+    --no-key) key=0; shift ;;
+    --remove) remove=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$(uname -s)" != Linux ]; then echo "SKIP transcript store writer is Linux-only (edge-dev3)"; exit 0; fi
+
+cfg_dir="$HOME/.config/ai-devops"
+inst_dir="$cfg_dir/transcript-store"
+key_store="$cfg_dir/secrets/scaledown-api-key"
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+systemctl_cmd="${AI_TRANSCRIPT_STORE_SYSTEMCTL:-systemctl}"
+op_cmd="${AI_TRANSCRIPT_STORE_OP:-op}"
+op_ref='op://vibe_coding/scaledown.ai API key for testing/credential'
+
+if (( remove )); then
+  # Reverses this installer: timer, units and copies. The key store and the
+  # working database are kept (the database is the writer's state).
+  run() { if (( dry )); then echo "WOULD $*"; else "$@"; fi; }
+  if [ -f "$unit_dir/ai-transcript-store.timer" ]; then
+    echo "REMOVE transcript store timer"
+    (( dry )) || "$systemctl_cmd" --user disable --now ai-transcript-store.timer >/dev/null 2>&1 || true
+    run rm -f "$unit_dir/ai-transcript-store.timer" "$unit_dir/ai-transcript-store.service"
+    (( dry )) || "$systemctl_cmd" --user daemon-reload >/dev/null 2>&1 || true
+  fi
+  [ -d "$inst_dir" ] && run rm -rf "$inst_dir"
+  echo "OK transcript store writer removed"
+  exit 0
+fi
+
+if (( check_only )); then
+  rc=0
+  [ -x "$inst_dir/ai-transcript-store-run" ] || { echo "ERROR $inst_dir/ai-transcript-store-run not installed"; rc=1; }
+  diff -rq -x __pycache__ "$repo_root/tools/transcript_store" "$inst_dir/transcript_store" >/dev/null 2>&1 \
+    || { echo "ERROR installed transcript_store differs from the checkout"; rc=1; }
+  if (( key )); then
+    [ -s "$key_store" ] && [ "$(stat -c %a "$key_store")" = 600 ] || { echo "ERROR ScaleDown key store missing or not owner-only"; rc=1; }
+  fi
+  if (( timer )); then
+    [ -f "$unit_dir/ai-transcript-store.timer" ] || { echo "ERROR transcript store timer not installed"; rc=1; }
+  fi
+  (( rc )) || echo "OK transcript store writer installed"
+  exit "$rc"
+fi
+
+mkdir -p "$inst_dir"
+rm -rf "$inst_dir/transcript_store.new"
+cp -r "$repo_root/tools/transcript_store" "$inst_dir/transcript_store.new" || exit 1
+rm -rf "$inst_dir/transcript_store.new/__pycache__" "$inst_dir/transcript_store"
+mv "$inst_dir/transcript_store.new" "$inst_dir/transcript_store" || exit 1
+cp "$repo_root/bin/ai-transcript-store-run" "$inst_dir/ai-transcript-store-run" || exit 1
+chmod +x "$inst_dir/ai-transcript-store-run"
+echo "OK writer copied to $inst_dir"
+
+if (( key )) && ! { [ -s "$key_store" ] && [ "$(stat -c %a "$key_store")" = 600 ]; }; then
+  token_file="$cfg_dir/op-service-account"
+  [ -s "$token_file" ] || { echo "ERROR protected 1Password service-account token is unavailable" >&2; exit 1; }
+  IFS= read -r op_token < "$token_file" || true
+  mkdir -p "$cfg_dir/secrets"; chmod 700 "$cfg_dir/secrets"
+  tmp="$(mktemp "$cfg_dir/secrets/.scaledown.XXXXXX")" || exit 1
+  trap 'rm -f "$tmp"' EXIT
+  chmod 600 "$tmp"
+  # 1Password access is serialized with the toolkit's shared refresh lock.
+  if command -v flock >/dev/null 2>&1; then
+    OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock -w 120 "$cfg_dir/op-refresh.lock" "$op_cmd" read "$op_ref" > "$tmp" 2>/dev/null
+  else
+    OP_SERVICE_ACCOUNT_TOKEN="$op_token" "$op_cmd" read "$op_ref" > "$tmp" 2>/dev/null
+  fi
+  if [ ! -s "$tmp" ]; then rm -f "$tmp"; echo "ERROR could not read the ScaleDown key from 1Password; nothing stored" >&2; exit 1; fi
+  mv "$tmp" "$key_store"
+  echo "OK ScaleDown key stored (owner-only)"
+fi
+
+(( timer )) || exit 0
+mkdir -p "$unit_dir"
+cat > "$unit_dir/ai-transcript-store.service" <<'EOF'
+[Unit]
+Description=Transcript store daily build and Dropbox publish (ai-devops)
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/bin/env bash "%h/.config/ai-devops/transcript-store/ai-transcript-store-run"
+EOF
+cat > "$unit_dir/ai-transcript-store.timer" <<'EOF'
+[Unit]
+Description=Run the transcript store build daily after the upload timers
+
+[Timer]
+OnCalendar=*-*-* 05:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+if "$systemctl_cmd" --user daemon-reload 2>/dev/null && "$systemctl_cmd" --user enable --now ai-transcript-store.timer >/dev/null 2>&1 \
+   && "$systemctl_cmd" --user restart ai-transcript-store.timer >/dev/null 2>&1; then
+  echo "OK transcript store timer active"
+else
+  echo "WARN transcript store timer written but systemd --user is unavailable here"
+fi
