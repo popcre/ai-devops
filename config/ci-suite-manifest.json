@@ -2,7 +2,6 @@
   "schema_version": 3,
   "windows_offline_powershell_shard": 3,
   "suspended_bash": [
-    "test-ai-claude-review.sh",
     "test-ai-gemini-request-precheck.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
@@ -11,10 +10,7 @@
     "test-ai-kimi.sh",
     "test-ai-qwen-cli.sh",
     "test-ai-qwen-part2.sh",
-    "test-ai-qwen.sh",
-    "test-gemini-door-duration.sh",
-    "test-gemini-door-no-shell.sh",
-    "test-gemini-door-response.sh"
+    "test-ai-qwen.sh"
   ],
   "suspended_powershell": [
     "test-kimi-windows-execution.ps1",
@@ -132,16 +128,12 @@
         "test-ai-sync-memory-empty-sections.sh"
       ],
       "bin/ai-muse": [
-        "test-ai-muse.sh",
-        "test-ai-muse-part2.sh",
-        "test-ai-muse-part3.sh",
-        "test-ai-lock-doctor.sh"
+        "test-ai-lock-doctor.sh",
+        "test-ai-review-simple.sh"
       ],
       "bin/ai-muse.cmd": [
-        "test-ai-muse.sh",
-        "test-ai-muse-part2.sh",
-        "test-ai-muse-part3.sh",
-        "test-ai-lock-doctor.sh"
+        "test-ai-lock-doctor.sh",
+        "test-ai-review-simple.sh"
       ],
       "bin/ai-memory-sync.cmd": [
         "test-ai-memory-sync.sh",
@@ -204,16 +196,6 @@
       ],
       "bin/ai-qwen-cli.cmd": [
         "test-ai-qwen-cli.sh"
-      ],
-      "bin/ai-muse-code": [
-        "test-ai-muse-code.sh",
-        "test-ai-muse-code-part2.sh",
-        "test-muse-opencode-contract.sh"
-      ],
-      "bin/ai-muse-code.cmd": [
-        "test-ai-muse-code.sh",
-        "test-ai-muse-code-part2.sh",
-        "test-muse-opencode-contract.sh"
       ],
       "bin/ai-jev-scripts": [
         "test-ai-jev-scripts.sh"
@@ -335,9 +317,6 @@
         "test-mcp-session-guard.sh",
         "test-mcp-launch-lock.sh"
       ],
-      "bin/setup-opencode-glm.sh": [
-        "test-ai-glm.sh"
-      ],
       "tests/test-mcp-session-guard.sh": [
         "test-mcp-session-guard.sh"
       ],
@@ -346,27 +325,10 @@
       ],
       "tools/lib/grok-paid-keys.sh": [
         "test-ai-grok-implement.sh",
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
-      "tools/lib/muse-credential-boundary.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-lock-doctor.sh",
-        "test-ai-muse-part2.sh",
-        "test-ai-muse-part3.sh",
-        "test-ai-muse.sh",
-        "test-ai-review-engine.sh",
-        "test-pool-dispatch-doors.sh",
-        "test-ubuntu-install-stages.sh",
-        "test-workflow-policy.sh"
-      ],
-      "tools/lib/opencode-maintenance-lock.sh": [
-        "test-ai-glm.sh"
+        "test-ai-grok-review.sh"
       ],
       "tools/lib/provider-wrapper-common.sh": [
         "test-ai-gemini.sh",
-        "test-ai-glm.sh",
         "test-ai-kimi.sh",
         "test-ai-lock-doctor.sh",
         "test-ai-qwen-part2.sh",
@@ -375,110 +337,13 @@
         "test-reviewer-caller-detection.sh",
         "test-workflow-policy.sh"
       ],
-      "tools/lib/review-doors/deepseek.sh": [
-        "test-ai-deepseek-agent.sh",
-        "test-ai-deepseek.sh",
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
-      "tools/lib/review-doors/gemini.sh": [
-        "test-ai-gemini-request-precheck.sh",
-        "test-ai-gemini-usage.sh",
-        "test-ai-gemini.sh",
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-gemini-door-duration.sh",
-        "test-gemini-door-no-shell.sh",
-        "test-pool-dispatch-doors.sh",
-        "test-workflow-policy.sh"
-      ],
-      "tools/lib/review-doors/grok.sh": [
-        "test-ai-grok-implement.sh",
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
-      "tools/lib/review-doors/muse.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-lock-doctor.sh",
-        "test-ai-muse-code-part2.sh",
-        "test-ai-muse-code.sh",
-        "test-ai-muse-credential-lock.sh",
-        "test-ai-muse-part2.sh",
-        "test-ai-muse-part3.sh",
-        "test-ai-muse.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-pool-dispatch-doors.sh",
-        "test-ubuntu-install-stages.sh",
-        "test-workflow-policy.sh"
-      ],
-      "tools/lib/review-doors/qwen.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-lock-doctor.sh",
-        "test-ai-qwen-cli.sh",
-        "test-ai-qwen-part2.sh",
-        "test-ai-qwen.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
-      "tools/lib/review-doors/stepfun.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-preflight.sh",
-        "test-ai-stepfun-windows-shell.sh",
-        "test-ai-stepfun.sh",
-        "test-pool-dispatch-doors.sh",
-        "test-stepfun-extract-verdict.sh"
-      ],
-      "tools/lib/review-terminal-verdict.sh": [
-        "test-pool-dispatch-doors.sh",
-        "test-stepfun-extract-verdict.sh"
-      ],
-      "tools/lib/review-lifecycle-core.sh": [
-        "test-ai-review-engine.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
       "tools/lib/review-session-skip.sh": [
-        "test-ai-review-lifecycle.sh",
-        "test-ai-review-engine.sh"
+        "test-ai-review-lifecycle.sh"
       ],
       "tools/lib/review-capabilities.sh": [
-        "test-pool-dispatch-doors.sh",
         "test-ai-review-preflight.sh",
         "test-ai-preflight-pinbump.sh",
         "test-ai-review-code-only.sh"
-      ],
-      "tools/lib/reviewer-instructions.sh": [
-        "test-ai-glm.sh",
-        "test-ai-muse.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-stepfun.sh"
-      ],
-      "tools/lib/stepfun-pace.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-stepfun-windows-shell.sh",
-        "test-ai-stepfun.sh",
-        "test-pool-dispatch-doors.sh"
-      ],
-      "tools/lib/stepfun-sandbox.sh": [
-        "test-ai-grok-review.sh",
-        "test-ai-review-engine.sh",
-        "test-ai-stepfun-windows-shell.sh",
-        "test-ai-stepfun.sh",
-        "test-pool-dispatch-doors.sh"
       ],
       "tools/reviewer_credit_stream.py": [
         "test-ai-gemini.sh",
@@ -491,16 +356,11 @@
       "tools/reviewer_maintenance.py": [
         "test-ai-gemini-request-precheck.sh",
         "test-ai-gemini.sh",
-        "test-ai-reviewer-issue.sh",
-        "test-ai-stepfun.sh",
         "test-workflow-policy.sh"
       ],
       "tools/reviewer_usage.py": [
         "test-ai-deepseek-agent.sh",
-        "test-ai-lock-doctor.sh",
-        "test-ai-muse-part2.sh",
-        "test-ai-muse-part3.sh",
-        "test-ai-muse.sh"
+        "test-ai-lock-doctor.sh"
       ],
       "tests/test_deepseek_repo_tools.py": [
         "test-ai-deepseek-agent.sh"
@@ -622,6 +482,27 @@
       ],
       "tests/test_transcript_mine.py": [
         "test-transcript-store.sh"
+      ],
+      "bin/ai-second-opinion": [
+        "test-ai-review-simple.sh"
+      ],
+      "bin/ai-second-opinion.cmd": [
+        "test-ai-review-simple.sh"
+      ],
+      "tests/test_ai_second_opinion.py": [
+        "test-ai-review-simple.sh"
+      ],
+      "bin/ai-glm": [
+        "test-ai-review-simple.sh"
+      ],
+      "bin/ai-stepfun": [
+        "test-ai-review-simple.sh"
+      ],
+      "bin/ai-glm.cmd": [
+        "test-ai-review-simple.sh"
+      ],
+      "bin/ai-stepfun.cmd": [
+        "test-ai-review-simple.sh"
       ]
     },
     "companion_suites": {

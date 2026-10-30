@@ -8,3 +8,4 @@ py="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
   printf '%s\n' 'Python 3 is required to run the ai-review-simple tests.' >&2; exit 2; }
 "$py" -W error::ResourceWarning "$ROOT/tests/test_ai_review_simple.py"
 "$py" -W error::ResourceWarning "$ROOT/tests/test_ai_review_rule.py"
+"$py" -W error::ResourceWarning "$ROOT/tests/test_ai_second_opinion.py"

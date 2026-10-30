@@ -19,7 +19,7 @@ export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 unset AI_KEEP_SANDBOX 2>/dev/null || true
 
 # Packet/sandbox classification calls ai-task-gates; offline suites mock it
-# (same contract as tests/test-ai-review-engine.sh) so no real gate run starts
+# so no real gate run starts
 # and the suite does not depend on host install state.
 mkdir -p "$TMP/mockbin"
 cat > "$TMP/mockbin/ai-task-gates" <<'EOF'
