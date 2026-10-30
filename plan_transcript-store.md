@@ -67,12 +67,15 @@ The store must have these properties:
 | Archive folder (`chat_transcripts/<folder>`) | Live `hostname` | OS | Role | Last file in archive (2026-10-29 check) |
 |---|---|---|---|---|
 | `edge-dev3` | `edge-dev3` | Linux (Ubuntu) | active: uploader and the store writer | 2026-10-29 |
-| `hetz` | `hetz` | Linux | active uploader | 2026-10-29 |
+| `hetz` | `hetz` | Linux | active uploader, pulled by edge-dev3 over SSH (no `~/Dropbox` for `root` or `ai`, checked 2026-10-29) | 2026-10-29 |
 | `edge-dev` | `edge-dev` | Windows | active uploader | 2026-10-29 |
-| `4837` | `4837` | Windows | active uploader | 2026-09-06 |
-| `916` | `916` | Windows | active uploader | 2026-09-06 |
-| `al8960ofc` | to verify | Linux | to verify (see below) | 2026-10-07 |
+| `al8960ofc` | `al8960ofc` (SSH alias `4837`, checked 2026-10-29) | Windows | active uploader | 2026-10-07 |
+| `916-alien` | `916-alien` (SSH alias `916`, checked 2026-10-29) | Windows | active uploader; folder starts with the first automatic upload | — |
+| `4837` | none (alias `4837` prints `al8960ofc`) | Windows | archive-only: older folder name of the machine now uploading as `al8960ofc` | 2026-09-06 |
+| `916` | none (alias `916` prints `916-alien`) | Windows | archive-only: older folder name of the machine now uploading as `916-alien` | 2026-09-06 |
 | `compshop`, `seafile`, `t16` | none known | — | archive-only: ingest, never upload | 2026-09-06 |
+
+**Checked 2026-10-29 (#2059):** every alias in `~/.ssh/ai-devops.conf` that answered was run with `hostname`. Besides the rows above, `envy` → `edge-runn-envy` and `alien` → `edge-alien` (runner-only machines, not transcript hosts), `coolify`/`vps2` → `hetz`, `seafile` → `seafile-br`; the rest refused the key. Destination subfolders mirror the source paths (`claude/projects/`, `codex/sessions/`, `codex/archived_sessions/`; on hetz under `root/` and `ai/`), matching the layout the manual backups already used, so existing copies are not duplicated.
 
 **Verify every "to verify" row before step 1 installs anything:** run `hostname` on edge-dev3 (it printed `edge-dev3` on 2026-10-29) and on each SSH alias in `~/.ssh/ai-devops.conf`. If no live host prints `al8960ofc`, mark the row archive-only: it is an older name for a machine whose new uploads now land under its current hostname. If one does, it is an active uploader. Record the result in this table in the same PR. The upload script always writes to `chat_transcripts/<live hostname>/`, so one host never feeds two folders. Archive-only folders are still ingested by step 4; `--stats` reports each folder separately.
 

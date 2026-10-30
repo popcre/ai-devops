@@ -529,6 +529,9 @@
       "tests/test_ai_review_rule.py": [
         "test-ai-review-simple.sh"
       ],
+      "bin/ai-transcript-upload.ps1": [
+        "test-ai-transcript-upload.sh"
+      ],
       "bin/ai-transcript-envcheck": [
         "test-transcript-store.sh"
       ],

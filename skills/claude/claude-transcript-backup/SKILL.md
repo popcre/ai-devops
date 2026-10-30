@@ -14,6 +14,21 @@ description: Find all local Claude Code and Codex session transcripts on this ma
 > is a frozen historical archive (last upload 2026-09-27); never add new
 > transcripts to it, and never to the PUBLIC `ai-devops` repository.
 
+## Now automatic; this skill is the manual fallback
+
+Since popcre/ai-devops#2059 every active host copies its transcripts daily
+with `bin/ai-transcript-upload` (Linux systemd user timer
+`ai-transcript-upload.timer`) or `bin/ai-transcript-upload.ps1` (Windows
+scheduled task `AiDevOps-TranscriptUpload`), into
+`chat_transcripts/<live hostname>/`. hetz has no Dropbox, so edge-dev3's timer
+pulls it over SSH into `chat_transcripts/hetz/root/` and
+`chat_transcripts/hetz/ai/`. Each run writes one line to
+`chat_transcripts/<host>/.upload-last.txt`; check that file first. Run this
+skill by hand only when that line is stale or shows errors, or for a source
+the uploader does not cover. To run the uploader now: `ai-transcript-upload`
+(Windows: `ai-transcript-upload.ps1`); `--check` / `-Check` verifies the
+schedule.
+
 ## Where transcripts live
 
 - **Linux:** `~/.claude/projects/` (check BOTH `/root` and `/home/ai`),
