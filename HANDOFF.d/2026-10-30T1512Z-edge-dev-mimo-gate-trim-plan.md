@@ -1,3 +1,9 @@
+issue: none
+status: OPEN
+owner: mimo/edge-dev-gate-trim-plan
+
+Reason: proposal only; no implementation tracker has been created yet. The implementation session must create it in `popcre/shared-db` and replace `none` with its full issue URL before stage 1.
+
 # Handoff — shared-db gate-trim implementation plan (published, awaiting approval)
 
 Session: MiMo chat on `edge-dev`, 2026-10-30.
@@ -12,8 +18,8 @@ Plan file: [`plan_shared-db-gate-trim.md`](../plan_shared-db-gate-trim.md) — *
 ## Next exact action
 
 1. Albert reviews/approves `plan_shared-db-gate-trim.md` (target: median open→merge ≤25 min).
-2. On approval: implementation session opens work on **stage 1** (one-shot claim preflight) as one PR in `popcre/shared-db`, ordinary maintenance route — see plan §9. Each stage is one PR, merged before the next.
-3. Tracker issue (popcre/shared-db) carries the per-stage `- [ ] live proof` checklist items.
+2. On approval: implementation session first creates the tracker in `popcre/shared-db`, records its full issue URL here and in the plan, and satisfies the durable baseline evidence prerequisite in plan §6. Only then open work on **stage 1** (one-shot claim preflight) as one PR in `popcre/shared-db`, ordinary maintenance route — see plan §9. Each stage is one PR, merged before the next.
+3. The newly recorded tracker carries the per-stage `- [ ] live proof` checklist items. The scratch timing table is not durable evidence; recover or reconstruct it with run IDs before any coverage cut.
 
 ## Boundaries (do not cross)
 
