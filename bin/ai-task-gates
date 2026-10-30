@@ -2003,7 +2003,7 @@ linux_stage_report_valid(){
     $2=="required" && $1!="PASS" { bad=1 }
     $2=="required" { seen[$3]++ }
     END {
-      split("Base dependencies|Node toolchain (node/npm/npx)|System directories|Configuration seed|Configuration migration and validation|Unix entrypoints|Reviewer auto-requalification hook|Claude and Codex skills|Protected machine configuration|Git commit identity|Claude tool permissions|Claude closeout hook|Private memory seed|Managed artifact manifest|ai-devops doctor|Reviewer requalification", required, "|")
+      split("Base dependencies|Node toolchain (node/npm/npx)|System directories|Configuration seed|Configuration migration and validation|Unix entrypoints|Managed git hooks (retire reviewer post-merge hook)|Claude and Codex skills|Protected machine configuration|Git commit identity|Claude tool permissions|Claude closeout hook|Private memory seed|Managed artifact manifest|ai-devops doctor|Reviewer requalification", required, "|")
       for (i in required) if (seen[required[i]]!=1) bad=1
       if (bad) exit 1
     }

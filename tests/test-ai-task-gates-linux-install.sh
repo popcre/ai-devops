@@ -59,7 +59,7 @@ manifest(){
 stage_report(){
   local target="$1" name report="$TMP/state/install-stage-reports/$1.tsv"
   mkdir -p "$(dirname "$report")"
-  for name in 'Base dependencies' 'Node toolchain (node/npm/npx)' 'System directories' 'Configuration seed' 'Configuration migration and validation' 'Unix entrypoints' 'Reviewer auto-requalification hook' 'Claude and Codex skills' 'Protected machine configuration' 'Git commit identity' 'Claude tool permissions' 'Claude closeout hook' 'Private memory seed' 'Managed artifact manifest' 'ai-devops doctor' 'Reviewer requalification'; do
+  for name in 'Base dependencies' 'Node toolchain (node/npm/npx)' 'System directories' 'Configuration seed' 'Configuration migration and validation' 'Unix entrypoints' 'Managed git hooks (retire reviewer post-merge hook)' 'Claude and Codex skills' 'Protected machine configuration' 'Git commit identity' 'Claude tool permissions' 'Claude closeout hook' 'Private memory seed' 'Managed artifact manifest' 'ai-devops doctor' 'Reviewer requalification'; do
     printf 'PASS\trequired\t%s\n' "$name"
   done > "$report"
   chmod 600 "$report"
