@@ -2,6 +2,32 @@
 
 ## Current scope — public companion alongside GitHub
 
+### Meaning of live and original deadline
+
+“Entire is live” describes the verified public-source mirror and manually
+linked Trail231/Change98, which created GitHub PR2156 and later reflected its
+GitHub merge. It does not mean private memory or automatic Agents are running,
+nor does it reverse the failed full-feature qualification. The proof is the
+recorded October 30 readback below, not a claim of a fresh browser test in this
+deadline-only continuation. GitHub remains the source, check and merge authority.
+Private capture stays off; billing is dropped; support is not a dependency.
+
+The original clock starts October 29, 2026, 5:58 AM EDT. Ten subsequent weekdays
+are October 30; November 2–6; and November 9–12. No holiday calendar was specified,
+so November 11 counts. The maximum stop is November 12, 2026, 5:58 AM EST,
+including the New York daylight-saving transition. Discovery remains bounded
+by November 2, 2026, 5:00 PM EST. Public operation on October 30 and later
+continuations do not reset or extend either boundary. The earlier full-feature
+stop/no-adoption disposition remains; the narrower public companion uses only
+the remaining original window.
+
+At the original stop boundary, end trial-owned manual activity and record its
+disposition on #2022. Preserve GitHub-only work, existing integrations and
+recovery evidence; do not revoke the shared App or imitate erasure by closing
+or unlinking records. No automatic deadline worker exists, and no additional
+test, support wait, private capture or billing investigation is required by
+this reconciliation.
+
 Albert's October 30 instruction: “Go ahead and get entire.com live alongside
 GitHub for ai-devops. Keep private capture off and billing dropped. Don't wait
 for support. Use sub-agents to finish the work and verify it live.”

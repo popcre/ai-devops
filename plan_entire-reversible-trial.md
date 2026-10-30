@@ -2,6 +2,28 @@
 
 ## STATUS — read first
 
+October 30 deadline reconciliation: the original clock remains anchored to
+October 29, 2026, 5:58 AM EDT, the first recorded local containment pass.
+Counting ten subsequent weekdays gives November 12, 2026, 5:58 AM EST;
+November 11 counts because the original protocol specified no holiday calendar.
+Discovery still ends November 2, 2026, 5:00 PM EST. Neither the October 30
+public-companion authorization nor this continuation starts a new clock.
+No extension is taken. These are maximum boundaries, not a requirement to
+repeat completed tests or wait for support. The historical full-feature trial
+already has a stop/no-adoption disposition; only the narrower public companion
+is operating within the remaining original window. At its stop boundary,
+end trial-owned manual activity and record the bounded disposition on #2022;
+preserve GitHub, existing integrations and recovery evidence. No shared-App
+revocation, unsupported deletion, capture or billing work is authorized.
+No deadline worker is running or promised.
+
+“Entire is live” means only that the public mirror and manual Trail linkage
+were live-proved through GitHub PR2156 and Trail231/Change98. It is not a claim
+that private memory, automatic Agents, automated findings, full departure or
+full-feature adoption passed. GitHub remains authoritative; private capture
+stays off and billing stays dropped. See the
+[clarification](docs/entire-trial.md#meaning-of-live-and-original-deadline).
+
 Session wrap-up: the authorized public-companion rollout and support-ruling
 documentation are complete. There is no active support wait. Retention and old
 issued-access behavior remain disclosed unknowns, not additional rollout work.
