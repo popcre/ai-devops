@@ -12,6 +12,13 @@ capture stays off; hosted Agents are not enabled; billing is excluded. Existing
 integrations and other sessions remain intact. Vendor support is not a dependency
 for ready public-companion work.
 
+Session closeout: the authorized live public companion is complete. Unanswered
+retention/access questions are recorded limitations, not an active support wait
+or a task Albert must unblock. No monitoring or repeated support request is
+running. The original trial boundary still applies; use the
+[closeout handoff](../HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md)
+only if continuing the bounded trial or reconciling actual new evidence.
+
 Authenticated Entire access as `u2giants` displayed main commit
 `43f5e608489d2c2bc29e03f22b9a02e410c78d7e`, matching the current GitHub public
 main observed in this continuation. Local capture-off custody was verified

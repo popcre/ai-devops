@@ -2,6 +2,13 @@
 
 ## STATUS — read first
 
+Session wrap-up: the authorized public-companion rollout and support-ruling
+documentation are complete. There is no active support wait. Retention and old
+issued-access behavior remain disclosed unknowns, not additional rollout work.
+The unchanged trial deadline remains recorded; no background worker runs.
+For a later authorized continuation, start with the
+[session closeout](HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md).
+
 October 30 support disposition: Albert supplied Entire support's answer that
 Trails cannot be deleted. Trail113 therefore cannot be removed; the same product
 limitation governs133. Closing changes lifecycle only; unlinking detaches a
