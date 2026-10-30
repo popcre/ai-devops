@@ -37,4 +37,13 @@ ai_same_path "$TMP/spot" "$TMP/other" && fail 'ai_same_path rejects distinct pat
 # CR-terminated path from native Windows tools must not break identity.
 ai_same_path "$(printf '%s\r' "$TMP/spot")" "$TMP/spot" && ok 'trailing CR ignored' || fail 'trailing CR ignored'
 
+# Native Windows tools often print a %TEMP% path in 8.3 short form
+# (C:\Users\RUNNER~1\...); it names the same place as the long form.
+if command -v cygpath >/dev/null 2>&1; then
+  short="$(cygpath -d "$TMP/spot" 2>/dev/null)"
+  if [ -n "$short" ]; then
+    ai_same_path "$short" "$TMP/spot" && ok '8.3 short name matches long name' || fail "8.3 short name matches long name ($short)"
+  fi
+fi
+
 printf 'path-identity: %d checks passed\n' "$PASS"
