@@ -13,8 +13,18 @@ Authenticated Entire access as `u2giants` displayed main
 Local capture-off custody was verified October 30 at 11:26 AM EDT.
 [Operational Trail231](https://entire.com/gh/popcre/ai-devops/-/trails/231) was
 created and read back with #2022, the exact main, scope and deadlines in its
-description. Public mirror access and manual Trail creation/readback are proved;
-no new PR/Change linkage is claimed by this receipt.
+description. Native **Add change** linked exact public source
+`309878f366444bbc7a17e00c079f2462a166a8f2` as
+[Change98](https://entire.com/gh/popcre/ai-devops/-/trails/231/changes/98) and
+created [GitHub PR2156](https://github.com/popcre/ai-devops/pull/2156), merged
+as `300bbbf0743efd707bd48712042b3d9f5d1962b4`. GitHub checks succeeded or
+were skipped; Entire Gates was NEUTRAL. Exact source/check links were observed
+before merge, and the landing commit was displayed by Entire afterward.
+At fresh authenticated readback October 30, 12:58 PM EDT, Trail231 was Complete
+and Change98 Merged, with “Changes were merged into main” and exact source
+activity retained. Earlier synchronization lag resolved. The merged view's
+Checks/Findings both say Not checked; no historical check archive or automated
+finding qualification is claimed. Scoped public-companion live proof passes.
 See the [current operating scope](docs/entire-trial.md#current-scope--public-companion-alongside-github).
 
 The prior full-feature rejection remains valid: frozen retrieval scored baseline
