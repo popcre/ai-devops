@@ -66,7 +66,7 @@ class ScaleDownError(Exception):
         self.status = status
 
 
-DEFAULT_PROMPT = "v6"
+DEFAULT_PROMPT = "v7"
 
 
 def load_prompt(version: str = DEFAULT_PROMPT) -> str:
@@ -187,21 +187,29 @@ BUSINESS_RX = _RX(r"\b(warner|paramount|sega|coca-cola|universal|nbcu|licensor|c
                   r"property codes?|style.?guides?|entitlements?|business[- ]rules?)\b")
 DATABASE_RX = _RX(r"\b(shared-db|supabase|migrations?|schema|postgres|rls|production apply|preview (lane|apply|capture)|"
                   r"orchestrator|sql)\b")
-APP_RX = _RX(r"\b(designflow|popdam|poppim|popcrm|erp|item library|crawler|search|frontend|ui|sandbox|cloud run|udf\w*)\b")
+APP_RX = _RX(r"\b(designflow|popdam|poppim|popcrm|erp|item library|crawler|search|frontend|ui|sandbox|cloud run|udf\w*|"
+              r"orderlist|sample tracking|flow \d|dialog|backend|harvest\w*|scrap(e|er|ing)|playwright|style-group)\b")
 CI_RX = _RX(r"\b(merge[- ]queue|merge[- ]lane|ci|runners?|github actions|workflow run|checks?)\b")
 SOFT_FIRST = {"ai-devops-process", "owner-decision", "ci", "database"}
 
 
 def refine_slugs(slugs: list[str], subject: str, text: str) -> tuple[list[str], bool]:
     """Re-order or replace a weak first slug; returns (slugs, changed)."""
-    if not slugs or slugs == ["other"]:
+    if not slugs:
         return slugs, False
+    if slugs == ["other"]:
+        return (["business-rules"], True) if BUSINESS_RX.search(subject) else (slugs, False)
     out = list(slugs)
     head = subject + "\n" + text[:1500]
     lead = subject + "\n" + text[:300]
     first = out[0]
     want = None
-    if first in SOFT_FIRST | {"ai-mistakes"} and REVIEWER_RX.search(subject) and not DATABASE_RX.search(subject):
+    if first in SOFT_FIRST | {"business-rules", "reviewer-tooling", "reviewer-model"} and APP_RX.search(subject) \
+            and not DATABASE_RX.search(subject) and not REVIEWER_RX.search(subject) and not CI_RX.search(subject):
+        want = "other"
+    elif first == "other" and BUSINESS_RX.search(subject):
+        want = "business-rules"
+    elif first in SOFT_FIRST | {"ai-mistakes"} and REVIEWER_RX.search(subject) and not DATABASE_RX.search(subject):
         want = "reviewer-tooling" if "reviewer-model" not in out else "reviewer-model"
     elif first in SOFT_FIRST and BUSINESS_RX.search(lead):
         want = "business-rules"
