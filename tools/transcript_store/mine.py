@@ -88,13 +88,13 @@ def parse_ts(s) -> dt.datetime | None:
 def segments(conn: sqlite3.Connection) -> list[dict]:
     """Segments with their chunk tool sequence and session end time."""
     rows = conn.execute(
-        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts"
+        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts, s.created"
         " FROM segments s LEFT JOIN chunks c ON c.chunk_id = s.chunk_id"
         " LEFT JOIN sessions se ON se.path = s.path").fetchall()
     out = []
-    for sid, subj, text, repo, slugs, seq, last in rows:
+    for sid, subj, text, repo, slugs, seq, last, created in rows:
         out.append({"id": sid, "subject": subj or "", "text": text or "", "repo": repo or "unknown",
-                    "slugs": slugs or "", "tools": _tools(seq), "ts": parse_ts(last)})
+                    "slugs": slugs or "", "tools": _tools(seq), "ts": parse_ts(last) or parse_ts(created)})
     return out
 
 
@@ -170,7 +170,10 @@ def key_phrase(bullet: str, idf: Idf) -> list[str]:
 # ------------------------------------------------------------------ git and gh
 
 def run(cmd, cwd=None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120)
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError):
+        return subprocess.CompletedProcess(cmd, 127, stdout="", stderr="lookup unavailable")
 
 
 class Cache:
@@ -226,7 +229,8 @@ class GH:
                 except (ValueError, KeyError):
                     found = f"{owner}/{name}"
                 break
-        self.cache.put(key, found)
+        if found:
+            self.cache.put(key, found)
         return found or None
 
     def numbers(self, full: str, nums) -> dict:
@@ -249,6 +253,8 @@ class GH:
             self._gate("graphql")
             self.calls += 1
             r = self.runner(["gh", "api", "graphql", "-f", f"query={q}"])
+            if r.returncode != 0:
+                continue
             try:
                 data = json.loads(r.stdout or "{}").get("data") or {}
             except ValueError:
@@ -272,8 +278,27 @@ def tracked_files(repo_dir: Path) -> set | None:
     return set(r.stdout.splitlines()) if r.returncode == 0 else None
 
 
-def commit_known(repo_dir: Path, sha: str) -> bool:
-    return run(["git", "-C", str(repo_dir), "cat-file", "-e", f"{sha}^{{commit}}"]).returncode == 0
+def commit_known(repo_dir: Path, sha: str) -> bool | None:
+    r = run(["git", "-C", str(repo_dir), "cat-file", "-e", f"{sha}^{{commit}}"])
+    return None if r.returncode == 127 else r.returncode == 0
+
+
+def tracked_branches(repo_dir: Path) -> set | None:
+    if not (repo_dir / ".git").exists():
+        return None
+    r = run(["git", "-C", str(repo_dir), "for-each-ref", "--format=%(refname)",
+             "refs/heads/", "refs/remotes/"])
+    if r.returncode != 0:
+        return None
+    branches = set()
+    for ref in r.stdout.splitlines():
+        if ref.startswith("refs/heads/"):
+            branches.add(ref[len("refs/heads/"):])
+        elif ref.startswith("refs/remotes/"):
+            remote = ref[len("refs/remotes/"):]
+            branches.add(remote)
+            branches.add(remote.split("/", 1)[-1])
+    return branches
 
 
 # ----------------------------------------------------------------- the checks
@@ -386,6 +411,7 @@ PATH_RE = re.compile(r"(?<![\w./-])((?:bin|tools|skills|docs|tests|templates|con
                      r"/[A-Za-z0-9_./-]*[A-Za-z0-9_])")
 NUM_RE = re.compile(r"(?<![\w/&])#(\d{2,6})\b")
 SKILL_RE = re.compile(r"`([a-z0-9][a-z0-9-]{2,60})`\s+skill\b|\bskill\s+`([a-z0-9][a-z0-9-]{2,60})`")
+BRANCH_RE = re.compile(r"\bbranch\s+`?([A-Za-z0-9_][A-Za-z0-9_./-]*)", re.I)
 
 
 def repo_set(segs, gh, min_refs=20):
@@ -408,6 +434,7 @@ def check_refs(segs, ctx, thr):
     resolved, unresolved = repo_set(segs, gh)
     skill_names = {s["name"] for s in ctx["skills"]}
     files_cache: dict = {}
+    branches_cache: dict = {}
     nums_wanted = defaultdict(set)
     flags, stats = [], Counter()
     for s in recent:
@@ -418,6 +445,18 @@ def check_refs(segs, ctx, thr):
         if full not in files_cache:
             files_cache[full] = tracked_files(ctx["repos_home"] / s["repo"])
         files = files_cache[full]
+        for branch in set(BRANCH_RE.findall(s["text"])):
+            branch = branch.rstrip(".")
+            if full not in branches_cache:
+                branches_cache[full] = tracked_branches(ctx["repos_home"] / s["repo"])
+            branches = branches_cache[full]
+            if branches is None:
+                stats["branches_unchecked"] += 1
+            else:
+                stats["branches"] += 1
+                if branch not in branches:
+                    flags.append({"segment": s["id"], "subject": s["subject"],
+                                  "object": f"{full}:branch {branch}", "kind": "branch"})
         tops = {f.split("/", 1)[0] for f in files} if files else set()
         for p in set(PATH_RE.findall(s["text"])):
             p = p.rstrip(".")
@@ -495,8 +534,12 @@ def check_claims(segs, ctx, thr):
             d = ctx["repos_home"] / s["repo"]
             if not (d / ".git").exists():
                 stats["commits_unchecked"] += 1
-            elif not commit_known(d, val):
-                flags.append({**base, "object": f"{full}@{val}", "why": "commit not found"})
+            else:
+                known = commit_known(d, val)
+                if known is None:
+                    stats["commits_unchecked"] += 1
+                elif not known:
+                    flags.append({**base, "object": f"{full}@{val}", "why": "commit not found"})
             continue
         got = answers.get(full, {})
         if val not in got:
@@ -555,7 +598,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     store_root = Path(a.store_root) if a.store_root else reader.default_store_root()
-    conn = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True) if a.db else reader.open_store(store_root)
+    conn = sqlite3.connect(f"{Path(a.db).resolve().as_uri()}?mode=ro", uri=True) if a.db else reader.open_store(store_root)
     root = Path(a.repo_root)
     cache = Cache(Path(a.cache) if a.cache else
                   Path.home() / ".local/share/ai-devops/transcript-store/mine-meta.db")
