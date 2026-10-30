@@ -14,11 +14,11 @@
 | B Remove APPROVE requirements from `ai-task-gates` and installers | #2071 | ✅ done (2026-10-29) | PR #2057 (87cd2905); 5-host proof https://github.com/popcre/ai-devops/issues/2071#issuecomment-6510582588 |
 | C shared-db merge gate off | — | ✅ done | popcre/shared-db PR #5055 merged (06220e0); proof PR shared-db#5057 merged with no verdict |
 | D Instructions, globals and skills rewritten | #2072 | ✅ done (2026-10-30) | PR #2085 (9170814b), ruling #2104 (5bf5ec01); 5-host proof https://github.com/popcre/ai-devops/issues/2072#issuecomment-6513481440 |
-| E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
+| E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30); watcher config deletion moved to F (#2113) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
 | F Delete old reviewer code and data | #2074 | 🟡 in progress | PR #2112 (d55ba665) merged; PR #2113 open |
 | G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
 
-**A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
+**A fresh session continues stage F (#2074),** including the remaining cleanup in PR #2113, and stage G (#2075)'s pending real-migration promotion and hold proofs when the next shared-db migration PR is available. A–E are complete; do not restart them. Re-read STATUS before acting.
 
 ## Part 1 — Why
 
@@ -79,7 +79,9 @@ CI uses the self-hosted runners `edge-dev3-linux` (1–4), label `ai-devops-linu
 
 ## Part 2 — What we know
 
-### 5. Current state
+### 5. Historical state (2026-10-29, before A and B merged)
+
+This section records the pre-merge snapshot only, not execution instructions. A–E are now complete; current evidence and remaining F/G work are in STATUS. The freeze window was removed in E: its former expiry and extension procedure no longer apply. Do not recreate the window file.
 
 **On main (merged in #2044):**
 - `bin/ai-review-simple` (stdlib Python, under 400 lines). One provider reviews `base...head` through `opencode` in a read-only clone and writes `{provider, head, verdict, findings, elapsed, error}` JSON. It exits 0 on a verdict and 3 when the reviewer is unavailable. The out-of-credit classifier matches 402, 429 and 1113, insufficient balance, rate limit, payment required and "exceeded your current quota" (`bin/ai-review-simple` ~93-97). It returns exit 2 for a refusal such as a head mismatch (`review()` ~327-329). Exit 2 must **not** fall through to the next provider.
@@ -108,7 +110,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 **Freeze window:**
 - `/etc/ai-devops/observation-week.json` (Linux) and `C:\ProgramData\ai-devops\observation-week.json` (Windows) were extended on all 5 hosts to `end: 2026-11-12T14:56:18Z`.
 - While it is live, `ai-task-gates` admits code and prose merges unreviewed and prints `MERGE-UNREVIEWED`.
-- If stage B is not merged by then, gating returns. Extend the window again rather than let gates return.
+- At that time, stage B had to land before expiry to prevent gating returning. This risk ended with B and E; no extension is now applicable.
 
 **Everything else** in `docs/reviewer-enforcement-inventory-2026-10-29.md` (59 rows) is still live unless STATUS says otherwise.
 
@@ -196,7 +198,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 
 *(Stage C, the shared-db merge gate, is done; see STATUS.)*
 
-**B deadline:** the freeze window ends 2026-11-12 14:56Z. If #2071 is not merged and installed by 2026-11-10, extend the window file's `end` by 14 days on all 5 hosts. The file is `/etc/ai-devops/observation-week.json` on Linux and `C:\ProgramData\ai-devops\observation-week.json` on Windows; the JSON shape is in `tools/lib/observation-week.sh`. Write it with the same privileged mechanism the installer uses for `/etc/ai-devops`. The first step of stage B is to post this dated action and procedure as a comment on #2071, so it does not depend on any one session. Do not let gating return.
+**B deadline (retired):** B is merged and installed, and E removed the freeze window. The former deadline and extension procedure no longer apply. Do not recreate or extend the window file.
 
 **D — Instructions and skills** (inventory rows 17–20 done in shared-db; rows 51–59 here).
 - Rewrite `templates/system/CLAUDE-global.md` and `AGENTS-global-codex.md`, plus the mimo and zcode variants: remove "assigned AI reviewers gate technical actions", the `ai-review` / rotation / observation-week paragraphs, and "exact-head APPROVE".
@@ -211,7 +213,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - Remove the post-merge requalification hook stage.
 - Remove the `ai-reviewer-logs-sync` cron.
 - Remove the `local-watch` entries.
-- Remove the Windows `machine-tools.tsv` rows and the `reviewer-start-watch` config.
+- Remove the Windows `machine-tools.tsv` rows. Deletion of `config/reviewer-start-watch.json` moved to stage F (#2113), together with its remaining command and tests; the config stays until those consumers are removed.
 - Disable `reviewer-membership-drift.yml`.
 - Remove the observation-week block in `bin/ai-task-gates` (~58-92) and `tools/lib/observation-week.sh`.
 - Make the normal installer (`install.sh` / `update.sh` and the Windows installer) delete the window file during the normal installer run, so no hand-run privileged command or credential extraction is needed.
@@ -221,6 +223,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
   - a code PR still merges.
 
 **F — Delete old code and data** (inventory rows 8–13, 47 and 50; leftovers from shared-db stage C).
+- Remove `config/reviewer-start-watch.json` together with `bin/ai-reviewer-start-watch` and `tests/test-ai-reviewer-start-watch.sh` in #2113 (cleanup transferred from E).
 - In ai-devops, remove `bin/ai-review*` (except `ai-review-simple`), `ai-reviewer-*`, `ai-*-review`, `ai-review-posthoc`, `ai-release-live-check`, `tools/lib/review-doors/`, `tools/reviewer_events.py`, their tests, `.cmd` twins, installer entries, and `verify.yml` `windows-reviewer-safety`.
 - In shared-db, remove:
   - `scripts/lib/lanes/review-*`
@@ -290,7 +293,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - **Runner capacity.** One review per PR keeps the load low.
 - **Credit runs out.** The reviewer falls through to the next, and if all four are out, there is "no advice this time".
 - **Automatic production promotion applies a broken migration.** Preview rehearsal and tests still gate it; rollback is a forward-fix migration.
-- **Stage B not merged by 2026-11-12.** Extend the window file.
+- **Former stage B deadline:** resolved by B and E; no freeze-window extension remains applicable.
 
 **Uncertain:**
 - Whether u2giants repos can use popcre runners. Check in stage G.
@@ -313,7 +316,7 @@ Muse session `skinny-plan-critique`: REVISE, REVISE, then **APPROVE** in round 3
 ## Self-audit
 
 1. **Could a brand-new session execute this without asking?**
-   - Yes: §5 gives exact state (PR numbers, branches, failing check, window file date).
+   - Yes: STATUS gives current evidence and remaining F/G work; §5 is explicitly pre-merge history.
    - §9 gives files, order and done-when per stage.
    - §11 and §12 give the rules and access.
    - Gap found and fixed: the flaky suites are now named in §6.
