@@ -2,6 +2,29 @@
 
 ## STATUS — read first
 
+October 30, 2026: Albert authorized a narrower live operating scope: the public
+`popcre/ai-devops` mirror and manual Trails alongside authoritative GitHub.
+Private capture remains off; no hosted Agents are enabled; billing stays dropped.
+Support is nonblocking for ready public-companion work. Existing integrations,
+other sessions and the original deadlines remain preserved.
+
+Authenticated Entire access as `u2giants` displayed main
+`43f5e608489d2c2bc29e03f22b9a02e410c78d7e`, matching observed GitHub public main.
+Local capture-off custody was verified October 30 at 11:26 AM EDT.
+[Operational Trail231](https://entire.com/gh/popcre/ai-devops/-/trails/231) was
+created and read back with #2022, the exact main, scope and deadlines in its
+description. Public mirror access and manual Trail creation/readback are proved;
+no new PR/Change linkage is claimed by this receipt.
+See the [current operating scope](docs/entire-trial.md#current-scope--public-companion-alongside-github).
+
+The prior full-feature rejection remains valid: frozen retrieval scored baseline
+10/10 versus Entire 8/10 and raw-capture privacy failed. This is no authorization
+to enable private capture, rewrite those results or claim untested hosted
+features. Trail113/133 deletion, backup retention and exact removed-login access
+semantics stay open with Entire on #2022, independently of public-companion work.
+Discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST
+are unchanged. The closeout status below describes the earlier full-feature scope.
+
 Closeout update, October 29, 2026: start with the
 [fresh continuation handoff](HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
 Do not restart the experiment or reset either deadline. Cost attribution and

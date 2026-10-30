@@ -1,5 +1,31 @@
 # Entire reversible trial execution report — #2022
 
+## Public companion live continuation
+
+On October 30, 2026, Albert authorized Entire live alongside GitHub for public
+`popcre/ai-devops`, with private capture off and billing dropped, without waiting
+for support. The bounded scope is the existing public mirror and manual Trails;
+GitHub remains authoritative. No hosted Agents, private uploads, shared logout
+or integration replacement is part of this continuation.
+
+Authenticated Entire access as `u2giants` displayed main
+`43f5e608489d2c2bc29e03f22b9a02e410c78d7e`, matching the observed public GitHub
+main. Local capture-off custody was verified October 30 at 11:26 AM EDT.
+The coordinator created and read back
+[operational Trail231](https://entire.com/gh/popcre/ai-devops/-/trails/231),
+“ai-devops live alongside GitHub — public mirror and manual Trails #2022”.
+Its description records #2022, the exact main, capture off, GitHub authority,
+nonblocking support and original deadlines. This establishes authenticated public
+mirror access and manual Trail creation/readback; no new PR/Change linkage is
+claimed by this receipt.
+
+Historical full-feature rejection is unchanged: baseline 10/10 versus Entire
+8/10, raw-capture privacy failure, and unqualified extraction/automated hosted
+features are not upgraded by a working public mirror. Exact Trail113/133
+deletion, backup retention and removed-login access semantics remain vendor-owned
+on #2022 and do not block ready public-companion work. Original discovery
+November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST are intact.
+
 ## Final independent recovery and closeout
 
 October 29, 2026: Albert removed cost attribution and all billing work from
