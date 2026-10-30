@@ -115,9 +115,8 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
   advisory AI review per code or plan PR and never blocks a merge; findings
   become `review-finding` issues that an automatic fixer handles. Never wait
-  on, request, or gate on a review; second opinions stay optional. When
-  `ai-task-gates` prints `MERGE-UNREVIEWED`, merge on green CI and add label
-  `unreviewed-week`.
+  on, request, or gate on a review; second opinions stay optional.
+  Reviews are preferred but never required (owner ruling 2026-10-29 night).
 - **Route every successor from its own work,** never a predecessor's.
 - **Synology:** NAS reads over 25 s load `synology-long-running-operations`.
 

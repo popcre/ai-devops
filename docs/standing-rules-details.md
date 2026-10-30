@@ -101,10 +101,10 @@ shared-db allocator draws; everywhere else, a rotation reviewer run through
 shared-db there is no draw command: the session itself picks any reviewer the
 registry lists as in rotation (`config/reviewer-registry.json`, mirrored from
 the allocator) and moves to the next one if it is unreachable. The
-implementing session never approves its own change. AI review is required
-**only in `popcre/shared-db`** (owner 2026-10-15, verbatim in
-`docs/owner-rulings.md`, superseding 2026-10-13 popcre/ai-devops#1714): no other
-repository's work waits for a review. Authority an AI cannot
+implementing session never approves its own change. AI review is preferred but
+**never required** in any repository, shared-db, production, infrastructure
+and deployment included (owner ruling 2026-10-29 night, verbatim in
+`docs/owner-rulings.md`, superseding 2026-10-15 and 2026-10-13). Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's
 exact-head APPROVE report (popcre/ai-devops#996), from a review run with
@@ -114,8 +114,8 @@ never bypassed and never becomes a request for Albert's approval.
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
 need an independent production reviewer. remove that requirement"; popcre/shared-db
 #3656): no separately registered independent reviewer identity is required for
-shared-db manual production recovery; the allocator-assigned exact-head AI review
-APPROVE and every other evidence gate still apply. Workflow detail:
+shared-db manual production recovery; every non-review evidence gate still applies (no AI review
+APPROVE is required, owner ruling 2026-10-29 night). Workflow detail:
 its full checklist lives in the [shared-db structural safety reference](shared-db-structural-safety/README.md) and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
