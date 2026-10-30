@@ -125,6 +125,12 @@ class ReviewTests(unittest.TestCase):
         with open(fake, "w") as fh:
             fh.write(FAKE)
         os.chmod(fake, 0o755)
+        if os.name == "nt":
+            # Windows cannot exec a shebang script; run the same fake through a .cmd shim.
+            shim = fake + ".cmd"
+            with open(shim, "w") as fh:
+                fh.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
+            fake = shim
         secrets = os.path.join(t, "secrets")
         os.makedirs(secrets)
         with open(os.path.join(secrets, "muse-api-key"), "w") as fh:

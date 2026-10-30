@@ -217,6 +217,10 @@ def uv_spans(text):
 
 def main():
     root = pathlib.Path(sys.argv[1]).resolve()
+    # grep hits are UTF-8 on every platform; Windows would otherwise decode
+    # them with the ANSI code page and never match the UTF-8 file text.
+    sys.stdin.reconfigure(encoding="utf-8", errors="surrogateescape")
+    sys.stdout.reconfigure(encoding="utf-8", errors="surrogateescape")
     cache = {}
     for raw in sys.stdin:
         hit = raw.rstrip("\n")

@@ -30,7 +30,7 @@ class VersionSpans(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
         hits = "".join(f"{name}:{number}:{line}\n" for number, line in enumerate(text.splitlines(), 1) if MODULE.TOPOLOGY.search(line))
-        return subprocess.run([sys.executable, "-I", str(HELPER), str(self.root)], input=hits, text=True, capture_output=True, check=True).stdout
+        return subprocess.run([sys.executable, "-I", str(HELPER), str(self.root)], input=hits, text=True, encoding="utf-8", capture_output=True, check=True).stdout
 
     def lock(self, *, name="nvidia-curand", wheel_name="nvidia_curand", host="files.pythonhosted.org", extra="", version_comment="", wheel_comment="", root_version=1):
         version = DATA["version"]

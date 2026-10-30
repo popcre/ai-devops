@@ -22,7 +22,7 @@ def claude_line(role, content, sid="sess-a", cwd="/home/u/repos/demo-app", ts="2
 
 def write(tmp, name, lines, trailing_newline=True):
     p = Path(tmp) / name
-    p.write_text("\n".join(lines) + ("\n" if trailing_newline else ""), encoding="utf-8")
+    p.write_text("\n".join(lines) + ("\n" if trailing_newline else ""), encoding="utf-8", newline="\n")
     return p
 
 
