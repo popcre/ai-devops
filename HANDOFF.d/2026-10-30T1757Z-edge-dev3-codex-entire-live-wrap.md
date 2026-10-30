@@ -212,3 +212,18 @@ Did: found no new candidate repair or independent runtime deliverable; checked
 the live scope and support-ruling update without material gaps. No files,
 branch, PR or worktree created. Did not manufacture natural histories, rerun
 the negative benchmark, enable capture/Agents or investigate billing. Complete.
+
+### Report-only housekeeping at closeout
+
+The completed inventory reported9 live worktrees,10 merged candidates and48 unknown before owned temporary-worktree cleanup;33 open handoffs,8 successor-review candidates,5 unprovable and1 unattributed. These labels are candidates, not deletion authority. No unrelated artifact was changed. Two finished agent worktrees were bundled and verified before removal; the app-attached chat workspace remains intentionally retained for the bounded-trial handoff.
+
+Successor-review candidates (name and recorded owner, not deletion approval):
+
+- [2026-08-27T2023Z-edge-dev-claude-codex-status-line-docs.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-08-27T2023Z-edge-dev-claude-codex-status-line-docs.md) — issue133; owner claude/codex-statusline-handoff.
+- [2026-09-17T2106Z-edge-dev-codex-open-issues-continuation.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-09-17T2106Z-edge-dev-codex-open-issues-continuation.md) — issue62; owner codex/wrapup-open-issues-20260917.
+- [2026-09-28T1123Z-edge-dev3-codex-jevgrep-search-evaluation.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-09-28T1123Z-edge-dev3-codex-jevgrep-search-evaluation.md) — issue643; owner codex/jevgrep-wrap-handoff.
+- [2026-10-02T2207Z-edge-dev-mimo-warpbuild-post-land-proof.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-02T2207Z-edge-dev-mimo-warpbuild-post-land-proof.md) — issue961; owner mimo/warpbuild-post-land-proof.
+- [2026-10-08T1754Z-edge-dev3-codex-hts-review-rag.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-08T1754Z-edge-dev3-codex-hts-review-rag.md) — issue1490; owner codex/hts-final-closeout.
+- [2026-10-09T1930Z-edge-dev3-claude-reviewer-followups.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-09T1930Z-edge-dev3-claude-reviewer-followups.md) — issue1544; owner claude chat eac6b686-2bdd-4fce-91fe-47ae8516cb81 (closed); next owner = whoever picks up popcre/ai-devops.
+- [2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md) — issue1948; owner unclaimed — next session claims on the owner issue.
+- [2026-10-29T1416Z-al8960ofc-claude-observation-week-diagnosis.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1416Z-al8960ofc-claude-observation-week-diagnosis.md) — issue1948; owner claude/observation-week-diagnosis-handoff.
