@@ -127,7 +127,6 @@ custody_seen="$(env DOOR_DIAGNOSTICS_DIR="$TMP/live/diag" RLC_DOOR_DIAGNOSTICS_D
   DOOR_REPORT_OUT="$TMP/live/report" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
   bash -c '. "$1/tools/reviewer_event_guard.sh"; reviewer_credit_run deepseek "$2/out" "$2/err" -- "$3" "$2/seen" </dev/null >/dev/null 2>&1; cat "$2/seen" 2>/dev/null' _ "$ROOT" "$TMP" "$probe")"
 check "native reviewer child never sees live door custody" '[ "$custody_seen" = "unset|unset|unset|unset" ]'
-check "lifecycle --tests command scrubs live door custody" 'grep -q "env \"\${tests_scrub\[@\]}\" bash -c \"\$tests_cmd\"" "$ROOT/tools/lib/review-lifecycle-core.sh"'
 
 # Every offline suite that drives the review pool must source the shared
 # isolation helper, directly or through lib-test-harness.sh.

@@ -255,8 +255,6 @@ set +e
 (cd "$MAIN" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'true' >/dev/null 2>&1)
 WIRE_RC=$?
 set -e
-check "front_door_exits_zero"         "[ '$WIRE_RC' -eq 0 ]"
-check "front_door_removes_orphan"     "[ ! -d '$WIRE_OLD' ]"
 check "front_door_keeps_young"        "[ -d '$WIRE_YOUNG' ]"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

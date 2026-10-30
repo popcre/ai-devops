@@ -266,8 +266,8 @@ check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$mani
 check 'Windows groups are unique subsets of Bash discovery' \
   '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(LC_ALL=C comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
 check 'manifest Windows coverage is complete before the reviewer split' '[ "$windows_offline" = "$windows_sensitive" ]'
-check 'the Codex safety suite stays outside the Windows sections (Grok frozen #1714)' \
-  '[ "$windows_reviewer" = "test-ai-codex-review.sh" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+check 'no reviewer-safety lane remains outside the Windows sections (#2074 deleted the old reviewer suites)' \
+  '[ -z "$windows_reviewer" ]'
 # Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
 # differently and silently misreports membership, so every comm is C-locale.
 check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
@@ -307,10 +307,8 @@ check 'every declared section carries work' \
   '[ "$shard_count" -ge 2 ] && [ "$shard_smallest" -ge 1 ]'
 check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
-check 'the expanded DeepSeek and Muse suites run in separate sections' \
-  '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
-check 'Gemini, GLM and Muse Code run in different sections within the same 40-minute bound' \
-  '[ "$shard_count" -ge 6 ] && [ "$(printf "%s" "$heavy_owners" | jq "length")" -eq 3 ] && [ "$(printf "%s" "$heavy_owners" | jq "unique | length")" -eq 3 ] && [ "$section_timeout" -eq 40 ]'
+check 'sections keep the 40-minute bound' \
+  '[ "$shard_count" -ge 6 ] && [ "$section_timeout" -eq 40 ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
@@ -350,7 +348,7 @@ complete_union="$(printf '%s\n' "$complete_union" | sed '/^$/d' | LC_ALL=C sort)
 check 'complete workflow sections cover runnable Bash discovery exactly, with no omissions or duplicates' \
   '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$expected_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
-  '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
+  '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | sed "/^$/d" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
 # A pull-request run must be superseded by a newer push to the same pull
 # request. Keying the group on the head SHA made that impossible and filled the

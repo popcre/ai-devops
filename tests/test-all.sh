@@ -222,9 +222,9 @@ elif [ "$windows_offline" = true ]; then
   [ "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#tests[@]}" ] || {
     printf 'test-all.sh: windows_offline_bash contains a duplicate suite\n' >&2; exit 2; }
   if [ "$exclude_reviewer_safety" = true ]; then
-    manifest_json | jq -e '.windows_reviewer_safety_bash | type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1 || {
+    manifest_json | jq -e '.windows_reviewer_safety_bash | type == "array" and all(.[]; type == "string")' >/dev/null 2>&1 || {
       printf 'test-all.sh: Windows suite manifest has no valid windows_reviewer_safety_bash group\n' >&2; exit 2; }
-    mapfile -t reviewer_tests < <(manifest_json | jq -r '.windows_reviewer_safety_bash[]' | tr -d '\r')
+    mapfile -t reviewer_tests < <(manifest_json | jq -r '.windows_reviewer_safety_bash[]' | tr -d '\r' | sed '/^$/d')
     mapfile -t tests < <(comm -23 \
       <(printf '%s\n' "${tests[@]}" | LC_ALL=C sort) \
       <(printf '%s\n' "${reviewer_tests[@]}" | LC_ALL=C sort))

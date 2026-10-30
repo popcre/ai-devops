@@ -22,7 +22,7 @@ git switch -c feat/my-task   # create a feature branch off the base
 
 ```bash
 ai-workspace-status          # confirm branch is ahead of origin, tree is clean
-ai-codex-review diff-review  # optional second opinion on the diff
+ai-glm review --repo . --base origin/main  # optional second opinion on the diff
 ```
 
 ## Safety warnings you may see from `ai-workspace-status`

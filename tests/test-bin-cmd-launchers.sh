@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$REPO_ROOT/tests/lib-reviewer-events-isolation.sh"
 # Launchers whose .cmd is reviewer-safety and cannot change under the
 # no-review plan (plan §8). Their empty-ProgramFiles walk stays on #1701.
-PROTECTED_LAUNCHERS="ai-gemini ai-gemini-usage ai-review-credit-watch ai-review-engine ai-review-lifecycle ai-review-packet ai-review-pool ai-review-preflight ai-review-sandbox ai-review-scoreboard ai-reviewer-logs-sync ai-stepfun ai-stepfun-windows-shell"
+PROTECTED_LAUNCHERS="ai-gemini ai-gemini-usage ai-review-credit-watch ai-review-lifecycle ai-review-packet ai-review-preflight ai-review-sandbox ai-review-scoreboard ai-stepfun"
 is_protected() {
   case " $PROTECTED_LAUNCHERS " in
   *" $1 "*) return 0 ;;

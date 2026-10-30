@@ -22,29 +22,6 @@ git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf 'base\n' > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm init
 git -C "$R" remote add origin 'https://user:secret@GitHub.COM/Owner/Repo.git'
 
-FRONT="$REPO_ROOT/bin/ai-review"
-FRONT_STUB="$TMP/front-wrapper"
-cat > "$FRONT_STUB" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$AI_TEST_FRONT_LOG"
-EOF
-chmod +x "$FRONT_STUB"
-export AI_TEST_FRONT_LOG="$TMP/front.log"
-# Shipped registry has Claude absent. A fixture is required to exercise the
-# legacy Claude adapter path; membership refusal is asserted below.
-printf '{"version":1,"providers":{"claude":{"registry_state":"registered","reason":"offline front-door fixture"}}}\n' > "$TMP/claude-registry.json"
-(cd "$R" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
-check "approval front door forwards exact test and source options" \
-  "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
-if (cd "$R" && AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789) >/dev/null 2>&1; then
-  check "shipped registry refuses Claude reviews" "false"
-else
-  check "shipped registry refuses Claude reviews" "true"
-fi
-(cd "$R" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
-check "approval front door forwards exact test and source options to Claude" \
-  "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
-
 PREFLIGHT="$TMP/preflight"
 cat > "$PREFLIGHT" <<'EOF'
 #!/usr/bin/env bash
@@ -73,9 +50,6 @@ IDENTITY="$($SCRIPT identity "$R")"
 # Regression (#1716): the paid report is written into the reviewed repository,
 # which is part of the source digest when .ai/ is not ignored. The post-review
 # identity comparison must run before that write.
-LIFECYCLE_CORE="$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
-check "post_review_identity_checked_before_report_write" \
-  "a=\$(grep -n 'after_identity=\"\$(rlc_identity' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); b=\$(grep -n '^  rlc_write_report \"\$report\"' '$LIFECYCLE_CORE' | head -1 | cut -d: -f1); [ -n \"\$a\" ] && [ -n \"\$b\" ] && [ \"\$a\" -lt \"\$b\" ]"
 check "identity_normalizes_github_upstream" \
   "[ \"\$(jq -r .normalized_upstream <<<'$IDENTITY')\" = 'https://github.com/Owner/Repo' ]"
 check "identity_never_retains_remote_credential" "! grep -q secret <<<'$IDENTITY'"
@@ -182,8 +156,6 @@ check "a_refused_record-tests_leaves_the_recorded_evidence_untouched" \
   "! '$SCRIPT' record-tests --state '$STATE_TESTS' --command 'bash tests/bad.sh' --exit 1 --output-sha256 '$H64' >/dev/null 2>&1 && jq -e '.tests.command==\"bash tests/x.sh\" and .tests.exit==0 and .tests.output_sha256==\"$H64\"' '$STATE_TESTS' >/dev/null"
 # Failure cleanup: when the tests command fails, the runner removes its output,
 # fails the lifecycle, and cleans up the snapshot BEFORE refusing to dispatch.
-check "the_tests_failure_branch_cleans_up_before_refusing_to_dispatch" \
-  "grep -B4 'tests command failed; no review was dispatched' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh' | grep -q 'rlc_cleanup_after_store'"
 STATE_STALE="$($SCRIPT begin --provider qwen --repo "$R" --run-id stale-one --caller codex)"
 printf 'changed\n' >> "$R/a.txt"
 $SCRIPT finish --state "$STATE_STALE" --verdict APPROVE --report "$REPORT" --elapsed 3 >/dev/null
@@ -341,220 +313,6 @@ check "the refusal names the file that escalated the class" \
   "printf '%s' \"\$GATE_OUT2\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
 
-# The wrappers call `begin` for every mode and cannot see the mode or the reviewer
-# approval, so `bin/ai-review` hands both on. These cases run the real front door
-# with a stub wrapper, which is the path the shipped code actually takes.
-FRONT="$REPO_ROOT/bin/ai-review"
-STUB="$TMP/stub-wrapper"
-cat > "$STUB" <<STUBEOF
-#!/usr/bin/env bash
-AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" \
-  "$SCRIPT" begin --provider grok --repo "$GR" --run-id "front-\$1" --caller codex
-STUBEOF
-chmod +x "$STUB"
-
-FRONT_OUT="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review 2>&1 )"; FRONT_RC=$?
-check "the front door refuses a paid diff review of a documentation change" "[ '$FRONT_RC' -ne 0 ]"
-
-FRONT_PLAN="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude plan-review 2>&1 )"; PLAN_RC=$?
-check "a plan review still runs, because it is what decides the class" \
-  "[ '$PLAN_RC' -eq 0 ] && [ -f \"\$FRONT_PLAN\" ]"
-
-FRONT_OWNER="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")" 2>&1 )"; OWNER_RC=$?
-check "a reviewer approval reaches the gate the lifecycle runs" \
-  "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
-
-# The private review front door must hand a provider only the explicitly
-# approved code export, while binding the result to the whole original source.
-PRIVATE="$TMP/private-code"; mkdir -p "$PRIVATE/src" "$PRIVATE/evidence" "$PRIVATE/.ai-devops"
-git -C "$PRIVATE" init -q
-git -C "$PRIVATE" config user.name Test; git -C "$PRIVATE" config user.email t@example.com
-git -C "$PRIVATE" remote add origin https://github.com/u2giants/licensor-source-data.git
-printf 'print("base")\n' > "$PRIVATE/src/loader.py"
-printf 'raw-row-sentinel\n' > "$PRIVATE/evidence/raw.csv"
-# The sealed route only opens for a repository whose own declaration carries
-# the synthetic-fixtures-only boundary, so the fixture models that opt-in.
-printf '{"schema_version":1,"paths":[{"glob":"**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"]},"private-tooling":{"required":["synthetic-fixtures-only"]}}}\n' > "$PRIVATE/.ai-devops/task-gates.json"
-git -C "$PRIVATE" add src/loader.py evidence/raw.csv .ai-devops/task-gates.json
-git -C "$PRIVATE" commit -qm 'history-raw-sentinel'
-printf 'print("changed")\n' > "$PRIVATE/src/loader.py"
-git -C "$PRIVATE" add src/loader.py; git -C "$PRIVATE" commit -qm code-change
-printf 'untracked-prompt-sentinel\n' > "$PRIVATE/prompt.txt"
-printf '["src/loader.py"]\n' > "$TMP/approved-paths.json"
-export AI_TASK_GATES_FILE="$REPO_ROOT/config/task-gates.json"
-export AI_TASK_GATES_DIR="$TMP/private-gates"
-( cd "$PRIVATE" && "$AI_TASK_GATES_BIN" start --class private-evidence ) >/dev/null
-PRIVATE_STUB="$TMP/private-review-stub"
-cat > "$PRIVATE_STUB" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$AI_TEST_PRIVATE_ARGS"
-git ls-files > "$AI_TEST_PRIVATE_TRACKED"
-if git log --all -p --format=%B | grep -Eq 'raw-row-sentinel|history-raw-sentinel|untracked-prompt-sentinel'; then
-  printf 'exposed\n' > "$AI_TEST_PRIVATE_EXPOSURE"
-fi
-if grep -Fq "$AI_TEST_PRIVATE_SOURCE" .ai-review-sandbox; then
-  printf 'source-path-exposed\n' > "$AI_TEST_PRIVATE_EXPOSURE"
-fi
-if [ "${AI_TEST_MUTATE_SOURCE:-0}" = 1 ]; then
-  printf 'drift\n' >> "$AI_TEST_PRIVATE_SOURCE/evidence/raw.csv"
-fi
-printf 'VERDICT: APPROVE %s\n' "$(git rev-parse HEAD)"
-EOF
-chmod +x "$PRIVATE_STUB"
-export AI_TEST_PRIVATE_ARGS="$TMP/private-review-args"
-export AI_TEST_PRIVATE_TRACKED="$TMP/private-review-tracked"
-export AI_TEST_PRIVATE_EXPOSURE="$TMP/private-review-exposure"
-export AI_TEST_PRIVATE_SOURCE="$PRIVATE"
-PRIVATE_NATIVE=0
-if python3 -c 'import os; raise SystemExit(0 if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)'; then PRIVATE_NATIVE=1; fi
-private_rows(){ find "$AI_REVIEW_LIFECYCLE_DIR/runs" -type f -name '*.json' -print 2>/dev/null | sort; }
-PRIVATE_ROWS_BEFORE="$(private_rows)"
-PRIVATE_HEAD="$(git -C "$PRIVATE" rev-parse HEAD)"
-PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
-if [ "$PRIVATE_NATIVE" -eq 1 ]; then
-  check "private stub reaches an exact export but cannot create approval authority" "[ '$PRIVATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
-else
-  check "unsupported platform keeps exact selected export advisory without original lifecycle" "[ '$PRIVATE_RC' -eq 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ] && [ \"\$(private_rows)\" = \"\$PRIVATE_ROWS_BEFORE\" ] && printf '%s' \"\$PRIVATE_OUT\" | grep -q 'selected-code advisory review only'"
-fi
-check "private export hides raw rows, untracked prompts, Git history, and source path" "[ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
-check "private review compares synthetic base and exact synthetic head" "grep -qx -- '--base' '$AI_TEST_PRIVATE_ARGS' && grep -qx 'HEAD~1' '$AI_TEST_PRIVATE_ARGS' && grep -qx -- '--assert-head' '$AI_TEST_PRIVATE_ARGS'"
-rm -f "$AI_TEST_PRIVATE_ARGS"
-UNKNOWN_ROWS_BEFORE="$(private_rows)"
-UNKNOWN_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; UNKNOWN_RC=$?
-if [ "$PRIVATE_NATIVE" -eq 1 ]; then
-  check "unknown implementing engine refuses before provider despite a valid selected export" "[ '$UNKNOWN_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q -- '--caller must be a safe non-empty identifier'"
-else
-  printf '%s\n' "$UNKNOWN_OUT" > "$TMP/unknown-advisory-report.txt"
-  UNKNOWN_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/unknown-advisory-report.txt" 2>&1)"; UNKNOWN_GATE_RC=$?
-  check "unsupported unknown-engine advisory has no original lifecycle or database authority" "[ '$UNKNOWN_RC' -eq 0 ] && [ -e '$AI_TEST_PRIVATE_ARGS' ] && [ '$UNKNOWN_GATE_RC' -ne 0 ] && [ \"\$(private_rows)\" = \"\$UNKNOWN_ROWS_BEFORE\" ] && printf '%s' \"\$UNKNOWN_OUT\" | grep -q 'selected-code advisory review only'"
-fi
-# SIMULATED unsupported custody: only the honest front-door probe is unavailable.
-# The selected export, source postcheck and provider stub still execute normally.
-mkdir "$TMP/simulated-native-capability"
-cat > "$TMP/simulated-native-capability/python3" <<'EOF'
-#!/usr/bin/env bash
-if [ "${1:-}" = -c ] && [ "${2:-}" = 'import os; raise SystemExit(0 if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") else 1)' ]; then exit 1; fi
-EOF
-printf 'exec %q "$@"\n' "$PY3" >> "$TMP/simulated-native-capability/python3"
-chmod +x "$TMP/simulated-native-capability/python3"
-SIMULATED_ROWS_BEFORE="$(private_rows)"
-SIMULATED_OUT="$(cd "$PRIVATE" && PATH="$TMP/simulated-native-capability:$PATH" AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; SIMULATED_RC=$?
-printf '%s\n' "$SIMULATED_OUT" > "$TMP/simulated-advisory-report.txt"
-SIMULATED_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/simulated-advisory-report.txt" 2>&1)"; SIMULATED_GATE_RC=$?
-check "SIMULATED unsupported custody retains sealed advisory without original lifecycle or action authority" "[ '$SIMULATED_RC' -eq 0 ] && [ '$SIMULATED_GATE_RC' -ne 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(private_rows)\" = \"\$SIMULATED_ROWS_BEFORE\" ] && printf '%s' \"\$SIMULATED_OUT\" | grep -q 'selected-code advisory review only' && [ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
-MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
-check "private review refuses a verdict when unselected source changes during provider work" "[ '$MUTATE_RC' -ne 0 ] && printf '%s' \"\$MUTATE_OUT\" | grep -q 'verdict refused'"
-check "a stale private result never prints an APPROVE token" "! printf '%s' \"\$MUTATE_OUT\" | grep -q 'VERDICT: APPROVE'"
-TESTS_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --tests 'cat evidence/raw.csv' 2>&1)"; TESTS_RC=$?
-check "private code-only route refuses arbitrary tests commands before provider" "[ '$TESTS_RC' -ne 0 ] && printf '%s' \"\$TESTS_OUT\" | grep -q 'does not accept a tests command'"
-CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
-check "private code-only route refuses tool-capable CLI reviewers before provider" "[ '$CLI_RC' -ne 0 ] && printf '%s' \"\$CLI_OUT\" | grep -q 'attachment-only DeepSeek'"
-rm -f "$AI_TEST_PRIVATE_ARGS"
-# Grok (owner instruction 2026-10-07) and Qwen (#1714, 2026-10-13) are paused
-# out of the registry, so the front door refuses them before the private-source
-# guard; a registered pool provider exercises that guard in their place.
-for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-review' 'muse diff-review'; do
-  set -- $provider_mode
-  RAW_CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_CODEX_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" "$1" "$2" 2>&1)"; RAW_CLI_RC=$?
-  check "ordinary $provider_mode refuses private source before provider" "[ '$RAW_CLI_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$RAW_CLI_OUT\" | grep -q 'private source requires'"
-done
-printf '["evidence/raw.csv"]\n' > "$TMP/raw-paths.json"
-rm -f "$AI_TEST_PRIVATE_ARGS"
-RAW_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/raw-paths.json" 2>&1)"; RAW_RC=$?
-check "private code-only route refuses a raw-evidence selection before provider" "[ '$RAW_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ]"
-
-# Exercise the real attachment-only DeepSeek wrapper without a network call.
-# The mock transport captures the complete JSON body that would be transmitted.
-mkdir -p "$TMP/private-mock-bin" "$TMP/private-mock-home"
-mkdir -p "$TMP/private-mock-home/.config/ai-devops/secrets"
-chmod 700 "$TMP/private-mock-home/.config/ai-devops/secrets"
-printf 'synthetic-test-key\n' > "$TMP/private-mock-home/.config/ai-devops/secrets/deepseek-api-key"
-chmod 600 "$TMP/private-mock-home/.config/ai-devops/secrets/deepseek-api-key"
-# Windows ACL validation is a separate installer concern. This fixture tests
-# the private code-only export without invoking a host ACL tool or 1Password.
-cat > "$TMP/private-mock-bin/pwsh.exe" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-chmod +x "$TMP/private-mock-bin/pwsh.exe"
-cat > "$TMP/private-mock-bin/curl" <<'EOF'
-#!/usr/bin/env bash
-out=""; body=""
-fixture_root="$(cd "$(dirname "$0")/.." && pwd -P)"
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -d) body="${2#@}"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-cp "$body" "$fixture_root/private-request.json"
-pwd -P > "$fixture_root/private-review-cwd"
-synthetic_head="$(git rev-parse HEAD)"
-PY3="$(command -v python3 || command -v python)"
-"$PY3" - "$out" "$synthetic_head" <<'PY'
-import json, sys
-json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet. The selected file contents match the supplied change, the synthetic baseline isolates exactly the approved path, no raw evidence or historical content is attached, and the checked source identity binds this review to the original source.\nVERDICT: APPROVE " + sys.argv[2] + "\n\n"}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
-PY
-printf 200
-EOF
-chmod +x "$TMP/private-mock-bin/curl"
-DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
-DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
-NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
-[ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet|code-only' | tail -8)" >&2
-check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
-check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"
-if [ -s "$DEEPSEEK_STUB_CWD" ]; then
-  NETWORK_SNAPSHOT="$(cat "$DEEPSEEK_STUB_CWD")"
-  NETWORK_SYNTHETIC_HEAD="$(git -C "$NETWORK_SNAPSHOT" rev-parse HEAD 2>/dev/null || true)"
-  NETWORK_META="$(find "$NETWORK_SNAPSHOT/.ai/deepseek-sessions" -maxdepth 1 -name '*.meta.json' -print -quit 2>/dev/null)"
-  check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
-  NETWORK_STATE="$(find "$AI_REVIEW_LIFECYCLE_DIR/runs" -name '*.json' -exec jq -r --arg export "$NETWORK_SNAPSHOT" 'select(.code_only_export==$export and .status=="completed") | input_filename' {} \; | head -1)"
-  if [ "$PRIVATE_NATIVE" -eq 1 ]; then
-    check "native private review publishes a prospective original-source lifecycle" "[ -n '$NETWORK_STATE' ]"
-  else
-    printf '%s\n' "$NETWORK_OUT" > "$TMP/native-unavailable-advisory-report.txt"
-    ADVISORY_GATE_OUT="$(cd "$PRIVATE" && "$AI_TASK_GATES_BIN" check --before database --reviewer-approval "$TMP/native-unavailable-advisory-report.txt" 2>&1)"; ADVISORY_GATE_RC=$?
-    check "unsupported private review keeps native packet proof without original action authority" "[ -z '$NETWORK_STATE' ] && [ '$ADVISORY_GATE_RC' -ne 0 ] && printf '%s' \"\$NETWORK_OUT\" | grep -q 'selected-code advisory review only'"
-  fi
-  if [ "$PRIVATE_NATIVE" -eq 1 ] && [ -n "$NETWORK_STATE" ]; then
-    NETWORK_REPORT="$(jq -r .report_path "$NETWORK_STATE")"
-    NETWORK_SESSION="$(jq -r .session_id "$NETWORK_STATE")"
-    check "original lifecycle keeps selected scope and independent native identity" "jq -e --arg h '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' '.head==\$h and .code_only.original_head==\$h and .code_only.export_head==\$export and .code_only.paths==[\"src/loader.py\"] and .provider==\"deepseek\" and .implementer_engine==\"codex\" and .stale==false and .verdict==\"APPROVE\"' '$NETWORK_STATE' >/dev/null"
-    PROOF_STATE="$TMP/proof-state.json"
-    jq '.status="running"' "$NETWORK_STATE" > "$PROOF_STATE"
-    chmod 600 "$PROOF_STATE"
-    check "native proof verifies report bytes from the actual final message" "python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null"
-    printf 'foreign report' > "$TMP/foreign-report"
-    check "foreign report cannot inherit genuine native authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$TMP/foreign-report' >/dev/null 2>&1"
-    check "completed invocation cannot be replayed or backfilled" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$NETWORK_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-    check "old export with native sessions cannot start retrospective lifecycle" "! '$SCRIPT' begin --provider deepseek --repo '$PRIVATE' --run-id retrospective --caller codex --code-only-export '$NETWORK_SNAPSHOT' >/dev/null 2>&1"
-    cp "$NETWORK_META" "$TMP/native-meta-before"
-    for field in provider caller head governed_head; do
-      jq --arg field "$field" '.[$field]="foreign"' "$TMP/native-meta-before" > "$NETWORK_META"
-      check "native foreign $field refuses authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-    done
-    cp "$TMP/native-meta-before" "$NETWORK_META"
-    NETWORK_OBSERVED="$NETWORK_SNAPSHOT/.ai/deepseek-sessions/$NETWORK_SESSION.pending/observed.json"
-    cp "$NETWORK_OBSERVED" "$TMP/native-observed-before"
-    jq '.response_sha256="foreign"' "$TMP/native-observed-before" > "$NETWORK_OBSERVED"
-    check "altered native response seal cannot authorize a real verdict" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-    cp "$TMP/native-observed-before" "$NETWORK_OBSERVED"
-    chmod 644 "$NETWORK_META"
-    check "publicly readable native metadata refuses authority" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-    chmod 600 "$NETWORK_META"
-    mv "$NETWORK_REPORT" "$TMP/exact-report-before"
-    ln -s "$TMP/exact-report-before" "$NETWORK_REPORT"
-    check "symlinked genuine report cannot authorize the invocation" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-    rm "$NETWORK_REPORT"; mv "$TMP/exact-report-before" "$NETWORK_REPORT"
-    check "hidden session identifier refuses native proof" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '.hidden' '$NETWORK_REPORT' >/dev/null 2>&1"
-    check "reserved Windows session identifier refuses native proof" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' 'CON' '$NETWORK_REPORT' >/dev/null 2>&1"
-    printf 'drift after response\n' >> "$PRIVATE/evidence/raw.csv"
-    check "unselected original drift invalidates native completion" "! python3 '$REPO_ROOT/bin/ai-review-code-only.py' lifecycle-proof '$PROOF_STATE' '$NETWORK_SESSION' '$NETWORK_REPORT' >/dev/null 2>&1"
-  fi
-fi
-
 # --- packet identity on terminal finish (#1111, additive) ---------------------
 # finish accepts --packet-dir and --packet-sha256, writes them into state, and
 # join() surfaces them. Without the new args, finish still works unchanged.
@@ -579,45 +337,6 @@ check "join_without_packet_args_still_works" \
 STATE_BADSHA="$($SCRIPT begin --provider grok --repo "$R" --run-id bad-sha-run --caller codex)"
 check "invalid_packet_sha256_is_rejected" \
   "! $SCRIPT finish --state '$STATE_BADSHA' --verdict APPROVE --report '$REPORT' --elapsed 5 --packet-sha256 'not-hex' >/dev/null 2>&1"
-
-# --- fast-fail watch and per-session skip (plan_reviewer-observation-week steps 1-2)
-echo '== fast-fail watch'
-FF="$TMP/fast-fail"; mkdir -p "$FF/fakebin"
-FF_HEAD=0123456789abcdef0123456789abcdef01234567
-ff_door(){ printf '#!/usr/bin/env bash\n%s\n' "$2" > "$FF/$1.sh"; }
-ff_call(){ # DOOR -> "$FF/DOOR.result" holds "rc reason seconds"
-  (
-    . "$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
-    rlc_init; rlc_export_runner_token
-    export AI_REVIEW_FIRST_OUTPUT_SECONDS=3 AI_REVIEW_FAST_FAIL_POLL_SECONDS=1 AI_REVIEW_FAST_FAIL_SETTLE_SECONDS=1
-    printf 'prompt\n' > "$FF/prompt"
-    started=$SECONDS; rc=0
-    rlc_call_door review "$FF/$1.sh" "$FF" "$FF" "$FF/prompt" "$FF/$1.report" "$FF_HEAD" "" 0 diff-review "" \
-      > "$FF/$1.stdout" 2> "$FF/$1.stderr" || rc=$?
-    printf '%s %s %s\n' "$rc" "${RLC_FAST_FAIL_REASON:-none}" "$((SECONDS - started))" > "$FF/$1.result"
-  )
-}
-ff_door silent 'sleep 40'
-ff_door fatal 'printf "Error: spawn pwsh.exe NotFound\n" >&2; sleep 40'
-ff_door streaming 'for i in 1 2 3 4 5 6; do printf "progress %s\n" "$i"; sleep 2; done; exit 0'
-ff_door diff429 'printf "+ return status 429 from the mock\n"; sleep 6; exit 0'
-ff_door verdict 'printf "Analysis.\n## Verdict\nAPPROVE\n" > "$DOOR_REPORT_OUT"; printf "HTTP 429 retry\n" >&2; sleep 40'
-ff_door binary 'printf "\000\377\376\001binary\000\n" >&2; sleep 4; exit 0'
-for d in silent fatal streaming diff429 verdict binary; do ff_call "$d" & done
-wait
-check "fast_fail_on_silent_start" "read -r rc why secs < '$FF/silent.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = silent-start ] && [ \"\$secs\" -lt 20 ]"
-check "fast_fail_on_fatal_pattern" "read -r rc why secs < '$FF/fatal.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = fatal-pattern ] && [ \"\$secs\" -lt 20 ] && grep -q NotFound '$FF/fatal.stderr'"
-check "fast_fail_never_on_streaming_review" "read -r rc why secs < '$FF/streaming.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ] && grep -q 'progress 6' '$FF/streaming.stdout'"
-check "fast_fail_pattern_only_on_stderr_or_status_lines" "read -r rc why secs < '$FF/diff429.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ]"
-check "fast_fail_after_verdict_still_records_verdict" "read -r rc why secs < '$FF/verdict.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ] && [ \"\$secs\" -lt 20 ] && grep -q 'keeping it' '$FF/verdict.stderr'"
-check "fast_fail_tolerates_binary_output" "read -r rc why secs < '$FF/binary.result'; [ \"\$rc\" = 0 ] && [ \"\$why\" = none ]"
-# A wall clock that jumps (here: a date that always answers 1970) cannot
-# stop or delay the watch: elapsed time is counted in sleep ticks.
-printf '#!/usr/bin/env bash\nprintf "0\\n"\n' > "$FF/fakebin/date"; chmod +x "$FF/fakebin/date"
-ff_door clock 'sleep 40'
-PATH="$FF/fakebin:$PATH" ff_call clock
-check "fast_fail_uses_monotonic_clock" "read -r rc why secs < '$FF/clock.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = silent-start ] && [ \"\$secs\" -lt 20 ]"
-check "fast_fail_watch_lives_in_shared_core_not_doors" "grep -q 'rlc_fast_fail_watch' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh' && ! grep -rq 'rlc_fast_fail_watch\|AI_REVIEW_FIRST_OUTPUT_SECONDS' '$REPO_ROOT/tools/lib/review-doors'"
 
 echo '== per-session skip recorded by the lifecycle'
 export AI_REVIEW_SESSION_SKIP_DIR="$TMP/session-skip"

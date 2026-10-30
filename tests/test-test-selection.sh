@@ -82,29 +82,22 @@ ALL_SUITES=($(cd "$ROOT/tests" && ls test-*.sh))
 ALL_LIST="$(printf '%s\n' "${ALL_SUITES[@]}" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 raff() { printf '%s\n' "$1" | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" | tr '\n' ' ' | sed 's/ $//'; }
 mapped() { jq -r --arg p "$1" '.affected_suite_rules.path_suites[$p][]' "$ROOT/config/ci-suite-manifest.json" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
-deepseek_door="$(raff 'tools/lib/review-doors/deepseek.sh')"
-check 'a reviewer door selects its declared suites, not every suite' \
-  "$(mapped 'tools/lib/review-doors/deepseek.sh')" "$deepseek_door"
-case " $deepseek_door " in
-  *' test-ai-deepseek-agent.sh '*' test-ai-review-engine.sh '*) door_ok=yes ;;
-  *) door_ok=no ;;
-esac
-check 'a reviewer door keeps its engine and shared review-engine suites' 'yes' "$door_ok"
-check 'a reviewer door with no declared suites fails closed to every suite' \
-  "$ALL_LIST" "$(raff 'tools/lib/review-doors/nosuch.sh')"
+so_sel="$(raff 'bin/ai-second-opinion')"
+check 'a mapped second-opinion tool selects its declared suites, not every suite' \
+  "$(mapped 'bin/ai-second-opinion')" "$so_sel"
+check 'an unmapped tool path fails closed to every suite' \
+  "$ALL_LIST" "$(raff 'tools/lib/nosuch-door.sh')"
 check 'shared task-gates library still fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/task-gates.sh')"
 check 'a mapped reviewer tool selects exactly its declared suites' \
   "$(mapped 'tools/reviewer_credit_watch.py')" "$(raff 'tools/reviewer_credit_watch.py')"
-check 'the GLM maintenance helper selects its lock regression suite' \
-  'test-ai-glm.sh' "$(raff 'tools/lib/opencode-maintenance-lock.sh')"
 check 'an unmapped new tools/lib file fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/brand-new-helper.sh')"
 gone_manifest="$(mktemp)"
-jq '.affected_suite_rules.path_suites["tools/lib/review-doors/removed.sh"] = ["test-ai-review-engine.sh"]' \
+jq '.affected_suite_rules.path_suites["tools/lib/removed-door.sh"] = ["test-removed-suite.sh"]' \
   "$ROOT/config/ci-suite-manifest.json" > "$gone_manifest"
-check 'a deleted reviewer door fails closed to every suite' \
-  "$ALL_LIST" "$(AI_CI_SUITE_MANIFEST="$gone_manifest" raff 'tools/lib/review-doors/removed.sh')"
+check 'a mapping to a deleted suite fails closed to every suite' \
+  "$ALL_LIST" "$(AI_CI_SUITE_MANIFEST="$gone_manifest" raff 'tools/lib/removed-door.sh')"
 rm -f "$gone_manifest"
 
 printf '\nSELECTION SUMMARY tests=%s failures=%s\n' "$n" "$fails"

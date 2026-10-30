@@ -1188,16 +1188,6 @@ cat > "$QD/qwen-stdin"
 printf '%s\n' '{"type":"result","is_error":false,"result":"ok\n## Verdict\nAPPROVE","num_turns":1}'
 EOF
 chmod +x "$QD/qwen"
-qwen_door() { rm -f "$QD/qwen-env"; ( export AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_QWEN_BIN="$QD/qwen" \
-  DOOR_WORKDIR="$QD/work" DOOR_PACKET_DIR="$QD/packet" DOOR_PROMPT_FILE="$QD/prompt" DOOR_REPORT_OUT="$QD/report" \
-  DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa OPENAI_API_KEY=fake-openai-1427 AI_QWEN_KEY=fake-aiqwen-1427 "$@"
-  unset AI_QWEN_ALLOW_NO_CREDS; bash "$REPO_ROOT/tools/lib/review-doors/qwen.sh" review ) > "$QD/out" 2>&1; }
-qwen_door AI_QWEN_KEY_STORE="$QD/no-such-store"; QD_RC=$?
-check 'qwen_door_ignores_ambient_openai_key' "test '$QD_RC' -eq 127 && test ! -e '$QD/qwen-env' && grep -q 'no Qwen key in the protected store' '$QD/out'"
-printf 'sk-sp-store-1427\n' > "$QD/store"; chmod 600 "$QD/store"
-qwen_door AI_QWEN_KEY_STORE="$QD/store"; QD_RC=$?
-check 'qwen door forwards only the protected store key' "test '$QD_RC' -eq 0 && grep -q '^OPENAI_API_KEY=sk-sp-store-1427$' '$QD/qwen-env' && ! grep -q 'fake-.*-1427' '$QD/qwen-env'"
-check 'qwen door keeps the complete multi-line result and its verdict' "grep -q '^ok$' '$QD/report' && grep -q '^## Verdict$' '$QD/report' && test \"\$(tail -1 '$QD/report')\" = APPROVE"
 check 'qwen door sends the complete brief as one stream-json user event on stdin' "grep -q -- '--input-format stream-json' '$QD/qwen-args' && jq -e 'select(.type==\"user\") | .message.content | contains(\"Review.\") and contains(\"MANIFEST.md\")' '$QD/qwen-stdin' >/dev/null && ! grep -q 'Review\\.' '$QD/qwen-args'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

@@ -108,8 +108,8 @@ bash "$LAUNCHER" --nonsense >/dev/null 2>&1
 check 'ai-test-local rejects an unknown option' '[ "$?" -ne 0 ]'
 check 'the collision probe rejects --force instead of bypassing itself' \
   '! bash "$LAUNCHER" --check-collision --force >/dev/null 2>&1'
-check 'the reviewer mode targets exactly the two reviewer suites' \
-  '[ "$(bash "$RUNNER" --list -p "test-ai-@(grok-review|codex-review).sh" | wc -l)" -eq 2 ]'
+check 'the reviewer mode targets exactly the remaining reviewer suite' \
+  '[ "$(bash "$RUNNER" --list -p "test-ai-@(grok-review).sh" | wc -l)" -eq 1 ]'
 
 # --- CI collision guard ----------------------------------------------------
 # ai-test-local must refuse to start when a CI job is live on THIS host, and

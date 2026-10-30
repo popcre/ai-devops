@@ -29,8 +29,9 @@ TEMPLATE = os.path.join(ROOT, "templates", "review-prompt-simple.md")
 VERDICTS = ("APPROVE", "REJECT", "REVISE")
 MAX_DIFF, MAX_STAT, MAX_FINDINGS = 300_000, 20_000, 4000
 
-# Provider facts copied from tools/lib/review-doors/{muse,deepseek,stepfun}.sh,
-# config/opencode-*/opencode.json and bin/ai-glm. GLM uses OpenCode's built-in
+# Provider facts for the advisory CI reviewer and bin/ai-second-opinion
+# (ai-glm, ai-muse, ai-stepfun), from config/opencode-*/opencode.json. GLM uses
+# OpenCode's built-in
 # zai-coding-plan provider (no custom block), keyed by ZHIPU_API_KEY.
 PROVIDERS = {
     "muse": {

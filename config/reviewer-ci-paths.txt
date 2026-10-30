@@ -35,12 +35,9 @@ tests/lib-test-timing.sh
 tests/lib-reviewer-events-isolation.sh
 tests/test-all.ps1
 tests/test-all.sh
-tests/test-ai-codex-review.sh
 tests/test-windows-job-run.sh
 tests/test-delegation-templates.sh
-tests/test-pool-dispatch-doors.sh
 tests/test-ai-review-code-only.sh
-tests/test-ai-review-engine.sh
 tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
@@ -74,14 +71,8 @@ tools/lib/provider-wrapper-common.sh
 tools/lib/opencode-curl-auth.sh
 tools/lib/opencode-maintenance-lock.sh
 tools/lib/deepseek-opencode.sh
-tools/lib/review-lifecycle-core.sh
-tools/lib/review-doors/*
-tools/lib/review-terminal-verdict.sh
-tools/lib/review-operation.sh
 tools/lib/review-capabilities.sh
 tools/lib/review-session-skip.sh
-tools/lib/stepfun-pace.sh
-tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh
 tools/application_workflow_target.py
 tools/reviewer_admission.py
@@ -102,8 +93,6 @@ tools/reviewer_credit_watch.py
 .github/workflows/fast-classifier.yml
 .github/workflows/verify.yml
 
-tools/lib/muse-credential-boundary.sh
-tools/lib/reviewer-instructions.sh
 config/reviewer-membership-scope.json
 tests/test-ai-review-doctor.sh
 bin/ai-local-watch
@@ -111,7 +100,6 @@ config/blocker-watch.json
 config/local-watch.json
 tools/lib/local-watch.sh
 tools/stuck-work/watchdog.mjs
-tests/test-ai-reviewer-logs-sync.sh
 tests/test-bin-cmd-launchers.sh
 config/reviewer-logs-archive.crt
 
@@ -143,3 +131,6 @@ tools/glm_output_recovery.py
 tools/glm_formal_profile.py
 templates/system/REVIEWER-global.md
 templates/review-prompt-simple.md
+bin/ai-second-opinion
+bin/ai-second-opinion.cmd
+tests/test_ai_second_opinion.py

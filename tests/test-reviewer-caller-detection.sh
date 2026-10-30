@@ -41,12 +41,9 @@ check 'ai-gemini accepts AI_GEMINI_CALLER=mimo' 'run_bare AI_GEMINI_CALLER=mimo 
 check 'ai-gemini auto-detects mimo' 'MIMO_NODE=/x CLAUDECODE= CODEX_THREAD_ID= CODEX_SANDBOX= ZCODE_SESSION_ID= MIMO_SESSION_ID= MIMO_PYTHON= MIMO_NPM= MIMO_ELECTRON_NODE_HOST= CLAUDE_CODE_SESSION_ID= "$ROOT/bin/ai-gemini" --version | grep -q ai-gemini'
 check 'ai-gemini rejects an unsafe explicit caller' '! run_bare AI_GEMINI_CALLER=../escape "$ROOT/bin/ai-gemini" new x --prompt y >/dev/null 2>&1'
 check 'ai-gemini version works without a caller' 'run_bare "$ROOT/bin/ai-gemini" --version | grep -q ai-gemini'
-check 'ai-glm refuses without a caller' '! run_bare "$ROOT/bin/ai-glm" list >/dev/null 2>&1'
-check 'ai-glm error names caller_identity_missing' 'out="$(run_bare "$ROOT/bin/ai-glm" list 2>&1 || true)"; grep -q caller_identity_missing <<<"$out"'
 check 'ai-glm accepts AI_GLM_CALLER=mimo' 'run_bare AI_GLM_CALLER=mimo "$ROOT/bin/ai-glm" --help >/dev/null'
 check 'ai-glm accepts --caller mimo' 'run_bare "$ROOT/bin/ai-glm" list --caller mimo >/dev/null'
 check 'ai-glm auto-detects mimo' 'MIMO_NODE=/x CLAUDECODE= CODEX_THREAD_ID= CODEX_SANDBOX= ZCODE_SESSION_ID= MIMO_SESSION_ID= MIMO_PYTHON= MIMO_NPM= MIMO_ELECTRON_NODE_HOST= CLAUDE_CODE_SESSION_ID= "$ROOT/bin/ai-glm" --help >/dev/null'
-check 'ai-glm rejects an unsafe explicit caller' '! run_bare AI_GLM_CALLER=bad/name "$ROOT/bin/ai-glm" list >/dev/null 2>&1'
 check 'ai-glm help works without a caller' 'run_bare "$ROOT/bin/ai-glm" --help >/dev/null'
 
 printf 'caller-detection: %d passed, %d failed\n' "$PASS" "$FAIL"

@@ -36,7 +36,7 @@ import shutil,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
 import glm_formal_profile as p
-for name in p.CRITICAL_FILES|{'bin/ai-review','bin/ai-review-pool'}:
+for name in p.CRITICAL_FILES:
     target=Path(sys.argv[2])/name;target.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(Path(sys.argv[1])/name,target)
 PYCOPY
@@ -51,7 +51,7 @@ manifest(){
   local sha="$1" hash
   hash="$(git -C "$TMP/installed" show "$sha:bin/ai-task-gates" | sha256sum | cut -d' ' -f1)"
   printf 'meta\tsource_sha\t%s\t-\nsymlink\t%s\t%s\t%s\n' "$sha" "$TMP/bin/ai-task-gates" "$TMP/installed/bin/ai-task-gates" "$hash" > "$TMP/etc/install-manifest.tsv"
-  for name in ai-review ai-review-pool ai-glm ai-task-gates; do
+  for name in ai-glm ai-task-gates; do
     hash="$(git -C "$TMP/installed" show "$sha:bin/$name" | sha256sum | cut -d' ' -f1)"
     printf 'symlink\t/usr/local/bin/%s\t%s/bin/%s\t%s\n' "$name" "$TMP/installed" "$name" "$hash" >> "$TMP/etc/install-manifest.tsv"
   done
@@ -59,7 +59,7 @@ manifest(){
 stage_report(){
   local target="$1" name report="$TMP/state/install-stage-reports/$1.tsv"
   mkdir -p "$(dirname "$report")"
-  for name in 'Base dependencies' 'Node toolchain (node/npm/npx)' 'System directories' 'Configuration seed' 'Configuration migration and validation' 'Unix entrypoints' 'Managed git hooks (retire reviewer post-merge hook)' 'Claude and Codex skills' 'Protected machine configuration' 'Git commit identity' 'Claude tool permissions' 'Claude closeout hook' 'Private memory seed' 'Managed artifact manifest' 'ai-devops doctor' 'Reviewer requalification'; do
+  for name in 'Base dependencies' 'Node toolchain (node/npm/npx)' 'System directories' 'Configuration seed' 'Configuration migration and validation' 'Unix entrypoints' 'Managed git hooks (retire reviewer post-merge hook)' 'Claude and Codex skills' 'Protected machine configuration' 'Git commit identity' 'Claude tool permissions' 'Claude closeout hook' 'Private memory seed' 'Managed artifact manifest' 'ai-devops doctor'; do
     printf 'PASS\trequired\t%s\n' "$name"
   done > "$report"
   chmod 600 "$report"
@@ -177,9 +177,9 @@ jq '.required_stages_pass=false' "$TMP/marker-original" > "$marker"
 chmod 600 "$marker"
 expect_stop 'tampered stage receipt cannot finalize' gate finalize "$TMP/installed" "$protected"
 cp "$TMP/marker-original" "$marker"
-printf 'FAIL(1)\trequired\tReviewer requalification\n' >> "$stage_path"
+printf 'FAIL(1)\trequired\tai-devops doctor\n' >> "$stage_path"
 expect_stop 'altered stage result refuses finalize' gate finalize "$TMP/installed" "$protected"
-printf 'FAIL(1)\trequired\tReviewer requalification\n' > "$stage_path"
+printf 'FAIL(1)\trequired\tai-devops doctor\n' > "$stage_path"
 expect_stop 'failed required stage cannot be sealed' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
 stage_path="$(stage_report "$protected")"
 expect_ok 'failed finalize can rebind repaired stage results' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
@@ -270,7 +270,7 @@ grep -F 'activation-only requires the exact already installed source' "$TMP/acti
 # managed manifest, completed source and activation publication remain real.
 mkdir -p "$TMP/canonical-bin" "$TMP/namespace-tmp" "$TMP/activation-home/.config/ai-devops/glm-formal"
 chmod 700 "$TMP/activation-home/.config/ai-devops/glm-formal"
-for name in ai-review ai-review-pool ai-glm ai-task-gates; do
+for name in ai-glm ai-task-gates; do
   ln -s "$TMP/installed/bin/$name" "$TMP/canonical-bin/$name"
 done
 cat > "$TMP/activation-native.py" <<'PYACT'

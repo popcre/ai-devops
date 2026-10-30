@@ -1288,20 +1288,6 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
 }
 
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
-if ($installBash) {
-    $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
-    Write-Step "Re-qualifying reviewers whose qualification the update invalidated"
-    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
-        Write-Note "Test mode: not running live reviewer qualification."
-    } else {
-        $exitCode = Invoke-BashGate -Bash $installBash -CommandText "'$requalify' requalify"
-        if ($exitCode -eq 0) {
-            Write-Note "Reviewer requalification passed; any reviewer deferred for a provider capacity event stays quarantined (see the output above)."
-        } else {
-            Write-Note "Automatic reviewer requalification failed (exit $exitCode); it is recorded as a reviewer issue and the reviewer stays quarantined. See the output above."
-        }
-    }
-}
 
 # Blocker notices and session wake-ups only happen on a machine that runs the
 # tick, so every machine installs the task. `schedule` uses schtasks /F, so
@@ -1338,19 +1324,16 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
 Write-Step "Retiring reviewer scheduled jobs and the freeze window"
 if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer jobs)."
-} elseif ($bwBash) {
-    foreach ($retired in @('ai-reviewer-start-watch', 'ai-reviewer-logs-sync')) {
-        $retiredTool = (Join-Path $RepoPath "bin\$retired") -replace '\\', '/'
-        if ($retiredTool.Contains("'")) { throw "Repository path contains a quote; cannot unschedule $retired safely: $retiredTool" }
-        $retiredProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$retiredTool' unschedule")
-        if ($retiredProbe.ExitCode -eq 0) {
-            Write-Note "Unscheduled the retired $retired job."
-        } else {
-            Write-Warning "Could not unschedule the retired ${retired}: $($retiredProbe.Output -join ' ')"
+} else {
+    foreach ($retired in @('ai-devops\reviewer-start-watch', 'ai-devops\ai-reviewer-logs-sync')) {
+        & schtasks.exe /Query /TN $retired *> $null
+        if ($LASTEXITCODE -eq 0) {
+            & schtasks.exe /Delete /F /TN $retired *> $null
+            if ($LASTEXITCODE -eq 0) { Write-Note "Unscheduled the retired $retired job." }
+            else { Write-Warning "Could not unschedule the retired $retired job." }
         }
     }
-} else {
-    Write-Note "Git Bash not found, so retired reviewer jobs were not unscheduled. Install Git for Windows and rerun this script."
+    $global:LASTEXITCODE = 0
 }
 $observationWindow = $null
 if ($env:ProgramData) { $observationWindow = Join-Path $env:ProgramData 'ai-devops\observation-week.json' }

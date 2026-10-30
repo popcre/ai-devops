@@ -204,7 +204,7 @@ run_bash_suites() {
 
 run_reviewer_suites() {
   printf '\n===== REVIEWER SAFETY SUITES (parallel) =====\n'
-  bash "$ROOT/tests/run-parallel.sh" "${jflag[@]}" -p 'test-ai-@(grok-review|codex-review).sh' \
+  bash "$ROOT/tests/run-parallel.sh" "${jflag[@]}" -p 'test-ai-@(grok-review).sh' \
     || failures=$((failures + 1))
 }
 

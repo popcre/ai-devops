@@ -266,17 +266,6 @@ print('distinct namespace; only loopback usable; no egress')
                     with self.assertRaises(ValueError):guardian.validate_input_fd(fd,item)
         finally:os.close(fd)
 
-    def test_oracle_evidence_loop_refuses_symlinked_parent(self):
-        source=(ROOT/'bin/ai-review').read_text();function=source[source.index('action_review_evidence_args(){'):source.index('pool_provider=""')]
-        # The Oracle loop is exercised separately after the unchanged legacy loop.
-        loop=function[function.index('  if [[ "${action_profile:-}"'):function.rindex('}')]
-        evidence=self.root/'evidence';outside=self.root/'outside';evidence.mkdir();outside.mkdir();(evidence/'tools').symlink_to(outside)
-        (evidence/'bin').mkdir()
-        for name in ('oracle_native_alternate_profile.py','oracle_native_alternate_guardian.py','oracle_native_alternate_runtime.py'):(outside/name).write_text('# invented')
-        (evidence/'bin/ai-oracle-native-alternate').write_text('# invented')
-        script='check(){\n'+loop+'\n}; action_profile='+profile.PROFILE+'; evidence_root='+str(evidence)+'; action_evidence_args=();check'
-        result=subprocess.run(['bash','-c',script],capture_output=True)
-        self.assertNotEqual(result.returncode,0)
 
 
     def test_native_gate_actual_branch_rechecks_persistence_and_summary(self):

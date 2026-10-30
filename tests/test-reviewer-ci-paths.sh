@@ -92,7 +92,7 @@ if tg_reviewer_ci_path tools/not-covered-runtime-helper.sh; then
 fi
 
 declare -A seen=()
-queue=(tests/test-ai-codex-review.sh tests/test-delegation-templates.sh tests/test-pool-dispatch-doors.sh)
+queue=(tests/test-delegation-templates.sh tests/test-ai-review-packet.sh)
 while [ "${#queue[@]}" -gt 0 ]; do
   file="${queue[0]}"; queue=("${queue[@]:1}")
   [ -z "${seen[$file]:-}" ] || continue
@@ -110,7 +110,7 @@ done
 for file in tools/generated_definition_action.py tests/test_generated_definition_action.py config/review-action-profiles.json \
   bin/ai-gh tools/application_source_release.py tools/github-requests/telemetry.sh \
   tools/github-requests/pr-status-context tools/github-requests/pr_status_singleflight.py \
-  bin/ai-codex-review templates/delegation/debate-turn.md bin/ai-muse \
+  templates/delegation/debate-turn.md \
   bin/ai-review-preflight bin/ai-review-lifecycle bin/ai-task-gates bin/ai-task-gates.cmd \
   config/task-gates.json config/reviewer-ci-paths.txt tests/test-reviewer-ci-paths.sh; do
   tg_reviewer_ci_path "$file" || fail "required reviewer CI path missing: $file"

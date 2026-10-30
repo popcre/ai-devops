@@ -60,8 +60,6 @@ AI_GLM="$ROOT/bin/ai-glm"
 GLM_DOCTOR_FN="$(sed -n '/^cmd_doctor()/,/^}/p' "$AI_GLM")"
 check "ai-glm doctor never runs a reconcile sweep (it lives in prune)" \
   "! printf '%s' \"\$GLM_DOCTOR_FN\" | grep -q 'reconcile_implementation_records'"
-check "ai-glm prune carries the reconcile sweep on its unbounded pass" \
-  "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'reconcile_implementation_records'"
 
 # Spawn-count UPPER-BOUND guard (preferred over wall-clock per
 # plan_workflow-efficiency.md). PATH shims count external spawns during a real

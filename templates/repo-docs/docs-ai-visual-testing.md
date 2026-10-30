@@ -28,8 +28,8 @@ Until automated visual regression is set up:
 2. Exercise the changed screens in the states above.
 3. Capture before/after screenshots and attach them to the PR / completion
    report.
-4. Have Opus do a `visual-review` pass:
-   `ai-codex-review visual-review` (identifies what to verify).
+4. Optionally ask for a second opinion on what to verify:
+   `ai-glm ask "Which screens and states does this diff change?"`.
 
 > This document will be replaced with concrete setup steps once the Playwright
 > harness is added to the toolkit.

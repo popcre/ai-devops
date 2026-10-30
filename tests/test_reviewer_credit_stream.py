@@ -210,55 +210,6 @@ class CreditStreamTests(unittest.TestCase):
         self.assertEqual(result.returncode, 124, result.stderr)
         self.assertFalse(self.marker.exists())
 
-    @unittest.skipIf(os.name == "nt", "native fake launcher is POSIX; Windows actual doors covered by Bash suites")
-    def test_six_formal_doors_stop_hung_provider_error(self):
-        fixture = self.base / "provider"
-        fixture.write_text('#!/usr/bin/env python3\nimport os,time\nprint(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"error.json")).read(),flush=True)\ntime.sleep(30)\n')
-        fixture.chmod(0o700)
-        prompt = self.base / "prompt.md"; prompt.write_text("review fixture")
-        env = dict(os.environ)
-        env.update(AI_REVIEW_RUNNER_CORE="review-lifecycle-core/1", DOOR_WORKDIR=str(self.base),
-                   DOOR_PACKET_DIR=str(self.base), DOOR_PROMPT_FILE=str(prompt),
-                   DOOR_REPORT_OUT=str(self.base / "report"), DOOR_HEAD="1" * 40,
-                   AI_REVIEW_QUARANTINE_DIR=str(self.base / "holds"), HOME=str(self.base))
-        mapping = {"grok": "AI_GROK_BIN", "muse": "AI_MUSE_BIN", "qwen": "AI_QWEN_BIN",
-                   "gemini": "AI_GEMINI_BIN", "deepseek": "AI_DEEPSEEK_OPENCODE", "stepfun": "AI_STEPFUN_OPENCODE"}
-        for provider, variable in mapping.items():
-            with self.subTest(provider=provider):
-                current = env.copy(); current[variable] = str(fixture)
-                current[f"AI_{provider.upper()}_ALLOW_NO_CREDS"] = "1"
-                if provider == "stepfun": current["AI_STEPFUN_ENGINE"] = "opencode"
-                (self.base / "error.json").write_text(json.dumps({"type": "error", "error": {"code": "402", "message": "Insufficient Balance"}}))
-                started = time.monotonic()
-                result = subprocess.run(["bash", str(ROOT / f"tools/lib/review-doors/{provider}.sh"), "review"],
-                                        env=current, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
-                elapsed = time.monotonic() - started
-                self.assertEqual(result.returncode, 92, result.stderr)
-                self.assertIn("AI_REVIEWER_OUT_OF_CREDIT provider=" + provider, result.stderr)
-                self.assertLess(elapsed, 2, provider)
-                print(f"formal {provider} hung refusal: {elapsed:.3f}s")
-
-    @unittest.skipIf(os.name == "nt", "native fake launcher POSIX; Windows Git Bash provider suites remain required")
-    def test_qwen_formal_door_distinct_allowance_and_monthly_return(self):
-        date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)).strftime("%m-%d %H:%M:%S")
-        message = f"Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at {date} UTC."
-        fixture = self.base / "qwen"
-        fixture.write_text('#!/usr/bin/env python3\nimport json,time\nprint(' + repr(json.dumps({"type": "result", "is_error": False, "result": "[API Error: " + message + "]"})) + ',flush=True)\ntime.sleep(30)\n')
-        fixture.chmod(0o700)
-        prompt = self.base / "prompt"; prompt.write_text("fixture")
-        env = dict(os.environ)
-        env.update(AI_REVIEW_RUNNER_CORE="review-lifecycle-core/1", DOOR_WORKDIR=str(self.base), DOOR_PACKET_DIR=str(self.base),
-                   DOOR_PROMPT_FILE=str(prompt), DOOR_REPORT_OUT=str(self.base / "report"), DOOR_HEAD="1" * 40,
-                   AI_QWEN_BIN=str(fixture), AI_QWEN_ALLOW_NO_CREDS="1", HOME=str(self.base),
-                   AI_REVIEW_QUARANTINE_DIR=str(self.base / "holds"))
-        result = subprocess.run(["bash", str(ROOT / "tools/lib/review-doors/qwen.sh"), "review"], env=env,
-                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 92, result.stderr)
-        self.assertIn("AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=qwen", result.stderr)
-        self.assertIn("ALLOWANCE EXHAUSTED", result.stderr)
-        self.assertNotIn("OUT OF CREDIT", result.stderr)
-        self.assertNotIn("reset unavailable", result.stderr)
-
     def run_supervisor(self, source):
         return subprocess.Popen([sys.executable, str(ROOT / "bin/ai-process-supervisor"),
             "--credit-provider", "muse", "--credit-output", str(self.out), "--credit-stderr", str(self.err),

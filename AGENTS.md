@@ -195,9 +195,8 @@ but will be reported as `UNPROVABLE`.
   lands, record the answer and move on. Prefer `bin/ai-pr-wait` /
   `bin/ai-gh-wait` over open polling; leave the issue or pull request as the
   card when a wait outlives the turn.
-- A reviewer repair is complete only when tests pass and every affected local
-  reviewer-issue record is resolved or partially resolved with exact evidence.
-  Follow `log-reviewer-issue` and preserve the incident package.
+- A second-opinion tool repair is complete only when tests pass and one live
+  call of the repaired tool succeeds.
 
 Before reporting completion: run required tests; verify Git identity; commit and
 push only task-owned files; reconcile current `main`; merge through the queue;
