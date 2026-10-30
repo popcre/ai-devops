@@ -39,11 +39,11 @@ What is true when this is done that is not true today: a session authors a migra
 
 ### 2. What this application is
 
-`popcre/shared-db` is the canonical repository for the **shape** of POP Creations' shared Supabase database (production project `qsllyeztdwjgirsysgai`) used by CRM, DAM, PM/PIM and DesignFlow PLM. It holds timestamped SQL migrations (`supabase/migrations/`), contract tests (`supabase/tests/`), GitHub Actions workflows (`.github/workflows/`), Node coordination tooling (`scripts/`), and the operating rulebook (`AGENTS.md` + `docs/agents/`). A "structural migration" here means a change to the database's shape — table, column, view, function, trigger, RLS, index — landed as a new migration file and then applied to preview and production through automated lanes.
+`popcre/shared-db` is the canonical repository for the **shape** of POP Creations' shared Supabase database (the shared production Supabase project — its ref is the deliberate constant `PRODUCTION_PROJECT_REF` in `scripts/production_business_risk_gate.py`) used by CRM, DAM, PM/PIM and DesignFlow PLM. It holds timestamped SQL migrations (`supabase/migrations/`), contract tests (`supabase/tests/`), GitHub Actions workflows (`.github/workflows/`), Node coordination tooling (`scripts/`), and the operating rulebook (`AGENTS.md` + `docs/agents/`). A "structural migration" here means a change to the database's shape — table, column, view, function, trigger, RLS, index — landed as a new migration file and then applied to preview and production through automated lanes.
 
 This plan is **repository maintenance** in that repo (workflows + scripts + docs), not a schema change. The plan file itself lives in `popcre/ai-devops` (this repo), which is the shared AI-toolkit repo where `plan_*.md` implementation plans are published.
 
-Relevant identities: protected branch `main` on both repos; merge via pull request only; preview project comes from repository variable `PREVIEW_PROJECT_REF` (never hard-code a preview ref — it is rebuilt from time to time); the production project ref is a deliberate constant (`PRODUCTION_PROJECT_REF = "qsllyeztdwjgirsysgai"` in `scripts/production_business_risk_gate.py:40`).
+Relevant identities: protected branch `main` on both repos; merge via pull request only; preview project comes from repository variable `PREVIEW_PROJECT_REF` (never hard-code a preview ref — it is rebuilt from time to time); the production project ref is a deliberate constant, not configuration (`PRODUCTION_PROJECT_REF` in `scripts/production_business_risk_gate.py`, read it from there — this plan deliberately does not repeat the value).
 
 ### 3. What triggered this work
 
