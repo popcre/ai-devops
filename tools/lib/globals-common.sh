@@ -97,8 +97,12 @@ global_refresh_unmodified() {
   start="$(find_section_start "$dst")"
   if [[ -n "$start" ]]; then
     section="$(mktemp)" || return 2
-    sed -n "${start},\$p" "$dst" > "$section"
-    { cat "$src"; printf '\n---\n\n'; cat "$section"; } > "$dst.ai-devops-new" && mv "$dst.ai-devops-new" "$dst"
+    sed -n "${start},\$p" "$dst" > "$section" || { rm -f "$section"; return 2; }
+    if ! { { cat "$src" && printf '\n---\n\n' && cat "$section"; } > "$dst.ai-devops-new" && mv "$dst.ai-devops-new" "$dst"; }; then
+      rm -f "$section" "$dst.ai-devops-new"
+      echo "ERROR: $label refresh failed; previous file kept in $backup." >&2
+      return 2
+    fi
     start="$(find_section_start "$dst")"
     if [[ -z "$start" ]] || ! cmp -s "$section" <(sed -n "${start},\$p" "$dst"); then
       cp "$backup" "$dst"; rm -f "$section"
