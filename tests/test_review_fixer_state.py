@@ -71,6 +71,55 @@ class StateTests(unittest.TestCase):
         self.assertTrue(self.state.check(self.data))
         self.assertFalse(self.commands)
 
+    def test_invalid_branch_receipts_are_rejected(self):
+        for branch in ("", "-bad", "@", "a b", "a\nb", "a?b", "a[b", "a\\b",
+                       "a..b", "a@{b", "a.", "/a", "a/", "a//b", ".a", "a/.b", "a.lock/b"):
+            with self.subTest(branch=branch), self.assertRaises(ValueError):
+                m.validate(dict(self.data, target_branch=branch), "o/r")
+        for branch in ("owner/work", "release/v1.2", "feature_test", "fix+one"):
+            m.validate(dict(self.data, target_branch=branch), "o/r")
+
+    def test_legitimate_bot_owner_is_valid(self):
+        m.validate(dict(self.data, owner="github-actions[bot]"), "o/r")
+        for owner in ("--bad", "bad user", "[bot]", "user[other]"):
+            with self.assertRaises(ValueError):
+                m.validate(dict(self.data, owner=owner), "o/r")
+
+    def test_assignment_failure_preserves_deferral_and_retirement(self):
+        self.pr["head"]["sha"] = NEXT
+        self.pulls = [self.fixer_pr(), dict(self.fixer_pr(), number=10)]
+        def gh(*args):
+            if "--add-assignee" in args:
+                raise subprocess.CalledProcessError(1, "gh")
+            self.commands.append(args)
+            return ""
+        with patch.object(m, "gh", side_effect=gh):
+            self.assertFalse(self.state.check(self.data))
+            self.state.retire("owner/work")
+        self.assertTrue(self.deferred())
+        for number in (9, 10):
+            self.assertTrue(any(c[:3] == ("pr", "close", number) for c in self.commands))
+        self.assertTrue(any("--body" in c and "@owner" in c[c.index("--body") + 1] for c in self.commands))
+
+    def test_trusted_default_branch_adapters_preserve_github_authentication(self):
+        with tempfile.TemporaryDirectory() as trusted:
+            script = Path(trusted) / "scripts/review-fixer-lifecycle.mjs"
+            script.parent.mkdir()
+            script.touch()
+            with patch.dict(os.environ, REVIEW_FIXER_TRUSTED_ROOT=trusted, GH_TOKEN="fixture-token", HOME=trusted), patch.object(
+                    m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, patch.object(
+                    m.subprocess, "check_output", return_value="file.py\0"):
+                self.assertTrue(self.state.check(self.data, "/unused"))
+                self.pulls = [self.fixer_pr()]
+                self.pr["head"]["sha"] = NEXT
+                self.state.retire("owner/work")
+                self.assertEqual(run.call_count, 2)
+                for call in run.call_args_list:
+                    env = call.kwargs.get("env", os.environ)
+                    self.assertEqual(env["GH_TOKEN"], "fixture-token")
+                    self.assertEqual(env["HOME"], trusted)
+                    self.assertEqual(call.args[0][1], str(script))
+
     def test_moved_source_defers_to_owner_without_closing_finding(self):
         self.pr["head"]["sha"] = NEXT
         self.assertFalse(self.state.check(self.data))

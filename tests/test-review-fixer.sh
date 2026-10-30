@@ -33,7 +33,13 @@ while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -C) dir="$2"; shift ;
 echo "agent called" >> "$STUB_LOG"
 case "$STUB_DECISION" in
   FIXED-WORKFLOW) mkdir -p "$dir/.github/workflows"; echo x > "$dir/.github/workflows/a.yml"; d=FIXED ;;
-  FIXED|MOVED) echo x > "$dir/safe.py"; d=FIXED; [ "$STUB_DECISION" = MOVED ] && touch "$STUB_LOG.moved" ;;
+  FIXED|MOVED|MOVED-AFTER-PUSH)
+    echo x > "$dir/safe.py"; d=FIXED
+    [ "$STUB_DECISION" = MOVED ] && touch "$STUB_LOG.moved"
+    if [ "$STUB_DECISION" = MOVED-AFTER-PUSH ]; then
+      printf '#!/bin/sh\ntouch "%s.moved"\n' "$STUB_LOG" > "$STUB_SOURCE/.git/hooks/post-receive"
+      chmod +x "$STUB_SOURCE/.git/hooks/post-receive"
+    fi ;;
   BAD-EXIT) printf 'summary\nDECISION: INVALID\n' > "$out"; exit 9 ;;
   *) d="$STUB_DECISION" ;;
 esac
@@ -69,6 +75,12 @@ check "genuine current fix still commits pushes and opens a usable PR" '[ $rc = 
 
 run MOVED; rc=$?
 check "source movement during model call stops publication and leaves finding open" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
+
+git -C "$tmp/source" branch -m review-fix/7 baseline-published-fix
+run MOVED-AFTER-PUSH; rc=$?
+retained="$(git -C "$tmp/source" rev-parse refs/heads/review-fix/7)"
+check "late source movement retains exact recovery tip and unresolved owner without PR" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log" && grep -q "Recovery branch .*review-fix/7" "$tmp/log"'
+check "retention comment names exact pushed tip owner and deliberate deferral" 'grep -Fq "$retained" "$tmp/log" && grep -q "unresolved with @owner" "$tmp/log" && grep -q "unchanged automatic reruns stay deferred" "$tmp/log"'
 
 run BAD-EXIT; rc=$?
 check "failed model cannot publish an invalid disposition" '[ $rc = 1 ] && ! grep -q "issue close" "$tmp/log" && ! grep -q "add-label fixer-invalid" "$tmp/log"'

@@ -67,8 +67,14 @@ def validate(data, repo, pr=None):
         raise ValueError("receipt issue/source PR is invalid")
     if any(not re.fullmatch(r"[0-9a-f]{40}", data.get(key, "")) for key in ("reviewed_head", "target_head")):
         raise ValueError("receipt commit is invalid")
-    if not isinstance(data.get("target_branch"), str) or not re.fullmatch(r"[A-Za-z0-9-]+", data.get("owner", "")):
+    if not isinstance(data.get("target_branch"), str) or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?", data.get("owner", "")):
         raise ValueError("receipt target/owner is invalid")
+    branch = data["target_branch"]
+    if (not branch or branch.startswith("-") or branch == "@"
+            or re.search(r"[\x00-\x20\x7f~^:?*\[\\]", branch)
+            or ".." in branch or "@{" in branch or branch.endswith(".")
+            or any(not part or part.startswith(".") or part.endswith(".lock") for part in branch.split("/"))):
+        raise ValueError("receipt target branch is invalid")
     if pr and (data["target_branch"] != pr["base"]["ref"] or pr["head"]["ref"] != f"review-fix/{data['issue']}"):
         raise ValueError("receipt does not belong to this fix PR")
 
@@ -100,7 +106,12 @@ class State:
         return paged(f"{self.prefix}/pulls?state=open&per_page=100")
 
     def assign(self, data):
-        gh("issue", "edit", data["issue"], "--repo", self.repo, "--add-assignee", data["owner"])
+        try:
+            gh("issue", "edit", data["issue"], "--repo", self.repo, "--add-assignee", data["owner"])
+        except subprocess.CalledProcessError:
+            # Bot/source authors need not be assignable. The durable comment
+            # still names the owner; an assignment failure must not strand a PR.
+            print(f"WARNING: could not assign deferred finding to @{data['owner']}; owner remains named in its comment", file=sys.stderr)
 
     def defer(self, data, reason):
         self.assign(data)
@@ -155,6 +166,9 @@ class State:
             trusted = os.environ.get("REVIEW_FIXER_TRUSTED_ROOT")
             adapter = Path(trusted) / "scripts/review-fixer-lifecycle.mjs" if trusted else None
             if adapter and adapter.is_file():
+                # This is same-repository DEFAULT-branch code, never PR-head
+                # code. Preserve GitHub auth/HOME: its existing ownership
+                # checks require authenticated reads, not a tokenless sandbox.
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as paths:
                     json.dump(sorted(changed), paths)
                 try:
@@ -205,6 +219,7 @@ class State:
             trusted = os.environ.get("REVIEW_FIXER_TRUSTED_ROOT")
             adapter = Path(trusted) / "scripts/review-fixer-lifecycle.mjs" if trusted else None
             if adapter and adapter.is_file():
+                # Same trusted default-branch adapter; preserve its GitHub auth.
                 subprocess.run(["node", str(adapter), "retire", "--fix-pr", str(pr["number"]),
                                 "--issue", str(data["issue"])], check=True, cwd=trusted)
             gh("pr", "close", pr["number"], "--repo", self.repo, "--comment",

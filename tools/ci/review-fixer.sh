@@ -138,7 +138,19 @@ case "$decision" in
     # Recheck after the push too: owner changes during network IO must not
     # publish a stale PR. Workflow target concurrency protects other fixers.
     python3 "$lifecycle" check "$receipt" "$work"
-    rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "final publication preflight failed"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+      published="$(git -C "$work" rev-parse HEAD)" || fail "could not read published recovery commit"
+      owner="$(jq -r .owner "$receipt")" || fail "could not read unresolved finding owner"
+      # Retain the successfully pushed tip as recovery evidence. No PR or lane
+      # reservation exists, and fixer-deferred prevents unchanged reruns. Never
+      # force-update or delete this branch to hide a late source movement.
+      gh issue comment "$issue" --repo "$repo" --body "$(printf 'Recovery branch `%s`, published tip `%s`, intentionally retained. No fix PR or reservation was opened. Finding #%s remains unresolved with @%s; unchanged automatic reruns stay deferred.\n\n%s\n' "$branch" "$published" "$issue" "$owner" "$sig")" \
+        >/dev/null || fail "could not record retained recovery branch"
+      label fixer-deferred
+      [ "$rc" = 3 ] && exit 0
+      fail "final publication preflight failed; recovery branch retained"
+    fi
     url="$(pgh pr create --repo "$repo" --base "$base" --head "$branch" \
       --title "Fix review finding #$issue" \
       --body "$(printf 'Closes #%s\n\n%s\n\n%s\n\n%s\n' "$issue" "$report" "$metadata" "$sig")")" \
