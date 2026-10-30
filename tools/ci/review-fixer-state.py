@@ -22,6 +22,13 @@ INVALID = "review-fixer-invalid:v1"
 DEFERRED = "fixer-deferred"
 
 
+def adapter_env():
+    # Caller code gets runtime essentials only, never job tokens or provider keys.
+    return {key: os.environ[key] for key in
+            ("PATH", "SystemRoot", "SYSTEMROOT", "TMP", "TEMP", "TMPDIR", "GITHUB_REPOSITORY")
+            if key in os.environ}
+
+
 def gh(*args):
     wrapper = Path(__file__).resolve().parents[2] / "bin/ai-gh"
     result = subprocess.run(["bash", str(wrapper), *map(str, args)], text=True, capture_output=True)
@@ -69,6 +76,12 @@ def validate(data, repo, pr=None):
         raise ValueError("receipt commit is invalid")
     if not isinstance(data.get("target_branch"), str) or not re.fullmatch(r"[A-Za-z0-9-]+", data.get("owner", "")):
         raise ValueError("receipt target/owner is invalid")
+    branch = data["target_branch"]
+    if (not branch or branch.startswith("-") or branch == "@"
+            or re.search(r"[\x00-\x20\x7f~^:?*\[\\]", branch)
+            or ".." in branch or "@{" in branch or branch.endswith(".")
+            or any(not part or part.startswith(".") or part.endswith(".lock") for part in branch.split("/"))):
+        raise ValueError("receipt target branch is invalid")
     if pr and (data["target_branch"] != pr["base"]["ref"] or pr["head"]["ref"] != f"review-fix/{data['issue']}"):
         raise ValueError("receipt does not belong to this fix PR")
 
@@ -100,7 +113,10 @@ class State:
         return paged(f"{self.prefix}/pulls?state=open&per_page=100")
 
     def assign(self, data):
-        gh("issue", "edit", data["issue"], "--repo", self.repo, "--add-assignee", data["owner"])
+        try:
+            gh("issue", "edit", data["issue"], "--repo", self.repo, "--add-assignee", data["owner"])
+        except subprocess.CalledProcessError:
+            print("WARNING: could not assign deferred finding", file=sys.stderr)
 
     def defer(self, data, reason):
         self.assign(data)
@@ -123,7 +139,7 @@ class State:
         if head.get("ref") != data["target_branch"] or head.get("sha") != data["reviewed_head"]:
             return "source moved to " + head.get("sha", "unknown")
         try:
-            ref = api(f"{self.prefix}/git/ref/heads/{quote(data['target_branch'], safe='')}")
+            ref = api(f"{self.prefix}/git/ref/heads/{quote(data['target_branch'], safe='/')}")
         except subprocess.CalledProcessError as error:
             if "HTTP 404" in (error.stderr or ""):
                 return "target branch is deleted"
@@ -160,7 +176,8 @@ class State:
                 try:
                     result = subprocess.run(["node", str(adapter), "check", "--source-pr", str(data["source_pr"]),
                                              "--issue", str(data["issue"]), "--paths-file", paths.name,
-                                             "--worktree", work], capture_output=True, text=True, cwd=trusted)
+                                             "--worktree", work], capture_output=True, text=True, cwd=trusted,
+                                            env=adapter_env())
                 finally:
                     Path(paths.name).unlink()
                 if result.returncode == 3:
@@ -206,7 +223,7 @@ class State:
             adapter = Path(trusted) / "scripts/review-fixer-lifecycle.mjs" if trusted else None
             if adapter and adapter.is_file():
                 subprocess.run(["node", str(adapter), "retire", "--fix-pr", str(pr["number"]),
-                                "--issue", str(data["issue"])], check=True, cwd=trusted)
+                                "--issue", str(data["issue"])], check=True, cwd=trusted, env=adapter_env())
             gh("pr", "close", pr["number"], "--repo", self.repo, "--comment",
                f"Stale automatic fix: {reason}. Finding https://github.com/{self.repo}/issues/{data['issue']} remains with @{data['owner']}.\n\n{self.sig}")
             print(f"RETIRED: PR #{pr['number']}")

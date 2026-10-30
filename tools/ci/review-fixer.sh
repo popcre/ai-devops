@@ -138,7 +138,16 @@ case "$decision" in
     # Recheck after the push too: owner changes during network IO must not
     # publish a stale PR. Workflow target concurrency protects other fixers.
     python3 "$lifecycle" check "$receipt" "$work"
-    rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "final publication preflight failed"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+      # Remove only the branch tip this attempt published; preserve later work.
+      published="$(git -C "$work" rev-parse HEAD)" || fail "could not read published commit"
+      pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
+        push -q --force-with-lease="refs/heads/$branch:$published" origin ":refs/heads/$branch" \
+        || fail "could not clean up unpublished $branch"
+      [ "$rc" = 3 ] && exit 0
+      fail "final publication preflight failed"
+    fi
     url="$(pgh pr create --repo "$repo" --base "$base" --head "$branch" \
       --title "Fix review finding #$issue" \
       --body "$(printf 'Closes #%s\n\n%s\n\n%s\n\n%s\n' "$issue" "$report" "$metadata" "$sig")")" \

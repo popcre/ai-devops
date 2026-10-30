@@ -33,7 +33,13 @@ while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -C) dir="$2"; shift ;
 echo "agent called" >> "$STUB_LOG"
 case "$STUB_DECISION" in
   FIXED-WORKFLOW) mkdir -p "$dir/.github/workflows"; echo x > "$dir/.github/workflows/a.yml"; d=FIXED ;;
-  FIXED|MOVED) echo x > "$dir/safe.py"; d=FIXED; [ "$STUB_DECISION" = MOVED ] && touch "$STUB_LOG.moved" ;;
+  FIXED|MOVED|MOVED-AFTER-PUSH)
+    echo x > "$dir/safe.py"; d=FIXED
+    [ "$STUB_DECISION" = MOVED ] && touch "$STUB_LOG.moved"
+    if [ "$STUB_DECISION" = MOVED-AFTER-PUSH ]; then
+      printf '#!/bin/sh\ntouch "%s.moved"\n' "$STUB_LOG" > "$STUB_SOURCE/.git/hooks/post-receive"
+      chmod +x "$STUB_SOURCE/.git/hooks/post-receive"
+    fi ;;
   BAD-EXIT) printf 'summary\nDECISION: INVALID\n' > "$out"; exit 9 ;;
   *) d="$STUB_DECISION" ;;
 esac
@@ -69,6 +75,10 @@ check "genuine current fix still commits pushes and opens a usable PR" '[ $rc = 
 
 run MOVED; rc=$?
 check "source movement during model call stops publication and leaves finding open" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
+
+git -C "$tmp/source" branch -D review-fix/7 >/dev/null
+run MOVED-AFTER-PUSH; rc=$?
+check "source movement after push removes the unpublished remote branch" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! git -C "$tmp/source" show-ref --verify --quiet refs/heads/review-fix/7'
 
 run BAD-EXIT; rc=$?
 check "failed model cannot publish an invalid disposition" '[ $rc = 1 ] && ! grep -q "issue close" "$tmp/log" && ! grep -q "add-label fixer-invalid" "$tmp/log"'
