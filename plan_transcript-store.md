@@ -15,7 +15,7 @@
 | 5 Smoke batch: first 1,000 calls | 🔄 in progress | #2061 (stage C) |
 | 6 Full backfill (about 15 h, background) | 🔄 in progress | #2061 (stage C) |
 | 7 Daily timer on edge-dev3 | 🔄 in progress | #2061 (stage C) |
-| 8 Reader helper and `transcript-query` skill | 🔄 in progress | #2062 (stage D) |
+| 8 Reader helper and `transcript-query` skill | 🟡 merged, Windows live check pending store | PR #2098 |
 | 9 Mining checks | ⬜ open | — |
 
 **A fresh session starts with Stage B (steps 2–4) and Stage D (step 8), which need no installs.** Step 1 writes and tests its scripts at once, but installing them on hosts waits while the observation-week freeze window file (#1948) is present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocks B or D. Step 5 is a quality check before step 6.
