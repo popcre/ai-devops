@@ -620,13 +620,14 @@ check "privacy_verdict_gate_setting_change_reclassifies" "[ \"\$(pv_runs)\" = 2 
 pv_reset code
 pv is-private "$PV/r"
 for f in "$PV/scope"/*; do chmod 644 "$f"; done
-pv_shared_mode="$(stat -c %a "$(ls -d "$PV/scope"/* | head -1)" 2>/dev/null)"
+# The record owner/mode check needs POSIX ids (os.getuid); native Windows
+# Python has none, so the product cannot and does not enforce it there.
+pv_posix_ids="$("$(command -v python3 || command -v python)" -c 'import os; print(int(hasattr(os, "getuid")))')"
 pv is-private "$PV/r"
-# NTFS has no POSIX group/other bits: chmod 644 cannot share the record there.
-if [ "$pv_shared_mode" = 644 ]; then
+if [ "$pv_posix_ids" = 1 ]; then
   check "privacy_verdict_shared_record_ignored" "[ \"\$(pv_runs)\" = 2 ]"
 else
-  skip "privacy_verdict_shared_record_ignored (this filesystem has no POSIX file modes)"
+  skip "privacy_verdict_shared_record_ignored (no POSIX owner ids on this platform)"
 fi
 
 pv_reset code
