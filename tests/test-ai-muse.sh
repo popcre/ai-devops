@@ -604,8 +604,13 @@ check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$EN
 # The publication-race fixtures below wait for a full `new` turn to reach a
 # marker. Process-spawn cost under-measures that on a self-hosted Windows box
 # where each stub turn costs 20-45s (edge-runn-envy) against ~3s on hosted
-# runners, so re-baseline on one representative stub turn. Ceilings only grow.
-ai_test_measure_baseline sh -c "cd '$REPO' && $ENV MUSE_STUB_TEXT=baseline '$SCRIPT' new timing-baseline --prompt test"
+# runners, so re-baseline on one representative stub turn. Ceilings only grow
+# (they never drop below the hosted floors; see tests/lib-test-timing.sh).
+# The suite-wide 45s cap clamped this exact measurement on EDGE-RUNN-ENVY
+# (46s measured), so a slightly busier day would have shrunk the headroom.
+# This one measurement gets a 180s cap: a stub turn slower than three minutes
+# means the machine cannot run the suite at all, not that it needs more time.
+AI_TEST_BASELINE_CAP=180 ai_test_measure_baseline sh -c "cd '$REPO' && $ENV MUSE_STUB_TEXT=baseline '$SCRIPT' new timing-baseline --prompt test"
 rm -f "$TMP/muse-post-open"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_POST_OPEN_MARKER="$TMP/muse-post-open" AI_MUSE_TEST_POST_OPEN_DELAY=3 "$SCRIPT" new post-open-swap --prompt test >/dev/null 2>&1) & MUSE_POST_OPEN_PID=$!
 poll_worker_until "$MUSE_POST_OPEN_PID" "$(budget 30 30)" 'post-open staging was reserved' '[ -s "$TMP/muse-post-open" ]' || true
 MUSE_POST_OPEN="$(cat "$TMP/muse-post-open" 2>/dev/null || true)"; if [ -n "$MUSE_POST_OPEN" ]; then mv "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held"; printf attacker-preserved > "$MUSE_POST_OPEN"; fi
