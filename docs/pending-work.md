@@ -15,7 +15,6 @@ Current reviewer recurrence repairs: read the [edge-dev3 repair plan](../plan_re
 Class-level reviewer stability (≥24h green): read the [reviewer stability plan](../plan_reviewer-stability-24h.md) STATUS first ([#1822](https://github.com/popcre/ai-devops/issues/1822)); do not re-derive the sibling host programmes; no bulk raw-transcript third-party extract without a token budget.
 
 Review output contract rebuild (one validator, format repair turn, roster cut): read the [review output contract plan](../plan_review-output-contract.md) STATUS first ([#1783](https://github.com/popcre/ai-devops/issues/1783)).
-Release live review check (real review on Ubuntu + Windows 4837 before a shared-review-code release installs): read the [release live check plan](../plan_release-live-review-check.md) STATUS first ([#1783](https://github.com/popcre/ai-devops/issues/1783)).
 
 Edge-dev reviewer repair without AI-reviewer gates: read the [edge-dev no-review plan](../plan_edge-dev-reviewer-repair-no-review.md) STATUS first (owner bootstrap: implementation must not need reviewers).
 
