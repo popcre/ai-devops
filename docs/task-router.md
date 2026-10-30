@@ -6,6 +6,7 @@ does not pay to load them. Read only the matching row and its named sources.
 
 | Current task | Read first | Important boundary |
 |---|---|---|
+| Trim shared-db migration gates (gate time, paperwork, duplicate proofs, merge-queue waits) | [Gate-trim plan](../plan_shared-db-gate-trim.md) STATUS, [popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) | Read STATUS first; proposal only until owner approval; production apply path stays untouched (stage 9 verify-only); one stage = one PR |
 | Entire alongside GitHub: reversible trial, continuous memory, Trails, sessions, search or CI | [Entire trial plan](../plan_entire-reversible-trial.md) STATUS, [#2022](https://github.com/popcre/ai-devops/issues/2022) | Read STATUS first; GitHub stays authoritative; no historical transcript uploads; prove departure |
 | GitHub API limits, request volume, quota coverage or duplicate polling | [GitHub request reduction plan](../plan_github-request-reduction.md) STATUS, [issue #658](https://github.com/popcre/ai-devops/issues/658) | Read STATUS before re-planning; source reduction and bucket protection both require measured workflow-preserving acceptance |
 | Implement the 2026-08-21 full repository audit | [`../plan_full-strategy-remediation.md`](../plan_full-strategy-remediation.md) STATUS, [`../bugs.md`](../bugs.md) current audit | Incident-first; preserve capabilities; all 30 findings must reach production evidence |
