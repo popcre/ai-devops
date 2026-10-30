@@ -31,8 +31,6 @@ removed-login access semantics remain assigned to Entire on #2022; they do not
 block the public companion. Discovery remains November 2, 2026, 5:00 PM EST;
 stop remains November 12, 2026, 5:58 AM EST. No clock restarts.
 
-The following closeout and earlier results are historical context.
-
 ### Using the public companion
 
 1. Keep GitHub as `origin` and use the normal branch, pull-request, checks and
@@ -54,6 +52,8 @@ The following closeout and earlier results are historical context.
 This workflow needs browser access only. Existing agent memory and handoffs
 remain the continuity system; the excluded captured-memory features are not
 silently replaced or presented as qualified. The original stop date still applies.
+
+The following closeout and earlier results are historical context.
 
 Closeout continuation: read the
 [new handoff](../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
