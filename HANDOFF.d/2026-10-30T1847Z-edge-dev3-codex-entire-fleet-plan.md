@@ -52,8 +52,15 @@ matrix, CI visibility versus execution gates, named tests/adversarial cases,
 access and rollback. It updates the
 [operating record](https://github.com/popcre/ai-devops/blob/main/docs/entire-trial.md)
 and [router](https://github.com/popcre/ai-devops/blob/main/AGENTS.md).
-Publication is through the current planning PR; its signed #2022 receipt records
-the final merge/commit and checks. A main URL alone is not proof it landed.
+Publication is delivered through
+[PR2173](https://github.com/popcre/ai-devops/pull/2173), merged as
+[453c4b06](https://github.com/popcre/ai-devops/commit/453c4b069031f43b4618f7634386dbb1db13b61e).
+All four published files matched fetched main; exact-head documentation safety
+passed across 533 Markdown files, whitespace and reciprocal links passed.
+The expanded issue title/body was read back exactly after preserving its latest
+prior content and signatures. The
+[signed publication receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531050730)
+records this delivery. A main URL alone is not proof it landed.
 No runtime installation or CI configuration was changed during planning.
 
 ## 4. Failed routes and rejected claims
@@ -148,3 +155,59 @@ Self-audit:
 4. Section 0 sweep passed: §§1–9 contain no owner decision hidden elsewhere;
    feasibility is an explicit technical investigation and forbidden expansion
    stays excluded. No technical permission request was introduced.
+
+### Session closeout and preservation
+
+Wrap-up froze new scope. R1–R8 implementation was not started by closeout;
+the latest explicit request before wrap-up was plan/issue expansion, which
+is delivered above. No in-flight runtime work, subagent or missing publication
+remains. No new bug or additional feature was taken on during closeout.
+No credentials appeared; secrets sweep/vault write n/a. No production,
+database, installation, global instruction adoption or CI migration occurred.
+
+The installed ownership checker succeeded for actual chat
+01a18dff-bb18-7ea3-b5a0-e67ada43d222 with zero owned blocking claims/stages.
+Owner-only receipt SHA256:
+fe0388c1912e011dac43098ed8ade1e75300a16b9737da1cc50e05bfaba476c9.
+Custody family: entire-closeout-01a18dff-20261030. It retains the checker,
+report-only housekeeping and worktree inventory; no private inventory is
+published here. The signed #2022 closeout receipt records final cleanup and
+delivery results. The app-attached workspace is intentionally retained clean
+for this open workstream; no other session's worktree is removed. Only this
+chat's completed branches may be removed after live MERGED/head proof and a
+verified recovery bundle. No installed toolkit update is part of closeout.
+
+Report-only inventory found 10 live worktrees, 12 merged candidates and 45
+unknown; 34 open handoffs, 8 successor-review candidates, 5 unprovable and
+1 unattributed. These are classification counts, not deletion authority or
+claims of current worker activity. No unrelated housekeeping was performed.
+Successor-review candidates, preserving recorded owners:
+
+- [status-line docs](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-08-27T2023Z-edge-dev-claude-codex-status-line-docs.md), issue133 — claude/codex-statusline-handoff.
+- [open-issues continuation](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-09-17T2106Z-edge-dev-codex-open-issues-continuation.md), issue62 — codex/wrapup-open-issues-20260917.
+- [Jev search evaluation](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-09-28T1123Z-edge-dev3-codex-jevgrep-search-evaluation.md), issue643 — codex/jevgrep-wrap-handoff.
+- [WarpBuild proof](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-02T2207Z-edge-dev-mimo-warpbuild-post-land-proof.md), issue961 — mimo/warpbuild-post-land-proof.
+- [HTS review/RAG](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-08T1754Z-edge-dev3-codex-hts-review-rag.md), issue1490 — codex/hts-final-closeout.
+- [reviewer follow-ups](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-09T1930Z-edge-dev3-claude-reviewer-followups.md), issue1544 — claude chat eac6b686-2bdd-4fce-91fe-47ae8516cb81 (closed); next owner whoever picks up ai-devops.
+- [observation week](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md), issue1948 — unclaimed; next session claims on owner issue.
+- [observation diagnosis](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1416Z-al8960ofc-claude-observation-week-diagnosis.md), issue1948 — claude/observation-week-diagnosis-handoff.
+
+Closeout completeness audit passed: §§0–9 and the linked plan carry the full
+business goal, actual delivery, failed claims, constraints, targets/tests and
+next gates; this supplement records custody, housekeeping and scope freeze.
+Section0 still has no owner decision to answer. No receipt is misrepresented
+as fleet adoption, and the original self-audit answers above remain valid.
+
+### Next-session prompt
+
+Continue popcre/ai-devops #2022 on a fresh codex/entire-trial-* branch from
+current main. Implement the four-client/four-machine and whole-CI plan, not
+another mirror-only demonstration. Read this handoff and
+[plan STATUS](https://github.com/popcre/ai-devops/blob/main/plan_entire-reversible-trial.md).
+Planning is delivered; implementation R1–R8 and all 16 live cells are open.
+Claim execution ownership on #2022 and start R1's private OS/client/access
+inventory; follow every phase's named tests, protected install route and live
+gates. GitHub authoritative, private capture off, billing dropped, support
+nonblocking; discovery November2 5:00PM EST, stop November12 5:58AM EST, 2026.
+Preserve original clients/settings/integrations. Unsupported app/platform or
+CI execution remains explicitly unmet, never substituted or called complete.
