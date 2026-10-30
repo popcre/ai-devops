@@ -171,95 +171,53 @@ set_world "$GOOD_HEAD" deadbeef "$(printf '9002\tcompleted\tsuccess\n9001\tcompl
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "a failed earlier run on the same commit still rejects" "test '$RC' -eq 1"
 
-set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tsuccess\nwindows-reviewer-safety\tskipped\n')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "real prose-only changes accept intentionally skipped Windows safety" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q prose"
 
 for strict_head in "$GOOD_HEAD" "$MIXED_HEAD" "$SKILL_HEAD"; do
-  set_world "$strict_head" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tskipped\n')"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+  set_world "$strict_head" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "code, mixed changes and skill Markdown still require successful safety proof" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'concluded skipped'"
 done
-set_world "$RENAME_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tskipped\n')" "$GOOD_HEAD"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+set_world "$RENAME_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')" "$GOOD_HEAD"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "moving a script into docs cannot hide its deleted code path" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'concluded skipped'"
 
 set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'linux-offline\tsuccess\n')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "prose never excuses missing required job evidence" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'never ran the required job'"
-set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tfailure\n')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tfailure\n')"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "prose never excuses a failed required job" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'concluded failure'"
 set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'other-required-job\tskipped\n')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require other-required-job)"; RC=$?
 check "prose allowance applies only to intentionally skipped Windows jobs" "test '$RC' -eq 1"
 
-set_world "$BASE_SHA" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tskipped\n')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+set_world "$BASE_SHA" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "empty changes do not invent prose-only coverage" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'diff is empty'"
-set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tskipped\n')" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "unavailable exact base refuses the skip allowance" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'diff is unavailable'"
 for changed_state in "$GOOD_HEAD|deadbeef|$BASE_SHA" "$PROSE_HEAD|deadbeef|$GOOD_HEAD" "$PROSE_HEAD|changed-group|$BASE_SHA"; do
-  set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-reviewer-safety\tskipped\n')"
+  set_world "$PROSE_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
   printf '%s\n' "$changed_state" > "$TMP/queue-after"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "head, base or queue movement invalidates path classification" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'changed during path classification'"
 done
 
-FALLBACK_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-reviewer-safety\tcancelled\tcompleted\nwindows-reviewer-fallback-codex\tsuccess\tcompleted\n')"
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
-check "same-head equivalent fallback covers a cancelled original lane" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'identical reviewer suites'"
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$(printf '%s\n' "$FALLBACK_JOBS" | sed 's/$/\r/')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-check "equivalent fallback accepts native Windows job line endings" "test '$RC' -eq 0"
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$(printf '%s' "$FALLBACK_JOBS" | sed 's/cancelled\tcompleted/pending\tin_progress/')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-check "completed equivalent fallback avoids waiting for redundant running lane" "test '$RC' -eq 0"
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf '%s' "$FALLBACK_JOBS" | sed 's/cancelled\tcompleted/skipped\tcompleted/')"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-check "code with a skipped original lane still requires complete equivalent fallback" "test '$RC' -eq 0"
-for mutation in fallback-failed fallback-missing other-failed other-pending original-failed original-missing missing-status select-missing validate-missing validate-failed legacy-classify-only; do
-  jobs="$FALLBACK_JOBS"
-  case "$mutation" in
-    fallback-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-reviewer-fallback-codex\tsuccess/windows-reviewer-fallback-codex\tfailure/')" ;;
-    fallback-missing) jobs="$(printf '%s' "$jobs" | sed '/windows-reviewer-fallback-codex/d')" ;;
-    other-failed) jobs="$jobs"$'\nunrelated-required-job\tfailure\tcompleted' ;;
-    other-pending) jobs="$(printf '%s' "$jobs" | sed 's/linux-offline\tsuccess\tcompleted/linux-offline\tpending\tin_progress/')" ;;
-    original-failed) jobs="$(printf '%s' "$jobs" | sed 's/cancelled\tcompleted/failure\tcompleted/')" ;;
-    original-missing) jobs="$(printf '%s' "$jobs" | sed '/windows-reviewer-safety/d')" ;;
-    missing-status) jobs="$(printf '%s' "$jobs" | sed 's/\tcompleted//g')" ;;
-    select-missing) jobs="$(printf '%s' "$jobs" | sed '/^fast-classifier \/ select\t/d')" ;;
-    validate-missing) jobs="$(printf '%s' "$jobs" | sed '/^fast-classifier \/ validate\t/d')" ;;
-    validate-failed) jobs="$(printf '%s' "$jobs" | sed 's/fast-classifier \/ validate\tsuccess/fast-classifier \/ validate\tfailure/')" ;;
-    legacy-classify-only) jobs="$(printf '%s' "$jobs" | sed -e '/^fast-classifier \/ select\t/d' -e 's/^fast-classifier \/ validate\t/fast-classifier \/ classify\t/')" ;;
-  esac
-  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-  check "fallback remains fail-closed for $mutation" "test '$RC' -eq 1"
-done
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" "$FALLBACK_JOBS"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-check "a failed run is never overridden by a fallback" "test '$RC' -eq 1"
-# Grok is fully frozen (#1714): no job in FALLBACK_JOBS. Advisory-skip
-# behavior for a leftover grok row is covered by GROK_PENDING_JOBS below.
-set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
-printf '%s|changed-group|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
-check "fallback proof rechecks exact queue identity" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'changed during fallback verification'"
-
-ADV_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-reviewer-safety\tsuccess\tcompleted\nverification-closure\tsuccess\tcompleted\nwindows-offline-warpbuild-proof (3)\tpending\tqueued\nwindows-offline-warpbuild-proof (4)\tpending\tqueued\n')"
+ADV_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nverification-closure\tsuccess\tcompleted\nwindows-offline-warpbuild-proof (3)\tpending\tqueued\nwindows-offline-warpbuild-proof (4)\tpending\tqueued\n')"
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$ADV_JOBS"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "queued advisory WarpBuild proof does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
 GROK_PENDING_JOBS="$(printf '%s' "$ADV_JOBS" | sed '/windows-offline-warpbuild-proof (3)/a windows-reviewer-fallback-grok\tpending\tqueued')"
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$GROK_PENDING_JOBS"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "queued advisory Grok review does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
 GROK_IN_PROGRESS_JOBS="$(printf '%s' "$ADV_JOBS" | sed '/windows-offline-warpbuild-proof (3)/a windows-reviewer-fallback-grok\tpending\tin_progress')"
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$GROK_IN_PROGRESS_JOBS"
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "in-progress advisory Grok review does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
 for mutation in closure-pending closure-missing required-pending required-failed core-missing; do
   jobs="$ADV_JOBS"
@@ -271,7 +229,7 @@ for mutation in closure-pending closure-missing required-pending required-failed
     core-missing) jobs="$(printf '%s' "$jobs" | sed '/^linux-offline\t/d')" ;;
   esac
   set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$jobs"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "advisory allowance remains fail-closed for $mutation" "test '$RC' -eq 1"
 done
 for mutation in required-pending required-failed; do
@@ -281,7 +239,7 @@ for mutation in required-pending required-failed; do
     required-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-offline\tsuccess\tcompleted/windows-offline\tfailure\tcompleted/')" ;;
   esac
   set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$jobs"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "pending Grok does not weaken required-job rejection for $mutation" "test '$RC' -eq 1"
 done
 
@@ -290,15 +248,15 @@ export AI_PR_WAIT_TEST_CONTEXT_KEY=merge-group-policy-test
 export AI_PR_WAIT_SNAPSHOT_DIR="$TMP/pr-cache"
 set_cancel_world() {
   local jobs
-  jobs="$(printf 'verification-closure\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-offline\tsuccess\tcompleted\nwindows-reviewer-safety\tsuccess\tcompleted\nwindows-reviewer-preferred\tcancelled\tcompleted\n')"
+  jobs="$(printf 'verification-closure\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-offline\tsuccess\tcompleted\ndoc-safety\tsuccess\tcompleted\nwindows-offline-warpbuild-proof (1)\tcancelled\tcompleted\n')"
   set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
   jq -nc --arg head "$GOOD_HEAD" '{id:9001,head_sha:$head,head_repository:{full_name:"popcre/ai-devops"},repository:{full_name:"popcre/ai-devops"},event:"pull_request",status:"completed",conclusion:"cancelled",run_attempt:1,workflow_id:90}' > "$TMP/cancel-run"
   jq -nc '{id:90,path:".github/workflows/verify.yml"}' > "$TMP/cancel-workflow"
   printf '%s' "$jobs" | jq -Rsc --arg head "$GOOD_HEAD" 'split("\n")|map(select(length>0)|split("\t"))|to_entries|map({id:(.key+100),name:.value[0],conclusion:.value[1],status:.value[2],run_id:9001,run_attempt:1,head_sha:$head})|[{total_count:length,jobs:.}]' > "$TMP/cancel-jobs"
-  jq -nc --arg head "$GOOD_HEAD" '{data:{repository:{pullRequest:{state:"OPEN",isInMergeQueue:true,headRefOid:$head,commits:{nodes:[{commit:{oid:$head,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false,startCursor:null},nodes:[{name:"windows-reviewer-preferred",conclusion:"CANCELLED",status:"COMPLETED",detailsUrl:"https://github.com/popcre/ai-devops/actions/runs/9001/job/106",isRequired:false}]}}}}]}}}}}' > "$TMP/cancel-policy"
+  jq -nc --arg head "$GOOD_HEAD" '{data:{repository:{pullRequest:{state:"OPEN",isInMergeQueue:true,headRefOid:$head,commits:{nodes:[{commit:{oid:$head,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false,startCursor:null},nodes:[{name:"windows-offline-warpbuild-proof (1)",conclusion:"CANCELLED",status:"COMPLETED",detailsUrl:"https://github.com/popcre/ai-devops/actions/runs/9001/job/106",isRequired:false}]}}}}]}}}}}' > "$TMP/cancel-policy"
 }
 set_cancel_world
-OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 if [ "$RC" -ne 0 ]; then printf "new cancellation case: %s\n" "$OUT" >&2; fi
 check "completed run with genuine required successes and exact same-run nonrequired cancellation passes" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'non-required cancellations'"
 for mutation in required unknown duplicate wrong-job wrong-head wrong-run wrong-event wrong-workflow wrong-attempt missing-closure cancelled-safety failed-job incomplete-page group-change; do
@@ -314,12 +272,12 @@ for mutation in required unknown duplicate wrong-job wrong-head wrong-run wrong-
     wrong-workflow) jq '.path=".github/workflows/foreign.yml"' "$TMP/cancel-workflow" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-workflow" ;;
     wrong-attempt) jq '.[0].jobs[0].run_attempt=2' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
     missing-closure) jq '.[0].jobs |= map(select(.name!="verification-closure"))|.[0].total_count=6' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
-    cancelled-safety) jq '.[0].jobs[5].conclusion="cancelled"' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
+    cancelled-safety) jq '.[0].jobs[4].conclusion="cancelled"' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
     failed-job) jq '.[0].jobs[6].conclusion="failure"' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
     incomplete-page) jq '.[0].total_count=8' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs" ;;
     group-change) printf '%s|changed|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after" ;;
   esac
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "same-run advisory cancellation remains fail-closed for $mutation" "test '$RC' -eq 1"
 done
 
@@ -339,14 +297,14 @@ for identity in missing unknown; do
   fi
   # Live-shaped 35 jobs, preserving the six original mandatory successes.
   jq --arg head "$GOOD_HEAD" '.[0].jobs += [range(107;135)|{id:.,name:("section-"+tostring),status:"completed",conclusion:"success",run_id:9001,run_attempt:1,head_sha:$head}]|.[0].total_count=35' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs"
-  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
   check "production $identity identity uses uncached complete policy with 35 genuine-shaped jobs" "test '$RC' -eq 0 && test ! -e '$AI_PR_WAIT_SNAPSHOT_DIR'"
   for mutation in unknown wrong-head; do
     cp "$TMP/cancel-policy" "$TMP/restore-policy"
     if [ "$mutation" = unknown ]; then jq 'del(.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired)' "$TMP/cancel-policy" > "$TMP/change"
     else jq '.data.repository.pullRequest.headRefOid="wrong"' "$TMP/cancel-policy" > "$TMP/change"; fi
     mv "$TMP/change" "$TMP/cancel-policy"
-    OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+    OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
     check "production $identity identity still refuses $mutation policy" "test '$RC' -eq 1"
     mv "$TMP/restore-policy" "$TMP/cancel-policy"
   done

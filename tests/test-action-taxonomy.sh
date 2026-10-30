@@ -70,7 +70,7 @@ check "stale-source is a result" \
 check "empty-verdict in the check name is review-step, never result" \
   "test \"$(act FAILURE empty-report 'provider returned no analysis')\" = 'review-step'"
 check "empty-verdict in the check summary is review-step, never result" \
-  "test \"$(act FAILURE windows-reviewer-safety 'empty report from provider')\" = 'review-step'"
+  "test \"$(act FAILURE some-check 'empty report from provider')\" = 'review-step'"
 check "empty-verdict detail is empty-verdict" \
   "test \"$(det FAILURE x 'empty report')\" = 'empty-verdict'"
 check "invalid-provider-envelope in a summary is a result, not empty-verdict" \

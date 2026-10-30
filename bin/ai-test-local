@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Run this repository's CI verification locally, in parallel, on this machine.
 #
-# GitHub Actions runs three jobs: linux-offline (all Bash), windows-offline
-# (Windows-sensitive Bash plus all PowerShell), and windows-reviewer-safety
-# (an early Codex/Grok repeat). Scheduled/manual Windows and the local default
-# below remain complete backstops.
+# GitHub Actions runs two jobs: linux-offline (all Bash) and windows-offline
+# (Windows-sensitive Bash plus all PowerShell). Scheduled/manual Windows and
+# the local default below remain complete backstops.
 #
 # This runs the same suites, unchanged, across worker slots on this machine.
 # It is a local pre-check, not a replacement for CI: GitHub is still the authority
@@ -31,7 +30,7 @@ usage: bin/ai-test-local [--bash|--powershell|--reviewer|--all] [-j N]
   --all          Bash suites and PowerShell suites (default; mirrors CI)
   --bash         only the Bash suites (mirrors linux-offline)
   --powershell   only the PowerShell suites
-  --reviewer     only the reviewer safety suites (mirrors windows-reviewer-safety)
+  --reviewer     only the reviewer safety suites (local check; no CI lane)
   -j N           worker slots (default: a quarter of this machine's cores, max 8)
   --force        start even if a CI job is running on this same machine
   --check-collision
