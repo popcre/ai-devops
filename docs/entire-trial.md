@@ -1,5 +1,38 @@
 # Entire trial operating record — #2022
 
+## Current scope — public companion alongside GitHub
+
+Albert's October 30 instruction: “Go ahead and get entire.com live alongside
+GitHub for ai-devops. Keep private capture off and billing dropped. Don't wait
+for support. Use sub-agents to finish the work and verify it live.”
+
+The current operating scope is the public `popcre/ai-devops` mirror and manual
+Trails. GitHub remains authoritative for code, checks and delivery. Private
+capture stays off; hosted Agents are not enabled; billing is excluded. Existing
+integrations and other sessions remain intact. Vendor support is not a dependency
+for ready public-companion work.
+
+Authenticated Entire access as `u2giants` displayed main commit
+`43f5e608489d2c2bc29e03f22b9a02e410c78d7e`, matching the current GitHub public
+main observed in this continuation. Local capture-off custody was verified
+October 30, 2026, 11:26 AM EDT. The coordinator created and read back
+[operational Trail231](https://entire.com/gh/popcre/ai-devops/-/trails/231),
+“ai-devops live alongside GitHub — public mirror and manual Trails #2022”.
+Its description binds #2022, that exact main, capture off, GitHub authority,
+nonblocking support and original deadlines. This proves authenticated public
+mirror access and manual Trail creation/readback. No new PR/Change linkage is
+claimed by this receipt.
+
+This narrower authority does not reverse the historical full-feature rejection,
+the frozen baseline 10/10 versus Entire 8/10 result, or the raw-capture privacy
+failure. Private capture, extraction quality, automated findings and full hosted
+departure remain unqualified. Exact Trail113/133 deletion, backup retention and
+removed-login access semantics remain assigned to Entire on #2022; they do not
+block the public companion. Discovery remains November 2, 2026, 5:00 PM EST;
+stop remains November 12, 2026, 5:58 AM EST. No clock restarts.
+
+The following closeout and earlier results are historical context.
+
 Closeout continuation: read the
 [new handoff](../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
 and [final independent recovery results](../tests/verification/entire-trial/report.md#final-independent-recovery-and-closeout)
