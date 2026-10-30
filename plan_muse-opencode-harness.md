@@ -116,9 +116,9 @@ No Muse code, configuration, credential, service, or test has been added yet. Th
 
 - `bin/ai-glm` currently pins provider `zai-coding-plan`, model `glm-5.3`, state directory `~/.local/state/ai-devops/glm`, and default port `4096` near [`bin/ai-glm:54`](bin/ai-glm#L54). These values must become a locked GLM profile, not generic defaults that Muse can override per call.
 - GLM review safety is enforced by the agent `tools:` map in [`config/opencode/agent/glm-review.md`](config/opencode/agent/glm-review.md), not by OpenCode’s permission map. This was measured against OpenCode 1.18.12.
-- GLM implementation runs in a no-hardlinks disposable clone and removes `origin`; [`tests/test-ai-glm.sh:56`](tests/test-ai-glm.sh#L56) guards both controls.
+- GLM implementation runs in a no-hardlinks disposable clone and removes `origin`; `tests/test-ai-glm.sh:56` (deleted in #2074) guards both controls.
 - Completion requires `finish == "stop"` and two consecutive idle polls. A missing active-session status alone is not completion.
-- `ai-glm` already uses `ai-review-sandbox` and `ai-review-packet` before both new and resumed reviews; the corresponding regression checks begin near [`tests/test-ai-glm.sh:192`](tests/test-ai-glm.sh#L192).
+- `ai-glm` already uses `ai-review-sandbox` and `ai-review-packet` before both new and resumed reviews; the corresponding regression checks begin near `tests/test-ai-glm.sh:192` (deleted in #2074).
 - Ubuntu setup creates a loopback-only OpenCode user service. Windows setup creates a log-writing recovery wrapper and Scheduled Task that an ordinary user can repair.
 - `tests/test-ai-glm.sh` contains extensive offline lifecycle, permission, recovery, long-path, and incomplete-artifact tests, with optional paid live tests behind `AI_GLM_LIVE=1`.
 - `tests/test-windows-scripts.sh` enforces ASCII-only PowerShell and the measured Windows service rules.

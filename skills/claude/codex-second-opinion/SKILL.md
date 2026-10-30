@@ -28,7 +28,6 @@ argument.
 |---|---|
 | Codex's *opinion* on reasoning, with Claude's own view and a rebuttal round | **this skill** |
 | Codex to *build/run/prove* something autonomously | `codex-handoff` |
-| A canned read-only Codex pass over the current git diff → `.ai/reviews/` | `ai-codex-review` (via the `ai-reviewer` skill) |
 
 ## Transport — prefer the MCP, fall back to the CLI
 

@@ -15,7 +15,7 @@ Before recording a reviewer as missing or not on PATH, run `ai-review-preflight 
 
 The shared destination is the private
 [`u2giants/ai-devops-reviewer-logs`](https://github.com/u2giants/ai-devops-reviewer-logs)
-repository. The [reporting skill](../skills/shared/log-reviewer-issue/SKILL.md)
+repository. The reporting skill (`log-reviewer-issue`, deleted in #2074)
 records the incident locally, then runs `ai-reviewer-logs-sync sync` to upload
 encrypted evidence immediately. The hourly schedule is a fallback. The recorder
 alone does not upload; a failed upload leaves the original incident intact and

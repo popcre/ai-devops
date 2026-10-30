@@ -8,15 +8,11 @@ ai-qwen	bin/ai-qwen	bash+cmd	yes	qwen	install-machine-tools.ps1
 ai-qwen-cli	bin/ai-qwen-cli	bash+cmd	yes	qwen	install-machine-tools.ps1
 ai-deepseek-agent	bin/ai-deepseek-agent	bash+cmd	yes	none	install-machine-tools.ps1
 ai-stepfun	bin/ai-stepfun	bash+cmd	yes	none	install-machine-tools.ps1
-ai-review	bin/ai-review	bash+cmd	yes	none	install-machine-tools.ps1
-ai-claude-review	bin/ai-claude-review	bash+cmd	yes	claude	install-machine-tools.ps1
-ai-codex-review	bin/ai-codex-review	bash+cmd	yes	codex	install-machine-tools.ps1
 ai-review-sandbox	bin/ai-review-sandbox	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-packet	bin/ai-review-packet	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-lifecycle	bin/ai-review-lifecycle	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-preflight	bin/ai-review-preflight	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-scoreboard	bin/ai-review-scoreboard	bash+cmd	yes	none	install-machine-tools.ps1
-ai-reviewer-issue	bin/ai-reviewer-issue	bash+cmd	yes	none	install-machine-tools.ps1
 ai-task-gates	bin/ai-task-gates	bash+cmd	yes	none	install-machine-tools.ps1
 ai-blocker-watch	bin/ai-blocker-watch	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reap-shared-db-worktrees	bin/ai-reap-shared-db-worktrees	bash+cmd	yes	none	install-machine-tools.ps1
