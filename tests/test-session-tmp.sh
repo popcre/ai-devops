@@ -5,6 +5,7 @@ set -u
 PASS=0; FAIL=0
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib-test-harness.sh"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) _win=1;; *) _win=0;; esac  # NTFS: no POSIX modes or real symlinks
 root_dir="$(cd "$here/.." && pwd)"
 lib="$root_dir/tools/lib/session-tmp.sh"
 
@@ -18,7 +19,9 @@ r="$AI_SESSION_TMP_BASE/test-abc"
 check "root created under base" '[ -d "$r" ]'
 check "TMPDIR/TMP/TEMP exported" '[[ "$out" == "$r|$r|$r|$r"* ]]'
 check "owner.json has pid and engine" 'grep -q "\"pid\":[0-9]" <<<"$out" && grep -q "\"engine\":\"test\"" <<<"$out"'
-check "root mode 700" '[[ "$out" == *$'"'"'\n'"'"'700 ]]'
+if [ "$_win" = 1 ]; then skip "root mode 700 (POSIX-only)"; else
+  check "root mode 700" '[[ "$out" == *$'"'"'\n'"'"'700 ]]'
+fi
 bash -c '. "$1"; AI_SESSION_TMP_ROOT="$2" ai_session_tmp_end' _ "$lib" "$r"
 check "end removes the root" '[ ! -e "$r" ]'
 
@@ -41,7 +44,9 @@ check "refuses /" '! g /'
 check "refuses the base itself" '! g "$AI_SESSION_TMP_BASE"'
 check "refuses /var/tmp" '! g /var/tmp'
 check "refuses a path with .." '! g "$AI_SESSION_TMP_BASE/../victim"'
-check "refuses a symlink root" '! g "$AI_SESSION_TMP_BASE/link-root" && [ -f "$work/victim/keep" ]'
+if [ "$_win" = 1 ]; then skip "refuses a symlink root (POSIX-only)"; else
+  check "refuses a symlink root" '! g "$AI_SESSION_TMP_BASE/link-root" && [ -f "$work/victim/keep" ]'
+fi
 check "refuses an outside path" '! g "$work/victim" && [ -f "$work/victim/keep" ]'
 check "begin refuses base /" '! AI_SESSION_TMP_BASE=/ bash -c ". \"$lib\"; ai_session_tmp_begin a b" 2>/dev/null'
 check "begin slugs a hostile id" 'bash -c ". \"$lib\"; ai_session_tmp_begin x \"../../etc\"; [[ \$AI_SESSION_TMP_ROOT == \$AI_SESSION_TMP_BASE/x-etc ]]"'

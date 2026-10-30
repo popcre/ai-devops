@@ -14,6 +14,22 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
+# Native Windows (Git Bash): the install-authority route is Linux-only
+# (test-ai-task-gates-linux-install.sh skips off Linux for the same reason),
+# and NTFS has no POSIX mode bits or real symlinks. Those named checks are
+# reported as skips there; every other check still runs.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    _linux_only_checks='installation task can issue exact reviewed authority|issued authority binds old and target commits|installed checkout advanced within the reviewed range|authority advanced within the range binds|managed Windows launcher resolves to the installed checkout|same-commit legacy migration binds managed launcher|legacy authority records exact launcher and source hashes|legacy Windows cross-commit migration binds|legacy cross-commit authority retains old checkout|dangling or linked authority destination cannot be replaced|reviewed recovery accepts one supported|recovery seals present and absent paths|deleted reviewer path still uses the protected installation route|matching installed source receipt permits same-source maintenance|matching Linux install manifest proves the source receipt|documented u2giants GitHub origin retains toolkit install route|real ansible main reaches the owner-authorization step|and starts with the owner authorization, no reviewer|same inventory in a fresh temporary file reuses the answer|explain cache directory is private|workflow refuses symlink manifest'
+    eval "_harness_$(declare -f check)"
+    check() {
+      local status=$?
+      if printf '%s' "$1" | grep -Eq "$_linux_only_checks"; then skip "$1 (Linux/POSIX-only)"; return 0; fi
+      ( exit "$status" ); _harness_check "$@"
+    }
+    ;;
+esac
+
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
