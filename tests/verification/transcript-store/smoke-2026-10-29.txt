@@ -1,0 +1,31 @@
+Transcript store step 5 smoke batches (popcre/ai-devops#2061), edge-dev3.
+Counts only. Each batch: build.py --limit-calls 1000 on the newest sessions,
+a fresh local database, --no-publish. Gate (plan step 5): ScaleDown failure
+<= 5% after retries; re-ask <= 10% of sections; other <= 25% of sections;
+hand check >= 40 of 50 correct first slugs (subject + slugs + a ScaleDown
+one-line chunk summary; chunk text never read).
+
+batch  prompt  threads  wall_s  calls  chunks_ok  chunks_failed  fail%  sections  reasked  other  aliased  handcheck
+v1     v1      8        (stopped early: 93 of 175 chunks had no parsable header; parser fixed)
+v2     v2      8        2515    965    965        19             1.9    1140      0        9      0        22/50
+v3     v3      16       774     928    926        72             7.2    1081      2        6      0        not run (failure gate)
+v3b    v3      16       860     973    946        13             1.4    1149      2        7      1        31/50
+v4     v4      16       691     988    963        6              0.6    1170      8        12     2        30/50
+v5     v5      16       620     990    960        5              0.5    1205      7        31     1        36/50
+v6     v6      16       601     994    974        3              0.3    1115      8        38     0        34/50
+v7     v7      16       603     986    964        7              0.7    1168      10       79     1        33/50
+v8     v8      16       715     987    961        6              0.6    1116      7        117    1        not scored
+
+Result: the label hand-check gate (>= 40/50) is NOT met after eight prompt
+and rule iterations (best 36/50); the other three gates pass on every batch since v3b.
+Sessions per batch: about 410 (1.39 GB of source). Rate at 16 threads:
+about 98 calls/minute.
+
+Projection for the full archive (12,201 session files, 19.3 GB): about
+85,000 calls at 16 threads, about 14-15 hours.
+
+Decision: step 6 (full backfill) was NOT started on these labels. A partial
+v2 backfill begun early was stopped and its local database set aside
+(store.db.v2-partial-20261029; nothing was published to Dropbox), and the
+daily timer is installed but disabled until the label gate passes.
+Dropbox quota checked 2026-10-29: 1.3 TiB free of 2.0 TiB (gate: >= 15 GB).

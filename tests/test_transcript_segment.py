@@ -89,6 +89,8 @@ class Parsing(unittest.TestCase):
         self.assertEqual(r(["ai-mistakes"], "Grok live qualification costs", "")[0][0], "reviewer-tooling")
         self.assertEqual(r(["business-rules", "owner-decision"], "PopDAM style-group ingestion timeout", "")[0], ["other"])
         self.assertEqual(r(["other"], "Plan Warner property mapping", "")[0][0], "business-rules")
+        self.assertEqual(r(["ai-mistakes", "owner-decision"], "Atomic box repair and vendor isolation", "")[0], ["other"])
+        self.assertEqual(r(["ai-devops-process"], "Issue fixed", "replaceFailedReviewer now skips")[0][0], "reviewer-tooling")
         self.assertEqual(r(["other"], "Kimi", ""), (["other"], False))
 
     def test_flattened_header_body_recovered(self):

@@ -625,6 +625,9 @@
       ],
       "tools/transcript_store/prompt_v7.txt": [
         "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v8.txt": [
+        "test-transcript-store.sh"
       ]
     },
     "companion_suites": {
