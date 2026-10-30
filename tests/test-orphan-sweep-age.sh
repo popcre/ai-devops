@@ -9,7 +9,6 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-review-sandbox"
-FRONT="$REPO_ROOT/bin/ai-review"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
@@ -234,30 +233,6 @@ set -e
 check "invalid_threshold_refused"        "[ '$BAD_RC' -ne 0 ]"
 check "invalid_threshold_touched_nothing" "[ -d '$REFUSE' ]"
 rm -rf "$REFUSE"
-
-echo '== ai-review front door sweeps at parent start'
-
-# The wiring proof drives the approval-gate front door WITHOUT
-# AI_DEVOPS_TEST_MODE (test mode skips the sweep by design, so offline suites
-# never touch the machine-global root); the real task gate runs and passes on
-# this clean throwaway repository, and the reviewer wrapper is stubbed so no
-# provider call is attempted.
-FRONT_STUB="$TMP/front-wrapper"
-cat > "$FRONT_STUB" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-chmod +x "$FRONT_STUB"
-
-WIRE_OLD="$(plant wiring-old '3 hours ago')"
-WIRE_YOUNG="$(plant wiring-young '10 minutes ago')"
-set +e
-(cd "$MAIN" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'true' >/dev/null 2>&1)
-WIRE_RC=$?
-set -e
-check "front_door_exits_zero"         "[ '$WIRE_RC' -eq 0 ]"
-check "front_door_removes_orphan"     "[ ! -d '$WIRE_OLD' ]"
-check "front_door_keeps_young"        "[ -d '$WIRE_YOUNG' ]"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

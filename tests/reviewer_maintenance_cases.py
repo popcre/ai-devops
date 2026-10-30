@@ -532,7 +532,7 @@ esac
         self.assertFalse(self.ledger.exists())
 
     def test_delete_preserves_metadata_and_provider_when_snapshot_cleanup_refuses(self):
-        for provider, wrapper in (("qwen", "ai-qwen"), ("kimi", "ai-kimi"), ("glm", "ai-glm"), ("grok", "ai-grok-review")):
+        for provider, wrapper in (("qwen", "ai-qwen"), ("kimi", "ai-kimi"), ("grok", "ai-grok-review")):
             with self.subTest(provider=provider):
                 source = (ROOT / "bin" / wrapper).read_text()
                 delete = source.split("\ncmd_delete() {", 1)[1].split("\n}\n", 1)[0]

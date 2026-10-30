@@ -176,20 +176,19 @@ check "Muse readiness preserves preflight caller" "AI_REVIEW_MUSE_WRAPPER='$TMP/
 check "Muse readiness uses its independent offline doctor budget" "AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=4 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT status muse | jq -e '.usable==true'"
 cat > "$TMP/bin/stepfun-offline-runner" <<'EOF'
 #!/usr/bin/env bash
-case "${1:-}" in --help) echo 'step - AI coding assistant';; --version) echo '0.1.1';; *) exit 91;; esac
+case "${1:-}" in --help) echo 'OpenCode';; --version) echo '0.1.1';; *) exit 91;; esac
 EOF
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/offline-bwrap"
-chmod +x "$TMP/bin/stepfun-offline-runner" "$TMP/bin/offline-bwrap"
+chmod +x "$TMP/bin/stepfun-offline-runner"
 actual_stepfun_readiness() {
   (
     export HOME="$TMP/actual-stepfun-home" USERPROFILE=''
-    export AI_STEPFUN_STATE_DIR="$TMP/actual-stepfun-state" AI_STEPFUN_KEY_STORE="$TMP/actual-stepfun-private/key"
-    export AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_BWRAP="$TMP/bin/offline-bwrap"
-    export AI_STEPFUN_STEP_BIN="$TMP/bin/stepfun-offline-runner" AI_REVIEW_STEPFUN_WRAPPER="$ROOT/bin/ai-stepfun"
-    mkdir -p "$HOME"
+    export AI_SECOND_OPINION_HOME="$TMP/actual-stepfun-state" AI_REVIEW_SIMPLE_SECRETS_DIR="$TMP/actual-stepfun-private"
+    export AI_REVIEW_SIMPLE_OPENCODE="$TMP/bin/stepfun-offline-runner" AI_REVIEW_STEPFUN_WRAPPER="$ROOT/bin/ai-stepfun"
+    mkdir -p "$HOME" "$AI_REVIEW_SIMPLE_SECRETS_DIR"
     case "$1" in
-      runner-missing) export AI_STEPFUN_STEP_BIN="$TMP/bin/no-stepfun";;
-      healthy) printf 'synthetic-readiness-key\n' | bash "$ROOT/bin/ai-stepfun" store-key --if-missing --key-fd 9 9<&0 >/dev/null || return;;
+      runner-missing) export AI_REVIEW_SIMPLE_OPENCODE="$TMP/bin/no-stepfun";;
+      key-missing) rm -f "$AI_REVIEW_SIMPLE_SECRETS_DIR/stepfun-api-key";;
+      healthy) printf 'synthetic-readiness-key\n' | bash "$ROOT/bin/ai-stepfun" store-key --if-missing >/dev/null || return;;
     esac
     "$SCRIPT" status stepfun
   )
@@ -674,7 +673,6 @@ check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merg
 check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "update.sh disables hooks on its own pull" "grep -q 'core.hooksPath' '$ROOT/update.sh'"
-check "Linux installer requires requalification before finalization" "grep -q 'run_stage required \"Reviewer requalification\".*ai-review-preflight' '$ROOT/install.sh' && grep -q 'install-verify --phase finalize' '$ROOT/update.sh'"
 check "the Windows installer requalifies after installing the hook" "grep -q 'requalify' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "uninstall removes the hook through the shared script" "grep -q 'bin/ai-install-post-merge-hook' '$ROOT/uninstall.sh' && grep -q -- '--remove.*--repo' '$ROOT/uninstall.sh'"
 check "the hook tree is pinned to LF" "grep -q '^hooks/.*text eol=lf' '$ROOT/.gitattributes'"
@@ -937,45 +935,6 @@ printf '{bad' > "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
 ph final-check >/dev/null 2>&1; PH_RC=$?
 [ "$PH_RC" -eq 3 ] && ok "passed_head_lookup_error_is_not_a_pass" || bad "passed_head_lookup_error_is_not_a_pass"
 rm -f "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
-# Front door: a request for another reviewer on the passed head returns the
-# existing pass; --additional-reviewer allocates (dispatches) one.
-cat > "$TMP/ph-pool" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$TMP/ph-pool-args"; printf '%s\n' "$TMP/new-report.md"
-EOF
-chmod +x "$TMP/ph-pool"
-ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" \
-  AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" \
-  "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
-rm -f "$TMP/ph-pool-args"
-PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
-[ "$PH_RC" -eq 0 ] && same_path "$(printf '%s\n' "$PH_FRONT" | tail -1)" "$PH_REPORT" && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
-  && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
-AI_REVIEW_SOURCE_RECEIPT_FILE="$REPO/.ai/reviews/governed-ph.json" ph_front > /dev/null 2>"$TMP/ph-governed.err"
-grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ! grep -q 'already passed' "$TMP/ph-governed.err" \
-  && ok "governed_caller_never_receives_another_reviewers_pass" || bad "governed_caller_never_receives_another_reviewers_pass"
-rm -f "$TMP/ph-pool-args"
-ph_front --additional-reviewer >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
-grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
-rm -f "$TMP/ph-pool-args"
-printf 'A specific review question.\n' > "$TMP/carried-question.md"
-AI_REVIEW_BRIEF_FILE="$TMP/carried-question.md" ph_front >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "carried_question_never_uses_a_generic_front_door_approval" || bad "carried_question_never_uses_a_generic_front_door_approval"
-rm -f "$TMP/ph-pool-args"
-jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
-ph_front --implementer codex >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"
-# Inherited Git locations must never aim the lookup at another tree: a victim
-# repository with no pass, pointed at the passing repo through GIT_DIR, must
-# still dispatch.
-VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; git -C "$VICTIM" init -q; git -C "$VICTIM" config user.name T; git -C "$VICTIM" config user.email t@example.com
-echo v > "$VICTIM/v"; git -C "$VICTIM" add v; git -C "$VICTIM" commit -qm v
-rm -f "$TMP/ph-pool-args"
-( cd "$VICTIM" && GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" \
-  AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
-! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
-
 # Windows (Git Bash) and every platform: a due paid-balance re-check must go
 # through bin/ai-review-credit-watch, the only entrypoint that hands the credit
 # reader a qualified Git Bash. A direct tools/reviewer_credit_watch.py refresh

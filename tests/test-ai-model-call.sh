@@ -2,7 +2,7 @@
 # Keep test runs out of the live reviewer events ledger (#1435).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
 set -u
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-model-call"; GATE="$ROOT/bin/ai-review"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-model-call"
 PASS=0; FAIL=0; ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }; check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT; R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q; git -C "$R" config user.name T; git -C "$R" config user.email t@e; echo x > "$R/a"; git -C "$R" add a; git -C "$R" commit -qm i; echo prompt > "$TMP/prompt"
 STUB="$TMP/codex"; cat > "$STUB" <<'EOF'
@@ -25,7 +25,6 @@ BAD="$TMP/bad.env"; printf "CODEX_PLAN_CMD='%s exec -m gpt-5.6-sol --sandbox rea
 check 'unsupported Codex reasoning is refused' "cd '$R' && ! AI_DEVOPS_MODELS_ENV='$BAD' '$SCRIPT' plan '$TMP/prompt' '$TMP/bad.out'"
 INJECT="$TMP/inject.env"; printf "CODEX_PLAN_CMD='%s exec -m gpt-5.6-sol --sandbox read-only -c model_reasoning_effort=medium; touch BAD'\n" "$STUB" > "$INJECT"
 check 'shell operators in config are refused' "cd '$R' && ! AI_DEVOPS_MODELS_ENV='$INJECT' '$SCRIPT' plan '$TMP/prompt' '$TMP/inject.out' && test ! -e '$R/BAD'"
-check 'advisory provider cannot satisfy gate' "cd '$R' && ! '$GATE' qwen diff-review >/dev/null 2>&1"
 check 'pipeline review refuses the implementing engine' "cd '$R' && ! AI_PIPELINE_REVIEW_PROVIDER=codex '$SCRIPT' plan-review '$TMP/prompt' '$TMP/codex.out'"
 check 'pipeline review refuses Claude' "cd '$R' && ! AI_PIPELINE_REVIEW_PROVIDER=claude '$SCRIPT' plan-review '$TMP/prompt' '$TMP/claude.out'"
 check 'unknown stage is rejected' "cd '$R' && ! '$SCRIPT' nope '$TMP/prompt' '$TMP/nope.out'"

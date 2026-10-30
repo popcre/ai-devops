@@ -1,0 +1,531 @@
+#!/usr/bin/env bash
+# ai-reviewer-issue - record a detailed reviewer failure and its evidence.
+#
+# WHY THIS EXISTS
+# The performance scoreboard records comparable numbers, but those numbers are
+# not enough to diagnose an unusual reviewer failure. This command captures the
+# surrounding repository, machine, reviewer state, complete matching review
+# reports, provider logs, scoreboard outcome, and any notes the session supplies.
+# Reports are local and git-ignored because reviewer state may describe private
+# code or provider sessions.
+set -euo pipefail
+
+VERSION="1.6.0"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+  SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+  case "$SCRIPT_SOURCE" in /*|[A-Za-z]:[\\/]*) ;; *) SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ISSUE_DIR="${AI_REVIEWER_ISSUE_DIR:-$TOOLKIT_ROOT/.ai/reviewer-issues}"
+STATE_BASE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
+
+die(){ printf 'ai-reviewer-issue: error: %s\n' "$*" >&2; exit 1; }
+note(){ printf 'ai-reviewer-issue: %s\n' "$*"; }
+
+usage(){
+  cat <<'EOF'
+Usage:
+  ai-reviewer-issue record --provider NAME --summary "title" [--details TEXT | --details-file PATH]
+                           [--command TEXT] [--repo PATH] [--error-file PATH]
+                           [--run-id ID] [--session-id ID] [--caller NAME]
+                           [--lifecycle-state PATH]
+  ai-reviewer-issue resolve <issue-id> --status resolved|partially-resolved
+                           --summary "repair outcome" --repair-commit SHA
+                           [--repair-repo PATH]
+                           --evidence PATH-OR-URL [--repair-commit SHA ...]
+                           [--evidence PATH-OR-URL ...]
+                           [--details TEXT | --details-file PATH]
+  ai-reviewer-issue list
+  ai-reviewer-issue show <issue-id>
+  ai-reviewer-issue path
+  ai-reviewer-issue maintenance start [--resume ROUND-ID]
+  ai-reviewer-issue maintenance show
+  ai-reviewer-issue maintenance record ROUND-ID CANDIDATE-ID
+                           --summary TEXT --details-file PATH
+  ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
+                           --issue ISSUE-ID [--carry-forward PATH --evidence PATH]
+  ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
+                           --reason REASON --evidence PATH-OR-URL [--carry-forward PATH]
+  ai-reviewer-issue maintenance complete ROUND-ID --proof PATH
+  ai-reviewer-issue maintenance carry-forward ROUND-ID CANDIDATE-ID
+                           --remaining PATH --evidence PATH-OR-URL
+
+The record command captures complete matching review reports, recent provider
+logs, reviewer metadata, scoreboard outcome, repository state, and machine facts.
+Details and error files are copied in full after common credentials are redacted.
+Reports remain local under the ai-devops checkout and are never committed.
+Resolve appends a separate, immutable repair record; it never edits the original
+incident package. Use partially-resolved whenever any recorded symptom remains.
+Repair commits are verified in the toolkit by default. Use --repair-repo for a
+fix owned by another repository; its canonical root is recorded with the commits.
+EOF
+}
+
+safe_provider(){
+  case "$1" in
+    ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+canonical_dir(){
+  [ -d "$1" ] || return 1
+  (cd "$1" && pwd -P)
+}
+
+boundary_dir(){
+  local p
+  [ -d "$1" ] || return 1
+  if p="$(cd "$1" && pwd -W 2>/dev/null)"; then printf '%s' "${p,,}"
+  else (cd "$1" && pwd -P); fi
+}
+
+repo_root(){
+  git -C "$1" rev-parse --show-toplevel 2>/dev/null || canonical_dir "$1"
+}
+
+latest_json(){ # latest_json DIRECTORY
+  local dir="$1" latest="" f
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    if [ -z "$latest" ] || [ "$f" -nt "$latest" ]; then latest="$f"; fi
+  done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
+  printf '%s' "$latest"
+}
+
+exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER SOURCE_DIGEST
+  local dir="$1" run="$2" session="$3" repo="$4" head="$5" caller="$6" source_digest="$7" f match="" count=0
+  { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    jq -e --arg run "$run" --arg session "$session" --arg repo "$repo" --arg head "$head" --arg caller "$caller" --arg source "$source_digest" '
+      ($run=="" or (.run_id // .job_id // .id // "")==$run) and
+      ($session=="" or (.session_id // .session // .name // "")==$session) and
+      ((.repo // .repository_root // "")==$repo) and (.head // "")==$head and
+      ($source=="" or (.source_digest // "")==$source) and
+      (.caller // "")==$caller' "$f" >/dev/null 2>&1 && { match="$f"; count=$((count + 1)); }
+  done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
+  case "$count" in
+    0) return 1 ;;
+    1) printf '%s' "$match" ;;
+    *) return 2 ;;
+  esac
+}
+
+exact_diagnostic(){ # DIRECTORY PROVIDER RUN SESSION REPO CALLER SOURCE_DIGEST
+  local dir="$1" provider="$2" run="$3" session="$4" repo="$5" caller="$6" source="$7" matches repo_key record_root record_key
+  [ -d "$dir" ] && [ -n "$run" ] && [ -n "$caller" ] || return 0
+  repo_key="$(boundary_dir "$repo")" || return 1
+  matches="$(find "$dir" -type f -name '*.json' -print0 2>/dev/null | while IFS= read -r -d '' f; do
+    [ ! -L "$f" ] || continue
+    record_root="$(jq -r '.repository_root // empty' "$f" 2>/dev/null)"
+    record_key="$(boundary_dir "$record_root")" || continue
+    [ "$record_key" = "$repo_key" ] || continue
+    jq -e --arg provider "$provider" --arg run "$run" --arg session "$session" --arg repo "$repo" --arg caller "$caller" --arg source "$source" \
+      '.schema_version==1 and .provider==$provider and .run_id==$run and ((.session_id//"")==$session) and .caller==$caller and ($source=="" or .source_digest==$source)' "$f" >/dev/null 2>&1 && printf '%s\n' "$f"
+  done)"
+  [ "$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')" -le 1 ] || return 2
+  printf '%s' "$matches"
+}
+
+sanitize_json(){ # sanitize_json SOURCE DESTINATION
+  jq 'walk(if type == "object" then
+        with_entries(select((.key | ascii_downcase) as $k |
+          ($k == "prompt" or $k == "prompt_text" or $k == "content" or
+           $k == "body" or $k == "api_key" or $k == "credential" or
+           $k == "secret" or $k == "authorization" or
+           $k == "access_token" or $k == "refresh_token") | not))
+      else . end)' "$1" > "$2"
+}
+
+redact_text(){
+  sed -E \
+    -e 's/((api[_ -]?key|token|secret|password|authorization|credential)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+    -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
+}
+
+# classify_failure prints {"stream":...,"failure_class":...} from the shared
+# admission classifier. Credit, usage-limit, capacity, and provider-down events
+# are provider-outage and are never labeled a code defect (#1115). A bare 404
+# or 403 stays code-config. Falls back to code-config only if classification
+# itself cannot run.
+classify_failure(){ # PROVIDER SUMMARY [SCAN_FILE...]
+  local provider="$1" summary="$2"; shift 2
+  local python tool out file
+  local -a scan=()
+  python="$(command -v python3 || command -v python)" || true
+  tool="$TOOLKIT_ROOT/tools/reviewer_admission.py"
+  for file in "$@"; do
+    [ -n "$file" ] && [ -f "$file" ] && [ ! -L "$file" ] && scan+=(--scan "$file")
+  done
+  if [ -n "${python:-}" ] && [ -f "$tool" ]; then
+    out="$("$python" "$tool" classify "$provider" --text "$summary" "${scan[@]}" 2>/dev/null)" || out=""
+    if [ -n "$out" ] && jq -e '.stream and .failure_class' >/dev/null 2>&1 <<<"$out"; then
+      printf '%s' "$out"
+      return 0
+    fi
+  fi
+  printf '{"stream":"code-defect","failure_class":"code-config"}'
+}
+
+write_artifact_inventory(){ # write_artifact_inventory REPO DESTINATION
+  local repo="$1" dest="$2" f count=0
+  : > "$dest"
+  [ -d "$repo/.ai/reviews" ] || return 0
+  while IFS= read -r -d '' f; do
+    printf '%s\t%s bytes\n' "${f#"$repo/"}" "$(wc -c < "$f" | tr -d ' ')" >> "$dest"
+    count=$((count + 1))
+    if [ "$count" -ge 10 ]; then break; fi
+  done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -print0 2>/dev/null)
+}
+
+capture_exact_files(){ # capture_exact_files METADATA KIND ALLOWED_ROOT DEST INVENTORY
+  local metadata="$1" kind="$2" allowed="$3" dest="$4" inventory="$5" f candidate resolved allowed_root candidate_dir saved count=0 filter
+  mkdir -p "$dest"
+  [ -s "$metadata" ] && [ -d "$allowed" ] || return 0
+  allowed_root="$(boundary_dir "$allowed")" || return 0
+  if [ "$kind" = report ]; then
+    filter='[.report_path?,.last_report?,.review_report?,.artifact_paths.repository?,.artifact_paths.canonical?]'
+  else
+    filter='[.log_path?,.stream_path?,.output_path?,.error_path?,.artifact_paths.stream?,.artifact_paths.log?]'
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      [A-Za-z]:[\\/]*) if command -v cygpath >/dev/null 2>&1; then candidate="$(cygpath -u "$f")"; else candidate="$f"; fi ;;
+      /*) candidate="$f" ;;
+      *) candidate="$allowed/$f" ;;
+    esac
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    candidate_dir="$(boundary_dir "$(dirname "$candidate")")" || continue
+    resolved="$candidate_dir/$(basename "$candidate")"
+    case "$resolved" in "$allowed_root"/*) ;; *) continue ;; esac
+    count=$((count + 1)); saved="$(printf '%03d-%s' "$count" "$(basename "$f")")"
+    redact_text < "$resolved" > "$dest/$saved"
+    printf '%s\t%s\t%s bytes\n' "$resolved" "$saved" "$(wc -c < "$resolved" | tr -d ' ')" >> "$inventory"
+  done < <(jq -r "$filter | .[] | select(type==\"string\" and length>0)" "$metadata" 2>/dev/null)
+}
+
+capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER SOURCE DESTINATION
+  local provider="$1" repo="$2" head="$3" run="$4" session="$5" caller="$6" source="$7" dest="$8" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
+  { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
+  [ -f "$ledger" ] || return 0
+  jq -s --arg provider "$provider" --arg repo "$repo" --arg head "$head" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg source "$source" \
+    '[.[] | select(.provider==$provider and .repo==$repo and .head==$head and
+      ($run=="" or (.run_id // "")==$run) and ($session=="" or (.session_id // "")==$session) and
+      ($source=="" or (.source_digest // "")==$source) and
+      (.caller // "")==$caller)] | last // empty' "$ledger" > "$dest"
+  [ -s "$dest" ] || rm -f "$dest"
+}
+
+record_issue(){
+  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" observed_head="" event_sha256="" root now stamp host id report_dir
+  local metadata_source="" metadata_copy="" metadata_status=0 diagnostic_source="" diagnostic_copy="" diagnostic_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
+  local classification="" failure_stream="" failure_class="" code_defect=false
+  local report_count=0 log_count=0 scoreboard_count=0 diagnostic_count=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift 2 ;;
+      --summary) summary="${2:-}"; shift 2 ;;
+      --details) details="${2:-}"; shift 2 ;;
+      --details-file) details_file="${2:-}"; shift 2 ;;
+      --command) command_text="${2:-}"; shift 2 ;;
+      --repo) repo="${2:-}"; shift 2 ;;
+      --error-file) error_file="${2:-}"; shift 2 ;;
+      --run-id) run_id="${2:-}"; shift 2 ;;
+      --session-id) session_id="${2:-}"; shift 2 ;;
+      --caller) caller="${2:-}"; shift 2 ;;
+      --lifecycle-state) lifecycle_state="${2:-}"; shift 2 ;;
+      *) die "unknown option '$1'." ;;
+    esac
+  done
+  if [ -n "$lifecycle_state" ]; then
+    [ -f "$lifecycle_state" ] && [ ! -L "$lifecycle_state" ] || die "lifecycle state not found: $lifecycle_state"
+    jq -e '.schema_version==1 and (.provider|type=="string") and (.run_id|type=="string") and (.caller|type=="string") and (.source_digest|type=="string")' "$lifecycle_state" >/dev/null 2>&1 \
+      || die "invalid lifecycle state: $lifecycle_state"
+    [ -z "$provider" ] || [ "$provider" = "$(jq -r .provider "$lifecycle_state")" ] || die "--provider conflicts with lifecycle state."
+    [ "$repo" = "$(pwd)" ] || [ "$(repo_root "$repo")" = "$(jq -r .repository_root "$lifecycle_state")" ] || die "--repo conflicts with lifecycle state."
+    provider="$(jq -r .provider "$lifecycle_state")"; repo="$(jq -r .repository_root "$lifecycle_state")"
+    run_id="$(jq -r .run_id "$lifecycle_state")"; session_id="$(jq -r '.session_id // empty' "$lifecycle_state")"
+    caller="$(jq -r .caller "$lifecycle_state")"; source_digest="$(jq -r .source_digest "$lifecycle_state")"
+    observed_head="$(jq -r '.head // empty' "$lifecycle_state")"
+    [ -z "$observed_head" ] || [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ ]] || die "invalid lifecycle head."
+    event_sha256="$(jq -r '.event_sha256 // empty' "$lifecycle_state")"
+    [ -z "$event_sha256" ] || [[ "$event_sha256" =~ ^[0-9a-f]{64}$ ]] || die "invalid event digest."
+  fi
+  safe_provider "$provider" || die "provider must use only letters, numbers, dot, dash, or underscore."
+  [ -n "$summary" ] || die "--summary is required."
+  [ -z "$details" ] || [ -z "$details_file" ] || die "use --details or --details-file, not both."
+  if ! root="$(repo_root "$repo")"; then
+    # A frozen maintenance event can legitimately name a worktree that was
+    # removed after the invocation. Preserve that exact recorded identity, but
+    # do not substitute a nearby clone or capture any repository-local files.
+    [ -n "$lifecycle_state" ] && [ -n "$observed_head" ] \
+      || die "repository directory not found: $repo"
+    root="$repo"
+  fi
+  if [ -n "$error_file" ]; then [ -f "$error_file" ] || die "error file not found: $error_file"; fi
+  if [ -n "$details_file" ] && [ "$details_file" != "-" ]; then [ -f "$details_file" ] || die "details file not found: $details_file"; fi
+  safe_summary="$(printf '%s' "$summary" | redact_text)"
+  safe_command="$(printf '%s' "$command_text" | redact_text)"
+
+  now="$(date -u +%FT%TZ)"; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  host="$(hostname 2>/dev/null || printf unknown)"
+  id="$stamp-$host-$provider-$$"
+  report_dir="$ISSUE_DIR/$id"
+  mkdir -p "$report_dir" || die "cannot create report directory: $report_dir"
+  chmod 0700 "$ISSUE_DIR" "$report_dir" 2>/dev/null || true
+
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"
+    head="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
+    remote="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+    status_short="$(git -C "$root" status --short --untracked-files=no 2>/dev/null || true)"
+  fi
+  if [ -n "$observed_head" ] && [ "$observed_head" != "$head" ]; then
+    head="$observed_head"; branch=""; status_short=""
+  fi
+  if [ -n "$lifecycle_state" ]; then
+    metadata_source="$lifecycle_state"
+  else
+    metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller" "$source_digest")" || metadata_status=$?
+  fi
+  if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
+    metadata_copy="$report_dir/reviewer-metadata.redacted.json"
+    sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
+    chmod 0600 "$metadata_copy" 2>/dev/null || true
+  fi
+  diagnostic_source="$(exact_diagnostic "${AI_REVIEW_LIFECYCLE_DIR:-$STATE_BASE/review-lifecycle}/diagnostics" "$provider" "$run_id" "$session_id" "$root" "$caller" "$source_digest")" || diagnostic_status=$?
+  if [ "$diagnostic_status" -eq 0 ] && [ -n "$diagnostic_source" ] && jq -e . "$diagnostic_source" >/dev/null 2>&1; then
+    diagnostic_copy="$report_dir/reviewer-diagnostic.redacted.json"
+    sanitize_json "$diagnostic_source" "$diagnostic_copy" || die "could not redact reviewer diagnostic envelope."
+    chmod 0600 "$diagnostic_copy" 2>/dev/null || true; diagnostic_count=1
+  fi
+
+  write_artifact_inventory "$root" "$report_dir/recent-review-artifacts.txt"
+  : > "$report_dir/captured-review-reports.txt"
+  : > "$report_dir/captured-provider-logs.txt"
+  capture_exact_files "$metadata_source" report "$root" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
+  capture_exact_files "$metadata_source" log "$STATE_BASE/$provider" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
+  if [ "$metadata_status" -ne 2 ]; then
+    capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$source_digest" "$report_dir/latest-scoreboard-entry.json"
+  fi
+  report_count="$(find "$report_dir/review-reports" -maxdepth 1 -type f -print 2>/dev/null | wc -l | tr -d ' ')"
+  log_count="$(find "$report_dir/provider-logs" -maxdepth 1 -type f -print 2>/dev/null | wc -l | tr -d ' ')"
+  [ -s "$report_dir/latest-scoreboard-entry.json" ] && scoreboard_count=1
+  if [ "$metadata_status" -eq 2 ]; then
+    printf 'Multiple reviewer metadata records matched provider, repository, head, run/session, and caller. No metadata-owned review report, provider log, or scoreboard entry was captured because ownership is ambiguous.\n' > "$report_dir/missing-evidence.txt"
+  elif [ -z "$metadata_source" ]; then
+    printf 'No exact reviewer metadata matched provider, repository, head, run/session, and caller.\n' > "$report_dir/missing-evidence.txt"
+  elif [ "$report_count" -eq 0 ] && [ "$log_count" -eq 0 ] && [ "$scoreboard_count" -eq 0 ]; then
+    printf 'Exact reviewer metadata matched, but no owned review report, provider log, or scoreboard entry was captured.\n' > "$report_dir/missing-evidence.txt"
+  fi
+  if [ -n "$details" ]; then
+    printf '%s\n' "$details" | redact_text > "$report_dir/details.redacted.txt"
+  elif [ -n "$details_file" ]; then
+    if [ "$details_file" = "-" ]; then redact_text > "$report_dir/details.redacted.txt"
+    else redact_text < "$details_file" > "$report_dir/details.redacted.txt"; fi
+  fi
+  if [ -n "$error_file" ]; then
+    redact_text < "$error_file" > "$report_dir/error.redacted.txt"
+    chmod 0600 "$report_dir/error.redacted.txt" 2>/dev/null || true
+  fi
+
+  # Shared admission classifier (#1115): credit, usage-limit, capacity, and
+  # provider-down are provider-outage and are never filed as code defects.
+  classification="$(classify_failure "$provider" "$safe_summary" "$report_dir/error.redacted.txt" "$report_dir/details.redacted.txt")"
+  failure_stream="$(jq -r '.stream' <<<"$classification")"
+  failure_class="$(jq -r '.failure_class' <<<"$classification")"
+  code_defect=false
+  [ "$failure_stream" = "code-defect" ] && code_defect=true
+
+  jq -n \
+    --arg id "$id" --arg created "$now" --arg provider "$provider" --arg summary "$safe_summary" \
+    --arg toolkit "$TOOLKIT_ROOT" --arg report_dir "$report_dir" --arg repo "$root" \
+    --arg remote "$remote" --arg branch "$branch" --arg head "$head" --arg status "$status_short" \
+    --arg host "$host" --arg os "$(uname -a 2>/dev/null || printf unavailable)" \
+    --arg shell "${SHELL:-unavailable}" --arg metadata_source "$metadata_source" \
+    --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
+    --arg details_file "$details_file" --arg details "$details" \
+    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" --arg event_sha256 "$event_sha256" \
+    --arg diagnostic_source "$diagnostic_source" --arg diagnostic_copy "$diagnostic_copy" \
+    --arg failure_stream "$failure_stream" --arg failure_class "$failure_class" \
+    --argjson code_defect "$code_defect" \
+    --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" --argjson diagnostic_count "$diagnostic_count" \
+    '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
+      failure_stream:$failure_stream,failure_class:$failure_class,code_defect:$code_defect,
+      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end),event_sha256:(if $event_sha256=="" then null else $event_sha256 end)},
+      toolkit_root:$toolkit,report_directory:$report_dir,
+      repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
+      machine:{hostname:$host,os:$os,shell:$shell},
+      evidence:{latest_metadata_source:$metadata_source,redacted_metadata_copy:$metadata_copy,
+        recent_review_artifacts:"recent-review-artifacts.txt",
+        complete_matching_review_reports:(if $report_count>0 then "review-reports/" else null end),
+        complete_matching_review_reports_captured:$report_count,
+        recent_provider_logs:(if $log_count>0 then "provider-logs/" else null end),
+        recent_provider_logs_captured:$log_count,
+        latest_scoreboard_entry:(if $scoreboard_count>0 then "latest-scoreboard-entry.json" else null end),
+        latest_scoreboard_entry_captured:$scoreboard_count,
+        exact_diagnostic_envelope:(if $diagnostic_count>0 then "reviewer-diagnostic.redacted.json" else null end),
+        exact_diagnostic_envelope_captured:$diagnostic_count,
+        session_details:(if ($details_file=="" and $details=="") then null else "details.redacted.txt" end),
+        complete_error_log:(if $error_source=="" then null else "error.redacted.txt" end)}}' \
+    > "$report_dir/issue.json"
+  chmod -R go-rwx "$report_dir" 2>/dev/null || true
+
+  note "recorded $id"
+  note "class $failure_stream/$failure_class"
+  if [ "$failure_stream" != "code-defect" ]; then
+    note "provider-side event; not a code defect"
+  fi
+  note "saved to $report_dir"
+}
+
+list_issues(){
+  local f found=0 issue_dir resolution status
+  [ -d "$ISSUE_DIR" ] || { note "no recorded issues"; return 0; }
+  for f in "$ISSUE_DIR"/*/issue.json; do
+    [ -f "$f" ] || continue; found=1
+    issue_dir="${f%/issue.json}"
+    resolution=""
+    [ ! -d "$issue_dir/resolutions" ] || resolution="$(find "$issue_dir/resolutions" -maxdepth 1 -type f -name '*.json' -print | sort | tail -n 1)"
+    status="open"
+    [ -z "$resolution" ] || status="$(jq -r '.status' "$resolution")"
+    jq -r --arg status "$status" '[.id,.created_at,.provider,$status,
+      ((.failure_stream // "code-defect") + "/" + (.failure_class // "code-config")),
+      .summary]|@tsv' "$f"
+  done
+  [ "$found" -eq 1 ] || note "no recorded issues"
+}
+
+show_issue(){
+  local id="$1" file issue_dir resolution
+  safe_provider "$id" || die "invalid issue id."
+  file="$ISSUE_DIR/$id/issue.json"
+  [ -f "$file" ] || die "issue not found: $id"
+  issue_dir="${file%/issue.json}"
+  resolution=""
+  [ ! -d "$issue_dir/resolutions" ] || resolution="$(find "$issue_dir/resolutions" -maxdepth 1 -type f -name '*.json' -print | sort | tail -n 1)"
+  if [ -n "$resolution" ]; then
+    jq --slurpfile resolution "$resolution" '. + {resolution:$resolution[0]}' "$file"
+  else
+    jq '. + {resolution:null}' "$file"
+  fi
+  # Stdout stays pure JSON; the platform obligations go to stderr so whoever
+  # diagnoses this incident sees them before designing a fix (#1783).
+  if [ -f "$TOOLKIT_ROOT/config/reviewer-platform-brief.txt" ]; then
+    printf '\nThis incident happened on: %s\n' "$(jq -r '[.machine.hostname // .machine.name // empty, .machine.os // empty] | map(tostring) | join(" / ")' "$file" 2>/dev/null | cut -c1-160)" >&2
+    cat "$TOOLKIT_ROOT/config/reviewer-platform-brief.txt" >&2
+  fi
+}
+
+resolve_issue(){
+  local id="${1:-}" status="" summary="" safe_summary="" details="" details_file="" arg repair_repo="$TOOLKIT_ROOT"
+  local file issue_dir issue_parent resolved_issue resolution_dir resolved_resolution timestamp destination tmp details_tmp commit full reference maintenance waited=0
+  local -a commits=() evidence=() full_commits=()
+  [ -n "$id" ] || die "resolve requires one issue id."
+  shift || true
+  safe_provider "$id" || die "invalid issue id."
+  while [ "$#" -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --status) [ "$#" -gt 0 ] || die "--status requires a value."; status="$1"; shift ;;
+      --summary) [ "$#" -gt 0 ] || die "--summary requires a value."; summary="$1"; shift ;;
+      --details) [ "$#" -gt 0 ] || die "--details requires a value."; details="$1"; shift ;;
+      --details-file) [ "$#" -gt 0 ] || die "--details-file requires a path."; details_file="$1"; shift ;;
+      --repair-commit) [ "$#" -gt 0 ] || die "--repair-commit requires a SHA."; commits+=("$1"); shift ;;
+      --repair-repo) [ "$#" -gt 0 ] || die "--repair-repo requires a path."; repair_repo="$1"; shift ;;
+      --evidence) [ "$#" -gt 0 ] || die "--evidence requires a path or URL."; evidence+=("$1"); shift ;;
+      *) die "unknown resolve option: $arg" ;;
+    esac
+  done
+  case "$status" in resolved|partially-resolved) ;; *) die "--status must be resolved or partially-resolved." ;; esac
+  [ -n "$summary" ] || die "--summary is required."
+  safe_summary="$(printf '%s' "$summary" | redact_text)"
+  [ "${#commits[@]}" -gt 0 ] || die "at least one --repair-commit is required."
+  [ "${#evidence[@]}" -gt 0 ] || die "at least one --evidence reference is required."
+  [ -z "$details" ] || [ -z "$details_file" ] || die "use --details or --details-file, not both."
+  [ -z "$details_file" ] || [ -f "$details_file" ] || die "details file not found: $details_file"
+  file="$ISSUE_DIR/$id/issue.json"
+  [ -f "$file" ] || die "issue not found: $id"
+  issue_dir="${file%/issue.json}"
+  [ ! -L "$issue_dir" ] && [ ! -L "$file" ] || die "refusing linked incident evidence: $id"
+  issue_parent="$(boundary_dir "$ISSUE_DIR")" || die "cannot resolve reviewer issue directory."
+  resolved_issue="$(boundary_dir "$issue_dir")" || die "cannot resolve incident directory: $id"
+  [ "$(dirname "$resolved_issue")" = "$issue_parent" ] || die "incident directory escapes reviewer issue storage: $id"
+  # Serialize status changes with checkpoint completion. Concurrent resolvers
+  # retain the existing append-only behavior and wait only for this short audit.
+  maintenance="$ISSUE_DIR/maintenance"
+  [ ! -L "$maintenance" ] || die "refusing linked maintenance storage."
+  mkdir -p "$maintenance"
+  [ "$(dirname "$(boundary_dir "$maintenance")")" = "$issue_parent" ] || die "maintenance storage escapes incident storage."
+  while ! mkdir "$maintenance/.writer-lock" 2>/dev/null; do
+    [ "$waited" -lt 100 ] || die "maintenance writer is busy; retry after its audit."
+    sleep 0.1; waited=$((waited + 1))
+  done
+  RESOLVE_MAINTENANCE_LOCK="$maintenance/.writer-lock"
+  trap 'rmdir "$RESOLVE_MAINTENANCE_LOCK" 2>/dev/null || true' EXIT
+  repair_repo="$(git -C "$repair_repo" rev-parse --show-toplevel 2>/dev/null)" || die "repair repository is not a Git working tree."
+  for commit in "${commits[@]}"; do
+    [[ "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || die "invalid repair commit: $commit"
+    full="$(git -C "$repair_repo" rev-parse --verify "$commit^{commit}" 2>/dev/null)" || die "repair commit not found in the selected repository: $commit"
+    full_commits+=("$full")
+  done
+  for reference in "${evidence[@]}"; do
+    case "$reference" in
+      https://*|http://*) ;;
+      /*|[A-Za-z]:[\\/]*) [ -e "$reference" ] || die "evidence path not found: $reference" ;;
+      *) [ -e "$TOOLKIT_ROOT/$reference" ] || die "evidence path not found in toolkit: $reference" ;;
+    esac
+  done
+  resolution_dir="$issue_dir/resolutions"
+  [ ! -L "$resolution_dir" ] || die "refusing linked resolution storage: $id"
+  mkdir -p "$resolution_dir"
+  [ ! -L "$resolution_dir" ] || die "resolution storage became a linked path: $id"
+  resolved_resolution="$(boundary_dir "$resolution_dir")" || die "cannot resolve resolution storage: $id"
+  [ "$(dirname "$resolved_resolution")" = "$resolved_issue" ] || die "resolution storage escapes its incident directory: $id"
+  timestamp="$(date -u +%Y%m%dT%H%M%S%N)"
+  destination="$resolution_dir/$timestamp-$$-$RANDOM.json"
+  tmp="$destination.tmp.$$"
+  details_tmp="$resolution_dir/.details.tmp.$$"
+  if [ -n "$details_file" ]; then redact_text < "$details_file" > "$details_tmp"
+  else printf '%s' "$details" | redact_text > "$details_tmp"; fi
+  jq -n --arg status "$status" --arg summary "$safe_summary" --arg resolved_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg repair_repo "$repair_repo" \
+    --rawfile details "$details_tmp" \
+    --argjson commits "$(printf '%s\n' "${full_commits[@]}" | jq -R . | jq -s .)" \
+    --argjson evidence "$(printf '%s\n' "${evidence[@]}" | jq -R . | jq -s .)" \
+    '{schema_version:1,status:$status,summary:$summary,resolved_at:$resolved_at,
+      repair_repository:$repair_repo,repair_commits:$commits,evidence:$evidence,details:(if $details=="" then null else $details end)}' > "$tmp"
+  rm -f "$details_tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  if ! ln "$tmp" "$destination" 2>/dev/null; then
+    rm -f "$tmp" "$details_tmp"
+    die "could not atomically append the resolution record."
+  fi
+  rm -f "$tmp"
+  note "marked $id $status"
+  note "saved to $destination"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  evidence)
+    python="$(command -v python3 || command -v python)" || die "evidence recovery requires Python 3."
+    exec "$python" "$TOOLKIT_ROOT/tools/reviewer_events.py" "$@" ;;
+  maintenance)
+    python="$(command -v python3 || command -v python)" || die "maintenance requires Python 3."
+    export AI_REVIEWER_BASH="$BASH"
+    exec "$python" "$TOOLKIT_ROOT/tools/reviewer_maintenance.py" --toolkit "$TOOLKIT_ROOT" --issues "$ISSUE_DIR" "$@" ;;
+  record) record_issue "$@" ;;
+  resolve) resolve_issue "$@" ;;
+  list) [ "$#" -eq 0 ] || die "list takes no arguments."; list_issues ;;
+  show) [ "$#" -eq 1 ] || die "show requires one issue id."; show_issue "$1" ;;
+  path) [ "$#" -eq 0 ] || die "path takes no arguments."; printf '%s\n' "$ISSUE_DIR" ;;
+  --version) printf 'ai-reviewer-issue %s\n' "$VERSION" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

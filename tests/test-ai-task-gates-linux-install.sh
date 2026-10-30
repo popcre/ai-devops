@@ -36,10 +36,16 @@ import shutil,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
 import glm_formal_profile as p
-for name in p.CRITICAL_FILES|{'bin/ai-review','bin/ai-review-pool'}:
+for name in p.CRITICAL_FILES:
     target=Path(sys.argv[2])/name;target.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(Path(sys.argv[1])/name,target)
 PYCOPY
+# Historical installations can retain these retired launchers. Their bytes are
+# fixture data for manifest migration, not callable review implementations.
+for name in ai-review ai-review-pool; do
+  printf '#!/bin/sh\nexit 99\n' > "$TMP/installed/bin/$name"
+  chmod +x "$TMP/installed/bin/$name"
+done
 printf 'old\n' > "$TMP/installed/tools/helper.sh"
 git -C "$TMP/installed" add .
 git -C "$TMP/installed" commit -qm base
@@ -411,12 +417,9 @@ manifest_hash="$(sha256sum "$TMP/etc/install-manifest.tsv" | cut -d' ' -f1)"
 live_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
 # The wrapper-owned evidence helper must produce exactly the rows the gate
 # recomputes from the host, in the header before "## Result".
-drift_evidence="$(. "$ROOT/tools/lib/review-operation.sh" && review_operation_evidence_from "$TMP/bin/ai-task-gates" "$TMP/etc/install-manifest.tsv")" || { echo 'FAIL: evidence helper read the fixture host'; exit 1; }
-[ "$drift_evidence" = "$(printf '| stale manifest SHA | `%s` |\n| stale manifest hash | `%s` |\n| live installed SHA | `%s` |\n| live gate hash | `%s` |' "$protected" "$manifest_hash" "$drifted" "$live_hash")" ] &&
-  echo 'PASS: evidence helper computes stale manifest and live gate rows from the host' || { echo 'FAIL: evidence helper rows'; exit 1; }
-drift_request="$(. "$ROOT/tools/lib/review-operation.sh" && review_operation_request stale-linux-manifest-recovery "$drift_evidence")"
-grep -Fqx 'Approved stale-linux-manifest-recovery.' <<<"$drift_request" && grep -Fqx "| live gate hash | \`$live_hash\` |" <<<"$drift_request" &&
-  echo 'PASS: stale request carries host evidence and the approval line' || { echo 'FAIL: stale request'; exit 1; }
+# Recovery authority still binds these measured fixture values; the retired
+# review-operation prompt/evidence formatter is no longer part of this route.
+drift_evidence="$(printf '| stale manifest SHA | `%s` |\n| stale manifest hash | `%s` |\n| live installed SHA | `%s` |\n| live gate hash | `%s` |' "$protected" "$manifest_hash" "$drifted" "$live_hash")"
 drift_key="$("$TMP/drift-reviewed/bin/ai-review-lifecycle" identity "$TMP/drift-reviewed" | jq -r .repository_key)"
 mkdir -p "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex"
 write_drift_report(){ # $1 = header rows, $2 = body rows

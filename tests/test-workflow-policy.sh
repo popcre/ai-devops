@@ -266,8 +266,8 @@ check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$mani
 check 'Windows groups are unique subsets of Bash discovery' \
   '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(LC_ALL=C comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
 check 'manifest Windows coverage is complete before the reviewer split' '[ "$windows_offline" = "$windows_sensitive" ]'
-check 'the Codex safety suite stays outside the Windows sections (Grok frozen #1714)' \
-  '[ "$windows_reviewer" = "test-ai-codex-review.sh" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+check 'the retired governed reviewer lane carries no suites' \
+  '[ -z "$windows_reviewer" ]'
 # Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
 # differently and silently misreports membership, so every comm is C-locale.
 check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
@@ -278,11 +278,6 @@ shard_count="$(jq '.windows_offline_shards | length' "$manifest" | tr -d '\r')"
 shard_smallest="$(jq '[.windows_offline_shards[] | length] | min' "$manifest" | tr -d '\r')"
 powershell_owner="$(jq -r '.windows_offline_powershell_shard' "$manifest" | tr -d '\r')"
 deepseek_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-deepseek-agent.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
-muse_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-muse.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
-# The three suites that exceeded section 4's combined 40-minute budget on
-# PR #666 must stay on separate hosts. The union check below protects every
-# suite even when future timing measurements rebalance the lighter sections.
-heavy_owners="$(jq -r '. as $manifest | ["test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh"] as $heavy | [$heavy[] | . as $suite | ($manifest.windows_offline_shards | to_entries[] | select(.value | index($suite)) | .key)] | @json' "$manifest" | tr -d '\r')"
 # The section list is the router's all-Blacksmith fallback plan in verify.yml.
 sections_declared="[$(printf '%s\n' "$section_block" | grep -o '"section":[0-9]*' | cut -d: -f2 | tr -d '\r' | paste -sd, - | sed 's/,/, /g')]"
 routing="$ROOT/config/ci-runner-routing.json"
@@ -307,10 +302,8 @@ check 'every declared section carries work' \
   '[ "$shard_count" -ge 2 ] && [ "$shard_smallest" -ge 1 ]'
 check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
-check 'the expanded DeepSeek and Muse suites run in separate sections' \
-  '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
-check 'Gemini, GLM and Muse Code run in different sections within the same 40-minute bound' \
-  '[ "$shard_count" -ge 6 ] && [ "$(printf "%s" "$heavy_owners" | jq "length")" -eq 3 ] && [ "$(printf "%s" "$heavy_owners" | jq "unique | length")" -eq 3 ] && [ "$section_timeout" -eq 40 ]'
+check 'the retained DeepSeek suite has a section within the 40-minute bound' \
+  '[ -n "$deepseek_owner" ] && [ "$section_timeout" -eq 40 ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
@@ -350,7 +343,7 @@ complete_union="$(printf '%s\n' "$complete_union" | sed '/^$/d' | LC_ALL=C sort)
 check 'complete workflow sections cover runnable Bash discovery exactly, with no omissions or duplicates' \
   '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$expected_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
-  '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
+  '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | sed "/^$/d" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
 # A pull-request run must be superseded by a newer push to the same pull
 # request. Keying the group on the head SHA made that impossible and filled the
