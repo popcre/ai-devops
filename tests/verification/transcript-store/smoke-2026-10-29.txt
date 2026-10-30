@@ -24,8 +24,14 @@ about 98 calls/minute.
 Projection for the full archive (12,201 session files, 19.3 GB): about
 85,000 calls at 16 threads, about 14-15 hours.
 
-Decision: step 6 (full backfill) was NOT started on these labels. A partial
+Decision before the deviation below: step 6 was not started on these labels. A partial
 v2 backfill begun early was stopped and its local database set aside
 (store.db.v2-partial-20261029; nothing was published to Dropbox), and the
 daily timer is installed but disabled until the label gate passes.
 Dropbox quota checked 2026-10-29: 1.3 TiB free of 2.0 TiB (gate: >= 15 GB).
+
+Gate deviation (coordinator decision, 2026-10-29, reversible via --relabel):
+v5 is used for the backfill. Its same 50 hand-check samples, re-scored as
+correct when the right topic is ANY of the segment's 1-3 slugs (queries match
+any slug): 41/50. First-slug score stays 36/50. Backfill started 11:41 PM EDT
+2026-10-29 from the v5 code at prompt_version v5, 16 threads.
