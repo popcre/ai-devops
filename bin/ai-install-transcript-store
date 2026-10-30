@@ -81,6 +81,7 @@ if (( key )) && ! { [ -s "$key_store" ] && [ "$(stat -c %a "$key_store")" = 600 
   IFS= read -r op_token < "$token_file" || true
   mkdir -p "$cfg_dir/secrets"; chmod 700 "$cfg_dir/secrets"
   tmp="$(mktemp "$cfg_dir/secrets/.scaledown.XXXXXX")" || exit 1
+  trap 'rm -f "$tmp"' EXIT
   chmod 600 "$tmp"
   # 1Password access is serialized with the toolkit's shared refresh lock.
   if command -v flock >/dev/null 2>&1; then
