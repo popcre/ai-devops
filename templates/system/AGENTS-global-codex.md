@@ -200,8 +200,8 @@ authoritative for source, checks and delivery. Bind source and check results to
 the exact GitHub head, inspect its corresponding existing Entire Trail when
 available, and keep sanitized continuity on the task’s owning GitHub issue.
 If Entire is unavailable, missing or stale, disclose it as unverified and
-continue through GitHub. Keep private capture off. Never enable session hooks
-or capture, import private context, activate paid Agents, or change billing,
+continue through GitHub. Keep private capture off. Never enable Entire session
+hooks or capture, import private context, activate paid Agents, or change billing,
 integrations or required checks. The discovery deadline remains November 2,
 2026, 5:00 PM EST. After the stop time, use GitHub only and record the trial
 disposition on #2022. These are client instructions; they do not enforce the

@@ -110,7 +110,8 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     'disclose it as unverified' \
     'continue through GitHub' \
     'Keep private capture off' \
-    'Never enable session hooks' \
+    'Never enable Entire session' \
+    'hooks or capture' \
     'import private context' \
     'paid Agents' \
     'change billing,' \
