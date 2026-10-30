@@ -124,6 +124,42 @@ retained as history and must not restart deletion attempts.
 
 ### Using the public companion
 
+#### Session workflow
+
+Owner: the Codex or Claude session performing the public ai-devops task; #2022
+owns the bounded trial, while each task keeps its existing owning issue. This
+workflow uses the existing browser integration and operating record, with no
+new service, CLI, hook or duplicate tracker. Retire trial activity at the
+original stop, November 12, 2026, 5:58 AM EST; preserve these instructions as
+the operating/decision record until #2022 is reconciled.
+
+1. Check New York time and current #2022 scope before trial activity. Keep the
+   real task's goal, acceptance, current source and next action on its GitHub
+   issue or PR. Only already-public repository material and deliberately
+   sanitized task summaries may go to Entire; never copy a chat transcript.
+2. Open the public repository overview and compare its latest full commit with
+   GitHub. Open the task's existing mirrored Trail when available. Do not
+   create a duplicate Trail merely because the integration has not caught up.
+   If real manual coordination is needed, use the supported Add change route
+   below before the real head branch is removed.
+3. Deliver through GitHub's normal checks and merge policy. Before relying on
+   Entire's check display, compare the exact source and linked GitHub results.
+   After merge, read back the corresponding Trail/change and exact landing.
+   Record observed divergence on the owning issue; retry once at a bounded
+   five-minute boundary only when needed, then continue GitHub-only delivery
+   if Entire still lags. Never weaken a check or wait for Entire review.
+4. Preserve a compact public receipt on the owning GitHub issue: goal; source
+   and landing IDs; PR and Trail/change links; actual check disposition;
+   next action or completed disposition; and limitations. A fresh session
+   must recover this from GitHub even if Entire is unavailable. Do not count
+   these manually copied summaries as automatic memory or utility evidence.
+
+Browser unavailability is not a GitHub delivery blocker. Record Entire as
+unverified for that task and use GitHub-only continuity. No background worker,
+new account permission or paid operation is required. At expiry, stop these
+trial-owned browser/manual steps and reconcile #2022 without removing shared
+integrations. Full-feature failures remain unchanged.
+
 1. Keep GitHub as `origin` and use the normal branch, pull-request, checks and
    merge route. The existing integration mirrors that public work into
    [Entire ai-devops](https://entire.com/gh/popcre/ai-devops); do not add a new
