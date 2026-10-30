@@ -96,16 +96,15 @@ global_refresh_unmodified() {
   { mkdir -p "$(dirname "$backup")" && cp "$dst" "$backup"; } || return 2
   start="$(find_section_start "$dst")"
   if [[ -n "$start" ]]; then
-    section="$(mktemp)" || return 2
-    sed -n "${start},\$p" "$dst" > "$section"
-    { cat "$src"; printf '\n---\n\n'; cat "$section"; } > "$dst.ai-devops-new" && mv "$dst.ai-devops-new" "$dst"
+    # The machine section is read straight from the backup copy.
+    section="$start"
+    { cat "$src"; printf '\n---\n\n'; sed -n "${section},\$p" "$backup"; } > "$dst.ai-devops-new" && mv "$dst.ai-devops-new" "$dst"
     start="$(find_section_start "$dst")"
-    if [[ -z "$start" ]] || ! cmp -s "$section" <(sed -n "${start},\$p" "$dst"); then
-      cp "$backup" "$dst"; rm -f "$section"
+    if [[ -z "$start" ]] || ! cmp -s <(sed -n "${section},\$p" "$backup") <(sed -n "${start},\$p" "$dst"); then
+      cp "$backup" "$dst"
       echo "ERROR: $label machine section changed during refresh; restored the previous file." >&2
       return 2
     fi
-    rm -f "$section"
   else
     cp "$src" "$dst" || { cp "$backup" "$dst"; return 2; }
   fi
