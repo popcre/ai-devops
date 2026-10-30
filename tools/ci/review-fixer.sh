@@ -32,8 +32,10 @@ done
 # fix PR runs CI; fall back to the workflow token otherwise.
 if env -u GH_TOKEN gh auth token >/dev/null 2>&1; then
   pgh() { env -u GH_TOKEN gh "$@"; }
+  pgit() { env -u GH_TOKEN -u GITHUB_TOKEN git "$@"; }
 else
   pgh() { gh "$@"; }
+  pgit() { git "$@"; }
 fi
 
 body="$(gh issue view "$issue" --repo "$repo" --json body --jq .body)" || fail "could not read the issue"
@@ -61,6 +63,14 @@ from an advisory AI code review:
 $body
 ----- end issue body -----
 
+Rules you must follow:
+- You only edit files. This script commits, pushes and opens the PR after you
+  finish; never decide a finding is unfixable because you cannot publish.
+- You may NEVER edit these protected paths: .github/workflows/**, install.sh,
+  update.sh, bin/install-ai-devops-windows.ps1, config/task-gates.json,
+  bin/ai-task-gates. A real finding that can only be fixed there is out of
+  the fixer's scope.
+
 Do this:
 1. Read the code each finding points at and decide whether it is real.
 2. Fix every real finding with the smallest correct change. Do not touch
@@ -70,6 +80,7 @@ Do this:
 4. End your final message with exactly one line:
    DECISION: FIXED   (you changed files and the tests pass)
    DECISION: INVALID (every finding is wrong; explain why above that line)
+   DECISION: PROTECTED (every real finding needs a protected path; say which)
    DECISION: FAILED  (you could not fix it; explain why above that line)
 Above the decision line, write a short plain summary of each finding and what
 you did, suitable for a PR body.
@@ -93,7 +104,7 @@ esac
 rc=$?
 tail -40 "$root/agent.log" || true
 [ -s "$last" ] || fail "the $agent run produced no report (exit $rc)"
-decision="$(grep -oE '^DECISION: (FIXED|INVALID|FAILED)' "$last" | tail -1 | awk '{print $2}')"
+decision="$(grep -oE '^DECISION: (FIXED|INVALID|PROTECTED|FAILED)' "$last" | tail -1 | awk '{print $2}')"
 report="$(grep -vE '^DECISION:' "$last" | head -c 50000)"
 echo "decision: ${decision:-none} (agent exit $rc)"
 
@@ -108,7 +119,9 @@ case "$decision" in
     [ -z "$denied" ] || fail "the fix touched protected files, refusing to push: $(tr '\n' ' ' <<<"$denied")"
     git -C "$work" commit -q -m "Fix review finding #$issue" \
       -m "Automatic fix by review-fixer ($agent)." || fail "commit failed"
-    git -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
+    # The credential helper must see the runner login, not the read-only
+    # workflow token, or the push is refused (popdam3#594).
+    pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
       push -q -u origin "$branch" || fail "push of $branch failed"
     url="$(pgh pr create --repo "$repo" --base "$base" --head "$branch" \
       --title "Fix review finding #$issue" \
@@ -116,6 +129,11 @@ case "$decision" in
       || fail "could not open the fix PR"
     gh issue comment "$issue" --repo "$repo" --body "$(printf 'Fix PR: %s\n\n%s\n' "$url" "$sig")" >/dev/null || true
     label fixer-done; echo "opened $url" ;;
+  PROTECTED)
+    # Designed refusal: the fixer never edits workflows or installers. The
+    # finding stays open for an engineer; it is not closed as not planned.
+    gh issue comment "$issue" --repo "$repo" --body "$(printf 'Automatic fixer refused by design: every real finding needs a protected path (workflows, installers, task gates), which the fixer never edits. Left open for an engineer.\n\n%s\n\n%s\n' "$report" "$sig")" >/dev/null || true
+    label fixer-done; echo "protected: left open" ;;
   INVALID)
     gh issue comment "$issue" --repo "$repo" --body "$(printf '%s\n\n%s\n' "$report" "$sig")" >/dev/null || true
     label fixer-done
