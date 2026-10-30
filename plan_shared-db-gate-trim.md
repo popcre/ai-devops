@@ -1,7 +1,7 @@
 # Implementation plan — trim shared-db migration gates to minutes
 
 Related handoff: [`HANDOFF.d/2026-10-30T1512Z-edge-dev-mimo-gate-trim-plan.md`](HANDOFF.d/2026-10-30T1512Z-edge-dev-mimo-gate-trim-plan.md). Do not rewrite root `HANDOFF.md`.
-Tracker issue: popcre/shared-db — see "Definition of done" (§13). Implementation happens in `popcre/shared-db`; this plan file lives in `popcre/ai-devops` per owner instruction.
+Tracker issue: none — proposal only; no implementation tracker has been created yet. Before stage 1, the implementation session must create it in `popcre/shared-db` and record its full issue URL here and in the related handoff. It owns the §13 checklist and evidence. This plan file lives in `popcre/ai-devops` per owner instruction.
 
 ## STATUS
 
@@ -23,7 +23,7 @@ Planning baseline: **2026-10-30**, `popcre/shared-db` @ `af8bd6b8f6ff3b75b1e4067
 
 **Target total time:** median open→merge for a routine migration PR falls from **147 minutes to ≤25 minutes** (measured on 28 merged PRs, 2026-10-18→30; see §6). Per-stage target: claim+paperwork ≤2 min with zero rejections, CI ≈8 min (replay kept), Guarded Merge under lock ≤6 min, merge queue ≤5 min. Preview rehearsal and production promotion are **not** targets — they stay as they are.
 
-**Where a fresh session starts:** step 1. Re-read §6 (why each cut is safe) and the adversarial table in §9 before each stage. Each stage is one PR in `popcre/shared-db`, merged one at a time.
+**Where a fresh session starts:** create and record the tracker, then satisfy the baseline evidence prerequisite in §6 before step 1. Re-read §6 (why each cut is safe) and the adversarial table in §9 before each stage. Each stage is one PR in `popcre/shared-db`, merged one at a time.
 
 ---
 
@@ -39,11 +39,11 @@ What is true when this is done that is not true today: a session authors a migra
 
 ### 2. What this application is
 
-`popcre/shared-db` is the canonical repository for the **shape** of POP Creations' shared Supabase database (production project `qsllyeztdwjgirsysgai`) used by CRM, DAM, PM/PIM and DesignFlow PLM. It holds timestamped SQL migrations (`supabase/migrations/`), contract tests (`supabase/tests/`), GitHub Actions workflows (`.github/workflows/`), Node coordination tooling (`scripts/`), and the operating rulebook (`AGENTS.md` + `docs/agents/`). A "structural migration" here means a change to the database's shape — table, column, view, function, trigger, RLS, index — landed as a new migration file and then applied to preview and production through automated lanes.
+`popcre/shared-db` is the canonical repository for the **shape** of POP Creations' shared Supabase database (production identity resolved through `PRODUCTION_PROJECT_REF` in that repository) used by CRM, DAM, PM/PIM and DesignFlow PLM. It holds timestamped SQL migrations (`supabase/migrations/`), contract tests (`supabase/tests/`), GitHub Actions workflows (`.github/workflows/`), Node coordination tooling (`scripts/`), and the operating rulebook (`AGENTS.md` + `docs/agents/`). A "structural migration" here means a change to the database's shape — table, column, view, function, trigger, RLS, index — landed as a new migration file and then applied to preview and production through automated lanes.
 
 This plan is **repository maintenance** in that repo (workflows + scripts + docs), not a schema change. The plan file itself lives in `popcre/ai-devops` (this repo), which is the shared AI-toolkit repo where `plan_*.md` implementation plans are published.
 
-Relevant identities: protected branch `main` on both repos; merge via pull request only; preview project comes from repository variable `PREVIEW_PROJECT_REF` (never hard-code a preview ref — it is rebuilt from time to time); the production project ref is a deliberate constant (`PRODUCTION_PROJECT_REF = "qsllyeztdwjgirsysgai"` in `scripts/production_business_risk_gate.py:40`).
+Relevant identities: protected branch `main` on both repos; merge via pull request only; preview project comes from repository variable `PREVIEW_PROJECT_REF` (never hard-code a preview ref — it is rebuilt from time to time); the production project ref is the constant `PRODUCTION_PROJECT_REF` in `popcre/shared-db` at `scripts/production_business_risk_gate.py:40`. Do not copy its value into this public plan.
 
 ### 3. What triggered this work
 
@@ -107,7 +107,9 @@ Exact wiring references for the duplicate work (verified this session):
 
 ### 6. Key findings and root cause (measured)
 
-**Sample:** 28 merged PRs touching `supabase/migrations/` (PRs #4476–#5098, 2026-10-18 → 2026-10-30), collected 2026-10-30 via `gh` check-run history. Full per-PR table kept in this session's scratch at `popcre/shared-db/.ai/gate-trim-pr-timings.md` (gitignored); aggregates below are the durable copy.
+**Reported sample (not independently reproducible yet):** 28 merged PRs touching `supabase/migrations/` (PRs #4476–#5098, 2026-10-18 → 2026-10-30), collected 2026-10-30 via `gh` check-run history. Full per-PR table was kept in this session's scratch at `popcre/shared-db/.ai/gate-trim-pr-timings.md` (gitignored); only aggregates are available here.
+
+**Baseline evidence prerequisite — before stage 1 or any coverage cut:** the implementation session must recover that table or reconstruct it from GitHub history, commit it in `popcre/shared-db` or publish it on the recorded tracker, and replace this paragraph with its permanent link. Include all 28 PR URLs, sampled head SHAs, open/merge timestamps, workflow/check names, run IDs and URLs, start/end timestamps, conclusions, retry classification, and aggregation rules reproducing the tables below. If reconstruction differs, correct the aggregates and conclusions before implementation. Until then, these figures are provisional reports, not evidence authorizing reduced coverage.
 
 | Metric | Median | Mean | Min | Max |
 |---|---|---|---|---|
@@ -339,6 +341,7 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 ### 13. Definition of done, risks, open questions
 
 **Definition of done (whole plan):**
+- [ ] Before stage 1: tracker URL recorded in this plan and handoff; reproducible baseline with per-PR run IDs durably published and linked in §6.
 - [ ] Stages 1–8 each merged to `popcre/shared-db` `main` as its own PR, each with its named tests green.
 - [ ] Stage 9 audit published on the tracker issue: production-path diff summary proving no semantic change (stage 6's single ordering line excepted and named).
 - [ ] Measured outcome recorded on the tracker: on ≥5 migration PRs after stage 8, median open→merge ≤25 min and zero paperwork-class failures (docs-auth/lease/work-contract), with the per-PR table as evidence — citing run IDs, not counts alone.
@@ -357,7 +360,7 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 **Open questions (with decision criteria):** the three items listed as OPEN in §8 (contract generation placement; verdict record medium; advisory signal in queue). None blocks stage 1.
 
 **Routed assumptions made this session (state them, and what would change them):**
-- The tracker issue is opened in `popcre/shared-db` (where the implementation lives and where gate-program trackers like #3779/#4039 live), while the plan file lives in `popcre/ai-devops` as instructed. If Albert wants the issue in `popcre/ai-devops` instead, move it; nothing else changes.
+- The tracker issue must be created in `popcre/shared-db` (where the implementation lives and where gate-program trackers like #3779/#4039 live), while the plan file lives in `popcre/ai-devops` as instructed. No tracker exists yet.
 - "Minutes of gating" is interpreted as median open→merge ≤25 min for a routine migration PR. If Albert meant only the *active* gating time (checks actually running), today's median is already ~8 min and the cuts then target the lock/queue overhead instead — same stages, different headline number.
 
 ---
@@ -365,7 +368,7 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 ## Self-audit (implementation-plan-writer Mode A)
 
 1. **Could a brand-new AI session with no project knowledge execute this plan to perfection without asking anything?** Yes — §2 defines the repos/identities, §5 gives the current gate map with file and line references, §9 names exact files and functions per stage with verification gates and an adversarial table, §11 names the standing rules (worktrees, no direct-to-main, sign-off, no apt-get, no review gate), §12 names access/secret locations. Gap found and fixed during drafting: stage 6 initially named only the queue side; both sides (queue + preview/production refusal) are now required in the same PR.
-2. **Does the plan carry every piece of background and reasoning held this session, including rejected approaches?** Yes — §6 carries the measured 28-PR table and failure census (the durable copy of scratch data), §7 records all seven rejected approaches with reasons, §8 separates locked from open decisions. Gap found and fixed: the overlap with `plan_shared_release_hold_reduction.md` was implicit; §4 now states the boundary explicitly so a future session does not redo #3779's steps.
+2. **Does the plan carry every piece of background and reasoning held this session, including rejected approaches?** Not yet — §6 carries reported aggregates and a failure census, but lacks the durable per-PR evidence. Recovery or reconstruction is required before stage 1. §7 records rejected approaches; §8 separates locked from open decisions. §4 states the overlap with `plan_shared_release_hold_reduction.md` so a future session does not redo #3779's steps.
 3. **Is the ultimate goal stated clearly enough for judgment calls when a step turns out wrong?** Yes — §1 states the goal in plain English with the explicit "goal wins — stop and flag it" rule, and names the non-negotiables (production guards, ordering guards, the replay). The two routed assumptions at the end of §13 state exactly what would change them.
 
-Self-audit passed 2026-10-30.
+Self-audit incomplete: tracker and durable baseline evidence must be supplied before implementation.
