@@ -20,7 +20,7 @@
     "test-kimi-windows-execution.ps1",
     "test-windows-ai-kimi-shim.ps1"
   ],
-  "_comment_suspended": "Suites suspended from every CI lane (declared here, honored by tests/test-all.sh and tests/test-all.ps1). Kimi suspended 2026-09-17: the provider is out of credit and registry-absent since 2026-09-10; the wrapper, suites, and timing entries are retained for re-entry. Grok-implement/Qwen/Gemini/Claude-review suspended 2026-10-13 (owner, popcre/ai-devops#1714): frozen tooling — installed and callable by name, not maintained as rotation. test-ai-grok-review.sh suspended 2026-10-15 (#1714 complete freeze): shared debate-template checks live in tests/test-delegation-templates.sh; pool dispatch coverage lives in tests/test-pool-dispatch-doors.sh. test-ai-codex-review.sh stays running: Codex remains the approval-gate wrapper. Remove the entries from the suspended lists to restore the lanes.",
+  "_comment_suspended": "Suites suspended from every CI lane (declared here, honored by tests/test-all.sh and tests/test-all.ps1). Kimi suspended 2026-09-17: the provider is out of credit and registry-absent since 2026-09-10; the wrapper, suites, and timing entries are retained for re-entry. Grok-implement/Qwen/Gemini/Claude-review suspended 2026-10-13 (owner, popcre/ai-devops#1714): frozen tooling \u2014 installed and callable by name, not maintained as rotation. test-ai-grok-review.sh suspended 2026-10-15 (#1714 complete freeze): shared debate-template checks live in tests/test-delegation-templates.sh; pool dispatch coverage lives in tests/test-pool-dispatch-doors.sh. test-ai-codex-review.sh stays running: Codex remains the approval-gate wrapper. Remove the entries from the suspended lists to restore the lanes.",
   "affected_suite_rules": {
     "_comment": "Issue #805: map changed paths to Bash suites for pull requests. select_all_globs are shared surfaces whose change must keep every suite. path_suites overrides the bin/<name> -> test-<name>.sh convention. companion_suites are added alongside a match. Anything unmapped selects every suite (fail-closed).",
     "select_all_globs": [
@@ -543,7 +543,8 @@
         "test-transcript-store.sh"
       ],
       "tools/transcript_store/build.py": [
-        "test-transcript-store.sh"
+        "test-transcript-store.sh",
+        "test-ai-transcript-query.sh"
       ],
       "tools/transcript_store/envcheck.py": [
         "test-transcript-store.sh"
@@ -555,7 +556,8 @@
         "test-transcript-store.sh"
       ],
       "tools/transcript_store/reader.py": [
-        "test-transcript-store.sh"
+        "test-transcript-store.sh",
+        "test-ai-transcript-query.sh"
       ],
       "tools/transcript_store/redact_patterns.tsv": [
         "test-transcript-store.sh"
@@ -571,6 +573,19 @@
       ],
       "tests/test_transcript_segment.py": [
         "test-transcript-store.sh"
+      ],
+      "bin/ai-transcript-query": [
+        "test-ai-transcript-query.sh"
+      ],
+      "bin/ai-transcript-query.cmd": [
+        "test-ai-transcript-query.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "tools/transcript_store/query.py": [
+        "test-ai-transcript-query.sh"
+      ],
+      "tests/test-ai-transcript-query.sh": [
+        "test-ai-transcript-query.sh"
       ]
     },
     "companion_suites": {

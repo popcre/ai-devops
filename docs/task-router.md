@@ -60,7 +60,7 @@ does not pay to load them. Read only the matching row and its named sources.
 | WarpBuild Azure BYOC Windows runners or canary | [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md), issue #961 | Dedicated CI subscription only; required CI unmigrated; public-repo jobs need a runner group with `allows_public_repositories` |
 | Diagnose a known tool failure | [`critical-incidents.md`](critical-incidents.md), [`design-decisions.md`](design-decisions.md), affected tool/tests | Odd behavior may be an intentional guardrail |
 | C: is full, disk is low, or AI debris is eating the drive | [`disk-space.md`](disk-space.md), then [`critical-incidents.md`](critical-incidents.md) 2026-09-23; prevention: [issue #711](https://github.com/popcre/ai-devops/issues/711) | Never delete dirty working copies or live repos; speed stays on the SSD, bulk on the HDD; daily sweep is backup only |
-| Transcript backup or analysis | [Transcript store plan](../plan_transcript-store.md) STATUS first (#2050), then the matching transcript skill | Do not open raw archives unless the task explicitly requires them |
+| Transcript backup or analysis | [Transcript store plan](../plan_transcript-store.md) STATUS first (#2050); query the store with `ai-transcript-query` ([skill](../skills/shared/transcript-query/SKILL.md)), then the matching transcript skill | Do not open raw archives unless the task explicitly requires them |
 
 ## Operational facts that change
 
