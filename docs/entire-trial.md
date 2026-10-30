@@ -33,6 +33,28 @@ stop remains November 12, 2026, 5:58 AM EST. No clock restarts.
 
 The following closeout and earlier results are historical context.
 
+### Using the public companion
+
+1. Keep GitHub as `origin` and use the normal branch, pull-request, checks and
+   merge route. The existing integration mirrors that public work into
+   [Entire ai-devops](https://entire.com/gh/popcre/ai-devops); do not add a new
+   integration, remote, capture hook or CLI initialization for this workflow.
+2. Use the corresponding mirrored Trail for each real GitHub pull request.
+   For multi-change coordination, use a manual Trail's **Add change** action
+   to select only `popcre/ai-devops` and its real head/base branches. Keep the
+   GitHub issue link, public goal, source commit and next action in its context.
+3. Compare the exact head and checks with GitHub before relying on Entire's
+   display. Mirroring can lag; GitHub decides delivery. Record any discrepancy
+   on the same owning issue rather than changing required checks or protections.
+4. Keep an explicitly sanitized copy of manual context and exact Git refs on
+   the owning GitHub issue or committed operating record, so work can continue
+   without Entire. Do not upload agent conversations, private submodules,
+   credentials or raw evidence. Do not enable Agents or runner settings.
+
+This workflow needs browser access only. Existing agent memory and handoffs
+remain the continuity system; the excluded captured-memory features are not
+silently replaced or presented as qualified. The original stop date still applies.
+
 Closeout continuation: read the
 [new handoff](../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
 and [final independent recovery results](../tests/verification/entire-trial/report.md#final-independent-recovery-and-closeout)
