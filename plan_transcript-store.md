@@ -16,7 +16,7 @@
 | 6 Full backfill (about 15 h, background) | 🔄 running since 11:41 PM EDT 2026-10-29 | #2061 |
 | 7 Daily timer on edge-dev3 | 🔄 in progress | #2061 (stage C) |
 | 8 Reader helper and `transcript-query` skill | ✅ done | PR #2098; Windows proof https://github.com/popcre/ai-devops/issues/2062#issuecomment-6518699681 |
-| 9 Mining checks | 🔄 in progress | #2063 (stage E) |
+| 9 Mining checks | ✅ done (6 checks pass ≥14/20) | PRs #2121, #2135; counts on #2063 |
 
 **A fresh session starts with Stage B (steps 2–4) and Stage D (step 8), which need no installs.** Step 1 writes and tests its scripts at once, but installing them on hosts waits while the observation-week freeze window file (#1948) is present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocks B or D. Step 5 is a quality check before step 6.
 
