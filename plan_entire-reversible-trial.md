@@ -2,6 +2,18 @@
 
 ## STATUS — read first
 
+October 30 support disposition: Albert supplied Entire support's answer that
+Trails cannot be deleted. Trail113 therefore cannot be removed; the same product
+limitation governs133. Closing changes lifecycle only; unlinking detaches a
+branch while retaining the branch, code, reviews and sessions. See the
+[support ruling and exact supported commands](docs/entire-trial.md#support-ruling--trails-cannot-be-deleted).
+Step6's original Trail-erasure criterion is **unmet / unsupported**, not a pending
+vendor deletion or a successful departure test. Do not retry deletion or treat
+close/unlink as erasure. Backup-retention disposition and removed-login issued
+access remain unanswered with Entire on #2022; public-companion live proof stays
+passed, private capture off, billing dropped and original deadlines unchanged.
+Start with that ruling before the historical closeout/deletion requirements below.
+
 October 30, 2026: Albert authorized a narrower live operating scope: the public
 `popcre/ai-devops` mirror and manual Trails alongside authoritative GitHub.
 Private capture remains off; no hosted Agents are enabled; billing stays dropped.
@@ -30,8 +42,8 @@ See the [current operating scope](docs/entire-trial.md#current-scope--public-com
 The prior full-feature rejection remains valid: frozen retrieval scored baseline
 10/10 versus Entire 8/10 and raw-capture privacy failed. This is no authorization
 to enable private capture, rewrite those results or claim untested hosted
-features. Trail113/133 deletion, backup retention and exact removed-login access
-semantics stay open with Entire on #2022, independently of public-companion work.
+features. Trail113/133 deletion is unsupported; backup retention and exact
+removed-login access semantics stay open with Entire on #2022, independently of public-companion work.
 Discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST
 are unchanged. The closeout status below describes the earlier full-feature scope.
 
@@ -667,6 +679,11 @@ harness: #2022 owns these bounded artifacts, retired or consolidated in step 7.
    prove source, protections and original installed toolkit remain intact.
    In an isolated clean profile restore exported memory/Trail records and
    recover a task goal, prior decision and unresolved finding without Entire.
+   **October30 correction for Trails:** support confirms Trail deletion is not
+   supported. Record that class as unsupported with the retained inventory;
+   close/unlink cannot satisfy erasure. Do not attempt undocumented deletion or
+   infer deletion of other record classes. The remaining historical procedure
+   below applies only where an actual supported record-specific action exists.
    Run `vendor-deletion` on synthetic qualification records and **all hosted
    real trial records** after their approved recovery copies are secured.
    Inventory every session, memory fact/index, Trail/discussion/finding,

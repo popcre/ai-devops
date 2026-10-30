@@ -1,5 +1,26 @@
 # Entire reversible trial execution report — #2022
 
+## Support clarification — Trail deletion unsupported
+
+October 30, 2026: Albert relayed Entire support's reply that a Trail cannot be
+deleted, including Trail113. Support offered closing the Trail or unlinking its
+branches instead. The [operating record](../../../docs/entire-trial.md#support-ruling--trails-cannot-be-deleted)
+retains provenance, exact commands, references and target-selection cautions.
+Official [update](https://docs.entire.com/cli-reference/trail#trail-update) and
+[unlink](https://docs.entire.com/cli-reference/trail#trail-unlink) documentation
+was retrieved successfully and confirms those action semantics.
+
+Disposition: Trail113/133 erasure is **unmet / unsupported**, not awaiting a
+promised deletion. Closing is a lifecycle change; unlinking removes the branch
+association while keeping branch/code/reviews/sessions. Neither is erasure.
+Earlier closed-but-readable observations remain valid. No close/unlink operation
+was executed in this update; no live deletion, unlink recovery, backup erasure
+or login-access termination is claimed. The pasted reply supplies no retention
+deadline or issued-access answer, so those questions remain with Entire on #2022.
+The public companion remains live; private capture stays off, billing excluded,
+and original deadlines unchanged. Historical requests and pending-deletion
+wording below are superseded for Trails by this vendor capability disposition.
+
 ## Public companion live continuation
 
 On October 30, 2026, Albert authorized Entire live alongside GitHub for public
@@ -36,8 +57,8 @@ Trail linkage through real GitHub delivery is live-proved.
 
 Historical full-feature rejection is unchanged: baseline 10/10 versus Entire
 8/10, raw-capture privacy failure, and unqualified extraction/automated hosted
-features are not upgraded by a working public mirror. Exact Trail113/133
-deletion, backup retention and removed-login access semantics remain vendor-owned
+features are not upgraded by a working public mirror. Trail113/133 deletion is
+unsupported; backup retention and removed-login access semantics remain vendor-owned
 on #2022 and do not block ready public-companion work. Original discovery
 November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST are intact.
 

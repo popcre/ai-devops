@@ -41,12 +41,53 @@ through GitHub delivery, not broader feature qualification.
 This narrower authority does not reverse the historical full-feature rejection,
 the frozen baseline 10/10 versus Entire 8/10 result, or the raw-capture privacy
 failure. Private capture, extraction quality, automated findings and full hosted
-departure remain unqualified. Exact Trail113/133 deletion, backup retention and
-removed-login access semantics remain assigned to Entire on #2022; they do not
+departure remain unqualified. Trail deletion is unsupported, as recorded below;
+backup retention and removed-login access semantics remain unanswered on #2022. They do not
 block the public companion. Discovery remains November 2, 2026, 5:00 PM EST;
 stop remains November 12, 2026, 5:58 AM EST. No clock restarts.
 
 The following closeout and earlier results are historical context.
+
+### Support ruling — Trails cannot be deleted
+
+On October 30, 2026, Albert supplied Entire support's reply in this chat:
+
+> Entire doesn't support deleting a Trail, so we can't remove Trail 113.
+
+Support identified closing a Trail and unlinking its branches as the supported
+alternatives. This is a vendor capability limitation, not an unfinished deletion
+command or a promise that support will delete the record later. It applies to
+the disposable Trail113 and Trail133 too. The original Trail-deletion acceptance
+criterion is **unmet / unsupported**, not passed. The public companion stays live;
+private capture remains off, billing excluded and original deadlines unchanged.
+
+| Supported action | Exact documented form | What it means |
+|---|---|---|
+| Close the intended Trail | `entire trail update <trail> --status closed` | Changes lifecycle status; the Trail and its contents are not deleted. |
+| Unlink an identified branch/change | `entire trail unlink <repo>/<number>` | Detaches that branch from its Trail; the branch, code, reviews and sessions remain. |
+
+Official references: [trail update](https://docs.entire.com/cli-reference/trail#trail-update)
+and [trail unlink](https://docs.entire.com/cli-reference/trail#trail-unlink),
+retrieved October 30. The reference permits `open`/`closed` lifecycle values and
+also supports branch selection for unlinking. Confirm the exact target first:
+`<repo>/<number>` selects branch/change work, not an arbitrary project-Trail
+number. Never substitute `113` merely because the requested Trail is113.
+
+No close or unlink command was run for this documentation update. Earlier live
+proof already recorded113/133 as closed and still readable. Do not unlink the
+live operational Trail231 or disturb shared branches/integrations to imitate
+deletion. Do not guess a DELETE endpoint, revoke the shared App, remove a
+repository or log everyone out as a substitute. No unlink recovery claim follows
+from this documentation check; the action was not exercised here.
+
+This reply does **not** establish a backup-retention period, an erasure date,
+removal of sessions/code/reviews, or termination of the removed login's issued
+access. Those unanswered questions remain with Entire, tracked on #2022, and do
+not block the authorized public companion. No mailbox message ID, ticket number,
+reply timestamp or independent support-account authentication was supplied;
+provenance is Albert's pasted support reply, separately corroborated for action
+semantics by the official reference. Historical requests for deletion below are
+retained as history and must not restart deletion attempts.
 
 ### Using the public companion
 
