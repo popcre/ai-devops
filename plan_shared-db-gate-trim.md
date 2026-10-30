@@ -5,7 +5,7 @@ Tracker issue: popcre/shared-db — see "Definition of done" (§13). Implementat
 
 ## STATUS
 
-**Proposal only. No gate, rule, or workflow has been changed.** This session ended at the plan. Implementation is not authorized until Albert approves it.
+**Proposal only. No gate, rule, or workflow has been changed.** This session ended at the plan. Implementation is not authorized until Albert approves it. Second opinion complete 2026-10-30: Muse Spark 1.3 Contributor returned `REVISE`; every finding is folded into this revision (record at the end of the file).
 
 Planning baseline: **2026-10-30**, `popcre/shared-db` @ `af8bd6b8f6ff3b75b1e4067c0ad38701e35ac90d`, `popcre/ai-devops` @ `43f5e608`. Planning session: MiMo chat on `edge-dev`.
 
@@ -129,10 +129,13 @@ Exact wiring references for the duplicate work (verified this session):
 | Paperwork — SQL migration guards | 6 | 5 | Static lint rejections of the migration text (format/derived-from/EOL rules) |
 | **Real defect** — Database contract tests | **7** | **6** | Actual SQL/contract breakage caught by the replay + `supabase/tests` |
 | Infra — preview dry-run lock contention | 1 | 1 | 22 s refusal, re-run cleared it |
+| Unclassified remainder | 4 | — | Not labeled in the per-PR pass; see caveat |
+
+**Caveat on the census (Muse review 2026-10-30):** the class rows sum to 36 of the 40 failed runs; four runs were not individually classified in the per-PR pass, and a per-PR label tally does not reproduce the class counts exactly (classification was derived from workflow-run names and can double-count). Treat the class proportions as approximate. The conclusion they support is robust under either reading: **at least 28 of 40 failed runs (70%, plausibly ~80%) are paperwork classes, and every real-defect run in the sample was caught by the ephemeral replay + contract tests.** An implementing session that needs exact counts re-derives them from `gh run list` per branch before citing numbers.
 
 **Root cause of the ~2 hours, in one sentence each:**
 1. **Waiting, not checking.** 95% of wall clock is idle: median CI is 8 minutes, median green→merge is 34 minutes, and the mean open→merge (413 min) is dominated by queue/lock waits and re-push cycles (outliers #4700 at 54 h and #4702 at 43 h had 7–9 min CI).
-2. **Paperwork causes 80% of failures and each failure costs a full re-push cycle** (new head → all checks rerun → queue again): 32 of 40 failed runs are docs-auth / lease / static-guard paperwork, not defects. A PR with 3 paperwork failures (e.g. #4984, #4966, #5018) burns 30+ minutes of cycles.
+2. **Paperwork causes most failures and each failure costs a full re-push cycle** (new head → all checks rerun → queue again): at least 28 of 40 failed runs (70%, plausibly ~80% — see the census caveat) are docs-auth / lease / static-guard paperwork, not defects. A PR with 3 paperwork failures (e.g. #4984, #4966, #5018) burns 30+ minutes of cycles.
 3. **Deterministic proofs are re-executed serially at three or four stages** (CI, guarded merge under the lock, merge queue) even though the inputs — the head tree and base tree — have not changed. The only reason to re-run under a lock is *drift* (base moved, or GitHub-side state changed). Non-drift re-runs add minutes inside the exclusive merge lane and minutes inside the queue.
 4. **The merge queue blocks on an apply-lane ordering fact** (`--require-preview-rehearsal`, up to 25 min) even though merging SQL text into git writes no database. The ordering that protects data lives in the preview and production lanes, which are already serialized with exclusive leases.
 5. **The documents-only route takes a global mutex to publish a per-PR status**, and it is a required context on every PR — so migration PRs queue behind an irrelevant lock 15 times in the sample.
@@ -161,11 +164,11 @@ Exact wiring references for the duplicate work (verified this session):
 - One stage = one PR = one revertable unit. No combined gate changes in a single PR.
 - This plan authorizes no implementation by itself. Albert approves; then stages merge in order.
 
-**OPEN (implementer's judgment, with criteria):**
-- Whether stage 3 auto-generates the pair via a workflow step at PR-open time or via the claim tool at author time. Criterion: the author must never hand-write either file, and the validator (`--validate-contract` / `--validate-completion`) must still reject a pair that contradicts the claim.
-- Whether stage 4 stores the deterministic verdict as a commit status or as a small artifact. Criterion: the later stage can prove "same (head, base) already proven by job X run Y" without network fan-out; and an absent record always fails closed (re-run).
-- Whether stage 6 leaves a non-blocking advisory signal in the queue for visibility. Criterion: it must not acquire the preview lane and must not block the merge.
-- Which guards are truly non-deterministic and therefore always re-run under the lock even after stage 4 (expected: anything reading GitHub API state or quota — `check-pr-object-collisions.mjs`, `check-migration-pr-lease.mjs`, `check-required-checks-preflight.mjs`, `check-actions-quota.mjs`, `check-main-tip-freshness.mjs`). Criterion: the plan's adversarial table (§9) must name each guard exactly once as deterministic or live.
+**OPEN (implementer's judgment, with criteria) — resolved by the Muse review 2026-10-30 unless an implementer has concrete evidence otherwise:**
+- ~~Whether stage 3 auto-generates the pair via a workflow step at PR-open time or via the claim tool at author time.~~ **Decided: generate at author time inside the claim tool** (`--generate` alongside `--claim`). The author runs the claim tool anyway for the object claim and version reservation, so generation there gives immediate feedback, keeps one source of truth, and avoids PR-branch write-back permissions, multi-push races, and `merge_group` checkout gotchas (§11).
+- ~~Whether stage 4 stores the deterministic verdict as a commit status or as a small artifact.~~ **Decided: commit status**, keyed by `(guard, head_sha, base_sha)` with a description citing the proving run. Statuses are queryable across runs/workflows without artifact plumbing or retention expiry, and are UI-auditable. Read back before trust (§11 #1175 gotcha); fail closed on absent; writes restricted to base workflows (same boundary as the stage-8 verdict).
+- ~~Whether stage 6 leaves a non-blocking advisory signal in the queue for visibility.~~ **Decided: keep a non-blocking advisory status** ("merged behind unrehearsed predecessor A") — read-only, never acquires the preview lane, never blocks the merge; it preserves operator visibility into ordering debt at near-zero cost.
+- Which guards are truly non-deterministic and therefore always re-run under the lock even after stage 4 (settled list: `check-pr-object-collisions.mjs`, `check-migration-pr-lease.mjs`, `check-required-checks-preflight.mjs`, `check-actions-quota.mjs`, `check-main-tip-freshness.mjs`, `check-live-proof-probe.mjs` — the last by evidence, not name; see stage 4). Criterion: the plan's adversarial table (§9) must name each guard exactly once as deterministic or live, and the implementation must justify each classification against the script body.
 
 ---
 
@@ -174,6 +177,8 @@ Exact wiring references for the duplicate work (verified this session):
 ### 9. The plan — stages, steps, verification gates
 
 All stages are **repository maintenance** in `popcre/shared-db` (workflows/scripts/docs only — no migrations). Route: ordinary maintenance route (`docs/agents/current-workflow.md`), own worktree per `docs/agents/worktrees-and-handoffs.md`, branch + PR, guarded merge as usual. Each stage below is one PR, merged before the next starts. Re-read this section before each stage (drift check).
+
+**Sequencing dependencies (Muse review 2026-10-30):** stages 1–3 and 7 are independent and may be taken in any order; stage 9 stays last. Stages **4 and 5 are a stacked pair** — both edit the same under-lock steps of `guarded-migration-merge.yml`, so if both land, revert 5 before 4 (4's skip-on-verdict logic is assumed by 5's once-per-hold assertion). Stage **8 depends on stage 4** (it reuses `scripts/lib/guard-verdict-binding.mjs` — the repo's reuse rule forbids a second verdict mechanism). Stage 6 legitimately touches `shared-supabase-migrations.yml`; its stage-9 exception must name the exact hunk (the preview/production precondition lines), otherwise stage 9 cannot distinguish it from drift. Stages 4/5 additionally sequence with `plan_shared_release_hold_reduction.md` (#3779) steps 4–5, which edit the same prepare/merge split: **#3779 steps 4–5 merge first, or these stages rebase on them** — the #3779 tracker owns the order; do not land both editing the same lines.
 
 #### Stage 1 — One-shot claim preflight (cut the paperwork loop at the source)
 
@@ -195,9 +200,11 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 
 **Behavior when done:** `Migration author lease` is a fast, single-purpose proof of the claim; guard self-tests run in one place.
 
-**Verification gate:** workflow run on a test PR shows `Migration author lease` completing with only the lease steps; `tools-offline-tests.yml` still green on the same head; `node --test scripts/check-migration-pr-lease.test.mjs` unchanged and green.
+**Verification gate:** workflow run on a test PR shows `Migration author lease` completing with only the lease steps; `tools-offline-tests.yml` still green on the same head; `node --test scripts/check-migration-pr-lease.test.mjs` unchanged and green; and the **required-context precondition** below is satisfied.
 
-**Risk reopens:** a broken guard self-test is discovered later (at tools-offline or on main) instead of on every PR push. Accepted: tools-offline is itself a required check on the same PR, so the discovery still pre-dates merge.
+**Required-context precondition (Muse review 2026-10-30 — stages 2, 7 and 8 all lean on this):** before this stage merges, record the authoritative required-status-check list from the repository ruleset/branch protection in this plan's STATUS evidence cell (do not assume it). Known entries at planning time, from the repo's own documents: `Domain ownership` is named as one of six required contexts on `main` (`AGENTS.md` §6.7); the production gate's `REQUIRED_CHECKS` set (`scripts/production_business_risk_gate.py`) names `Cross-PR object collision`, `Migration author lease`, `SQL migration guards`, and `supabase/tests against an ephemeral database`; `verification-closure` is the single required context on `popcre/ai-devops` (ruleset "main: pull request + merge queue"). §11's no-`paths:`-filter rule applies to every entry. **Stage 2 must not land unless `tools-offline-tests.yml` (or an equivalent always-on guard self-test) is confirmed required on migration PRs** — if it is not, make it required in the same PR, or keep the fast battery and drop this stage.
+
+**Risk reopens:** a broken guard self-test is discovered later (at tools-offline or on main) instead of on every PR push. Accepted **only under the precondition above** (Muse: the premise was assumed, not cited): with tools-offline required on the same PR, discovery still pre-dates merge. If the precondition cannot be met, the stage is skipped, not weakened.
 
 #### Stage 3 — Auto-generate the work-contract + completion pair
 
@@ -215,8 +222,8 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 
 **What to change:**
 - Introduce a tiny shared helper (e.g. `scripts/lib/guard-verdict-binding.mjs`): a commit status or artifact keyed by `(guard name, head_sha, base_sha)` recording "guard G passed for this pair at run R".
-- Deterministic guards (pure functions of the checked-out tree + diff): `check-sql.sh`, `check-production-verification-sidecars.mjs`, `check-applied-migration-edit.mjs`, `check-live-proof-probe.mjs`, and the static halves of the pr-guards jobs. These: run once in PR CI; the later stages (`guarded-migration-merge.yml`, `merge-queue-gate.yml`) **skip re-running** them when a recorded green verdict exists for the same `(head, base)` and **re-run when base moved** (no verdict for the current base) or when no verdict exists. Fail closed on any unreadable record.
-- Live GitHub-state guards are exempt and always run at every stage (the TOCTOU guards): `check-pr-object-collisions.mjs`, `check-migration-pr-lease.mjs`, `check-required-checks-preflight.mjs`, `check-main-tip-freshness.mjs`, `check-actions-quota.mjs`, and anything reading ledgers or API state.
+- Deterministic guards (pure functions of the checked-out tree + diff): `check-sql.sh`, `check-production-verification-sidecars.mjs`, `check-applied-migration-edit.mjs`, and the static halves of the pr-guards jobs. These: run once in PR CI; the later stages (`guarded-migration-merge.yml`, `merge-queue-gate.yml`) **skip re-running** them when a recorded green verdict exists for the same `(head, base)` and **re-run when base moved** (no verdict for the current base) or when no verdict exists. Fail closed on any unreadable record.
+- Live GitHub-state guards are exempt and always run at every stage (the TOCTOU guards): `check-pr-object-collisions.mjs`, `check-migration-pr-lease.mjs`, `check-required-checks-preflight.mjs`, `check-main-tip-freshness.mjs`, `check-actions-quota.mjs`, `check-live-proof-probe.mjs`, and anything reading ledgers or API state. **`check-live-proof-probe.mjs` is live, not deterministic** (Muse review 2026-10-30, accepted with evidence): despite its "probe file present in tree or main" flavor, it resolves the work issue and parses its `db-work-scope` block through the GitHub transport (`scripts/check-live-proof-probe.mjs` — `runGitHubCommand` import, `scopeField(body, …)`), so its verdict depends on mutable GitHub issue state, not only on the tree. A stale "skipped (proven at run R)" here would let a probe deleted or an issue scope edited after CI green merge unchallenged. Any guard that reads GitHub state goes in this list; the implementation must justify each classification against the script body, not its name.
 
 **Behavior when done:** one deterministic proof per (head, base); lock-time and queue-time only prove what can actually have changed.
 
@@ -231,9 +238,9 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 
 **Behavior when done:** the lock is held for a shorter time with identical proof coverage; the log shows each guard exactly once per hold.
 
-**Verification gate:** `scripts/guarded-merge-preparation-split.test.mjs` (existing) extended with `each_coordination_guard_runs_once_per_hold`; live run log grep proving 1× occurrences.
+**Verification gate:** `scripts/guarded-merge-preparation-split.test.mjs` (existing) extended with `each_coordination_guard_runs_once_per_hold` — asserting **position as well as count**: the single execution must occur after lock acquisition and after `check-main-tip-freshness.mjs`, never before; live run log grep proving 1× occurrences at the right position.
 
-**Risk reopens:** none to coverage — the same guards run in the same hold; the only loss is a second execution of an idempotent read within seconds of the first. Named anyway per instructions: a guard whose second run could catch a mid-hold state change (GitHub state changing between the two runs inside one hold). Accepted: the first run is the authoritative under-lock read; mid-hold changes are absorbed by the freshness/authorization re-checks that follow.
+**Risk reopens:** ordering, not coverage (Muse review 2026-10-30, accepted): the collapsed single read must come **after** the lock is acquired **and after** freshness is proven, otherwise removing the second execution reintroduces the TOCTOU it accidentally covered — e.g. the lease released or an object claimed between prepare and merge would no longer be seen. The plan's own ordering requirement ("a single under-lock step, after the lock is acquired and after freshness is proven") closes it only if enforced; the verification gate above asserts position, not just count. Secondary: a mid-hold GitHub state change between the single read and the merge verb is absorbed by the freshness/authorization read-back that follows (the #1175 readback loop).
 
 #### Stage 6 — Move the predecessor-rehearsal wait out of the merge queue
 
@@ -243,7 +250,9 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 
 **Behavior when done:** migration B may merge while migration A's rehearsal is still running; B's own rehearsal and B's promotion still wait behind A's. The rehearsal sequence on the shared preview ledger stays contiguous.
 
-**Verification gate:** `scripts/merge-queue-contract.test.mjs` gains `queue_group_merges_without_predecessor_rehearsal` and the preview side gains `preview_rehearsal_refuses_unrehearsed_predecessor`; live proof on the tracker: two sequential migration PRs, second merges before first's rehearsal completes, second's rehearsal starts only after the first's completes.
+**Verification gate:** `scripts/merge-queue-contract.test.mjs` gains `queue_group_merges_without_predecessor_rehearsal`; the preview side gains `preview_rehearsal_refuses_unrehearsed_predecessor`; **and the automatic production qualification side gains `production_qualification_refuses_unrehearsed_predecessor`** (Muse review 2026-10-30 — the plan text requires both apply-side refusals, so both must be tested; the production side is the one that guards data). Live proof on the tracker: two sequential migration PRs, second merges before first's rehearsal completes, second's rehearsal starts only after the first's completes.
+
+**Liveness remediation (named in the stage, not left implicit):** when predecessor A's rehearsal **fails** after B has merged, B is blocked at the preview/production precondition until A is fixed and rehearsed or its versions are formally retired (existing retirement paths — `historical-migration-restorations.mjs` / migration retirement tombstones). The stage PR must name the exact remediation command sequence in the workflow comment it adds, so a blocked B is not a dead end.
 
 **Risk reopens:** the "preview-ledger-predecessor-not-on-main" class — a preview rehearsal whose predecessor is merged-but-unrehearsed. That is exactly what the moved precondition refuses at the preview lane; the risk is real only if the move is implemented in one lane and not the other. The stage is not done until **both** sides (queue no longer waits, preview/production refuse) are in the same PR.
 
@@ -262,13 +271,14 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 #### Stage 8 — Replay bound to the migrations tree hash
 
 **What to change:**
-- `database-contract-tests.yml`: record a verdict keyed by the tree hash of `supabase/migrations/**` + `supabase/tests/**` + `supabase/ci-bootstrap/**` (and the workflow itself) against `base_sha`. If a new push changes only files outside that set (e.g. `.agent/**` evidence pairs), skip the replay with a truthful "not applicable — SQL surface unchanged" result citing the proven run. Any change inside the set reruns the full replay.
+- `database-contract-tests.yml`: record a verdict keyed by the tree hash of the **closed replay-surface set** against `base_sha`, using the same `scripts/lib/guard-verdict-binding.mjs` helper that stage 4 introduces (reuse rule — stage 8 therefore **depends on stage 4**). The hashed set (Muse review 2026-10-30 — closed enumeration, nothing implied): `supabase/migrations/**`, `supabase/tests/**`, `supabase/ci-bootstrap/**`, `supabase/config.toml` and any seed/config inputs the runner reads, the replay runner entry points under `scripts/`, the pinned Supabase CLI + PostgreSQL versions in the workflow, and `database-contract-tests.yml` itself. If a new push changes only files outside that set (e.g. `.agent/**` evidence pairs), skip the replay with a truthful "not applicable — replay surface unchanged" result citing the proven run. Any change inside the set, any absent/unreadable verdict, or any `base_sha` change reruns the full replay.
+- Verdict writes follow the same trust boundary as stage 4 statuses: only base-workflow runs may write the verdict (a PR-head workflow must not be able to forge a deterministic green), and dependents read back before trusting (the #1175 gotcha in §11).
 
-**Behavior when done:** evidence-only pushes (the common consequence of stage 3 and of paperwork fixes) do not burn 5.6 minutes.
+**Behavior when done:** evidence-only pushes (the common consequence of stage 3 and of paperwork fixes) do not burn 5.6 minutes, and no replay-surface change of any kind can skip the replay.
 
-**Verification gate:** `scripts/check-sql.test.mjs`-style test for the hashing (`tree_hash_unchanged_skips`, `test_file_change_reruns`, `migration_change_reruns`); live proof: a push touching only `.agent/` files shows the replay skipped with the citation.
+**Verification gate:** tests next to the binding helper: `tree_hash_unchanged_skips`, `test_file_change_reruns`, `migration_change_reruns`, `config_toml_change_reruns`, `cli_pin_change_reruns`, `missing_verdict_reruns`, `pr_head_cannot_write_verdict`; live proof: a push touching only `.agent/` files shows the replay skipped with the citation.
 
-**Risk reopens:** a file outside the hashed set influencing replay results (e.g. `scripts/` used by the replay runner). Mitigated: include the runner entry points in the hash; default is re-run.
+**Risk reopens:** a file outside the hashed set influencing replay results (config, seeds, CLI/Postgres version pins, runner entry points). Mitigated: the closed enumeration above includes all of them; anything unrecognized defaults to re-run; PR-head workflows cannot write the verdict. Residual (accepted): a change inside the pinned toolchain **that is not expressed in the hashed files** (e.g. a runner-image update GitHub rolls out) — the full replay still runs at preview rehearsal (unchanged), so this is liveness delay, never production corruption.
 
 #### Stage 9 — Production path: verify, do not touch
 
@@ -340,11 +350,13 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 
 **Definition of done (whole plan):**
 - [ ] Stages 1–8 each merged to `popcre/shared-db` `main` as its own PR, each with its named tests green.
-- [ ] Stage 9 audit published on the tracker issue: production-path diff summary proving no semantic change (stage 6's single ordering line excepted and named).
-- [ ] Measured outcome recorded on the tracker: on ≥5 migration PRs after stage 8, median open→merge ≤25 min and zero paperwork-class failures (docs-auth/lease/work-contract), with the per-PR table as evidence — citing run IDs, not counts alone.
+- [ ] Stage 9 audit published on the tracker issue: production-path diff summary proving no semantic change (stage 6's single ordering hunk excepted and named).
+- [ ] Measured outcome recorded on the tracker: on ≥5 migration PRs after stage 8, median open→merge ≤25 min and zero paperwork-class failures (docs-auth/lease/work-contract), with the per-PR table as evidence — citing run IDs, not counts alone. **Include the green→merged queue-wait split** (predecessor-rehearsal wait vs queue/mutex overhead vs lock hold) on at least 3 of those PRs, so the 25-min budget is auditable and stage 6 is shown to move the right minutes (Muse review 2026-10-30).
 - [ ] `- [ ] live proof` checklist items on the tracker issue completed per stage (this plan's STATUS rows cite artifacts when marked done; no bare numbers).
 - [ ] `plan_shared-db-gate-trim.md` STATUS table updated by whoever executes each stage (mandatory plan-file gate — a plan goes stale the moment a stage lands).
 - [ ] Nothing on the production path changed semantically (stage 9 verdict attached).
+
+Tracker: **[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150)** — it carries this plan as its body and the per-stage checklist. Plan source of truth: `plan_shared-db-gate-trim.md` in this repo (merged `cc16ccbe`).
 
 **Target total time (the number to judge success by):** median open→merge for a routine structural migration PR: **147 min today → ≤25 min**. Component budgets: claim+paperwork ≤2 min (zero retries), CI ≈8 min (replay kept), Guarded Merge ≤6 min under lock, merge queue ≤5 min.
 
@@ -354,10 +366,10 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 - The ordering risk in stage 6 is contained by implementing both sides in one PR; if only one side lands, revert it.
 - The biggest residual unknown: the sample is 28 PRs over 12 days. If a quieter class of defect (rare SQL shapes) exists, only the replay catches it — which is exactly why the replay is kept.
 
-**Open questions (with decision criteria):** the three items listed as OPEN in §8 (contract generation placement; verdict record medium; advisory signal in queue). None blocks stage 1.
+**Open questions (with decision criteria):** none block stage 1. The three former OPEN items in §8 were decided by the Muse review of 2026-10-30 (claim-tool generation; commit status as the verdict medium; non-blocking advisory queue signal).
 
 **Routed assumptions made this session (state them, and what would change them):**
-- The tracker issue is opened in `popcre/shared-db` (where the implementation lives and where gate-program trackers like #3779/#4039 live), while the plan file lives in `popcre/ai-devops` as instructed. If Albert wants the issue in `popcre/ai-devops` instead, move it; nothing else changes.
+- The tracker issue is **[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150)** (where the implementation lives and where gate-program trackers like #3779/#4039 live), while the plan file lives in `popcre/ai-devops` as instructed. If Albert wants the issue in `popcre/ai-devops` instead, move it; nothing else changes.
 - "Minutes of gating" is interpreted as median open→merge ≤25 min for a routine migration PR. If Albert meant only the *active* gating time (checks actually running), today's median is already ~8 min and the cuts then target the lock/queue overhead instead — same stages, different headline number.
 
 ---
@@ -369,3 +381,7 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 3. **Is the ultimate goal stated clearly enough for judgment calls when a step turns out wrong?** Yes — §1 states the goal in plain English with the explicit "goal wins — stop and flag it" rule, and names the non-negotiables (production guards, ordering guards, the replay). The two routed assumptions at the end of §13 state exactly what would change them.
 
 Self-audit passed 2026-10-30.
+
+## Second opinion — Muse Spark 1.3 Contributor (2026-10-30)
+
+Verdict: `REVISE`. Every finding is addressed in this revision; nothing was dismissed. Accepted and folded in: the failure-census arithmetic gap (§6 caveat); the missing required-context inventory (stage 2 precondition); `check-live-proof-probe.mjs` reclassified **live** with script-level evidence (it reads the work issue through the GitHub transport — stage 4); stage 5's real risk restated as ordering, with the test asserting position; stage 6's production-side refusal test and liveness remediation; stage 8's closed hash set, verdict-writer trust boundary, and reuse of stage 4's binding helper (making 8 depend on 4); the 4→5 stacked-pair revert order; the queue-wait split as a DoD measurement; and all three OPEN decisions (claim-tool generation, commit-status verdicts, advisory queue signal). Pushed back: none — the review was correct on every point checked, including the live-proof probe, which the first draft misclassified from the script's name instead of its body. Muse's full text is in the `gate-trim-plan-review` session (`ai-muse show gate-trim-plan-review`).
