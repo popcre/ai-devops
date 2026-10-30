@@ -12,8 +12,8 @@
 | 2 Normalizer and tool-call capture | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
 | 3 ScaleDown clean + topic segmenter | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
 | 4 Store schema, writer and Dropbox publish | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
-| 5 Smoke batch: first 1,000 calls | ✅ done (gate deviation: first slug 36/50, any slug 41/50, v5) | PR #2100; tests/verification/transcript-store/smoke-2026-10-29.txt |
-| 6 Full backfill (about 15 h, background) | 🔄 running since 11:41 PM EDT 2026-10-29 | #2061 |
+| 5 Smoke batch: first 1,000 calls | 🔄 incomplete — first-slug gate failed (36/50, v5); same-sample any-slug re-score 41/50 does not pass this gate | PR #2100; tests/verification/transcript-store/smoke-2026-10-29.txt; recovery below |
+| 6 Full backfill (about 15 h, background) | ⚠️ started 11:41 PM EDT 2026-10-29 before step 5 passed; prerequisite bypass, acceptance pending recovery below (current runtime unverified) | #2061; tests/verification/transcript-store/smoke-2026-10-29.txt |
 | 7 Daily timer on edge-dev3 | 🔄 in progress | #2061 (stage C) |
 | 8 Reader helper and `transcript-query` skill | 🟡 merged, Windows live check pending store | PR #2098 |
 | 9 Mining checks | 🔄 in progress | #2063 (stage E) |
@@ -499,6 +499,10 @@ The prompt version is stored with every row (see risks).
 If one fails, change the prompt, decision rules or alias table, bump `prompt_version`, and re-run a fresh 1,000-call batch.
 
 **Done when:** the file exists with all four numbers passing, and a comment on #2050 states the numbers and the projection.
+
+**Recorded deviation and recovery (steps 5–6):** The smoke evidence records a coordinator decision to start the v5 backfill despite the failed first-slug gate. Its 41/50 any-slug result re-scores the same samples under a different criterion; it is not a pass of this gate. No Albert ruling accepting that criterion or #2050 comment satisfying the done-when is cited here. Step 5 remains incomplete and step 6's start does not establish acceptance.
+
+Stage C (#2061) owns recovery: flag the deviation, all four gate numbers and the projection on #2050. Before accepting the backfill or enabling the daily timer, either record Albert's explicit acceptance of the changed criterion and amend this gate and done-when, or improve the prompt/rules/aliases, bump `prompt_version`, and pass a fresh smoke batch under the existing gate. For the latter route, preserve the v5 database and any published version, then relabel the backfill with the passing prompt using step 4's transactional relabel path; verify labels and publish before accepting step 6. If a published v5 build must be withdrawn, restore `CURRENT.json` to a previously verified version under §13's rollback; if none exists, withhold publication until the replacement passes. These are pending recovery actions, not evidence that the running job was stopped or the store repaired.
 
 #### Step 6 — Full backfill
 
