@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Disposable #2022 CI failure/repair probe; never merge this branch.
 #
 # The full client-autonomy-guardrail check (tests/test-context-audit.ps1) is
 # PowerShell, so it only runs in the Windows CI lanes — a 75-90 minute round
