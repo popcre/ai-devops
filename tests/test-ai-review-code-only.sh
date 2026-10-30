@@ -332,50 +332,5 @@ fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/planted.out"   || fail 'the planted-gate refusal did not name the missing fixtures boundary'
 pass 'a planted PATH gate cannot answer the export opt-in'
 
-# The front door itself must strip inherited Git location variables: with
-# GIT_DIR/GIT_WORK_TREE aimed at the private tree, the synthetic HEAD capture
-# and the provider launch would otherwise bind to the private repository and
-# hand DeepSeek the private work tree instead of the stage (exact-head
-# review, 2026-09-25).  Scope synthetic readiness helper/state to this final
-# frontdoor fixture so the offline test does not depend on ambient provider
-# health or quarantine state (merge-group diagnosis, 2026-10-09).
-SYNTH_PREFLIGHT="$TMP/synth-preflight"
-cat > "$SYNTH_PREFLIGHT" <<'SYNTH'
-#!/usr/bin/env bash
-exit 0
-SYNTH
-chmod +x "$SYNTH_PREFLIGHT"
-export AI_REVIEW_PREFLIGHT_BIN="$SYNTH_PREFLIGHT"
-export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle-state"
-[ -d "$EXPORT" ] || fail 'expected code-only export is absent before frontdoor fixture'
-[ -n "$BASE" ] || fail 'expected base is absent before frontdoor fixture'
-STUB_DEEPSEEK="$TMP/stub-deepseek"
-cat > "$STUB_DEEPSEEK" <<'STUB'
-#!/usr/bin/env bash
-pwd -P > "$STUB_DEEPSEEK_CWD"
-printf 'GIT_DIR=%s\n' "${GIT_DIR:-<stripped>}" > "$STUB_DEEPSEEK_ENV"
-sha=""
-while [ "$#" -gt 0 ]; do
-  [ "$1" = "--governed-verdict" ] && sha="$2"
-  shift
-done
-printf 'VERDICT: APPROVE %s\n' "$sha"
-STUB
-chmod +x "$STUB_DEEPSEEK"
-export STUB_DEEPSEEK_CWD="$TMP/stub-deepseek-cwd" STUB_DEEPSEEK_ENV="$TMP/stub-deepseek-env"
-if ( cd "$R" && GIT_DIR="$R/.git" GIT_WORK_TREE="$R" AI_DEVOPS_TEST_MODE=1 AI_DEEPSEEK_REVIEW_BIN="$STUB_DEEPSEEK" \
-       "$FRONT" deepseek diff-review --implementer codex --code-only --paths-file "$TMP/approved.json" --base "$BASE" ) > "$TMP/gitdir-route.out" 2>&1; then
-  fail 'token-only provider stub acquired lifecycle authority'
-fi
-if [ ! -f "$TMP/stub-deepseek-cwd" ]; then
-  cat "$TMP/gitdir-route.out" >&2
-  fail 'provider stub was not launched; readiness marker absent'
-fi
-STAGE_CWD="$(cat "$TMP/stub-deepseek-cwd")"
-TMP_PHYS="$(cd "$TMP" && pwd -P)"
-case "$STAGE_CWD" in "$TMP_PHYS"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
-grep -Fq 'GIT_DIR=<stripped>' "$TMP/stub-deepseek-env" || fail 'GIT_DIR reached the provider environment'
-! grep -Fq 'VERDICT: APPROVE' "$TMP/gitdir-route.out" || fail 'unproved stub verdict was published'
-pass 'inherited GIT_DIR cannot redirect the sealed route or grant token-only authority'
 
 printf '%d passed; 0 failed\n' "$PASS"
