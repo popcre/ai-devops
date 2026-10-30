@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -396,6 +397,15 @@ class StateTests(unittest.TestCase):
         self.assertIn("python3 toolkit/tools/ci/review-fixer-state.py retire", workflow)
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("caller-trusted", workflow)
+
+    def test_prepare_and_fix_share_the_existing_caller_runner_contract(self):
+        workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
+        expected = "${{ fromJSON(inputs.runner_labels || '[\"self-hosted\", \"ai-devops-linux\"]') }}"
+        for job in ("prepare", "fix"):
+            block = re.search(r"^  " + job + r":\n(.*?)(?=^  [A-Za-z][A-Za-z0-9_-]*:|\Z)", workflow, re.M | re.S)
+            self.assertIsNotNone(block)
+            runners = re.findall(r"^    runs-on: (.+)$", block[1], re.M)
+            self.assertEqual(runners, [expected])
 
 
 if __name__ == "__main__":
