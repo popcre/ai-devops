@@ -18,6 +18,7 @@ sig="${AI_GH_SIGNATURE:-Posted by review-fixer}"
 agent="${REVIEW_FIXER_AGENT:-codex}"
 mkdir -p "${WORK_ROOT:-${RUNNER_TEMP:-/tmp}}"
 root="$(mktemp -d "${WORK_ROOT:-${RUNNER_TEMP:-/tmp}}/review-fixer-$issue.XXXXXX")" || exit 1
+trap 'rm -rf "$root"' EXIT
 branch="review-fix/$issue"
 lifecycle="$(cd "$(dirname "$0")" && pwd)/review-fixer-state.py"
 gh_cmd="$(cd "$(dirname "$0")/../.." && pwd)/bin/ai-gh"
