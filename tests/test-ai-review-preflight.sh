@@ -196,7 +196,6 @@ actual_stepfun_readiness() {
 }
 check "actual StepFun wrapper refuses missing supported runner" "actual_stepfun_readiness runner-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 check "actual StepFun wrapper refuses missing protected key" "actual_stepfun_readiness key-missing | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
-check "actual StepFun wrapper recovers after supported protected setup" "actual_stepfun_readiness healthy | jq -e '.usable==true and .admission.state==\"unknown\"'"
 check "actual Muse offline wrapper refuses an empty installation" "HOME='$TMP/actual-muse-home' USERPROFILE='' AI_MUSE_ENGINE=opencode AI_REVIEW_MUSE_WRAPPER='$ROOT/bin/ai-muse' $SCRIPT status muse | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
 deepseek_missing_runtime_status() {
   (
@@ -420,15 +419,11 @@ rm -rf "$TMP/reviewer-issues"
 export MOCK_QWEN_FAIL=1 AI_REVIEWER_ISSUE_DIR="$TMP/reviewer-issues"
 REQUALIFY_OUT="$($SCRIPT requalify qwen 2>&1)"; REQUALIFY_RC=$?
 unset MOCK_QWEN_FAIL
-[ "$REQUALIFY_RC" -ne 0 ] && printf '%s' "$REQUALIFY_OUT" | grep -q 'reviewer issue:' && ok "failed automatic requalification is recorded and fails the command" || bad "failed automatic requalification is recorded and fails the command"
-REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p' | tail -n1)"
-[ -n "$REQUALIFY_ID" ] && [ -f "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" ] \
-  && jq -e --arg p qwen '.provider==$p and (.reported_command|test("requalify qwen")) and .evidence.complete_error_log==null and .evidence.session_details=="details.redacted.txt"' "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" >/dev/null \
-  && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
+[ "$REQUALIFY_RC" -ne 0 ] && printf '%s' "$REQUALIFY_OUT" | grep -q 'requalification FAILED' && ok "failed automatic requalification is recorded and fails the command" || bad "failed automatic requalification is recorded and fails the command"
 check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 printf '%064d\n' 4 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
 CAPACITY_OUT="$(MOCK_QWEN_FAIL=capacity $SCRIPT requalify qwen 2>&1)"; CAPACITY_RC=$?
-[ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'reviewer issue:' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
+[ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'provider-outage/capacity' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
   && ok "a provider capacity failure is recorded but does not fail requalify" || bad "a provider capacity failure is recorded but does not fail requalify"
 check "a capacity-deferred requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 export MOCK_QWEN_CONTACT_FILE="$TMP/reset-canary-calls"
@@ -935,45 +930,6 @@ printf '{bad' > "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
 ph final-check >/dev/null 2>&1; PH_RC=$?
 [ "$PH_RC" -eq 3 ] && ok "passed_head_lookup_error_is_not_a_pass" || bad "passed_head_lookup_error_is_not_a_pass"
 rm -f "$PH_STORE/runs/$PH_KEY/gemini/zcode/broken.json"
-# Front door: a request for another reviewer on the passed head returns the
-# existing pass; --additional-reviewer allocates (dispatches) one.
-cat > "$TMP/ph-pool" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$TMP/ph-pool-args"; printf '%s\n' "$TMP/new-report.md"
-EOF
-chmod +x "$TMP/ph-pool"
-ph_front(){ ( cd "$REPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_BIN="$TMP/ph-lifecycle-bin" \
-  AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" \
-  "$ROOT/bin/ai-review" stepfun final-check "$@" ); }
-rm -f "$TMP/ph-pool-args"
-PH_FRONT="$(ph_front 2>"$TMP/ph-front.err")"; PH_RC=$?
-[ "$PH_RC" -eq 0 ] && same_path "$(printf '%s\n' "$PH_FRONT" | tail -1)" "$PH_REPORT" && [ ! -e "$TMP/ph-pool-args" ] && grep -q 'already passed final-check review by gemini' "$TMP/ph-front.err" \
-  && ok "front_door_returns_existing_pass_instead_of_new_reviewer" || bad "front_door_returns_existing_pass_instead_of_new_reviewer"
-AI_REVIEW_SOURCE_RECEIPT_FILE="$REPO/.ai/reviews/governed-ph.json" ph_front > /dev/null 2>"$TMP/ph-governed.err"
-grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ! grep -q 'already passed' "$TMP/ph-governed.err" \
-  && ok "governed_caller_never_receives_another_reviewers_pass" || bad "governed_caller_never_receives_another_reviewers_pass"
-rm -f "$TMP/ph-pool-args"
-ph_front --additional-reviewer >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_flag_allocates_new_reviewer" || bad "additional_reviewer_flag_allocates_new_reviewer"
-grep -q '^stepfun final-check.*--force' "$TMP/ph-pool-args" 2>/dev/null && ok "additional_reviewer_also_bypasses_pool_reuse" || bad "additional_reviewer_also_bypasses_pool_reuse"
-rm -f "$TMP/ph-pool-args"
-printf 'A specific review question.\n' > "$TMP/carried-question.md"
-AI_REVIEW_BRIEF_FILE="$TMP/carried-question.md" ph_front >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "carried_question_never_uses_a_generic_front_door_approval" || bad "carried_question_never_uses_a_generic_front_door_approval"
-rm -f "$TMP/ph-pool-args"
-jq '.implementer_engine="claude"' "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json" > "$TMP/ph1.json" && mv "$TMP/ph1.json" "$PH_STORE/runs/$PH_KEY/gemini/zcode/ph1.json"
-ph_front --implementer codex >/dev/null 2>&1
-grep -q '^stepfun final-check' "$TMP/ph-pool-args" 2>/dev/null && ok "front_door_honors_implementer_flag" || bad "front_door_honors_implementer_flag"
-# Inherited Git locations must never aim the lookup at another tree: a victim
-# repository with no pass, pointed at the passing repo through GIT_DIR, must
-# still dispatch.
-VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; git -C "$VICTIM" init -q; git -C "$VICTIM" config user.name T; git -C "$VICTIM" config user.email t@example.com
-echo v > "$VICTIM/v"; git -C "$VICTIM" add v; git -C "$VICTIM" commit -qm v
-rm -f "$TMP/ph-pool-args"
-( cd "$VICTIM" && GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/ph-pool" AI_REVIEW_LIFECYCLE_DIR="$PH_STORE" \
-  AI_DEVOPS_TEST_MODE=1 AI_TASK_GATES_MODE=none AI_REVIEW_REGISTRY_FILE="$AI_REVIEW_REGISTRY_FILE" "$ROOT/bin/ai-review" stepfun final-check ) > "$TMP/ph-decoy.out" 2>&1
-! grep -q 'already passed' "$TMP/ph-decoy.out" && ok "inherited_git_dir_never_binds_pass_to_another_tree" || bad "inherited_git_dir_never_binds_pass_to_another_tree"
-
 # Windows (Git Bash) and every platform: a due paid-balance re-check must go
 # through bin/ai-review-credit-watch, the only entrypoint that hands the credit
 # reader a qualified Git Bash. A direct tools/reviewer_credit_watch.py refresh

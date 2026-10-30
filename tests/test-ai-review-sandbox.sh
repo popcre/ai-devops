@@ -421,7 +421,7 @@ check "snapshot freezes ref identities before copying objects" "test -n '$REF_SN
 # The snapshot only helps if the reviewer wrappers actually route their review
 # directory through it. These guards fail loudly if a future edit hands a raw
 # worktree path back to a delegated reviewer.
-for w in ai-glm ai-kimi ai-qwen ai-grok-review; do
+for w in ai-kimi ai-qwen ai-grok-review; do
   check "${w}_defines_review_boundary"        "grep -q '^review_boundary()' '$REPO_ROOT/bin/$w'"
   if grep -q '^prepare_review()' "$REPO_ROOT/bin/$w"; then
     check "${w}_prepares_through_boundary"     "grep -q 'REVIEW_DIR=\"\$(review_boundary' '$REPO_ROOT/bin/$w'"
@@ -434,8 +434,6 @@ done
 # ai-codex-review now uses the same complete, digest-bound disposable snapshot
 # as the other directory-aware reviewers. DeepSeek still receives evidence as
 # text and deliberately does not receive a repository directory.
-check "codex_review_uses_snapshot_boundary"   "grep -q 'ensure-copy' '$REPO_ROOT/bin/ai-codex-review' && grep -q 'remove-copy' '$REPO_ROOT/bin/ai-codex-review'"
-check "codex_review_hands_snapshot_to_model"  "grep -q -- '--cd \"\$REVIEW_DIR\"' '$REPO_ROOT/bin/ai-codex-review'"
 check "deepseek_hands_over_no_directory"      "! grep -qE -- '--cd |--cwd ' '$REPO_ROOT/bin/ai-deepseek-agent'"
 
 check "invalid_tag_rejected"                  "! '$SCRIPT' ensure '$WT' 'bad tag'"

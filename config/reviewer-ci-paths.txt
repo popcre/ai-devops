@@ -131,3 +131,6 @@ tools/glm_output_recovery.py
 tools/glm_formal_profile.py
 templates/system/REVIEWER-global.md
 templates/review-prompt-simple.md
+bin/ai-second-opinion
+bin/ai-second-opinion.cmd
+tests/test_ai_second_opinion.py

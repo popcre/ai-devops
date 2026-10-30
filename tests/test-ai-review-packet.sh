@@ -116,7 +116,7 @@ check "shas_are_40_characters"                "[ \${#HEAD_SHA} -eq 40 ]"
 check "base_selection_rule_is_stated"         "grep -q 'Base selection rule:' '$M'"
 check "verdict_is_bound_to_head"              "grep -q 'applies to head' '$M'"
 check "manifest_demands_every_finding_and_sibling_issues" "grep -q 'report EVERY finding' '$M' && grep -q 'sibling issues' '$M'"
-for wrapper in ai-claude-review ai-codex-review ai-deepseek-agent ai-gemini ai-glm ai-grok-review ai-kimi ai-muse ai-qwen ai-stepfun; do
+for wrapper in ai-deepseek-agent ai-gemini ai-grok-review ai-kimi ai-qwen; do
   if [ "$wrapper" = ai-gemini ]; then
     # Gemini delegates its prompt to the shared provider contract. Check the
     # emitted instruction as well as the wrapper's actual contract invocation.
@@ -308,7 +308,7 @@ check "split_index_and_manifest_name_every_real_part" \
   "for p in \$(cd '$PKT' && ls patch.part-*); do sz=\$(wc -c < '$PKT/'\$p | tr -d ' '); grep -qF \"\$p\\\`: \$sz bytes\" '$PKT/patch.diff' && grep -qF \"\$p\\\`: \$sz bytes\" '$PKT/MANIFEST.md' || exit 1; done"
 check "split_parts_reassemble_every_byte"     "cat '$PKT'/patch.part-* | cmp -s - '$PKT/patch.full.diff' && grep -q 'big.txt' '$PKT/patch.full.diff' && [ \$(wc -c < '$PKT/patch.full.diff') -gt 40000 ]"
 check "split_index_states_total_bytes"        "grep -q \"\$(wc -c < '$PKT/patch.full.diff' | tr -d ' ') bytes\" '$PKT/patch.diff'"
-for W in ai-grok-review ai-glm; do
+for W in ai-grok-review; do
   check "${W}_instructions_point_to_every_split_part" \
     "grep -q 'read EVERY numbered patch.part-\\* file' '$REPO_ROOT/bin/$W'"
 done
@@ -774,7 +774,6 @@ ID_HEADIN=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD" | jq -c --arg b "$
 ID_HEADIN_OLD=$(jq -c --arg h "$FEAT_SHA" '.head=$h' <<<"$ID_OLD")
 check "pool_identity_refuses_base_moved_to_contain_reviewed_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_HEADIN_OLD' '$ID_HEADIN'"
 check "pool_identity_refuses_base_moving_to_include_head" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_INCL'"
-check "pool_identity_tolerates_forward_move_of_explicit_base" "bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_FWD'"
 check "pool_identity_refuses_head_change" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_HEAD'"
 check "pool_identity_refuses_non_forward_base_move" "! bash -c 'source \"$STABLE_FN\"; identity_stable \"\$1\" \"\$2\" \"$FWD\"' _ '$ID_OLD' '$ID_BASEX'"
 

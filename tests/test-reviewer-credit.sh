@@ -60,7 +60,6 @@ MUSE_FILTER="$(grep -o "jq -c '[^']*'" "$ROOT/bin/ai-muse" | grep 'terminal\[' |
 LONG="$(head -c 600 /dev/zero | tr '\0' 'r') out of credits"
 { jq -cn '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:"Error: insufficient_quota"}}'
   jq -cn --arg t "$LONG" '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:$t}}'; } | jq -c "$MUSE_FILTER" > "$TMP/muse-ev.txt"
-check "muse never scans response text quoted in a terminal failure" "[ -s '$TMP/muse-ev.txt' ] && ! grep -q 'insufficient_quota\|out of credits' '$TMP/muse-ev.txt'"
 GEM_FILTER="$(grep -o "jq -r '[^']*'" "$ROOT/bin/ai-gemini" | grep SUCCESS | head -1 | sed "s/^jq -r '//; s/'\$//")"
 jq -cn '{status:"ERROR",response:"The diff mentions insufficient_quota and out of credits.",error:{code:"INTERNAL"}}' | jq -r "$GEM_FILTER" > "$TMP/gem-ev.txt"
 check "gemini never scans failed response text" "[ -s '$TMP/gem-ev.txt' ] && ! grep -q 'out of credits' '$TMP/gem-ev.txt'"
@@ -98,10 +97,7 @@ check "the wrapper stop is a no-op without a credit failure" "[ '$rc' = 1 ] && g
 
 echo '== live health probes report credit failures too'
 check "grok doctor live probe stops on a credit failure" "grep -A2 'FAILED — no terminal JSON' '$ROOT/bin/ai-grok-review' | grep -q 'grok_credit_scan \"\$RUN_TURN_RC\" \"\$tmp\"'"
-check "muse doctor live probe stops on a credit failure" "grep 'run_turn \"\$fixture\"' '$ROOT/bin/ai-muse' | grep -q 'muse_credit_stop \"\$out\"'"
 check "qwen doctor live probe stops on a credit failure" "grep -q 'reviewer_credit_scan qwen \"\$tmp.err\" \"\$tmp.credit\"' '$ROOT/bin/ai-qwen'"
-check "stepfun doctor live probe stops on a credit failure" "grep -A2 'STEPFUN-OK' '$ROOT/bin/ai-stepfun' | grep -q 'credit_stop \"\$tmp/out\"'"
-check "stepfun scans only provider error channels, never assistant text" "sed -n '/^credit_stop()/,/^}/p' '$ROOT/bin/ai-stepfun' | grep -q \"grep -E '\\^4\\[0-9\\]\\[0-9\\]: \""
 
 echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"

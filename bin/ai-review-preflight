@@ -799,30 +799,24 @@ reset_requalify() { # only a due reset of an exact capacity-deferred installatio
   requalify_provider "$provider"
 }
 
-# record_requalify_failure PROVIDER OUTPUT_FILE persists a failed automatic
-# requalification as a reviewer issue (#804). A failure that cannot be
-# recorded is still printed, so it is never silently skipped.
+# record_requalify_failure PROVIDER OUTPUT_FILE classifies a failed automatic
+# requalification with the shared admission classifier (the reviewer-issue
+# recorder was retired in #2074) and prints it, so it is never silently skipped.
 REQUALIFY_FAILURE_CLASS=""
 record_requalify_failure() { # PROVIDER OUTPUT_FILE
   REQUALIFY_FAILURE_CLASS=""
-  local provider="$1" output="$2" issue_bin="${AI_REVIEWER_ISSUE_BIN:-$SCRIPT_DIR/ai-reviewer-issue}" out id
-  if [ -x "$issue_bin" ]; then
-    out="$("$issue_bin" record --provider "$provider" \
-      --summary "automatic $provider requalification failed after a pulled wrapper, runtime, or preloader change" \
-      --details-file "$output" \
-      --command "ai-review-preflight requalify $provider" \
-      --repo "$REGISTRY_REAL_DIR/.." \
-      --caller requalify 2>&1)" || out="$out
-ai-reviewer-issue record itself failed."
-    printf '%s\n' "$out" >&2
-    id="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: recorded //p')"
-    REQUALIFY_FAILURE_CLASS="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: class //p' | tail -n1)"
-  else
-    id=""
-    printf 'ai-review-preflight: ai-reviewer-issue is unavailable at %s; failure NOT recorded.\n' "$issue_bin" >&2
+  local provider="$1" output="$2" python tool out=""
+  python="$(command -v python3 || command -v python)" || true
+  tool="$REGISTRY_REAL_DIR/../tools/reviewer_admission.py"
+  if [ -n "${python:-}" ] && [ -f "$tool" ] && [ -f "$output" ] && [ ! -L "$output" ]; then
+    out="$("$python" "$tool" classify "$provider" --text "automatic $provider requalification failed" --scan "$output" 2>/dev/null)" || out=""
   fi
-  [ -n "$id" ] || id=unrecorded
-  printf 'ai-review-preflight: %s automatic requalification FAILED; it stays quarantined (live-qualification-required). reviewer issue: %s\n' "$provider" "$id" >&2
+  if [ -n "$out" ] && jq -e '.stream and .failure_class' >/dev/null 2>&1 <<<"$out"; then
+    REQUALIFY_FAILURE_CLASS="$(jq -r '.stream + "/" + .failure_class' <<<"$out")"
+  else
+    REQUALIFY_FAILURE_CLASS="code-defect/code-config"
+  fi
+  printf 'ai-review-preflight: %s automatic requalification FAILED (%s); it stays quarantined (live-qualification-required).\n' "$provider" "$REQUALIFY_FAILURE_CLASS" >&2
 }
 
 # requalify_expected_file PROVIDER is the marker that says this host HAS

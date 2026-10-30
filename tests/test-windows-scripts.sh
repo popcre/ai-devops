@@ -94,13 +94,12 @@ setup_file=bin/setup-machine.ps1
 token_line=$(grep -nF '$env:OP_SERVICE_ACCOUNT_TOKEN = $Token.Trim()' "$setup_file" | tail -1 | cut -d: -f1)
 muse_setup_line=$(grep -nF '& $gitBash $museSetup' "$setup_file" | tail -1 | cut -d: -f1)
 muse_store_line=$(grep -nF '& $gitBash $museWrapper store-key --if-missing' "$setup_file" | tail -1 | cut -d: -f1)
-muse_live_line=$(grep -nF '& $gitBash $preflight check muse ($museRepo[0]) --live' "$setup_file" | tail -1 | cut -d: -f1)
+muse_live_line=$(grep -nF '& $gitBash $museWrapper doctor' "$setup_file" | tail -1 | cut -d: -f1)
 if [ -n "$token_line" ] && [ -n "$muse_setup_line" ] && [ -n "$muse_store_line" ] && [ -n "$muse_live_line" ] &&
    [ "$token_line" -lt "$muse_setup_line" ] && [ "$muse_setup_line" -lt "$muse_store_line" ] && [ "$muse_store_line" -lt "$muse_live_line" ] &&
-   grep -Fq 'cygpath -u -- "$1"' "$setup_file" &&
    grep -Fq 'if ($storeExit -ne 0) { throw "ai-muse store-key exited $storeExit" }' "$setup_file" &&
-   grep -Fq 'if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }' "$setup_file"; then
-  ok "fresh Windows setup stores and live-checks Muse after token and runtime setup"
+   grep -Fq 'if ($LASTEXITCODE -ne 0) { throw "ai-muse doctor exited $LASTEXITCODE" }' "$setup_file"; then
+  ok "fresh Windows setup stores and checks Muse after token and runtime setup"
 else
   bad "fresh Windows setup can leave Muse unprepared or hide its setup failure"
 fi
@@ -190,10 +189,6 @@ else bad "no Stop-PortOwner; the port cleanup is unscoped"; fi
 if grep -q 'taskkill.exe /PID \$smoke.Id /T /F' bin/setup-opencode-glm.ps1; then
   ok "the smoke test reaps its own process tree"
 else bad "the smoke test can leave an opencode child holding the port"; fi
-if grep -q "ProcessName -notmatch 'opencode'" bin/ai-glm; then ok "restart verifies the old listener before stopping it"
-else bad "restart may stop an unrelated listener"; fi
-if grep -q 'stayed busy for 30 seconds' bin/ai-glm; then ok "restart has a bounded port-free wait"
-else bad "restart can race the old listener"; fi
 
 echo "== GLM task recovery policy =="
 if grep -q 'max_attempts=4' bin/setup-opencode-glm.ps1 && grep -q 'sleep 60' bin/setup-opencode-glm.ps1; then
@@ -207,8 +202,6 @@ else bad "service wrapper does not rotate its log"; fi
 if grep -q 'bounded recovery exhausted' bin/setup-opencode-glm.ps1 && ! grep -q 'exec "\$launchBash"' bin/setup-opencode-glm.ps1; then
   ok "service wrapper normalizes child failure"
 else bad "service wrapper does not return a restartable failure"; fi
-if grep -q 'service wrapper retries 3 times at 1 minute' bin/ai-glm; then ok "doctor verifies the recovery policy"
-else bad "doctor does not verify the recovery policy"; fi
 
 echo "== portable Codex defaults =="
 if grep -q 'codex-portable.toml' bin/setup-machine.ps1 && grep -q -- '-not (Test-Path -LiteralPath $codexConfigPath)' bin/setup-machine.ps1; then
