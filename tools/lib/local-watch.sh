@@ -106,7 +106,10 @@ unregister_timer(){
   command -v crontab >/dev/null || die "unschedule needs schtasks (Windows) or crontab"
   local tmp
   tmp="$(mktemp)"
-  { crontab -l 2>/dev/null | grep -vF "$marker" || :; } > "$tmp"
+  # Drop the marker AND the scheduled command line (register writes the
+  # entry as '<root>/bin/<tool>' args); the line alone also catches an entry
+  # whose marker an older unschedule already stripped.
+  { crontab -l 2>/dev/null | grep -vF "$marker" | grep -vF "/bin/$TOOL_NAME' " || :; } > "$tmp"
   local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
   [ "$rc" -eq 0 ] || die "crontab refused the removal"
   note "removed the $TOOL_NAME crontab entry"
