@@ -144,7 +144,7 @@ check 'missing or invalid classification is never a green skip' never_green_skip
 no_progress_never_pass_ok() {
   grep -Fq 'bash tools/ci/verify-closure.sh' "$workflow" || return 1
   local closure_block
-  closure_block="$(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow")"
+  closure_block="$(sed -n '/^  verification-report:/,/^  verification-closure:/p' "$workflow")"
   printf '%s' "$closure_block" | grep -Fq 'outputs.validation_result' || return 1
   # The closure evaluator is the no-progress detector: it is the component that
   # names a cancelled or missing lane and refuses to close.
@@ -219,12 +219,19 @@ check 'the queue evidence gate reports on every event, not only merge groups' \
   "! awk '/^  merge-group-evidence:/{f=1;next} f&&/^  [a-z]/{exit} f' '$workflow' | grep -q \"if: .*event_name == 'merge_group'\""
 check 'one stable required closure covers pull requests and merge groups' \
   "grep -q '^  verification-closure:' '$workflow' && sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -q \"github.event_name == 'pull_request'.*github.event_name == 'merge_group'\""
-check 'the required closure depends on every pull-request and queue proof' \
-  "grep -Fq 'needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline]' '$workflow'"
-check 'the required closure delegates to the regression-tested evaluator' \
-  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -Fq 'bash tools/ci/verify-closure.sh'"
-check 'the required closure checks out its evaluator before running it' \
-  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
+required_secret_gate_ok() {
+  local block
+  block="$(awk '/^  verification-closure:/{f=1;next} f&&/^  [a-z]/{exit} f' "$workflow")"
+  printf '%s' "$block" | grep -Fq 'run: bash bin/ai-public-boundary-check .' || return 1
+  printf '%s' "$block" | grep -Fq 'ref: ${{ github.sha }}' || return 1
+  ! printf '%s' "$block" | grep -Eq '^[[:space:]]*(needs:|continue-on-error:)|needs\.|outputs\.|verify-closure.sh' || return 1
+  printf '%s' "$block" | awk '/uses: actions\/checkout@/{checkout=NR} /run: bash bin\/ai-public-boundary-check \./{run=NR} END {exit !(checkout && run && checkout < run)}'
+}
+check 'the required context independently scans the exact candidate for secret leaks' required_secret_gate_ok
+check 'the advisory report retains every pull-request and queue proof dependency' \
+  "sed -n '/^  verification-report:/,/^  verification-closure:/p' '$workflow' | grep -Fq 'needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline]'"
+check 'the advisory report retains the regression-tested evaluator' \
+  "sed -n '/^  verification-report:/,/^  verification-closure:/p' '$workflow' | grep -Fq 'bash tools/ci/verify-closure.sh'"
 
 # The #1188 doc gate: the two whole-repo doc invariants must run on EVERY
 # event with no classification condition and no path filter — the opposite of
@@ -241,8 +248,8 @@ check 'the doc-safety job checks added Markdown reachability against the PR or q
   "printf '%s' '$doc_safety_block' | grep -q 'bin/ai-doc-reachability' && printf '%s' '$doc_safety_block' | grep -q 'github.event.merge_group.base_sha' && printf '%s' '$doc_safety_block' | grep -q 'fetch-depth: 0'"
 check 'the doc-safety job stays on the Blacksmith Linux pool' \
   "printf '%s' '$doc_safety_block' | grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404'"
-check 'closure evaluates the doc-safety result fail-closed' \
-  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -q 'needs.doc-safety.result'"
+check 'the advisory report evaluates the doc-safety result fail-closed' \
+  "sed -n '/^  verification-report:/,/^  verification-closure:/p' '$workflow' | grep -q 'needs.doc-safety.result'"
 
 # Counts are derived from discovery (checked exactly below), never hard-coded:
 # a literal count went stale on every new suite and failed 11 of 23 runs.
@@ -529,7 +536,8 @@ cancel_aware_ok() {
   job_has linux-offline merge-group-evidence '!cancelled()' || return 1
   job_has windows-offline-section windows-offline-complete '!cancelled()' || return 1
   job_has windows-offline-complete windows-offline '!cancelled()' || return 1
-  job_has windows-offline verification-closure '!cancelled()' || return 1
+  job_has windows-offline verification-report '!cancelled()' || return 1
+  job_has verification-report verification-closure '!cancelled()' || return 1
   job_has verification-closure report-scheduled-failure '!cancelled()' || return 1
 }
 check 'every dependent verification job stops when its run is cancelled' cancel_aware_ok
@@ -671,6 +679,10 @@ BOOTSTRAP
   assert_rejected validation-stop-removed
   sed "s/RUN_LONG\" = 'false'/RUN_LONG\" != 'true'/" "$workflow" >"$mutation_dir/green-skip-reintroduced.yml"
   assert_rejected green-skip-reintroduced
+  sed '/^  verification-closure:$/a\    needs: [windows-offline]' "$workflow" >"$mutation_dir/secret-gate-waits-windows.yml"
+  assert_rejected secret-gate-waits-windows
+  sed 's@run: bash bin/ai-public-boundary-check \.@run: true@' "$workflow" >"$mutation_dir/secret-scanner-removed.yml"
+  assert_rejected secret-scanner-removed
 fi
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }

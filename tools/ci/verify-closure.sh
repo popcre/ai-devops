@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Evaluate the stable required context for pull-request and merge-queue runs.
+# Evaluate the advisory full-verification report for PR and merge-queue runs.
+# The stable required context runs the actual public-boundary scanner directly;
+# this truth table remains intact for diagnostics (owner ruling #2172).
 #
 # Selection, fast validation and every required lane are evaluated as one truth
 # table over success / failure / cancelled / skipped / missing. A known terminal
