@@ -1,76 +1,29 @@
 ---
 name: stepfun
-description: "StepFun Step 5 (step-5-preview) via ai-stepfun: reviews with a VERDICT line, second opinions, and isolated implementation runs (refused on Windows). Use for \"ask StepFun\", \"StepFun review\", \"Step 5\", \"have StepFun implement this\", or a StepFun second opinion."
+description: "StepFun Step 5 (step-5-preview) via ai-stepfun: reviews with a VERDICT line, second opinions, and isolated implementation runs. Use for \"ask StepFun\", \"StepFun review\", \"Step 5\", \"have StepFun implement this\", or a StepFun second opinion."
 ---
 
 # stepfun
 
-StepFun Step 5 runs through `ai-stepfun`. On Ubuntu/Linux where StepCode is
-installed it uses the StepCode CLI (`step`); otherwise the pinned OpenCode
-harness (the same binary GLM, Muse, and DeepSeek use). Both run under
-bubblewrap. Owner instruction 2026-09-25: let it write,
-implement, and execute code. Owner instruction 2026-09-28 (#974): reviewers are
-not read-only.
+StepFun Step 5 runs through `ai-stepfun`, a thin entry to
+`bin/ai-second-opinion stepfun`: the same pinned OpenCode path and provider
+definition the advisory CI reviewer uses, on Linux and Windows. Review is
+advice only (owner ruling 2026-10-29, #2104).
 
-## Platform
-
-Linux (owner instruction 2026-09-25): bubblewrap plus StepCode or the OpenCode
-harness (#1086). Windows (owner instruction 2026-09-30): `review` and `ask` run
-through the pinned OpenCode engine in a disposable folder with a gated test
-shell; `implement` is refused there.
-The Windows shell permits in-folder `ls`/`cat`, `head -n N` for 1–200 lines,
-and `grep -n -F` for up to 200 literal matches. Windows file tools remain
-disabled; the runner binaries are hash-pinned.
-
-## Sandbox
-
-Every turn runs against a disposable, remote-less copy or clone. StepCode turns
-additionally run under bubblewrap: the model sees only its own folder, with an
-empty home, /tmp and /run and a cleared environment; OpenCode turns on Linux get the
-same sandbox. Windows turns are not mount-isolated: see the owner-accepted
-Windows residual in the archived reviewer rules (rule 12). OpenCode turns run against
-the same disposable copy with a per-run profile and the key exported only into
-the child environment.
-
-## Commands
+Every call runs on a private copy of the repository (HEAD plus uncommitted
+changes, no git remote); your checkout is never touched.
 
 ```bash
-# Formal review: read, shell, edit and write tools in a disposable
-# remote-less copy (edits discarded, never part of the PR), ends in
-# "VERDICT: APPROVE|REVISE|REJECT <head sha>"
+ai-stepfun doctor [--live]
 ai-stepfun review --repo . --base origin/main --prompt-file brief.md
-
-# Second opinion, same disposable writable copy
-ai-stepfun ask --repo . "Is this retry loop bounded?"
-
-# Implementation: StepFun may read, edit, write, and run commands, in a NEW
-# remote-less clone on branch stepfun/impl-<id>. A run that commits or adds a
-# remote is refused.
-ai-stepfun implement --repo . --prompt-file task.md
+ai-stepfun ask "Is this retry loop bounded?"
+ai-stepfun implement <name> --prompt-file task.md   # private writable copy; prints the diff
+ai-stepfun diff <name> | git apply
+ai-stepfun list | show <name> | transcript <name> | delete <name>
+ai-stepfun store-key [--if-missing]                 # installer use: key from 1Password
 ```
 
-- Reviews and `ask` are not read-only (owner instruction, #974): StepFun may
-  run builds and tests and edit files, but only in a disposable, remote-less
-  copy that is thrown away. The caller's checkout is checked unchanged and the
-  answer is rejected if it moved. Keeping changes is `implement`'s job.
-- After `implement`, inspect the diff in the printed `CLONE` folder, run the tests
-  yourself, and only then carry the change into your own branch. StepFun's
-  output is work to verify, not a finished change.
-- Delete the clone folder when you are done with it.
-
-## Membership
-
-`stepfun` is one of the four reviewers CI's advisory `ai-review` check rotates
-through (owner ruling 2026-10-29: review is advice only and gates nothing).
-Also use it for second opinions or when Albert asks for StepFun.
-
-## Failures
-
-- Exit 92 with `AI_REVIEWER_OUT_OF_CREDIT provider=stepfun`: the StepFun
-  account needs credit at https://platform.stepfun.ai. Tell Albert in the same
-  reply, then use another reviewer.
-- HTTP 429 `rate_limited`: the account tier allows about 10 requests a minute.
-  Reviews retry automatically; do not run several StepFun jobs at once.
-- Missing key store: run `ai-stepfun store-key` (reads 1Password item
-  `stepfun step5 ai api key` once; reviews never call 1Password).
-- Health: `ai-stepfun doctor --live`.
+StepFun's account allows about 10 requests a minute; keep calls few. Exit code
+3 means StepFun was unavailable; use another second-opinion tool instead of
+retrying in a loop. The implementer edits files but cannot run commands, so run
+the tests yourself after applying its diff.

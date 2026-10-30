@@ -1390,8 +1390,7 @@ if (Test-Path -LiteralPath $glmSetup) {
 Step "Muse protected reviewer"
 $museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
 $museWrapper = Join-Path $RepoPath "bin\ai-muse"
-$preflight = Join-Path $RepoPath "bin\ai-review-preflight"
-foreach ($required in @($museSetup, $museWrapper, $preflight)) {
+foreach ($required in @($museSetup, $museWrapper)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Missing Muse setup component: $required" }
 }
 & $gitBash $museSetup
@@ -1405,13 +1404,8 @@ try {
   $env:AI_MUSE_CALLER = $oldMuseCaller
 }
 if ($storeExit -ne 0) { throw "ai-muse store-key exited $storeExit" }
-# Muse has no requalify record; a live preflight is its supported health proof.
-$museRepo = @(& $gitBash -c 'cygpath -u -- "$1"' -- $RepoPath 2>$null)
-if ($LASTEXITCODE -ne 0 -or $museRepo.Count -ne 1 -or [string]::IsNullOrWhiteSpace($museRepo[0])) {
-  throw "Could not translate Muse repository path for Git Bash."
-}
-& $gitBash $preflight check muse ($museRepo[0]) --live
-if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }
+& $gitBash $museWrapper doctor
+if ($LASTEXITCODE -ne 0) { throw "ai-muse doctor exited $LASTEXITCODE" }
 Ok "Muse protected reviewer is ready"
 
 # The Windows installer precedes service-account token setup. Seed DeepSeek's

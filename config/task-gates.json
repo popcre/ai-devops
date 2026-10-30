@@ -388,19 +388,7 @@
       "match": "*/ai-devops",
       "paths": [
         {
-          "glob": "bin/ai-review",
-          "class": "code"
-        },
-        {
           "glob": "bin/ai-review-*",
-          "class": "code"
-        },
-        {
-          "glob": "bin/ai-claude-review",
-          "class": "code"
-        },
-        {
-          "glob": "bin/ai-codex-review",
           "class": "code"
         },
         {
@@ -424,6 +412,10 @@
           "class": "code"
         },
         {
+          "glob": "bin/ai-second-opinion*",
+          "class": "code"
+        },
+        {
           "glob": "bin/ai-kimi",
           "class": "code"
         },
@@ -436,23 +428,7 @@
           "class": "code"
         },
         {
-          "glob": "bin/ai-reviewer-issue",
-          "class": "code"
-        },
-        {
-          "glob": "bin/ai-reviewer-logs-sync",
-          "class": "code"
-        },
-        {
           "glob": "config/reviewer-logs-archive.crt",
-          "class": "code"
-        },
-        {
-          "glob": "bin/ai-reviewer-logs-sync.cmd",
-          "class": "code"
-        },
-        {
-          "glob": "tests/test-ai-reviewer-logs-sync.sh",
           "class": "code"
         },
         {

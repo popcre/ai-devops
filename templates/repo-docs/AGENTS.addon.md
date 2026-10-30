@@ -24,7 +24,7 @@ Review stages (plan / diff / security / final) are handled by Opus and are
 Useful commands (from the toolkit):
 
 - `ai-workspace-status` — check branch/dirty/PR safety before you start.
-- `ai-codex-review diff-review` — second-opinion review of the current diff.
+- `ai-glm review --repo . --base origin/main` — optional second opinion on the diff.
 
 AI review is advice only (owner ruling 2026-10-29): CI runs one advisory
 reviewer per PR and never blocks a merge; nothing waits on a reviewer.

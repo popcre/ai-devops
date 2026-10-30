@@ -2,8 +2,8 @@
 #
 # Owner rule (Albert, 2026-10-07, "remove the paid fallback"): Grok runs only
 # on the subscription OAuth login (~/.grok/auth.json) and never bills a paid
-# API key. Every Grok launcher (bin/ai-grok-review, bin/ai-grok-implement,
-# tools/lib/review-doors/grok.sh) sources this file and calls
+# API key. Every Grok launcher (bin/ai-grok-review, bin/ai-grok-implement)
+# sources this file and calls
 # grok_strip_paid_keys before any grok process starts, so no child inherits a
 # key. Unsetting happens in-process: no name or value ever reaches argv.
 # Names come from the grok 1.0.44 binary (XAI_API_KEY, GROK_CODE_XAI_API_KEY,

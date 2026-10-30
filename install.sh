@@ -345,8 +345,7 @@ restore_install_crontab() {
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
       "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
       "$REPO_ROOT/bin/ai-local-watch" unschedule &&
-      "$REPO_ROOT/bin/ai-housekeeping" unschedule &&
-      "$REPO_ROOT/bin/ai-reviewer-logs-sync" unschedule
+      "$REPO_ROOT/bin/ai-housekeeping" unschedule
   else
     return 1
   fi
@@ -721,7 +720,11 @@ run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin
 # review). The hourly reviewer-log sync is unscheduled, and the window file is
 # deleted here so no hand-run privileged command is ever needed.
 retire_reviewer_jobs() {
-  "$REPO_ROOT/bin/ai-reviewer-logs-sync" unschedule || return 1
+  local cron
+  cron="$(crontab -l 2>/dev/null || true)"
+  if printf '%s\n' "$cron" | grep -q 'ai-reviewer-logs-sync'; then
+    printf '%s\n' "$cron" | grep -v 'ai-reviewer-logs-sync' | crontab - || return 1
+  fi
   $SUDO rm -f -- "$ETC_DIR/observation-week.json"
 }
 run_stage required "Retire reviewer jobs and freeze window" retire_reviewer_jobs
@@ -886,10 +889,6 @@ else
   install_provider_clis() { "$REPO_ROOT/bin/install-ai-provider-clis.sh" </dev/null; }
   run_stage optional "Reviewer provider CLIs" install_provider_clis
 fi
-
-# A newly installed reviewer profile may be marked unqualified until this
-# pass succeeds. Requalify before the doctor checks provider usability.
-run_stage required "Reviewer requalification" "$REPO_ROOT/bin/ai-review-preflight" requalify
 
 # --------------------------------------------------------------------------
 # 5. Doctor

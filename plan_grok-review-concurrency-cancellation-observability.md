@@ -106,8 +106,8 @@ The affected pieces are:
 
 - [`bin/ai-grok-review`](bin/ai-grok-review), the read-only Grok wrapper. It pins `grok-4.6`, permissions, turn bounds, result validation, repository snapshots, locks, session records, review files, and cost reporting.
 - [`tests/test-ai-grok-review.sh`](tests/test-ai-grok-review.sh), its offline regression suite.
-- [`bin/ai-reviewer-issue`](bin/ai-reviewer-issue), the local incident recorder that captured the wrong Grok session metadata in both #56 evidence packages.
-- [`tests/test-ai-reviewer-issue.sh`](tests/test-ai-reviewer-issue.sh), the recorder's offline suite.
+- `bin/ai-reviewer-issue` (deleted in #2074), the local incident recorder that captured the wrong Grok session metadata in both #56 evidence packages.
+- `tests/test-ai-reviewer-issue.sh` (deleted in #2074), the recorder's offline suite.
 - [`skills/shared/grok-cli/SKILL.md`](skills/shared/grok-cli/SKILL.md), the shared Claude/Codex operating instructions.
 
 GitHub repository: `https://github.com/u2giants/ai-devops`. Normal policy is direct work on `main`, no feature branch. The current planning machine is `edge-dev`, Windows, repository `C:\repos\ai-devops`; Bash scripts run through Git Bash. Installed commands normally point at the canonical checkout, so no application deployment exists.

@@ -56,7 +56,7 @@ if "$DOCTOR" --older-than ten "$TMP/x" >/dev/null 2>&1; then result fail 'non-nu
 # The wired wrappers must prove contention (flock's conflict exit code) before
 # any sweep, and must call the doctor only through the bounded --recover route
 # (#1002 reviews, findings 4 and 5 of rounds 3 and 4).
-for wrapper in ai-qwen ai-muse ai-deepseek-agent; do
+for wrapper in ai-qwen ai-deepseek-agent; do
   body="$ROOT/bin/$wrapper"
   if grep -q -- '-E 87' "$body" && grep -q 'ai-lock-doctor' "$body" \
      && grep -q -- '--recover --older-than' "$body" && bash -n "$body"; then

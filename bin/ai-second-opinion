@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""ai-second-opinion: one simple OpenCode path for GLM, Muse and StepFun (#2074).
+
+  ai-second-opinion PROVIDER new NAME [--repo DIR] (--prompt-file F | TEXT...)
+  ai-second-opinion PROVIDER ask [NAME] [--repo DIR] (--prompt-file F | TEXT...)
+  ai-second-opinion PROVIDER review [--repo DIR] [--base REF] [--prompt-file F | TEXT...]
+  ai-second-opinion PROVIDER implement [NAME] [--repo DIR] [--base REF] (--prompt-file F | TEXT...)
+  ai-second-opinion PROVIDER list | show NAME | transcript NAME | diff NAME
+  ai-second-opinion PROVIDER abort NAME | delete NAME | doctor [--live] | store-key
+
+PROVIDER is glm, muse or stepfun (deepseek also works). Provider facts, key
+lookup and the OpenCode binary come from bin/ai-review-simple, so the advisory
+CI reviewer and these second opinions share one definition.
+
+new/ask/review run read-only on a private copy of the repository (HEAD plus
+uncommitted changes, no git remote). implement runs on a private writable copy
+with file edits allowed and no shell; it prints the resulting diff and never
+touches the caller's checkout. A named session keeps its OpenCode session, so
+`ask NAME` continues the same conversation. `ask` with text and no known
+session name is a one-shot question. State lives under
+${AI_SECOND_OPINION_HOME:-~/.local/state/ai-devops/second-opinion}.
+
+Exit codes: 0 answered, 1 usage or local error, 3 provider unavailable
+(missing key, out of credit, timeout, no answer).
+"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+_loader = importlib.machinery.SourceFileLoader("ai_review_simple", os.path.join(HERE, "ai-review-simple"))
+_spec = importlib.util.spec_from_loader("ai_review_simple", _loader)
+ars = importlib.util.module_from_spec(_spec)
+_loader.exec_module(ars)
+
+STATE = os.environ.get("AI_SECOND_OPINION_HOME") or os.path.expanduser(
+    "~/.local/state/ai-devops/second-opinion")
+
+READ_AGENT = """---
+description: Read-only second opinion
+mode: primary
+tools:
+  write: false
+  edit: false
+  patch: false
+  bash: false
+  webfetch: false
+  task: false
+---
+
+You are an independent senior engineer giving a second opinion. Inspect the
+local files as needed and answer the request directly with concrete evidence
+(paths and lines). Never change files or claim that you ran anything. When the
+request asks for a review or verdict, end with exactly one final line:
+VERDICT: APPROVE, VERDICT: REJECT or VERDICT: REVISE.
+"""
+
+WRITE_AGENT = """---
+description: Isolated implementer
+mode: primary
+tools:
+  write: true
+  edit: true
+  patch: true
+  bash: false
+  webfetch: false
+  task: false
+---
+
+You implement the requested change by editing files in this private copy of
+the repository. Keep the change minimal and focused. You cannot run commands;
+say which tests the caller should run. Finish with a short summary of what you
+changed and why.
+"""
+
+# 1Password references for store-key (vault vibe_coding; never printed).
+OP_REFS = {
+    "muse": "op://vibe_coding/Meta ai Muse Spark API Key/api key",
+    "stepfun": os.environ.get("AI_STEPFUN_OP_REF") or "op://vibe_coding/stepfun step5 ai api key/credential",
+}
+
+REVIEW_SUFFIX = """
+
+Review the change between {base} and HEAD in this repository copy. The diff is
+below; read surrounding files when needed. Report concrete defects first, with
+paths. End with exactly one final line: VERDICT: APPROVE, VERDICT: REJECT or
+VERDICT: REVISE.
+
+{fence}diff
+{diff}
+{fence}
+"""
+
+
+def die(msg, code=1):
+    print(f"ai-second-opinion: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def git(repo, *args, check=True):
+    return subprocess.run(["git", "-C", repo, *args], check=check, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace").stdout
+
+
+def session_dir(provider, name):
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        die(f"invalid session name: {name!r}")
+    return os.path.join(STATE, provider, name)
+
+
+def load_meta(sdir):
+    try:
+        with open(os.path.join(sdir, "meta.json")) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def save_meta(sdir, meta):
+    tmp = os.path.join(sdir, "meta.json.tmp")
+    with open(tmp, "w") as fh:
+        json.dump(meta, fh, indent=1)
+    os.replace(tmp, os.path.join(sdir, "meta.json"))
+
+
+def copy_repo(repo, work, writable):
+    """Private copy: HEAD, plus tracked edits and untracked files, no remote."""
+    top = git(repo, "rev-parse", "--show-toplevel").strip()
+    subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", top, work],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", work, "remote", "remove", "origin"], capture_output=True)
+    patch = subprocess.run(["git", "-C", top, "diff", "--binary", "HEAD"],
+                           check=True, capture_output=True).stdout
+    if patch.strip():
+        subprocess.run(["git", "-C", work, "apply", "--whitespace=nowarn"], input=patch,
+                       capture_output=True)
+    for rel in git(top, "ls-files", "--others", "--exclude-standard", "-z").split("\0"):
+        if not rel:
+            continue
+        src, dst = os.path.join(top, rel), os.path.join(work, rel)
+        if os.path.isfile(src) and not os.path.islink(src):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+    if writable:
+        subprocess.run(["git", "-C", work, "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", work, "-c", "user.name=second-opinion",
+                        "-c", "user.email=second-opinion@localhost", "commit", "-q",
+                        "--allow-empty", "-m", "baseline"], capture_output=True)
+    else:
+        for d, _dirs, files in os.walk(work):
+            if os.sep + ".git" in d + os.sep:
+                continue
+            for f in files:
+                p = os.path.join(d, f)
+                if not os.path.islink(p):
+                    os.chmod(p, stat.S_IRUSR | stat.S_IRGRP)
+    return top
+
+
+def write_config(sdir, provider, agent_name, agent_text):
+    cfg_dir = os.path.join(sdir, "xdg", "config", "opencode")
+    os.makedirs(os.path.join(cfg_dir, "agent"), exist_ok=True)
+    spec = ars.PROVIDERS[provider]
+    cfg = {"$schema": "https://opencode.ai/config.json", "model": spec["model"],
+           "share": "disabled", "autoupdate": False}
+    if spec["provider"]:
+        cfg["provider"] = spec["provider"]
+    with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
+        json.dump(cfg, fh, indent=1)
+    with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w") as fh:
+        fh.write(agent_text)
+    os.makedirs(os.path.join(sdir, "home"), exist_ok=True)
+
+
+def session_id(stdout):
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            sid = ev.get("sessionID") or (ev.get("part") or {}).get("sessionID")
+            if sid:
+                return sid
+    return None
+
+
+def run_opencode(provider, sdir, meta, prompt):
+    """One turn. Returns the answer text; exits 3 when the provider is unavailable."""
+    key = ars.read_key(provider)
+    if not key:
+        die(f"{provider}: no API key (secret file {ars.PROVIDERS[provider]['key_file']}).", 3)
+    oc = ars.resolve_opencode()
+    if not oc:
+        die("opencode binary not found; run the normal installer.", 3)
+    spec = ars.PROVIDERS[provider]
+    xdg = os.path.join(sdir, "xdg")
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(sdir, "home"),
+           "XDG_CONFIG_HOME": os.path.join(xdg, "config"),
+           "XDG_DATA_HOME": os.path.join(xdg, "data"),
+           "XDG_STATE_HOME": os.path.join(xdg, "state"),
+           "XDG_CACHE_HOME": os.path.join(xdg, "cache"),
+           "OPENCODE_DISABLE_CLAUDE_CODE": "1", "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+           "PYTHONDONTWRITEBYTECODE": "1", spec["key_env"]: key}
+    if os.name == "nt":
+        env["USERPROFILE"] = env["HOME"]
+    for n in ("LANG", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "PATHEXT", "COMSPEC", "WINDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+              "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE"):
+        if os.environ.get(n):
+            env[n] = os.environ[n]
+    work = meta["work"]
+    cmd = [oc, "run", "--agent", meta["agent"], "--auto", "--format", "json",
+           "--model", spec["model"], "--dir", work]
+    if meta.get("session"):
+        cmd += ["--session", meta["session"]]
+    timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
+    meta.update(state="running", pid=os.getpid(), updated=time.time())
+    save_meta(sdir, meta)
+    proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace",
+                            start_new_session=hasattr(os, "killpg"))
+    try:
+        out, err = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL) if hasattr(os, "killpg") else proc.kill()
+        except OSError:
+            pass
+        proc.communicate()
+        meta.update(state="failed", updated=time.time())
+        save_meta(sdir, meta)
+        die(f"{provider}: no answer within {timeout}s.", 3)
+    meta["session"] = meta.get("session") or session_id(out)
+    full, final, ev_err = ars.read_events(out)
+    answer = ars.redact((final or full or "").strip(), key)
+    with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
+                 f"\n## {provider}\n\n{ars.redact((full or '').strip(), key)}\n")
+    if not answer:
+        problem = ars.redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
+        meta.update(state="failed", updated=time.time())
+        save_meta(sdir, meta)
+        kind = "out of credit" if ars.is_credit_error(problem) else f"no answer (exit {proc.returncode})"
+        die(f"{provider}: {kind}: {problem[:800]}", 3)
+    meta.update(state="idle", turns=meta.get("turns", 0) + 1, updated=time.time())
+    meta.pop("pid", None)
+    save_meta(sdir, meta)
+    return answer
+
+
+def read_prompt(args):
+    if getattr(args, "prompt", None):
+        return args.prompt
+    if args.prompt_file:
+        with open(args.prompt_file, encoding="utf-8") as fh:
+            return fh.read()
+    text = " ".join(args.text).strip()
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read()
+    return text
+
+
+def start(provider, name, repo, writable, base=None):
+    if name is None:
+        name = f"oneshot-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    sdir = session_dir(provider, name)
+    if os.path.exists(sdir):
+        die(f"session {name} already exists; use ask, or delete it first.")
+    os.makedirs(sdir)
+    work = os.path.join(sdir, "work")
+    try:
+        top = copy_repo(repo, work, writable)
+    except subprocess.CalledProcessError as exc:
+        shutil.rmtree(sdir, ignore_errors=True)
+        die("could not copy the repository: " + (exc.stderr or b"").decode(errors="replace")[:300])
+    agent = "implement" if writable else "second-opinion"
+    write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT)
+    meta = {"name": name, "provider": provider, "repo": top, "work": work, "agent": agent,
+            "mode": "implement" if writable else "read-only", "base": base,
+            "created": time.time(), "turns": 0, "state": "idle"}
+    save_meta(sdir, meta)
+    return sdir, meta
+
+
+def parse(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="ai-second-opinion")
+    ap.add_argument("provider", choices=sorted(ars.PROVIDERS))
+    ap.add_argument("command")
+    ap.add_argument("text", nargs="*")
+    ap.add_argument("--prompt-file")
+    ap.add_argument("--prompt")
+    ap.add_argument("--repo", default=".")
+    ap.add_argument("--base")
+    ap.add_argument("--live", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    args, _unknown = ap.parse_known_args(argv)
+    return args
+
+
+def main(argv):
+    global STATE
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    args = parse(argv)
+    p, cmd = args.provider, args.command
+
+    if cmd in ("new", "ask", "implement"):
+        name = existing = None
+        t = args.text
+        if t and "/" not in t[0] and " " not in t[0] and load_meta(os.path.join(STATE, p, t[0])):
+            existing = name = t[0]
+            args.text = t[1:]
+        elif t and " " not in t[0] and (
+                (cmd in ("new", "implement") and (len(t) >= 2 or args.prompt_file or args.prompt))
+                or (args.prompt_file and len(t) == 1)):
+            name = t[0]
+            args.text = t[1:]
+        prompt = read_prompt(args)
+        if not prompt.strip():
+            die("nothing to ask: give --prompt-file or text.")
+        if existing:
+            if cmd == "new":
+                die(f"session {name} already exists; use ask.")
+            sdir = os.path.join(STATE, p, name)
+            meta = load_meta(sdir)
+        else:
+            sdir, meta = start(p, name, args.repo, cmd == "implement", args.base)
+        print(run_opencode(p, sdir, meta, prompt))
+        if meta["mode"] == "implement":
+            git(meta["work"], "add", "-A", check=False)
+            diff = git(meta["work"], "diff", "--cached", "HEAD")
+            print(f"\n--- {p} changes (private copy {meta['work']}; apply with "
+                  f"`ai-second-opinion {p} diff {meta['name']} | git apply`) ---\n{diff or '(no changes)'}")
+        print(f"\n[session {meta['name']}]", file=sys.stderr)
+        return 0
+
+    if cmd == "review":
+        repo = git(args.repo, "rev-parse", "--show-toplevel").strip()
+        base = args.base or "origin/main"
+        mb = git(repo, "merge-base", base, "HEAD").strip()
+        diff = git(repo, "diff", mb)
+        if len(diff) > ars.MAX_DIFF:
+            diff = diff[:ars.MAX_DIFF] + "\n[diff truncated; read the files directly]\n"
+        runs = [len(m) for m in __import__("re").findall(r"`{3,}", diff)]
+        fence = "`" * max([3] + [n + 1 for n in runs])
+        brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
+        prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
+        sdir, meta = start(p, None, repo, False, base)
+        print(run_opencode(p, sdir, meta, prompt))
+        return 0
+
+    if cmd == "list":
+        root = os.path.join(STATE, p)
+        for n in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            m = load_meta(os.path.join(root, n))
+            if m:
+                print(f"{n}\t{m.get('mode')}\t{m.get('state')}\tturns={m.get('turns', 0)}\t"
+                      f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(m.get('updated', m['created'])))}")
+        return 0
+
+    if cmd in ("server", "reconcile", "finalize-failed-turn") and not args.text[1:]:
+        if cmd == "server":
+            print(f"{p}: no server is needed; each call runs OpenCode directly.")
+            return 0
+
+    if cmd in ("show", "transcript", "diff", "abort", "delete", "reconcile", "finalize-failed-turn"):
+        if not args.text:
+            die(f"{cmd} needs a session name.")
+        sdir = session_dir(p, args.text[0])
+        meta = load_meta(sdir)
+        if not meta:
+            die(f"no session named {args.text[0]}.")
+        if cmd in ("show", "reconcile", "finalize-failed-turn"):
+            print(json.dumps(meta, indent=1))
+        elif cmd == "transcript":
+            with open(os.path.join(sdir, "transcript.md"), encoding="utf-8") as fh:
+                sys.stdout.write(fh.read())
+        elif cmd == "diff":
+            git(meta["work"], "add", "-A", check=False)
+            sys.stdout.write(git(meta["work"], "diff", "--cached", "HEAD"))
+        elif cmd == "abort":
+            pid = meta.get("pid")
+            if pid and meta.get("state") == "running":
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            meta.update(state="aborted", updated=time.time())
+            save_meta(sdir, meta)
+            print(f"{args.text[0]}: aborted")
+        elif cmd == "delete":
+            for d, dirs, files in os.walk(sdir):
+                for x in dirs + files:
+                    try:
+                        os.chmod(os.path.join(d, x), stat.S_IRWXU)
+                    except OSError:
+                        pass
+            shutil.rmtree(sdir)
+            print(f"{args.text[0]}: deleted")
+        return 0
+
+    if cmd == "store-key":
+        if_missing = "--if-missing" in argv
+        if if_missing and ars.read_key(p):
+            print(f"{p}: key store already present")
+            return 0
+        key = "" if sys.stdin.isatty() else sys.stdin.readline().strip()
+        if not key and OP_REFS.get(p) and shutil.which("op"):
+            env = dict(os.environ)
+            tok = os.path.expanduser("~/.config/ai-devops/op-service-account")
+            if not env.get("OP_SERVICE_ACCOUNT_TOKEN") and os.path.isfile(tok):
+                with open(tok) as fh:
+                    env["OP_SERVICE_ACCOUNT_TOKEN"] = fh.read().strip()
+            r = subprocess.run(["op", "read", OP_REFS[p]], env=env, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=120)
+            key = r.stdout.strip() if r.returncode == 0 else ""
+        if not key:
+            die(f"store-key: no key on stdin and none readable from 1Password for {p}.")
+        if p == "glm":
+            die("glm keys are stored by bin/setup-opencode-glm.sh; nothing written.")
+        secrets = os.environ.get("AI_REVIEW_SIMPLE_SECRETS_DIR",
+                                 os.path.expanduser("~/.config/ai-devops/secrets"))
+        os.makedirs(secrets, mode=0o700, exist_ok=True)
+        path = os.path.join(secrets, ars.PROVIDERS[p]["key_file"])
+        tmp = path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(key + "\n")
+        os.replace(tmp, path)
+        print(f"{p}: key stored")
+        return 0
+
+    if cmd == "doctor":
+        ok = True
+        oc = ars.resolve_opencode()
+        print(f"opencode: {oc or 'MISSING'}")
+        ok &= bool(oc)
+        has_key = bool(ars.read_key(p))
+        print(f"{p} key: {'present' if has_key else 'MISSING'}")
+        ok &= has_key
+        print(f"model: {ars.PROVIDERS[p]['model']}")
+        if ok and args.live:
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                subprocess.run(["git", "init", "-q", tmp], check=True)
+                with open(os.path.join(tmp, "README"), "w") as fh:
+                    fh.write("probe\n")
+                subprocess.run(["git", "-C", tmp, "add", "README"], check=True)
+                subprocess.run(["git", "-C", tmp, "-c", "user.name=p", "-c", "user.email=p@l",
+                                "commit", "-qm", "p"], check=True)
+                STATE = os.path.join(tmp, "state")
+                sdir, meta = start(p, "doctor", tmp, False)
+                ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
+                print(f"live: {ans.strip()[:80]}")
+                ok &= "READY" in ans.upper()
+        print("doctor: OK" if ok else "doctor: FAILED")
+        return 0 if ok else 3
+
+    die(f"unknown command {cmd!r}; see --help.")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

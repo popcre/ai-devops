@@ -3,88 +3,29 @@ name: ask-muse
 description: Start or continue a persistent protected Muse Spark 1.3 Contributor review, debate, or implementation. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", "have Muse implement/build/fix X", or requests a Muse Spark second opinion.
 ---
 
-# Persistent Muse review and debate
+# Ask Muse
 
 Use `ai-muse` only. Do not call OpenCode, the Meta API, or 1Password directly.
+Review is advice only (owner ruling 2026-10-29, #2104).
 
-Muse uses named persistent conversations in a disposable, self-contained copy of the
-target repository (no git remote, never your checkout). Reviews may run commands, builds and
-tests and edit files in that copy; the edits are discarded and are not part of the PR.
-No other model is used if Muse fails.
-
-To have Muse write code, use `ai-muse implement <name> [--base REF] --prompt-file <brief>`.
-Muse edits a disposable worktree with a sandboxed shell; its work is committed on
-branch `muse/<name>`. Repeat the name to continue. Review that branch before
-landing it; it is never pushed or merged automatically.
-
-First select the actual current client. Never reuse the other client's value:
+`ai-muse` is a thin entry to `bin/ai-second-opinion muse`, the same OpenCode
+path the advisory CI reviewer uses. Every call runs on a private copy of the
+repository (HEAD plus uncommitted changes, no git remote); your checkout is
+never touched. Named sessions keep their conversation.
 
 ```bash
-# Use exactly one of these in the current shell.
-export AI_MUSE_CALLER=codex   # Codex only
-export AI_MUSE_CALLER=claude  # Claude only
+ai-muse doctor [--live]
+ai-muse new <stable-name> --prompt-file <brief-file>
+ai-muse ask <stable-name> --prompt-file <follow-up-file>
+ai-muse review --repo . --base origin/main [--prompt-file <brief>]
+ai-muse implement <name> --prompt-file <brief>    # private writable copy; prints the diff
+ai-muse diff <name> | git apply
+ai-muse transcript <stable-name>
+ai-muse list | show <name> | abort <name> | delete <name>
+ai-muse store-key [--if-missing]                  # installer use: key from 1Password to the private store
 ```
 
-Then check the runner:
-
-```bash
-AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse doctor
-```
-
-Start once from the repository root:
-
-```bash
-AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse new <stable-name> --prompt-file <brief-file>
-```
-
-Continue the exact conversation for objections, rebuttals, or new evidence:
-
-```bash
-AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse ask <stable-name> --prompt-file <follow-up-file>
-```
-
-Caller identity is mandatory. In Bash, use `AI_MUSE_CALLER=codex ai-muse ...` or
-`AI_MUSE_CALLER=claude ai-muse ...`. In PowerShell, set `$env:AI_MUSE_CALLER` to
-`codex` or `claude` before `ai-muse ...`. Never create a replacement
-session when the named one can be continued. Read the report path printed after each
-turn; use `AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse transcript <stable-name>` for the full conversation.
-
-If `ask` says reconciliation is required, inspect that transcript first, then run
-`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse reconcile <stable-name>` to verify and publish the exact retained completion without a provider call.
-The command requires a successful retained process, matching session and source
-packet, and unchanged response bytes. Missing terminal proof stays blocked; a
-session ID or manual acknowledgment cannot substitute for it. Source movement
-produces a non-authorizing retained report, after which a fresh same-session `ask`
-can review the current source. Never bypass or silently replace an uncertain session.
-
-The only failed-turn recovery currently supported is the OpenCode permission-denial
-path; Muse Code failures remain fenced. First run
-`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse finalize-failed-turn <stable-name> --dry-run`.
-Proceed with the same command without `--dry-run` only when it reports a
-qualified non-authorizing failed turn. This requires exact retained packet and
-byte hashes, the original caller/repository/head, a verified unsignaled wrapper
-exit, and a complete native stream whose only errors are one to three consecutive
-exact denied reads immediately before its final tool-calls finish. No text or
-successful tool may follow the first denial; malformed steps and verdict-like
-text remain fenced. The neutral preliminary phrase "approval evidence" is not
-a verdict.
-It archives the original descriptor; it does not publish an accepted review or
-verdict and says nothing about billing. Then use the normal `ask` flow for a
-fresh same-session turn. If dry-run refuses, leave the session fenced; do not
-infer success from tool calls, text, a session ID, or a wrapper error alone.
-
-For a code review, tell Muse to read the manifest in its evidence packet first.
-The packet directory is named after the session (`.ai-review-muse-<caller>-<name>`),
-not a fixed `.ai-review`, so two reviewers working from one checkout cannot
-overwrite each other's evidence. Take the exact name from the path the wrapper
-prints. For a focused debate that does not need repository inspection, do not
-force a packet read.
-
-A turn is valid only when the wrapper proves OpenCode's structured stop event, the
-exact session ID, and non-empty response text. Do not substitute GLM, another model,
-or your own opinion without stating that Muse did not complete.
-
-Native Muse Code engine is the default. Prefix a command with `AI_MUSE_ENGINE=opencode`
-to run the same conversation through the pinned OpenCode harness instead. Muse Code
-proof is its final `run.terminal.completed` event in the wrapper-chosen session. Keep
-one engine per named session.
+Report Muse's view, say whether you agree, and push back with evidence when
+you do not. Exit code 3 means Muse was unavailable; use another second-opinion
+tool instead of retrying in a loop. The implementer edits files but cannot run
+commands, so run the tests yourself after applying its diff.
