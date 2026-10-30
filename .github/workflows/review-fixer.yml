@@ -69,7 +69,8 @@ jobs:
   fix:
     name: review-fixer-${{ matrix.key }}
     needs: prepare
-    if: needs.prepare.outputs.matrix != '{"include": []}'
+    if: >-
+      needs.prepare.outputs.matrix != '{"include": []}'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}

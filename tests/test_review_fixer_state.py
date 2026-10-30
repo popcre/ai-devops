@@ -380,6 +380,15 @@ class StateTests(unittest.TestCase):
         self.issue["labels"].append({"name": "fixer-deferred"})
         self.assertEqual(self.state.plan(), {"include": []})
 
+    def test_workflow_conditions_do_not_embed_unquoted_yaml_mapping_values(self):
+        workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
+        for line in workflow.splitlines():
+            if not line.lstrip().startswith("if:"):
+                continue
+            expression = line.split("if:", 1)[1].strip()
+            if not expression.startswith(("'", '"', ">", "|")):
+                self.assertNotRegex(expression, r":\s", "unquoted colon-space prevents the workflow from registering")
+
     def test_workflow_serializes_repository_target_for_all_entry_points(self):
         workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
         self.assertIn("group: review-fixer-${{ github.repository }}-${{ matrix.key }}", workflow)
