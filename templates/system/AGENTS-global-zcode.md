@@ -143,6 +143,9 @@ rulings, verbatim: `docs/owner-rulings.md`.
   become `review-finding` issues that an automatic fixer handles. Never wait
   on, request, or gate on a review; second opinions stay optional.
   Reviews are preferred but never required (owner ruling 2026-10-29 night).
+- **Lean required checks** (owner ruling 2026-10-30): only checks that stop
+  production-data damage or secret leaks may block a merge; every other check
+  is advisory. Drop a hanging or flaky required check first, repair after.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in
   their approved private repository.
