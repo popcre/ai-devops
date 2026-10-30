@@ -170,6 +170,12 @@ Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
 [#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
 
+Fleet/CI expansion: read that plan's current STATUS and R1–R8 before claiming
+rollout. Codex, Claude, MiMo and ZCode across all four requested machines each
+need live proof; repository instructions/mirror success prove neither fleet
+installation nor CI execution migration. The existing public workflow below
+is narrower than that pending acceptance; preserve its locked constraints.
+
 During the authorized public-companion trial, follow
 [`docs/entire-trial.md` § Session workflow](docs/entire-trial.md#session-workflow)
 for public ai-devops work: keep the owning GitHub issue and normal PR route,
