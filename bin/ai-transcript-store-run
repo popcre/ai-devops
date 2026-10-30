@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ai-transcript-store-run — one daily transcript-store build and publish
+# (plan_transcript-store.md step 7). Started by ai-transcript-store.service.
+# Reads the ScaleDown key from the per-user protected store written by
+# bin/ai-install-transcript-store; never prints it. Writes a counts-only run log.
+set -u
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+tools="${AI_TRANSCRIPT_STORE_TOOLS:-$here/transcript_store}"
+[ -f "$tools/build.py" ] || tools="$here/../tools/transcript_store"
+key_store="${AI_TRANSCRIPT_STORE_KEY:-$HOME/.config/ai-devops/secrets/scaledown-api-key}"
+log_dir="${AI_TRANSCRIPT_STORE_LOGS:-$HOME/.local/state/ai-devops/transcript-store}"
+python="${AI_TRANSCRIPT_STORE_PYTHON:-python3}"
+mkdir -p "$log_dir"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+log="$log_dir/run-$stamp.json"
+[ -s "$key_store" ] || { echo "ERROR ScaleDown key store missing: rerun bin/ai-install-transcript-store" >&2; exit 1; }
+[ "$(stat -c %a "$key_store" 2>/dev/null)" = 600 ] || { echo "ERROR ScaleDown key store is not owner-only" >&2; exit 1; }
+IFS= read -r SCALEDOWN_API_KEY < "$key_store" || true
+export SCALEDOWN_API_KEY
+# Single writer: a run (daily timer or the backfill) holds this lock; a second
+# start while one is running skips instead of writing the same database.
+lock="${AI_TRANSCRIPT_STORE_LOCK:-$HOME/.local/share/ai-devops/transcript-store/writer.lock}"
+mkdir -p "$(dirname "$lock")"
+exec 9>"$lock"
+if ! flock -n 9; then echo "SKIP another transcript-store writer is running"; exit 0; fi
+"$python" "$tools/build.py" "$@" > "$log" 2> "$log_dir/run-$stamp.err"
+rc=$?
+# keep a year of run logs
+find "$log_dir" -maxdepth 1 -name 'run-*' -mtime +365 -delete 2>/dev/null || true
+echo "transcript-store run rc=$rc log=$log"
+exit "$rc"

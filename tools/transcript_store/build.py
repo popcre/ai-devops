@@ -648,7 +648,7 @@ def main(argv=None) -> int:
     ap.add_argument("--store-root", type=Path, default=DEFAULT_STORE_ROOT)
     ap.add_argument("--limit-calls", type=int, default=None)
     ap.add_argument("--threads", type=int, default=6)
-    ap.add_argument("--prompt", default="v1", help="prompt version (prompt_<v>.txt)")
+    ap.add_argument("--prompt", default=segment.DEFAULT_PROMPT, help="prompt version (prompt_<v>.txt)")
     ap.add_argument("--relabel", action="store_true")
     ap.add_argument("--import-labels", type=Path)
     ap.add_argument("--stats", action="store_true")

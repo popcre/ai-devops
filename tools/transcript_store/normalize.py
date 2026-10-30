@@ -200,11 +200,14 @@ def parse_lines(raw: bytes):
     """Yield (obj_or_None, end_offset, is_last) per line of ``raw``."""
     pos = 0
     n = len(raw)
+    # end of the last non-blank byte, computed once: re-stripping the rest of
+    # the file on every line was quadratic and took hours on 100 MB sessions
+    tail = len(raw.rstrip())
     while pos < n:
         nl = raw.find(b"\n", pos)
         end = n if nl < 0 else nl + 1
         line = raw[pos:end]
-        is_last = end >= n or not raw[end:].strip()
+        is_last = end >= tail
         try:
             obj = json.loads(line.decode("utf-8")) if line.strip() else ...
         except (ValueError, UnicodeDecodeError):

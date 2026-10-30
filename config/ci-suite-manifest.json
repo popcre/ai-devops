@@ -546,8 +546,9 @@
         "test-transcript-store.sh"
       ],
       "tools/transcript_store/build.py": [
-        "test-transcript-store.sh",
-        "test-ai-transcript-query.sh"
+        "test-ai-install-transcript-store.sh",
+        "test-ai-transcript-query.sh",
+        "test-transcript-store.sh"
       ],
       "tools/transcript_store/envcheck.py": [
         "test-transcript-store.sh"
@@ -589,6 +590,38 @@
       ],
       "tests/test-ai-transcript-query.sh": [
         "test-ai-transcript-query.sh"
+      ],
+      "bin/ai-install-transcript-store": [
+        "test-ai-install-transcript-store.sh"
+      ],
+      "bin/ai-transcript-store-run": [
+        "test-ai-install-transcript-store.sh"
+      ],
+      "tests/test-ai-install-transcript-store.sh": [
+        "test-ai-install-transcript-store.sh"
+      ],
+      "bin/ai-install-transcript-store.cmd": [
+        "test-ai-install-transcript-store.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "bin/ai-transcript-store-run.cmd": [
+        "test-ai-install-transcript-store.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "tools/transcript_store/prompt_v2.txt": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v3.txt": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v4.txt": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v5.txt": [
+        "test-transcript-store.sh"
+      ],
+      "tools/transcript_store/prompt_v6.txt": [
+        "test-transcript-store.sh"
       ]
     },
     "companion_suites": {
