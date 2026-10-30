@@ -209,14 +209,10 @@ class ReviewTests(unittest.TestCase):
         self.assertNotIn("test-key", res["error"])
 
     def test_workspace_failure_still_writes_result(self):
-        # A broken git on PATH makes clone fail after rev-parse succeeded.
-        shim = os.path.join(self.tmp.name, "bin")
-        os.makedirs(shim)
-        with open(os.path.join(shim, "git"), "w") as fh:
-            fh.write("#!/bin/sh\ncase \"$*\" in *clone*) echo nope >&2; exit 128;; esac\n"
-                     "exec %s \"$@\"\n" % subprocess.check_output(["sh", "-c", "command -v git"], text=True).strip())
-        os.chmod(os.path.join(shim, "git"), 0o755)
-        self.env["PATH"] = shim + os.pathsep + self.env["PATH"]
+        # An invalid remote name only clone reads makes clone fail after
+        # rev-parse succeeded; unlike a PATH shim it works on native Windows too.
+        self.env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="clone.defaultRemoteName",
+                        GIT_CONFIG_VALUE_0="bad..name")
         rc, res, calls = self.run_review("approve")
         self.assertEqual((rc, res["verdict"], calls), (3, None, 0))
         self.assertTrue(res["error"].startswith("local: CalledProcessError"), res["error"])
