@@ -674,6 +674,7 @@ def main(argv=None) -> int:
             return 0
     else:
         pv = meta_get(conn, "prompt_version") or a.prompt
+        meta_set(conn, "prompt_version", pv)  # later runs keep the store on one version
         runner = Runner(conn, call, pv, a.threads, budget)
         run_archive(conn, a.archive, runner)
         result = dict(runner.stats)

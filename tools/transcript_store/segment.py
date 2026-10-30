@@ -66,7 +66,7 @@ class ScaleDownError(Exception):
         self.status = status
 
 
-DEFAULT_PROMPT = "v8"
+DEFAULT_PROMPT = "v5"
 
 
 def load_prompt(version: str = DEFAULT_PROMPT) -> str:
@@ -182,45 +182,31 @@ def parse_reply(content) -> list[dict]:
 # summarizer and does not follow a priority order reliably; these rules run
 # on its own subject and cleaned text, never on raw transcript text.
 _RX = lambda p: re.compile(p, re.IGNORECASE)
-REVIEWER_RX = _RX(r"\b(reviewers?|\w*failedreviewer|ai-review|kimi|grok|glm|qwen|muse|deepseek|stepfun|gemini|review wrapper|exact-head review)\b")
+REVIEWER_RX = _RX(r"\b(reviewers?|ai-review|kimi|grok|glm|qwen|muse|deepseek|stepfun|gemini|review wrapper|exact-head review)\b")
 BUSINESS_RX = _RX(r"\b(warner|paramount|sega|coca-cola|universal|nbcu|licensor|coldlion|mg0[1-9]|mgcategory|merch(andise)? group|"
                   r"property codes?|style.?guides?|entitlements?|business[- ]rules?)\b")
 DATABASE_RX = _RX(r"\b(shared-db|supabase|migrations?|schema|postgres|rls|production apply|preview (lane|apply|capture)|"
                   r"orchestrator|sql)\b")
-APP_RX = _RX(r"\b(designflow|popdam|poppim|popcrm|erp|item library|crawler|search|frontend|ui|sandbox|cloud run|udf\w*|"
-              r"orderlist|sample tracking|sample splits?|flow \d|dialog|backend|harvest\w*|scrap(e|er|ing)|playwright|style-group|"
-              r"shipments?|vendor|box(ed|es)?|office switch\w*|e2e|ningbo|popcrm customers?)\b")
-CI_RX = _RX(r"\b(merge[- ]queue|merge[- ]lane|ci|runners?|github actions|workflow run|checks?)\b")
+APP_RX = _RX(r"\b(designflow|popdam|poppim|popcrm|erp|item library|crawler|search results?|frontend|ui)\b")
 SOFT_FIRST = {"ai-devops-process", "owner-decision", "ci", "database"}
 
 
 def refine_slugs(slugs: list[str], subject: str, text: str) -> tuple[list[str], bool]:
     """Re-order or replace a weak first slug; returns (slugs, changed)."""
-    if not slugs:
+    if not slugs or slugs == ["other"]:
         return slugs, False
-    if slugs == ["other"]:
-        return (["business-rules"], True) if BUSINESS_RX.search(subject) else (slugs, False)
     out = list(slugs)
     head = subject + "\n" + text[:1500]
-    lead = subject + "\n" + text[:300]
     first = out[0]
     want = None
-    if first in SOFT_FIRST | {"business-rules", "reviewer-tooling", "reviewer-model", "ai-mistakes"} and APP_RX.search(subject) \
-            and not DATABASE_RX.search(subject) and not REVIEWER_RX.search(subject) and not CI_RX.search(subject):
-        want = "other"
-    elif first == "other" and BUSINESS_RX.search(subject):
-        want = "business-rules"
-    elif first in SOFT_FIRST | {"ai-mistakes"} and REVIEWER_RX.search(subject + " " + text[:300]) and not DATABASE_RX.search(subject):
+    if first in SOFT_FIRST and REVIEWER_RX.search(subject):
         want = "reviewer-tooling" if "reviewer-model" not in out else "reviewer-model"
-    elif first in SOFT_FIRST and BUSINESS_RX.search(lead):
+    elif first in SOFT_FIRST and BUSINESS_RX.search(head):
         want = "business-rules"
-    elif first == "database" and CI_RX.search(subject) and not DATABASE_RX.search(subject):
-        want = "ci"
-    elif first in ("database", "ai-devops-process", "owner-decision") and APP_RX.search(subject) \
-            and not DATABASE_RX.search(subject):
-        want = "other"
     elif first in ("ai-devops-process", "owner-decision") and DATABASE_RX.search(head):
         want = "database"
+    elif first in ("ai-devops-process", "owner-decision") and APP_RX.search(head):
+        want = "other"
     if want == "other":
         return ["other"], True
     if want:
