@@ -7,11 +7,11 @@
 
 | Stage | State (2026-10-30) | Evidence |
 |---|---|---|
-| A Standing rule + owner ruling in ai-devops | in PR | this PR |
-| B shared-db required checks cut to core; queue-gate collision/lease re-checks removed; "one licensor per change" killed | pending | |
-| C shared-db claim / lease / evidence-pair / guarded-authorization chain retired | pending | |
-| D Other toolkit repos audited to the same core | pending | |
-| E Live proof: fresh shared-db migration PR merges on core checks only | pending | |
+| A Standing rule + owner ruling in ai-devops | ✅ done | PR #2174 |
+| B shared-db required checks cut to core; queue-gate collision/lease re-checks removed; "one licensor per change" killed | ✅ done; live ruleset + classic protection = 5 contexts | shared-db #5171 (8dd0e9b2) |
+| C shared-db claim / lease / evidence-pair / guarded-authorization chain retired | 🟡 C1 done: guarded merge no longer re-runs collision or lease checks. C2 (retire claim-first contracts, version lanes, preview leases, guarded authorization) open | shared-db #5183 (835b4491) merged on the 5-check set |
+| D Other toolkit repos audited to the same core | ✅ done: no other popcre/u2giants repo has required checks; ai-devops keeps only `verification-closure` | audit 2026-10-30 |
+| E Live proof: fresh shared-db migration PR merges on core checks only | 🟡 non-migration proof done (#5171 switch, #5183 merged on core set); first migration PR on the core set still to land | |
 
 ## The rule
 
