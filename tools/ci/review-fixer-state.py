@@ -50,6 +50,13 @@ def labels(issue):
     return {x["name"] for x in issue.get("labels", [])}
 
 
+def inventory_path(path):
+    if (not isinstance(path, str) or not path or "\0" in path or path.startswith("/")
+            or any(part in {"", ".", ".."} for part in path.split("/"))):
+        raise ValueError("collision inventory path is invalid")
+    return path
+
+
 def marker(body, kind=MARKER):
     match = re.search(r"<!-- " + re.escape(kind) + r" (.*?) -->", body or "")
     return json.loads(match[1]) if match else None
@@ -106,6 +113,66 @@ class State:
 
     def pulls(self):
         return paged(f"{self.prefix}/pulls?state=open&per_page=100")
+
+    def candidate_files(self, candidates):
+        """Read the same collision candidates in bounded GraphQL batches.
+
+        Complete small connections need one request per <=50 candidates. Only
+        a genuinely paginated connection uses its existing complete REST path.
+        Unknown/partial responses never count as an empty collision inventory.
+        """
+        numbers = [pr.get("number") for pr in candidates]
+        if any(type(number) is not int or not 0 < number <= 2147483647 for number in numbers) or len(set(numbers)) != len(numbers):
+            raise ValueError("collision candidate PR numbers are invalid")
+        owner, name = self.repo.split("/", 1)
+        result = {}
+        for offset in range(0, len(numbers), 50):
+            chunk = numbers[offset:offset + 50]
+            fields = " ".join(
+                f"p_{number}: pullRequest(number: {number}) {{ number files(first: 100) {{ totalCount nodes {{ path }} pageInfo {{ hasNextPage }} }} }}"
+                for number in chunk)
+            query = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner " + fields + "}}"
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".json", delete=False) as request:
+                json.dump({"query": query, "variables": {"owner": owner, "name": name}}, request)
+            try:
+                response = json.loads(gh("api", "graphql", "--input", request.name))
+            finally:
+                Path(request.name).unlink()
+            if not isinstance(response, dict) or ("errors" in response and response["errors"] != []):
+                raise ValueError("collision file query returned errors or invalid data")
+            data = response.get("data")
+            repo = data.get("repository") if isinstance(data, dict) else None
+            if not isinstance(repo, dict) or repo.get("nameWithOwner") != self.repo:
+                raise ValueError("collision file query repository is missing or mismatched")
+            for number in chunk:
+                pr = repo.get(f"p_{number}")
+                if not isinstance(pr, dict) or type(pr.get("number")) is not int or pr["number"] != number:
+                    raise ValueError("collision file query PR is missing or mismatched")
+                files = pr.get("files")
+                if not isinstance(files, dict) or type(files.get("totalCount")) is not int or files["totalCount"] < 0:
+                    raise ValueError("collision file query count is invalid")
+                nodes, page = files.get("nodes"), files.get("pageInfo")
+                if not isinstance(nodes, list) or not isinstance(page, dict) or type(page.get("hasNextPage")) is not bool:
+                    raise ValueError("collision file query nodes/page metadata are invalid")
+                paths = []
+                for node in nodes:
+                    path = node.get("path") if isinstance(node, dict) else None
+                    paths.append(inventory_path(path))
+                count, more = files["totalCount"], page["hasNextPage"]
+                if len(paths) != min(count, 100) or len(set(paths)) != len(paths) or more != (count > len(paths)):
+                    raise ValueError("collision file query is incomplete or inconsistent")
+                if more:
+                    rows = paged(f"{self.prefix}/pulls/{number}/files?per_page=100")
+                    if not isinstance(rows, list):
+                        raise ValueError("collision fallback inventory is invalid")
+                    paths = []
+                    for row in rows:
+                        path = row.get("filename") if isinstance(row, dict) else None
+                        paths.append(inventory_path(path))
+                    if len(paths) != count or len(set(paths)) != len(paths):
+                        raise ValueError("collision fallback inventory is incomplete or changed")
+                result[number] = set(paths)
+        return result
 
     def assign(self, data):
         try:
@@ -185,13 +252,12 @@ class State:
                 if result.returncode:
                     raise ValueError("trusted object check failed: " + result.stdout + result.stderr)
             source_base = api(f"{self.prefix}/pulls/{data['source_pr']}")["base"]["ref"]
-            for pr in pulls:
-                if pr["number"] == data["source_pr"] or pr["head"]["ref"].startswith("review-fix/"):
-                    continue
-                if pr["base"]["ref"] not in {data["target_branch"], source_base}:
-                    continue
-                files = {x["filename"] for x in paged(f"{self.prefix}/pulls/{pr['number']}/files?per_page=100")}
-                if changed & files:
+            candidates = [pr for pr in pulls if pr["number"] != data["source_pr"]
+                          and not pr["head"]["ref"].startswith("review-fix/")
+                          and pr["base"]["ref"] in {data["target_branch"], source_base}]
+            inventories = self.candidate_files(candidates)
+            for pr in candidates:
+                if changed & inventories[pr["number"]]:
                     self.defer(data, f"overlapping owner work in PR #{pr['number']}")
                     return False
         return True

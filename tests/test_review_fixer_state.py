@@ -38,14 +38,31 @@ class StateTests(unittest.TestCase):
         self.pr = source()
         self.pulls = []
         self.commands = []
+        self.graphql_paths = {}
         self.api_patch = patch.object(m, "api", side_effect=self.api)
         self.api_patch.start(); self.addCleanup(self.api_patch.stop)
-        self.gh_patch = patch.object(m, "gh", side_effect=lambda *args: self.commands.append(args) or "")
+        self.gh_patch = patch.object(m, "gh", side_effect=self.gh)
         self.gh_patch.start(); self.addCleanup(self.gh_patch.stop)
         self.paged_patch = patch.object(m, "paged", side_effect=self.paged)
         self.paged_patch.start(); self.addCleanup(self.paged_patch.stop)
         self.state = m.State()
         self.data, _ = self.state.source(self.issue)
+
+    def gh(self, *args):
+        self.commands.append(args)
+        if args[:2] != ("api", "graphql"):
+            return ""
+        request = json.loads(Path(args[args.index("--input") + 1]).read_text())
+        self.assertEqual(request["variables"], {"owner": "o", "name": "r"})
+        numbers = [int(n) for n in re.findall(r"p_(\d+): pullRequest", request["query"])]
+        self.assertLessEqual(len(numbers), 50)
+        repo = {"nameWithOwner": "o/r"}
+        for n in numbers:
+            paths = self.graphql_paths.get(n, ["file.py"])
+            repo[f"p_{n}"] = {"number": n, "files": {"totalCount": len(paths),
+                               "nodes": [{"path": path} for path in paths[:100]],
+                               "pageInfo": {"hasNextPage": len(paths) > 100}}}
+        return json.dumps({"data": {"repository": repo}})
 
     def api(self, endpoint):
         if endpoint.endswith("/pulls/2"):
@@ -211,11 +228,93 @@ class StateTests(unittest.TestCase):
 
     def test_nul_paths_preserve_newlines_and_quotes(self):
         self.pulls = [{"number": 3, "base": {"ref": "main"}, "head": {"ref": "owner-new-work"}}]
-        original = self.paged
-        def paged(endpoint):
-            return [{"filename": 'odd\n"file.py'}] if "/files?" in endpoint else original(endpoint)
-        with patch.object(m, "paged", side_effect=paged), patch.object(m.subprocess, "check_output", return_value='odd\n"file.py\0'):
+        self.graphql_paths[3] = ['odd\n"file.py']
+        with patch.object(m.subprocess, "check_output", return_value='odd\n"file.py\0'):
             self.assertFalse(self.state.check(self.data, "/unused"))
+
+    def test_multiple_same_filtered_candidates_use_one_batch_and_same_owner(self):
+        self.pulls = [self.pr,
+                      {"number": 3, "base": {"ref": "main"}, "head": {"ref": "owner-first"}},
+                      {"number": 4, "base": {"ref": "owner/work"}, "head": {"ref": "owner-second"}},
+                      {"number": 5, "base": {"ref": "unrelated"}, "head": {"ref": "ignore"}},
+                      {"number": 6, "base": {"ref": "other"}, "head": {"ref": "review-fix/6"}}]
+        self.graphql_paths[3] = ["not-changed.py"]
+        with patch.object(m.subprocess, "check_output", return_value="file.py\0"):
+            self.assertFalse(self.state.check(self.data, "/unused"))
+        queries = [c for c in self.commands if c[:2] == ("api", "graphql")]
+        self.assertEqual(len(queries), 1)
+        self.assertTrue(any("--body" in c and "overlapping owner work in PR #4" in c[c.index("--body") + 1] for c in self.commands))
+        self.assertTrue(any("--add-assignee" in c and "owner" in c for c in self.commands))
+
+    def test_empty_candidates_do_not_query_file_inventory(self):
+        with patch.object(m, "gh", side_effect=AssertionError("empty set needs no query")), patch.object(m, "paged", side_effect=AssertionError("empty set needs no fallback")):
+            self.assertEqual(self.state.candidate_files([]), {})
+
+    def test_batches_never_exceed_fifty_aliases(self):
+        numbers = list(range(1, 103))
+        self.assertEqual(set(self.state.candidate_files([{"number": n} for n in numbers])), set(numbers))
+        self.assertEqual(sum(c[:2] == ("api", "graphql") for c in self.commands), 3)
+
+    def test_only_truncated_candidate_uses_complete_rest_fallback(self):
+        paths = [f"file-{n}.py" for n in range(101)]
+        self.graphql_paths[3] = paths
+        with patch.object(m, "paged", return_value=[{"filename": p} for p in paths]) as fallback:
+            inventory = self.state.candidate_files([{"number": 3}, {"number": 4}])
+        self.assertEqual(inventory, {3: set(paths), 4: {"file.py"}})
+        fallback.assert_called_once_with("repos/o/r/pulls/3/files?per_page=100")
+        self.assertEqual(sum(c[:2] == ("api", "graphql") for c in self.commands), 1)
+
+    def test_truncated_rest_fallback_cannot_hide_missing_or_invalid_files(self):
+        self.graphql_paths[3] = [f"file-{n}.py" for n in range(101)]
+        for rows in ([{"filename": "file.py"}], [{"filename": None}], [{"filename": "../file.py"}], None):
+            with patch.object(m, "paged", return_value=rows), self.assertRaises(ValueError):
+                self.state.candidate_files([{"number": 3}])
+
+    def test_batch_query_input_is_protected_and_removed_after_api_error(self):
+        captured = []
+        def fail(*args):
+            path = Path(args[args.index("--input") + 1]); captured.append(path)
+            self.assertTrue(path.is_file())
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o077, 0)
+            raise subprocess.CalledProcessError(1, "gh")
+        with patch.object(m, "gh", side_effect=fail), self.assertRaises(subprocess.CalledProcessError):
+            self.state.candidate_files([{"number": 3}])
+        self.assertFalse(captured[0].exists())
+
+    def test_invalid_candidate_alias_numbers_refuse_before_query(self):
+        for candidates in ([{"number": True}], [{"number": -1}], [{"number": "3}"}], [{"number": 2147483648}], [{"number": 3}, {"number": 3}]):
+            with patch.object(m, "gh", side_effect=AssertionError("invalid alias must not query")), self.assertRaises(ValueError):
+                self.state.candidate_files(candidates)
+
+    def test_malformed_or_partial_graphql_inventory_never_clears_collision(self):
+        valid = {"data": {"repository": {"nameWithOwner": "o/r", "p_3": {"number": 3, "files": {
+            "totalCount": 1, "nodes": [{"path": "file.py"}], "pageInfo": {"hasNextPage": False}}}}}}
+        bad = [None, {}, {"errors": [{"message": "denied"}], "data": valid["data"]},
+               {"errors": None, "data": valid["data"]}, {"data": None}, {"data": {"repository": None}}]
+        for route, value in ((["nameWithOwner"], "foreign/r"), (["p_3"], None), (["p_3", "number"], 4),
+                             (["p_3", "number"], True), (["p_3", "files"], None),
+                             (["p_3", "files", "totalCount"], True), (["p_3", "files", "totalCount"], -1),
+                             (["p_3", "files", "nodes"], None), (["p_3", "files", "nodes"], [None]),
+                             (["p_3", "files", "nodes"], [{"path": None}]),
+                             (["p_3", "files", "nodes"], [{"path": ""}]),
+                             (["p_3", "files", "nodes"], [{"path": "bad\0path"}]),
+                             (["p_3", "files", "nodes"], [{"path": "/file.py"}]),
+                             (["p_3", "files", "nodes"], [{"path": "../file.py"}]),
+                             (["p_3", "files", "nodes"], [{"path": "a/../file.py"}]),
+                             (["p_3", "files", "nodes"], [{"path": "a//file.py"}]),
+                             (["p_3", "files", "pageInfo"], None),
+                             (["p_3", "files", "pageInfo", "hasNextPage"], 0),
+                             (["p_3", "files", "pageInfo", "hasNextPage"], True),
+                             (["p_3", "files", "totalCount"], 2)):
+            response = copy.deepcopy(valid); obj = response["data"]["repository"]
+            for key in route[:-1]: obj = obj[key]
+            obj[route[-1]] = value; bad.append(response)
+        self.pulls = [{"number": 3, "base": {"ref": "main"}, "head": {"ref": "other-work"}}]
+        for response in bad:
+            with self.subTest(response=response), patch.object(m, "gh", return_value=json.dumps(response)), patch.object(m.subprocess, "check_output", return_value="file.py\0"), self.assertRaises(ValueError):
+                self.state.check(self.data, "/unused")
+        self.assertFalse(self.deferred())
 
     def test_unrelated_target_work_does_not_collide(self):
         self.pulls = [{"number": 3, "base": {"ref": "unrelated"}, "head": {"ref": "other-work"}}]
