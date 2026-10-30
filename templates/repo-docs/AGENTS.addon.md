@@ -9,12 +9,12 @@
 This repo is onboarded to the AI DevOps staged workflow. When you act as the
 **planning**, **implementation**, or **testing** agent (GPT-5.6 / Codex, medium reasoning):
 
-- Work only from an **approved plan**. If there is no approved plan, write one and get an assigned AI reviewer's APPROVE.
+- Work only from an **approved plan**. If there is no approved plan, write one and record it on the tracking issue.
 - Make the **smallest safe change**. Do not refactor unrelated code.
 - Always **add or update tests** for behavior you change.
 - Never commit secrets. Never weaken auth or permission checks.
 - Never force-push, never delete branches, never merge to `main`/`master`
-  without an assigned AI reviewer's APPROVE (never a human approval request).
+  without a recorded, recoverable reason (never a human approval request).
 - Run on a **feature branch**, never directly on `main`/`master`.
 - When done, summarize files changed, tests added, and any plan deviations.
 
@@ -26,6 +26,5 @@ Useful commands (from the toolkit):
 - `ai-workspace-status` — check branch/dirty/PR safety before you start.
 - `ai-codex-review diff-review` — second-opinion review of the current diff.
 
-An *assigned AI reviewer* is a rotation reviewer run through `ai-review` (or the
-shared-db allocator) whose engine differs from the implementing session's; the
-implementing session never approves its own change.
+AI review is advice only (owner ruling 2026-10-29): CI runs one advisory
+reviewer per PR and never blocks a merge; nothing waits on a reviewer.

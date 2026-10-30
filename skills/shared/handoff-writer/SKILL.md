@@ -224,7 +224,7 @@ session; those are not symmetric, so err long.
 0. **⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below.
    **Mandatory, goes FIRST, and is a consolidation of every business-meaning owner
    decision in the document.** Technical approvals never go here (owner ruling
-   2026-09-28: never ask a human to approve) — they go to an assigned AI reviewer.
+   2026-09-28: never ask a human to approve) — they are handled by the AI itself.
 1. **What this application is** — plain English: what it does, who uses it, why.
    Repos, stack, where it runs (URLs, hosts).
 2. **What we set out to do this session, and why** — goal in business terms + the
@@ -251,7 +251,7 @@ session; those are not symmetric, so err long.
 
 **Scope (owner ruling 2026-09-28, verbatim: "never ask a human to approve").**
 Only business-meaning questions belong here. Any technical approval, access,
-sign-in, key, or manual step is done by the AI, gated by an assigned AI reviewer,
+sign-in, key, or manual step is done by the AI, checked by the AI itself,
 or listed as `Blocked —`; it is never an ask for Albert.
 
 **Why this exists.** A handoff is written for the *worker*, so owner decisions
@@ -281,11 +281,11 @@ operationally, AND is listed here. **The duplication is the point.** Include:
 - Choices where a wrong guess is recoverable but rework is wasteful.
 - **Anything you learned that needs a business-meaning judgement from the owner,
   even if it is OUTSIDE this workstream** (a technical item such as a bug, stale
-  ticket, open marker, or security exposure instead gets a tracked issue, an
-  assigned AI reviewer, or a `Blocked —` line — never an ask to Albert). **This is the category that goes missing.** "Not my scope"
+  ticket, open marker, or security exposure instead gets a tracked issue, the
+  AI's own fix, or a `Blocked —` line — never an ask to Albert). **This is the category that goes missing.** "Not my scope"
   is exactly why it has been ignored by five sessions already.
 - Anything a sub-agent surfaced that needs a business ruling. That is an **ask**,
-  not a finding — promote it. A technical ruling goes to an assigned AI reviewer.
+  not a finding — promote it. A technical ruling is handled by the AI itself.
 
 ### How to write it
 
@@ -307,7 +307,7 @@ operationally, AND is listed here. **The duplication is the point.** Include:
 
 Before you finish, **re-read your own handoff end to end and extract every sentence that needs the
 owner**, then classify it: a business-meaning question goes in §0; a technical
-approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+approval, access, key, or manual step is handled by the AI itself, a tracked
 issue, or `Blocked —`, never to Albert. Search for the tells: `⛔`, "approve", "owner",
 "decide", "waiting on", "needs a ruling", "unanswered", "nobody has", the owner's
 name. Anything you find anywhere in §1–§9 or part (b) **must also appear in §0**.
@@ -423,7 +423,7 @@ now**. If that is true, the answer is Yes — say it.
   §0 as well.
 - **Recording something that needs the owner's ruling as a "finding" because it is
   out of scope.** Out-of-scope findings are precisely the ones that have already
-  been ignored by several sessions. A finding that needs a business ruling is an ask; a technical one goes to an assigned AI reviewer.
+  been ignored by several sessions. A finding that needs a business ruling is an ask; a technical one is handled by the AI itself.
 - **Making the owner ask "will the next session actually raise all of these?"**
   If he has to ask, §0 was missing or the sweep was skipped. That question is the
   alarm, not the process.

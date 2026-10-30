@@ -499,9 +499,9 @@ owner: claude/fixture-$n
         foreach ($required in @(
             "Start immediately",
             "Never ask a human to approve",
-            "assigned AI reviewer's explicit APPROVE",
+            "AI review is advice",
             "no human approval is ever requested",
-            "waits for an assigned AI reviewer's APPROVE of the rotation plan",
+            "never blocks",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",

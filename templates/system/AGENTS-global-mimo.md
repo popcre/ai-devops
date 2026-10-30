@@ -64,8 +64,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work. **Never ask a human to approve:**
-  ask Albert only a genuine business-meaning question; assigned AI reviewers
-  gate technical actions. Authority the AI cannot obtain itself (a platform
+  ask Albert only a genuine business-meaning question; AI review is advice
+  only and never blocks. Authority the AI cannot obtain itself (a platform
   limit) is reported `Blocked —`, never worked around. (rulings:
   docs/owner-rulings.md)
 - **Never ask Albert to type, click, or create a credential.** If a
@@ -120,37 +120,29 @@ rulings, verbatim: `docs/owner-rulings.md`.
   from a UTC log line, and never quote a time later than now.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself; only a `popcre/shared-db` credential waits for an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), and no rotation happens for a credential under a standing
+  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself; no rotation happens for a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production:** read-only by default; no human approval is ever requested.
-  In `popcre/shared-db` the assigned AI reviewer's explicit APPROVE on the exact inputs gates every
-  technical production action; elsewhere no review is required (owner ruling 2026-10-15: outside `popcre/shared-db` no AI reviewer APPROVE is required). Database writes skip that APPROVE but keep every other gate. Before production or database work, read
-  `docs/standing-rules-details.md`. (rulings: docs/owner-rulings.md)
-  The sole narrow exception is `shared-db`'s activated automatic migration promotion workflow,
-  which re-proves the one open structural work issue or stops for an engineer;
-  this exception authorizes no manual production command or bypass.
+  No review approval gates it (owner ruling 2026-10-29). Before production or
+  database work, read `docs/standing-rules-details.md`. Shared-db migrations
+  reach production only through its automatic promotion workflow (preview
+  rehearsal, tests, no open `review-finding` issue); no manual production
+  command or bypass. (rulings: docs/owner-rulings.md)
 - **Shared database:** every STRUCTURE change, and every outside bulk load into
   curated Master Data, is authored first in `popcre/shared-db` (claim-first,
   minimum scope). Before any shared-db work, load `shared-db-change`.
 - **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on
   <machine>`, where `<id>` is `$MIMO_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
-- **Reviews:** required only in `popcre/shared-db` (owner ruling
-  2026-10-15); no other repository waits for a review. There, pick an
-  in-rotation reviewer of a different engine via `ai-review`; first read
-  `docs/reviewer-rotation-rules.md`.
-- **Observation week** (while the window file is live, #1948): send reviews
-  with `--detach` and read them with `ai-review outcome`. Never retry a
-  reviewer that failed or was reported skipped this session. When
-  `ai-task-gates check --before ship` prints `MERGE-UNREVIEWED`, merge on green
-  CI, add label `unreviewed-week`, and continue. Shared-db, production,
-  infrastructure and deployment still wait for an exact-head APPROVE. No
-  reviewer-repair PRs or toolkit installs; log failures with
-  `ai-reviewer-issue`. Allowed operations: `plan_reviewer-observation-week.md` §11.
+- **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
+  advisory AI review per code or plan PR and never blocks a merge; findings
+  become `review-finding` issues that an automatic fixer handles. Never wait
+  on, request, or gate on a review; second opinions stay optional.
+  Reviews are preferred but never required (owner ruling 2026-10-29 night).
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in
   their approved private repository.

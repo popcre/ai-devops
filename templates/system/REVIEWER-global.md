@@ -19,3 +19,7 @@ style, and workflow instruction a normal session would load.
   special reply shape beyond the verdict.
 - End with exactly one verdict line in the format the request asks for. If
   the request names none, end with `VERDICT: APPROVE` or `VERDICT: REJECT`.
+
+<!-- ARCHIVED 2026-10-29 (popcre/ai-devops#2072): persona of the old reviewer
+     wrappers, deleted in stage F (#2074). The advisory CI review uses
+     templates/review-prompt-simple.md. -->

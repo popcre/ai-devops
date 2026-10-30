@@ -1,5 +1,9 @@
 # Reviewer rotation rules
 
+> **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory
+> review model in [`plan_skinny-review.md`](../plan_skinny-review.md) (owner ruling
+> 2026-10-29: review is advice only). Kept as history; do not follow.
+
 **Scope (owner ruling 2026-10-15):** review is required only in
 `popcre/shared-db`. These rules govern that rotation and any review requested
 by name elsewhere; nothing outside shared-db waits for a review.

@@ -654,7 +654,7 @@ Do not be afraid to propose deletion.
 
 It is usually reversible.
 
-But do not delete significant directories without a recoverable backup and an assigned AI reviewer's APPROVE.
+But do not delete significant directories without a recoverable backup recorded on the tracking issue.
 
 ### Step 3: Create AI ignore files
 

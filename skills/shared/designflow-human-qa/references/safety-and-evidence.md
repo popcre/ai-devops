@@ -6,7 +6,7 @@
 - Albert confirmed on 2026-08-15 that alsand does not write to the shared
   production database. This supersedes stale repository text stating otherwise.
 - Treat `https://designflow.app` and other production endpoints as read-only
-  unless an assigned AI reviewer APPROVEs the exact mutation; never ask Albert
+  except for the recoverable, task-required exact mutation; never ask Albert
   to approve it (owner ruling 2026-09-28).
 - Stop if the browser unexpectedly changes from the approved host to production.
 

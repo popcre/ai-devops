@@ -50,7 +50,7 @@ diagnose the failure first.
 - If the reviewer exited 92 or printed `OUT OF CREDIT:`, tell Albert in the same
   reply which provider needs credits and where, quoting that line, then rotate
   to another reviewer. It is an account balance problem, not a wrapper defect;
-  do not retry that provider. See `docs/reviewer-rotation-rules.md` rule 10.
+  do not retry that provider.
 - Do not make Albert type command options or repeat the error.
 - Never record a problem without naming the computer it happened on.
 - Do not reduce the details to one sentence.

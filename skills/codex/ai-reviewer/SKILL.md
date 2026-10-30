@@ -1,7 +1,6 @@
 ---
 name: ai-reviewer
 description: >-
-  Approval-gate wrapper (maintained). Not a rotation reviewer.
   Run a read-only Codex second-opinion review (plan, diff, security, visual, or
   final-check) on the current git repo and save the result under .ai/reviews/.
   Use when the user wants Codex to independently review work without changing any
@@ -58,6 +57,6 @@ Each run:
 
 ## Relationship to the pipeline
 
-This skill covers the Opus/Codex review gates (Stages 02, 04, 06, plus visual and
+This skill covers the advisory Opus/Codex review stages (02, 04, 06, plus visual and
 final checks) of the `ai-development-pipeline` skill, but as an independent Codex
 opinion rather than the primary Opus review.

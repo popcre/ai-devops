@@ -1,5 +1,9 @@
 # Implementation plan — reviewer observation week (fast-fail, skip, non-blocking reviews)
 
+> **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory
+> review model in [`plan_skinny-review.md`](plan_skinny-review.md) (owner ruling
+> 2026-10-29: review is advice only). Kept as history; do not follow.
+
 ## STATUS — read first; do not re-derive
 
 > **Superseded 2026-10-29** by [plan_simple-reviewer-rebuild.md](plan_simple-reviewer-rebuild.md) (#2041). Steps 8 (report: [docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md)) done; freeze lift moves to the new plan step 4.

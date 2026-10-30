@@ -1,13 +1,13 @@
 ---
 name: ask-glm
-description: "Rotation reviewer (GLM-5.3); never reviews GLM-orchestrated (ZCode) work. Analysis, review, debate, second opinion, or scoped implementation through `ai-glm`. Use for \"ask GLM\", \"run this by GLM\", \"get GLM's opinion\", GLM-5.3, or delegating repository work to GLM."
+description: "GLM-5.3 second opinion; never reviews GLM-orchestrated (ZCode) work. Analysis, review, debate, second opinion, or scoped implementation through `ai-glm`. Use for \"ask GLM\", \"run this by GLM\", \"get GLM's opinion\", GLM-5.3, or delegating repository work to GLM."
 ---
 
 # Ask GLM
 
-**GLM is in reviewer rotation** (owner instruction 2026-09-30; `registered` in
-`config/reviewer-registry.json`, `glm-5.3` active in shared-db `ACTIVE_REVIEWERS`).
-The 2026-09-17 independence ruling still binds: GLM never reviews GLM-orchestrated
+**GLM is one of the four reviewers CI's advisory `ai-review` check rotates
+through** (owner ruling 2026-10-29: review is advice only and gates nothing).
+Use this skill for second opinions, debates and delegated work. The 2026-09-17 independence ruling still binds: GLM never reviews GLM-orchestrated
 (ZCode) work.
 
 GLM runs in **named, persistent sessions** hosted by a local OpenCode server. A session

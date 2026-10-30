@@ -37,7 +37,8 @@ required_phrases=(
   "resume that agent immediately"
   "quote Albert's exact words"
   "no human approval is ever requested"
-  "assigned AI reviewer's explicit APPROVE"
+  "AI review is advice"
+  "never blocks"
   "Live proof is required before an outcome is closed"
   "One issue per application need"
   "Quote every time in EST"
@@ -70,22 +71,23 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
 done
 
 # Owner ruling 2026-09-28 ("never ask a human to approve"): the repository
-# guide, the secrets skill, and the details doc must keep the AI-reviewer gate
-# and must not return to asking Albert to approve.
+# guide, the secrets skill, and the details doc must not return to asking Albert
+# to approve. Owner ruling 2026-10-29 (#2041/#2072): review is advice only, so
+# no reviewer-approval gate may come back either.
 AGENTS_MD="$REPO_ROOT/AGENTS.md"
 SECRETS_SKILL="$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md"
 DETAILS="$REPO_ROOT/docs/standing-rules-details.md"
-grep -qF "assigned AI reviewer's explicit APPROVE" "$AGENTS_MD" \
-  || fail "AGENTS.md lost the assigned AI reviewer production gate"
+grep -qF "AI review is advice only" "$AGENTS_MD" \
+  || fail "AGENTS.md lost the advisory-review rule"
 ! grep -qF "without Albert naming" "$AGENTS_MD" \
   || fail "AGENTS.md returned to requiring Albert to name production actions"
-grep -qF "assigned AI reviewer's APPROVE of the" "$SECRETS_SKILL" \
-  || fail "secrets-to-1password lost the reviewed rotation plan"
+grep -qF "record a rotation plan on the tracking issue" "$SECRETS_SKILL" \
+  || fail "secrets-to-1password lost the recorded rotation plan"
 ! grep -qF "without Albert's approval" "$SECRETS_SKILL" \
   || fail "secrets-to-1password returned to requiring Albert's approval"
 grep -qF "hetzner_vps" "$SECRETS_SKILL" || fail "secrets-to-1password lost the standing no-rotation exception"
-grep -qF "An **assigned AI reviewer** is" "$DETAILS" \
-  || fail "standing-rules-details lost the assigned AI reviewer definition"
+grep -qF "supersedes every reviewer-approval rule" "$DETAILS" \
+  || fail "standing-rules-details lost the 2026-10-29 advisory-review ruling"
 
 for never_ask in \
   "$REPO_ROOT/skills/claude/new-app-setup/NEW-PROJECT-STANDARD.md" \
@@ -111,12 +113,12 @@ for never_ask in \
 done
 
 for addon in "$REPO_ROOT/templates/repo-docs/AGENTS.addon.md" "$REPO_ROOT/templates/repo-docs/docs-ai-branching.md"; do
-  grep -qF "An *assigned AI reviewer* is" "$addon" || fail "$(basename "$addon") lost the assigned AI reviewer definition"
+  grep -qF "AI review is advice only" "$addon" || fail "$(basename "$addon") lost the advisory-review rule"
 done
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
-  grep -qF "waits for an assigned AI reviewer's APPROVE of the rotation plan" "$client_file" \
-    || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
+  ! grep -qiEz "assigned[[:space:]]+AI[[:space:]]+reviewer|exact-head[[:space:]]+APPROVE|reviewer-rotation-rules" "$client_file" \
+    || fail "$(basename "$client_file") brought back a reviewer gate (owner ruling 2026-10-29)"
 done
 
 for sync_skill in "$REPO_ROOT/skills/claude/sync-dotfiles/SKILL.md" "$REPO_ROOT/skills/codex/codex-sync-dotfiles/SKILL.md"; do

@@ -249,7 +249,7 @@ Group by consequence, not topic:
 - NOT PART OF THIS WORK, AND NOBODY IS ON IT — anything you learned that needs
   a business ruling even though it is out of scope. THIS IS THE CATEGORY THAT
   GOES MISSING, because "not my scope" is exactly why five sessions already
-  skipped it. A technical finding goes to an assigned AI reviewer or a tracked
+  skipped it. A technical finding is handled by the AI itself or a tracked
   issue, never to Albert.
 
 Also list "Already settled — do NOT re-ask", with dates.
@@ -261,7 +261,7 @@ not one at a time as each is tripped over.
 
 THE SWEEP: before finishing, re-read the whole handoff and extract every sentence
 needing the owner, then classify it: business meaning goes in §0; a technical
-approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+approval, access, key, or manual step is handled by the AI itself, a tracked
 issue, or `Blocked —`, never to Albert. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
 ruling", "unanswered", "nobody has", his name. Anything found in §1–§9 or part (b)
 MUST also appear here. If there are genuinely none, write "None" explicitly — an
