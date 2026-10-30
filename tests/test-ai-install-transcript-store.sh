@@ -3,6 +3,8 @@
 # (plan_transcript-store.md step 7). Stubs systemctl, op and python; no real
 # key, transcript or ScaleDown call is ever touched.
 set -u
+# The Bash path is Linux-only: the product SKIPs elsewhere (ai-install-transcript-store:29).
+[ "$(uname -s)" = Linux ] || { echo "SKIP: transcript store installer is Linux-only"; exit 0; }
 PASS=0; FAIL=0
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib-test-harness.sh"

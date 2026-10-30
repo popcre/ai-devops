@@ -2,6 +2,8 @@
 # Offline suite for bin/ai-transcript-upload (plan_transcript-store.md step 1).
 # Synthetic fixtures only; never touches the real Dropbox or systemd.
 set -u
+# On Windows the tool hands off to ai-transcript-upload.ps1; this suite covers the Bash path.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "SKIP: Windows uses the PowerShell twin"; exit 0;; esac
 PASS=0; FAIL=0
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib-test-harness.sh"
