@@ -311,4 +311,21 @@ rc8=0; run sync 2> "$TMP/out8" || rc8=$?
 check 'repository symlinks refused' "[ $rc8 -ne 0 ] && grep -q 'symbolic links' '$TMP/out8' && [ ! -e '$TMP/outside' ]"
 check 'program is executable in git' "[ \"\$(git -C '$ROOT' ls-files -s bin/ai-reviewer-logs-sync | cut -c1-6)\" = 100755 ]"
 
+# unschedule removes the scheduled command line, not only its marker comment,
+# including an orphan line an older unschedule left behind (#2073).
+mkdir -p "$TMP/cronbin"
+cat > "$TMP/cronbin/crontab" <<CRON
+#!/usr/bin/env bash
+if [ "\${1:-}" = -l ]; then cat "$TMP/crontab.txt" 2>/dev/null; else cp "\$1" "$TMP/crontab.txt"; fi
+CRON
+chmod +x "$TMP/cronbin/crontab"
+printf '%s\n' '0 9 * * 1 keep-me' \
+  "# ai-devops ai-reviewer-logs-sync (managed by ai-reviewer-logs-sync schedule; unschedule removes)" \
+  "0 */1 * * *  '/x/bin/ai-reviewer-logs-sync' 'sync' >> '/h/cron.log' 2>&1" \
+  "0 */1 * * *  '/old/bin/ai-reviewer-logs-sync' 'sync' >> '/h/cron.log' 2>&1" > "$TMP/crontab.txt"
+if ! command -v schtasks.exe >/dev/null 2>&1; then
+  PATH="$TMP/cronbin:$PATH" "$ROOT/bin/ai-reviewer-logs-sync" unschedule >/dev/null 2>&1
+  check 'unschedule removes marker and command lines, keeps others' "absent grep -q 'ai-reviewer-logs-sync' '$TMP/crontab.txt' && grep -qx '0 9 \* \* 1 keep-me' '$TMP/crontab.txt'"
+fi
+
 printf 'PASS test-ai-reviewer-logs-sync (%s checks)\n' "$pass"
