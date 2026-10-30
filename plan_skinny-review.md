@@ -6,17 +6,17 @@
 
 ## STATUS (read first; do not re-derive)
 
-| Stage | Child issue | State (2026-10-29) | Evidence |
+| Stage | Child issue | State (2026-10-30) | Evidence |
 |---|---|---|---|
 | 0 Rulings and evidence | — | ✅ done | `docs/owner-rulings.md` (three 2026-10-29 entries); `docs/reviewer-observation-week-2026-10-22.md`; `docs/review-value-by-repo-vs-work-2026-10-29.md`; `docs/reviewer-enforcement-inventory-2026-10-29.md` |
 | 1 Base review script and workflow | — | ✅ merged | PR #2044 merge commit on main; live run 40911611071 |
-| A Advisory, one rotating reviewer, docs skip, findings issue, auto-fixer | #2070 | 🟡 PR #2058 open, CI green, not merged, not live-proven | PR #2058 |
-| B Remove APPROVE requirements from `ai-task-gates` and installers | #2071 | 🟡 PR #2057 open, CI failing (`windows-offline-section (3)`) | PR #2057 |
+| A Advisory, one rotating reviewer, docs skip, findings issue, auto-fixer | #2070 | ✅ done (2026-10-30) | PR #2058 (ec3432d2), #2089 (e421e28b); live proof https://github.com/popcre/ai-devops/issues/2070#issuecomment-6515908853 |
+| B Remove APPROVE requirements from `ai-task-gates` and installers | #2071 | ✅ done (2026-10-29) | PR #2057 (87cd2905); 5-host proof https://github.com/popcre/ai-devops/issues/2071#issuecomment-6510582588 |
 | C shared-db merge gate off | — | ✅ done | popcre/shared-db PR #5055 merged (06220e0); proof PR shared-db#5057 merged with no verdict |
-| D Instructions, globals and skills rewritten | #2072 | ⬜ open | — |
-| E Installer stages, scheduled jobs, freeze window removed | #2073 | ⬜ open | — |
-| F Delete old reviewer code and data | #2074 | ⬜ open | — |
-| G Advisory review in other repos + automatic production promotion in shared-db | #2075 | ⬜ open | — |
+| D Instructions, globals and skills rewritten | #2072 | ✅ done (2026-10-30) | PR #2085 (9170814b), ruling #2104 (5bf5ec01); 5-host proof https://github.com/popcre/ai-devops/issues/2072#issuecomment-6513481440 |
+| E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
+| F Delete old reviewer code and data | #2074 | 🟡 in progress | PR #2112 (d55ba665) merged; PR #2113 open |
+| G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
 
 **A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
 
