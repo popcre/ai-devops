@@ -167,6 +167,14 @@ check "local doctor timeout cannot prove readiness" "AI_REVIEW_DOCTOR_PROBE_TIME
 check "restored local executable recovers without a stale quarantine" "$SCRIPT status codex | jq -e '.usable==true' && test ! -f '$AI_REVIEW_QUARANTINE_DIR/codex.json'"
 for local_provider in stepfun muse; do
   if [ "$local_provider" = muse ]; then wrapper_var=AI_REVIEW_MUSE_WRAPPER; else wrapper_var=AI_REVIEW_STEPFUN_WRAPPER; fi
+  # These cases test the local doctor, not engine presence: give StepFun an
+  # engine so a Windows host without OpenCode reaches the doctor (engine
+  # absence keeps its own unsupported-platform checks below).
+  if [ "$local_provider" = stepfun ]; then export AI_STEPFUN_OPENCODE="$TMP/bin/good"; else unset AI_STEPFUN_OPENCODE; fi
+  # These cases test the local doctor, not engine presence: give StepFun an
+  # engine so a Windows host without OpenCode reaches the doctor (engine
+  # absence has its own unsupported-platform checks below).
+  [ "$local_provider" = muse ] || export AI_STEPFUN_OPENCODE="$TMP/bin/good"
   check "$local_provider nonzero local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-failed' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
   check "$local_provider empty local doctor refuses allocation" "env $wrapper_var='$TMP/bin/local-empty' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"
   check "$local_provider bounded local doctor refuses timeout" "env AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 $wrapper_var='$TMP/bin/local-slow' $SCRIPT status $local_provider | jq -e '.usable==false and .failure_class==\"local-doctor-failed\"'"

@@ -549,6 +549,14 @@ source_is_private() { # source_is_private ROOT; 0 private, 1 public, 2 unknown
   fi
   # Only a definite answer is filed; a failed store only loses the reuse.
   if [ -n "$verdict" ] && [ -n "$inputs" ] && [ -s "$inputs" ]; then
+    # Native Windows Python cannot open MSYS paths (/tmp/..., /c/...): every
+    # input would digest as "absent" and a changed input would go unseen.
+    # Store the Windows spelling so reuse proves each input truly unchanged.
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -w -f "$inputs" > "$inputs.w" 2>/dev/null && mv -f "$inputs.w" "$inputs" || { rm -f "$inputs.w"; : > "$inputs"; }
+    fi
+  fi
+  if [ -n "$verdict" ] && [ -n "$inputs" ] && [ -s "$inputs" ]; then
     "$python" -c "$PRIVACY_VERDICT_PY" store "$scope" "$root" "$gates_bin" "$key" "$verdict" "$paths" "$inputs" </dev/null || true
   fi
   rm -f "$paths" ${inputs:+"$inputs"}
