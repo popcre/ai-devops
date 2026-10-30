@@ -609,12 +609,12 @@ function Install-PostMergeHook {
     }
     $tool = (Join-Path $Root 'bin\ai-install-post-merge-hook') -replace '\\', '/'
     $exitCode = Invoke-BashGate -Bash $Bash -CommandText "'$tool'"
-    if ($exitCode -eq 0 -and ($script:LastBashGateOutput -match 'leaving foreign post-merge hook untouched')) {
-        Write-Note "A foreign post-merge hook was preserved; reviewer auto-requalification hook NOT installed."
-    } elseif ($exitCode -eq 0) {
-        Write-Note "Installed post-merge reviewer auto-requalification hook."
+    # The reviewer post-merge hook is retired (#2073): the tool removes our
+    # owned copy and keeps the installed-checkout main guard.
+    if ($exitCode -eq 0) {
+        Write-Note "Managed git hooks refreshed; the retired reviewer post-merge hook is removed."
     } else {
-        Write-Note "Installing the post-merge reviewer hook failed (exit $exitCode); see the output above."
+        Write-Note "Refreshing the managed git hooks failed (exit $exitCode); see the output above."
     }
 }
 
@@ -1311,26 +1311,33 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so the blocker watch was not scheduled. Install Git for Windows and rerun this script."
 }
 
-# The shared-db reviewer start watch runs on ONE machine (run_on_host in
-# config/reviewer-start-watch.json): the one with the reviewer wrappers, because
-# drawing a replacement reviewer needs ai-review-preflight. Other machines skip it.
-Write-Step "Scheduling the reviewer start watch"
-$rswHost = $null
-try { $rswHost = (Get-Content -Raw (Join-Path $RepoPath 'config\reviewer-start-watch.json') | ConvertFrom-Json).run_on_host } catch { }
+# Retired reviewer jobs (#2073, skinny review): the shared-db reviewer start
+# watch and the hourly reviewer-logs sync are unscheduled on every computer,
+# and the observation-week freeze window file is deleted by this normal run.
+Write-Step "Retiring reviewer scheduled jobs and the freeze window"
 if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
-    Write-Note "Test mode: not touching this computer's scheduled tasks."
-} elseif (-not $rswHost -or $rswHost -ne $env:COMPUTERNAME) {
-    Write-Note "Reviewer start watch runs on $rswHost, not this computer; skipped."
+    Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer jobs)."
 } elseif ($bwBash) {
-    $rswTool = (Join-Path $RepoPath 'bin\ai-reviewer-start-watch') -replace '\\', '/'
-    $rswProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$rswTool' schedule")
-    if ($rswProbe.ExitCode -eq 0) {
-        Write-Note "Reviewer start watch scheduled. Shared-db reviewers that never start are now rerouted from this computer."
-    } else {
-        Write-Note "Could not schedule the reviewer start watch: $($rswProbe.Output -join ' ')"
+    foreach ($retired in @('ai-reviewer-start-watch', 'ai-reviewer-logs-sync')) {
+        $retiredTool = (Join-Path $RepoPath "bin\$retired") -replace '\\', '/'
+        if ($retiredTool.Contains("'")) { throw "Repository path contains a quote; cannot unschedule $retired safely: $retiredTool" }
+        $retiredProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$retiredTool' unschedule")
+        if ($retiredProbe.ExitCode -eq 0) {
+            Write-Note "Unscheduled the retired $retired job."
+        } else {
+            Write-Warning "Could not unschedule the retired ${retired}: $($retiredProbe.Output -join ' ')"
+        }
     }
 } else {
-    Write-Note "Git Bash not found, so the reviewer start watch was not scheduled. Install Git for Windows and rerun this script."
+    Write-Note "Git Bash not found, so retired reviewer jobs were not unscheduled. Install Git for Windows and rerun this script."
+}
+$observationWindow = $null
+if ($env:ProgramData) { $observationWindow = Join-Path $env:ProgramData 'ai-devops\observation-week.json' }
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching the observation-week window file."
+} elseif ($observationWindow -and (Test-Path -LiteralPath $observationWindow)) {
+    Remove-Item -LiteralPath $observationWindow -Force
+    Write-Note "Deleted the retired observation-week window file."
 }
 
 # Scheduled retirement of merged shared-db worktrees (same shape as above).
@@ -1372,25 +1379,6 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     }
 } else {
     Write-Note "Git Bash not found, so local-watch was not scheduled. Install Git for Windows and rerun this script."
-}
-
-# Every machine sends its complete reviewer logs to the private fleet
-# repository hourly, so one session can see all machines' reviewer evidence.
-if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
-    Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer-logs sync)."
-} elseif ($bwBash) {
-    $rlTool = (Join-Path $RepoPath 'bin\ai-reviewer-logs-sync') -replace '\\', '/'
-    # The path is single-quoted for bash; a path containing a quote is refused
-    # rather than spliced into shell text.
-    if ($rlTool.Contains("'")) { throw "Repository path contains a quote; cannot schedule the reviewer-logs sync safely: $rlTool" }
-    $rlProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$rlTool' schedule")
-    if ($rlProbe.ExitCode -eq 0) {
-        Write-Note "Reviewer logs now sync hourly to the private fleet repository."
-    } else {
-        Write-Warning "Could not schedule the reviewer-logs sync: $($rlProbe.Output -join ' ')"
-    }
-} else {
-    Write-Note "Git Bash not found, so the reviewer-logs sync was not scheduled. Install Git for Windows and rerun this script."
 }
 
 Write-Step "Checking optional logins"

@@ -53,13 +53,17 @@ GITREPO="$TMP/git-repo"
 git init -q -b main "$GITREPO"
 git -C "$GITREPO" config user.email t@e.c; git -C "$GITREPO" config user.name t
 printf 'x\n' > "$GITREPO/x"; git -C "$GITREPO" add x; git -C "$GITREPO" commit -qm one
-"$ROOT/bin/ai-install-post-merge-hook" --repo "$GITREPO"
-[ -x "$GITREPO/.git/hooks/post-merge" ] || { echo 'FAIL: hook installer did not place the hook'; exit 1; }
+plant_hook(){ mkdir -p "$GITREPO/.git/hooks"; cp "$ROOT/hooks/post-merge" "$GITREPO/.git/hooks/post-merge"; chmod +x "$GITREPO/.git/hooks/post-merge"; }
+# The hook is retired (#2073): the installer now removes an owned copy.
+plant_hook
+"$ROOT/bin/ai-install-post-merge-hook" --repo "$GITREPO" >/dev/null
+[ ! -e "$GITREPO/.git/hooks/post-merge" ] || { echo 'FAIL: hook installer did not retire the owned hook'; exit 1; }
+plant_hook
 bash "$ROOT/uninstall.sh" --dry-run --repo-root "$GITREPO" --config-dir "$ETC2" --bin-target "$BIN" --archive-root "$ARCH" >/dev/null
 [ -e "$GITREPO/.git/hooks/post-merge" ] || { echo 'FAIL: dry run removed the managed hook'; exit 1; }
 bash "$ROOT/uninstall.sh" --repo-root "$GITREPO" --config-dir "$ETC2" --bin-target "$BIN" --archive-root "$ARCH" >/dev/null
 [ ! -e "$GITREPO/.git/hooks/post-merge" ] || { echo 'FAIL: minimal did not remove the owned hook'; exit 1; }
-"$ROOT/bin/ai-install-post-merge-hook" --repo "$GITREPO"
+plant_hook
 printf '\n# drifted\n' >> "$GITREPO/.git/hooks/post-merge"
 bash "$ROOT/uninstall.sh" --repo-root "$GITREPO" --config-dir "$ETC2" --bin-target "$BIN" --archive-root "$ARCH" >/dev/null
 [ -e "$GITREPO/.git/hooks/post-merge" ] || { echo 'FAIL: uninstall removed a drifted managed hook'; exit 1; }

@@ -408,6 +408,8 @@ restore_reviewer_hook() {
     current_mode="$(stat -c %a "$HOOK_TARGET")"
     [ "$prior_mode" = "$current_mode" ]
   elif $SUDO test -f "$BACKUP_DIR/post-merge.managed"; then
+    # The retired hook (#2073) is removed by this run; rollback puts it back.
+    [ -e "$HOOK_TARGET" ] || { $SUDO cp -p "$BACKUP_DIR/post-merge" "$HOOK_TARGET"; return; }
     [ -f "$HOOK_TARGET" ] || return 1
     if $SUDO cmp -s "$BACKUP_DIR/post-merge" "$HOOK_TARGET"; then
       prior_mode="$($SUDO stat -c %a "$BACKUP_DIR/post-merge")"
@@ -582,14 +584,11 @@ install_entrypoints() {
 run_stage required "Unix entrypoints" install_entrypoints
 
 # --------------------------------------------------------------------------
-# 4.1 Reviewer auto-requalification post-merge hook (#804). Pulling new
-#     reviewer wrapper code invalidates the affected reviewer's live
-#     qualification; without this hook it stays quarantined until a person
-#     re-qualifies by hand. bin/ai-install-post-merge-hook owns the marker
-#     rules (foreign hooks are never touched) so both installers and
-#     uninstall.sh share one implementation.
+# 4.1 Managed git hooks. The reviewer auto-requalification post-merge hook is
+#     retired (#2073, skinny review): this removes our owned copy and keeps
+#     the installed-checkout main guard. Foreign hooks are never touched.
 # --------------------------------------------------------------------------
-run_stage required "Reviewer auto-requalification hook" "$REPO_ROOT/bin/ai-install-post-merge-hook"
+run_stage required "Managed git hooks (retire reviewer post-merge hook)" "$REPO_ROOT/bin/ai-install-post-merge-hook"
 
 # --------------------------------------------------------------------------
 # 4.5 Claude + Codex skills and global instruction files. Delegate to the one
@@ -718,9 +717,14 @@ run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-
 # others exit 0 with "not in watch_hosts". Free Actions stay backup only.
 run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin/ai-local-watch" schedule
 
-# Optional: every machine sends its complete reviewer logs hourly to the private
-# fleet repository u2giants/ai-devops-reviewer-logs (bin/ai-reviewer-logs-sync).
-run_stage optional "Reviewer logs fleet sync scheduling" "$REPO_ROOT/bin/ai-reviewer-logs-sync" schedule
+# Retired reviewer jobs and the observation-week freeze window (#2073, skinny
+# review). The hourly reviewer-log sync is unscheduled, and the window file is
+# deleted here so no hand-run privileged command is ever needed.
+retire_reviewer_jobs() {
+  "$REPO_ROOT/bin/ai-reviewer-logs-sync" unschedule || return 1
+  $SUDO rm -f -- "$ETC_DIR/observation-week.json"
+}
+run_stage required "Retire reviewer jobs and freeze window" retire_reviewer_jobs
 
 # Optional: daily housekeeping report (plan_repo-housekeeping-visibility.md
 # step 7). Same shape as the stages above - one marked, idempotent `schedule`

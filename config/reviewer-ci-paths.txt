@@ -81,7 +81,6 @@ tools/lib/review-terminal-verdict.sh
 tools/lib/review-operation.sh
 tools/lib/review-capabilities.sh
 tools/lib/review-session-skip.sh
-tools/lib/observation-week.sh
 tools/lib/stepfun-pace.sh
 tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh

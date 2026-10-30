@@ -555,9 +555,10 @@ class CreditTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()): self.assertEqual(watch.main(['tick'], run=run), 3)
         self.assertEqual(len(calls), 1)
 
-    def test_one_existing_scheduler_hourly(self):
+    def test_not_scheduled_after_retirement(self):
+        # Retired from the duty pool by #2073 (skinny review); the tool itself goes in stage F.
         config = json.loads((ROOT / 'config/local-watch.json').read_text())
-        self.assertEqual(config['tools']['review-credit-watch'], {'tick_minutes': 60, 'command': 'ai-review-credit-watch'})
+        self.assertNotIn('review-credit-watch', config['tools'])
         self.assertNotIn('register_timer', (ROOT / 'tools/reviewer_credit_watch.py').read_text())
 
 if __name__ == '__main__': unittest.main()

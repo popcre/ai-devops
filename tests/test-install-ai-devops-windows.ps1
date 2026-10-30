@@ -354,8 +354,11 @@ try {
     $codex = Join-Path $TempRoot "hook\codex"
     Invoke-Installer $fixture $claude $codex -SkillsDryRun | Out-Null
     Assert-True (-not (Test-Path (Join-Path $fixture ".git\hooks\post-merge"))) "skills dry run installed the managed hook"
+    # Retired by #2073: a real run removes an owned copy instead of installing it.
+    New-Item -ItemType Directory -Force -Path (Join-Path $fixture ".git\hooks") | Out-Null
+    Copy-Item -LiteralPath (Join-Path $fixture "hooks\post-merge") -Destination (Join-Path $fixture ".git\hooks\post-merge")
     $output = Invoke-Installer $fixture $claude $codex
-    Assert-True (Test-Path (Join-Path $fixture ".git\hooks\post-merge")) "managed post-merge hook was not installed into the fixture"
+    Assert-True (-not (Test-Path (Join-Path $fixture ".git\hooks\post-merge"))) "retired post-merge hook was not removed from the fixture"
     Assert-True ($output -match "Test mode: not running live reviewer qualification") "requalify step did not honour test mode"
 
     # Exercise the Qwen install stage with a fixture wrapper. The stub leaves
