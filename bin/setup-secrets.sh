@@ -723,16 +723,35 @@ done < "$MCP_ENV"
 
 echo
 if [ "$fail" -eq 0 ]; then
-  if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
-    info "Verifying GLM end-to-end through the shared second-opinion path"
-    if "$REPO_ROOT/bin/ai-glm" doctor --live >/dev/null 2>&1; then
-      ok "GLM-5.3 verified end-to-end through the pinned OpenCode and Z.ai"
+  if [ -x "$REPO_ROOT/bin/ai-glm" ]; then
+    info "Verifying the GLM session harness end-to-end"
+    glm_probe="$(mktemp -d)"
+    trap 'rm -rf "$glm_probe"' EXIT
+    # Keep probe sessions and reports in the temporary repository, ignored by
+    # the review copy and removed on both success and failure.
+    ( cd "$glm_probe" && git init -q && printf '%s\n' '.ai/' >> .git/info/exclude && printf '%s\n' 'Public GLM capability probe.' > README.md &&
+      git add README.md && git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
+    glm_result=""
+    if glm_result="$(cd "$glm_probe" && AI_SECOND_OPINION_HOME="$glm_probe/.ai/state" "$REPO_ROOT/bin/ai-glm" review --base HEAD \
+           --json --prompt "Review this minimal capability-probe repository. End with exactly VERDICT: APPROVE or VERDICT: REJECT." 2>/dev/null)" &&
+       glm_report="$(printf '%s' "$glm_result" | jq -er '
+         select(.schema_version == 1 and .ok == true) |
+         select(.session.type == "review" and .session.model == "zai-coding-plan/glm-5.3") |
+         select(.response.text | type == "string" and
+           test("(?:^|\\n)VERDICT: (APPROVE|REJECT)[ \\t]*\\r?(?:\\n[ \\t]*)?$")) |
+         .artifacts.report | select(type == "string" and length > 0)
+       ' 2>/dev/null)" &&
+       [ -s "$glm_report" ]; then
+      ok "GLM-5.3 verified end-to-end through the protected OpenCode review harness and Z.ai"
     else
+      rm -rf "$glm_probe"
       warn "GLM capability check failed. Run: ai-glm doctor --live"
       exit 1
     fi
+    rm -rf "$glm_probe"
+    trap - EXIT
   else
-    warn "Claude Code is missing; GLM agent cannot be capability-tested yet."
+    warn "ai-glm is missing or not executable; GLM cannot be capability-tested."
   fi
   info "Secrets wiring complete. Open a new terminal (or: source ~/.bashrc),"
   info "then run 'claude' in any app folder — placeholders fill automatically."
