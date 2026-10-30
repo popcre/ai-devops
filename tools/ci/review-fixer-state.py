@@ -67,6 +67,8 @@ def validate(data, repo, pr=None):
         raise ValueError("receipt issue/source PR is invalid")
     if any(not re.fullmatch(r"[0-9a-f]{40}", data.get(key, "")) for key in ("reviewed_head", "target_head")):
         raise ValueError("receipt commit is invalid")
+    if pr and data["target_head"] != data["reviewed_head"]:
+        raise ValueError("receipt target commit differs from reviewed commit")
     if not isinstance(data.get("target_branch"), str) or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?", data.get("owner", "")):
         raise ValueError("receipt target/owner is invalid")
     branch = data["target_branch"]
@@ -198,20 +200,35 @@ class State:
         for pr in self.pulls():
             if pr["base"]["ref"] != target or not pr["head"]["ref"].startswith("review-fix/"):
                 continue
-            data = marker(pr.get("body"))
-            if not data:
-                body = pr.get("body") or ""
-                number = re.fullmatch(r"review-fix/([1-9][0-9]*)", pr["head"]["ref"])
-                generated = re.search(r"^Posted by review-fixer workflow run [0-9]+\s*$", body, re.M)
-                if not number or not generated or not re.search(r"^Closes #" + number[1] + r"\s*$", body, re.M):
-                    print(f"LEGACY: PR #{pr['number']} has no trusted retirement receipt")
-                    continue
-                data, source = self.source(self.issue(int(number[1])))
-                if data["target_branch"] != target or (source["head"].get("repo") or {}).get("full_name") != self.repo:
-                    print(f"LEGACY: PR #{pr['number']} source/target association is unproven")
-                    continue
-                data["target_head"] = data["reviewed_head"]
-            validate(data, self.repo, pr)
+            if (pr["head"].get("repo") or {}).get("full_name") != self.repo:
+                print(f"WARNING: PR #{pr['number']} is not a same-repository fixer; skipped", file=sys.stderr)
+                continue
+            try:
+                data = marker(pr.get("body"))
+                if not data:
+                    body = pr.get("body") or ""
+                    number = re.fullmatch(r"review-fix/([1-9][0-9]*)", pr["head"]["ref"])
+                    generated = re.search(r"^Posted by review-fixer workflow run [0-9]+\s*$", body, re.M)
+                    if not number or not generated or not re.search(r"^Closes #" + number[1] + r"\s*$", body, re.M):
+                        raise ValueError("no trusted retirement receipt")
+                    finding = self.issue(int(number[1]))
+                    data, _ = self.source(finding)
+                    data["target_head"] = data["reviewed_head"]
+                else:
+                    validate(data, self.repo, pr)
+                    finding = self.issue(data["issue"])
+                if "review-finding" not in labels(finding):
+                    raise ValueError("associated issue is not a review finding")
+                actual, source = self.source(finding)
+                if (source["head"].get("repo") or {}).get("full_name") != self.repo:
+                    raise ValueError("finding source is not in the same repository")
+                bound = ("issue", "source_pr", "reviewed_head", "target_branch", "owner")
+                if any(data.get(key) != actual.get(key) for key in bound):
+                    raise ValueError("receipt does not match the actual finding source")
+                validate(data, self.repo, pr)
+            except (ValueError, TypeError) as error:
+                print(f"WARNING: PR #{pr['number']} retirement skipped: {error}", file=sys.stderr)
+                continue
             reason = self.current(data)
             if not reason:
                 continue

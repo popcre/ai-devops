@@ -157,8 +157,9 @@ class StateTests(unittest.TestCase):
         self.assertFalse(self.deferred())
 
     def test_target_drift_refuses_publication(self):
-        data = dict(self.data, target_head=NEXT)
-        self.assertFalse(self.state.check(data))
+        real = self.api
+        with patch.object(m, "api", side_effect=lambda endpoint: {"object": {"sha": NEXT}} if "/git/ref/" in endpoint else real(endpoint)):
+            self.assertFalse(self.state.check(self.data))
 
     def test_pending_fixer_defers_additional_finding(self):
         self.pulls = [{"number": 9, "base": {"ref": "owner/work"}, "head": {"ref": "review-fix/8"}}]
@@ -221,7 +222,7 @@ class StateTests(unittest.TestCase):
             self.assertTrue(self.state.check(self.data, "/unused"))
 
     def fixer_pr(self):
-        return {"number": 9, "base": {"ref": "owner/work"}, "head": {"ref": "review-fix/7"}, "body": m.encoded_marker(self.data)}
+        return {"number": 9, "base": {"ref": "owner/work"}, "head": {"ref": "review-fix/7", "repo": {"full_name": "o/r"}}, "body": m.encoded_marker(self.data)}
 
     def test_stale_fix_retires_but_finding_stays_open(self):
         self.pulls = [self.fixer_pr()]
@@ -259,8 +260,52 @@ class StateTests(unittest.TestCase):
         for bad in (dict(self.data, issue=8), dict(self.data, repository="foreign/r"), dict(self.data, owner="--bad"), dict(self.data, reviewed_head="bad")):
             pr["body"] = m.encoded_marker(bad)
             self.pulls = [pr]
-            with self.assertRaises(ValueError):
-                self.state.retire("owner/work")
+            self.state.retire("owner/work")
+        self.assertFalse(self.commands)
+
+    def test_foreign_fork_cannot_forge_same_named_fixer_receipt(self):
+        pr = self.fixer_pr()
+        pr["head"]["repo"]["full_name"] = "foreign/r"
+        self.pulls = [pr]
+        self.pr["head"]["sha"] = NEXT
+        with patch.object(self.state, "issue", side_effect=AssertionError("foreign PR cannot dereference issue")):
+            self.state.retire("owner/work")
+        self.assertFalse(self.commands)
+
+    def test_business_issue_cannot_be_deferred_by_forged_fixer(self):
+        self.pulls = [self.fixer_pr()]
+        self.issue["labels"] = []
+        self.pr["head"]["sha"] = NEXT
+        self.state.retire("owner/work")
+        self.assertFalse(self.commands)
+
+    def test_receipt_must_bind_actual_finding_reviewed_commit(self):
+        self.pr["head"]["sha"] = NEXT
+        for bad in (dict(self.data, reviewed_head=NEXT, target_head=NEXT),
+                    dict(self.data, target_head=NEXT), dict(self.data, owner="other-owner"),
+                    dict(self.data, source_pr=8)):
+            pr = self.fixer_pr()
+            pr["body"] = m.encoded_marker(bad)
+            self.pulls = [pr]
+            self.state.retire("owner/work")
+        self.assertFalse(self.commands)
+
+    def test_receipt_target_commit_must_equal_reviewed_commit(self):
+        with self.assertRaises(ValueError):
+            m.validate(dict(self.data, target_head=NEXT), "o/r", self.fixer_pr())
+
+    def test_stale_source_at_prepare_defers_to_named_owner(self):
+        self.pr["head"]["sha"] = NEXT
+        data, _ = self.state.source(self.issue)
+        self.assertEqual(data["target_head"], NEXT)
+        self.assertFalse(self.state.check(data))
+        self.assertTrue(self.deferred())
+        self.assertTrue(any("--add-assignee" in c and "owner" in c for c in self.commands))
+
+    def test_retirement_api_failure_still_refuses_visibly(self):
+        self.pulls = [self.fixer_pr()]
+        with patch.object(self.state, "issue", side_effect=subprocess.CalledProcessError(1, "gh")), self.assertRaises(subprocess.CalledProcessError):
+            self.state.retire("owner/work")
         self.assertFalse(self.commands)
 
     def test_marker_escapes_comment_terminators(self):
