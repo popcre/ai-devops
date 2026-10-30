@@ -13,9 +13,11 @@ cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
 case "$1 $2" in
-  "api repos/o/r/issues/7") printf '{"number":7,"state":"open","labels":[{"name":"review-finding"}],"body":"PR: https://github.com/o/r/pull/2\\nHead SHA: `%s`"}\n' "$STUB_HEAD" ;;
+  "api repos/o/r/issues/7")
+    [ "$STUB_DECISION" != PRECHECK-ERROR ] || exit 1
+    printf '{"number":7,"state":"open","labels":[{"name":"review-finding"}],"body":"PR: https://github.com/o/r/pull/2\\nHead SHA: `%s`"}\n' "$STUB_HEAD" ;;
   "api repos/o/r/pulls/2")
-    sha="$STUB_HEAD"; [ -f "$STUB_LOG.moved" ] && sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    sha="$STUB_HEAD"; { [ -f "$STUB_LOG.moved" ] || [ "$STUB_DECISION" = STALE ]; } && sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     printf '{"number":2,"state":"open","user":{"login":"owner"},"head":{"ref":"main","sha":"%s","repo":{"full_name":"o/r"}},"base":{"ref":"main"}}\n' "$sha" ;;
   "api repos/o/r/git/ref/heads/main") printf '{"object":{"sha":"%s"}}\n' "$STUB_HEAD" ;;
   "api --paginate") echo '[[]]' ;;
@@ -56,6 +58,12 @@ run() {
     bash "$root/tools/ci/review-fixer.sh" 7 > "$tmp/out" 2>&1
 }
 check() { if eval "$2"; then echo "  ok   $1"; else echo "  FAIL $1"; cat "$tmp/out" "$tmp/log"; fail=1; fi; }
+
+run STALE; rc=$?
+check "stale source stops before outcome setup credential probe clone or model" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -Eq "label create fixer-(done|failed)|auth token|repo clone|agent called|pr create|issue close" "$tmp/log"'
+
+run PRECHECK-ERROR; rc=$?
+check "failed preflight still creates its failure label and reports failure without a model" '[ $rc = 1 ] && grep -q "label create fixer-failed" "$tmp/log" && grep -q "source preflight failed" "$tmp/log" && grep -q "add-label fixer-failed" "$tmp/log" && ! grep -Eq "auth token|repo clone|agent called|pr create|issue close" "$tmp/log"'
 
 run PROTECTED; rc=$?
 check "PROTECTED exits 0" '[ $rc = 0 ]'
