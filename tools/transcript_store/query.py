@@ -136,7 +136,7 @@ def raw_pointer(conn, seg_id: str, archive: Path) -> list[str]:
     if not row:
         raise SystemExit(f"no segment with id {seg_id}")
     path, first, last = row
-    return [f"file: {archive / path}", f"turns: {first} .. {last}"]
+    return [f"file: {(archive / path).as_posix()}", f"turns: {first} .. {last}"]
 
 
 def add_labels(src: Path, inbox: Path, host: str | None = None, now: dt.datetime | None = None) -> Path:

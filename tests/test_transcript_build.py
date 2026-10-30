@@ -53,7 +53,7 @@ class Base(unittest.TestCase):
     def session(self, rel, lines, newline=True, mtime=OLD):
         p = self.archive / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("\n".join(lines) + ("\n" if newline else ""), encoding="utf-8")
+        p.write_text("\n".join(lines) + ("\n" if newline else ""), encoding="utf-8", newline="\n")
         os.utime(p, (mtime, mtime))
         return p
 
