@@ -53,6 +53,10 @@ done
 SYNTHETIC_KEY=synthetic-value "$@"
 SH
   chmod 700 "$shellrc_tmp/bin/op"
+  # The snippet runs python3 under the stripped PATH below; hosted Windows keeps
+  # Python outside /usr/bin, so expose the interpreter found above as python3.
+  printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$(command -v "$PYTHON")" > "$shellrc_tmp/bin/python3"
+  chmod 700 "$shellrc_tmp/bin/python3"
   if /usr/bin/env -i PATH="$shellrc_tmp/bin:/usr/bin:/bin" HOME="$shellrc_tmp" \
       bash --noprofile --norc -c '. "$1"; [ -z "${OP_SERVICE_ACCOUNT_TOKEN+x}" ] && [ -z "${SYNTHETIC_KEY+x}" ]' _ "$shellrc_tmp/shellrc"; then
     ok "noninteractive shell does not resolve credentials"

@@ -37,7 +37,6 @@ tests/test-all.ps1
 tests/test-all.sh
 tests/test-windows-job-run.sh
 tests/test-delegation-templates.sh
-tests/test-ai-review-code-only.sh
 tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
@@ -63,8 +62,6 @@ config/opencode-stepfun/**
 config/systemd/opencode-*
 tests/fixtures/**
 tests/test-reviewer-ci-paths.sh
-tests/test-ai-review-credit-watch.sh
-tests/test_review_credit_watch.py
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
 tools/lib/provider-wrapper-common.sh
@@ -80,7 +77,6 @@ tools/review_door_diagnostics.py
 tools/reviewer_credit_stream.py
 tests/test_reviewer_credit_stream.py
 tests/test-reviewer-credit-stream.sh
-tests/test_glm_credit_reset.py
 tools/reviewer_event_guard.sh
 tools/reviewer_events.py
 tests/test-reviewer-events-profile-home.sh
