@@ -249,7 +249,7 @@ class GH:
         self._gate("core")
         self.calls += 1
         r = self.runner(["gh", "api", f"repos/{full}/git/trees/HEAD?recursive=1", "--jq", ".tree[].path"])
-        if r.returncode != 0 or not r.stdout.strip():
+        if r.returncode != 0:
             return None
         paths = r.stdout.splitlines()
         self.cache.put(key, paths)
@@ -265,6 +265,8 @@ class GH:
             self._gate("core")
             self.calls += 1
             r = self.runner(["gh", "repo", "list", owner, "--limit", "1000", "--json", "nameWithOwner"])
+            if r.returncode != 0:
+                return out  # transient: do not cache a partial inventory
             try:
                 out += [x["nameWithOwner"] for x in json.loads(r.stdout or "[]")]
             except (ValueError, KeyError, TypeError):
@@ -337,10 +339,11 @@ def commit_known(repo_dir: Path, sha: str) -> bool:
 
 # ----------------------------------------------------------------- the checks
 
-ON_REQUEST = re.compile(r'"(?:ask|run this by|use|have|debate|review with|delegate)\b', re.I)
+ON_REQUEST = re.compile(r'"(?:ask|run this by|use|have|debate|review with|delegate)\b'
+                        r'|\buse for\s+"|\buse when the user asks\b', re.I)
 DELEGATION = re.compile(r"^FROZEN\b|\bdelegat|\bsecond[- ]opinion\b", re.I)
 CLAUDE_TOOLS = {"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Agent", "Task"}
-CODEX_TOOLS = {"exec", "exec_command", "shell_command", "apply_patch", "shell"}
+CODEX_TOOLS = {"exec", "exec_command", "shell_command", "apply_patch", "shell", "local_shell_call"}
 
 
 def skill_applies(sk: dict, names: set) -> bool:
@@ -521,7 +524,10 @@ def check_refs(segs, ctx, thr):
     resolved, unresolved = repo_set(segs, gh)
     skill_names = {s["name"] for s in ctx["skills"]}
     # GitHub's default branch is the source of truth; a local checkout may sit on any branch.
-    files_cache = {full: gh.tree(full) or tracked_files(ctx["repos_home"] / name) for name, full in resolved.items()}
+    files_cache = {}
+    for name, full in resolved.items():
+        files = gh.tree(full)
+        files_cache[full] = tracked_files(ctx["repos_home"] / name) if files is None else files
     nums_wanted = defaultdict(set)
     flags, stats = [], Counter()
     for s in recent:
@@ -537,7 +543,7 @@ def check_refs(segs, ctx, thr):
                     or not re.search(r"\.[A-Za-z0-9]{1,6}$", p.rsplit("/", 1)[-1]):
                 continue  # extensionless tails are usually truncated summary text
             stats["paths"] += 1
-            if p not in files and not any(p in (f or ()) for f in files_cache.values()):
+            if p not in files:
                 flags.append({"segment": s["id"], "subject": s["subject"], "object": f"{full}:{p}",
                               "kind": "path"})
         for m in SKILL_RE.finditer(s["text"]):
@@ -591,8 +597,6 @@ def claim_refs(text: str, window: int = 0):
     for m in MERGED_NUM.finditer(text):
         if NEG.search(text[max(0, m.start() - 15):m.start()]):
             continue
-        if re.match(r"\s+(?:origin/)?main\s+into\b", text[m.start() + 6:m.start() + 26], re.I):
-            continue
         n = m.group(1) or m.group(2)
         out.add(("merged", "number", int(n), m.start(m.lastindex)))
     for m in OTHER_NUM.finditer(text):
@@ -627,17 +631,15 @@ def check_claims(segs, ctx, thr):
         if kind == "number":
             by_repo[name].add(val)
     answers = lookup_all(gh, resolved, by_repo)
+    local_dirs = {name: ctx["repos_home"] / name for name in resolved
+                  if (ctx["repos_home"] / name / ".git").exists()}
     flags, stats = [], Counter(claims=len(found), **stats0)
     for s, (word, kind, val, name) in found:
         full = resolved[name]
         base = {"segment": s["id"], "subject": s["subject"], "claim": word}
         if kind == "commit":
-            dirs = [ctx["repos_home"] / n2 for n2 in resolved if (ctx["repos_home"] / n2 / ".git").exists()]
-            if not dirs:
-                stats["commits_unchecked"] += 1
-            elif not any(commit_known(d, val) for d in dirs) \
-                    and not any(gh.commit(f2, val) for f2 in resolved.values()) \
-                    and not any(gh.commit(f2, val) for f2 in gh.all_repos() if f2 not in resolved.values()):
+            if not (name in local_dirs and commit_known(local_dirs[name], val)) \
+                    and not gh.commit(full, val):
                 flags.append({**base, "object": f"{full}@{val}", "why": "commit not found"})
             continue
         if (name, val) not in answers:
