@@ -3,7 +3,7 @@
 Read this first, then open only the document named for the current task.
 
 - Reviewer system: advisory, one rotating CI reviewer (owner ruling 2026-10-29). Plan + STATUS: [plan_skinny-review.md](plan_skinny-review.md); checklist: [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md).
-- Merge-blocking checks: only data-safety gates block a merge; everything else is advisory (owner ruling 2026-10-30). Plan + STATUS: [plan_lean-required-checks.md](plan_lean-required-checks.md).
+- Merge-blocking checks: target only data-safety and secret protections; existing required contexts remain blocking until rulesets change. Plan + STATUS: [plan_lean-required-checks.md](plan_lean-required-checks.md).
 
 ## Project summary
 
@@ -162,10 +162,11 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
-Shared-db migration gate trimming (plan, not active): read
-[`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) STATUS first;
-[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
-No gate or workflow changes until the owner approves.
+Shared-db migration gate trimming: read
+[`plan_lean-required-checks.md`](plan_lean-required-checks.md) STATUS first
+(ai-devops #2172; shared-db #5150). It supersedes
+[`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) for execution.
+Retain existing required checks until the successor safety conditions are met.
 
 Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;

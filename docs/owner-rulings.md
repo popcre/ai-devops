@@ -168,13 +168,18 @@ Current rule (issue #2041):
 
 Verbatim, Albert's chat: "can we bypass/eliminate some or all of the automatic
 checks?" then "yes. and do it in a permanent way in the ai-devops repo so that
-it hits all apps/harnesses on all machines". Also ordered killed permanently:
-the shared-db rule "one licensor per change" for curated Master Data loads.
+it hits all apps/harnesses on all machines".
 
-Current rule:
-- A merge-blocking check must directly prevent production-data damage or a
-  secret leak. Process, ownership, claim, lease, evidence-pair, handoff,
-  hygiene and broad test-suite checks are advisory or removed.
-- A required check that hangs or flakes is dropped from the required set at
-  once, then repaired.
-- Curated Master Data loads may cover any number of licensors in one change.
+Source limitation: the exact proposal answered by "yes" is not recorded here.
+The reported instruction to remove "one licensor per change" is a session
+paraphrase, not a verbatim quote; its exact words and source are unavailable
+in this record. These summaries do not establish a waiver of data-safety controls.
+
+Recorded implementation interpretation (not Albert's verbatim words):
+- Only direct production-data and secret protections are intended to remain
+  required; existing contexts remain blocking until rulesets are changed.
+- Repair hanging or flaky checks. Never remove the only data-safety or secret
+  check before an equivalent required replacement is active and passing.
+- Retain collision and domain-ownership protections. Any multi-licensor load
+  must first prove the per-licensor controls in
+  [the successor plan](../plan_lean-required-checks.md#curated-loads).

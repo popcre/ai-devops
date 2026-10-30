@@ -119,7 +119,10 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Reviews are preferred but never required (owner ruling 2026-10-29 night).
 - **Lean required checks** (owner ruling 2026-10-30): only checks that stop
   production-data damage or secret leaks may block a merge; every other check
-  is advisory. Drop a hanging or flaky required check first, repair after.
+  is advisory once repository rulesets are updated; existing required contexts
+  remain blocking until then. Repair hanging or flaky checks; never remove the
+  only data-safety or secret check before an equivalent required replacement
+  is active and passing.
 - **Route every successor from its own work,** never a predecessor's.
 - **Synology:** NAS reads over 25 s load `synology-long-running-operations`.
 
