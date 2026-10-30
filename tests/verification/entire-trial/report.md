@@ -1,5 +1,105 @@
 # Entire reversible trial execution report — #2022
 
+## Fleet and CI implementation baseline
+
+October 30, 2026 continuation, coordinator Codex chat
+`01a18e41-40fb-76f2-90a6-cad01b186b8e`. Source baseline:
+`84063b6b7df9abd0bf4efe5f5c1f72e844353279`. Execution was claimed on
+[#2022](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531589539);
+the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322)
+records observed capability and gaps. Original discovery and stop remain
+November 2, 2026, 5:00 PM EST and November 12, 2026, 5:58 AM EST.
+
+All four hosts were reached through existing authenticated access. OS,
+client versions, instruction roots, installed-source/launcher markers,
+configuration hashes and recoverable originals are owner-only in custody
+`entire-2022-fleet-20261030`. Raw inventories and configuration are not public.
+No installer, capture hook, credential or provider setting changed in R1.
+No sampled client config or repository capture setting showed Entire capture;
+Entire CLI was absent on all four hosts. These sampled checks do not certify
+every workspace or future process. Login-file presence is not login proof.
+
+| Host | Observed client capability | Live acceptance |
+|---|---|---|
+| edge-dev | Codex/Claude Desktop, Claude CLI, MiMo Desktop, ZCode Desktop/core present; standalone MiMo CLI absent | All four fresh-session journeys unproved; Codex CLI absent from SSH PATH is not Desktop absence. |
+| edge-dev3 | Codex/Claude CLIs and packaged ZCode Desktop present; MiMo CLI absent | All four journeys unproved; desktop launch is not a CLI version probe. |
+| al8960ofc | Codex/Claude Desktop and CLIs present; MiMo/ZCode absent at standard system/user app paths and command lookup | All four journeys unproved; instruction-file presence does not prove installed apps. |
+| 916 | Codex/Claude Desktop and CLIs present; MiMo/ZCode absent at standard system/user app paths and command lookup | All four journeys unproved; existing credential-file presence does not establish a working client. |
+
+Official [ZCode installation](https://zcode.z.ai/en/docs/install) supports
+Windows and Linux. Official [MiMo Desktop](https://mimo-ai.xiaomimimo.com/desktop/)
+offers Windows/macOS; the distinct official
+[MiMoCode releases](https://github.com/XiaomiMiMo/MiMo-Code/releases) include
+Linux CLI artifacts. Qualify the actual requested surface before choosing a
+remedy; no wrapper/emulator or another client counts as the missing app.
+This session's computer connector offers browser access but no native-app
+control, so desktop journeys cannot be fabricated from file or SSH probes.
+
+### Whole CI contract
+
+Source inventory accounts for all 12 `.github/workflows/` files and all 182
+`config/ci-suites/` registrations. `verify.yml` owns PR, merge-group, manual and
+scheduled verification: four balanced Linux shards, 12 PR Windows sections,
+five full-backstop Windows sections, exact-head Windows evidence, documentation
+safety and stable `verification-closure`. The live ruleset requires that one
+stable context, rather than treating an arbitrary green check as acceptance.
+`fast-classifier.yml` selects suites; `docs-reachability.yml` is reusable;
+`ai-review.yml` and `review-fixer.yml` retain advisory review/fix behavior.
+`windows-runner-qualification.yml`, `windows-offline-blacksmith.yml` and
+`warpbuild-win2022-canary.yml` retain their distinct qualification/manual lanes.
+`merge-queue-drift.yml`, `runner-pool-watchdog.yml`,
+`stuck-work-watchdog.yml` and `windows-queue-watchdog.yml` retain monitoring.
+Source inventory is not installed-runtime, completed CI or Entire-display proof.
+
+Authenticated Entire project Plugins displayed **No plugins installed**.
+The existing protected vault has no matching Buildkite/Depot account entry;
+that does not prove no account exists elsewhere. Depot setup reaches sign-in,
+not an observed existing entitled organization. No account was created and no
+new grant, subscription, secret import or plugin was activated.
+Official [Depot Entire integration](https://depot.dev/docs/ci/integrations/entire)
+documents push/schedule/manual triggers, unsupported pull-request events and
+different token semantics. Official
+[Buildkite Entire integration](https://buildkite.com/docs/pipelines/source-control/entire)
+requires organization-administrator access; that authority/entitlement is not
+established. CI execution migration remains **unmet**, not optional or passed.
+Keep GitHub execution and every required behavior while independent client
+implementation proceeds. No billing investigation or support wait is needed.
+
+At baseline current main had no completed verify result. Earlier
+[run 41112658629](https://github.com/popcre/ai-devops/actions/runs/41112658629)
+tests `7dfde65177ddff5e29a484316895be3b606fd238`, not the baseline head;
+Linux aggregate passed but Windows section 4 failed while other sections were
+unfinished at observation. It is not a current-head success or parity receipt.
+The R2 delivery must obtain its own exact-head ordinary checks.
+
+### Shared client instructions and offline checks
+
+R2 changes the two canonical globals and renders the MiMo/ZCode copies with
+the existing renderer. No installer, client launcher, MCP writer, hook or
+vendor application is changed. The shared instruction applies only to public
+`popcre/ai-devops`, keeps both original deadlines, requires exact GitHub source
+and check identity, discloses missing/stale Entire state, and continues through
+GitHub. Private capture/import, paid Agents, billing, integrations and required
+check changes remain excluded. It directs clients to the existing Session
+workflow; it is not an executable expiry guard or an installed-client receipt.
+
+Linux focused checks passed: `test-client-globals-required-phrases.sh`,
+`test-ai-render-globals.sh` (four scenarios), `test-ai-adopt-globals.sh`
+(12 scenarios), and `test-ai-install-skills.sh`. The named
+`entire-adoption-preserves-machine-section` /
+`entire-capture-off-preserved` fixture uses real templates, client paths with
+spaces and a CRLF machine tail, verifies byte-identical tail preservation,
+and verifies four synthetic capture-off config hashes remain unchanged.
+The phrase check requires one shared CRLF-normalized policy across all four
+clients. Renderer drift, whitespace and documentation safety passed.
+These are fixture results, not real capture-channel, app behavior, deadline,
+CI interpretation or outage qualification. Windows and ordinary code-delivery
+checks remain required. A local full-suite collision check refused because a
+CI job was using this host; no full local series or force override was run.
+
+- [ ] live proof — all 16 actual client-machine journeys, CI success/failure/
+  stale-result visibility, actual whole-CI execution and cross-host recovery.
+
 ## Support clarification — Trail deletion unsupported
 
 October 30, 2026: Albert relayed Entire support's reply that a Trail cannot be

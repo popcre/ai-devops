@@ -38,6 +38,11 @@ action_file="$action_dir/$safe_session"
 action_marker="$action_file.action"
 case "$event" in
   UserPromptSubmit)
+    # Claude is told the date but never the clock time, so sessions guessed
+    # (2026-10-30: "10pm" at 2:55 PM EDT). Plain stdout on this event becomes
+    # turn context, so every prompt carries the real New York time.
+    now_ny="$(TZ=America/New_York date '+%A %Y-%m-%d %-I:%M %p %Z' 2>/dev/null || true)"
+    [[ -n "$now_ny" ]] && printf 'Current time in New York (from the system clock): %s. Use this; never guess the time.\n' "$now_ny"
     mkdir -p "$action_dir" 2>/dev/null || exit 0
     rm -f "$action_marker" 2>/dev/null || true
     printf 'no-action\n' >"$action_file.tmp.$$" 2>/dev/null && mv "$action_file.tmp.$$" "$action_file" 2>/dev/null || true
