@@ -6,6 +6,10 @@ Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-r
 STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); planning only,
 execution not started. Includes continuous memory, Trails, sessions/search and optional CI.
 
+Lean required checks: read the [successor plan](../plan_lean-required-checks.md)
+STATUS first (#2172; shared-db #5150). The earlier shared-db gate-trim proposal
+is superseded for execution; implementation and live proof remain pending.
+
 Ruleset trim and enforcement: read the [ruleset plan](../plan_ruleset-trim-and-enforce.md) STATUS first ([#1881](https://github.com/popcre/ai-devops/issues/1881)); evidence is private and stays out of Git.
 
 Reviewer observation week (fast-fail, per-session skip, non-blocking reviews, 7-day repair freeze): read the [observation week plan](../plan_reviewer-observation-week.md) STATUS first; sibling repair programmes (#1783, #1822, #1678) pause for the week.

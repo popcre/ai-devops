@@ -5,7 +5,10 @@ Tracker issue: popcre/shared-db — see "Definition of done" (§13). Implementat
 
 ## STATUS
 
-**Proposal only. No gate, rule, or workflow has been changed.** This session ended at the plan. Implementation is not authorized until Albert approves it. Second opinion complete 2026-10-30: Muse Spark 1.3 Contributor returned `REVISE`; every finding is folded into this revision (record at the end of the file).
+**Superseded for execution by [lean required checks](plan_lean-required-checks.md)
+(issue #2172).** The proposal and checklist below are historical, not an active
+route or an additional approval requirement. Follow the successor STATUS and its
+data-safety retention conditions; this document does not prove any implementation.
 
 Planning baseline: **2026-10-30**, `popcre/shared-db` @ `af8bd6b8f6ff3b75b1e4067c0ad38701e35ac90d`, `popcre/ai-devops` @ `43f5e608`. Planning session: MiMo chat on `edge-dev`.
 
@@ -23,7 +26,7 @@ Planning baseline: **2026-10-30**, `popcre/shared-db` @ `af8bd6b8f6ff3b75b1e4067
 
 **Target total time:** median open→merge for a routine migration PR falls from **147 minutes to ≤25 minutes** (measured on 28 merged PRs, 2026-10-18→30; see §6). Per-stage target: claim+paperwork ≤2 min with zero rejections, CI ≈8 min (replay kept), Guarded Merge under lock ≤6 min, merge queue ≤5 min. Preview rehearsal and production promotion are **not** targets — they stay as they are.
 
-**Where a fresh session starts:** step 1. Re-read §6 (why each cut is safe) and the adversarial table in §9 before each stage. Each stage is one PR in `popcre/shared-db`, merged one at a time.
+**Historical starting point (superseded; do not execute):** step 1. Re-read §6 (why each cut is safe) and the adversarial table in §9 before each stage. Each stage is one PR in `popcre/shared-db`, merged one at a time.
 
 ---
 
