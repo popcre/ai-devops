@@ -45,6 +45,11 @@ class SecondOpinion(unittest.TestCase):
         with open(fake, "w") as fh:
             fh.write(FAKE)
         os.chmod(fake, 0o755)
+        if os.name == "nt":
+            # Windows cannot exec a shebang script; run the same fake through a .cmd shim.
+            with open(fake + ".cmd", "w") as fh:
+                fh.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
+            fake += ".cmd"
         secrets = os.path.join(t, "secrets")
         os.makedirs(secrets)
         for name in ("muse-api-key", "stepfun-api-key"):
@@ -152,11 +157,12 @@ class SecondOpinion(unittest.TestCase):
         p = os.path.join(self.env["AI_REVIEW_SIMPLE_SECRETS_DIR"], "stepfun-api-key")
         with open(p) as fh:
             self.assertEqual(fh.read(), "new-key-value\n")
-        self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
+        if os.name != "nt":  # NTFS has no POSIX mode bits to check
+            self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
 
     def test_shims_route_to_provider(self):
         for prov in ("glm", "muse", "stepfun"):
-            r = self.run_tool("ask", f"hi from {prov}", tool=os.path.join(ROOT, "bin", f"ai-{prov}"))
+            r = self.run_tool("ask", f"hi from {prov}", tool=os.path.join(ROOT, "bin", f"ai-{prov}" + (".cmd" if os.name == "nt" else "")))
             self.assertEqual(r.returncode, 0, r.stderr)
         models = [c["args"][c["args"].index("--model") + 1] for c in self.calls()]
         self.assertEqual(models, ["zai-coding-plan/glm-5.3", "meta-model-api/muse-spark-1.3-contributor",
