@@ -357,10 +357,19 @@ def main(argv):
             diff = diff[:ars.MAX_DIFF] + "\n[diff truncated; read the files directly]\n"
         runs = [len(m) for m in __import__("re").findall(r"`{3,}", diff)]
         fence = "`" * max([3] + [n + 1 for n in runs])
-        brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
+        brief = read_prompt(args) if (args.prompt_file or args.prompt or args.text) else "Review this change."
         prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
         sdir, meta = start(p, None, repo, False, base)
-        print(run_opencode(p, sdir, meta, prompt))
+        answer = run_opencode(p, sdir, meta, prompt)
+        if args.json:
+            report = os.path.join(sdir, "report.md")
+            with open(report, "w", encoding="utf-8") as fh:
+                fh.write(answer + "\n")
+            print(json.dumps({"schema_version": 1, "ok": True,
+                              "session": {"type": "review", "model": ars.PROVIDERS[p]["model"]},
+                              "response": {"text": answer}, "artifacts": {"report": report}}))
+        else:
+            print(answer)
         return 0
 
     if cmd == "list":
@@ -466,7 +475,7 @@ def main(argv):
                 sdir, meta = start(p, "doctor", tmp, False)
                 ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
                 print(f"live: {ans.strip()[:80]}")
-                ok &= "READY" in ans.upper()
+                ok &= ans.strip() == "READY"
         print("doctor: OK" if ok else "doctor: FAILED")
         return 0 if ok else 3
 

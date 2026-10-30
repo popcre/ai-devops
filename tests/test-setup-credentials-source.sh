@@ -152,13 +152,13 @@ probe_fixture() {
 }
 
 if [ -n "$GLM_FILTER" ] && command -v jq >/dev/null 2>&1 &&
-   probe_fixture $'Reviewed.\n\n## Verdict\n\n**APPROVE**\n' &&
-   probe_fixture $'Finding.\n\n## Verdict\nREJECT - repair required\n' &&
+   probe_fixture $'Reviewed.\n\nVERDICT: APPROVE\n' &&
+   probe_fixture $'Finding.\n\nVERDICT: REJECT\n' &&
    ! probe_fixture '' &&
    ! probe_fixture $'Reviewed without a terminal verdict.' &&
-   ! probe_fixture $'## Verdict\nBLOCKED\n' &&
-   ! probe_fixture $'## Verdict\nAPPROVE\n\ntrailing nonterminal text\n' &&
-   ! probe_fixture $'## Verdict\nAPPROVE\n' 'zai-coding-plan/wrong-model'; then
+   ! probe_fixture $'VERDICT: BLOCKED\n' &&
+   ! probe_fixture $'VERDICT: APPROVE\n\ntrailing nonterminal text\n' &&
+   ! probe_fixture $'VERDICT: APPROVE\n' 'zai-coding-plan/wrong-model'; then
   ok "GLM capability probe accepts only a terminal protected verdict from the exact model"
 else
   bad "GLM capability probe accepts only a terminal protected verdict from the exact model"

@@ -31,7 +31,9 @@ FAKE = textwrap.dedent("""\
             fh.write("made by fake\\n")
     sid = "--session" in args and args[args.index("--session") + 1] or "ses_fake1"
     print(json.dumps({"type": "step_start", "sessionID": sid, "part": {}}))
-    print(json.dumps({"type": "text", "sessionID": sid, "part": {"text": "ANSWER for: " + prompt.splitlines()[0]}}))
+    answer_file = os.path.join(state, "answer")
+    answer = open(answer_file).read() if os.path.exists(answer_file) else "ANSWER for: " + prompt.splitlines()[0]
+    print(json.dumps({"type": "text", "sessionID": sid, "part": {"text": answer}}))
 """)
 
 
@@ -119,6 +121,49 @@ class SecondOpinion(unittest.TestCase):
         prompt = self.calls()[0]["prompt"]
         self.assertIn("+two", prompt)
         self.assertIn("VERDICT: APPROVE", prompt)
+
+    def test_review_json_envelope_and_report(self):
+        answer = "Reviewed.\nVERDICT: APPROVE"
+        with open(os.path.join(self.state, "answer"), "w") as fh:
+            fh.write(answer)
+        r = self.run_tool("glm", "review", "--base", "HEAD", "--json", "--prompt", "Probe review.")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)
+        self.assertEqual(result["schema_version"], 1)
+        self.assertIs(result["ok"], True)
+        self.assertEqual(result["session"], {"type": "review", "model": "zai-coding-plan/glm-5.3"})
+        self.assertEqual(result["response"]["text"], answer)
+        with open(result["artifacts"]["report"]) as fh:
+            self.assertEqual(fh.read(), answer + "\n")
+        self.assertTrue(self.calls()[0]["prompt"].startswith("Probe review."))
+
+    def test_live_doctor_requires_exact_ready(self):
+        for answer in ("READY", " READY\n", "NOT READY", "ALREADY", "I am READY", "ready"):
+            with self.subTest(answer=answer):
+                with open(os.path.join(self.state, "answer"), "w") as fh:
+                    fh.write(answer)
+                r = self.run_tool("glm", "doctor", "--live")
+                self.assertEqual(r.returncode, 0 if answer.strip() == "READY" else 3, r.stderr)
+
+    @unittest.skipUnless(shutil.which("jq"), "setup probe requires jq")
+    def test_setup_runs_review_and_cleans_probe(self):
+        with open(os.path.join(ROOT, "bin", "setup-secrets.sh")) as fh:
+            source = fh.read()
+        block = source[source.index('if [ "$fail" -eq 0 ]; then'):]
+        probe_tmp = os.path.join(self.tmp, "probes")
+        os.mkdir(probe_tmp)
+        env = dict(self.env, REPO_ROOT=ROOT, TMPDIR=probe_tmp)
+        for answer in ("Reviewed.\nVERDICT: APPROVE", "Finding.\nVERDICT: REJECT",
+                       "READY", "VERDICT: APPROVE\ntrailing text", "VERDICT: REVISE"):
+            with self.subTest(answer=answer):
+                with open(os.path.join(self.state, "answer"), "w") as fh:
+                    fh.write(answer)
+                r = subprocess.run(["bash", "-c", 'set -e; fail=0; info() { :; }; ok() { :; }; warn() { :; };\n' + block],
+                                   env=env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0 if answer in (
+                    "Reviewed.\nVERDICT: APPROVE", "Finding.\nVERDICT: REJECT") else 1, r.stderr)
+                self.assertEqual(os.listdir(probe_tmp), [])
+        self.assertIn("VERDICT:", self.calls()[0]["prompt"])
 
     def test_implement_returns_diff_and_leaves_checkout(self):
         with open(os.path.join(self.state, "mode"), "w") as fh:
