@@ -21,8 +21,8 @@ OLD = "2026-01-01T00:00:00Z"
 
 
 class R:
-    def __init__(self, out="", code=0):
-        self.stdout, self.returncode = out, code
+    def __init__(self, out="", code=0, err=""):
+        self.stdout, self.returncode, self.stderr = out, code, err
 
 
 class FakeGH:
@@ -47,6 +47,8 @@ class FakeGH:
             import re
             nums = [int(n) for n in re.findall(r"n(\d+): issueOrPullRequest", q)]
             return R(json.dumps({"data": {"repository": {f"n{n}": known.get(n) for n in nums}}}))
+        if cmd[:2] == ["gh", "api"] and "/commits/" in cmd[2]:
+            return R("", 1, "gh: No commit found for SHA (HTTP 422)")
         return R("", 1)
 
 
@@ -55,7 +57,8 @@ def make_store(path: Path, segs, chunks=None):
     conn.executescript(build.SCHEMA)
     for i, (subject, text, repo, ts, tools) in enumerate(segs):
         cid, p = f"c{i}", f"m/s{i}.jsonl"
-        conn.execute("INSERT INTO sessions (path, last_ts, repo) VALUES (?,?,?)", (p, ts, repo))
+        conn.execute("INSERT INTO sessions (path, first_ts, last_ts, repo) VALUES (?,?,?,?)",
+                     (p, "2025-12-31T00:00:00Z", ts, repo))
         conn.execute("INSERT INTO chunks (chunk_id, path, tool_seq_json) VALUES (?,?,?)", (cid, p, json.dumps(tools)))
         conn.execute("INSERT INTO segments (id, chunk_id, section_no, path, subject, repo, text) VALUES"
                      " (?,?,?,?,?,?,?)", (f"g{i}", cid, 1, p, subject, repo, text))
@@ -124,7 +127,7 @@ class TestMine(Base):
 
     def test_key_phrase_bold_or_rarest(self):
         idf = mine.Idf([["common", "rare1"], ["common"]])
-        self.assertEqual(mine.key_phrase("**Lead in.** rest", idf), ["lead in"])
+        self.assertEqual(mine.key_phrase("**Lead in.** rest", idf), ["lead"])
         self.assertEqual(len(mine.key_phrase("alpha bravo charlie delta echo", idf)), 3)
 
     def test_triggers_overlap(self):
@@ -134,7 +137,8 @@ class TestMine(Base):
 
     def test_toolseq_patterns(self):
         conn = make_store(self.tmp / "s.db", [], chunks={
-            "rep": ["Grep"] * 5 + ["Bash"],
+            "rep": [["Grep"], ["Grep", "Grep"], ["Grep"], ["Grep"], ["Bash"]],
+            "shell": [["Bash"]] * 9,
             "short": ["Grep"] * 4,
             "reread": [{"name": "Edit", "path": "a"}, {"name": "Read", "path": "a"}],
             "other": [{"name": "Edit", "path": "a"}, {"name": "Read", "path": "b"}],
@@ -146,14 +150,14 @@ class TestMine(Base):
         self.assertEqual(stats["edit_then_read_names_only"], 1)
 
     def test_refs_stale_paths_and_numbers(self):
-        segs = [("paths", "see bin/real-tool and bin/gone-tool and #10 and #99", "demo", RECENT, []),
+        segs = [("paths", "see bin/real-tool and bin/gone-tool.sh and bin/trunc and #10 and #99", "demo", RECENT, []),
                 ("old", "bin/gone-old", "demo", OLD, []),
                 ("other", "bin/gone-elsewhere #5", "ghost", RECENT, [])] + self.filler() \
             + self.filler(20, "ghost")
         conn = make_store(self.tmp / "s.db", segs)
         flags, stats = mine.check_refs(mine.segments(conn), self.ctx(conn), 0)
         objs = sorted(f["object"] for f in flags)
-        self.assertEqual(objs, ["popcre/demo#99", "popcre/demo:bin/gone-tool"])
+        self.assertEqual(objs, ["popcre/demo#99", "popcre/demo:bin/gone-tool.sh"])
         self.assertEqual(stats["unresolved"], ["ghost"])
 
     def test_claims_hallucination(self):
@@ -165,7 +169,22 @@ class TestMine(Base):
         flags, stats = mine.check_claims(mine.segments(conn), self.ctx(conn), 20)
         got = sorted((f["segment"], f["object"].split("/")[-1]) for f in flags)
         self.assertEqual(got, [("g0", "demo#11"), ("g0", "demo#99"), ("g0", "demo@abc1234ff"), ("g1", "demo#10")])
-        self.assertEqual(stats["open_issue_done_claims"], 1)
+        self.assertEqual(stats["existence_only"], 1)  # "done on #12": existence only
+
+    def test_claims_merge_main_into_is_not_a_merge_claim(self):
+        segs = [("upd", "merged main into #11 and reran", "demo", RECENT, [])] + self.filler()
+        conn = make_store(self.tmp / "s.db", segs)
+        flags, _ = mine.check_claims(mine.segments(conn), self.ctx(conn), 20)
+        self.assertEqual(flags, [])
+
+    def test_skill_bypass_skips_named_or_skill_work(self):
+        text = "merge split rotate watermark pdf documents pages"
+        segs = [("pdf work", text + " via pdf-merge", "demo", RECENT, []),
+                ("edit the pdf skill", text, "demo", RECENT, [])] + self.filler()
+        conn = make_store(self.tmp / "s.db", segs)
+        flags, _ = mine.check_skill_bypass(mine.segments(conn), self.ctx(conn), 0.35)
+        self.assertFalse(any(f["segment"] == "g1" for f in flags))
+        self.assertFalse(any(f["segment"] == "g0" and "pdf-merge" in f["object"] for f in flags))
 
     def test_gh_cache_and_rate_gate(self):
         fake = FakeGH(remaining=10)

@@ -88,13 +88,14 @@ def parse_ts(s) -> dt.datetime | None:
 def segments(conn: sqlite3.Connection) -> list[dict]:
     """Segments with their chunk tool sequence and session end time."""
     rows = conn.execute(
-        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts"
+        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts, se.first_ts"
         " FROM segments s LEFT JOIN chunks c ON c.chunk_id = s.chunk_id"
         " LEFT JOIN sessions se ON se.path = s.path").fetchall()
     out = []
-    for sid, subj, text, repo, slugs, seq, last in rows:
+    for sid, subj, text, repo, slugs, seq, last, first in rows:
         out.append({"id": sid, "subject": subj or "", "text": text or "", "repo": repo or "unknown",
-                    "slugs": slugs or "", "tools": _tools(seq), "ts": parse_ts(last)})
+                    "slugs": slugs or "", "tools": _tools(seq), "ts": parse_ts(last),
+                    "timed": bool(first and last and first != last)})
     return out
 
 
@@ -103,7 +104,13 @@ def _tools(seq_json) -> list:
         seq = json.loads(seq_json or "[]")
     except ValueError:
         return []
-    return seq if isinstance(seq, list) else []
+    if not isinstance(seq, list):
+        return []
+    # the writer stores one list of tool names per turn; flatten to call order
+    out = []
+    for t in seq:
+        out.extend(t if isinstance(t, list) else [t])
+    return out
 
 
 def tool_name(t) -> str:
@@ -160,10 +167,14 @@ def load_bullets(root: Path) -> list[dict]:
 
 
 def key_phrase(bullet: str, idf: Idf) -> list[str]:
+    """The 3 rarest 4+-letter words of the bold lead-in, else of the bullet.
+
+    Segments are ScaleDown summaries, not verbatim text, so a whole lead-in
+    sentence never matches; its rarest words do (tuned 2026-10-30, #2063).
+    """
     m = re.match(r"\*\*(.+?)\*\*", bullet)
-    if m:
-        return [m.group(1).strip().rstrip(".:").lower()]
-    ws = sorted(set(words(bullet)), key=lambda w: (idf.df.get(w, 0), w))
+    src = m.group(1) if m and words(m.group(1)) else bullet
+    ws = sorted(set(words(src)), key=lambda w: (idf.df.get(w, 0), w))
     return ws[:3]
 
 
@@ -229,6 +240,54 @@ class GH:
         self.cache.put(key, found)
         return found or None
 
+    def tree(self, full: str) -> set | None:
+        """Paths on the default branch, cached for the day (trees change; answers about numbers do not)."""
+        key = f"mine:tree:{dt.date.today().isoformat()}:{full}"
+        hit = self.cache.get(key)
+        if hit is not None:
+            return set(hit)
+        self._gate("core")
+        self.calls += 1
+        r = self.runner(["gh", "api", f"repos/{full}/git/trees/HEAD?recursive=1", "--jq", ".tree[].path"])
+        if r.returncode != 0 or not r.stdout.strip():
+            return None
+        paths = r.stdout.splitlines()
+        self.cache.put(key, paths)
+        return set(paths)
+
+    def all_repos(self) -> list:
+        """Every repository of the owners (cached); a commit may live outside the repo set."""
+        hit = self.cache.get("mine:all-repos")
+        if hit is not None:
+            return hit
+        out = []
+        for owner in OWNERS:
+            self._gate("core")
+            self.calls += 1
+            r = self.runner(["gh", "repo", "list", owner, "--limit", "1000", "--json", "nameWithOwner"])
+            try:
+                out += [x["nameWithOwner"] for x in json.loads(r.stdout or "[]")]
+            except (ValueError, KeyError, TypeError):
+                return out  # transient: do not cache
+        self.cache.put("mine:all-repos", out)
+        return out
+
+    def commit(self, full: str, sha: str) -> bool:
+        """True when GitHub still serves ``sha`` in ``full`` (squash-merged branch commits included)."""
+        key = f"mine:commit:{full}@{sha}"
+        hit = self.cache.get(key)
+        if hit is not None:
+            return bool(hit)
+        self._gate("core")
+        self.calls += 1
+        r = self.runner(["gh", "api", f"repos/{full}/commits/{sha}", "--jq", ".sha"])
+        if r.returncode != 0 and "No commit found" not in (getattr(r, "stderr", "") or "") \
+                and "422" not in (getattr(r, "stderr", "") or ""):
+            return True  # transient or auth failure: do not flag, do not cache
+        ok = r.returncode == 0
+        self.cache.put(key, ok)
+        return ok
+
     def numbers(self, full: str, nums) -> dict:
         """{n: {"type","state","merged_at","closed_at"} or None (missing)}."""
         out, todo = {}, []
@@ -278,6 +337,24 @@ def commit_known(repo_dir: Path, sha: str) -> bool:
 
 # ----------------------------------------------------------------- the checks
 
+ON_REQUEST = re.compile(r'"(?:ask|run this by|use|have|debate|review with|delegate)\b', re.I)
+DELEGATION = re.compile(r"^FROZEN\b|\bdelegat|\bsecond[- ]opinion\b", re.I)
+CLAUDE_TOOLS = {"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Agent", "Task"}
+CODEX_TOOLS = {"exec", "exec_command", "shell_command", "apply_patch", "shell"}
+
+
+def skill_applies(sk: dict, names: set) -> bool:
+    """False for a skill that runs only when asked by name, or belongs to another client."""
+    if ON_REQUEST.search(sk["description"]) or DELEGATION.search(sk["description"]):
+        return False  # "ask X", "use X", "run this by X": not using it is not a bypass
+    client = sk["file"].split("/")[1] if sk["file"].count("/") > 2 else "shared"
+    if client == "codex" and names & CLAUDE_TOOLS and not names & CODEX_TOOLS:
+        return False
+    if client == "claude" and names & CODEX_TOOLS and not names & CLAUDE_TOOLS:
+        return False
+    return client in ("shared", "claude", "codex")
+
+
 def check_skill_bypass(segs, ctx, thr):
     skills = [s for s in ctx["skills"] if s["description"]]
     toks = [words(s["subject"] + " " + s["text"]) for s in segs]
@@ -289,9 +366,14 @@ def check_skill_bypass(segs, ctx, thr):
             continue
         v = idf.vec(tk)
         names = {tool_name(t) for t in seg["tools"]}
+        if seg["slugs"].split(",")[0] == "database":
+            continue  # schema and migration work around a skill's data is not the skill's task
+        low = (seg["subject"] + " " + seg["text"]).lower()
         for sk, sv in svecs:
             sc = cosine(sv, v)
-            if sc >= thr and "Skill" not in names and sk["name"] not in names:
+            # A named skill was used (Codex reads SKILL.md by path) or is being worked on.
+            if sc >= thr and "Skill" not in names and sk["name"] not in names and skill_applies(sk, names) \
+                    and sk["name"] not in low and "skill" not in seg["subject"].lower():
                 flags.append({"segment": seg["id"], "subject": seg["subject"], "object": f"skill {sk['name']}",
                               "score": round(sc, 3)})
     return flags, {"skills": len(skills), "segments": len(segs)}
@@ -310,7 +392,8 @@ def check_instructions(segs, ctx, thr):
             continue
         sig = tuple(kp)
         if sig not in seen:
-            seen[sig] = sum(1 for t in lows if all(k in t for k in kp))
+            need = min(len(kp), 2)  # tuned 2026-10-30 (#2063): all 3 missed paraphrases
+            seen[sig] = sum(1 for t in lows if sum(k in t for k in kp) >= need)
         if seen[sig] == 0:
             flags.append({"segment": "-", "subject": "unused bullet", "object": f"{b['file']}: {b['text'][:100]}",
                           "key": " + ".join(kp)})
@@ -343,6 +426,10 @@ def check_triggers(segs, ctx, thr):
     return flags, {"skills": len(skills)}
 
 
+GENERIC_TOOLS = {"Bash", "exec", "exec_command", "shell_command", "shell", "PowerShell", "js", "Edit",
+                 "MultiEdit", "Write", "apply_patch", "write_stdin", "mcp__ccd_turn__update_plan"}
+
+
 def check_toolseq(segs, ctx, thr):
     conn = ctx["conn"]
     first_subject = dict(conn.execute(
@@ -359,7 +446,7 @@ def check_toolseq(segs, ctx, thr):
             j = i
             while j < len(names) and names[j] == names[i]:
                 j += 1
-            if j - i >= 5 and names[i]:
+            if j - i >= 5 and names[i] and names[i] not in GENERIC_TOOLS:
                 flags.append({"segment": cid, "subject": first_subject.get(cid, ""),
                               "object": f"{names[i]} x{j - i} in a row", "pattern": "repeat"})
             i = j
@@ -402,12 +489,39 @@ def repo_set(segs, gh, min_refs=20):
     return resolved, sorted(unresolved)
 
 
+def attributed(text: str, pos: int, default: str, resolved: dict) -> str:
+    """The repo named just before ``pos`` (e.g. "shared-db PR #12"), else ``default``."""
+    before = text[max(0, pos - 40):pos].lower()
+    best, at = default, -1
+    for name in resolved:
+        i = before.rfind(name.lower())
+        if i > at:
+            best, at = name, i
+    return best
+
+
+def lookup_all(gh, resolved: dict, wanted: dict) -> dict:
+    """{(repo, n): answer} for every wanted number in its repo and every other repo-set repo."""
+    allnums = set().union(*wanted.values()) if wanted else set()
+    out = {}
+    for name, full in resolved.items():
+        got = gh.numbers(full, allnums)
+        for n, v in got.items():
+            out[(name, n)] = v
+    return out
+
+
+def exists_elsewhere(answers: dict, resolved: dict, n: int) -> bool:
+    return any(answers.get((name, n)) for name in resolved)
+
+
 def check_refs(segs, ctx, thr):
     gh, now = ctx["gh"], ctx["now"]
     recent = [s for s in segs if s["ts"] and s["ts"] >= now - dt.timedelta(days=30)]
     resolved, unresolved = repo_set(segs, gh)
     skill_names = {s["name"] for s in ctx["skills"]}
-    files_cache: dict = {}
+    # GitHub's default branch is the source of truth; a local checkout may sit on any branch.
+    files_cache = {full: gh.tree(full) or tracked_files(ctx["repos_home"] / name) for name, full in resolved.items()}
     nums_wanted = defaultdict(set)
     flags, stats = [], Counter()
     for s in recent:
@@ -415,16 +529,15 @@ def check_refs(segs, ctx, thr):
             stats["segments_outside_repo_set"] += 1
             continue
         full = resolved[s["repo"]]
-        if full not in files_cache:
-            files_cache[full] = tracked_files(ctx["repos_home"] / s["repo"])
         files = files_cache[full]
         tops = {f.split("/", 1)[0] for f in files} if files else set()
         for p in set(PATH_RE.findall(s["text"])):
             p = p.rstrip(".")
-            if files is None or p.split("/", 1)[0] not in tops or "*" in p or "<" in p:
-                continue
+            if files is None or p.split("/", 1)[0] not in tops or "*" in p or "<" in p or "..." in p \
+                    or not re.search(r"\.[A-Za-z0-9]{1,6}$", p.rsplit("/", 1)[-1]):
+                continue  # extensionless tails are usually truncated summary text
             stats["paths"] += 1
-            if p not in files and not any(f.startswith(p + "/") for f in files):
+            if p not in files and not any(p in (f or ()) for f in files_cache.values()):
                 flags.append({"segment": s["id"], "subject": s["subject"], "object": f"{full}:{p}",
                               "kind": "path"})
         for m in SKILL_RE.finditer(s["text"]):
@@ -433,21 +546,24 @@ def check_refs(segs, ctx, thr):
             if name not in skill_names and full == ctx["home_repo"]:
                 flags.append({"segment": s["id"], "subject": s["subject"], "object": f"skill {name}",
                               "kind": "skill"})
-        for n in set(NUM_RE.findall(s["text"])):
-            nums_wanted[full].add(int(n))
+        for m in NUM_RE.finditer(s["text"]):
+            nums_wanted[attributed(s["text"], m.start(), s["repo"], resolved)].add(int(m.group(1)))
             stats["numbers"] += 1
-    for full, nums in nums_wanted.items():
-        got = gh.numbers(full, nums)
-        for s in recent:
-            if resolved.get(s["repo"]) != full:
+    answers = lookup_all(gh, resolved, nums_wanted)
+    done = set()
+    for s in recent:
+        if s["repo"] not in resolved:
+            continue
+        for m in NUM_RE.finditer(s["text"]):
+            n, name = int(m.group(1)), attributed(s["text"], m.start(), s["repo"], resolved)
+            if (s["id"], name, n) in done:
                 continue
-            for n in set(NUM_RE.findall(s["text"])):
-                n = int(n)
-                if n not in got:
-                    stats["numbers_unchecked"] += 1
-                elif got[n] is None:
-                    flags.append({"segment": s["id"], "subject": s["subject"], "object": f"{full}#{n}",
-                                  "kind": "number"})
+            done.add((s["id"], name, n))
+            if (name, n) not in answers:
+                stats["numbers_unchecked"] += 1
+            elif answers[(name, n)] is None and not exists_elsewhere(answers, resolved, n):
+                flags.append({"segment": s["id"], "subject": s["subject"], "object": f"{resolved[name]}#{n}",
+                              "kind": "number"})
     stats["unresolved_repos"] = len(unresolved)
     return flags, {**dict(stats), "repo_set": len(resolved), "unresolved": unresolved}
 
@@ -456,66 +572,94 @@ CLAIM_RE = re.compile(r"\b(merged|done|fixed|pushed)\b", re.I)
 SHA_RE = re.compile(r"\bcommit\s+`?([0-9a-f]{7,40})\b", re.I)
 
 
-def claim_refs(text: str, window: int = 30):
-    """(word, kind, value) for refs within ``window`` chars of a claim word; one per ref."""
-    best: dict = {}
-    rank = {"merged": 0, "fixed": 1, "pushed": 2, "done": 3}
-    for m in CLAIM_RE.finditer(text):
-        lo, hi = max(0, m.start() - window), m.end() + window
-        span = text[lo:hi]
-        w = m.group(1).lower()
-        refs = [("number", int(n)) for n in NUM_RE.findall(span)]
-        refs += [("commit", sha.lower()) for sha in SHA_RE.findall(span)
-                 if re.search(r"[a-f]", sha, re.I) and re.search(r"\d", sha)]
-        for ref in refs:
-            if ref not in best or rank[w] < rank[best[ref]]:
-                best[ref] = w
-    return {(w, kind, val) for (kind, val), w in best.items()}
+NEG = re.compile(r"\b(?:not|never|un|blocked|before|after|once|until|when|if|be|will|to|awaiting|ready)\W*$",
+                 re.I)
+MERGED_NUM = re.compile(r"\b(?:PR|pull request)\s*#(\d{1,6})\s+(?:was\s+|is\s+|has been\s+|got\s+|now\s+)?merged\b"
+                        r"|\bmerged\s+(?:PR\s*|pull request\s*)?#(\d{1,6})\b", re.I)
+OTHER_NUM = re.compile(r"\b(fixed|pushed|done)\s+(?:in|to|via|on|by)\s+(?:PR\s*|issue\s*)?#(\d{1,6})\b"
+                       r"|#(\d{1,6})\s+(?:is\s+|was\s+)?(fixed|done)\b", re.I)
+COMMIT = re.compile(r"\b(merged|fixed|pushed)\b[^.\n]{0,20}?\bcommit\s+`?([0-9a-f]{7,40})\b", re.I)
+
+
+def claim_refs(text: str, window: int = 0):
+    """(word, kind, value, pos): refs stated directly as merged/fixed/pushed/done.
+
+    Tuned 2026-10-30 (#2063): a loose window caught neighbouring numbers and
+    "merge blocked"/"will be merged" phrasing, so only adjacent forms count.
+    """
+    out = set()
+    for m in MERGED_NUM.finditer(text):
+        if NEG.search(text[max(0, m.start() - 15):m.start()]):
+            continue
+        if re.match(r"\s+(?:origin/)?main\s+into\b", text[m.start() + 6:m.start() + 26], re.I):
+            continue
+        n = m.group(1) or m.group(2)
+        out.add(("merged", "number", int(n), m.start(m.lastindex)))
+    for m in OTHER_NUM.finditer(text):
+        w, n = (m.group(1), m.group(2)) if m.group(1) else (m.group(4), m.group(3))
+        out.add((w.lower(), "number", int(n), m.start()))
+    for m in COMMIT.finditer(text):
+        sha = m.group(2).lower()
+        if re.search(r"[a-f]", sha) and re.search(r"\d", sha):
+            out.add((m.group(1).lower(), "commit", sha, m.start()))
+    return out
 
 
 def check_claims(segs, ctx, thr):
     gh = ctx["gh"]
-    window = int(thr) if thr else 30
+    grace = dt.timedelta(hours=thr if thr else 6)
     resolved, unresolved = repo_set(segs, gh)
-    found = []
+    found, stats0 = [], Counter()
     for s in segs:
         if s["repo"] in resolved and s["ts"]:
-            for ref in claim_refs(s["text"], window):
-                found.append((s, ref))
+            for w, kind, val, pos in claim_refs(s["text"]):
+                # attribute to the nearest repo named before the ref, unresolved ones included
+                name = attributed(s["text"], pos, s["repo"], {**resolved, **{u: None for u in unresolved}})
+                if name not in resolved:
+                    stats0["other_repo_unchecked"] += 1
+                    continue
+                if kind == "commit" and not (7 <= len(val) <= 12 or len(val) == 40):
+                    stats0["truncated_sha"] += 1
+                    continue
+                found.append((s, (w, kind, val, name)))
     by_repo = defaultdict(set)
-    for s, (_, kind, val) in found:
+    for s, (_, kind, val, name) in found:
         if kind == "number":
-            by_repo[resolved[s["repo"]]].add(val)
-    answers = {full: gh.numbers(full, nums) for full, nums in by_repo.items()}
-    flags, stats = [], Counter(claims=len(found))
-    for s, (word, kind, val) in found:
-        full = resolved[s["repo"]]
+            by_repo[name].add(val)
+    answers = lookup_all(gh, resolved, by_repo)
+    flags, stats = [], Counter(claims=len(found), **stats0)
+    for s, (word, kind, val, name) in found:
+        full = resolved[name]
         base = {"segment": s["id"], "subject": s["subject"], "claim": word}
         if kind == "commit":
-            d = ctx["repos_home"] / s["repo"]
-            if not (d / ".git").exists():
+            dirs = [ctx["repos_home"] / n2 for n2 in resolved if (ctx["repos_home"] / n2 / ".git").exists()]
+            if not dirs:
                 stats["commits_unchecked"] += 1
-            elif not commit_known(d, val):
+            elif not any(commit_known(d, val) for d in dirs) \
+                    and not any(gh.commit(f2, val) for f2 in resolved.values()) \
+                    and not any(gh.commit(f2, val) for f2 in gh.all_repos() if f2 not in resolved.values()):
                 flags.append({**base, "object": f"{full}@{val}", "why": "commit not found"})
             continue
-        got = answers.get(full, {})
-        if val not in got:
+        if (name, val) not in answers:
             stats["numbers_unchecked"] += 1
             continue
-        v = got[val]
+        v = answers[(name, val)]
         if v is None:
-            flags.append({**base, "object": f"{full}#{val}", "why": "does not exist"})
-            continue
-        when = parse_ts(v["merged_at"] if v["type"] == "PullRequest" else v["closed_at"])
-        if v["type"] == "PullRequest" and word == "merged" and not v["merged_at"]:
-            flags.append({**base, "object": f"{full}#{val}", "why": f"PR not merged ({v['state']})"})
-        elif when is None:
-            if v["type"] == "PullRequest" or word in ("fixed", "merged"):
-                flags.append({**base, "object": f"{full}#{val}", "why": f"{v['type']} still {v['state']}"})
+            if exists_elsewhere(answers, resolved, val):
+                stats["ambiguous_repo"] += 1
             else:
-                stats["open_issue_done_claims"] += 1  # "step done on #N" is not a closure claim
-        elif when > s["ts"] + dt.timedelta(hours=1):
-            flags.append({**base, "object": f"{full}#{val}", "why": "merged/closed after the segment"})
+                flags.append({**base, "object": f"{full}#{val}", "why": "does not exist"})
+            continue
+        # Only "merged" about a PR is a closure claim; "fixed in #N", "pushed to #N" and
+        # "done on #N" legitimately precede an issue's closing (tuned 2026-10-30, #2063).
+        if word != "merged" or v["type"] != "PullRequest":
+            stats["existence_only"] += 1
+        elif not v["merged_at"]:
+            flags.append({**base, "object": f"{full}#{val}", "why": f"PR not merged ({v['state']})"})
+        elif not s.get("timed"):
+            stats["untimed_session"] += 1  # one timestamp only: the session end is unknown
+        elif parse_ts(v["merged_at"]) > s["ts"] + grace:
+            flags.append({**base, "object": f"{full}#{val}", "why": "merged after the segment"})
     return flags, {**dict(stats), "repo_set": len(resolved), "unresolved": unresolved}
 
 
@@ -572,7 +716,7 @@ def main(argv=None) -> int:
     segs = segments(conn)
     out_dir = Path(a.reports) if a.reports else store_root / "reports"
     for check in (CHECKS if a.check == "all" else (a.check,)):
-        thr = a.threshold if a.threshold is not None else DEFAULTS.get(check, 30 if check == "claims" else 0)
+        thr = a.threshold if a.threshold is not None else DEFAULTS.get(check, 6 if check == "claims" else 0)
         flags, stats = RUNNERS[check](segs, ctx, thr)
         p = write_report(out_dir, check, flags, stats, thr, a.date or today)
         print(f"{check}: {len(flags)} flags -> {p.name}")
