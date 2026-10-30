@@ -69,8 +69,8 @@ git clone -q -b main "$TMP/remote.git" "$TMP/installed"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 check_head() { [ "$(git -C "$TMP/installed" rev-parse HEAD)" = "$1" ] || fail 'installed HEAD changed'; }
-grep -Fq 'run_stage required "Reviewer requalification"' "$ROOT/install.sh" ||
-  fail 'installer must require reviewer requalification before finalize'
+! grep -Fq 'run_stage required "Reviewer requalification"' "$ROOT/install.sh" ||
+  fail 'installer must not require reviewer requalification (review is advisory, #2074)'
 before="$(git -C "$TMP/installed" rev-parse HEAD)"
 
 # A direct installer must refuse before any stage on an authorization failure.
@@ -362,11 +362,11 @@ grep -B1 -F 'run_stage required "Claude and Codex skills"' "$ROOT/install.sh" |
 eval "$(sed -n '/^publish_stage_report() {/,/^}/p' "$ROOT/install.sh")"
 target_head="$target"
 stage_results=('PASS\trequired\tManaged artifact manifest' 'PASS\trequired\tai-devops doctor'
-  'PASS\trequired\tReviewer requalification' 'SKIP\toptional\tFixture optional')
+  'PASS\trequired\tGit commit identity' 'SKIP\toptional\tFixture optional')
 publish_stage_report || fail 'exact stage result report was not published'
 [ "$(stat -c %a "$STAGE_REPORT")" = 600 ] || fail 'stage report permissions are not private'
 [ "$(wc -l < "$STAGE_REPORT")" = 4 ] || fail 'stage report omitted an outcome'
-grep -Fxq $'PASS\trequired\tReviewer requalification' "$STAGE_REPORT" ||
+grep -Fxq $'PASS\trequired\tGit commit identity' "$STAGE_REPORT" ||
   fail 'stage report changed required outcome'
 rm "$STAGE_REPORT"
 ln -s "$TMP/foreign-report" "$STAGE_REPORT"

@@ -128,7 +128,7 @@ def installed_state(repo):
     rows = [line.split("\t") for line in manifest.read_text().splitlines()]
     require([row for row in rows if row[:2] == ["meta", "source_sha"]] == [["meta", "source_sha", head, "-"]],
             "installed manifest/source mismatch")
-    for name in ["ai-review", "ai-review-pool", "ai-glm", "ai-task-gates"]:
+    for name in ["ai-glm", "ai-task-gates"]:
         target = Path("/usr/local/bin") / name
         matching = [row for row in rows if row[:2] == ["symlink", str(target)]]
         require(len(matching) == 1 and len(matching[0]) == 4

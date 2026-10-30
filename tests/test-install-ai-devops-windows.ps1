@@ -359,7 +359,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $fixture "hooks\post-merge") -Destination (Join-Path $fixture ".git\hooks\post-merge")
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True (-not (Test-Path (Join-Path $fixture ".git\hooks\post-merge"))) "retired post-merge hook was not removed from the fixture"
-    Assert-True ($output -match "Test mode: not running live reviewer qualification") "requalify step did not honour test mode"
+    Assert-True (-not ($output -match "Re-qualifying reviewers")) "retired reviewer requalification still runs (#2074)"
 
     # Exercise the Qwen install stage with a fixture wrapper. The stub leaves
     # a marker only when store-key --if-missing is actually invoked by Git Bash.
@@ -421,11 +421,6 @@ printf ready > "$(dirname "$0")/muse-store-called"
     }
     Assert-True (Test-Path (Join-Path $fixture "bin\muse-store-called")) "Muse install stage did not invoke store-key --if-missing"
     Assert-True ($output -match "Muse protected per-user key store is ready") "Muse install stage did not report protected key-store readiness"
-    $keyReadyAt = $output.IndexOf("Muse protected per-user key store is ready")
-    $requalifyAt = $output.IndexOf("Re-qualifying reviewers whose qualification the update invalidated")
-    $qualificationAt = $output.IndexOf("Test mode: not running live reviewer qualification")
-    Assert-True ($keyReadyAt -ge 0 -and $requalifyAt -gt $keyReadyAt -and $qualificationAt -gt $requalifyAt) `
-        "Muse key store was not prepared before the reviewer requalification path"
 
     Write-Host "PASS: install-ai-devops-windows"
 } finally {
