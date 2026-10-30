@@ -28,9 +28,16 @@ receipt="$root/source.json"
 label() { gh issue edit "$issue" --repo "$repo" --add-label "$1" >/dev/null || true; }
 fail() {
   echo "::error::$1"
+  gh label create fixer-failed --repo "$repo" --color 5319E7 --description "review-fixer outcome" 2>/dev/null || true
   gh issue comment "$issue" --repo "$repo" --body "$(printf 'Automatic fixer failed: %s\n\n%s\n' "$1" "$sig")" >/dev/null || true
   label fixer-failed; exit 1
 }
+
+# Stop stale or already handled work before outcome setup or credential probes.
+# The preflight records its own deferral and source owner on the same finding.
+python3 "$lifecycle" prepare "$issue" "$receipt"
+rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "source preflight failed"
+
 for l in fixer-done fixer-failed; do
   gh label create "$l" --repo "$repo" --color 5319E7 --description "review-fixer outcome" 2>/dev/null || true
 done
@@ -45,8 +52,6 @@ else
   pgit() { git "$@"; }
 fi
 
-python3 "$lifecycle" prepare "$issue" "$receipt"
-rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "source preflight failed"
 base="$(jq -r .target_branch "$receipt")"
 body="$(gh issue view "$issue" --repo "$repo" --json body --jq .body)" || fail "could not read the issue"
 work="$root/repo"
