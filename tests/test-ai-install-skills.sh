@@ -19,6 +19,7 @@ make_fixture() {
     "$fixture/skills/codex/client-codex" "$fixture/skills/shared/shared-one" \
     "$fixture/skills/shared/synology-sharesync-triage" "$fixture/templates/system"
   cp "$REPO_ROOT/bin/ai-install-skills" "$fixture/bin/ai-install-skills"
+  mkdir -p "$fixture/tools/lib" && cp "$REPO_ROOT/tools/lib/globals-common.sh" "$fixture/tools/lib/globals-common.sh"
   printf '%s\n' '---' 'name: client-claude' 'description: test' '---' > "$fixture/skills/claude/client-claude/SKILL.md"
   printf '%s\n' '---' 'name: client-codex' 'description: test' '---' > "$fixture/skills/codex/client-codex/SKILL.md"
   printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$fixture/skills/shared/shared-one/SKILL.md"
@@ -250,6 +251,29 @@ run_installer "$fixture" "$claude" "$codex" --adopt-globals >"$TMP_ROOT/g3.out" 
 grep -Fq 'machine-specific section' "$claude/globals-backup/CLAUDE.md" || fail "old global not backed up"
 grep -Fq 'machine-specific section' "$claude/CLAUDE.md" && fail "--adopt-globals did not replace the global"
 grep -Fq 'restore with' "$TMP_ROOT/g3.out" || fail "restore hint missing"
+
+echo "globals: an unmodified older template version is refreshed; a real edit is kept"
+fixture="$TMP_ROOT/oldglobal/repo"; claude="$TMP_ROOT/oldglobal/claude"; codex="$TMP_ROOT/oldglobal/codex"
+make_fixture "$fixture"
+git -C "$fixture" init -q
+git -C "$fixture" -c user.name=T -c user.email=t@example.com add -A
+git -C "$fixture" -c user.name=T -c user.email=t@example.com commit -qm v1
+run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
+printf '\n---\n\n## Machine facts — testbox\nlocal fact\n' >> "$claude/CLAUDE.md"
+cp "$codex/AGENTS.md" "$TMP_ROOT/oldglobal/codex-v1.md"
+printf '%s\n' '# test Codex global' 'locally edited line' > "$codex/AGENTS.md"
+printf '%s\n' '# test Claude global v2' > "$fixture/templates/system/CLAUDE-global.md"
+printf '%s\n' '# test Codex global v2' > "$fixture/templates/system/AGENTS-global-codex.md"
+git -C "$fixture" -c user.name=T -c user.email=t@example.com commit -qam v2
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/og1.out" 2>&1
+grep -Fq '# test Claude global v2' "$claude/CLAUDE.md" || fail "unmodified old global was not refreshed"
+grep -Fq 'local fact' "$claude/CLAUDE.md" || fail "machine section lost during refresh"
+grep -Fq 'local fact' "$claude/globals-backup/CLAUDE.md" || fail "refreshed global not backed up"
+grep -Fq 'locally edited line' "$codex/AGENTS.md" || fail "locally edited global was overwritten"
+grep -Fq 'NOT overwriting' "$TMP_ROOT/og1.out" || fail "edited global not reported"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/og2.out" 2>&1
+grep -Fq 'Claude global instructions already up to date (machine section kept).' "$TMP_ROOT/og2.out" \
+  || fail "refreshed global with machine section not seen as current"
 
 echo "scoped install preserves all unrelated state"
 fixture="$TMP_ROOT/scoped/repo"; claude="$TMP_ROOT/scoped/claude"; codex="$TMP_ROOT/scoped/codex"

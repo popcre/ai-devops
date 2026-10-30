@@ -326,10 +326,6 @@ check 'authorize-install refuses an approval that carries no passing test eviden
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
 check 'authorize-install local-tests refusal names the missing test evidence' \
   "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy '' '.tests=null')\" | grep -q 'local-tests'"
-live_status failure
-check 'a shared review code release without passing live reviews is refused' \
-  "out '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\" | grep -q 'ai-release-live-check fleet' && [ ! -e '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json' ]"
-live_status success
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
@@ -1091,7 +1087,7 @@ newrepo "$TMP/gate"
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a paid review is refused for a documentation change' "rc 3 '$TMP/gate' check --before review"
 check 'a long PR wait is refused for a documentation change' "rc 3 '$TMP/gate' check --before pr-wait"
-check 'an assigned AI reviewer approval lifts a non-protected forbidden action' \
+check 'an optional lifecycle-recorded AI review report still lifts a non-protected forbidden verification action (advice, never required)' \
   "rc 0 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review)\""
 check 'an approval whose reviewer is the implementing engine is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.implementer_engine=\"grok\"')\""

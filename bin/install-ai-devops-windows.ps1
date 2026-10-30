@@ -1018,8 +1018,29 @@ function Install-GlobalFile {
     $dstHash = Get-Sha256 $Dest
     $backupRoot = Join-Path (Split-Path -Parent $Dest) "globals-backup"
     $leaf = Split-Path -Leaf $Dest
-    if ($srcHash -eq $dstHash) {
-        Write-Note "$Label already up to date."
+    # An installed global whose body (machine section aside) is a committed
+    # version of its template was never edited here: refresh it and keep the
+    # machine section (tools/lib/globals-common.sh, shared with the Bash
+    # installer). Exit 1 means a real local edit, which falls through below.
+    $refreshCode = 1
+    if ($srcHash -ne $dstHash) {
+        $refreshBash = Get-GitBash
+        $commonLib = Join-Path $RepoPath 'tools\lib\globals-common.sh'
+        if ($refreshBash -and (Test-Path -LiteralPath $commonLib)) {
+            $toBash = { param([string]$p) $p -replace '\\', '/' }
+            $refresh = Invoke-NativeProbe -Command $refreshBash.Source -Arguments @(
+                (& $toBash $commonLib), 'refresh', (& $toBash $RepoPath), (& $toBash $Source), (& $toBash $Dest), $Label,
+                $(if ($SkillsDryRun) { 'true' } else { 'false' }))
+            $refreshCode = $refresh.ExitCode
+            foreach ($line in $refresh.Output) { Write-Note $line }
+        }
+    }
+    if ($srcHash -eq $dstHash -or $refreshCode -eq 3) {
+        if ($refreshCode -ne 3) { Write-Note "$Label already up to date." }
+    } elseif ($refreshCode -eq 0) {
+        # Refreshed by the shared helper; it printed the backup location.
+    } elseif ($refreshCode -eq 2) {
+        throw "$Label refresh failed; the previous file was restored."
     } elseif ($AdoptGlobals) {
         # A global is the one file that carries per-machine additions, so
         # replacing it needs an explicit managed boundary: -AdoptGlobals.

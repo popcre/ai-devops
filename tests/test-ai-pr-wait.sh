@@ -231,7 +231,7 @@ check "nothing else in the repository hand-rolls a pull-request wait loop" \
 
 # --------------------------------------------------------------------------
 # Task gate. A documentation-only pull request must not start a long wait at
-# all, and an assigned AI reviewer APPROVE of the exact head may still lift that.
+# all. An optional lifecycle-recorded AI review report may still lift that; review is advice, never required (#2041).
 # --------------------------------------------------------------------------
 GR="$TMP/gated"; mkdir -p "$GR"; git -C "$GR" init -q --initial-branch=main
 git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
