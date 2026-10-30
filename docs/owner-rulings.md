@@ -163,3 +163,18 @@ Current rule (issue #2041):
   APPROVE verdict to merge, deploy, install, or touch shared-db, production or
   infrastructure. Test checks and non-review production safety gates stay.
 - This supersedes every earlier ruling that required an exact-head APPROVE.
+
+## 2026-10-30 — lean required checks (issue #2172)
+
+Verbatim, Albert's chat: "can we bypass/eliminate some or all of the automatic
+checks?" then "yes. and do it in a permanent way in the ai-devops repo so that
+it hits all apps/harnesses on all machines". Also ordered killed permanently:
+the shared-db rule "one licensor per change" for curated Master Data loads.
+
+Current rule:
+- A merge-blocking check must directly prevent production-data damage or a
+  secret leak. Process, ownership, claim, lease, evidence-pair, handoff,
+  hygiene and broad test-suite checks are advisory or removed.
+- A required check that hangs or flakes is dropped from the required set at
+  once, then repaired.
+- Curated Master Data loads may cover any number of licensors in one change.
