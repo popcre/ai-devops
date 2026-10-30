@@ -44,19 +44,19 @@ This is the checklist for phases B–F of the skinny review in [plan_simple-revi
 | 44 | ai-devops `config/local-watch.json` | Membership drift and credit-watch jobs | Remove the entries |
 | 45 | ai-devops `config/machine-tools.tsv` | Windows reviewer watch tools | Remove the rows |
 | 46 | ai-devops `config/reviewer-start-watch.json` | Start-watch host | Retire |
-| 47 | ai-devops `bin/ai-review*`, `ai-reviewer-*`, `ai-*-review`, `ai-review-posthoc`, `ai-release-live-check` | Old toolchain | Delete (F) |
-| 48 | ai-devops `.github/workflows/reviewer-membership-drift.yml` | Weekly drift check | Disable |
+| 47 | ai-devops `bin/ai-review*`, `ai-reviewer-*`, `ai-*-review`, `ai-review-posthoc`, `ai-release-live-check` | Old toolchain | Partly resolved (F, #2113): `ai-review-posthoc`, `ai-release-live-check`, `ai-reviewer-membership-drift` deleted; the engine, doors and front door remain (second-opinion wrappers still depend on the sandbox and packet tools) |
+| 48 | ai-devops `.github/workflows/reviewer-membership-drift.yml` | Weekly drift check | Resolved (F, #2113): workflow and tool deleted |
 | 49 | GitHub lists an `ai-review.yml` workflow before it is on main | It comes from PR #2044, the new workflow | No action |
-| 50 | ai-devops `verify.yml` `windows-reviewer-safety` | Tests reviewer code | Drop it after F |
-| 51 | `templates/system/CLAUDE-global.md` (installed `~/.claude/CLAUDE.md`) | "Reviewers gate technical actions" | Rewrite and reinstall |
-| 52 | `templates/system/AGENTS-global-codex.md` and the mimo/zcode variants | The same rules | Rewrite and reinstall |
-| 53 | ai-devops `AGENTS.md` ~105-141 | APPROVE rules | Rewrite |
-| 54 | ai-devops `docs/reviewer-rotation-rules.md` | Rotation rules | Archive |
-| 55 | ai-devops `docs/owner-rulings.md` | Older reviewer rulings | Superseded by the 2026-10-29 entry |
-| 56 | `templates/system/REVIEWER-global.md`, `plan_reviewer-observation-week.md` | Reviewer persona; observation-week plan | Archive |
-| 57 | skills `codex/ai-reviewer`, `claude/ai-development-pipeline`, `claude/deploy-and-verify` | Require reviews | Edit |
-| 58 | skills ask-glm, ask-muse, deepseek-second-opinion, stepfun, grok-cli, qwen-code, gemini-code-delegation, kimi-code-delegation, log-reviewer-issue, codex-second-opinion | Rotation wording | Keep second-opinion use; drop the gate wording |
-| 59 | skill `secrets-to-1password` and the globals | Rotation needs an APPROVE | Edit |
+| 50 | ai-devops `verify.yml` `windows-reviewer-safety` | Tests reviewer code | Resolved (F, #2112): lane removed |
+| 51 | `templates/system/CLAUDE-global.md` (installed `~/.claude/CLAUDE.md`) | "Reviewers gate technical actions" | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 52 | `templates/system/AGENTS-global-codex.md` and the mimo/zcode variants | The same rules | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 53 | ai-devops `AGENTS.md` ~105-141 | APPROVE rules | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 54 | ai-devops `docs/reviewer-rotation-rules.md` | Rotation rules | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 55 | ai-devops `docs/owner-rulings.md` | Older reviewer rulings | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 56 | `templates/system/REVIEWER-global.md`, `plan_reviewer-observation-week.md` | Reviewer persona; observation-week plan | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 57 | skills `codex/ai-reviewer`, `claude/ai-development-pipeline`, `claude/deploy-and-verify` | Require reviews | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 58 | skills ask-glm, ask-muse, deepseek-second-opinion, stepfun, grok-cli, qwen-code, gemini-code-delegation, kimi-code-delegation, log-reviewer-issue, codex-second-opinion | Rotation wording | Resolved (D, #2085; verified empty grep 2026-10-30) |
+| 59 | skill `secrets-to-1password` and the globals | Rotation needs an APPROVE | Resolved (D, #2085; verified empty grep 2026-10-30) |
 
 ## Not checked yet (resolve during C and E)
 

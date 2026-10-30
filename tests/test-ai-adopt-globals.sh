@@ -27,6 +27,7 @@ make_fixture() {
   mkdir -p "$fixture/bin" "$fixture/templates/system" "$fixture/config" \
            "$fixture/skills/shared/shared-one"
   cp "$REPO_ROOT/bin/ai-install-skills" "$fixture/bin/ai-install-skills"
+  mkdir -p "$fixture/tools/lib" && cp "$REPO_ROOT/tools/lib/globals-common.sh" "$fixture/tools/lib/globals-common.sh"
   cp "$REPO_ROOT/bin/ai-adopt-globals"  "$fixture/bin/ai-adopt-globals"
   cp "$REPO_ROOT/config/retired-skills.txt" "$fixture/config/retired-skills.txt"
   printf '%s\n' '---' 'name: shared-one' 'description: test' '---' \

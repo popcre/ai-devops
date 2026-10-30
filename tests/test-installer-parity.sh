@@ -34,6 +34,7 @@ mkdir -p "$fixture/bin" "$fixture/config" "$fixture/templates/system" \
   "$fixture/skills/claude/client-claude" "$fixture/skills/codex/client-codex" \
   "$fixture/skills/shared/shared-one/agents"
 cp "$REPO_ROOT/bin/ai-install-skills" "$fixture/bin/ai-install-skills"
+mkdir -p "$fixture/tools/lib" && cp "$REPO_ROOT/tools/lib/globals-common.sh" "$fixture/tools/lib/globals-common.sh"
 printf '%s\n' '---' 'name: client-claude' 'description: test' '---' > "$fixture/skills/claude/client-claude/SKILL.md"
 printf '%s\n' '---' 'name: client-codex' 'description: test' '---' > "$fixture/skills/codex/client-codex/SKILL.md"
 printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$fixture/skills/shared/shared-one/SKILL.md"

@@ -54,6 +54,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../tools/lib/globals-common.sh
+source "$REPO_ROOT/tools/lib/globals-common.sh"
+SHORT_HOST="${SHORT_HOST:-$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')}"
 
 # On Windows (Git Bash / MSYS) $HOME can be redirected to a mapped network
 # drive (e.g. Z:) via a HOME env var or a roaming profile. That is NOT where
@@ -847,7 +850,7 @@ prune_orphan_skills "$CLAUDE_HOME" "Claude" \
 # differing global is reported and left alone, exactly as before. With it, the
 # installed copy is backed up first and the replacement is announced.
 install_global() {
-  local src="$1" dst="$2" label="$3" backup_dir
+  local src="$1" dst="$2" label="$3" backup_dir grc
   backup_dir="$(dirname "$dst")/globals-backup"
   if [[ ! -f "$dst" ]]; then
     run mkdir -p "$(dirname "$dst")"
@@ -856,6 +859,10 @@ install_global() {
     echo "NOTE: append this machine's section from: ai-private-config path machine_atlas"
   elif cmp -s "$src" "$dst"; then
     echo "$label already up to date."
+  elif { grc=0; global_refresh_unmodified "$REPO_ROOT" "$src" "$dst" "$label" "$DRY_RUN" || grc=$?; [[ $grc -ne 1 ]]; }; then
+    # Exit 1 means a real local edit: fall through to the branches below.
+    [[ $grc -eq 0 ]] && log_event refreshed-global "$label dst=$dst backup=$backup_dir/$(basename "$dst")"
+    [[ $grc -ne 2 ]] || return 1
   elif $ADOPT_GLOBALS; then
     echo "$dst differs — --adopt-globals given, replacing it."
     log_event replaced-global "$label dst=$dst backup=$backup_dir/$(basename "$dst")"

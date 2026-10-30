@@ -106,9 +106,9 @@ pipeline. The recovery procedure lives in
   ask Albert to approve (owner rulings 2026-09-28 and 2026-10-29). AI review
   is advice only and gates nothing. Shared-db migrations reach production only
   through its automatic promotion workflow (preview rehearsal, tests, no
-  blocking `review-finding` issue); no manual production command. Until
-  #2071 removes the old approval checks from `ai-task-gates`, a refusal there
-  is reported `Blocked —` on #2071, never worked around.
+  blocking `review-finding` issue); no manual production command.
+  `ai-task-gates` requires no reviewer verdict for any class (#2071); a
+  refusal there is reported `Blocked —`, never worked around.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.
@@ -131,9 +131,9 @@ pipeline. The recovery procedure lives in
   for the automatic fixer. No work waits for a review. Wrappers stay callable
   by name for second opinions. Plan: [`plan_skinny-review.md`](plan_skinny-review.md).
 - Declare what the task is before starting it: `ai-task-gates start --class
-  <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
-  recheck the real change set first and refuse an action the work does not
-  call for. A protected class cannot be acknowledged or reviewer-approved away;
+  <class>`. `bin/ai-pr-wait` and the second-opinion wrappers recheck the
+  real change set first and refuse an action the work does not call for. A
+  protected class cannot be acknowledged away, and no review verdict lifts it;
   the honest way past one is to redeclare the task at the stronger class and
   then do what that class actually requires.
 - Wait on CI through **bounded, event-aware** tools.

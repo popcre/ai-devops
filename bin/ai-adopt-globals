@@ -80,45 +80,10 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "ERROR: $*" >&2; exit 1; }
 say()  { printf '%s\n' "$*"; }
 
-# Drop trailing blank lines, then a trailing horizontal rule, then blanks again.
-# The "\n---\n\n" separator written before a machine section is ours, not the
-# template's, so it must not count as a difference.
-trim_tail() {
-  awk '{ lines[NR] = $0 } END {
-    last = NR
-    while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
-    if (last > 0 && lines[last] ~ /^-{3,}[[:space:]]*$/) {
-      last--
-      while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
-    }
-    for (i = 1; i <= last; i++) print lines[i]
-  }'
-}
-
-# Print the 1-based line number where this file's machine section starts, or
-# nothing at all if there is no machine section.
-#
-# Real headings in use across the machines, all of which must match:
-#   ## al8960ofc — Windows 11 dev machine (machine-specific; not from the hub template)
-#   # Machine facts — al8960ofc (Windows 11 dev box)
-#   # Machine atlas — this machine (t16 / `albt16`)
-#   # Machine atlas - 916 ("916-alien") and t16 and 4837 - Windows 11 dev machines
-#   # Local standing addition retained from previous AGENTS.md
-# Note the last two: neither contains this machine's own hostname, so hostname
-# matching alone silently reports "no machine section" on a file that has one.
-find_section_start() {
-  local file=$1
-  awk -v host="$SHORT_HOST" '
-    /^#{1,6} / {
-      line = tolower($0)
-      if ((host != "" && index(line, host) > 0) ||
-          index(line, "machine-specific") > 0 ||
-          index(line, "machine facts") > 0 ||
-          index(line, "machine atlas") > 0 ||
-          index(line, "local standing addition") > 0) { print NR; exit }
-    }
-  ' "$file"
-}
+# trim_tail and find_section_start live in tools/lib/globals-common.sh,
+# shared with bin/ai-install-skills.
+# shellcheck source=../tools/lib/globals-common.sh
+source "$REPO_ROOT/tools/lib/globals-common.sh"
 
 # A machine section is not always pure machine facts. On some machines the tail
 # of the installed global is INTERLEAVED: machine atlas, then a local standing
