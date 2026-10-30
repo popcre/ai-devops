@@ -342,15 +342,13 @@
       ],
       "tools/lib/review-capabilities.sh": [
         "test-ai-review-preflight.sh",
-        "test-ai-preflight-pinbump.sh",
-        "test-ai-review-code-only.sh"
+        "test-ai-preflight-pinbump.sh"
       ],
       "tools/reviewer_credit_stream.py": [
         "test-ai-gemini.sh",
         "test-reviewer-credit-stream.sh"
       ],
       "tools/reviewer_credit_watch.py": [
-        "test-ai-review-credit-watch.sh",
         "test-ai-review-preflight.sh"
       ],
       "tools/reviewer_maintenance.py": [
@@ -364,12 +362,6 @@
       ],
       "tests/test_deepseek_repo_tools.py": [
         "test-ai-deepseek-agent.sh"
-      ],
-      "tests/test_glm_credit_reset.py": [
-        "test-ai-review-credit-watch.sh"
-      ],
-      "tests/test_review_credit_watch.py": [
-        "test-ai-review-credit-watch.sh"
       ],
       "tests/test_reviewer_admission.py": [
         "test-ai-review-preflight.sh"
@@ -506,18 +498,6 @@
       ]
     },
     "companion_suites": {
-      "bin/ai-review*": [
-        "test-ai-review-action-profile.sh"
-      ],
-      "bin/ai-task-gates": [
-        "test-ai-review-action-profile.sh"
-      ],
-      "tools/review_action_profile.py": [
-        "test-ai-review-action-profile.sh"
-      ],
-      "config/review-action-profiles.json": [
-        "test-ai-review-action-profile.sh"
-      ],
       "bin/*.cmd": [
         "test-bin-cmd-launchers.sh"
       ]

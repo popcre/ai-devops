@@ -309,6 +309,15 @@ fi
 # clears this toolkit's own holders once, then one retry (#1002); a foreign
 # holder is never touched and the failure stands.
 _aidev_flock() {
+  # Windows Git Bash ships no flock: serialize with an atomic mkdir lock
+  # instead (same 90 s wait, rc 87 on contention, released after the command).
+  if ! command -v flock >/dev/null 2>&1; then
+    _aidev_lk="$CFG_DIR/op-refresh.lock.d"; _aidev_i=0
+    until mkdir "\$_aidev_lk" 2>/dev/null; do
+      _aidev_i=\$((_aidev_i + 1)); [ "\$_aidev_i" -le 90 ] || return 87; sleep 1
+    done
+    "\$@"; _aidev_rc=\$?; rmdir "\$_aidev_lk" 2>/dev/null; return "\$_aidev_rc"
+  fi
   # Exit 87 means the wait timed out on contention; any other failure is the
   # op command's own error: no sweep, no retry. On real contention
   # ai-lock-doctor clears this toolkit's own holders once, then one retry
@@ -383,6 +392,15 @@ URL="\$1"; REF="\$2"; shift 2
 # lock gets one doctor pass and one retry (#1002), never holding the lock
 # around mcp-remote.
 _aidev_flock() {
+  # Windows Git Bash ships no flock: serialize with an atomic mkdir lock
+  # instead (same 90 s wait, rc 87 on contention, released after the command).
+  if ! command -v flock >/dev/null 2>&1; then
+    _aidev_lk="$CFG_DIR/op-refresh.lock.d"; _aidev_i=0
+    until mkdir "\$_aidev_lk" 2>/dev/null; do
+      _aidev_i=\$((_aidev_i + 1)); [ "\$_aidev_i" -le 90 ] || return 87; sleep 1
+    done
+    "\$@"; _aidev_rc=\$?; rmdir "\$_aidev_lk" 2>/dev/null; return "\$_aidev_rc"
+  fi
   # Exit 87 means the wait timed out on contention; any other failure is the
   # op command's own error: no sweep, no retry. On real contention
   # ai-lock-doctor clears this toolkit's own holders once, then one retry

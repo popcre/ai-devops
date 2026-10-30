@@ -27,8 +27,10 @@ grep -q '^OWNER_NAME="Custom Owner"' "$CFG/server.env" || { echo 'FAIL: user val
 jq -e --arg sha "$FIXED_SHA" '.schema == 2 and .source_sha == $sha' "$CFG/config-state.json" >/dev/null || { echo 'FAIL: exact source state missing'; exit 1; }
 jq -e 'keys == ["applied_at","schema","source_sha"] and (.applied_at|type=="string")' "$CFG/config-state.json" >/dev/null || { echo 'FAIL: migration metadata schema changed'; exit 1; }
 [[ "$(stat -c '%a' "$CFG/config-state.json")" = 644 && -r "$CFG/config-state.json" ]] || { echo 'FAIL: migration metadata is not readable with mode 0644'; exit 1; }
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *)  # NTFS has no POSIX mode bits
 [[ "$(stat -c '%a' "$CFG/models.env")" = 600 && "$(stat -c '%a' "$CFG/server.env")" = 600 ]] || { echo 'FAIL: secret config permissions changed'; exit 1; }
 [[ "$(stat -c '%a' "$CFG/backups/schema-2-"*/models.env)" = 600 ]] || { echo 'FAIL: secret config backup permissions changed'; exit 1; }
+esac
 [[ "$(sha256sum "$CFG/server.env" | cut -d' ' -f1)" = "$server_hash_before" ]] || { echo 'FAIL: secret config content changed'; exit 1; }
 find "$CFG/backups" -type f -name models.env | grep -q . || { echo 'FAIL: backup missing'; exit 1; }
 
