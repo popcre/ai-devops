@@ -149,3 +149,17 @@ Current rule:
 - No step anywhere may wait for Albert to authorize production.
 - An AI agent promotes merged shared-db changes to production automatically once the preview rehearsal and tests pass and the advisory review has no open real findings (any `review-finding` issue on that change is resolved).
 - This is the only point where a review result is checked. Merging still never waits.
+
+## 2026-10-29 (night) — freeze off; reviewers preferred, never required
+
+Verbatim, Albert's chat: "take off the freeze and make reviewers preferred but
+not required. now that's unblocked".
+
+Current rule (issue #2041):
+- The observation-week freeze ends now. The window file is removed on every
+  host; nothing is frozen and no merge is labelled `unreviewed-week`.
+- AI reviews keep running as advice and are preferred, but no ruleset, branch
+  protection, gate or instruction may require an AI-review check or an
+  APPROVE verdict to merge, deploy, install, or touch shared-db, production or
+  infrastructure. Test checks and non-review production safety gates stay.
+- This supersedes every earlier ruling that required an exact-head APPROVE.
