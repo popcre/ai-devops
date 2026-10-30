@@ -213,11 +213,70 @@ class State:
 
     def plan(self, number=None):
         groups = {}
-        cleanup = os.environ.get("GITHUB_EVENT_NAME") in {"push", "pull_request", "pull_request_target", "delete"}
+        event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
+        cleanup = event in {"push", "pull_request", "pull_request_target", "delete"}
+        target = None
+        if cleanup:
+            event_path = os.environ.get("GITHUB_EVENT_PATH")
+            if not event_path:
+                raise ValueError("cleanup event has no GITHUB_EVENT_PATH")
+            payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("cleanup event payload is not an object")
+            if event == "push":
+                ref = payload.get("ref")
+                if not isinstance(ref, str):
+                    raise ValueError("push event has no ref")
+                if ref.startswith("refs/tags/"):
+                    if not ref[len("refs/tags/"):]:
+                        raise ValueError("push tag event has no tag name")
+                    return {"include": []}
+                if not ref.startswith("refs/heads/"):
+                    raise ValueError("push event ref is not a branch or tag")
+                target = ref[len("refs/heads/"):]
+            elif event == "delete":
+                if not isinstance(payload.get("ref"), str) or not payload["ref"]:
+                    raise ValueError("delete event has no ref")
+                if payload.get("ref_type") == "tag":
+                    return {"include": []}
+                if payload.get("ref_type") != "branch":
+                    raise ValueError("delete event has no branch/tag ref_type")
+                target = payload.get("ref")
+            else:
+                pr = payload.get("pull_request")
+                if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
+                    raise ValueError("pull request event has no head")
+                head = pr["head"]
+                if "repo" not in head:
+                    raise ValueError("pull request event has no head repository")
+                head_repo = head.get("repo")
+                if head_repo is None:  # Deleted fork repository; no same-repo target.
+                    return {"include": []}
+                if not isinstance(head_repo, dict) or not isinstance(head_repo.get("full_name"), str):
+                    raise ValueError("pull request event has no head repository identity")
+                if head_repo["full_name"] != self.repo:
+                    return {"include": []}
+                target = head.get("ref")
+            if not isinstance(target, str) or not target or target.startswith("refs/"):
+                raise ValueError("cleanup event has no valid branch name")
+            if target.startswith("review-fix/"):
+                return {"include": []}
+        elif event not in {"schedule", "workflow_dispatch", "issues"}:
+            raise ValueError("unsupported fixer event: " + event)
+        elif event == "issues" and not number:
+            raise ValueError("issue event has no issue number")
+
+        issues = []
+        if not cleanup and number:
+            issue = self.issue(number)
+            data, _ = self.source(issue)
+            target = data["target_branch"]
+            issues = [issue]
         for pr in self.pulls():
-            if pr["head"]["ref"].startswith("review-fix/"):
+            if pr["head"]["ref"].startswith("review-fix/") and (target is None or pr["base"]["ref"] == target):
                 groups.setdefault(pr["base"]["ref"], [])
-        issues = [self.issue(number)] if number else ([] if cleanup else paged(f"{self.prefix}/issues?state=open&labels=review-finding&per_page=100"))
+        if not cleanup and not number:
+            issues = paged(f"{self.prefix}/issues?state=open&labels=review-finding&per_page=100")
         for issue in issues:
             if issue["state"] != "open" or "review-finding" not in labels(issue) or labels(issue) & {DEFERRED, "fixer-done", "fixer-failed"}:
                 continue
