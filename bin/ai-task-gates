@@ -2312,6 +2312,7 @@ cmd_install_verify(){
   printf 'ai-task-gates: Linux %s verified for %s from %s.\n' "$phase" "$target" "$old"
 }
 
+cmd_authorize_install(){
   local target_head="" installed_checkout="" installed_launcher="" review_report="" reviewer_approval="" approval_summary="" legacy_migration=0 first_install=0 recover_launchers=0 stale_manifest_recovery=0
   while [ $# -gt 0 ]; do
     case "$1" in
