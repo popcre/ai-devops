@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,6 +106,110 @@ class Base(unittest.TestCase):
 
 
 class TestMine(Base):
+    def test_skill_applicability(self):
+        for desc in ('Use for "look through transcripts"', 'Use when the user asks to search',
+                     'Use for "ask Muse"', 'A second-opinion helper', 'FROZEN helper',
+                     'Delegate implementation'):
+            self.assertFalse(mine.skill_applies({"file": "skills/shared/x/SKILL.md",
+                                                 "description": desc}, {"shell"}))
+        for tool in ("shell", "apply_patch", "local_shell_call"):
+            self.assertFalse(mine.skill_applies({"file": "skills/claude/x/SKILL.md",
+                                                 "description": "Create documents"}, {tool}))
+        self.assertFalse(mine.skill_applies({"file": "skills/codex/x/SKILL.md",
+                                             "description": "Create documents"}, {"Bash"}))
+        self.assertTrue(mine.skill_applies({"file": "skills/shared/x/SKILL.md",
+                                            "description": "Create documents"}, {"shell"}))
+
+    def test_tree_empty_success_failure_and_cache(self):
+        runner = Mock(return_value=R(""))
+        gh = mine.GH(mine.Cache(self.tmp / "tree.db"), runner=runner)
+        self.assertEqual(gh.tree("popcre/empty"), set())
+        calls = runner.call_count
+        self.assertEqual(gh.tree("popcre/empty"), set())
+        self.assertEqual(runner.call_count, calls)
+        runner.return_value = R("", 1)
+        self.assertIsNone(gh.tree("popcre/fail"))
+        runner.return_value = R("bin/a.sh\ndocs/a.md\n")
+        self.assertEqual(gh.tree("popcre/full"), {"bin/a.sh", "docs/a.md"})
+
+    def test_all_repos_cache_and_retry_failure(self):
+        runner = Mock(return_value=R('[{"nameWithOwner":"popcre/demo"}]'))
+        gh = mine.GH(mine.Cache(self.tmp / "repos.db"), runner=runner)
+        gh._gate = Mock()
+        self.assertEqual(len(gh.all_repos()), len(mine.OWNERS))
+        calls = runner.call_count
+        gh.all_repos()
+        self.assertEqual(runner.call_count, calls)
+        gh = mine.GH(mine.Cache(self.tmp / "retry.db"), runner=runner)
+        gh._gate = Mock()
+        runner.return_value = R("", 1)
+        self.assertEqual(gh.all_repos(), [])
+        runner.return_value = R('[{"nameWithOwner":"popcre/demo"}]')
+        self.assertTrue(gh.all_repos())
+
+    def test_attribution_and_elsewhere(self):
+        text = "demo then other PR #11"
+        repos = {"demo": "popcre/demo", "other": "popcre/other"}
+        self.assertEqual(mine.attributed(text, text.index("#"), "demo", repos), "other")
+        self.assertEqual(mine.attributed("#11", 0, "demo", repos), "demo")
+        self.assertTrue(mine.exists_elsewhere({("other", 11): {"state": "OPEN"}}, repos, 11))
+        self.assertFalse(mine.exists_elsewhere({("other", 11): None}, repos, 11))
+
+    def test_refs_paths_stay_in_own_repo_and_empty_tree_stays_empty(self):
+        conn = make_store(self.tmp / "s.db", self.filler())
+        ctx = self.ctx(conn)
+        segs = mine.segments(conn)
+        segs[0]["text"] = "bin/other.sh"
+        with patch.object(mine, "repo_set", return_value=({"demo": "popcre/demo", "other": "popcre/other"}, [])):
+            ctx["gh"].tree = Mock(side_effect=[{"bin/own.sh"}, {"bin/other.sh"}])
+            flags, _ = mine.check_refs(segs, ctx, 0)
+            self.assertEqual([f["object"] for f in flags], ["popcre/demo:bin/other.sh"])
+            ctx["gh"].tree = Mock(return_value=set())
+            with patch.object(mine, "tracked_files") as local:
+                mine.check_refs(segs, ctx, 0)
+                local.assert_not_called()
+
+    def test_claim_commit_without_checkout_and_unrelated_local_commit(self):
+        conn = make_store(self.tmp / "s.db", self.filler())
+        ctx = self.ctx(conn)
+        segs = mine.segments(conn)
+        segs[0]["text"] = f"pushed commit {self.sha}"
+        segs[0]["repo"] = "other"
+        ctx["gh"].commit = Mock(return_value=False)
+        with patch.object(mine, "repo_set", return_value=({"demo": "popcre/demo", "other": "popcre/other"}, [])):
+            flags, _ = mine.check_claims(segs, ctx, 6)
+            self.assertEqual(flags[0]["object"], f"popcre/other@{self.sha}")
+            ctx["gh"].commit.assert_called_once_with("popcre/other", self.sha)
+            ctx["gh"].commit.return_value = True
+            self.assertEqual(mine.check_claims(segs, ctx, 6)[0], [])
+
+    def test_claim_timing_grace_and_ambiguous_repo(self):
+        conn = make_store(self.tmp / "s.db", self.filler())
+        ctx = self.ctx(conn)
+        segs = mine.segments(conn)
+        segs[0].update(text="merged #10", ts=mine.parse_ts("2026-10-19T23:00:00Z"), timed=True)
+        self.assertEqual(mine.check_claims(segs, ctx, 6)[0], [])
+        segs[0]["ts"] = mine.parse_ts("2026-10-01T00:00:00Z")
+        self.assertEqual(len(mine.check_claims(segs, ctx, 6)[0]), 1)
+        segs[0]["timed"] = False
+        flags, stats = mine.check_claims(segs, ctx, 6)
+        self.assertEqual(flags, [])
+        self.assertEqual(stats["untimed_session"], 1)
+        with patch.object(mine, "lookup_all", return_value={('demo', 10): None, ('other', 10): {"state": "OPEN"}}), \
+                patch.object(mine, "repo_set", return_value=({"demo": "popcre/demo", "other": "popcre/other"}, [])):
+            flags, stats = mine.check_claims(segs, ctx, 6)
+            self.assertEqual(flags, [])
+            self.assertEqual(stats["ambiguous_repo"], 1)
+
+    def test_database_slug_skips_skill_bypass(self):
+        conn = make_store(self.tmp / "s.db", [("pdf work", "merge split rotate watermark pdf documents pages",
+                                               "demo", RECENT, [])])
+        segs = mine.segments(conn)
+        ctx = self.ctx(conn)
+        self.assertTrue(mine.check_skill_bypass(segs, ctx, 0.35)[0])
+        segs[0]["slugs"] = "database,documents"
+        self.assertEqual(mine.check_skill_bypass(segs, ctx, 0.35)[0], [])
+
     def test_skill_bypass_flags_only_without_skill_call(self):
         text = "merge split rotate watermark pdf documents pages"
         segs = [("pdf work", text, "demo", RECENT, ["Bash"]),
@@ -172,6 +277,10 @@ class TestMine(Base):
         self.assertEqual(stats["existence_only"], 1)  # "done on #12": existence only
 
     def test_claims_merge_main_into_is_not_a_merge_claim(self):
+        self.assertEqual(mine.claim_refs("merged main into #11"), set())
+        self.assertEqual(mine.claim_refs("merged origin/main into #11"), set())
+        self.assertTrue(mine.claim_refs("PR #11 merged"))
+        self.assertTrue(mine.claim_refs("merged #11"))
         segs = [("upd", "merged main into #11 and reran", "demo", RECENT, [])] + self.filler()
         conn = make_store(self.tmp / "s.db", segs)
         flags, _ = mine.check_claims(mine.segments(conn), self.ctx(conn), 20)
