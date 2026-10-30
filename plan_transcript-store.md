@@ -8,7 +8,7 @@
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Daily upload from every machine | 🔄 in progress | #2059 (stage A) |
+| 1 Daily upload from every machine | ✅ done | PR #2082; proof https://github.com/popcre/ai-devops/issues/2059#issuecomment-6512950560 |
 | 2 Normalizer and tool-call capture | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
 | 3 ScaleDown clean + topic segmenter | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
 | 4 Store schema, writer and Dropbox publish | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
