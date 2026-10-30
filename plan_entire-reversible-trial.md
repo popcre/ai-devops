@@ -16,17 +16,18 @@ all clients on all machines follow it. No fleet rollout or CI changeover has
 been completed by this planning update.
 
 Single owner/acceptance record: [#2022](https://github.com/popcre/ai-devops/issues/2022).
-Current planning coordinator: Codex chat
-`01a18dff-bb18-7ea3-b5a0-e67ada43d222`; the next executing session claims the
-same issue before work and owns progress through live acceptance.
+Executing coordinator: Codex chat `01a18e41-40fb-76f2-90a6-cad01b186b8e` on
+edge-dev3, claimed in the [execution receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531589539).
+The coordinator owns the same issue through live acceptance or an evidenced
+blocked disposition. Planning is already merged.
 [Fresh-session handoff](HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
 
 | Step | Status, October 30, 2026 EDT | Evidence / gate still required |
 |---|---|---|
 | R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
-| R1 Inventory and supported capability map | open | §9 R1: private host/client inventory and all 16 matrix cells; no inferred Windows/Linux or desktop/CLI equivalence. |
-| R2 Shared client workflow and safe access | open | §9 R2: canonical templates, existing client writers/installers, capture-off tests and source-bound receipts. |
-| R3 CI contract and Entire feasibility | open | §9 R3: inventory every current check, live exact-head success/failure/stale comparison; execution migration is a separate unpassed gate. |
+| R1 Inventory and supported capability map | observed baseline; authentication/live use partial | Four authenticated host reads, OS/client/root/source hashes and recoverable originals retained owner-only; missing command/app locations and unverified desktop/login behavior disclosed in the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322). No client/platform equivalence inferred. |
+| R2 Shared client workflow and safe access | source implemented; delivery/live adoption open | Canonical Claude/Codex policy and rendered MiMo/ZCode share the existing capture-free browser workflow; Linux phrase/render/adoption/install-skills fixtures pass, including CRLF machine-tail and capture-off sentinel preservation. Installed adoption remains unproved. |
+| R3 CI contract and Entire feasibility | inventory complete; execution unmet | All 12 workflows and 182 registrations inventoried. Entire project has no installed plugin; Depot's Entire integration lacks pull-request events. Full exact-head success/failure/display and admissible execution remain unproved; GitHub CI preserved. |
 | R4 Offline cross-platform verification | open | §10 named suites and adversarial cases; no fleet installation on fixture results alone. |
 | R5 Protected installation on four machines | open | §9 R5: each host's installed commit, before/after preservation and rollback receipt. |
 | R6 All 16 live client-machine journeys | open | §9 matrix: actual fresh-session behavior, source/check/Trail readback, no private capture and recovery. |

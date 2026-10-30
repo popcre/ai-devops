@@ -60,6 +60,73 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
 
+# The bounded public Entire trial policy must match across all four client
+# globals. Compare extracted blocks to Claude's block without duplicating the
+# prose here; semantic guards protect the repository, deadlines, privacy, checks
+# and fallback contract. Normalize CRLF only in the extracted comparison copy.
+trial_tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ai-devops-entire-trial.XXXXXX")"
+trap 'rm -rf -- "$trial_tmpdir"' EXIT
+trial_reference="$trial_tmpdir/reference"
+trial_actual="$trial_tmpdir/actual"
+trial_have_reference=false
+extract_trial_block() {
+  local client_file="$1" output_file="$2"
+  tr -d '\r' < "$client_file" | awk '
+    $0 == "## Public Entire trial instructions (#2022)" {
+      starts++
+      if (starts != 1 || active) invalid = 1
+      active = 1
+    }
+    active { print }
+    active && $0 == "deadline at runtime." {
+      ends++
+      active = 0
+    }
+    END {
+      if (starts != 1 || ends != 1 || active || invalid) exit 1
+    }
+  ' > "$output_file" \
+    || fail "$(basename "$client_file") must contain exactly one complete Entire trial policy block"
+}
+
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
+  extract_trial_block "$client_file" "$trial_actual"
+  if ! $trial_have_reference; then
+    cp "$trial_actual" "$trial_reference"
+    trial_have_reference=true
+  elif ! cmp -s "$trial_reference" "$trial_actual"; then
+    fail "$(basename "$client_file") Entire trial policy differs from the Claude policy block"
+  fi
+  for phrase in \
+    'public `popcre/ai-devops` tasks' \
+    'Before each trial activity, check the current' \
+    'docs/entire-trial.md' \
+    'GitHub is' \
+    'authoritative for source, checks and delivery' \
+    'exact GitHub head' \
+    'corresponding existing Entire Trail' \
+    'sanitized continuity on the task' \
+    'If Entire is unavailable, missing or stale' \
+    'disclose it as unverified' \
+    'continue through GitHub' \
+    'Keep private capture off' \
+    'Never enable session hooks' \
+    'import private context' \
+    'paid Agents' \
+    'change billing,' \
+    'integrations or required checks' \
+    'November 12, 2026, 5:58 AM EST (America/New_York)' \
+    'The discovery deadline remains November 2,' \
+    '2026, 5:00 PM EST.' \
+    'After the stop time, use GitHub only' \
+    'disposition on #2022' \
+    'do not enforce the' \
+    'deadline at runtime.'; do
+    grep -qF "$phrase" "$trial_actual" \
+      || fail "$(basename "$client_file") Entire trial policy lost required phrase: $phrase"
+  done
+done
+
 # Each global lists the valid task-gate classes; the list must match
 # config/task-gates.json change_classes exactly so it cannot go stale (#1881).
 expected_classes="$(jq -r '.change_classes|keys[]' "$REPO_ROOT/config/task-gates.json" | tr -d '\r' | sort | tr '\n' ' ')"
