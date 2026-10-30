@@ -14,7 +14,10 @@ ai_path_canonical() { # ai_path_canonical PATH -> canonical spelling on stdout
   local p="${1%$'\r'}"
   [ -n "$p" ] || return 1
   if command -v cygpath >/dev/null 2>&1; then
-    p="$(cygpath -am -- "$p" 2>/dev/null)" || return 1
+    # -l expands 8.3 short names (RUNNER~1 vs runneradmin): native Windows
+    # tools often print the short form of a %TEMP% path. -l needs the path
+    # to exist, so fall back to the plain absolute form.
+    p="$(cygpath -aml -- "$p" 2>/dev/null || cygpath -am -- "$p" 2>/dev/null)" || return 1
     printf '%s\n' "$p" | tr '[:upper:]' '[:lower:]'
   else
     realpath -m -- "$p" 2>/dev/null
