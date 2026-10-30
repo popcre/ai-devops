@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Transcript store, plan steps 2-4 (popcre/ai-devops#2050, #2060).
+# Transcript store, plan steps 2-4 and 9 (popcre/ai-devops#2050, #2060, #2063).
 # Synthetic fixtures only; never point these at real transcripts.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
-for t in test_transcript_normalize.py test_transcript_segment.py test_transcript_build.py; do
+for t in test_transcript_normalize.py test_transcript_segment.py test_transcript_build.py test_transcript_mine.py; do
   python3 "$ROOT/tests/$t"
 done
 empty="$(mktemp -d)"
