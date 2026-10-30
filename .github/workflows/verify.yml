@@ -511,12 +511,9 @@ jobs:
           printf 'windows-offline: %s reported %s; failing closed.\n' "$lane_name" "$lane_result" >&2
           exit 1
 
-  # The ruleset requires this one stable context on both pull_request and
-  # merge_group. On a pull request it closes over every exact-head platform
-  # proof before GitHub may admit the change to the queue. In the
-  # queue it closes over the fresh Linux run and merge-group-evidence, so an
-  # evidence refusal cannot be hidden by an unrelated green required job.
-  verification-closure:
+  # Broad verification remains visible as advice; it cannot block the narrow
+  # secret-leak gate below (owner ruling 2026-10-30, issue #2172).
+  verification-report:
     needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline]
     if: >-
       always() && !cancelled() &&
@@ -525,7 +522,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Close every required verification path
+      - name: Report every advisory verification path
         run: |
           bash tools/ci/verify-closure.sh \
             "${{ github.event_name }}" \
@@ -536,6 +533,23 @@ jobs:
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
             "${{ needs.doc-safety.result }}"
+
+  # Keep the existing required context and both event producers. Its only
+  # merge-blocking responsibility is the real candidate's privacy boundary;
+  # general tests, process, links and evidence are advisory, never prerequisites.
+  verification-closure:
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Reject secrets in the exact candidate
+        run: bash bin/ai-public-boundary-check .
 
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete]

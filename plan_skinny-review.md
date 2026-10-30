@@ -17,8 +17,35 @@
 | E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
 | F Delete old reviewer code and data | #2074 | ✅ done | #2112 d55ba665, #2113 e9239b09, #2131 dd691629, #2139 1f4fb596, shared-db#5118 92133262, #5121 562ad02b; proof issues/2074#issuecomment-6520525203 |
 | G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
+| H Fixer hygiene and delivery speed | #2171 | 🟡 implementation in progress; live proof open | [Owning acceptance](https://github.com/popcre/ai-devops/issues/2171); [shared-db integration](https://github.com/popcre/shared-db/issues/5175) |
 
 **A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
+
+### Fixer follow-up — #2171
+
+Stage H corrects the original fixer's behavior on moving branches. Its goal is
+fewer model calls, duplicate fix PRs, object collisions, repeated review rounds,
+and avoidable delivery delays. The detailed rules and acceptance checklist live
+on [#2171](https://github.com/popcre/ai-devops/issues/2171); this is a follow-up
+to the completed stage A, not a reason to rerun A–F.
+
+Stop stale attempts before invoking the agent and again before publishing.
+Retire exact stale automatic PRs without another AI review, retaining the
+unresolved finding and naming its source owner. Overlap defers work to that
+owner; it never proves the problem fixed. Serialize publication per repository
+and target branch, including scheduled sweeps and reruns. Do not silently target
+main when the source closes or disappears.
+
+Proven invalid findings retain their explanation and an explicit evidenced
+disposition. The shared-db hold may exempt only that verified disposition;
+branch movement, overlap, failures and skipped findings remain unresolved.
+Do not add per-push AI reassessment or another review gate.
+
+Acceptance requires an actual current finding to produce a usable fix, safe
+stale retirement and retained findings, duplicate and overlap prevention,
+invalid-finding hold proof and preserved holds for unresolved findings. Record
+actual before/after calls, PRs, collisions, review rounds and elapsed time for
+comparable live cases. Offline fixtures alone do not establish a speedup.
 
 ## Part 1 — Why
 

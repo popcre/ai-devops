@@ -1,5 +1,21 @@
 # ai-devops required-check closure
 
+## Current contract — owner ruling October 30, 2026
+
+The sole required context remains `verification-closure`, but its producer
+runs only the existing exact-candidate public-boundary secret scanner. It has
+no dependency on general Linux/Windows suites, Markdown quality,
+classification or queue-evidence results. The former full aggregate remains
+available as advisory `verification-report`; its suites and reporting are
+preserved. No live ruleset or required-context rename is needed.
+
+This implements [the lean-check rule](../plan_lean-required-checks.md) through
+[#2191](https://github.com/popcre/ai-devops/pull/2191), tracked under
+[#2172](https://github.com/popcre/ai-devops/issues/2172). Its landing and live
+acceptance are separate from this source description.
+
+## Historical contract — superseded by the rule above
+
 **Written 2026-09-01; resolved 2026-09-14.** Repository: `popcre/ai-devops`.
 
 ## Required contract

@@ -6,10 +6,16 @@ name: review-fixer
 # opens a PR, or closes the issue as not planned. Fix PRs are never reviewed
 # (ai-review skips review-fix/* heads), so this cannot loop. Agent credentials
 # stay in the runner user's own login, never here.
+# Source/branch update events only retire stale fix PRs. They never start a
+# model. Each repository/target branch has one publisher across all entrypoints.
 
 on:
   issues:
     types: [labeled]
+  pull_request_target:
+    types: [synchronize, closed]
+  push:
+  delete:
   schedule:
     - cron: '17 */2 * * *'
   workflow_dispatch:
@@ -34,13 +40,45 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: review-fixer-${{ github.event.issue.number || inputs.issue || 'sweep' }}
-  cancel-in-progress: false
-
 jobs:
-  fix:
+  prepare:
     if: github.event_name != 'issues' || github.event.label.name == 'review-finding'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: popcre/ai-devops
+          ref: main
+          path: toolkit
+          persist-credentials: false
+      - id: plan
+        run: |
+          set -euo pipefail
+          matrix="$(python3 toolkit/tools/ci/review-fixer-state.py plan "$ISSUE")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  fix:
+    name: review-fixer-${{ matrix.key }}
+    needs: prepare
+    if: needs.prepare.outputs.matrix != '{"include": []}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    # All entry points, including sweeps and cleanup, share the same target
+    # lock. Replaced pending jobs lose no finding: the next sweep lists every
+    # still-open unhandled issue, rather than relying on a one-shot event.
+    concurrency:
+      group: review-fixer-${{ github.repository }}-${{ matrix.key }}
+      cancel-in-progress: false
     runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     timeout-minutes: 45
     permissions:
@@ -49,9 +87,11 @@ jobs:
       pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
-      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      TARGET: ${{ matrix.target }}
+      ISSUES: ${{ toJSON(matrix.issues) }}
       PYTHONDONTWRITEBYTECODE: '1'
       AI_GH_SIGNATURE: Posted by review-fixer workflow run ${{ github.run_id }}
+      REVIEW_FIXER_TRUSTED_ROOT: ${{ github.workspace }}/caller-trusted
     steps:
       - name: Check out the fixer (trusted popcre/ai-devops main, never the caller)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -60,26 +100,27 @@ jobs:
           ref: main
           path: toolkit
           persist-credentials: false
+      - name: Check out trusted caller lifecycle adapters (default branch only)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: caller-trusted
+          persist-credentials: false
       - name: Fix pending review findings
         run: |
           set -uo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          if [ -n "$ISSUE" ]; then
-            todo="$ISSUE"
-          else
-            todo="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label review-finding \
-              --limit 20 --json number,labels \
-              --jq '.[] | select([.labels[].name] | index("fixer-done") or index("fixer-failed") | not) | .number')"
-          fi
+          python3 toolkit/tools/ci/review-fixer-state.py retire "$TARGET" || exit 1
+          todo="$(jq -r '.[]' <<< "$ISSUES")"
           status=0
           for n in $todo; do
-            labels="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state,labels \
+            labels="$(bash toolkit/bin/ai-gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state,labels \
               --jq '.state + " " + ([.labels[].name] | join(","))')"
             case "$labels" in
               OPEN\ *review-finding*) ;;
               *) echo "#$n: not an open review-finding issue; skipped"; continue ;;
             esac
-            case "$labels" in *fixer-done*|*fixer-failed*) echo "#$n: already handled"; continue ;; esac
+            case "$labels" in *fixer-done*|*fixer-failed*|*fixer-deferred*) echo "#$n: already handled"; continue ;; esac
             echo "::group::issue #$n"
             bash toolkit/tools/ci/review-fixer.sh "$n" || status=1
             echo "::endgroup::"

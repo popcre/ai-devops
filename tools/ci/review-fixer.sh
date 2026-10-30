@@ -3,7 +3,8 @@
 # REVISION phase A). A headless Codex run decides whether each finding is real,
 # fixes the real ones and runs the relevant tests. This script then commits,
 # pushes `review-fix/<issue>` and opens a PR, or closes the issue as not
-# planned, and labels it fixer-done or fixer-failed.
+# planned with explicit evidence. Stale/competing attempts defer to the owner
+# without another model call on subsequent sweeps (#2171).
 #
 #   review-fixer.sh ISSUE_NUMBER
 #
@@ -15,8 +16,14 @@ issue="${1:?issue number}"
 repo="${GITHUB_REPOSITORY:?}"
 sig="${AI_GH_SIGNATURE:-Posted by review-fixer}"
 agent="${REVIEW_FIXER_AGENT:-codex}"
-root="${WORK_ROOT:-${RUNNER_TEMP:-/tmp}}/review-fixer-$issue"
+mkdir -p "${WORK_ROOT:-${RUNNER_TEMP:-/tmp}}"
+root="$(mktemp -d "${WORK_ROOT:-${RUNNER_TEMP:-/tmp}}/review-fixer-$issue.XXXXXX")" || exit 1
+trap 'rm -rf "$root"' EXIT
 branch="review-fix/$issue"
+lifecycle="$(cd "$(dirname "$0")" && pwd)/review-fixer-state.py"
+gh_cmd="$(cd "$(dirname "$0")/../.." && pwd)/bin/ai-gh"
+gh() { bash "$gh_cmd" "$@"; }
+receipt="$root/source.json"
 
 label() { gh issue edit "$issue" --repo "$repo" --add-label "$1" >/dev/null || true; }
 fail() {
@@ -30,27 +37,23 @@ done
 
 # Push and open PRs as the runner user's own gh login when it works, so the
 # fix PR runs CI; fall back to the workflow token otherwise.
-if env -u GH_TOKEN gh auth token >/dev/null 2>&1; then
-  pgh() { env -u GH_TOKEN gh "$@"; }
+if env -u GH_TOKEN bash "$gh_cmd" auth token >/dev/null 2>&1; then
+  pgh() { env -u GH_TOKEN bash "$gh_cmd" "$@"; }
   pgit() { env -u GH_TOKEN -u GITHUB_TOKEN git "$@"; }
 else
   pgh() { gh "$@"; }
   pgit() { git "$@"; }
 fi
 
+python3 "$lifecycle" prepare "$issue" "$receipt"
+rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "source preflight failed"
+base="$(jq -r .target_branch "$receipt")"
 body="$(gh issue view "$issue" --repo "$repo" --json body --jq .body)" || fail "could not read the issue"
-pr="$(grep -oE "github\.com/$repo/pull/[0-9]+" <<<"$body" | head -1 | grep -oE '[0-9]+$' || true)"
-base=main
-if [ -n "$pr" ]; then
-  read -r state head_ref head_repo < <(gh pr view "$pr" --repo "$repo" \
-    --json state,headRefName,headRepositoryOwner,headRepository \
-    --jq '"\(.state) \(.headRefName) \(.headRepositoryOwner.login)/\(.headRepository.name)"') || true
-  if [ "${state:-}" = OPEN ] && [ "${head_repo:-}" = "$repo" ]; then base="$head_ref"; fi
-fi
-
-rm -rf "$root"; mkdir -p "$root"
 work="$root/repo"
 pgh repo clone "$repo" "$work" -- --quiet --branch "$base" || fail "could not clone $repo at $base"
+[ "$(git -C "$work" rev-parse HEAD)" = "$(jq -r .target_head "$receipt")" ] || {
+  python3 "$lifecycle" check "$receipt"; rc=$?; [ "$rc" = 3 ] && exit 0; exit 1;
+}
 git -C "$work" checkout -q -b "$branch" || fail "could not create $branch"
 
 prompt="$root/prompt.md"
@@ -109,6 +112,7 @@ case "$agent" in
 esac
 rc=$?
 tail -40 "$root/agent.log" || true
+[ "$rc" = 0 ] || fail "the $agent run failed (exit $rc)"
 [ -s "$last" ] || fail "the $agent run produced no report (exit $rc)"
 decision="$(grep -oE '^DECISION: (FIXED|INVALID|PROTECTED|FAILED)' "$last" | tail -1 | awk '{print $2}')"
 report="$(grep -vE '^DECISION:' "$last" | head -c 50000)"
@@ -123,15 +127,34 @@ case "$decision" in
     denied="$(git -C "$work" diff --cached --name-only | grep -E \
       '^(\.github/workflows/|install\.sh$|update\.sh$|bin/install-ai-devops-windows\.ps1$|config/task-gates\.json$|bin/ai-task-gates$)' || true)"
     [ -z "$denied" ] || fail "the fix touched protected files, refusing to push: $(tr '\n' ' ' <<<"$denied")"
+    python3 "$lifecycle" check "$receipt" "$work"
+    rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "publication preflight failed"
     git -C "$work" commit -q -m "Fix review finding #$issue" \
       -m "Automatic fix by review-fixer ($agent)." || fail "commit failed"
     # The credential helper must see the runner login, not the read-only
     # workflow token, or the push is refused (popdam3#594).
     pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
       push -q -u origin "$branch" || fail "push of $branch failed"
+    metadata="$(python3 "$lifecycle" metadata "$receipt")" || fail "could not encode source receipt"
+    # Recheck after the push too: owner changes during network IO must not
+    # publish a stale PR. Workflow target concurrency protects other fixers.
+    python3 "$lifecycle" check "$receipt" "$work"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+      published="$(git -C "$work" rev-parse HEAD)" || fail "could not read published recovery commit"
+      owner="$(jq -r .owner "$receipt")" || fail "could not read unresolved finding owner"
+      # Retain the successfully pushed tip as recovery evidence. No PR or lane
+      # reservation exists, and fixer-deferred prevents unchanged reruns. Never
+      # force-update or delete this branch to hide a late source movement.
+      gh issue comment "$issue" --repo "$repo" --body "$(printf 'Recovery branch `%s`, published tip `%s`, intentionally retained. No fix PR or reservation was opened. Finding #%s remains unresolved with @%s; unchanged automatic reruns stay deferred.\n\n%s\n' "$branch" "$published" "$issue" "$owner" "$sig")" \
+        >/dev/null || fail "could not record retained recovery branch"
+      label fixer-deferred
+      [ "$rc" = 3 ] && exit 0
+      fail "final publication preflight failed; recovery branch retained"
+    fi
     url="$(pgh pr create --repo "$repo" --base "$base" --head "$branch" \
       --title "Fix review finding #$issue" \
-      --body "$(printf 'Closes #%s\n\n%s\n\n%s\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n' "$issue" "$report" "$sig")")" \
+      --body "$(printf 'Closes #%s\n\n%s\n\n%s\n\n%s\n' "$issue" "$report" "$metadata" "$sig")")" \
       || fail "could not open the fix PR"
     gh issue comment "$issue" --repo "$repo" --body "$(printf 'Fix PR: %s\n\n%s\n' "$url" "$sig")" >/dev/null || true
     label fixer-done; echo "opened $url" ;;
@@ -141,7 +164,9 @@ case "$decision" in
     gh issue comment "$issue" --repo "$repo" --body "$(printf 'Automatic fixer refused by design: every real finding needs a protected path (workflows, installers, task gates), which the fixer never edits. Left open for an engineer.\n\n%s\n\n%s\n' "$report" "$sig")" >/dev/null || true
     label fixer-done; echo "protected: left open" ;;
   INVALID)
-    gh issue comment "$issue" --repo "$repo" --body "$(printf '%s\n\n%s\n' "$report" "$sig")" >/dev/null || true
+    printf '%s\n' "$report" > "$root/report.txt"
+    python3 "$lifecycle" invalid "$receipt" "$root/report.txt"
+    rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "could not record invalid-finding evidence"
     label fixer-done
     gh issue close "$issue" --repo "$repo" --reason "not planned" >/dev/null || true ;;
   *)
