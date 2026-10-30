@@ -20,11 +20,32 @@ LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 # reported as skips there; every other check still runs.
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    _linux_only_checks='installation task can issue exact reviewed authority|issued authority binds old and target commits|installed checkout advanced within the reviewed range|authority advanced within the range binds|managed Windows launcher resolves to the installed checkout|same-commit legacy migration binds managed launcher|legacy authority records exact launcher and source hashes|legacy Windows cross-commit migration binds|legacy cross-commit authority retains old checkout|dangling or linked authority destination cannot be replaced|reviewed recovery accepts one supported|recovery seals present and absent paths|deleted reviewer path still uses the protected installation route|matching installed source receipt permits same-source maintenance|matching Linux install manifest proves the source receipt|documented u2giants GitHub origin retains toolkit install route|real ansible main reaches the owner-authorization step|and starts with the owner authorization, no reviewer|same inventory in a fresh temporary file reuses the answer|explain cache directory is private|workflow refuses symlink manifest'
+    _linux_only_checks='a separate installation task can issue exact reviewed authority
+the issued authority binds old and target commits
+an installed checkout advanced within the reviewed range can issue authority
+authority advanced within the range binds the actual installed HEAD
+managed Windows launcher resolves to the installed checkout
+same-commit legacy migration binds managed launcher and source bytes
+legacy authority records exact launcher and source hashes
+legacy Windows cross-commit migration binds the original installed source
+legacy cross-commit authority retains old checkout and empty original receipt
+dangling or linked authority destination cannot be replaced
+reviewed recovery accepts one supported Bash launcher
+one-file recovery seals present and absent paths
+reviewed recovery accepts one supported command launcher
+command-only recovery seals present and absent paths
+a deleted reviewer path still uses the protected installation route
+matching installed source receipt permits same-source maintenance
+matching Linux install manifest proves the source receipt
+the documented u2giants GitHub origin retains toolkit install route
+the real ansible main reaches the owner-authorization step for production
+and starts with the owner authorization, no reviewer (#2041)
+the same inventory in a fresh temporary file reuses the answer
+the explain cache directory is private'
     eval "_harness_$(declare -f check)"
     check() {
       local status=$?
-      if printf '%s' "$1" | grep -Eq "$_linux_only_checks"; then skip "$1 (Linux/POSIX-only)"; return 0; fi
+      if grep -Fxq -- "$1" <<< "$_linux_only_checks"; then skip "$1 (Linux/POSIX-only)"; return 0; fi
       ( exit "$status" ); _harness_check "$@"
     }
     ;;
@@ -1939,9 +1960,16 @@ check 'workflow refuses wrong service' "rc 3 '$WF' check $WF_ARGS --reviewer-app
 printf '{"schema_version":1,"schema_version":1}\n' > "$WF/.ai-devops/application-workflow-target.json"
 check 'workflow refuses duplicate keys' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 rm "$WF/.ai-devops/application-workflow-target.json"
-ln -s "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
-check 'workflow refuses symlink manifest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
-rm "$WF/.ai-devops/application-workflow-target.json"
+if ln -s "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json" 2>/dev/null &&
+    [ -L "$WF/.ai-devops/application-workflow-target.json" ]; then
+  check 'workflow refuses symlink manifest' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
+else
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) skip 'workflow refuses symlink manifest (real symlinks unavailable)' ;;
+    *) bad 'workflow symlink fixture could not be created' ;;
+  esac
+fi
+rm -f "$WF/.ai-devops/application-workflow-target.json"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" remote set-url origin https://github.com/popcre/other.git
 check 'workflow refuses foreign origin before reaching admission' "rc 4 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"

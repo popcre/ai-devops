@@ -572,6 +572,21 @@ for terminal in MERGED CLOSED; do
   done
 done
 checks_extract(){ event_extract "{\"data\":{\"repository\":{\"pullRequest\":{\"commits\":{\"nodes\":[{\"commit\":{\"statusCheckRollup\":{\"contexts\":{\"nodes\":$1}}}}]}}}}}" CHECKS; }
+# Model native jq's CRLF output, including CR on the final output line.
+mkdir -p "$TMP/crlf-jq"
+real_jq="$(command -v jq)"
+cat > "$TMP/crlf-jq/jq" <<'EOF'
+#!/usr/bin/env bash
+"$REAL_JQ" "$@" | sed 's/$/\r/'
+EOF
+chmod +x "$TMP/crlf-jq/jq"
+for terminal in MERGED CLOSED; do
+  field=mergedAt; kind=pr_merged; [ "$terminal" = MERGED ] || { field=closedAt; kind=pr_closed; }
+  event="$(REAL_JQ="$real_jq" PATH="$TMP/crlf-jq:$PATH" event_extract "{\"data\":{\"repository\":{\"pullRequest\":{\"$field\":\"2026-01-01T00:00:00Z\"}}}}" "$terminal")"
+  check "CRLF $terminal timestamp retains terminal evidence" "[ '$event' = '$kind:1767225600000' ]"
+done
+event="$(REAL_JQ="$real_jq" PATH="$TMP/crlf-jq:$PATH" checks_extract '[{"conclusion":"FAILURE","completedAt":"2026-01-02T00:00:00Z"},{"conclusion":"TIMED_OUT","completedAt":"2026-01-01T00:00:00Z"}]')"
+check 'CRLF check timestamps retain the earliest completion' "[ '$event' = 'check_completed:1767225600000' ]"
 event="$(checks_extract '[{"conclusion":"FAILURE","completedAt":"2026-01-02T00:00:00Z"},{"conclusion":"TIMED_OUT","completedAt":"2026-01-01T00:00:00Z"}]')"
 check 'all current failing checks yield the earliest authoritative completion' "[ '$event' = check_completed:1767225600000 ]"
 for nodes in '[{"state":"FAILURE","updatedAt":"2026-01-01T00:00:00Z"}]' \

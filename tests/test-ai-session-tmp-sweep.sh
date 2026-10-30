@@ -25,7 +25,10 @@ mk t-dead-new "$dead" "$new"
 mk t-reused "$live" "$old" 1
 mkdir -p "$AI_SESSION_TMP_BASE/t-noowner"
 mkdir -p "$AI_SESSION_TMP_BASE/t-bad"; echo garbage > "$AI_SESSION_TMP_BASE/t-bad/owner.json"
-ln -s "$work" "$AI_SESSION_TMP_BASE/t-link"
+if [ "$_win" = 0 ]; then
+  ln -s "$work" "$AI_SESSION_TMP_BASE/t-link"
+  check "sweep link fixture is a link" '[ -L "$AI_SESSION_TMP_BASE/t-link" ]'
+fi
 
 bash "$sweep" --dry-run >/dev/null
 check "dry run deletes nothing" '[ -d "$AI_SESSION_TMP_BASE/t-dead-old" ]'
@@ -66,7 +69,10 @@ check "Claude root of a removed scratch folder -> deleted" '[ ! -e "$AI_SESSION_
 sid5=aaaaaaaa-bbbb-cccc-dddd-222222222222
 mkdir -p "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5" "$work/forged"
 printf '{"pid":%s,"pid_start_ticks":"","engine":"t","session_id":"x","started_utc":"","started_epoch":%s,"cwd":"/"}\n' "$dead" "$old" > "$work/forged/owner.json"
-ln -s "$work/forged" "$AI_SESSION_TMP_BASE/claude-$sid5"
+if [ "$_win" = 0 ]; then
+  ln -s "$work/forged" "$AI_SESSION_TMP_BASE/claude-$sid5"
+  check "Claude owner fixture is a link" '[ -L "$AI_SESSION_TMP_BASE/claude-$sid5" ]'
+fi
 touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5"
 bash "$sweep" >/dev/null
 if [ "$_win" = 1 ]; then skip "symlinked Claude root is not accepted as an owner record (POSIX-only)"; else

@@ -39,7 +39,10 @@ check "AI_KEEP_SANDBOX=1 keeps the root" '[ -d "$AI_SESSION_TMP_BASE/keep-k" ]'
 echo "== guard"
 g() { bash -c '. "$1"; AI_SESSION_TMP_ROOT="$2" ai_session_tmp_end' _ "$lib" "$1" 2>/dev/null; }
 mkdir -p "$work/victim"; touch "$work/victim/keep"
-ln -s "$work/victim" "$AI_SESSION_TMP_BASE/link-root"
+if [ "$_win" = 0 ]; then
+  ln -s "$work/victim" "$AI_SESSION_TMP_BASE/link-root"
+  check "symlink root fixture is a link" '[ -L "$AI_SESSION_TMP_BASE/link-root" ]'
+fi
 check "refuses /" '! g /'
 check "refuses the base itself" '! g "$AI_SESSION_TMP_BASE"'
 check "refuses /var/tmp" '! g /var/tmp'
