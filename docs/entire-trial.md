@@ -39,10 +39,12 @@ The following closeout and earlier results are historical context.
    merge route. The existing integration mirrors that public work into
    [Entire ai-devops](https://entire.com/gh/popcre/ai-devops); do not add a new
    integration, remote, capture hook or CLI initialization for this workflow.
-2. Use the corresponding mirrored Trail for each real GitHub pull request.
-   For multi-change coordination, use a manual Trail's **Add change** action
+2. Use the corresponding mirrored Trail when one is available for a real GitHub
+   pull request. A source-mirror pass alone does not prove that a Trail was
+   created for that pull request. For manual coordination, use a Trail's **Add change** action
    to select only `popcre/ai-devops` and its real head/base branches. Keep the
    GitHub issue link, public goal, source commit and next action in its context.
+   Link while the head branch still exists, before GitHub's merge cleanup.
 3. Compare the exact head and checks with GitHub before relying on Entire's
    display. Mirroring can lag; GitHub decides delivery. Record any discrepancy
    on the same owning issue rather than changing required checks or protections.
