@@ -1,3 +1,7 @@
+issue: popcre/shared-db#5150
+status: plan published, awaiting owner approval
+owner: MiMo session (edge-dev) until approval, then unassigned
+
 # Handoff — shared-db gate-trim implementation plan (published, awaiting approval)
 
 Session: MiMo chat on `edge-dev`, 2026-10-30.

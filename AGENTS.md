@@ -161,6 +161,11 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
+Shared-db migration gate trimming (plan, not active): read
+[`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) STATUS first;
+[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
+No gate or workflow changes until the owner approves.
+
 Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
 [#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
