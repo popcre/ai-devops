@@ -19,9 +19,24 @@ October 30, 2026, 11:26 AM EDT. The coordinator created and read back
 [operational Trail231](https://entire.com/gh/popcre/ai-devops/-/trails/231),
 “ai-devops live alongside GitHub — public mirror and manual Trails #2022”.
 Its description binds #2022, that exact main, capture off, GitHub authority,
-nonblocking support and original deadlines. This proves authenticated public
-mirror access and manual Trail creation/readback. No new PR/Change linkage is
-claimed by this receipt.
+nonblocking support and original deadlines.
+
+The live companion subsequently linked the real public source
+`309878f366444bbc7a17e00c079f2462a166a8f2` through native **Add change** as
+[Change98](https://entire.com/gh/popcre/ai-devops/-/trails/231/changes/98),
+which produced [GitHub PR2156](https://github.com/popcre/ai-devops/pull/2156).
+GitHub merged it as `300bbbf0743efd707bd48712042b3d9f5d1962b4`; its checks
+succeeded or were skipped, with Entire Gates NEUTRAL. The exact source and
+GitHub check links were observed before merge; Entire displayed the landing
+commit afterward.
+
+Fresh authenticated readback October 30 at 12:58 PM EDT showed Trail231
+**Complete**, Change98 **Merged**, and “Changes were merged into main”, with
+that exact source activity preserved. The earlier “Syncing pull request” display
+has resolved. The merged view now says **Checks Not checked** and **Findings
+Not checked**; it does not establish archival of historical check results or
+automated findings. This proves the scoped public mirror/manual-Trail linkage
+through GitHub delivery, not broader feature qualification.
 
 This narrower authority does not reverse the historical full-feature rejection,
 the frozen baseline 10/10 versus Entire 8/10 result, or the raw-capture privacy
