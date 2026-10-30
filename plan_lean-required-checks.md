@@ -10,7 +10,7 @@
 | A Standing rule + owner ruling in ai-devops | ✅ done | PR #2174 |
 | B shared-db required checks cut to core; queue-gate collision/lease re-checks removed; "one licensor per change" killed | ✅ done; live ruleset + classic protection = 5 contexts | shared-db #5171 (8dd0e9b2) |
 | C shared-db claim / lease / evidence-pair / guarded-authorization chain retired | 🟡 C1 done: guarded merge no longer re-runs collision or lease checks. C2 (retire claim-first contracts, version lanes, preview leases, guarded authorization) open | shared-db #5183 (835b4491) merged on the 5-check set |
-| D Other toolkit repos audited to the same core | ✅ done: no other popcre/u2giants repo has required checks; ai-devops keeps only `verification-closure` | audit 2026-10-30 |
+| D Other toolkit repos audited to the same core | 🟡 other repos audited; ai-devops producer correction awaits landing/live proof | Other popcre/u2giants repos have no required checks. [#2191](https://github.com/popcre/ai-devops/pull/2191) removes broad-suite dependencies hidden behind `verification-closure`; source/platform proof remains on [#2171](https://github.com/popcre/ai-devops/issues/2171). |
 | E Live proof: fresh shared-db migration PR merges on core checks only | 🟡 non-migration proof done (#5171 switch, #5183 merged on core set); first migration PR on the core set still to land | |
 
 ## The rule
@@ -26,7 +26,16 @@ removed from the required set first and repaired afterwards.
 | Repo | Required checks |
 |---|---|
 | shared-db | `SQL migration guards` (migration lint, applied-migration edit refusal, duplicate/ordering of versions, production sidecars), `Destructive SQL outside migrations`, `supabase/tests against an ephemeral database`. Until stage C: `Merge queue gate` + `Migration guarded merge authorization`, because automatic production promotion and the shared-preview ordering hold still read them. |
-| ai-devops | `verification-closure` (unchanged). |
+| ai-devops | `verification-closure`: the existing public-boundary secret scanner on the exact candidate, independently of general tests. Context name and live ruleset remain unchanged. |
+
+The earlier stage-D audit counted required context names without examining
+their dependencies. `verification-closure` still waited for every general
+Windows/Linux suite, so it did not implement the owner's rule. The correction
+keeps the secret check required and preserves the previous full verification
+aggregate as advisory `verification-report`. Broad tests, their platform
+results, Markdown checks, classification and queue evidence continue to run;
+they do not block this toolkit's merge. Shared-db's production-data gates are
+unchanged by this correction.
 
 Post-merge production promotion keeps its own safety: preview rehearsal, tests,
 no open `review-finding` issue (owner ruling 2026-10-29).
