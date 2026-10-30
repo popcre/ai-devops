@@ -63,7 +63,8 @@ printf '%s\n' "$out" | grep -q '^  edge-dev3: 1 sessions, last 2026-10-29 10:00 
 printf '%s\n' "$out" | grep -q '^  old-box: 1 sessions, last 2026-10-20 10:00 AM EDT  STALE$' || fail "stale machine flag" "$out"
 
 # raw: a pointer into the reader's own archive, never transcript text
-out="$(AI_TRANSCRIPT_ARCHIVE=/arch q --raw seg1)"
+# MSYS would rewrite /arch to a Windows path for native Python; keep it literal.
+out="$(MSYS2_ENV_CONV_EXCL=AI_TRANSCRIPT_ARCHIVE AI_TRANSCRIPT_ARCHIVE=/arch q --raw seg1)"
 printf '%s\n' "$out" | grep -q '^file: /arch/edge-dev3/a.jsonl$' || fail "raw path" "$out"
 printf '%s\n' "$out" | grep -q '^turns: t3 .. t9$' || fail "raw turn range" "$out"
 
