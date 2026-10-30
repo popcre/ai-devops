@@ -67,6 +67,20 @@ class Base(unittest.TestCase):
 
 
 class Incremental(Base):
+    def test_no_header_content_persisted_and_counted(self):
+        self.session("m1/a.jsonl", [line("user", "release audit request")])
+        reply = "### Topic: Release audit notes and the release shipped Tuesday"
+        self.assertEqual(build.stats(self.conn)["label_flags"]["no_header"], 0)
+        self.run_build(lambda system, user: reply)
+        self.assertEqual(self.count("SELECT text FROM segments"), reply)
+        self.assertEqual(build.stats(self.conn)["label_flags"]["no_header"], 1)
+
+    def test_empty_heading_chunk_stays_failed(self):
+        self.session("m1/a.jsonl", [line("user", "release audit request")])
+        self.run_build(lambda system, user: "### TOPIC:")
+        self.assertEqual(self.count("SELECT status FROM chunks"), "failed")
+        self.assertEqual(self.count("SELECT count(*) FROM segments"), 0)
+
     def test_unchanged_file_skipped(self):
         self.session("m1/a.jsonl", [line("user", "first request about the pipeline")])
         sd = FakeSD()
