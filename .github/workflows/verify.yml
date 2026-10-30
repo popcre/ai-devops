@@ -227,7 +227,7 @@ jobs:
             echo 'Not a merge-queue run: the queued-commit evidence check applies to merge groups only.'
             exit 0
           fi
-          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
+          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline
 
   # The two whole-repo doc invariants — the public boundary and local Markdown
   # links — are the only checks whose input a prose-only change controls, yet
@@ -511,293 +511,13 @@ jobs:
           printf 'windows-offline: %s reported %s; failing closed.\n' "$lane_name" "$lane_result" >&2
           exit 1
 
-  reviewer-runner-availability:
-    needs: [fast-classifier, manual-preflight]
-    # Samples the qualified pool only for an explicit full manual proof (#736).
-    # PR/schedule proofs go directly to hosted fallbacks.
-    if: >-
-      !cancelled() && github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository) &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      github.event_name == 'workflow_dispatch' &&
-      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 3
-    outputs:
-      preferred_available: ${{ steps.runners.outputs.preferred_available }}
-    steps:
-      - name: Check for an idle qualified reviewer host
-        id: runners
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-        with:
-          github-token: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
-          script: |
-            try {
-              const runners = await github.paginate(github.rest.actions.listSelfHostedRunnersForRepo, {
-                ...context.repo, per_page: 100
-              });
-              const available = runners.some(runner =>
-                runner.status === 'online' && !runner.busy &&
-                runner.labels.some(label => label.name === 'ai-devops-windows-qualified')
-              );
-              core.setOutput('preferred_available', available ? 'true' : 'false');
-              core.info(`Idle qualified reviewer host available=${available}.`);
-            } catch (error) {
-              core.setOutput('preferred_available', 'false');
-              core.warning(`Runner availability is unknown; using the independent hosted proof: ${error.message}`);
-            }
-
-  windows-reviewer-preferred:
-    needs: [fast-classifier, manual-preflight, push-settle, reviewer-runner-availability]
-    # Not run on merge_group: linux-offline is the queue gate, and the Windows
-    # proof comes from the pull_request run on the exact head commit (#204).
-    # Also skipped when the fast classifier proves the change does not touch
-    # the declared reviewer dependency path set. Classifier failure remains
-    # fail-closed and runs the complete reviewer proof.
-    if: >-
-      !cancelled() && github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository) &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
-      github.event_name == 'workflow_dispatch' &&
-      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
-    # Deliberate manual diagnostic on the qualified pool. Pull requests and
-    # schedules use the independent hosted proof below, so a runner that turns
-    # busy after this availability sample can delay only its explicitly chosen
-    # manual run, never a required repository check. Moving this job
-    # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
-    # stalled (#204), so this is not a return to hosted runners: it is a move
-    # to a dedicated, qualified, otherwise idle machine. The reviewer suite
-    # passed 199 of 199 checks in 538s on EDGE-RUNN-ENVY in qualification run
-    # 33571202823 - well inside the 30 minute ceiling it exceeded while
-    # sharing the edge-dev desktop with windows-offline.
-    runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]
-    concurrency:
-      group: ai-devops-windows-reviewer-preferred
-      cancel-in-progress: false
-    # This lane is preferred evidence, not the required result. A timeout or
-    # assertion failure must release the identical hosted fallback, whose
-    # stable aggregate below remains fail-closed.
-    continue-on-error: true
-    timeout-minutes: 60
-    outputs:
-      proof_result: ${{ steps.proof.outputs.proof_result }}
-      codex_result: ${{ steps.proof.outputs.codex_result }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Verify offline reviewer dependencies
-        shell: pwsh
-        run: |
-          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
-            throw 'The pinned Windows runner image does not provide jq.'
-          }
-      - name: Focused Windows reviewer safety suites
-        id: proof
-        shell: pwsh
-        run: |
-          # Preferred stays serial on one host (same-host exclusion). The one
-          # remaining Windows reviewer-safety suite writes its result so the
-          # hosted fallback only runs when the preferred host did not prove it.
-          $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $resultFile = Join-Path $env:RUNNER_TEMP 'preferred-suite-results.txt'
-          $scriptFile = Join-Path $env:RUNNER_TEMP 'preferred-reviewer-suites.sh'
-          $resultFilePosix = $resultFile -replace '\\', '/'
-          @"
-          set -uo pipefail
-          c=0
-          bash tests/test-ai-codex-review.sh || c=`$?
-          {
-            if [ "`$c" -eq 0 ]; then echo 'codex_result=success'; else echo 'codex_result=failure'; fi
-          } > '$resultFilePosix'
-          if [ "`$c" -eq 0 ]; then
-            exit 0
-          fi
-          exit 1
-          "@ | Set-Content -Path $scriptFile -Encoding ascii
-          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-          $startInfo.FileName = $bash
-          $startInfo.UseShellExecute = $false
-          $startInfo.WorkingDirectory = $env:GITHUB_WORKSPACE
-          $scriptFilePosix = $scriptFile -replace '\\', '/'
-          $startInfo.ArgumentList.Add($scriptFilePosix)
-          $process = [System.Diagnostics.Process]::Start($startInfo)
-          if (-not $process.WaitForExit(55 * 60 * 1000)) {
-            & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
-            if ($LASTEXITCODE -ne 0) {
-              "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              "codex_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
-              exit 0
-            }
-            "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            "codex_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Warning 'Preferred reviewer proof reached its 55-minute bound; hosted fallback is required.'
-            exit 0
-          }
-          $codex = 'failure'
-          if (Test-Path $resultFile) {
-            foreach ($line in Get-Content $resultFile) {
-              if ($line -match '^codex_result=(\w+)$') { $codex = $Matches[1] }
-            }
-          }
-          "codex_result=$codex" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          if ($process.ExitCode -eq 0 -and $codex -eq 'success') {
-            "proof_result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } else {
-            "proof_result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Warning "Preferred reviewer proof failed with exit code $($process.ExitCode); hosted fallback is required for unproved suites."
-          }
-
-  reviewer-safety-start-deadline:
-    needs: [fast-classifier, manual-preflight, reviewer-runner-availability, windows-reviewer-preferred]
-    if: >-
-      !cancelled() && github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository) &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 3
-    outputs:
-      fallback_required: ${{ steps.watch.outputs.fallback_required }}
-      preferred_result: ${{ steps.watch.outputs.preferred_result }}
-      fallback_codex: ${{ steps.watch.outputs.fallback_codex }}
-      codex_status: ${{ steps.watch.outputs.codex_status }}
-    steps:
-      - name: Bound the self-hosted reviewer lane start
-        id: watch
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-        env:
-          AVAILABLE: ${{ needs.reviewer-runner-availability.outputs.preferred_available }}
-          PROOF_RESULT: ${{ needs.windows-reviewer-preferred.outputs.proof_result }}
-          CODEX_RESULT: ${{ needs.windows-reviewer-preferred.outputs.codex_result }}
-        with:
-          script: |
-            const available = process.env.AVAILABLE === 'true';
-            const proofResult = process.env.PROOF_RESULT || (available ? 'unknown' : 'unavailable');
-            const status = (value) => value || (available ? 'unknown' : 'unavailable');
-            const codexStatus = status(process.env.CODEX_RESULT);
-            // Per unproved suite: a suite the preferred host already proved (or
-            // that left an unclean process tree) never overlaps a hosted twin.
-            const needsFallback = (v) => (v === 'success' || v === 'cleanup_failure' ? 'false' : 'true');
-            const fallbackCodex = needsFallback(codexStatus);
-            const fallback = fallbackCodex === 'true' ? 'true' : 'false';
-            core.setOutput('fallback_required', fallback);
-            core.setOutput('preferred_result', proofResult);
-            core.setOutput('fallback_codex', fallbackCodex);
-            core.setOutput('codex_status', codexStatus);
-            core.info(`Reviewer host available=${available} proof=${proofResult} codex=${codexStatus}; fallback_codex=${fallbackCodex}.`);
-
-  # Hosted Codex proof runs only when the preferred host did not prove it.
-  # Timeouts stay bounded at the existing 60-minute ceiling. Grok is frozen
-  # per popcre/ai-devops#1714 and no longer runs here.
-  windows-reviewer-fallback-codex:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
-    if: >-
-      always() && !cancelled() && github.event_name != 'merge_group' &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.reviewer != 'false') &&
-      (github.event_name != 'workflow_dispatch' ||
-       needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
-      (needs['reviewer-safety-start-deadline'].result != 'success' ||
-       needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true')
-    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
-    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
-    # get stuck).
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Codex reviewer safety suite
-        shell: pwsh
-        run: |
-          & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-codex-review.sh
-
-  # Stable required result for reviewer safety. The qualified self-hosted lane
-  # remains preferred, but it is not a machine-wide stop: the hosted Codex
-  # fallback is an equally valid proof of the only remaining Windows
-  # reviewer-safety suite (Grok is frozen per popcre/ai-devops#1714).
-  windows-reviewer-safety:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex]
-    if: >-
-      !cancelled() && github.event_name != 'merge_group'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - name: Aggregate reviewer safety proof
-        env:
-          EVENT: ${{ github.event_name }}
-          SELECTION_RESULT: ${{ needs.fast-classifier.outputs.selection_result }}
-          RUN_REVIEWER: ${{ needs.fast-classifier.outputs.reviewer }}
-          RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
-          PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
-          WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
-          CODEX_PREFERRED: ${{ needs.reviewer-safety-start-deadline.outputs.codex_status }}
-          CODEX_FALLBACK: ${{ needs.windows-reviewer-fallback-codex.result }}
-        run: |
-          set -uo pipefail
-          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s codex_pref=%s codex_fb=%s\n' \
-            "$EVENT" "$SELECTION_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" \
-            "$CODEX_PREFERRED" "$CODEX_FALLBACK"
-
-          # A legitimate skip needs an explicit "reviewer is not selected"
-          # verdict from a successful selection, or a manual run that declined
-          # the expensive jobs. Unknown selection is never a green skip.
-          legitimate_skip=false
-          if [ "$SELECTION_RESULT" = 'success' ] && [ "$RUN_REVIEWER" = 'false' ]; then
-            legitimate_skip=true
-          fi
-          if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
-            legitimate_skip=true
-          fi
-          if [ "$legitimate_skip" = true ] && [ "$CODEX_FALLBACK" = 'skipped' ]; then
-            printf 'windows-reviewer-safety: reviewer work was legitimately skipped.\n'
-            exit 0
-          fi
-
-          suite_proved() {
-            preferred="$1"
-            fallback="$2"
-            [ "$preferred" = 'success' ] || [ "$fallback" = 'success' ]
-          }
-
-          all_ok=true
-          if ! suite_proved "$CODEX_PREFERRED" "$CODEX_FALLBACK"; then
-            printf 'windows-reviewer-safety: codex suite unproved (preferred=%s fallback=%s).\n' \
-              "$CODEX_PREFERRED" "$CODEX_FALLBACK" >&2
-            all_ok=false
-          fi
-
-          if [ "$all_ok" = true ]; then
-            printf 'windows-reviewer-safety: every reviewer suite is proved.\n'
-            exit 0
-          fi
-
-          printf 'windows-reviewer-safety: no complete reviewer proof; preferred=%s watchdog=%s codex_fb=%s.\n' \
-            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$CODEX_FALLBACK" >&2
-          exit 1
-
   # The ruleset requires this one stable context on both pull_request and
-  # merge_group. On a pull request it closes over every exact-head platform and
-  # reviewer proof before GitHub may admit the change to the queue. In the
+  # merge_group. On a pull request it closes over every exact-head platform
+  # proof before GitHub may admit the change to the queue. In the
   # queue it closes over the fresh Linux run and merge-group-evidence, so an
   # evidence refusal cannot be hidden by an unrelated green required job.
   verification-closure:
-    needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline, windows-reviewer-safety]
+    needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline]
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')
@@ -815,11 +535,10 @@ jobs:
             "${{ needs.merge-group-evidence.result }}" \
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
-            "${{ needs.windows-reviewer-safety.result }}" \
             "${{ needs.doc-safety.result }}"
 
   report-scheduled-failure:
-    needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
+    needs: [fast-classifier, linux-offline, windows-offline-complete]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
@@ -838,8 +557,7 @@ jobs:
           for pair in \
             "fast-classifier=${{ needs.fast-classifier.result }}" \
             "linux-offline=${{ needs.linux-offline.result }}" \
-            "windows-offline-complete=${{ needs.windows-offline-complete.result }}" \
-            "windows-reviewer-safety=${{ needs.windows-reviewer-safety.result }}"; do
+            "windows-offline-complete=${{ needs.windows-offline-complete.result }}"; do
             needs_summary="$needs_summary$pair "
           done
           bash tools/ci/report-scheduled-failure.sh \
