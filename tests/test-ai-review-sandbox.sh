@@ -579,7 +579,12 @@ check "privacy_verdict_no_scope_always_classifies" "[ \"\$(pv_runs)\" = 2 ]"
 pv_reset code
 ln -s "$PV/scope" "$PV/scope-link"
 for i in 1 2; do AI_TASK_GATES_BIN="$PV/bin/ai-task-gates" AI_REVIEW_PRIVACY_SCOPE="$PV/scope-link" "$SCRIPT" is-private "$PV/r" >/dev/null 2>&1; done
-check "privacy_verdict_linked_scope_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+# Windows ln -s may fall back to a copy; assert only on a real link.
+if [ -L "$PV/scope-link" ]; then
+  check "privacy_verdict_linked_scope_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+else
+  skip "privacy_verdict_linked_scope_ignored (this filesystem cannot create a real symlink)"
+fi
 
 pv_reset code
 pv is-private "$PV/r"
@@ -615,8 +620,14 @@ check "privacy_verdict_gate_setting_change_reclassifies" "[ \"\$(pv_runs)\" = 2 
 pv_reset code
 pv is-private "$PV/r"
 for f in "$PV/scope"/*; do chmod 644 "$f"; done
+pv_shared_mode="$(stat -c %a "$(ls -d "$PV/scope"/* | head -1)" 2>/dev/null)"
 pv is-private "$PV/r"
-check "privacy_verdict_shared_record_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+# NTFS has no POSIX group/other bits: chmod 644 cannot share the record there.
+if [ "$pv_shared_mode" = 644 ]; then
+  check "privacy_verdict_shared_record_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+else
+  skip "privacy_verdict_shared_record_ignored (this filesystem has no POSIX file modes)"
+fi
 
 pv_reset code
 pv is-private "$PV/r"

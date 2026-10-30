@@ -43,6 +43,8 @@ if command -v cygpath >/dev/null 2>&1; then
   short="$(cygpath -d "$TMP/spot" 2>/dev/null)"
   if [ -n "$short" ]; then
     ai_same_path "$short" "$TMP/spot" && ok '8.3 short name matches long name' || fail "8.3 short name matches long name ($short)"
+    # A not-yet-created child under a short-named parent is the same place too.
+    ai_same_path "$short/not-yet/made" "$TMP/spot/not-yet/made" && ok '8.3 parent of a missing path matches' || fail "8.3 parent of a missing path matches ($short/not-yet/made)"
   fi
 fi
 

@@ -109,7 +109,7 @@ awk '{ print } /^  verification-closure:$/ { print "    if: github.event_name !=
   "$ROOT/.github/workflows/verify.yml" > "$f_excl/.github/workflows/verify.yml.new"
 python3 - "$f_excl/.github/workflows/verify.yml.new" "$f_excl/.github/workflows/verify.yml" <<'PY2'
 import sys, re
-t = open(sys.argv[1]).read().split('\n')
+t = open(sys.argv[1], encoding='utf-8', newline='').read().split('\n')
 out, in_job, seen = [], False, False
 for line in t:
     if line == '  verification-closure:':
@@ -120,7 +120,7 @@ for line in t:
         if seen: continue
         seen = True
     out.append(line)
-open(sys.argv[2], 'w').write('\n'.join(out))
+open(sys.argv[2], 'w', encoding='utf-8', newline='').write('\n'.join(out))
 PY2
 out="$("$DRIFT" --root "$f_excl" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
 [ $rc -eq 1 ] && grep -q 'excludes merge_group' <<<"$out" \
@@ -131,13 +131,16 @@ out="$("$DRIFT" --root "$f_excl" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$
 f_str="$(make_fixture onlystring)"
 python3 - "$ROOT/.github/workflows/verify.yml" "$f_str/.github/workflows/verify.yml" <<'PY2'
 import sys
-t = open(sys.argv[1]).read()
-old = """    if: >-
+t = open(sys.argv[1], encoding='utf-8', newline='').read()
+# Anchor on the required job: verification-report (#2191) carries the same if:.
+old = """  verification-closure:
+    if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')"""
 assert old in t, 'verify.yml verification-closure if: changed; update this fixture'
-t = t.replace(old, """    if: github.event_name == 'pull_request' || format('{0}', 'merge_group') == 'x'""", 1)
-open(sys.argv[2], 'w').write(t)
+t = t.replace(old, """  verification-closure:
+    if: github.event_name == 'pull_request' || format('{0}', 'merge_group') == 'x'""", 1)
+open(sys.argv[2], 'w', encoding='utf-8', newline='').write(t)
 PY2
 out="$("$DRIFT" --root "$f_str" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
 [ $rc -eq 1 ] && grep -q 'does not explicitly select it' <<<"$out" \
@@ -148,12 +151,14 @@ out="$("$DRIFT" --root "$f_str" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
 f_false="$(make_fixture andfalse)"
 python3 - "$ROOT/.github/workflows/verify.yml" "$f_false/.github/workflows/verify.yml" <<'PY2'
 import sys
-t = open(sys.argv[1]).read()
-old = """    if: >-
+t = open(sys.argv[1], encoding='utf-8', newline='').read()
+# Anchor on the required job: verification-report (#2191) carries the same if:.
+old = """  verification-closure:
+    if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')"""
 assert old in t, 'verify.yml verification-closure if: changed; update this fixture'
-open(sys.argv[2], 'w').write(t.replace(old, "    if: github.event_name == 'merge_group' && false", 1))
+open(sys.argv[2], 'w', encoding='utf-8', newline='').write(t.replace(old, "  verification-closure:\n    if: github.event_name == 'merge_group' && false", 1))
 PY2
 out="$("$DRIFT" --root "$f_false" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
 [ $rc -eq 1 ] && grep -q 'does not explicitly select it' <<<"$out" \
