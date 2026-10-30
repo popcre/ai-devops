@@ -1,6 +1,485 @@
 # Reversible Entire trial alongside GitHub
 
-## STATUS — read first
+## STATUS — fleet and CI implementation, read first
+
+**Ultimate goal:** Albert can start a public ai-devops task in Codex, Claude,
+MiMo or ZCode on edge-dev, edge-dev3, al8960ofc or 916 and get the same verified
+Entire-assisted workflow, including trustworthy CI results, without manually
+teaching each session what to do. GitHub remains authoritative. **If a step
+conflicts with this goal, the goal wins — stop and flag it.**
+
+This October 30, 2026 expansion is the current implementation specification.
+It supersedes earlier “no implementation remains” statements **for fleet and
+CI coverage only**. Earlier scoped mirror/manual-Trail passes remain valid.
+A public mirror, a merged instruction or an installed file is not proof that
+all clients on all machines follow it. No fleet rollout or CI changeover has
+been completed by this planning update.
+
+Single owner/acceptance record: [#2022](https://github.com/popcre/ai-devops/issues/2022).
+Current planning coordinator: Codex chat
+`01a18dff-bb18-7ea3-b5a0-e67ada43d222`; the next executing session claims the
+same issue before work and owns progress through live acceptance.
+[Fresh-session handoff](HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
+
+| Step | Status, October 30, 2026 EDT | Evidence / gate still required |
+|---|---|---|
+| R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
+| R1 Inventory and supported capability map | open | §9 R1: private host/client inventory and all 16 matrix cells; no inferred Windows/Linux or desktop/CLI equivalence. |
+| R2 Shared client workflow and safe access | open | §9 R2: canonical templates, existing client writers/installers, capture-off tests and source-bound receipts. |
+| R3 CI contract and Entire feasibility | open | §9 R3: inventory every current check, live exact-head success/failure/stale comparison; execution migration is a separate unpassed gate. |
+| R4 Offline cross-platform verification | open | §10 named suites and adversarial cases; no fleet installation on fixture results alone. |
+| R5 Protected installation on four machines | open | §9 R5: each host's installed commit, before/after preservation and rollback receipt. |
+| R6 All 16 live client-machine journeys | open | §9 matrix: actual fresh-session behavior, source/check/Trail readback, no private capture and recovery. |
+| R7 Live CI workflow and continuity | open | §9 R7: genuine authorized task and disposable intentional-failure branch; no weakening GitHub controls. |
+| R8 Acceptance, bounded stop and disposition | open | §13: every matrix cell and CI gate has evidence; original stop retained, missing capability stays visibly incomplete. |
+
+**Fresh session starts at R1**, not another mirror demo. Re-read §§1–13 below,
+then the earlier evidence only as linked. At every phase boundary update this
+table and #2022, re-read downstream phases, and use the fresh-session skill
+when context is insufficient. Do not reset a completed row without new evidence.
+
+### 1. Ultimate goal and success language
+
+“Officially using Entire across the fleet” requires the real task workflow to
+work in every named client on every named machine, with portable instructions,
+reproducible installation, exact GitHub/Entire source and CI correspondence,
+and GitHub-only recovery. Report each of these independently: source mirror;
+client workflow; installed fleet coverage; CI-result visibility; requested
+Entire-connected CI execution. Never collapse them into “live.” Execution
+integration is part of the requested outcome, not silently optional; if the
+constraints make it unavailable, the full rollout remains partial/unmet.
+
+“CI changed over” means test execution actually moved and parity/recovery was
+proved. It cannot mean a neutral Entire check or links back to GitHub Actions.
+The standing GitHub-authoritative requirement means GitHub required checks,
+merge policy and delivery authority remain intact. This plan includes a
+technical feasibility gate for Entire execution; it does not silently replace
+the existing CI service to satisfy a phrase.
+
+### 2. Application, repository and environments
+
+This is the public recovery toolkit
+[popcre/ai-devops](https://github.com/popcre/ai-devops), Bash/Python/PowerShell
+scripts, generated client instructions, managed installers and GitHub workflows.
+It is not a deployed business app. The Entire project is
+[ai-devops](https://entire.com/gh/popcre/ai-devops).
+Four coding clients are in scope: Codex, Claude (identify desktop/CLI launch
+surface), MiMo/MiMoCode and ZCode. Four machines are requested: edge-dev,
+edge-dev3, al8960ofc and 916. These are an explicit 4 × 4 requirement, not an
+assumed list of installed or compatible clients. Confirm actual OS/profile and
+client availability privately at R1; existing records describe edge-dev3 as
+Ubuntu and the other three as Windows. Do not install Windows application
+binaries on Ubuntu or claim a wrapper is a desktop application.
+
+### 3. Trigger and owner intent
+
+After the public mirror and repository instructions were delivered, Albert
+asked: “that's it? we're now officially on Entire.com? our whole CI process is
+changed over? all apps (codex, claude, Mimo, zcode) on all machines (edge-dev,
+edge-dev3, al8960ofc, 916) will now follow that?”
+The honest answer was no: neither CI migration nor fleet installation/behavior
+had been proved. Albert then requested: “add all of that to the Entire plan &
+github Issue.” This turn authorizes planning and publication, not a claim that
+the stronger rollout has happened. Implementers must not mistake earlier
+public-companion completion for this expanded outcome.
+
+### 4. Scope and exclusions
+
+In scope: current capability inventory; consistent four-client instructions and
+supported access; safe managed installation; all 16 live behavior checks;
+CI inventory/parity, failure/stale-result handling and feasibility of
+Entire-connected execution; preservation, rollback and honest adoption decision.
+
+Not in this plan: private transcript/session capture or historical import;
+uploading private repositories/submodules, raw logs or machine inventories;
+billing/cost investigation, purchases, subscriptions or paid Agent activation;
+organization-wide grants; GitHub replacement, required-check weakening or
+manual production/database changes; unrelated application rollouts. “All apps”
+here means the four coding clients Albert named, not every business repository.
+If implementation requires a forbidden capability, record its exact unsatisfied
+dependency on #2022 and continue independent authorized work. Do not call the
+requirement met, substitute another client, or infer expanded business scope.
+
+### 5. Current state and concrete source anchors
+
+Anchors below refer to starting commit
+[`74fb9f9b`](https://github.com/popcre/ai-devops/commit/74fb9f9bed94e7112efaa980ca62e5d047bb23f5);
+line numbers can move, so resolve the named target at execution.
+
+- `AGENTS.md:173–183` contains the repository-only public session workflow.
+  `docs/entire-trial.md` sections “Meaning of live and original deadline” and
+  “Session workflow” define the narrow installed-in-repository behavior.
+  These files landed; global instruction files are not thereby installed.
+- `bin/ai-adopt-globals:60–85` resolves four client homes and machine-section
+  preservation. `bin/ai-render-globals:3–18,37–50` derives ZCode/MiMo globals
+  from `templates/system/AGENTS-global-codex.md`. Never hand-edit generated
+  `AGENTS-global-zcode.md` or `AGENTS-global-mimo.md`.
+- `bin/ai-install-skills:44–51,884–900`, `install.sh`, `update.sh`,
+  `bin/install-ai-devops-windows.ps1`, `bin/setup-machine.ps1` and
+  `docs/deployment.md` own distribution. Existing per-client MCP writers:
+  `bin/configure-zcode-mcps.ps1`, `bin/configure-mimocode-mcps.ps1`.
+  Reuse them only if the chosen capture-free interface requires configuration.
+- CI remains in `.github/workflows/verify.yml:1–45`,
+  `.github/workflows/fast-classifier.yml`,
+  `.github/workflows/windows-offline-blacksmith.yml`,
+  `.github/workflows/ai-review.yml` and the live repository rulesets.
+  Inventory all invoked/reusable workflows and `config/ci-suites/`, not only
+  these entry points. No execution migration was made by PR2167.
+- Scoped browser proof: Trail231/Change98 linked PR2156; subsequent
+  Trail246/Change107 preserved PR2166 source. PR2167's landing appeared exactly
+  in Entire and its instruction changes rendered. PR2167 native Trail readback
+  was not established in that receipt. See the
+  [operating record](docs/entire-trial.md) and
+  [latest signed evidence](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6530210288).
+- A targeted search of the four global templates found no Entire instruction
+  on October 30 in this starting tree. There is no signed 16-cell live proof.
+  An earlier 10/10 baseline versus 8/10 Entire retrieval result and capture
+  privacy failure remain unchanged; fleet instructions do not repair them.
+
+### 6. Findings, boundaries and root cause
+
+The gap is scope/acceptance: mirror success and a repository instruction were
+reported too broadly. Installation, client startup/adoption and CI execution
+are separate deliverables with separate evidence. Current source already has
+four-client adoption machinery; another installer or provider-specific copy
+would add drift.
+
+Official sources read October 30:
+[agent integrations](https://docs.entire.com/agents/overview) lists Codex and
+Claude Code capture integrations; MiMo and ZCode were not listed there. Absence
+from that list is not proof that their public browser workflow is impossible.
+Do not enable capture to gain apparent integration. The
+[product introduction](https://docs.entire.com/) describes Buildkite/Depot
+integration in public preview; documentation is not a verified entitlement,
+supported Windows lane or installed integration. Detailed CI/installation
+pages did not retrieve through the web reader in this planning session:
+R1/R3 must fetch official supported instructions through available access before
+selecting commands. Never invent endpoints or flags.
+
+A shared public-workflow skill/instruction is distinct from automatic native
+session capture. On a platform without a requested client, literal 16-cell
+acceptance is incomplete; another tool, emulator or same-model wrapper does
+not satisfy that client's row. Record exact vendor/platform evidence and route
+a supported remedy if one exists without reducing the original capability.
+
+### 7. Rejected approaches and failed attempts
+
+Do not repeat: equating a mirror with CI migration; equating committed globals
+with installation; copying instructions without proving client startup use;
+calling one edge-dev3 browser test fleet proof; rewriting negative memory scores;
+enabling private capture or paid Agents to make a badge green; a second trial
+clock; new tickets for proof gaps; broad logout/shared-App removal.
+
+Trail closure/unlink is not deletion. Trail113/133 deletion is unsupported per
+Albert's supplied support reply. Retention and old issued-access behavior are
+disclosed unknowns, not a support wait. Some same-tab navigation showed stale
+content; a fresh authenticated tab provided correct source readback. Check the
+actual displayed commit, not a cached title or a claimed instantaneous latency.
+
+### 8. Decisions, locked and open
+
+Locked October 30: GitHub authority; private capture off; billing dropped; no
+waiting for support; no purchase or paid-Agent expansion; all four clients and
+four machines require explicit coverage; existing integrations/protections and
+unrelated settings preserved. Current turn delivers the expanded plan/issue.
+
+Original anchor October 29, 2026, 5:58 AM EDT gives ten subsequent weekdays,
+ending November 12, 2026, 5:58 AM EST; discovery ends November 2, 2026,
+5:00 PM EST. November 11 counts because no holiday calendar was specified.
+No extension/reset follows from this expanded scope. If time/capability is
+insufficient, record incomplete/partial adoption at the stop, not success.
+
+Open technical choices, owned by the implementation coordinator: smallest
+capture-free supported client interface (browser workflow first, optional
+supported CLI/MCP only if needed); installer touch points; client version pins;
+which already-entitled Entire CI provider can run the exact required scope
+without a purchase. Choose by supported capability, minimum access, identical
+test scope and rollback evidence, not convenience. No question for Albert is
+needed to inventory, implement supported public workflow or record a limit.
+If no admissible CI provider exists, execution migration stays unmet while
+CI visibility and fleet work proceed.
+
+### 9. Executable phases and verification gates
+
+**Phase A — establish and implement shared behavior (R1–R2).**
+
+**R1. Inventory before writing or installing.** Claim #2022; refresh main in a
+new worktree, classify task, read `docs/deployment.md`,
+`docs/configuration.md`, `docs/onboarding-secrets.md`, protected machine atlas
+and owning client plans `plan_mimo-windows-support.md`,
+`plan_zcode-windows-support.md`. Use existing protected atlas access through
+`ai-private-config path machine_atlas`; do not copy inventory into this public
+plan. On each host record exact OS, app version, launch surface, instruction
+roots, installed toolkit source, managed receipt, browser/CLI authentication,
+capture-off state and accessible public repository. Retain baseline hashes and
+backups owner-only. Produce the matrix below with cell-specific evidence.
+**Gate:** all 16 cells have exact observed current state; unavailable cells have
+actual reason/owner, never an assumed pass; official supported command/version
+sources are retained by URL/version. Dependency: none.
+
+**R2. Implement one shared, capture-free workflow.** Edit
+`templates/system/CLAUDE-global.md` and canonical
+`templates/system/AGENTS-global-codex.md` to route this repository to its Entire
+session workflow during the original window, with GitHub fallback and explicit
+capture/paid-agent exclusion. Render MiMo/ZCode through
+`bin/ai-render-globals`; preserve per-client overrides and machine sections.
+Reuse `skills/shared/` only if a callable skill is required: choose one shared
+Entire workflow, owned by #2022, retire/consolidate it into the existing
+operating record at trial end rather than creating four copies. Update
+`bin/ai-install-skills`, `bin/ai-adopt-globals`, existing client writers and
+Windows launcher registry only for proven missing distribution/access.
+Preserve `bin/ai-mimo` and `bin/ai-zcode` capabilities; never fake native
+capture or modify vendor application bytes. No client setting should read
+private chat history as part of this workflow.
+**Gate:** four client fixtures consume the correct managed instruction, routing
+is repository-scoped and time-bound, installed machine sections survive
+byte-identically, existing skills/MCPs/hooks remain intact and capture is off.
+Dependency: R1; select browser access without new grants when possible.
+
+**Phase B — CI contract and offline qualification (R3–R4).**
+
+**R3. Specify and qualify the whole CI path.** Inventory workflow triggers,
+reusable jobs, suite manifest, Ubuntu/Windows runner lanes, required status
+contexts, tested commit binding, advisory review/fixer and merge queue from
+the existing files/rulesets in §5. Record current source versus installed
+runtime separately. In `docs/entire-trial.md` and
+`tests/verification/entire-trial/report.md`, map each check to its authoritative
+GitHub run and observed Entire display. Treat missing/stale/neutral/skipped
+checks accurately; a merged view saying Not checked is not a passing archive.
+
+Before considering execution migration, verify official provider/platform
+support, current account entitlement without billing investigation, scope of
+access and exact-command parity. No available already-entitled provider or
+a required purchase/new sensitive grant means do not activate it; mark actual
+execution migration unmet, retaining GitHub execution. If admissible, stage
+the smallest public/synthetic-only **shadow** execution using existing suite
+commands and no deployment credentials. Name provider, config path and exact
+pinned command in the operating record before enabling it. Expand to every
+required suite/OS lane only after same-commit positive and failure proof.
+GitHub remains the required merge authority throughout; passing shadow CI is
+not a CI replacement or permission to remove GitHub jobs.
+**Gate:** every existing check is accounted for; exact-head failure cannot
+appear as success; platform/execution limitations are explicit; no “whole CI
+changed over” claim without all existing behaviors and recovery proved.
+Dependency: R1; can run alongside R2, without installing clients.
+
+**R4. Add and run focused verification.** Extend the named tests in §10 for R2
+and R3 changes; reuse suite registration in `config/ci-suites/` and existing
+offline Windows/Linux workflows. Do not create a parallel harness. Run
+`bin/ai-test-local --check-collision` before shared-runtime/full series.
+**Gate:** applicable tests pass on Linux and real Windows/Git Bash/PowerShell
+lanes, generated files match, and all adversarial rows pass. Do not install an
+unmerged candidate. Dependencies: touched implementation ready from R2/R3.
+Context cut: reconcile main, tests and downstream phases before R5.
+
+**Phase C — land, install and prove all combinations (R5–R7).**
+
+**R5. Land and install the exact release.** Verify identity; stage only owned
+files; use a PR and normal merge queue for code/config/workflows. Plan/prose
+alone follows doc-safety/admin prose route. Reconcile current main and bind the
+install candidate to the merged source. On each Dev-class host use its existing
+protected installation route from `docs/deployment.md`: candidate `update.sh`
+on Ubuntu, `bin/install-ai-devops-windows.ps1` on Windows, never a plain pull
+in the installed checkout. Keep Windows .cmd launchers and schema writers.
+An actual install-gate refusal is a blocker to resolve via its documented
+route, not an owner approval request or bypass.
+**Gate:** four per-host receipts identify installed source/file hashes,
+preserved unrelated settings, working original clients and restore backups.
+Dependency: R4, merged release. Serialize writes per host; remote read-only
+inventory and independent fixtures may run concurrently.
+
+**R6. Execute every live client-machine cell.** Start a fresh real session in
+each named installed app, using the actual launch surface the owner uses;
+prove it loads managed instructions without pasting them. Use one real
+authorized public ai-devops task, not 16 fabricated changes. Each session must
+identify its owning issue, correct source and Trail, read exact CI disposition,
+give the correct next action, honor capture-off and recover from GitHub when
+Entire is unavailable. Record app version, host, installed commit, observed
+source/check IDs, time in EDT/EST and durable private receipt; publish only a
+sanitized receipt reference. No raw conversations or sensitive screenshots.
+**Gate:** all 16 cells are independently live-proved; file presence, a doctor
+pass, another app's session, unsupported-platform skip or browser-only access
+without actual client use cannot mark a cell passed. Dependency: R5.
+
+| Machine / required app | Codex | Claude | MiMo/MiMoCode | ZCode |
+|---|---|---|---|---|
+| edge-dev | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required |
+| edge-dev3 | open — R6 receipt required | open — R6 receipt required | open — platform/client support unverified | open — platform/client support unverified |
+| al8960ofc | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required |
+| 916 | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required | open — R6 receipt required |
+
+**R7. Prove CI and cross-session continuity live.** On the real authorized task,
+link/inspect its Trail while the source exists; compare exact source and every
+required GitHub result before ordinary merge and exact landing afterward.
+Use a separate disposable unmerged public/synthetic branch for intentional
+failure and repair; never merge failing test code. Verify Entire distinguishes
+failure, pending, missing and stale results and does not imply archival passes
+after cleanup. Recover task goal/source/next action in a second fresh client
+on a different host using sanitized GitHub context, not private capture.
+If R3 admitted shadow CI, run equivalent success/failure at identical heads,
+compare all suite/OS scope and restore GitHub-only operation with preserved
+results. If a vendor/platform cannot represent a required behavior, record
+the exact limit; never erase a GitHub check to make parity appear.
+**Gate:** signed same-issue live receipt includes real PR/source/landing/run
+links and cross-host recovery; actual execution migration only passes if all
+its additional §13 criteria pass. Dependency: R3/R5; R6 can share the real task.
+
+**Phase D — disposition (R8).** Update this table, matrix, operating record,
+report and #2022 with exact results, missing cells and named coordinator.
+Use historical negative scores and current compatibility evidence honestly.
+At the original stop end trial-owned activity, preserve recovery/GitHub/shared
+integrations, and record partial adoption or unmet scope if any gate remains.
+No unattended deadline job exists unless separately created and proved.
+**Gate:** §13 checklist is satisfied for completion, or the same issue clearly
+shows the bounded incomplete disposition. Dependencies: R6/R7 or stop reached.
+
+### 10. Tests and adversarial cases
+
+Extend existing `tests/test-ai-adopt-globals.sh`,
+`tests/test-ai-install-skills.sh`, `tests/test-ai-render-globals.sh` and
+`tests/test-client-globals-required-phrases.sh`. Use
+`tests/test-ai-mimo.sh`, `tests/test-ai-zcode.sh`,
+`tests/test-configure-mimocode-mcps.ps1`,
+`tests/test-configure-zcode-mcps.ps1` for touched client/writer behavior.
+Run Bash suites through Git Bash on Windows and PowerShell writer tests on
+their supported version. Preserve existing full suite selection in
+`config/ci-suites/`; new cases below belong in these harnesses or existing
+Entire verification fixtures, not a parallel framework.
+
+| External input / boundary | Hostile or failure case | Named test to implement / live receipt |
+|---|---|---|
+| Managed client home / path | CRLF, spaces, drive-letter aliases, absent/unsupported app | `entire-client-path-and-platform` in install-skills/adopt-globals tests; use `tools/lib/path-identity.sh`. |
+| Existing global instructions | Conflicting machine tail, unknown boundary, interrupted adoption | `entire-adoption-preserves-machine-section` in test-ai-adopt-globals; refusal with originals intact. |
+| Session context / repository | Private marker, nested private submodule, injected page instruction | `entire-public-context-only` fixture: refuse transmission; raw synthetic markers stay local. |
+| Agent setup / environment | Existing capture hooks, broad auto-capture or private transcript discovery | `entire-capture-off-preserved` in install/client fixtures; no enabling or import, baseline preserved. |
+| Time / scope | Expired trial, EDT/EST transition, unrelated/private repo | `entire-scope-and-deadline` fixture; original New York stop enforced, GitHub-only fallback. |
+| Source/check data | Old head passes, current head fails/pending/missing, forged/misleading link | `entire-ci-exact-head` in existing Entire verification fixtures plus R7 live receipt; only actual GitHub run for that head accepted. |
+| Entire UI / provider availability | Cached view, offline service, missing Trail or CI lane | `entire-outage-continuity` R6/R7 receipt; fresh read or explicit unverified, no duplicate Trail or GitHub blockage. |
+| CI plugin/config | Extra repo grant, paid activation, missing Windows suite, accidental deploy permission | `entire-ci-scope-refusal` qualification receipt; refuse activation/migration while preserving existing CI. |
+| Export/recovery artifact | Corruption, wrong repo identity, deletion/unlink presented as erasure | `entire-recovery-identity-and-integrity` existing fault fixtures/receipt; fail closed, original retained. |
+
+Test IDs above are **required new cases/receipts, not tests already present or
+passed**. For any new machine-readable export, CLI/MCP boundary or CI adapter,
+add parser-specific malicious input tests to its existing owning harness before
+activation. Test copied fake data only; never real secrets.
+Documentation publication requires `bin/ai-doc-safety` and whitespace/link
+verification. Runtime change completion additionally needs normal CI, Linux
+and Windows tests, exact merged-source installation and R6/R7 live proof.
+
+### 11. Constraints and traps
+
+Classify task and recheck before stronger actions; installation is not prose.
+Keep landing-only canonical checkouts and task-owned worktrees. GitHub calls
+use `bin/ai-gh`, bounded waits use `bin/ai-pr-wait`/`bin/ai-gh-wait`;
+never wait for AI review or support. Never admin-merge non-prose. Preserve
+other sessions' work and installed capability. Reviews remain advisory.
+
+Keep generated globals canonical; MiMo has no completion-hook surface, ZCode
+headless hooks cannot be assumed to fire, and MCP schemas differ (MiMo command
+is argv array, timeout key `timeout`). See the owning client plans and
+`docs/model-setup.md:85–140`. Do not use native hooks to evade capture-off.
+Do not install on networking-only machines or equate similarly named hosts.
+Do not overlap shared physical-host Windows CI/local full tests.
+
+No database work is needed. Any later structure change belongs in shared-db
+through its own skill/workflow, not here. No public inventory, secrets, chat
+archives, private artifacts or host addresses. Keep recoverable backups before
+changes and restore only task-owned settings; unrelated Codex drift stays intact.
+
+### 12. Access and environment
+
+Planning was on Ubuntu edge-dev3, GitHub `u2giants`, task worktree; current
+main starting source is §5. Existing GitHub CLI access fetched #2022 and merged
+the earlier prose deliveries. Authenticated Entire browser access proved the
+public mirror in the earlier receipt; recheck current sign-in before use.
+No current access/login/privilege is claimed for the other machines or apps.
+
+Resolve host access through the protected atlas in
+`u2giants/ai-devops-private-config`; read `docs/onboarding-secrets.md` and the
+app's existing secret reference before commands needing credentials. Vault is
+`vibe_coding`. No new Entire CLI credential is required by the browser-first
+workflow; no current reusable trial CLI login remains. Do not guess an item
+title or restore destroyed bearer material. If a required existing secret item
+is missing, the coordinator uses the secrets-to-1password skill and approved
+access route; never asks Albert to type/click/create a credential.
+No local web server is needed. CI/plugin access must be obtained by the
+documented account route without widening forbidden grants.
+
+### 13. Definition of done, risks, rollback and uncertainty
+
+- [ ] Shared behavior is source-controlled, tested and discoverable through
+  AGENTS, operating record and the linked handoff; all generated clients match.
+- [ ] Runtime changes committed/pushed, normal CI passed, protected merge
+  verified on origin/main; installed source on each of four hosts matches its
+  intended merged release; fixtures and original capabilities remain green.
+- [ ] All 16 live client-machine matrix cells passed with durable proof and
+  fresh-session automatic instruction adoption; unavailable clients remain
+  unmet requirements, never silently N/A or counted as another app.
+- [ ] CI inventory covers the entire original process, including Windows,
+  failures, advisory review, stale-head handling and merge queue. CI-result
+  visibility and CI execution are separately stated with evidence.
+- [ ] Requested Entire-connected CI execution is actually proved across the
+  entire original suite/OS scope; otherwise full rollout is partial/unmet,
+  even if all clients and CI-result visibility work. For an execution claim:
+  admissible supported provider used;
+  exact-command/suite/OS coverage and success/failure equivalence proved;
+  credentials/access unchanged in scope; no paid activation; GitHub required
+  statuses and merge authority still work; GitHub-only recovery live-proved.
+  If any condition fails, “whole CI changed over” stays false.
+- [ ] Cross-host/client task recovery succeeds from sanitized GitHub context;
+  private capture stays off, billing dropped, no support dependency.
+- [ ] Plan/issue/report/operating record match actual delivery; same issue
+  retains `- [ ] live proof` until fleet AND CI outcome is proved. Historical
+  full-feature memory/departure failures remain separately disclosed.
+- [ ] Original discovery/stop honored; no implied extension or adoption beyond
+  stop. Record incomplete/partial disposition if scope cannot be achieved.
+
+Risks: unsupported client/OS combinations (especially Windows-oriented apps on
+edge-dev3), differing client startup loading, public-preview CI lacking parity,
+access restrictions, unintended private capture and time remaining. Technical
+investigation resolves these; unsupported platform or unavailable entitled CI
+is a named limit on #2022, not a fabricated pass or a reason to wait for support.
+
+Rollback: preserve per-host preinstall hashes and backups, previous installed
+release/receipt, hooks, MCP config and machine instruction tails. Restore via
+the documented protected candidate route and existing writers, only task-owned
+changes, then re-run each original client and a GitHub-only task. Preserve public
+mirror/shared App and all recovery evidence. No global logout or unsupported
+erasure. If rollback cannot preserve original capability, stop and report the
+exact host/app blocker on #2022 before reducing function.
+
+### Final fleet-plan self-audit — October 30, 2026
+
+1. **Can a new session execute without planning chat? Yes for the specified
+   work and honest blocked dispositions:** §§1–4 state the business outcome
+   and boundary; §§5–6 name source/evidence and unsupported assumptions;
+   §9 gives ordered targets/dependencies/gates and all 16 cells; §§10–13 name
+   tests, access routes, acceptance and rollback. Actual vendor/platform
+   feasibility is explicitly an R1/R3 investigation, never guessed.
+2. **Does it preserve background, nuance and rejected paths? Yes:** §§3,5–8
+   retain the scope overstatement, completed narrow proof, failed memory/privacy
+   results, CI authority versus execution, unsupported deletion, stale UI and
+   unverified client platforms. None is silently converted into success.
+3. **Can the implementer steer when a step is wrong? Yes:** the plain-English
+   ultimate goal and §1 govern; §§4,8,11,13 preserve hard limits and require
+   unmet scope to stay visible rather than substituting weaker behavior.
+
+Checklist passed: all 13 sections, goal/override, portable context, concrete
+targets/gates, named adversarial cases, locked/open decisions, exclusions,
+tests, access without secret values, source/install/live acceptance, and
+reciprocal handoff links. Initial audit found the CI execution/visibility
+distinction and unsupported-client disposition needed explicit gates; those
+are now in §§1,6,9,13. The 16-cell live matrix remains open; the self-audit is
+a plan-quality pass, not an implementation or vendor-capability pass.
+
+---
+
+## Historical narrower trial STATUS and evidence — not fleet completion
+
+The earlier sections below retain their dated findings and original trial
+protocol. The fleet/CI specification and STATUS above govern the new rollout
+scope; historical “no implementation remains” applies only to the previously
+proved public companion.
 
 October 30 implementation continuation: repository instructions now route public
 ai-devops tasks through the bounded
