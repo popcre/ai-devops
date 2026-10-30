@@ -278,6 +278,28 @@ def call_with_retry(call, system: str, user: str, retries: int = RETRIES, sleep=
     raise last if isinstance(last, ScaleDownError) else ScaleDownError(str(last))
 
 
+NO_SECTION_REASKS = 2
+
+
+def fallback_section(reply) -> list[dict]:
+    """Keep a cleaned reply whose header never parsed as one `other` section.
+    The subject comes from a free-text '### Word: ...' header when present,
+    otherwise from the reply's first words."""
+    text = (unwrap_reply(reply) or "").strip()
+    if not text:
+        return []
+    lines = text.splitlines()
+    subject = ""
+    if lines[0].startswith("#"):
+        m = re.match(r"^#{1,4}[ \t]*(?:[A-Za-z]+:[ \t]*)?(.*)$", lines[0])
+        subject, lines = m.group(1).split("|")[0].strip(), lines[1:]
+    body = "\n".join(lines).strip()
+    if not subject:
+        subject = " ".join(body.split()[:8])
+    return [{"raw_slugs": ["other"], "subject": " ".join(subject.split()[:8]),
+             "repo_hint": None, "text": body, "no_header": True}]
+
+
 def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=time.sleep) -> LabelResult:
     """Label one chunk. Raises ScaleDownError when every retry failed or the
     reply holds no section header."""
@@ -285,11 +307,15 @@ def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=tim
     reply = call_with_retry(call, prompt, text, sleep=sleep)
     res.calls += 1
     sections = parse_reply(reply)
-    if not sections:
-        # ScaleDown's header format drifts between calls: ask once more
+    for _ in range(NO_SECTION_REASKS):
+        if sections:
+            break
+        # ScaleDown's header format drifts between calls: ask again
         reply = call_with_retry(call, prompt, text, sleep=sleep)
         res.calls += 1
         sections = parse_reply(reply)
+    if not sections:
+        sections = fallback_section(reply)
     if not sections:
         raise ScaleDownError("reply had no TOPIC sections")
     resolved = [(s, *resolve_slugs(s["raw_slugs"], aliases)) for s in sections]
@@ -313,6 +339,8 @@ def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=tim
         if not slugs:
             slugs = ["other"]
             flags.append("forced-other")
+        if s.get("no_header"):
+            flags.append("no-header")
         slugs, refined = refine_slugs(slugs, s["subject"], s["text"])
         if refined:
             flags.append("refined")
