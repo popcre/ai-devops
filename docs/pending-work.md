@@ -3,8 +3,9 @@
 Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 phase 4). Read the linked plan STATUS first.
 
 Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-reversible-trial.md)
-STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); planning only,
-execution not started. Includes continuous memory, Trails, sessions/search and optional CI.
+STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); public mirror
+access and manual Trail creation/readback are verified. Private capture remains off;
+hosted Agents and billing are excluded.
 
 Ruleset trim and enforcement: read the [ruleset plan](../plan_ruleset-trim-and-enforce.md) STATUS first ([#1881](https://github.com/popcre/ai-devops/issues/1881)); evidence is private and stays out of Git.
 
