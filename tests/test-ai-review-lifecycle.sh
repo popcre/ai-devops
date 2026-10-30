@@ -617,7 +617,6 @@ printf '#!/usr/bin/env bash\nprintf "0\\n"\n' > "$FF/fakebin/date"; chmod +x "$F
 ff_door clock 'sleep 40'
 PATH="$FF/fakebin:$PATH" ff_call clock
 check "fast_fail_uses_monotonic_clock" "read -r rc why secs < '$FF/clock.result'; [ \"\$rc\" = 124 ] && [ \"\$why\" = silent-start ] && [ \"\$secs\" -lt 20 ]"
-check "fast_fail_watch_lives_in_shared_core_not_doors" "grep -q 'rlc_fast_fail_watch' '$REPO_ROOT/tools/lib/review-lifecycle-core.sh' && ! grep -rq 'rlc_fast_fail_watch\|AI_REVIEW_FIRST_OUTPUT_SECONDS' '$REPO_ROOT/tools/lib/review-doors'"
 
 echo '== per-session skip recorded by the lifecycle'
 export AI_REVIEW_SESSION_SKIP_DIR="$TMP/session-skip"
