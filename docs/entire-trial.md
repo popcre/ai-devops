@@ -1,5 +1,13 @@
 # Entire trial operating record — #2022
 
+Closeout continuation: read the
+[new handoff](../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
+and [final independent recovery results](../tests/verification/entire-trial/report.md#final-independent-recovery-and-closeout)
+first. Cost/billing work was dropped by Albert. Scoped support follow-up was
+submitted at 7:19 PM EDT October 29; no reply/deletion proof established.
+Original discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026,
+5:58 AM EST remain unchanged. Do not restore unrelated Codex settings drift.
+
 Latest result: [independent free tests](#independent-free-feature-tests) finished
 with negative memory/private-capture outcomes and limited manual Trails/export
 passes. See that section before the historical continuation receipts below.
