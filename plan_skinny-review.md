@@ -15,7 +15,7 @@
 | C shared-db merge gate off | — | ✅ done | popcre/shared-db PR #5055 merged (06220e0); proof PR shared-db#5057 merged with no verdict |
 | D Instructions, globals and skills rewritten | #2072 | ✅ done (2026-10-30) | PR #2085 (9170814b), ruling #2104 (5bf5ec01); 5-host proof https://github.com/popcre/ai-devops/issues/2072#issuecomment-6513481440 |
 | E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
-| F Delete old reviewer code and data | #2074 | 🟡 in progress | PR #2112 (d55ba665) merged; PR #2113 open |
+| F Delete old reviewer code and data | #2074 | ✅ done | #2112 d55ba665, #2113 e9239b09, #2131 dd691629, #2139 1f4fb596, shared-db#5118 92133262, #5121 562ad02b; proof issues/2074#issuecomment-6520525203 |
 | G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
 
 **A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
