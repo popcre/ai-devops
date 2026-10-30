@@ -125,6 +125,23 @@ class Incremental(Base):
         self.assertEqual(self.count("SELECT count(DISTINCT lineage_id) FROM sessions"), 1)
         self.assertEqual(self.count("SELECT count(*) FROM seen_turns"), 4)
 
+    def test_fork_lineage_id_is_earliest_by_first_ts(self):
+        # newest-first processing sees the later fork first; the lineage id
+        # must still end up as the earliest file's session_id
+        opening = [line("user", f"shared opening turn {i} text", sid="early", ts="2026-10-01T00:00:0{i}Z") for i in range(3)]
+        later = [line("user", f"shared opening turn {i} text", sid="late", ts="2026-10-02T00:00:0{i}Z") for i in range(3)]
+        self.session("m1/early.jsonl", opening, mtime=OLD)
+        self.session("m1/late.jsonl", later + [line("user", "fork only follow up turn", sid="late", ts="2026-10-02T00:01:00Z")], mtime=OLD + 50)
+        sd = FakeSD()
+        self.run_build(sd)
+        self.assertEqual(self.count("SELECT group_concat(DISTINCT lineage_id) FROM sessions"), "early")
+        self.assertEqual(self.count("SELECT count(*) FROM seen_turns WHERE lineage_id<>'early'"), 0)
+        self.assertEqual(self.count("SELECT count(*) FROM chunks WHERE lineage_id<>'early' OR first_turn_key NOT LIKE 'early:%'"), 0)
+        self.assertEqual(self.count("SELECT count(*) FROM seen_turns"), 4)
+        calls = sd.calls
+        self.run_build(sd)
+        self.assertEqual(sd.calls, calls)
+
     def test_failed_chunk_recorded_and_resumed(self):
         self.session("m1/a.jsonl", [line("user", "first request about the pipeline")])
         self.run_build(FakeSD(fail=True))

@@ -182,11 +182,31 @@ class Runner:
         if own and own[1] == key and own[0]:
             return own[0], key
         row = self.conn.execute(
-            "SELECT lineage_id FROM sessions WHERE lineage_key=? AND path<>? ORDER BY first_ts LIMIT 1",
+            "SELECT lineage_id, first_ts FROM sessions WHERE lineage_key=? AND path<>?"
+            " ORDER BY first_ts IS NULL, first_ts LIMIT 1",
             (key, path)).fetchone()
+        mine = parsed["meta"]["session_id"]
         if row and parsed["turns"]:
+            first = parsed["meta"].get("first_ts")
+            # the lineage id is the session_id of the earliest file by first_ts,
+            # whatever order the files are processed in
+            if first and (row[1] is None or first < row[1]) and row[0] != mine:
+                self.rekey_lineage(row[0], mine)
+                return mine, key
             return row[0], key
-        return parsed["meta"]["session_id"], key
+        return mine, key
+
+    def rekey_lineage(self, old: str, new: str):
+        t = self.t
+        po, pn = f"{old}:", f"{new}:"
+        self.conn.execute("UPDATE sessions SET lineage_id=? WHERE lineage_id=?", (new, old))
+        self.conn.execute(
+            f"UPDATE {t['chunks']} SET lineage_id=?, first_turn_key=?||substr(first_turn_key,?),"
+            " last_turn_key=?||substr(last_turn_key,?), turn_keys_json=replace(turn_keys_json,?,?)"
+            " WHERE lineage_id=?",
+            (new, pn, len(po) + 1, pn, len(po) + 1, '"' + po, '"' + pn, old))
+        self.conn.execute(f"UPDATE {t['seen']} SET lineage_id=? WHERE lineage_id=?", (new, old))
+        self.conn.commit()
 
     def drop_lineage(self, lineage_id: str):
         t = self.t
