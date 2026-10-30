@@ -95,8 +95,25 @@ class Parsing(unittest.TestCase):
         self.assertEqual(res.sections[0]["topic_slugs"], ["other"])
         self.assertIn("no-header", res.sections[0]["flags"])
         self.assertEqual(res.sections[0]["subject"], "Release audit notes")
+        self.assertEqual(res.sections[0]["text"], "The audit passed and the release shipped.")
         prose = segment.label_chunk("t", lambda a, b: "Plain prose summary only.", "p", {}, sleep=lambda s: None)
         self.assertEqual(prose.sections[0]["subject"], "Plain prose summary only.")
+
+    def test_single_line_fallback_preserves_all_content(self):
+        for reply in ("### Topic: Release audit notes and the release shipped Tuesday",
+                      "### Topic: Release audit notes | The release shipped Tuesday"):
+            with self.subTest(reply=reply):
+                res = segment.label_chunk("t", Fake(reply), PROMPT, ALIASES, sleep=NOSLEEP)
+                self.assertEqual(res.sections[0]["subject"],
+                                 " ".join(reply.removeprefix("### Topic: ").split("|")[0].split()[:8]))
+                self.assertEqual(res.sections[0]["text"], reply)
+
+    def test_empty_heading_fallback_fails(self):
+        for reply in ("#", "###", "### TOPIC:"):
+            with self.subTest(reply=reply):
+                self.assertEqual(segment.fallback_section(reply), [])
+                with self.assertRaises(segment.ScaleDownError):
+                    segment.label_chunk("t", Fake(reply), PROMPT, ALIASES, sleep=NOSLEEP)
 
     def test_flattened_header_body_recovered(self):
         secs = segment.parse_reply("### TOPIC: ci | a b c d e f g h then the body text follows")
@@ -111,7 +128,6 @@ class Parsing(unittest.TestCase):
         self.assertEqual(segment.parse_reply(""), [])
         self.assertEqual(segment.parse_reply("not json and no header"), [])
         self.assertEqual(segment.parse_reply(None), [])
-        # empty and JSON-without-header replies are failures after retries
         # empty replies are failures after retries; prose is kept as `other`
         for bad in ("", json.dumps({"summary": ""})):
             with self.assertRaises(segment.ScaleDownError):

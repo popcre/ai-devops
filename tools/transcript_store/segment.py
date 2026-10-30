@@ -8,8 +8,10 @@ Main pieces (the writer, ``build.py``, owns the database side):
 
 - ``make_chunks(lineage_id, records, prompt_version, max_chars)`` cuts
   ``[(turn_key, turn), ...]`` into chunks on turn boundaries.
-- ``label_chunk(text, call, ...)`` -> ``LabelResult``: one ScaleDown call
-  (plus at most one re-ask for invalid slugs), with retries and backoff.
+- ``label_chunk(text, call, ...)`` -> ``LabelResult``: one ScaleDown call,
+  up to ``NO_SECTION_REASKS`` re-asks for missing headers, and at most one
+  re-ask for invalid slugs, each with retries and backoff. Header-less prose
+  is retained as an ``other`` section flagged ``no-header``.
   ``call(system, user) -> str`` is injectable; ``scaledown_call`` is the real
   one. Errors raise ``ScaleDownError`` after the retries are spent.
 - ``parse_reply(content)`` parses ``### TOPIC: slugs | subject | repo=x``
@@ -294,6 +296,10 @@ def fallback_section(reply) -> list[dict]:
         m = re.match(r"^#{1,4}[ \t]*(?:[A-Za-z]+:[ \t]*)?(.*)$", lines[0])
         subject, lines = m.group(1).split("|")[0].strip(), lines[1:]
     body = "\n".join(lines).strip()
+    if not subject and not body:
+        return []
+    if not body:
+        body = text
     if not subject:
         subject = " ".join(body.split()[:8])
     return [{"raw_slugs": ["other"], "subject": " ".join(subject.split()[:8]),
@@ -301,8 +307,9 @@ def fallback_section(reply) -> list[dict]:
 
 
 def label_chunk(text: str, call, prompt: str, aliases: dict[str, str], sleep=time.sleep) -> LabelResult:
-    """Label one chunk. Raises ScaleDownError when every retry failed or the
-    reply holds no section header."""
+    """Label one chunk, retaining header-less prose as ``other``/``no-header``.
+    Raises ScaleDownError when retries fail or no usable content remains.
+    """
     res = LabelResult()
     reply = call_with_retry(call, prompt, text, sleep=sleep)
     res.calls += 1

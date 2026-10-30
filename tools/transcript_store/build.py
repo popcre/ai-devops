@@ -633,6 +633,7 @@ def stats(conn) -> dict:
             "aliased": q("SELECT count(*) FROM segments WHERE label_flags LIKE '%aliased%'")[0][0],
             "reasked": q("SELECT count(*) FROM segments WHERE label_flags LIKE '%reasked%'")[0][0],
             "forced_other": q("SELECT count(*) FROM segments WHERE label_flags LIKE '%forced-other%'")[0][0],
+            "no_header": q("SELECT count(*) FROM segments WHERE label_flags LIKE '%no-header%'")[0][0],
             "other": q("SELECT count(*) FROM segments WHERE topic_slugs='other'")[0][0]},
         "question_labels": dict(q("SELECT question, count(*) FROM question_labels GROUP BY question")),
         "inbox_applied": q("SELECT count(*) FROM inbox_applied")[0][0],
