@@ -209,7 +209,7 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 #### Stage 3 — Auto-generate the work-contract + completion pair
 
 **What to change:**
-- `scripts/agent-work-contract.mjs` + a new small generator (e.g. `scripts/generate-work-contract.mjs`) or a `--generate` mode: from the open claim (issue number, generation, `writes:`/`reads:`, branch, head SHA) emit `.agent/work/<issue>/<generation>/contract.json` and a matching `completion.json` skeleton whose validation the existing `--validate-contract` / `--validate-completion` paths accept. Generation happens either in the claim tool run (author time) or as a trusted-base workflow step at PR open (see OPEN decision in §8).
+- `scripts/agent-work-contract.mjs` + a new small generator (e.g. `scripts/generate-work-contract.mjs`) or a `--generate` mode: from the open claim (issue number, generation, `writes:`/`reads:`, branch, head SHA) emit `.agent/work/<issue>/<generation>/contract.json` and a matching `completion.json` skeleton whose validation the existing `--validate-contract` / `--validate-completion` paths accept. Generation must happen at author time inside the claim tool (`--generate` alongside `--claim`), as decided in §8.
 - Keep `config/agent-work-contract-activation.json` mode `enforced` and keep the validator rejecting hand-written pairs that contradict the claim. Remove the need for a human/AI to author the JSON.
 
 **Behavior when done:** no session hand-writes contract/completion JSON; the pair is always present, always valid, always consistent with the claim. The `Enforced mode requires this pull request to change both …` failure (`pr-guards.yml` around the `agent-work-contract` job) can still fire only when someone bypasses generation.
@@ -221,7 +221,7 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 #### Stage 4 — Deterministic-guard verdict binding (run once per head+base)
 
 **What to change:**
-- Introduce a tiny shared helper (e.g. `scripts/lib/guard-verdict-binding.mjs`): a commit status or artifact keyed by `(guard name, head_sha, base_sha)` recording "guard G passed for this pair at run R".
+- Introduce a tiny shared helper (e.g. `scripts/lib/guard-verdict-binding.mjs`): a commit status keyed by `(guard name, head_sha, base_sha)` recording "guard G passed for this pair at run R".
 - Deterministic guards (pure functions of the checked-out tree + diff): `check-sql.sh`, `check-production-verification-sidecars.mjs`, `check-applied-migration-edit.mjs`, and the static halves of the pr-guards jobs. These: run once in PR CI; the later stages (`guarded-migration-merge.yml`, `merge-queue-gate.yml`) **skip re-running** them when a recorded green verdict exists for the same `(head, base)` and **re-run when base moved** (no verdict for the current base) or when no verdict exists. Fail closed on any unreadable record.
 - Live GitHub-state guards are exempt and always run at every stage (the TOCTOU guards): `check-pr-object-collisions.mjs`, `check-migration-pr-lease.mjs`, `check-required-checks-preflight.mjs`, `check-main-tip-freshness.mjs`, `check-actions-quota.mjs`, `check-live-proof-probe.mjs`, and anything reading ledgers or API state. **`check-live-proof-probe.mjs` is live, not deterministic** (Muse review 2026-10-30, accepted with evidence): despite its "probe file present in tree or main" flavor, it resolves the work issue and parses its `db-work-scope` block through the GitHub transport (`scripts/check-live-proof-probe.mjs` — `runGitHubCommand` import, `scopeField(body, …)`), so its verdict depends on mutable GitHub issue state, not only on the tree. A stale "skipped (proven at run R)" here would let a probe deleted or an issue scope edited after CI green merge unchallenged. Any guard that reads GitHub state goes in this list; the implementation must justify each classification against the script body, not its name.
 
@@ -246,11 +246,12 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 
 **What to change:**
 - `merge-queue-gate.yml` (`:191-205`, `Require the latest preceding migration merge to have completed preview rehearsal`): stop failing/waiting the merge group on this. Merge of SQL text into git writes no database.
+- Keep a non-blocking advisory status ("merged behind unrehearsed predecessor A") for queue visibility. Its ordering check is read-only, never acquires the preview lane, and never blocks the merge.
 - Move the ordering precondition to where the data lives: the preview lane (`shared-supabase-migrations.yml` `preview` job) and the automatic production qualification job must refuse to start a rehearsal/promotion while the immediately preceding merged migration version lacks a completed preview rehearsal. The existing serialized preview lane and `preview-ledger-predecessor-not-on-main` graph logic already encode the same ordering; this stage makes the *merge* path not re-implement it.
 
 **Behavior when done:** migration B may merge while migration A's rehearsal is still running; B's own rehearsal and B's promotion still wait behind A's. The rehearsal sequence on the shared preview ledger stays contiguous.
 
-**Verification gate:** `scripts/merge-queue-contract.test.mjs` gains `queue_group_merges_without_predecessor_rehearsal`; the preview side gains `preview_rehearsal_refuses_unrehearsed_predecessor`; **and the automatic production qualification side gains `production_qualification_refuses_unrehearsed_predecessor`** (Muse review 2026-10-30 — the plan text requires both apply-side refusals, so both must be tested; the production side is the one that guards data). Live proof on the tracker: two sequential migration PRs, second merges before first's rehearsal completes, second's rehearsal starts only after the first's completes.
+**Verification gate:** `scripts/merge-queue-contract.test.mjs` gains `queue_group_merges_without_predecessor_rehearsal` and `predecessor_advisory_is_nonblocking_and_never_acquires_preview_lane` (assert advisory status present, non-blocking, and no preview-lane acquisition); the preview side gains `preview_rehearsal_refuses_unrehearsed_predecessor`; **and the automatic production qualification side gains `production_qualification_refuses_unrehearsed_predecessor`** (Muse review 2026-10-30 — the plan text requires both apply-side refusals, so both must be tested; the production side is the one that guards data). Live proof on the tracker: two sequential migration PRs, second merges before first's rehearsal completes, second's rehearsal starts only after the first's completes.
 
 **Liveness remediation (named in the stage, not left implicit):** when predecessor A's rehearsal **fails** after B has merged, B is blocked at the preview/production precondition until A is fixed and rehearsed or its versions are formally retired (existing retirement paths — `historical-migration-restorations.mjs` / migration retirement tombstones). The stage PR must name the exact remediation command sequence in the workflow comment it adds, so a blocked B is not a dead end.
 
@@ -301,7 +302,7 @@ All stages are **repository maintenance** in `popcre/shared-db` (workflows/scrip
 | GitHub state (collisions) | Another PR claims the same object between green and merge | always re-run under lock (kept in stage 4/5 live list) |
 | GitHub state (lease) | Claim released/expired between green and merge | always re-run under lock (kept) |
 | Base branch | Main moves after CI green | `check-main-tip-freshness.mjs --contains` under lock (kept) |
-| Predecessor migration | Merged but un-rehearsed predecessor | stage 6: preview/production refusal test `preview_rehearsal_refuses_unrehearsed_predecessor` |
+| Predecessor migration | Merged but un-rehearsed predecessor | stage 6: `preview_rehearsal_refuses_unrehearsed_predecessor`, `production_qualification_refuses_unrehearsed_predecessor` |
 | Replay tree hash | Test file changed but hash set forgot `supabase/tests/` | stage 8: `test_file_change_reruns` |
 | Documents-only status | Concurrent publish for the same PR | per-PR concurrency group (existing) + stage 7 test |
 | Production dispatch | Any stage-1–8 diff on a production-path file | stage 9 audit gate |
@@ -314,9 +315,9 @@ Named tests to add (each in the stage that introduces it):
 - Stage 3: `generated_pair_validates`, `generated_pair_mismatching_claim_is_rejected` (`scripts/agent-work-contract.test.mjs`).
 - Stage 4: `verdict_for_same_pair_is_reused`, `verdict_for_moved_base_is_not_reused`, `missing_verdict_fails_closed`, `tampered_verdict_fails_closed` (new `scripts/lib/guard-verdict-binding.test.mjs`).
 - Stage 5: `each_coordination_guard_runs_once_per_hold` (`scripts/guarded-merge-preparation-split.test.mjs`).
-- Stage 6: `queue_group_merges_without_predecessor_rehearsal` (`scripts/merge-queue-contract.test.mjs`), `preview_rehearsal_refuses_unrehearsed_predecessor` (preview lane tests).
+- Stage 6: `queue_group_merges_without_predecessor_rehearsal`, `predecessor_advisory_is_nonblocking_and_never_acquires_preview_lane` (`scripts/merge-queue-contract.test.mjs`), `preview_rehearsal_refuses_unrehearsed_predecessor` (preview lane tests), `production_qualification_refuses_unrehearsed_predecessor` (automatic production qualification tests).
 - Stage 7: `claimed_pr_authorizes_without_mutex` (`scripts/check-documents-only-merge-authorization.test.mjs`).
-- Stage 8: `tree_hash_unchanged_skips`, `test_file_change_reruns`, `migration_change_reruns` (new small test next to the classifier).
+- Stage 8: `tree_hash_unchanged_skips`, `test_file_change_reruns`, `migration_change_reruns`, `config_toml_change_reruns`, `cli_pin_change_reruns`, `missing_verdict_reruns`, `pr_head_cannot_write_verdict` (tests next to `scripts/lib/guard-verdict-binding.mjs`).
 
 Existing suites that must stay green on every stage PR: `bash scripts/check-sql.sh`; `node --test scripts/check-migration-pr-lease.test.mjs scripts/agent-work-contract.test.mjs scripts/merge-queue-contract.test.mjs scripts/guarded-merge-preparation-split.test.mjs`; the `tools-offline-tests.yml` battery; the full `database-contract-tests.yml` replay + `supabase/tests`.
 
@@ -356,7 +357,7 @@ Existing suites that must stay green on every stage PR: `bash scripts/check-sql.
 - [ ] `plan_shared-db-gate-trim.md` STATUS table updated by whoever executes each stage (mandatory plan-file gate — a plan goes stale the moment a stage lands).
 - [ ] Nothing on the production path changed semantically (stage 9 verdict attached).
 
-Tracker: **[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150)** — it carries this plan as its body and the per-stage checklist. Plan source of truth: `plan_shared-db-gate-trim.md` in this repo (merged `cc16ccbe`).
+Tracker: **[popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150)** — it carries this plan as its body and the per-stage checklist. Plan source of truth: `plan_shared-db-gate-trim.md` in this repo.
 
 **Target total time (the number to judge success by):** median open→merge for a routine structural migration PR: **147 min today → ≤25 min**. Component budgets: claim+paperwork ≤2 min (zero retries), CI ≈8 min (replay kept), Guarded Merge ≤6 min under lock, merge queue ≤5 min.
 
