@@ -170,6 +170,17 @@ Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
 [#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
 
+During the authorized public-companion trial, follow
+[`docs/entire-trial.md` § Session workflow](docs/entire-trial.md#session-workflow)
+for public ai-devops work: keep the owning GitHub issue and normal PR route,
+inspect the corresponding mirrored Trail, compare exact source/check links,
+and retain sanitized continuation context on GitHub. Entire is advisory and
+must not delay GitHub delivery. Never upload private context or enable capture,
+Agents, billing, integrations or required-check changes. This instruction
+expires November 12, 2026, 5:58 AM EST; check the current New York time before
+trial activity. After expiry, record the trial disposition on #2022 and continue
+GitHub-only work without altering shared integrations.
+
 Low-frequency and specialized tasks live in [`docs/task-router.md`](docs/task-router.md); load only the matching row.
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block

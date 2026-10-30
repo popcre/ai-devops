@@ -2,6 +2,15 @@
 
 ## STATUS — read first
 
+October 30 implementation continuation: repository instructions now route public
+ai-devops tasks through the bounded
+[session workflow](docs/entire-trial.md#session-workflow), preserving GitHub-only
+continuity and advisory Entire readback. The instruction expires at the original
+stop; no runtime, capture, Agent, billing or integration change is introduced.
+This makes the public companion part of session operation rather than expanding
+the rejected full-feature experiment. Actual delivery/live evidence is recorded
+on #2022; writing this instruction alone is not live proof.
+
 October 30 deadline reconciliation: the original clock remains anchored to
 October 29, 2026, 5:58 AM EDT, the first recorded local containment pass.
 Counting ten subsequent weekdays gives November 12, 2026, 5:58 AM EST;
