@@ -17,7 +17,7 @@
 | E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
 | F Delete old reviewer code and data | #2074 | ✅ done | #2112 d55ba665, #2113 e9239b09, #2131 dd691629, #2139 1f4fb596, shared-db#5118 92133262, #5121 562ad02b; proof issues/2074#issuecomment-6520525203 |
 | G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
-| H Fixer hygiene and delivery speed | #2171 | 🟡 implementation in progress; live proof open | [Owning acceptance](https://github.com/popcre/ai-devops/issues/2171); [shared-db integration](https://github.com/popcre/shared-db/issues/5175) |
+| H Fixer hygiene and delivery speed | #2171 | ✅ delivered and live-proved | [Owning acceptance and cleanup](https://github.com/popcre/ai-devops/issues/2171); final implementation [#2204](https://github.com/popcre/ai-devops/pull/2204) landed `23bf2a8aa9177edaf84f47e04b1b760334cd7b56`; [shared-db integration and live receipt](https://github.com/popcre/shared-db/issues/5175#issuecomment-6534013046). |
 
 **A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
 
@@ -46,6 +46,85 @@ stale retirement and retained findings, duplicate and overlap prevention,
 invalid-finding hold proof and preserved holds for unresolved findings. Record
 actual before/after calls, PRs, collisions, review rounds and elapsed time for
 comparable live cases. Offline fixtures alone do not establish a speedup.
+
+### Stage H implementation and qualification
+
+The central implementation landed in [#2191](https://github.com/popcre/ai-devops/pull/2191)
+(`d1bc598ab860609455fca487135ce3e488016228`). Real qualification exposed and
+repaired invalid YAML registration ([#2200](https://github.com/popcre/ai-devops/pull/2200),
+`e0f116304a6ec9b03594cef85c1653309b6902d9`), preparation ignoring caller runner
+labels ([#2201](https://github.com/popcre/ai-devops/pull/2201),
+`d068e908f37139bdcf406bd71b939a2566fda560`), optional setup preceding source
+preflight ([#2202](https://github.com/popcre/ai-devops/pull/2202),
+`b4b6e360460d5131a269872e8c080fefb7903ed9`), and per-PR file reads stalling
+publication ([#2204](https://github.com/popcre/ai-devops/pull/2204), final landing
+`23bf2a8aa9177edaf84f47e04b1b760334cd7b56`). File inventories now use bounded
+batches of at most 50 candidate PRs, preserve the same ownership filter, fall
+back to complete pagination for truncated file lists, and refuse malformed or
+incomplete evidence. One actual read-only batch returned both controlled PR
+inventories correctly without a fallback.
+
+Exact final source `d378c997bd3b348ed48cf810d0c3e5eb7257b246` executed 53 lifecycle
+tests and 14 shell checks on both [Windows](https://github.com/popcre/ai-devops/actions/runs/41132188196/job/124326265288)
+and [Linux](https://github.com/popcre/ai-devops/actions/runs/41132188196/job/124326265012),
+without test/setup skips or failures. [Oracle](https://github.com/u2giants/theoracle/actions/runs/41128889748)
+and [PopDAM](https://github.com/u2giants/popdam3/actions/runs/41128888914) used
+their existing caller runners successfully; their cleanup-only controls ran
+zero models. Their four temporary branches were removed only after exact SHA
+checks and remote-absence verification.
+
+The actual stale-source baseline invoked one model and opened unnecessary
+[#2182](https://github.com/popcre/ai-devops/pull/2182), launching a successful
+[29-job verification run](https://github.com/popcre/ai-devops/actions/runs/41113207755)
+lasting 19 minutes 43 seconds. The final matched stale control
+[#2203](https://github.com/popcre/ai-devops/issues/2203) invoked zero models and
+created zero fix PRs. Its fix job took 8 minutes 13 seconds, versus 28 minutes
+56 seconds for the first, poorly ordered candidate. The original baseline
+fixer workflow took 27 seconds; these observations do **not** establish faster
+overall elapsed delivery under comparable load. They establish eliminated
+model/PR/CI work; no measured database-lane or review-round savings are claimed.
+
+The first genuine-fix candidate timed out before publication after 45 minutes
+20 seconds. Its real model patch was retained as recovery evidence, not counted
+as successful delivery. After batching, [run 41135896694](https://github.com/popcre/ai-devops/actions/runs/41135896694)
+published [#2206](https://github.com/popcre/ai-devops/pull/2206), commit
+`f296735ecc7457d8e33a48a6cd21cd920dd02f4f`, in a 6-minute-12-second fix job.
+Both original focused tests passed on that exact fetched commit, and normal
+[verification started](https://github.com/popcre/ai-devops/actions/runs/41136587830).
+That older fixture's general verification later failed; it is not credited as
+green. The actual failure was an installer-parity assertion about the optional
+GitHub-login diagnostic, outside the changed fixture helper. The parent and
+fixed commits have identical installer-test inputs; the unmodified targeted
+parity test passed locally on both exact pinned versions. The CI run did not
+print the underlying probe outcome, so its environmental cause remains
+unproven. No CI rerun or extra model was used to manufacture a green result.
+
+The second current attempt deferred specifically to the existing #2206 before
+the controlled source advance, with no second model or PR. Advancing the
+source to `75bce666f49b1ee694e3d6aeb093c552a7e1c5b7` then caused
+[automatic retirement](https://github.com/popcre/ai-devops/actions/runs/41137759097):
+#2206 closed, its recovery branch stayed at the exact published commit, and
+the unresolved finding retained its named owner. Real overlap, unchanged
+retry and deleted-source controls likewise produced no competing PR or main
+fallback. A broad qualification sweep was explicitly canceled after capacity
+starvation; its native pending-job replacement/serialization evidence is
+retained, but it is not described as a completed successful sweep.
+
+The [shared-db live receipt](https://github.com/popcre/shared-db/issues/5175#issuecomment-6534013046)
+binds an actual recent not-planned finding to its trusted bot marker and exact
+successful target job. The unchanged current hold verifier returned clear for
+that finding and held the unresolved control. No database writes, foreign
+claim releases, or permanent-version mutations occurred. Controlled source
+PRs never merge, and cleanup preserves the invalid finding's original reason,
+closure time, labels and bot evidence.
+
+The eight public QA findings and five never-merge source PRs were closed after
+proof; the two generated fix PRs remained closed and unmerged. Recovery refs
+were retained. Only the specifically backed-up baseline source and four
+SHA-checked caller callback branches were removed. The failed public invalid
+qualification remains not-planned without an invalid exemption claim; the
+separate successful private invalid control retains its original evidence.
+No foreign issue, PR or claim was changed by fixture cleanup.
 
 ## Part 1 — Why
 
