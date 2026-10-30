@@ -128,7 +128,7 @@ class ReviewTests(unittest.TestCase):
         if os.name == "nt":
             # Windows cannot exec a shebang script; run the same fake through a .cmd shim.
             shim = fake + ".cmd"
-            with open(shim, "w") as fh:
+            with open(shim, "w", newline="") as fh:
                 fh.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
             fake = shim
         secrets = os.path.join(t, "secrets")
