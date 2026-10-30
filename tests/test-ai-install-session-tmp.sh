@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Offline suite for bin/ai-install-session-tmp (install, check, idempotence, remove).
 set -u
+# The installer is Linux-only and SKIPs elsewhere (ai-install-session-tmp:8); so does this suite.
+[ "$(uname -s)" = Linux ] || { echo "SKIP: session-tmp installer is Linux-only"; exit 0; }
 PASS=0; FAIL=0
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib-test-harness.sh"

@@ -4,6 +4,7 @@ set -u
 PASS=0; FAIL=0
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib-test-harness.sh"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) _win=1;; *) _win=0;; esac  # NTFS: no POSIX modes or real symlinks
 sweep="$here/../bin/ai-session-tmp-sweep"
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
@@ -35,7 +36,9 @@ check "dead but young -> kept" '[ -d "$AI_SESSION_TMP_BASE/t-dead-new" ]'
 check "reused pid (start ticks differ) -> deleted" '[ ! -e "$AI_SESSION_TMP_BASE/t-reused" ]'
 check "missing owner.json -> kept and reported" '[ -d "$AI_SESSION_TMP_BASE/t-noowner" ] && grep -q "t-noowner (no owner.json)" <<<"$out"'
 check "malformed owner.json -> kept" '[ -d "$AI_SESSION_TMP_BASE/t-bad" ]'
-check "symlink entry -> kept, target intact" '[ -L "$AI_SESSION_TMP_BASE/t-link" ] && [ -d "$work/logs" ]'
+if [ "$_win" = 1 ]; then skip "symlink entry -> kept, target intact (POSIX-only)"; else
+  check "symlink entry -> kept, target intact" '[ -L "$AI_SESSION_TMP_BASE/t-link" ] && [ -d "$work/logs" ]'
+fi
 check "log written" '[ -s "$work/logs/session-tmp-sweep.log" ]'
 
 for i in $(seq 1 5); do mk "t-cap-$i" "$dead" "$old"; done
@@ -66,7 +69,9 @@ printf '{"pid":%s,"pid_start_ticks":"","engine":"t","session_id":"x","started_ut
 ln -s "$work/forged" "$AI_SESSION_TMP_BASE/claude-$sid5"
 touch -d "@$old" "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5"
 bash "$sweep" >/dev/null
-check "symlinked Claude root is not accepted as an owner record" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5" ]'
+if [ "$_win" = 1 ]; then skip "symlinked Claude root is not accepted as an owner record (POSIX-only)"; else
+  check "symlinked Claude root is not accepted as an owner record" '[ -d "$AI_SESSION_TMP_CLAUDE_DIR/proj/$sid5" ]'
+fi
 
 kill "$live" 2>/dev/null
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
