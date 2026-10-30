@@ -1,6 +1,6 @@
 # Entire trial operating record — #2022
 
-## Fleet and CI rollout — planned, not delivered
+## Fleet and CI rollout — implementation underway, acceptance open
 
 Albert's October 30 clarification adds Codex, Claude, MiMo and ZCode across
 edge-dev, edge-dev3, al8960ofc and 916, plus the whole CI process, to the
@@ -11,8 +11,11 @@ All 16 client-machine live cells and CI execution integration remain open.
 The mirror and repository workflow below are delivered narrower capabilities;
 they do not establish installation, fresh-session adoption or CI changeover.
 GitHub remains authoritative; private capture off, billing dropped, support
-nonblocking and original deadlines unchanged. This planning update installs
-nothing and changes no CI configuration. Full rollout cannot be called done
+nonblocking and original deadlines unchanged. The October 30 implementation
+continuation has captured a protected four-host baseline and inventoried CI;
+the [execution report](../tests/verification/entire-trial/report.md#fleet-and-ci-implementation-baseline)
+separates observations from unproved installation and actual app behavior.
+Full rollout cannot be called done
 if requested CI execution or any app-machine cell is unmet.
 
 ## Current scope — public companion alongside GitHub
