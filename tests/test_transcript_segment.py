@@ -85,6 +85,19 @@ class Parsing(unittest.TestCase):
         self.assertEqual(r(["ci", "ai-mistakes"], "Flaky runner", ""), (["ci", "ai-mistakes"], False))
         self.assertEqual(r(["other"], "Kimi", ""), (["other"], False))
 
+    def test_no_header_after_reasks_kept_as_other(self):
+        calls = []
+        def sd(a, b):
+            calls.append(1)
+            return "### Topic: Release audit notes\nThe audit passed and the release shipped."
+        res = segment.label_chunk("t", sd, "p", {}, sleep=lambda s: None)
+        self.assertEqual(len(calls), 1 + segment.NO_SECTION_REASKS)
+        self.assertEqual(res.sections[0]["topic_slugs"], ["other"])
+        self.assertIn("no-header", res.sections[0]["flags"])
+        self.assertEqual(res.sections[0]["subject"], "Release audit notes")
+        prose = segment.label_chunk("t", lambda a, b: "Plain prose summary only.", "p", {}, sleep=lambda s: None)
+        self.assertEqual(prose.sections[0]["subject"], "Plain prose summary only.")
+
     def test_flattened_header_body_recovered(self):
         secs = segment.parse_reply("### TOPIC: ci | a b c d e f g h then the body text follows")
         self.assertEqual(secs[0]["subject"], "a b c d e f g h")
@@ -99,7 +112,8 @@ class Parsing(unittest.TestCase):
         self.assertEqual(segment.parse_reply("not json and no header"), [])
         self.assertEqual(segment.parse_reply(None), [])
         # empty and JSON-without-header replies are failures after retries
-        for bad in ("", json.dumps({"summary": ""}), "plain prose with no headers"):
+        # empty replies are failures after retries; prose is kept as `other`
+        for bad in ("", json.dumps({"summary": ""})):
             with self.assertRaises(segment.ScaleDownError):
                 segment.label_chunk("t" * 50, Fake(bad), PROMPT, ALIASES, sleep=NOSLEEP)
 
