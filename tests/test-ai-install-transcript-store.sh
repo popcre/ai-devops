@@ -27,7 +27,7 @@ check "install output never shows the key" '! printf "%s" "$out" | grep -q fake-
 check "key stored owner-only from vibe_coding" '[ "$(cat "$key")" = fake-key ] && [ "$(stat -c %a "$key")" = 600 ] && grep -q "op://vibe_coding/scaledown.ai API key for testing" "$work/op.log"'
 check "writer copied outside the checkout" '[ -x "$idir/ai-transcript-store-run" ] && [ -f "$idir/transcript_store/build.py" ]'
 t="$units/ai-transcript-store.timer"
-check "timer runs daily at 05:30 and is persistent" 'grep -qx "OnCalendar=\*-\*-\* 05:30:00" "$t" && grep -qx "Persistent=true" "$t"'
+check "timer runs daily at 08:00 and is persistent" 'grep -qx "OnCalendar=\*-\*-\* 08:00:00" "$t" && grep -qx "Persistent=true" "$t"'
 check "service runs the installed copy" 'grep -q "%h/.config/ai-devops/transcript-store/ai-transcript-store-run" "$units/ai-transcript-store.service"'
 check "timer enabled through systemctl --user" 'grep -q "enable --now ai-transcript-store.timer" "$work/systemctl.log"'
 : > "$work/op.log"; bash "$inst" >/dev/null

@@ -5,7 +5,7 @@
 #     ~/.config/ai-devops so the unit never points into a movable checkout;
 #   * stores the ScaleDown key once in ~/.config/ai-devops/secrets (mode 600),
 #     read from 1Password vibe_coding with the protected service-account token;
-#   * writes ai-transcript-store.service + .timer (daily 05:30 local, after the
+#   * writes ai-transcript-store.service + .timer (daily 08:00 local, after the
 #     upload timers) as systemd USER units.
 # Linux only; elsewhere it reports SKIP and exits 0.
 #
@@ -110,7 +110,7 @@ cat > "$unit_dir/ai-transcript-store.timer" <<'EOF'
 Description=Run the transcript store build daily after the upload timers
 
 [Timer]
-OnCalendar=*-*-* 05:30:00
+OnCalendar=*-*-* 08:00:00
 Persistent=true
 
 [Install]
