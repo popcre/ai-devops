@@ -1,5 +1,150 @@
 # Reversible Entire trial alongside GitHub
 
+## October 31 controlling amendment — Entire testing and merge trial
+
+This amendment governs conflicting older instructions below, including the
+October 30 shadow-only R3/R7 language. Albert authorized in chat:
+
+> let's test Entire controlling testing and merging, with GitHub retaining the official code.
+
+The goal is to test removal of GitHub PR/check/merge waiting, using the existing
+edge-runn-envy, edge-runn-xps and edge-alien machines. Displaying GitHub results
+in Entire does not meet that goal. GitHub retains official recoverable code;
+Entire is authorized to control testing and merging **in the bounded trial**.
+Do not re-ask this business decision. This is not a permanent production-main
+cutover or permission to bypass existing protected-main rules. The obsolete
+blanket ban on testing a replacement controller does not block this trial.
+Necessary trial-scoped setup is evaluated by the stages below, rather than
+silently ruled out by the historical browser-only workflow.
+
+Private capture stays OFF; no private imports, paid Agents, purchases, billing
+investigation, organization-wide grants or unrelated changes. Existing runners
+and GitHub fallback remain working. Discovery ends November 2, 2026, 5:00 PM
+EST; stop remains November 12, 2026, 5:58 AM EST. No extension is authorized.
+
+Current evidence and full continuity:
+[investigation receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550148920)
+and [new execution handoff](HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
+No native CI execution, replacement merge, latency benefit or 16-cell app
+acceptance has passed. The original R1–R8 work remains, with updates below.
+
+### Trial sequence, dependencies and completion gates
+
+**T1 Reconcile and freeze.** The new coordinator claims #2022, reads this whole
+plan and the handoff, refreshes current main in its own worktree and declares
+the honest task class. Reconcile the partially completed installations before
+further writes to each affected host. Preserve old receipts, settings, hooks,
+client access and recoverable code. Inventory current GitHub rules, all CI
+triggers/suites/OS lanes and runner scheduling; do not assume October 30 state
+is current. Freeze candidate/base commits, exact suite commands and timing
+boundaries on #2022 before collecting new pairs. Gate: a re-derivable baseline
+and recovery manifest exists; blocked prerequisites have exact owners.
+
+**T2 Qualify existing-runner control.** Start with Buildkite's provider-specific
+[Entire self-hosted documentation](https://buildkite.com/docs/pipelines/source-control/entire#check-out-repositories-on-self-hosted-agents)
+and [Windows installation route](https://buildkite.com/docs/agent/self-hosted/install/windows).
+It documents a possible route, not an installed or entitled account. Entire's
+overview still describes hosted Buildkite agents: retain this documentation
+discrepancy until actual Windows jobs settle compatibility. Use existing
+authenticated accounts/approved access routes; no new financial commitment or
+broad credential import. Scope any supported connection to public trial code.
+If account creation, terms acceptance or access is a genuine platform limit,
+record the exact limit and route to a capable session; do not invent accounts,
+request Albert's manual steps or waive a real platform restriction.
+
+Use a dedicated trial queue/workspace on the existing physical machines, with
+capacity separation from GitHub jobs. Do not install the full ai-devops toolkit
+on these networking-only hosts: runner-specific setup is distinct from toolkit
+installation. Preserve their existing GitHub runner services. On Windows verify
+the supported Entire Git helper and shell dependencies; the integration only
+auto-installs its helper on Linux. No unchecked script or guessed flag.
+Gate: an Entire-triggered public/synthetic job actually checks out the pinned
+commit and runs on a named existing machine, with exact runner/job/result IDs.
+Expand to all three named runners and the necessary Linux lane only after that.
+GitHub-hosted runner capacity cannot be assumed reusable outside GitHub Actions.
+
+**T3 Prove tests and merge control in isolation.** Use a public/synthetic
+trial-only Entire-hosted repository or supported native branch, selected from
+current official documentation. Do not import private submodules or chat
+context. Establish and prove export to a dedicated GitHub trial branch before
+trusting Entire-only commits. Reuse existing suite commands and registration;
+do not add a second permanent test harness. Record the exact chosen vendor,
+configuration, checkout identity and command before activating a pipeline.
+Run pass → newer fail → repair, plus pending, cancellation, missing provider,
+stale result, base movement and concurrent-change cases. Bind every outcome to
+the current tested head and actual proposed merge result, not just a branch
+name or an older passing attempt. Gate: failing/missing/stale current results
+cannot authorize a merge; repaired current results allow an actual Entire
+merge with correct parent/tree identity and a durable evidence export.
+Never merge deliberately failing experiment code into the official branch.
+
+**T4 Publish official code and identify the final barrier.** Publish the
+accepted Entire result to a dedicated GitHub trial target, preserving commit
+objects and an auditable mapping if merge methods alter IDs. Verify trees,
+parents, result provenance and recovery without Entire. This proves a bounded
+publication route, **not** replacement of protected-main delivery. Snapshot
+current protected-main policy and demonstrate whether its required PR,
+verification-closure and merge queue still cause another wait. Do not count
+clicking Merge in Entire when it merely invokes GitHub's same path as success.
+Do not force-push, direct-push protected main, admin-merge code or use a bypass.
+If protected-main acceptance needs policy/configuration changes, specify the
+minimal repository-scoped supported transition and preserved data/privacy
+protections on #2022; implement only within current standing authority and
+the normal code/config delivery route. Do not make a permanent cutover as a
+side effect of qualification. Gate: separately state isolated merge success,
+GitHub publication success and actual protected-main replacement or its exact
+remaining technical/policy obstacle. No full-replacement claim without the last.
+
+**T5 Whole-process parity and latency.** Cover every inventoried trigger,
+Linux/Windows suite, advisory review/fixer behavior, evidence/artifacts,
+failure/cancel/retry behavior, concurrency and recovery. No skipped job counts
+as executed parity. Freeze at least five same-source/same-scope matched pairs
+where natural work permits; publish each pair, sample count, exclusions and
+confounding. Measure push/request → scheduling → tests → merge → official
+GitHub publication, including all repeated checks and synchronization waits.
+Twenty percent lower observed median end-to-end time with no correctness loss
+is only a directional pilot signal; fewer pairs or changed scope is inconclusive.
+The old Linux-only protocol does not establish this new Windows-inclusive
+replacement result. Do not compare prose fast-path merges with code merges.
+Gate: functional parity and measured advantage are separate verdicts; report
+negative results honestly rather than manufacturing favorable tasks.
+
+**T6 Finish R2/R4/R5/R6.** Repair the actual protected-installation failures,
+including the missing default Linux ZCode/MiMo global-distribution path, with
+focused tests and normal delivery. Preserve private memory health and data;
+do not trim private facts or relax limits to force installation acceptance.
+Complete all four machine installations and all 16 actual fresh-client
+journeys under the qualified trial workflow, including cross-host recovery.
+Instruction files, CLI login status and doctor passes are not desktop proof.
+Gate: each requested cell has its own actual-client receipt, or remains visibly
+unmet with exact platform/access limitation; preserve original capabilities.
+
+**T7 Recovery and stop.** Demonstrate GitHub-only operation with trial control
+unavailable, all accepted code and evidence recoverable, and existing runner
+services intact. Restore only owned trial changes; do not remove shared
+integrations or log out other sessions. Reconcile plan STATUS, operating record,
+report, matrix and #2022. At the unchanged stop, end trial-owned activity and
+record adoption, partial result or failure. Unsupported Trail deletion remains
+unsupported; do not restart support or billing work. Gate: every original R8
+obligation is either evidenced complete or explicitly unmet on the same issue.
+
+**Reciprocal phase rule:** at the end of **every T or R phase**, re-read every
+downstream phase through T7/R8 and the final definition of done. Report drift
+on #2022 and update affected assumptions, dependencies, identifiers and gates
+before continuing or handing off. Neither a successful isolated trial nor a
+completed child phase ends the authorized whole job.
+
+### Acceptance precedence over the older specification
+
+R3/R7 now require actual Entire-controlled testing/merging and the T4 distinction
+between trial publication and removal of protected-main waits. Old shadow-only,
+GitHub-merge-authority and no-integration statements describe the previous
+scope; they cannot silently veto Albert's October 31 bounded test. Existing
+protected-main rules remain real constraints until changed through a supported
+authorized route, never a bypass. R1/R2/R4/R5/R6 and all 16 cells remain required;
+R8 includes T1–T7, parity, timing and recovery. Historical private-capture,
+memory-quality and deletion failures are not reopened or rewritten.
+
 ## STATUS — fleet and CI implementation, read first
 
 **Ultimate goal:** Albert can start a public ai-devops task in Codex, Claude,

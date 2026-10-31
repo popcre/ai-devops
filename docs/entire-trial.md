@@ -1,5 +1,25 @@
 # Entire trial operating record — #2022
 
+## October 31 authority update — replacement-controller trial
+
+Albert authorized: “let's test Entire controlling testing and merging, with
+GitHub retaining the official code.” The
+[controlling plan amendment](../plan_entire-reversible-trial.md#october-31-controlling-amendment--entire-testing-and-merge-trial)
+and [fresh execution handoff](../HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md)
+govern this bounded test. Older browser-only/shadow-only instructions below
+describe the previous operating scope, not a veto on this authorization.
+GitHub remains the official code record; a permanent protected-main cutover
+is not silently performed. Private capture stays off, billing dropped, support
+nonblocking and both original deadlines unchanged. All16 client journeys stay
+required. No replacement execution/merge or measured speed benefit is proved.
+
+The actual GitHub-backed release PR2195 merged as d7f4c10; ordinary and queue
+checks passed. Protected updates subsequently only partially advanced
+edge-dev3, edge-dev and al8960ofc. Windows managed receipts are stale after
+an absent-retired-task query failure; Linux private-memory seed failed health.
+916 was not installed. These are incomplete transactions, not fleet delivery.
+See the handoff for source-bound repair evidence and preservation requirements.
+
 ## Fleet and CI rollout — implementation underway, acceptance open
 
 Albert's October 30 clarification adds Codex, Claude, MiMo and ZCode across
