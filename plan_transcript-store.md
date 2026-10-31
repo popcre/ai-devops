@@ -14,11 +14,11 @@
 | 4 Store schema, writer and Dropbox publish | ✅ done | PR #2083; tests/verification/transcript-store/live-segment-2026-10-29.txt |
 | 5 Smoke batch: first 1,000 calls | ✅ done (gate deviation: first slug 36/50, any slug 41/50, v5) | PR #2100; tests/verification/transcript-store/smoke-2026-10-29.txt |
 | 6 Full backfill (about 15 h, background) | ✅ done (12,316 sessions, 0 failed chunks; published 8:42 AM EDT 2026-10-30) | #2061, PR #2146 |
-| 7 Daily timer on edge-dev3 | 🟡 day 1 ran 5:30 AM EDT 2026-10-30; day 2 due 5:30 AM EDT 2026-10-31 | #2061 |
+| 7 Daily timer on edge-dev3 | ✅ done (5:30 AM EDT 2026-10-30 and 2026-10-31, 0 errors) | https://github.com/popcre/ai-devops/issues/2061#issuecomment-6550440933 |
 | 8 Reader helper and `transcript-query` skill | ✅ done | PR #2098; Windows proof https://github.com/popcre/ai-devops/issues/2062#issuecomment-6518699681 |
 | 9 Mining checks | ✅ done (6 checks pass ≥14/20) | PRs #2121, #2135; counts on #2063 |
 
-**Closeout (next session, after 5:30 AM EDT 2026-10-31):** only step 7's second day remains. On edge-dev3 confirm `~/Dropbox/ai/transcript-store/CURRENT.json` names a file built 2026-10-31 whose size/sha256 match, and the newest `~/.local/state/ai-devops/transcript-store/run-*.json` has `chunks_failed: 0` and an empty `.err`; also check `question_labels` holds 6,490 rows in the published copy (imported 2026-10-30, publishes with that run). Then tick #2061 "live proof", mark row 7 done, tick #2050's live proof citing the comments on #2050 (incl. the real-question answer), and close #2050 and its children. If the run failed, fix it and wait one more day.
+**Closed 2026-10-31:** all nine steps done; #2050 and #2059–#2063 closed.
 
 **A fresh session starts with Stage B (steps 2–4) and Stage D (step 8), which need no installs.** Step 1 writes and tests its scripts at once, but installing them on hosts waits while the observation-week freeze window file (#1948) is present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocks B or D. Step 5 is a quality check before step 6.
 
