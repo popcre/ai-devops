@@ -514,7 +514,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 
 #### Step 7 — Daily timer on edge-dev3
 
-- `bin/ai-install-transcript-store` installs `ai-transcript-store.timer`, which runs daily after the upload timers, for example at 05:30 local. It runs `build.py` and then publishes.
+- `bin/ai-install-transcript-store` installs `ai-transcript-store.timer`, which runs daily after the upload timers, at 08:00 local (the uploads run at 06:30). It runs `build.py` and then publishes.
 - The pattern is `bin/ai-install-session-tmp`.
 
 **Done when:**
