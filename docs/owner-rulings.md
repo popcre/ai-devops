@@ -178,3 +178,12 @@ Current rule:
 - A required check that hangs or flakes is dropped from the required set at
   once, then repaired.
 - Curated Master Data loads may cover any number of licensors in one change.
+
+## 2026-10-31 — Entire Gates stays connected, advisory only
+
+Albert's words: "keep the Entire Gates service connected, we're still in the
+process of testing & implementing. nothing should rely on it or be blocked by
+it"
+
+- The Entire Gates check is never a required check, merge gate, or input to
+  any wait, merge, or promotion decision.
