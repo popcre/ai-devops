@@ -433,6 +433,11 @@ wakes, ticks and original/provider context remain unknown. Its landing/native
 integration/installed proof remain required. No completion envelope is
 event-detection latency.
 
+The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
+and genuine eligible GitHub UTC, never subtract Windows wall clocks. Its named
+boundary is parent-received alarm batch acknowledgement over SSH and includes
+transport; it does not claim an exact native SDK-ack interval or full-budget pass.
+
 ## Retirement
 
 #660 owns the minimal pinned patch until upstream supplies an equivalent
