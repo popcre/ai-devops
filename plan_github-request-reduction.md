@@ -54,18 +54,23 @@ T16's documented trusted-executor access remains unavailable.
 Dispatch/privacy receipt emission is implemented and tested. Active
 BlockerWatch terminal receipts merged through #2281 (`e178`); the stricter
 legacy/active fixture repair then passed on the original CI environment and
-merged through #2282 (`aaca50a8`). The common active-completion adapter is queued
-in #2283 at `d5d3d0fa`, with 49 qualification tests passing. Its explicit SDK-only
+merged through #2282 (`aaca50a8`). The common active-completion adapter merged
+through #2283 as `49dec38d`, with code bytes equal to tested `d5d3d0fa` and 49
+qualification tests passing. Its explicit SDK-only
 alarm/links profile measures an acknowledged parent envelope, not detection or
 arbitrary provider work. Default original-context/provider operations decline
 qualification before running once unchanged; native completion integration and
 final installed proof remain unfinished. The separate `e6ed1ac8` durable-only
 event-fact producer passed 185 BlockerWatch and 31 receipt/fact cases on Linux;
 its corrected bounded native run passed all 31 cases in 186.212 seconds, with
-owned-process/fixture absence verified. These facts do not yet have
-a governed eligibility-to-delivery consumer, even for SDK alarm/links. That is
-an implementation gap, separate from genuine future activity and privileged
-source-authority constraints. Accepted P5/headroom proof stays accepted.
+owned-process/fixture absence verified. Its separate governed consumer is now
+implemented at `f2a90c12`, with 60 qualification, 31 caller/fact, 185 BlockerWatch
+and 38 counter cases passing. It admits only successful standalone explicit
+SDK alarms, conservatively bounds batch acknowledgement and leaves links,
+wakes, original-context/provider work and whole-observer budgets unknown.
+Producer/consumer landing, native integration and final installation remain
+unfinished; genuine future activity alone is not their substitute. Accepted
+P5/headroom proof stays accepted.
 
 The five finite read observations preserve environment, working directory,
 authentication, streams and original descriptor limits within their declared

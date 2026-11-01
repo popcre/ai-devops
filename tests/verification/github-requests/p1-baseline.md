@@ -20,8 +20,8 @@ Its actual native proof passed sixteen cases; earlier fixture-selection failures
 remain retained. The legacy/active CI-fixture repair #2282 (`aaca50a8`) passed
 on the same physical CI environment without relaxing the validator.
 
-Common parent-completion adapter #2283 is queued at `d5d3d0fa`, with 49
-qualification cases passing. It distinguishes the acknowledged active envelope
+Common parent-completion adapter #2283 merged as `49dec38d`, with exact code
+equivalence to tested `d5d3d0fa` and 49 qualification cases passing. It distinguishes the acknowledged active envelope
 from full caller-through-cleanup costs; neither alone supplies a whole-observer
 budget verdict. Default original-context and provider-capable work executes once
 outside reduced-rights qualification. Explicit SDK-only alarm/links is component
@@ -36,9 +36,19 @@ retains actual `e6ed` source; separate executed-closure equivalence to PR #2285
 head `7f926` is bound by
 `7e6e997c7a2031d74243142d848727c0f590555a372d05f14a87e281cd61deb7`.
 The original 180-second timeout remains historical protocol failure evidence.
-No governed BW eligibility-to-delivery consumer exists yet. Genuine future facts
-alone cannot close that implementation gap; PR event qualification remains
-strictly PR-only. Historical P5 and busy-window proofs remain accepted.
+The separately finished governed consumer `f2a90c12` now joins one bounded
+facts frame per acknowledged completed active ID, using a separate parent
+receive clock and unchanged END completion clock. Only a successful standalone
+explicit SDK alarm can receive its conservative batch-ack interval. Default
+original-context, links, wakes, ticks and failed/partial/refused operations
+cannot receive numeric detection. Producer/consumer landing, native integration
+and installed proof remain required; future facts alone cannot supply them.
+Its Linux gates passed 60 qualification, 31 caller/fact, 185 BlockerWatch and
+38 counter cases. A caught no-observer dispatch regression was fixed by requiring
+both reserved channels/helper before forwarding; only a partial recovered
+failure excerpt remains because the first test log was overwritten. Corrected
+31-case proof is separate. PR event qualification remains strictly PR-only.
+Historical P5 and busy-window proofs remain accepted.
 
 Coverage aggregate V4 has digest
 `fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.
