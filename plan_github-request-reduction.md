@@ -9,6 +9,22 @@ are complete; broader fleet and comparable-workload acceptance is not.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 Three parallel audits reconciled source, fleet and measurement evidence.
 
+Measurement continuation: the frozen 712-read replay's helper latency regression
+has a concrete cause: separate durable write/read telemetry appends and repeated
+ordinal-map work. A same-operation two-row commit preserves both records and
+durability with one append/fsync, without changing the ten-second TTL, request
+freshness, terminal outcomes or targets. One unprofiled exact-source replay of
+the repair reduced local total time by 23.89% (stable-open) and 25.56%
+(unknown-head); both local p95 comparisons stayed within the 5% budget. The
+[bounded comparison record](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
+retains the earlier failure and source/input digests. All 712 upstream fixture
+reads remain necessary under the replay assumptions, so observed read reduction
+is still 0%, failing the 50% replay target. Original arrivals, response heads and
+overlap were not recorded; natural savings and global irreducibility remain
+unknown. This is candidate code/local replay proof, not a merged installation or
+programme acceptance. Windows and full Linux observer qualification are being
+completed separately; no unverified outcome is counted as installed.
+
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
 `8ab68085c4fee1ad00fe9b26e991c3b595c69168`, both verified on origin/main.

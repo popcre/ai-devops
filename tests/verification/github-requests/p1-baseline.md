@@ -895,3 +895,74 @@ including 59.376810 ms source bootstrap; total waiting time is not event deliver
 latency. The original 25-minute deadline was unchanged and no replay was run.
 This is one genuine useful outcome, not twenty matched baseline/candidate
 outcomes, a p95 regression result, an HTTP census or savings evidence.
+
+## Same-operation durable telemetry repair comparison
+
+The frozen input remains
+`f8477e7532d881905a4e3c7dda07500ea47863576c4bb2739a6d42a3f868cb28`:
+712 recorded read completions, 217 anonymous targets and 495 same-target gaps.
+Minimum gap is 16 seconds, median 305 seconds and 25th percentile 304 seconds;
+none is inside the existing ten-second TTL. Only 52 gaps are below 300 seconds.
+The serial replay therefore cannot show savings from that TTL. These are
+completion timestamps, not original arrivals, response heads or overlap; no
+claim of natural duplicate demand, global irreducibility or revised target
+follows. No TTL or freshness bound was extended.
+
+Diagnostic profiling of the literal pinned helpers identifies actual extra
+work: the original helper made 712 fsync calls; the historical candidate made
+1,866, including 1,424 separately durable measurement appends. The current
+pre-repair helper made 2,083 fsync calls and 2,136 ordinal lookups; its telemetry
+appends accounted for 2.072 seconds and ordinal work for 1.468 seconds in that
+profiled cohort. Profiling affects timings, so these figures diagnose work,
+not latency acceptance. The historical original-to-candidate p95 failure remains
+preserved; it has not been replaced with a new baseline by inference.
+
+The bounded repair commits the same operation's write and read rows in their
+original order with one append/flush/fsync before returning. It retains both
+schemas, unknowns, privacy checks, daily ceiling and original command results.
+Only the immediate same-key ordinal result is reused; new ordinals still take
+the mapping lock. There is no cross-operation buffer/cache, durability removal,
+request change or target amendment. Short/late writes attempt rollback under
+the existing lock; any commit or recovery failure returns false without turning
+the original command into a failure. Focused tests cover nested/concurrent
+isolation, cancellation, serialization, short writes, flush/fsync and rollback
+errors, lock refusal, caps and symlink refusal.
+
+One unprofiled before/after execution used exact pre-repair source
+`bdcbf84e9c40c91a7b577f9c84cfecde40ad7370` and repair source
+`55ef580d9a7c4188001791aa420a217fb310760d`, with the frozen workload and literal
+existing sharing code. Each profile preserved all 712 paired local terminal
+outcomes, 712 upstream fixture invocations, 224 content writes, 488 metadata
+refreshes and zero duplicate unchanged-content writes.
+
+| Local replay profile | Total before / after | Local p95 before / after |
+|---|---|---|
+| Stable open | 5.024190088 / 3.823920970 seconds (23.89% lower) | [10,11] / [9,10] ms; within 5% |
+| Unknown head | 4.923124611 / 3.665008221 seconds (25.56% lower) | [10,11] / [8,9] ms; within 5% |
+
+Each phase includes its source/bootstrap in its first normalized row. Shared
+input bootstrap was 73.545734 ms; all four cohorts, setup and cleanup took
+17.529304466 seconds. The protected summary digest is
+`0261aab6cc0003a6caca0a1793ef3a5ed3ee308354c39dd1771fb8b4661e85a3`;
+stable-open comparison digest
+`a9442cc8f3dff7c22020f5465cbed442e4802d86ece19b079f6ffb1a34772297`;
+unknown-head comparison digest
+`52de9afa07dacd8dde8ffde25ee9c76f7bd9e971167f67da06a84a749af314d3`.
+
+The exact replayed helper SHA-256 is
+`9d91fb29a7fd659051a6325f8bddc03f6bbb0c17a0922af46cc01f7ee64610b2`
+before and `e973cf3bafb4ec66f35322808f269c3546f18c0a7f6ecc701abba296fd585968`
+after. Append-helper digests are
+`4c6656af4dd9df0bd6e336c5f3d6a2287751403a72cc9930d4ed30bb2f309052`
+and `23f9ee78788243458a184c8a678eb7d9263f3b0a626fb712dd5c6317fbba4296`;
+the unchanged ordinal helper is
+`86834061ba75e904520c93e2a35191f8ca947d5af5ae17c7c99a8b962d2fcc24`.
+A later docstring-only clarification is not retroactively substituted for this
+executed candidate source binding.
+
+This is an honest matched offline comparison of this repair, not a natural
+twenty-outcome cohort, useful-work/detection p95 or a whole-observer overhead
+qualification. The repeated-read reduction remains 0%, failing the 50% target;
+actual HTTP requests, GraphQL points and natural per-outcome savings remain
+unknown. Candidate Windows and full Linux observer verification/installation
+remain separate pending outcomes until their actual receipts are available.
