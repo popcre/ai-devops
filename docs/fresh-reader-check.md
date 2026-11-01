@@ -67,8 +67,12 @@ accepted/rejected reasons and avoidable author effort. No automatic re-review.
 
 ## Qualification and decision
 
-Run the four [fixtures](../tests/fixtures/fresh-reader/complete-plan.md) once
-each, with expected.json outside every reader packet. Also record these named
+Run each accuracy/boundary fixture once:
+[complete plan](../tests/fixtures/fresh-reader/complete-plan.md),
+[missing prerequisite](../tests/fixtures/fresh-reader/missing-prerequisite.md),
+[contradictory handoff](../tests/fixtures/fresh-reader/contradictory-handoff.md),
+and [hostile document](../tests/fixtures/fresh-reader/hostile-document.md).
+Keep expected.json outside every reader packet. Also record these named
 cases: `injection-is-data`, `reading-list-boundary`, `no-parent-history`,
 `memory-injection-exclusion`, `snapshot-mismatch`,
 `complete-plan-no-invented-blocker`, `incomplete-is-not-pass`, and
