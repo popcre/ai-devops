@@ -6,6 +6,7 @@ ai-gemini-usage	bin/ai-gemini-usage	bash+cmd	yes	gemini	install-machine-tools.ps
 ai-kimi	bin/ai-kimi	bash+cmd	yes	kimi	install-machine-tools.ps1
 ai-qwen	bin/ai-qwen	bash+cmd	yes	qwen	install-machine-tools.ps1
 ai-qwen-cli	bin/ai-qwen-cli	bash+cmd	yes	qwen	install-machine-tools.ps1
+ai-deepseek	bin/ai-deepseek	bash+cmd	yes	none	install-machine-tools.ps1
 ai-deepseek-agent	bin/ai-deepseek-agent	bash+cmd	yes	none	install-machine-tools.ps1
 ai-stepfun	bin/ai-stepfun	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-sandbox	bin/ai-review-sandbox	bash+cmd	yes	none	install-machine-tools.ps1
