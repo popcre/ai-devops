@@ -378,6 +378,19 @@ class CohortContract(unittest.TestCase):
         finally:
             os.close(descriptor); left.close(); right.close()
 
+    def test_unexpected_credentials_do_not_leak_later_rights_descriptors(self):
+        left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        right.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        descriptor = os.open(os.devnull, os.O_RDONLY)
+        try:
+            before = len(os.listdir('/proc/self/fd'))
+            left.sendmsg([b'{}'], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [descriptor]))])
+            with self.assertRaises(ValueError):
+                _packet_receive(right)
+            self.assertEqual(len(os.listdir('/proc/self/fd')), before)
+        finally:
+            os.close(descriptor); left.close(); right.close()
+
     def worker(self, directory, body, environment=None):
         transport = pathlib.Path(directory) / 'ai-gh'
         transport.write_text(body)
