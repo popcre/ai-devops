@@ -171,6 +171,16 @@ with the selected readonly image in a namespace-only private tmpfs.
 pacing, credentials, quotas, probes and backoff remain in force; no alternate
 real GitHub throttle state is created.
 
+The candidate setup copies captured files only into the three fresh private
+`bin`, `tools` and `config` tmpfs trees with explicit captured modes, closes setup
+writers, then remounts each whole tree readonly before execution. This avoids
+hundreds of individual source bind mounts without a writable host alias. The
+top-level `.gitattributes` capture remains an individual readonly bind, since it
+is outside those fresh trees. Each launch borrows independent readonly source
+descriptions for both `--file` and `--ro-bind-data`; no consumed offset is reused.
+Qualification checks cover file/tree mutation, mode changes, hardlinks, remounts,
+inherited writer descriptors, repeat launches and canonical-file immutability.
+
 This is Linux-only, private cohort custody, not a global service, persistent
 daemon or production route. A literal `python -I -S` bootstrap loads only the
 sealed worker and excludes user-site/source-injection startup. The frozen original

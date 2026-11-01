@@ -966,3 +966,18 @@ qualification. The repeated-read reduction remains 0%, failing the 50% target;
 actual HTTP requests, GraphQL points and natural per-outcome savings remain
 unknown. Candidate Windows and full Linux observer verification/installation
 remain separate pending outcomes until their actual receipts are available.
+
+The first strict bounded Linux cohort qualification also remains a measured
+failure: protected receipt digest
+`4afc5d7d2d740091c87c962dbaed2477f3f8b13862f0e46afcee8d1a2a6156bd`, source
+`341a05bc035fba485d7dd1f798ad2f32429de909`. Twenty cold pairs had equal 84/84
+requests, successful cleanup, total ratio 1.0292534577 and bootstrap-amortized
+p95 ratio 1.0669898085, failing 5%. Twenty warm pairs had equal 60/60 requests,
+successful cleanup, total ratio 1.0161382597 and p95 ratio 1.0482486041, passing
+that group only. All setup, matched warmup and teardown remain counted. This
+receipt used the retained non-updateable local fixture build
+`c8e762079b6a2490e7962da7cccf4dbef7630b3a6f163b45e5b839f09421df58`; it
+does not replace the separate updateable-image runtime-parity binding or prove
+installed acceptance. The later private-tmpfs copy optimization is a concrete
+candidate setup repair with adversarial source/mode/alias tests, not a positive
+performance result until its unchanged strict qualification actually completes.
