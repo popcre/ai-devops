@@ -1787,6 +1787,56 @@ def active_sdk_profile(before, inside):
         return False
 
 
+def active_credential_access(environment):
+    """Open/close only fixed existing files. No authentication bytes are read."""
+    if any(bool(environment.get(name)) for name in ("GH_TOKEN", "GITHUB_TOKEN")):
+        return {"mode": "environment_token", "fixed_files": {}}
+    config = environment.get("GH_CONFIG_DIR")
+    if config is None:
+        home = environment.get("HOME")
+        if not home:
+            raise ValueError("credential context unavailable")
+        config = os.path.join(environment.get("XDG_CONFIG_HOME", os.path.join(home, ".config")), "gh")
+    path = pathlib.Path(config)
+    if not path.is_absolute():
+        raise ValueError("credential context unavailable")
+    descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    files = {}
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=descriptor)
+            os.close(descriptor); descriptor = child
+        for name in ("config.yml", "hosts.yml"):
+            try:
+                handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=descriptor)
+            except FileNotFoundError:
+                files[name] = None
+                continue
+            try:
+                info = os.fstat(handle)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("credential context unavailable")
+                files[name] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, stat.S_IMODE(info.st_mode)]
+            finally:
+                os.close(handle)
+        if files["hosts.yml"] is None:
+            raise ValueError("credential context unavailable")
+        return {"mode": "fixed_config_readability", "fixed_files": files}
+    finally:
+        os.close(descriptor)
+
+
+def active_credential_guard(environment):
+    """Reuse the established metadata-only read-profile trust policy."""
+    directory = pathlib.Path(__file__).resolve().parent / "instrumented-gh"
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
+    import managed_read
+    if not pathlib.Path(managed_read.__file__).samefile(directory / "managed_read.py"):
+        return False
+    return managed_read._protected_config(environment)
+
+
 def _save_active_parent_receipt(receipt_path, receipt):
     try:
         destination = pathlib.Path(receipt_path)
@@ -1797,14 +1847,37 @@ def _save_active_parent_receipt(receipt_path, receipt):
         print("active qualification: receipt unavailable; original command status preserved", file=sys.stderr)
 
 
+def active_original_inherited_fds(environment):
+    """Preserve caller-designated exec inheritance, excluding observer pipes."""
+    excluded = set()
+    for name in ("AI_GH_ACTIVE_EVENT_FD", "AI_GH_ACTIVE_ACK_FD", "AI_GH_QUALIFICATION_EVENT_FD"):
+        try: excluded.add(_active_pipe(environment.get(name)))
+        except (OSError, ValueError, TypeError): pass
+    inherited = []
+    for name in os.listdir("/proc/self/fd"):
+        if not name.isdigit():
+            continue
+        fd = int(name)
+        if fd <= 2 or fd in excluded:
+            continue
+        try:
+            if os.get_inheritable(fd): inherited.append(fd)
+        except OSError:
+            continue
+    return tuple(inherited)
+
+
 def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="original_context"):
-    """Execute one original finite operation. No fallback after Popen starts."""
+    """Linux finite operation. Native Windows uses its original-token supervisor."""
     started = time.perf_counter_ns()
+    if not sys.platform.startswith("linux"):
+        raise ValueError("native original-context supervisor required")
     arguments = list(arguments)
     if (not arguments or arguments[0] not in {"alarm", "links", "tick"}
             or arguments[1:] not in ([], ["--dry-run"])):
         raise ValueError("unsupported BlockerWatch operation")
     root = pathlib.Path(root).resolve()
+    caller_inherited = active_original_inherited_fds(os.environ)
     environment = os.environ.copy()
     for key in (*ACTIVE_CHANNEL_ENV, "AI_GH_QUALIFICATION_EVENT_FD", "AI_GH_QUALIFICATION_EVENT_HANDLE"):
         environment.pop(key, None)
@@ -1819,7 +1892,8 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
                "source_bootstrap_ns": None, "qualification_elapsed_ns": None,
                "begin_ack_deadline_ms": 250, "http_requests": None, "programme_acceptance": "unknown",
                "qualification_profile": profile, "original_privilege_equivalence": False,
-               "provider_acceptance": False, "privilege_context": None}
+               "provider_acceptance": False, "privilege_context": None,
+               "credential_context": {"metadata_guard_passed": False, "readability_preserved": False}}
     descriptors, generation_context, launch_context, generation = [], None, None, None
     selector, child, observer = None, None, None
     operation_started = None
@@ -1837,7 +1911,13 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
                 raise ValueError("arbitrary provider context is not admitted")
             if os.environ.get("AI_GH_REAL_GH") or os.environ.get("GH_PATH"):
                 raise ValueError("custom runtime capability is not admitted")
+            if os.environ.get("GH_HOST") not in (None, "", "github.com") or os.environ.get("GH_DEBUG"):
+                raise ValueError("SDK context unavailable")
             trusted_boundary_executable(shutil.which("gh") or "")
+            if not active_credential_guard(environment):
+                raise ValueError("credential metadata unavailable")
+            credentials_before = active_credential_access(environment)
+            receipt["credential_context"]["metadata_guard_passed"] = True
             generation_context = retained_generation(root, manifest)
             generation = generation_context.__enter__()
             python = trusted_boundary_executable(pathlib.Path(sys.executable))
@@ -1848,9 +1928,19 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
                 observed = subprocess.run(list(probe["argv_prefix"]) + [python, "-I", "-S", "-c", script,
                     str(root / "tools/github-requests/report.py"), "--active-privilege-probe"],
                     pass_fds=probe["pass_fds"], capture_output=True, timeout=10, check=True)
-            inside = json.loads(observed.stdout, object_pairs_hook=unique_object)
-            receipt["privilege_context"] = {"before": before, "inside": inside,
-                "difference_fields": sorted(key for key in before if before[key] != inside.get(key))}
+            observation = json.loads(observed.stdout, object_pairs_hook=unique_object)
+            if not isinstance(observation, dict) or set(observation) != {"privilege", "credential_access"}:
+                raise ValueError("SDK metadata unavailable")
+            inside = observation["privilege"]
+            receipt["privilege_context"] = {"comparison_performed": True,
+                "difference_fields": sorted(key for key in before if before[key] != inside.get(key)),
+                "uid_unchanged": before["Uid"] == inside.get("Uid"),
+                "gid_unchanged": before["Gid"] == inside.get("Gid")}
+            credentials_same = (credentials_before == observation["credential_access"])
+            receipt["credential_context"].update(readability_preserved=credentials_same,
+                                                 mode=credentials_before["mode"])
+            if not credentials_same:
+                raise ValueError("credential access changed")
             if not active_sdk_profile(before, inside):
                 raise ValueError("SDK component privilege context unavailable")
             launch_context = retained_generation_launch(generation)
@@ -1877,12 +1967,13 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
             for key in ACTIVE_CHANNEL_ENV:
                 environment.pop(key, None)
             observer = None
-            inherited = ()
+            inherited = caller_inherited
             command = [shutil.which("bash") or "/bin/bash", str(root / "bin/ai-blocker-watch"), *arguments]
         receipt["clock_start"] = qualification_clock()
         receipt["observer_setup_elapsed_ns"] = time.perf_counter_ns() - started
         operation_started = time.perf_counter_ns()
-        child = subprocess.Popen(command, env=environment, pass_fds=inherited, start_new_session=True)
+        receipt["control_session_isolated"] = observer is not None
+        child = subprocess.Popen(command, env=environment, pass_fds=inherited, start_new_session=observer is not None)
         if observer is not None:
             for fd in (event_write, ack_read):
                 os.close(fd); descriptors.remove(fd)
@@ -1922,12 +2013,16 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
     except (KeyboardInterrupt, ActiveCancelled) as interruption:
         signum = interruption.signum if isinstance(interruption, ActiveCancelled) else signal.SIGINT
         if child is not None and child.poll() is None:
-            try: os.killpg(child.pid, signal.SIGTERM)
+            try:
+                if observer is not None: os.killpg(child.pid, signal.SIGTERM)
+                else: child.send_signal(signum)
             except ProcessLookupError: pass
             try:
                 child.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                try: os.killpg(child.pid, signal.SIGKILL)
+                try:
+                    if observer is not None: os.killpg(child.pid, signal.SIGKILL)
+                    else: child.kill()
                 except ProcessLookupError: pass
                 child.wait()
         receipt.update(source_verified="unknown", unknown_reason="cancelled", child_exit=128 + signum,
@@ -1972,7 +2067,8 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
 if __name__ == "__main__":
     try:
         if len(sys.argv) == 2 and sys.argv[1] == "--active-privilege-probe":
-            print(json.dumps(active_privilege_state(), separators=(",", ":")))
+            print(json.dumps({"privilege": active_privilege_state(),
+                              "credential_access": active_credential_access(os.environ)}, separators=(",", ":")))
             sys.exit(0)
         if len(sys.argv) == 2 and sys.argv[1] == "--active-harness":
             # BW's original provider stdin is /dev/null. NUL framing avoids

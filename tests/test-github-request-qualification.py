@@ -702,6 +702,11 @@ exit "${ACTIVE_TEST_STATUS:-0}"
         self.state = Path(self.fixture.temp.name) / "state"
         self.state.mkdir(mode=0o700)
         self.invocations = Path(self.fixture.temp.name) / "invocations"
+        self.credentials = Path(self.fixture.temp.name) / "credential-context"
+        self.credentials.mkdir(mode=0o700)
+        for name in ("hosts.yml", "config.yml"):
+            (self.credentials / name).write_text("fixture credential bytes must not be read\n")
+            (self.credentials / name).chmod(0o600)
 
     def tearDown(self): self.fixture.tearDown()
 
@@ -720,7 +725,7 @@ exit "${ACTIVE_TEST_STATUS:-0}"
             return original(*args, **kwargs)
         with self.fixture.fixture_installation(), mock.patch.dict(os.environ, {
                 "AI_DEVOPS_TEST_MODE": "1", "AI_GH_STATE_DIR": str(self.state),
-                "ACTIVE_TEST_INVOCATIONS": str(self.invocations), **environment}), \
+                "ACTIVE_TEST_INVOCATIONS": str(self.invocations), "GH_CONFIG_DIR": str(self.credentials), **environment}), \
                 mock.patch.object(report, "qualification_clock", side_effect=self.clock), \
                 mock.patch.object(report.subprocess, "Popen", side_effect=capture):
             status = report.qualify_blocker_watch(self.root, self.manifest, [operation], receipt, profile)
@@ -800,6 +805,65 @@ exit "${ACTIVE_TEST_STATUS:-0}"
             self.assertFalse(report.active_sdk_profile(state, changed))
         for field in ("CapEff", "CapPrm", "CapAmb"):
             self.assertFalse(report.active_sdk_profile(state, dict(state, **{field: "1"})))
+
+    def test_credential_probe_reads_no_contents_and_decline_exposes_no_paths(self):
+        with mock.patch.object(report.os, "read", side_effect=AssertionError("credential contents read")):
+            access = report.active_credential_access({"GH_CONFIG_DIR": str(self.credentials)})
+        self.assertEqual(access["mode"], "fixed_config_readability")
+        (self.credentials / "hosts.yml").chmod(0o644)
+        _, declined, _, _ = self.run_active()
+        self.assertEqual(declined["source_verified"], "unknown")
+        self.assertFalse(declined["credential_context"]["metadata_guard_passed"])
+        text = json.dumps(declined)
+        self.assertNotIn(str(self.credentials), text)
+        self.assertNotIn("fixture credential bytes", text)
+        self.assertEqual(self.invocations.read_text(), "x")
+
+    def test_mismatched_fixed_credential_objects_decline_before_original_work(self):
+        with mock.patch.object(report, "active_credential_access", return_value={
+                "mode": "fixed_config_readability", "fixed_files": {"hosts.yml": [0], "config.yml": None}}):
+            status, receipt, _, _ = self.run_active(ACTIVE_TEST_STATUS="5")
+        self.assertEqual(status, 5)
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertFalse(receipt["credential_context"]["readability_preserved"])
+        self.assertEqual(receipt["source_verified"], "unknown")
+
+    def test_original_fallback_preserves_legitimate_fd_and_session_not_observer_pipes(self):
+        import fcntl
+        output = Path(self.fixture.temp.name) / "context-result.json"
+        sentinel = tempfile.TemporaryFile()
+        sentinel.write(b"sentinel"); sentinel.flush(); sentinel.seek(0)
+        reader, writer = os.pipe()
+        legit = fcntl.fcntl(sentinel.fileno(), fcntl.F_DUPFD, 180)
+        reserved = fcntl.fcntl(writer, fcntl.F_DUPFD, 190)
+        os.set_inheritable(legit, True); os.set_inheritable(reserved, True)
+        identity = os.fstat(reserved)
+        self.script.write_text('''#!/usr/bin/env bash
+printf x >> "$ACTIVE_TEST_INVOCATIONS"
+/usr/bin/python3 - "$ACTIVE_TEST_LEGIT" "$ACTIVE_TEST_RESERVED" "$ACTIVE_TEST_RESULT" <<'PY'
+import json,os,sys
+try:
+ s=os.fstat(int(sys.argv[2])); reserved=[s.st_dev,s.st_ino]
+except OSError: reserved=None
+with open(sys.argv[3],'w') as f:json.dump({'session':os.getsid(0),'sentinel':os.read(int(sys.argv[1]),8).decode(),'reserved':reserved,'observer_env':any(x.startswith('AI_GH_ACTIVE_') for x in os.environ)},f)
+PY
+exit 7
+''')
+        try:
+            status, receipt, _, _ = self.run_active(profile="original_context", AI_GH_ACTIVE_EVENT_FD=str(reserved),
+                ACTIVE_TEST_LEGIT=str(legit), ACTIVE_TEST_RESERVED=str(reserved), ACTIVE_TEST_RESULT=str(output))
+            observed = json.loads(output.read_text())
+            self.assertEqual(status, 7)
+            self.assertEqual(observed["session"], os.getsid(0))
+            self.assertEqual(observed["sentinel"], "sentinel")
+            self.assertNotEqual(observed["reserved"], [identity.st_dev, identity.st_ino])
+            self.assertFalse(observed["observer_env"])
+            self.assertTrue(os.get_inheritable(legit)); self.assertTrue(os.get_inheritable(reserved))
+            self.assertFalse(receipt["control_session_isolated"])
+            self.assertEqual(self.invocations.read_text(), "x")
+        finally:
+            for fd in (reader, writer, legit, reserved): os.close(fd)
+            sentinel.close()
 
     def test_forged_typed_custody_reordered_duplicate_and_unknown_fields_rejected(self):
         begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin",
