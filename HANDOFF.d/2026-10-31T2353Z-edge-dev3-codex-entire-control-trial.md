@@ -236,7 +236,9 @@ Key owning sources, all portable:
 
 1. Claim #2022 as the new coordinator and reconcile this handoff, the entire
    amended plan and current source/install/rules/runner evidence. Recover
-   private baselines using §8. Gate: fresh manifest and owner, no stale state
+   private baselines using §8. Also resolve the failed outgoing ownership check
+   recorded in the wrap-up reconciliation; never treat unreadable claims as
+   zero or release a foreign reservation. Gate: fresh manifest and owner, no stale state
    presented as live; all downstream T/R assumptions checked.
 2. Execute planT1/T2: preserve/recover partial host transactions before writes,
    qualify Buildkite/current account access and supported self-hosted Windows
@@ -362,6 +364,22 @@ No new implementation, account, integration, database write or policy bypass.
 Credential sweep: nothing new to store; no plaintext credential appeared.
 The existing sudo credential stayed in1Password and protected transport.
 No private memory was edited. Both sub-agents are completed, not working.
+
+Required ownership check is **unverified**, not passed. This session did no
+shared-database work and held no known shared-db claim, but wrap-up requires
+the native check because sub-agents were used. The installed
+ai-shared-db-closeout-check was run twice for actual session UUID
+01a18e41-40fb-76f2-90a6-cad01b186b8e. Both returned exit2, okfalse,
+“GitHub request timed out.” Empty arrays in those failure receipts do not
+prove zero reservations. Receipts are owner-only in cutover-20261031 as
+shared-db-closeout-check.json and shared-db-closeout-check-retry.json.
+An existing SSH route to the alternate Linux host denied public-key/password
+authentication before any remote checker ran. No permissions, tool limits or
+checks were bypassed, and no foreign claim was touched. The coordinator owns
+resolution of the timed-out native reads; closeout must not be called fully
+verified until a supported fresh check succeeds. This is a newly observed
+closing-tool blocker, not a reason to resume unrelated implementation or ask
+Albert to perform technical steps. Record any later resolution on #2022.
 
 Workspace decisions: preserve the clean original fleet working copy, repaired
 negative experiment, detached Linux install candidate and prose-delivery working
