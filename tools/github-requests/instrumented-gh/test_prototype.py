@@ -123,7 +123,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.updater_entered.set()
             if mode == 'error':
                 self.server.updater_release.wait(5)
-            self.reply({'tag_name': 'v2.101.0', 'html_url': 'https://github.com/cli/cli/releases/v2.101.0',
+            version = MANIFEST['pins']['upstream_version']
+            self.reply({'tag_name': 'v' + version, 'html_url': 'https://github.com/cli/cli/releases/v' + version,
                         'published_at': '2026-10-07T00:00:00Z'})
             return
         if mode and parsed.path in ('/private', '/denied'):
@@ -384,7 +385,7 @@ class PrototypeTests(unittest.TestCase):
                 self.parity(['issue', 'view', '1', '-R', 'owner/fixture', '--json', 'number'],
                             1, diagnostic=True, require_metadata=True)
 
-    def observation(self, environment=None):
+    def observation(self, environment=None, **options):
         # Copy only this public wrapper into private fixture custody. Helpers
         # retain their original layout; this is intentionally source-unknown.
         transport = pathlib.Path(self.scratch.name) / 'transport' / 'bin' / 'ai-gh'
@@ -397,7 +398,7 @@ class PrototypeTests(unittest.TestCase):
         environment['AI_GH_MIN_SPACING_SECONDS'] = '0'  # isolated local-server fixture only
         return ManagedReadObservation(MANIFEST_PATH, hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest(),
                                       transport_path=transport, transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
-                                      environment=environment, cwd=self.cwd)
+                                      environment=environment, cwd=self.cwd, **options)
 
     def test_managed_observation_preserves_streams_and_counts_public_read(self):
         arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
@@ -440,9 +441,25 @@ class PrototypeTests(unittest.TestCase):
                 managed_read_label(arguments)
         environment = self.raw_env()
         for key, value in (('GH_PATH', '/sentinel'), ('GH_DEBUG', 'api'),
-                           ('AI_GH_HTTP_COUNTER_FD', '99'), ('GH_HOST', 'other')):
+                           ('AI_GH_HTTP_COUNTER_FD', '99'), ('AI_GH_REAL_GH', '/sentinel'),
+                           ('BASH_ENV', '/sentinel'), ('GH_HOST', 'other')):
             with self.subTest(environment_key=key), self.assertRaises(ValueError):
                 self.observation({**environment, key: value})
+
+    def test_managed_observation_refuses_forged_generation_and_wrong_release(self):
+        from unittest.mock import patch
+        import managed_read
+        environment = self.raw_env()
+        environment['GH_HOST'] = 'github.com'
+        with self.assertRaisesRegex(ValueError, 'serialized boundary'):
+            self.observation(environment, transport_boundary={})
+        original = managed_read.ordinary_cli_profile(environment)
+        changed = (original[0], '0.0.0', original[2], original[3])
+        with patch.object(managed_read, 'ordinary_cli_profile', return_value=changed):
+            with self.assertRaisesRegex(ValueError, 'counter release differs'):
+                self.observation(environment)
+            with self.observation(environment, historical_profile=True) as observation:
+                self.assertTrue(observation.summary()['historical_profile'])
 
     def test_managed_observation_cancellation_is_unknown_without_replay(self):
         arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']

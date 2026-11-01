@@ -7,6 +7,7 @@ The old isolated qualification CLI remains independent and unchanged.
 """
 import contextlib
 import hashlib
+import importlib
 import json
 import os
 import pathlib
@@ -18,10 +19,11 @@ import subprocess
 import threading
 import time
 import tempfile
+import shutil
 
 from run import UNKNOWN, validate
 from sealed import verified_snapshot
-from source_binding import validate_source_binding
+from source_binding import validate_source_binding, version_profile
 
 REPOSITORY = "popcre/ai-devops"
 FAMILIES = {("issue", "view"), ("issue", "list"), ("pr", "view"),
@@ -132,6 +134,29 @@ def _protected_config(environment):
             os.close(descriptor)
 
 
+def ordinary_cli_profile(environment):
+    """Local vendor version only; no authentication/API preflight request."""
+    selected = shutil.which("gh", path=environment.get("PATH", os.defpath))
+    if selected is None:
+        raise ValueError("ordinary vendor CLI unavailable")
+    path = pathlib.Path(selected).resolve(strict=True)
+    for entry in (path, *path.parents):
+        info = entry.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError("ordinary vendor CLI custody is untrusted")
+    with path.open("rb") as stream:
+        if stream.read(4) != b"\x7fELF":
+            raise ValueError("ordinary native vendor CLI required")
+        stream.seek(0)
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        info = os.fstat(stream.fileno())
+    result = subprocess.run([str(path), "--version"], env=environment, capture_output=True, timeout=10)
+    match = re.match(rb"gh version ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)", result.stdout)
+    if result.returncode or match is None:
+        raise ValueError("ordinary vendor CLI version is unqualified")
+    return str(path), match.group(1).decode("ascii"), digest, (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
 class ManagedReadObservation:
     """One explicit cohort, retained sealed images, no service or command replay.
 
@@ -141,7 +166,7 @@ class ManagedReadObservation:
     manifest verification and image bootstrap in cohort_elapsed_ns.
     """
     def __init__(self, manifest, expected_manifest_sha256, *, transport_path, transport_sha256,
-                 transport_boundary=None, environment=None, cwd=None):
+                 transport_boundary=None, environment=None, cwd=None, historical_profile=False):
         self.started_ns = time.perf_counter_ns()
         self.environment = dict(os.environ if environment is None else environment)
         self.cwd = cwd
@@ -151,25 +176,31 @@ class ManagedReadObservation:
         self.transport_path = os.path.abspath(transport_path)
         self.transport_sha256 = transport_sha256
         self.manifest_sha256 = expected_manifest_sha256
-        self.transport_boundary = dict(transport_boundary) if transport_boundary else None
+        self.transport_boundary = transport_boundary
+        self._generation_provider = None
         self.source_identity = None
-        source_bootstrap = transport_boundary.get("bootstrap_ns") if transport_boundary else 0
-        self.bootstrap_complete = type(source_bootstrap) is int and source_bootstrap >= 0
-        self.source_bootstrap_ns = source_bootstrap if self.bootstrap_complete else None
+        self.bootstrap_complete = True
+        self.source_bootstrap_ns = 0
         self._transport = None
+        self.historical_profile = historical_profile
         self.commands = 0
         self.cohort_elapsed_ns = None
         if (os.name != "posix" or not hasattr(os, "uname") or os.uname().sysname != "Linux"
                 or threading.current_thread() is not threading.main_thread()
                 or self.environment.get("GH_HOST", "github.com") != "github.com"
                 or any(self.environment.get(name) for name in ("GH_PATH", "GH_DEBUG", "GH_PAGER", "PAGER", "GH_FORCE_TTY"))
+                or "AI_GH_REAL_GH" in self.environment
                 or any(name.startswith("AI_GH_HTTP_COUNTER_") for name in self.environment)
                 or any(value and (name in {"BASH_ENV", "ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",
                                            "PYTHONINSPECT", "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH"}
                                   or name.startswith("BASH_FUNC_")) for name, value in self.environment.items())
                 or os.isatty(0) or os.isatty(1) or not _protected_config(self.environment)):
             raise ValueError("unsupported managed observation environment")
+        if type(historical_profile) is not bool:
+            raise ValueError("historical profile must be explicit")
         try:
+            if isinstance(transport_boundary, dict):
+                raise ValueError("serialized boundary cannot grant retained generation authority")
             if pathlib.Path(self.transport_path).name != "ai-gh" or not re.fullmatch(r"[0-9a-f]{64}", transport_sha256):
                 raise ValueError("exact ai-gh transport binding required")
             descriptor = os.open(self.transport_path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -182,11 +213,14 @@ class ManagedReadObservation:
                 if info.st_uid != 0 or info.st_mode & 0o022:
                     raise ValueError("trusted system Bash required")
             if transport_boundary is not None:
+                self._generation_provider = importlib.import_module("report")
+                if not self._generation_provider.retained_generation_valid(transport_boundary):
+                    raise ValueError("active retained generation authority required")
+                source_bootstrap = transport_boundary.get("bootstrap_ns")
+                self.bootstrap_complete = type(source_bootstrap) is int and source_bootstrap >= 0
+                self.source_bootstrap_ns = source_bootstrap if self.bootstrap_complete else None
                 if (os.path.abspath(transport_boundary["transport_path"]) != self.transport_path
-                        or not transport_boundary["argv_prefix"]
-                        or transport_boundary["argv_prefix"][-1] != "--"
-                        or transport_boundary["bash_path"] != self.bash
-                        or any(type(fd) is not int or fd < 3 for fd in transport_boundary["pass_fds"])):
+                        or transport_boundary["bash_path"] != self.bash):
                     raise ValueError("retained generation transport mismatch")
                 identity = transport_boundary["identity"]
                 for key, length in (("source_sha", 40), ("source_fingerprint", 64), ("install_generation_binding", 64)):
@@ -196,11 +230,23 @@ class ManagedReadObservation:
                     raise ValueError("unsupported retained generation boundary")
                 self.source_identity = {key: identity[key] for key in
                                         ("source_sha", "source_fingerprint", "install_generation_binding", "source_boundary")}
-                self.transport_boundary["argv_prefix"] = tuple(transport_boundary["argv_prefix"])
-                self.transport_boundary["pass_fds"] = tuple(transport_boundary["pass_fds"])
+                if "loaded_source_fingerprint" in identity:
+                    if not isinstance(identity["loaded_source_fingerprint"], str) or not re.fullmatch(r"[0-9a-f]{64}", identity["loaded_source_fingerprint"]):
+                        raise ValueError("loaded source fingerprint is invalid")
+                    self.source_identity["loaded_source_fingerprint"] = identity["loaded_source_fingerprint"]
                 self._native_mount = self._stack.enter_context(tempfile.TemporaryDirectory(prefix="gh-counter-observation-"))
             with verified_snapshot(manifest, expected_manifest_sha256, limit=1048576) as stream:
                 build = json.load(stream)
+            self.ordinary_cli_path, self.ordinary_cli_version, self.ordinary_cli_sha256, self._ordinary_identity = ordinary_cli_profile(self.environment)
+            profile = version_profile(pathlib.Path(__file__).parent / "pins.json", build["pins"]["upstream_version"])
+            for field in ("upstream_version", "upstream_commit", "source_sha256", "toolchain_sha256"):
+                if build["pins"][field] != profile[field]:
+                    raise ValueError("counter release source pins differ")
+            if build.get("target") != "linux-amd64":
+                raise ValueError("native Linux counter profile required")
+            self.counter_version = profile["upstream_version"]
+            if (self.counter_version != self.ordinary_cli_version or profile["profile_kind"] == "historical") and not historical_profile:
+                raise ValueError("counter release differs from actual ordinary CLI; historical evidence only")
             validate_source_binding(build["counter_source_binding"], pathlib.Path(__file__).parent)
             for kind in ("baseline", "instrumented"):
                 artifact = build["artifacts"][kind]
@@ -227,7 +273,13 @@ class ManagedReadObservation:
         return {"bootstrap_ns": self.bootstrap_ns, "cohort_elapsed_ns": self.cohort_elapsed_ns,
                 "commands": self.commands, "manifest_sha256": self.manifest_sha256,
                 "transport_sha256": self.transport_sha256, "source_bootstrap_ns": self.source_bootstrap_ns,
-                "bootstrap_complete": self.bootstrap_complete}
+                "bootstrap_complete": self.bootstrap_complete, "ordinary_cli_version": self.ordinary_cli_version,
+                "ordinary_cli_sha256": self.ordinary_cli_sha256, "counter_version": self.counter_version,
+                "historical_profile": self.historical_profile}
+
+    def _ordinary_matches(self):
+        info = os.stat(self.ordinary_cli_path, follow_symlinks=False)
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) == self._ordinary_identity
 
     def __enter__(self):
         return self
@@ -250,8 +302,10 @@ class ManagedReadObservation:
             raise ValueError("opaque workflow ID required")
         if kind not in self._images or self.cohort_elapsed_ns is not None:
             raise ValueError("observation cohort is closed or image unknown")
-        if self.commands >= 40 or not self._transport_matches():
+        if self.commands >= 40 or not self._transport_matches() or not self._ordinary_matches():
             raise ValueError("observation cohort limit or changed transport")
+        if self.transport_boundary is not None and not self._generation_provider.retained_generation_valid(self.transport_boundary):
+            raise ValueError("retained generation authority expired")
         if subprocess.PIPE in (stdin, stdout, stderr):
             raise ValueError("caller-owned streaming descriptors required")
         if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300:
@@ -260,6 +314,7 @@ class ManagedReadObservation:
         child = None
         handlers = {}
         raw = bytearray()
+        launch_stack = contextlib.ExitStack()
         complete = overflow = False
         started = time.perf_counter_ns()
         deadline = time.monotonic() + timeout_seconds
@@ -275,11 +330,17 @@ class ManagedReadObservation:
                 # Bind the same sealed bytes into a private namespace-only
                 # tmpfs; no image or helper is written to the host directory.
                 executable = os.path.join(self._native_mount, "gh")
-                prefix = [*self.transport_boundary["argv_prefix"][:-1],
+                launch = launch_stack.enter_context(self._generation_provider.retained_generation_launch(self.transport_boundary))
+                # ro-bind-data advances its input's open-file offset. Borrow
+                # a new description for EVERY launch; the held image remains
+                # immutable and reusable for subsequent observations.
+                borrowed_image = os.open(f"/proc/self/fd/{image.fileno()}", os.O_RDONLY | os.O_CLOEXEC)
+                launch_stack.callback(os.close, borrowed_image)
+                prefix = [*launch["argv_prefix"][:-1],
                           "--tmpfs", self._native_mount, "--perms", "0500",
-                          "--ro-bind-data", str(image.fileno()), executable,
+                          "--ro-bind-data", str(borrowed_image), executable,
                           "--remount-ro", self._native_mount, "--"]
-                retained = (*self.transport_boundary["pass_fds"], image.fileno())
+                retained = (*launch["pass_fds"], borrowed_image)
             environment = self.environment.copy()
             # Bind supported upstream self-execution to the retained image.
             environment["GH_PATH"] = executable
@@ -341,8 +402,9 @@ class ManagedReadObservation:
             if timed_out:
                 status = 124
             record = (aggregate_invocations(raw) if complete and not overflow and not timed_out and not interrupted
-                      and self._transport_matches() else {**UNKNOWN, "counted_invocations": None})
-            verified = record["complete"] and self.transport_boundary is not None
+                      and self._transport_matches() and self._ordinary_matches() else {**UNKNOWN, "counted_invocations": None})
+            verified = (record["complete"] and self.transport_boundary is not None
+                        and self._generation_provider.retained_generation_valid(self.transport_boundary))
             self.commands += 1
             return (status if status >= 0 else 128 - status), {
                 **record, "measurement": "managed_read_observation", "command_label": label,
@@ -351,6 +413,8 @@ class ManagedReadObservation:
                 "transport_source_verified": "verified" if verified else "unknown",
                 "source_identity": dict(self.source_identity) if verified else None,
                 "counter_image_sha256": self._image_hashes[kind], "counter_enabled": kind == "instrumented",
+                "counter_version": self.counter_version, "ordinary_cli_version": self.ordinary_cli_version,
+                "historical_profile": self.historical_profile,
                 "elapsed_ns": time.perf_counter_ns() - started,
                 "scope": "primary_builtin_api_constructors including admission identity/quota probes; subprocess and whole-account totals unknown"}
         finally:
@@ -365,3 +429,4 @@ class ManagedReadObservation:
                 except ProcessLookupError:
                     pass
                 child.wait()
+            launch_stack.close()

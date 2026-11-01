@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from source_binding import source_binding, validate_source_binding
+from source_binding import source_binding, validate_source_binding, version_profile
 from numeric_receipt import validate_receipt
 from managed_read import aggregate_invocations, managed_read_label
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
@@ -29,6 +29,21 @@ def channel(**overrides):
 
 
 class OfflineContract(unittest.TestCase):
+    def test_shared_version_profiles_reject_unknown_or_unpinned_sources(self):
+        runtime = version_profile(HERE / 'pins.json')
+        self.assertEqual(runtime['profile_kind'], 'runtime')
+        self.assertEqual(version_profile(HERE / 'pins.json', '2.101.0')['profile_kind'], 'historical')
+        for version in ('0.0.0', '../2.101.0', True):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                version_profile(HERE / 'pins.json', version)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'pins.json'
+            registry = json.loads((HERE / 'pins.json').read_text())
+            registry['profiles'][registry['default_profile']]['source_url'] = 'https://untrusted.invalid/archive'
+            path.write_text(json.dumps(registry))
+            with self.assertRaises(ValueError):
+                version_profile(path)
+
     def test_admission_invocations_aggregate_only_complete_sequential_pairs(self):
         result = aggregate_invocations(channel() + channel(observed_completed_writes=2))
         self.assertTrue(result['complete'])
@@ -169,7 +184,7 @@ class OfflineContract(unittest.TestCase):
 
     def test_windows_numeric_receipt_schema_and_bindings(self):
         import copy
-        pins = json.loads((HERE / "pins.json").read_text())
+        pins = version_profile(HERE / "pins.json")
         binding = source_binding(HERE)
         manifest = {"pins": pins, "counter_source_binding": binding,
                     "compiled_counter_source_binding": binding,

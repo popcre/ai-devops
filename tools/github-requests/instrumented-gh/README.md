@@ -4,8 +4,16 @@ Owner: [#660](https://github.com/popcre/ai-devops/issues/660), under #658.
 This extends the existing measurement namespace. It does not install, alter
 `ai-gh` routing, replace vendor `gh`, or establish programme acceptance.
 
-`pins.json` binds upstream CLI 2.101.0 to an immutable commit/archive and the
-official Go 1.27.1 Linux toolchain archive/hash. `build.py` accepts those two
+`pins.json` is the single finite version-profile registry owned by #660. Its
+default is the actual Linux vendor CLI 2.103.3; Windows source profiles 2.97.0
+and 2.88.1 preserve those hosts' existing versions. The old 2.101.0 prototype
+profile and its evidence remain explicitly historical. Each profile binds an
+immutable official commit/archive and shares the official Go 1.27.1 Linux
+toolchain archive/hash. `build.py --upstream-version VERSION` selects a recorded
+profile using the same code path; profile presence is not native qualification.
+Retire redundant profiles when the actual fleet versions converge through their
+normal maintenance routes, without changing a host merely for measurement.
+`build.py` accepts those two
 verified archives (`gh.tar.gz`, `go.tar.gz`) from a private directory and builds
 unmodified/instrumented binaries in a new private output directory. It changes
 only the two upstream API client constructors, the CLI finalization point and
@@ -131,9 +139,18 @@ Only explicit public `popcre/ai-devops` issue/PR/run/repository reads with JSON
 fields are admitted. Mutations, aliases/extensions, implicit repository context,
 executor flags, interactive terminals, source-injection variables and explicit
 caller `GH_PATH` decline qualification. The ordinary command remains available.
+An ambient `AI_GH_REAL_GH` also declines qualification. A local version read
+of the original protected vendor ELF must match the bound source release;
+historical profiles require explicit `historical_profile=True` and cannot
+establish current runtime acceptance. No system CLI is changed.
 
 The controller holds `report.retained_generation(root, install_manifest)` and
-passes its live mapping as `transport_boundary`. The observer retains sealed
+passes its live mapping as `transport_boundary`.
+The boundary is an opaque active capsule produced by canonical `import report`,
+not a serializable dictionary. Each actual launch borrows independent sealed
+source/image descriptors so repeated `ro-bind-data` mounts cannot consume the
+next launch's bytes. Closed or forged capsules decline qualification.
+The observer retains sealed
 paired native images once per cohort. It launches the original `ai-gh` through
 that readonly generation boundary, with its chosen image mounted readonly in
 a namespace-only private tmpfs. `AI_GH_REAL_GH` selects that image only inside
@@ -270,6 +287,6 @@ private structured outgoing-write counter. Retire the patch/build helper when
 native retry/privacy/parity evidence meets the same contract; preserve existing
 unknown and measured-subset history. Requalify each upstream version change.
 
-Primary sources: [GitHub CLI client constructors](https://github.com/cli/cli/blob/v2.101.0/api/http_client.go),
-[CLI exit boundary](https://github.com/cli/cli/blob/v2.101.0/cmd/gh/main.go), and
+Primary sources: [GitHub CLI client constructors](https://github.com/cli/cli/blob/v2.103.3/api/http_client.go),
+[CLI exit boundary](https://github.com/cli/cli/blob/v2.103.3/cmd/gh/main.go), and
 [Go httptrace](https://pkg.go.dev/net/http/httptrace).

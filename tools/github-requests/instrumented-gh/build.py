@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 from contextlib import ExitStack
 from sealed import verified_snapshot, private_directory
-from source_binding import FILES, source_binding
+from source_binding import FILES, source_binding, version_profile
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -60,6 +60,7 @@ def build(snapshots):
     parser.add_argument("--archives", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--target", choices=("linux-amd64", "windows-amd64"), default="linux-amd64")
+    parser.add_argument("--upstream-version", help="select one registered fleet CLI source profile")
     parser.add_argument("--compile-native-fixture", action="store_true")
     parser.add_argument("--qualify-updater", action="store_true",
                         help="local fixture variant using upstream updateable build tag")
@@ -72,7 +73,7 @@ def build(snapshots):
         raise ValueError("counter source changed while capturing inputs")
     if os.name != "posix" or os.uname().sysname != "Linux":
         raise ValueError("Linux prototype only")
-    pins = json.loads((HERE / "pins.json").read_text())
+    pins = version_profile(HERE / "pins.json", args.upstream_version)
     source_tar, go_tar = args.archives / "gh.tar.gz", args.archives / "go.tar.gz"
     source_snapshot = snapshots.enter_context(verified_snapshot(source_tar, pins["source_sha256"]))
     go_snapshot = snapshots.enter_context(verified_snapshot(go_tar, pins["toolchain_sha256"]))
