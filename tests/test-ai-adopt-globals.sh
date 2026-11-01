@@ -56,7 +56,7 @@ printf '%s\n' '#!/usr/bin/env bash' 'echo testbox' > "$STUB_BIN/hostname"
 chmod +x "$STUB_BIN/hostname"
 export PATH="$STUB_BIN:$PATH"
 
-echo "1/12 machine section is detected, saved and restored byte-identically"
+echo "1/13 machine section is detected, saved and restored byte-identically"
 fixture="$TMP_ROOT/keep/repo"; claude="$TMP_ROOT/keep/claude"; codex="$TMP_ROOT/keep/codex"; zcode="$TMP_ROOT/keep/zcode"; mimo="$TMP_ROOT/keep/mimo"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
@@ -70,11 +70,11 @@ grep -Fq 'Codex-side machine fact.' "$codex/AGENTS.md" \
   || fail "Codex machine section lost"
 grep -Fq 'Body line two.' "$claude/CLAUDE.md" || fail "repo body not installed"
 
-echo "2/12 installed body equals the repo template exactly"
+echo "2/13 installed body equals the repo template exactly"
 grep -Fq 'installed body matches the repo template exactly' <<<"$output" \
   || fail "body verification did not run or did not pass: $output"
 
-echo "3/12 a machine with no machine section is handled without inventing one"
+echo "3/13 a machine with no machine section is handled without inventing one"
 fixture="$TMP_ROOT/none/repo"; claude="$TMP_ROOT/none/claude"; codex="$TMP_ROOT/none/codex"; zcode="$TMP_ROOT/none/zcode"; mimo="$TMP_ROOT/none/mimo"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\nAn old locally-edited line.\n' "$TEMPLATE_CLAUDE" > "$claude/CLAUDE.md"
@@ -87,7 +87,7 @@ grep -Fq 'nothing to re-append' <<<"$output" || fail "did not say it appended no
 diff "$claude/CLAUDE.md" "$fixture/templates/system/CLAUDE-global.md" >/dev/null \
   || fail "installed global is not exactly the template when there is no section"
 
-echo "4/12 --dry-run changes nothing"
+echo "4/13 --dry-run changes nothing"
 fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"; zcode="$TMP_ROOT/dry/zcode"; mimo="$TMP_ROOT/dry/mimo"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
@@ -97,7 +97,7 @@ grep -Fq 'Nothing was changed.' <<<"$output" || fail "dry-run did not say so: $o
 [[ "$(cat "$claude/CLAUDE.md")" == "$before" ]] || fail "dry-run modified the global"
 [[ ! -d "$claude/skills" ]] || fail "dry-run installed skills"
 
-echo "5/12 originals are always recoverable"
+echo "5/13 originals are always recoverable"
 fixture="$TMP_ROOT/backup/repo"; claude="$TMP_ROOT/backup/claude"; codex="$TMP_ROOT/backup/codex"
 home="$TMP_ROOT/backup/home"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$home"
@@ -110,7 +110,7 @@ found="$(find "$home/.ai-globals-backup" -name 'Claude-BEFORE.md' | head -n 1)"
 [[ -n "$found" ]] || fail "no timestamped backup of the original Claude global"
 grep -Fq 'A fact that exists nowhere else.' "$found" || fail "backup does not hold the original"
 
-echo "6/12 an interleaved tail keeps machine facts and drops re-synced template blocks"
+echo "6/13 an interleaved tail keeps machine facts and drops re-synced template blocks"
 # This is albt16's real shape: machine atlas, a local standing addition, then
 # several blocks pasted in by earlier template syncs whose text the repo
 # template now carries. Note the atlas heading names OTHER machines, so hostname
@@ -148,12 +148,12 @@ grep -Fq 'Duplicated safety text' "$codex/AGENTS.md" && fail "re-synced template
 grep -Fq 'A sub-section of a block the template owns.' "$codex/AGENTS.md" \
   && fail "sub-section of a dropped heading was re-appended"
 
-echo "7/12 a dropped block is still recoverable in the backup"
+echo "7/13 a dropped block is still recoverable in the backup"
 found="$(find "$interleaved_home/.ai-globals-backup" -name 'Codex-BEFORE.md' | head -n 1)"
 [[ -n "$found" ]] || fail "no backup of the original Codex global"
 grep -Fq 'Duplicated safety text' "$found" || fail "backup does not hold the dropped block"
 
-echo "8/12 an old installed sync skill adopts globals on its first post-pull install"
+echo "8/13 an old installed sync skill adopts globals on its first post-pull install"
 fixture="$TMP_ROOT/bootstrap/repo"; claude="$TMP_ROOT/bootstrap/claude"; codex="$TMP_ROOT/bootstrap/codex"
 home="$TMP_ROOT/bootstrap/home"
 make_fixture "$fixture"
@@ -181,7 +181,7 @@ output="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$home" USERPROFILE= \
   bash "$fixture/bin/ai-install-skills" 2>&1)" || fail "second install failed: $output"
 grep -Fq 'First-sync bridge:' <<<"$output" && fail "one-time bridge ran again"
 
-echo "9/12 an existing ZCode global is refreshed from a changed template, machine section kept"
+echo "9/13 an existing ZCode global is refreshed from a changed template, machine section kept"
 # 4837's shape: the file exists with a STALE body plus a machine section, and
 # the repo template has moved on. Refreshing must replace the body, keep the
 # section byte-identically, and still exit 0 (issue #810: it used to exit 1 and
@@ -209,7 +209,7 @@ found="$(find "$BASE_BACKUP_HOME/.ai-globals-backup" -name 'ZCode-BEFORE.md' | h
 [[ -n "$found" ]] || fail "no backup of the original ZCode global"
 grep -Fq 'Old body naming u2giants/shared-db.' "$found" || fail "backup does not hold the stale original"
 
-echo "10/12 an existing MiMo global with no machine section is refreshed, not failed"
+echo "10/13 an existing MiMo global with no machine section is refreshed, not failed"
 # The exact 4837 failure: no machine section at all, so the only defence was
 # the body-verification exit 1. Now the refresh happens first and the body
 # verification passes.
@@ -228,7 +228,7 @@ grep -Fq 'MiMo body.' "$mimo/AGENTS.md" || fail "template body not installed for
 diff "$mimo/AGENTS.md" "$fixture/templates/system/AGENTS-global-mimo.md" >/dev/null \
   || fail "refreshed MiMo global is not exactly the template"
 
-echo "11/12 --check reports drift with the machine section stripped, then clean after adopt (#1881)"
+echo "11/13 --check reports drift with the machine section stripped, then clean after adopt (#1881)"
 fixture="$TMP_ROOT/check/repo"; claude="$TMP_ROOT/check/claude"; codex="$TMP_ROOT/check/codex"
 zcode="$TMP_ROOT/check/zcode"; mimo="$TMP_ROOT/check/mimo"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
@@ -243,7 +243,7 @@ run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo" >/dev/null || fail "ado
 output="$(run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo" --check)" \
   || fail "--check still reports drift after adopt: $output"
 
-echo "12/12 entire-adoption-preserves-machine-section/entire-capture-off-preserved"
+echo "12/13 entire-adoption-preserves-machine-section/entire-capture-off-preserved"
 fixture="$TMP_ROOT/entire-adoption/repo"
 clients="$TMP_ROOT/entire adoption/client homes"
 claude="$clients/Claude Home"; codex="$clients/Codex Home"
@@ -290,5 +290,28 @@ for i in "${!sentinel_files[@]}"; do
   [[ "$after_hash" == "${sentinel_hashes[$i]}" ]] \
     || fail "synthetic capture-off config changed for client $i"
 done
+
+echo "13/13 chained linked entrypoint finds repo templates from an unrelated cwd"
+LINK_HOME="$TMP_ROOT/linked-home"
+mkdir -p "$TMP_ROOT/link-one/bin" "$TMP_ROOT/link-two" "$TMP_ROOT/unrelated" \
+         "$LINK_HOME/.claude" "$LINK_HOME/.codex" "$LINK_HOME/.zcode" "$LINK_HOME/.config/mimocode"
+ln -s ../../link-two/ai-adopt-globals "$TMP_ROOT/link-one/bin/ai-adopt-globals"
+ln -s "$REPO_ROOT/bin/ai-adopt-globals" "$TMP_ROOT/link-two/ai-adopt-globals"
+if [[ -L "$TMP_ROOT/link-one/bin/ai-adopt-globals" && -L "$TMP_ROOT/link-two/ai-adopt-globals" ]]; then
+  cp "$REPO_ROOT/templates/system/CLAUDE-global.md" "$LINK_HOME/.claude/CLAUDE.md"
+  cp "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$LINK_HOME/.codex/AGENTS.md"
+  cp "$REPO_ROOT/templates/system/AGENTS-global-zcode.md" "$LINK_HOME/.zcode/AGENTS.md"
+  cp "$REPO_ROOT/templates/system/AGENTS-global-mimo.md" "$LINK_HOME/.config/mimocode/AGENTS.md"
+  output="$(cd "$TMP_ROOT/unrelated" && env HOME="$LINK_HOME" USERPROFILE= \
+    CLAUDE_HOME="$LINK_HOME/.claude" CODEX_HOME="$LINK_HOME/.codex" \
+    ZCODE_HOME="$LINK_HOME/.zcode" MIMO_HOME="$LINK_HOME/.config/mimocode" \
+    "$TMP_ROOT/link-one/bin/ai-adopt-globals" --check 2>&1)" \
+    || fail "linked --check failed from unrelated cwd: $output"
+  for label in Claude Codex ZCode MiMo; do
+    grep -Fq "$label: CLEAN" <<<"$output" || fail "linked --check did not report $label CLEAN: $output"
+  done
+else
+  echo "SKIP: linked --check fixture requires actual symlink support"
+fi
 
 echo "ALL TESTS PASSED"

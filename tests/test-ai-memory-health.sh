@@ -163,5 +163,41 @@ AI_MEMORY_HEALTH_STATE="$TREND" "$SCRIPT" --repo-root "$TMP/nohub" --claude-home
 after_trend="$(find "$TMP/home" -type f -printf '%p %s %T@\n' | sort | md5sum)"
 check "trend tracking still changes no memory" "[ \"$before_trend\" = \"$after_trend\" ]"
 
+# The installed command may be a chain of relative and absolute symlinks.
+# Invoke that chain outside the checkout and use a separate synthetic hub to
+# prove root resolution and the explicit --repo-root override together.
+LINK_REPO="$TMP/linked-command-hub"
+OVERRIDE_REPO="$TMP/explicit-override-hub"
+LINK_HOME="$TMP/linked-command-home"
+mkdir -p "$TMP/link-one/bin" "$TMP/link-two" "$TMP/unrelated" "$LINK_HOME" \
+         "$LINK_REPO/bin" "$LINK_REPO/memory/synthetic" "$OVERRIDE_REPO/memory/override"
+cp "$SCRIPT" "$LINK_REPO/bin/ai-memory-health"
+ln -s ../../link-two/ai-memory-health "$TMP/link-one/bin/ai-memory-health"
+ln -s "$LINK_REPO/bin/ai-memory-health" "$TMP/link-two/ai-memory-health"
+printf 'synthetic fact\n' > "$LINK_REPO/memory/synthetic/fact.md"
+printf '# Memory index\n\n- [Missing](default-missing.md) — fixture\n' \
+  > "$LINK_REPO/memory/synthetic/MEMORY.md"
+printf 'override fact\n' > "$OVERRIDE_REPO/memory/override/fact.md"
+printf '# Memory index\n\n- [Missing](override-missing.md) — fixture\n' \
+  > "$OVERRIDE_REPO/memory/override/MEMORY.md"
+if [[ -L "$TMP/link-one/bin/ai-memory-health" && -L "$TMP/link-two/ai-memory-health" ]]; then
+  out="$(cd "$TMP/unrelated" && env HOME="$LINK_HOME" \
+    AI_MEMORY_HEALTH_STATE="$TMP/linked-health-state" \
+    "$TMP/link-one/bin/ai-memory-health" --hub-only --coverage-only \
+    --ignore-sync-state 2>&1)"; rc=$?
+  check "linked health derives root from its synthetic repository" \
+    "[ $rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'BROKEN INDEX LINE: MEMORY.md points at missing default-missing.md'"
+  out="$(cd "$TMP/unrelated" && env HOME="$LINK_HOME" \
+    AI_MEMORY_HEALTH_STATE="$TMP/linked-health-override-state" \
+    "$TMP/link-one/bin/ai-memory-health" --hub-only --coverage-only \
+    --ignore-sync-state --repo-root "$OVERRIDE_REPO" 2>&1)"; rc=$?
+  check "linked health honors explicit --repo-root override" \
+    "[ $rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'BROKEN INDEX LINE: MEMORY.md points at missing override-missing.md'"
+  check "explicit override result is not the default synthetic hub" \
+    "! printf '%s' \"\$out\" | grep -q 'default-missing.md'"
+else
+  echo "SKIP: linked health fixtures require actual symlink support"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

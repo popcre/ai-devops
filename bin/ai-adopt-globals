@@ -42,7 +42,18 @@
 #
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve through symlinks before finding the repository root. Installed
+# entrypoints live in /usr/local/bin and may themselves point through one or
+# more relative or absolute symlinks into the checkout.
+_ai_self="${BASH_SOURCE[0]}"
+while [ -L "$_ai_self" ]; do
+  _ai_target="$(readlink "$_ai_self")"
+  case "$_ai_target" in
+    /*) _ai_self="$_ai_target" ;;
+    *) _ai_self="$(dirname "$_ai_self")/$_ai_target" ;;
+  esac
+done
+REPO_ROOT="$(cd "$(dirname "$_ai_self")/.." && pwd)"
 DRY_RUN=false
 CHECK=false
 

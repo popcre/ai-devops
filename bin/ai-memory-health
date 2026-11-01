@@ -10,7 +10,15 @@
 # Exit status: 0 = nothing to act on, 1 = findings to review, 2 = usage/setup error.
 set -u
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_ai_self="${BASH_SOURCE[0]}"
+while [ -L "$_ai_self" ]; do
+  _ai_target="$(readlink "$_ai_self")"
+  case "$_ai_target" in
+    /*) _ai_self="$_ai_target" ;;
+    *) _ai_self="$(dirname "$_ai_self")/$_ai_target" ;;
+  esac
+done
+repo_root="$(cd "$(dirname "$_ai_self")/.." && pwd)"
 claude_home=""
 out=""
 stale_days=180
