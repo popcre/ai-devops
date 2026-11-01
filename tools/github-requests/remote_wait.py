@@ -472,6 +472,15 @@ def _peek(stream):
                                                    ctypes.byref(available), None) else 0
 
 
+def _active_terminal_status(source, status, cleanup):
+    if (source is not None and status == 125 and not (
+            source["child_exit"] == 125 and isinstance(cleanup, dict)
+            and cleanup.get("owned_cleanup_verified") is True)):
+        return source["child_exit"], {"schema": 1, "frame": "cleanup", "observer_run_id": source["observer_run_id"],
+                                      "owned_cleanup_verified": False}
+    return status, cleanup
+
+
 def bounded_arguments(argument_bytes):
     if not isinstance(argument_bytes, bytes) or len(argument_bytes) > 8192:
         raise ValueError("bounded original argument JSON required")
@@ -645,13 +654,7 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                 output_frames()
                 status = child.returncode
                 if active_completion:
-                    if source is not None and status == 125:
-                        # 125 is this supervisor's observer-cleanup status.
-                        # Preserve the genuinely recorded original operation,
-                        # while independently refusing any qualification.
-                        native_cleanup = {"schema": 1, "frame": "cleanup", "observer_run_id": source["observer_run_id"],
-                                          "owned_cleanup_verified": False}
-                        status = source["child_exit"]
+                    status, native_cleanup = _active_terminal_status(source, status, native_cleanup)
                     if native_cleanup is not None:
                         sys.stdout.buffer.write(frame("cleanup", record=native_cleanup))
                 sys.stdout.buffer.write(frame("exit", code=status))
