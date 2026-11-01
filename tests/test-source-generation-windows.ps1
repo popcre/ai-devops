@@ -107,6 +107,33 @@ exit 0
     [IO.File]::WriteAllText($injected,'parent restoration works')
     Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
     [IO.File]::Delete($injected)
+    foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
+        $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+        if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
+        . ([scriptblock]::Create($cleanupAst.Extent.Text))
+    }
+    $faultRoot=Join-Path $root 'cleanup-fault'
+    $firstDirectory=Join-Path $faultRoot 'first';$secondDirectory=Join-Path $faultRoot 'second'
+    [GenerationCustody]::PrivateDirectory($faultRoot)
+    [GenerationCustody]::PrivateDirectory($firstDirectory);[GenerationCustody]::PrivateDirectory($secondDirectory)
+    [IO.File]::WriteAllText((Join-Path $secondDirectory 'owned-file'),'owned cleanup fixture')
+    $invalidControl=[GenerationCustody]::DirectoryControl($firstDirectory);$invalidControl.Dispose()
+    $laterControl=[GenerationCustody]::DirectoryControl($secondDirectory)
+    [GenerationCustody]::DirectoryAccess($laterControl,$false)
+    $throwing=[pscustomobject]@{}
+    $throwing|Add-Member ScriptMethod Dispose {throw 'Expected first capture cleanup failure'}
+    $recording=[pscustomobject]@{Count=0}
+    $recording|Add-Member ScriptMethod Dispose {$this.Count++}
+    $cleanupBootstrap=Join-Path $root 'cleanup-bootstrap'
+    [GenerationCustody]::PrivateDirectory($cleanupBootstrap)
+    $cleanupFailures=Close-OwnedGeneration @{Job=$recording;Child=$null;EventChannel=$recording;CounterChannel=$recording;
+        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);Locks=@($recording);
+        Receipt=$recording;Ack=$recording;Snapshot=$faultRoot;Bootstrap=$cleanupBootstrap}
+    Assert ($cleanupFailures.Count -eq 2) 'Every injected cleanup failure remains visible'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'directory_unseal'}).Count -eq 1) 'First failed native unseal is retained'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'capture_handle'}).Count -eq 1) 'First failed capture disposal is retained'
+    Assert ($laterControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
+    Assert (-not (Test-Path -LiteralPath $faultRoot) -and -not (Test-Path -LiteralPath $cleanupBootstrap)) 'Later native unseal permits actual owned directory cleanup'
     Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
     Assert $true 'Finite public read arguments accepted'
@@ -299,6 +326,10 @@ else:
     $fixture=@{schema=4;utc='2026-10-31T00:00:00Z';measurement='workflow_evidence';caller='ai-pr-wait';workflow='pr_wait';workflow_id=('a'*32);cohort_id=$null;target_ordinal=$null;source_verified='unknown';source_fingerprint_start=$null;source_fingerprint_end=$null;install_generation_binding=$null;event_kind='pr_merged';eligible_utc_ms=1750000000000L;observed_utc_ms=1750000001000L;delivered_utc_ms=1750000001000L;delivery_boundary='terminal_report';clock_quality='unknown';clock_error_bound_ms=$null;latency_ms=$null;unknown_reason='source_unknown'}
     $json=$fixture|ConvertTo-Json -Compress
     Assert (Test-ObserverEvent $json) 'Exact unqualified event schema accepted'
+    foreach($value in @('4.0','"4"','true')){
+        Assert (-not (Test-ObserverEvent ($json.Replace('"schema":4',('"schema":'+$value))))) 'Noninteger JSON schema stays refused'
+    }
+    Assert (-not (Test-ObserverEvent ($json.Replace('2026-10-31T00:00:00Z','2026-10-31T00:00:00+00:00')))) 'Noncanonical UTC string stays refused'
     Assert (-not (Test-ObserverEvent ($json -replace '"schema":4','"schema":4,"schema":4'))) 'Duplicate JSON event keys refused'
     $fixture.source_verified='verified'
     Assert (-not (Test-ObserverEvent ($fixture|ConvertTo-Json -Compress))) 'Child source claim refused'
