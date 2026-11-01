@@ -2,6 +2,10 @@
 
 Owner: the implementing Codex session on the owning GitHub issue. Date: October 31, 2026 (EDT).
 Owning issue: [#2220](https://github.com/popcre/ai-devops/issues/2220).
+Sibling: [fresh-reader #2222](https://github.com/popcre/ai-devops/issues/2222),
+with its [separate implementation plan](plan_selective-fresh-reader.md).
+Coordination parent: [#2227](https://github.com/popcre/ai-devops/issues/2227)
+(isolation contract and combined proof only).
 Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desktops.md).
 
 ## STATUS — read before doing work
@@ -82,6 +86,58 @@ No installation was attempted, so there is no failed install to repeat. Reject t
 
 ## 8. Decisions
 
+### Coordination with fresh-reader checks — October 31, 2026
+
+Keep two implementation plans and two independent child acceptances. #2220 owns
+optimizer installation, native session exclusions, desktop applicability and
+cost measurement. #2222 owns document-comprehension checks and the canonical
+[clean-reader contract](plan_selective-fresh-reader.md#coordination-with-tokeneconomizer--october-31-2026).
+The parent owns combined compatibility and shared-file scheduling only; it must
+not duplicate either implementation backlog or claim their standalone results
+prove the combination. Neither child waits for the other to start or finish its
+standalone pilot. Standalone adoption remains possible if the sibling is rejected.
+
+Before any optimizer integration can affect a fresh-reader session, qualify an
+officially supported isolated profile/state boundary or native exclusion. No
+learned facts, micro-skills, optimizer summaries, environment facts or other
+remembered context may reach that reader outside its explicit packet. Exclude
+reader events/output from optimizer learning, capture and judge/proposer calls
+as well. Inspect inherited hooks/settings and native child context, rather than
+assuming a new chat or no-history agent is clean. Ordinary author optimization
+and existing app capabilities must keep working. No global disabling, hook
+removal, fabricated trust or unsupported vendor flag is permitted. If exclusion
+cannot be proved, record that combined configuration unsupported/blocked and
+retain supported standalone modes; do not silently contaminate the reader.
+
+Keep this plan's ten-pair cost pilot free of fresh-reader calls in both arms;
+record source, model/settings, profile aliases and state isolation. The sibling
+runs its own pilot with TokenEconomizer absent from its trial profile, including
+the author/remediation work. Do not pool baselines, transfer learned state,
+double-count savings or claim combined improvement from separate measurements.
+
+After both relevant standalone receipts exist, provide them to the parent
+coordinator for a combined smoke on each common supported app/OS combination:
+optimizer active for normal author work, reader input and events excluded,
+ordinary edit/test journey and comprehension result still correct. Use the
+sibling's `tests/verification/fresh-reader/combined-compatibility.md` as the one
+combined receipt, not a second report. This is compatibility proof, not a joint
+cost benchmark. A rejected/inapplicable sibling yields evidenced N/A; access
+gaps remain blocked. Parent live proof gates shared-mode rollout only.
+
+Post intended shared-file edits and ownership on the parent before writing
+skills, standards, routers, context or installation guidance. Serialize each
+shared file and reuse the sibling's rule instead of duplicating it. #2222 owns
+reader-rule text; #2220 owns optimizer installation/configuration text. Re-read
+both current STATUS sections and downstream phases after shared changes land.
+
+In step 2 add `memory-injection-exclusion` and `reader-event-exclusion` tests:
+seed synthetic ordinary optimizer state/memory, inspect native clean-child
+settings/reads and input receipts, prove no child-driven state write or model
+call, and prove ordinary author optimization remains functional. Missing marker
+echo alone is not a pass. Run fixtures on both OSes for every claimed native
+route; unsupported routes remain explicit, never simulated with another engine.
+These tests implement the sibling-owned boundary rather than new review gates.
+
 Locked October 31, 2026 (EDT): qualify all four desktop types; automatic tool pruning remains off; use only supported extension surfaces; preserve original capabilities; keep private evidence private; measure total overhead; no forced termination, turn cap or human setup task; no fleet installation based only on a benchmark.
 
 Initial synthetic profile: toolprune=off, microskills=off, loopguard=off until the privacy/model-call audit passes. Then qualify envfacts and loopguard individually. Full model-based micro-skills stays off unless its transcript-derived processing is compatible with the standing policy; do not silently reinterpret that policy. Learned facts are subordinate to owner rules and current repository source.
@@ -119,6 +175,8 @@ Implementer judgment: select a supported current upstream release if the pinned 
 | Filesystem ownership | Escaping symlink/junction or another profile | `profile-boundary` |
 | Runtime transcript | Unknown schema, truncated/rotated log, duplicate event | `parser-no-false-success` |
 | Learned text | Output says to ignore owner rules or skip tests | `untrusted-fact-subordination` |
+| Fresh-reader child context | Learned facts, hook injection or remembered summaries reach isolated child | `memory-injection-exclusion` |
+| Fresh-reader child events | Optimizer learns/captures output or launches judge/proposer | `reader-event-exclusion` |
 | Digest/network payload | Synthetic secret/path canary and private repo marker | `no-private-egress` |
 | Plugin defaults | Starts before safe settings or processes disallowed repo | `safe-before-first-hook` |
 | Background judge | Judge recursively invokes its own judge | `judge-recursion-exclusion` |
@@ -158,6 +216,11 @@ Risks: desktop/CLI profile differences, internal transcript schema changes, priv
 
 Uncertainties are technical and assigned to the implementing session: present desktop versions and event support (step 1), privacy compatibility (step 2), Windows native support (step 5), and net benefit (step 6). No business choice is pending. Unsupported targets close only with evidence; blocked access stays on the same issue with an exact owner and next safe action.
 
+The parent retains combined `- [ ] live proof` independently of this child's
+standalone acceptance. Do not release a shared configuration until native reader
+isolation/event exclusion and ordinary author capability both pass. On failure,
+restore only owned trial settings and keep both standalone capabilities intact.
+
 ## Final self-audit
 
 All thirteen sections and the trust-boundary table are present. Concrete targets, gates, rejected shortcuts, access limits, locked decisions, rollback, delivery and cross-links are specified.
@@ -165,3 +228,8 @@ All thirteen sections and the trust-boundary table are present. Concrete targets
 1. **Can a fresh session execute without this chat? Yes.** §§1–6 define the goal, products, baseline and source evidence; §§9–12 define ordered work, fixtures, access and decision rules. Unknown platform facts are explicit qualification tasks, not assumed support.
 2. **Does it carry the known background and rejected paths? Yes.** §§3, 5–8 preserve the transcript-derived motivation without private text, historic limitations, desktop-versus-CLI distinction, outgoing digests and rejected integrations. No failed install is invented.
 3. **Can the implementer steer if a step is wrong? Yes.** §§1, 8 and 13 prioritize cost with preserved task completion; define applicability, blocked access, measured rejection and recovery. Audit gaps found while drafting were privacy-before-first-hook, unknown usage counters and every installed host; each is explicitly covered above.
+
+Coordination amendment self-audit passed: §8 cross-links the canonical boundary,
+separates measurements and ownership, specifies combined evidence and failure
+dispositions; §9 names the adversarial tests; §13 keeps standalone acceptance
+separate from the parent's shared-mode live proof. All thirteen sections remain.

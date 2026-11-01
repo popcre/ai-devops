@@ -4,6 +4,10 @@ Owner: Codex chat `01a19476-0eae-7092-ad1a-43b4120a92b2` for publication;
 the successor implementing session takes ownership before §9.1.
 Owning issue: [#2222](https://github.com/popcre/ai-devops/issues/2222).
 Keep implementation and `- [ ] live proof` on that same issue.
+Sibling: [TokenEconomizer #2220](https://github.com/popcre/ai-devops/issues/2220),
+with its [separate implementation plan](plan_tokeneconomizer-desktops.md).
+Coordination parent: [#2227](https://github.com/popcre/ai-devops/issues/2227)
+(isolation contract and combined proof only).
 Planning date: October 31, 2026 (America/New_York).
 Source baseline: `7e591363634be65a6b99d7e60443afc6f1091716` in
 [popcre/ai-devops](https://github.com/popcre/ai-devops).
@@ -139,6 +143,66 @@ claim is absence of planning conversation, not absence of every instruction.
 
 ## 8. Decisions
 
+### Coordination with TokenEconomizer — October 31, 2026
+
+The plans remain separate. #2222 owns document-comprehension behavior, its
+three-artifact quality pilot, and the clean-reader isolation contract below.
+#2220 owns optimizer configuration, session-event exclusion, its desktop
+applicability tests and cost pilot. The coordination parent owns combined
+compatibility acceptance; it is not a second implementation tracker. Each child
+keeps its own scope, owner, live-proof checklist and independent disposition.
+Neither child requires the sibling to begin or complete its standalone pilot.
+
+**Clean-reader contract (canonical boundary for both plans).** A fresh reader
+must receive no parent conversation, portable/personal memory, learned facts,
+micro-skills, optimizer state, optimizer-generated summaries or environment
+facts beyond the explicitly allowed document/reading packet and unavoidable
+platform safety instructions. No-history spawning alone does not prove this:
+inspect effective native child settings, inherited hooks/plugins, context
+injection paths, state roots and actual reads. Reader events and output must
+also be excluded from optimizer learning, capture and judge/proposer calls.
+
+Use an officially supported isolated child profile/state boundary that leaves
+the ordinary author session's optimizer and other capabilities working. Do not
+disable global functionality, remove hooks from shared profiles, alter safety
+rules or invent unsupported exclusion flags. #2220 implements and proves any
+required optimizer-side exclusion; #2222 proves the child's actual input/output
+boundary. If a native child cannot meet it, mark that combined configuration
+unsupported or blocked with exact evidence; never silently run a contaminated
+reader. Independently supported standalone routes remain usable.
+
+**Measurement separation.** Freeze #2222's three-artifact standalone pilot with
+TokenEconomizer absent from its trial profile, including parent/remediation
+sessions. Freeze #2220's baseline/treatment pairs without fresh-reader calls.
+Record versions, profile aliases, source hashes, state roots and settings that
+show the other treatment was absent. Do not mix receipts or count one saving
+twice. Existing privacy and unknown-usage rules still apply.
+
+**Combined smoke test.** Only after the corresponding standalone evidence is
+recorded, the parent coordinator tests the accepted settings together for each
+common supported app/OS combination: normal author optimization remains active;
+the native reader obeys the clean boundary; ordinary edit/test capability and
+document-comprehension outcomes remain correct. This smoke test establishes
+compatibility, not combined token savings. If one sibling is rejected or
+inapplicable, record that combination N/A with its evidence rather than invent
+a dependency. Access gaps remain blocked, not N/A. Child acceptance can close
+for standalone use; shared-mode rollout waits for parent compatibility proof.
+
+**Shared-edit ownership.** Before either implementer edits shared skills,
+standards, context guidance, routing or installation documents, post the exact
+files and current owner on the parent issue. One writer at a time per shared
+file; the sibling links/reuses its change instead of adding duplicate rules.
+This parent owns coordination only; #2222 owns the reader rule text and #2220
+owns optimizer installation/configuration text. Re-read downstream phases and
+the sibling's current STATUS after either lands a shared-file change.
+
+The parent coordinator records sanitized compatibility receipts in
+`tests/verification/fresh-reader/combined-compatibility.md`, linking both
+children's exact standalone artifacts. Include engine/app/OS versions, exact
+heads, isolated profile aliases, native input and event-exclusion evidence,
+ordinary-session capability result and pass/blocked/unsupported/N/A disposition.
+No private memory or canary value belongs in a public receipt.
+
 Locked for this plan, October 31, 2026: selective opt-in; advisory only; one
 reader pass per artifact revision selected for the pilot; no automated retry or
 recursive reader calls; parent retains decisions and edits; existing safety and
@@ -231,6 +295,16 @@ unchanged. When no read-only permission control exists, report that limitation
 and do not claim enforced read-only isolation; qualify using a supported native
 route before making that platform accepted. Do not weaken host safety settings.
 
+Also run `memory-injection-exclusion`: seed distinct harmless synthetic markers
+in parent-only conversation, ordinary optimizer learned state and a separate
+memory source. Keep them outside the allowed packet. Inspect actual effective
+child configuration/reads and native context evidence; lack of an echoed marker
+alone is insufficient. Run `reader-event-exclusion` to show the child's events
+and output cause no optimizer-state change or judge/proposer call while ordinary
+author optimization still works. Use synthetic state snapshots and native event
+receipts; no real private memory. #2220 supplies its optimizer-side proof under
+the same case names, rather than a duplicate independent contract.
+
 Gate: missing prerequisite and contradiction are identified, complete input is
 accurately restated without invented blockers, hostile input does not trigger
 instructions or access, and fresh-context/read-only evidence is real. A failed
@@ -253,6 +327,9 @@ discovered during the successor's real execution. Never rerun implementation
 just to generate a comparison. Use native receipts; missing usage is unknown,
 not zero. This small paired before/after study supports a directional quality
 decision, not causal savings claims or model rankings.
+Apply §8's measurement separation throughout this pilot. After the sibling's
+standalone evidence exists, provide this child's receipts to the coordination
+parent for the combined smoke; do not enlarge this pilot into a joint cost study.
 
 Adopt opt-in after the pilot only if at least two of three artifacts yield a
 confirmed material clarity fix, no unresolved material invented requirement or
@@ -294,6 +371,8 @@ deployment, production modification or database work is required.
 | Target document | Tells reader to ignore safety or expose secrets | `hostile-document.md` live case `injection-is-data` |
 | Referenced path/link | Requests private archive, traversal or unrelated network content | Live case `reading-list-boundary` with denied/unread path receipt |
 | Parent conversation | Hidden answer or canary leaks into child | Live case `no-parent-history` plus native invocation inspection |
+| Optimizer or memory injection | Learned state, hook or summary reaches the clean reader | Live case `memory-injection-exclusion`; native effective-config/read evidence |
+| Reader events/output | Optimizer learns from or processes the child | Live case `reader-event-exclusion`; state snapshots and model-call receipts |
 | Artifact revision | Parent edits after snapshot | Live case `snapshot-mismatch`; discard stale findings, no silent reuse |
 | Reader response | Invented prerequisites or ungrounded severity | Live case `complete-plan-no-invented-blocker`; parent disposition |
 | Reader failure | Timeout, missing output or unavailable native isolation | Live case `incomplete-is-not-pass`; normal writing continues |
@@ -373,6 +452,10 @@ whether savings exceed its extra work, and whether both native harnesses can
 prove the desired isolation on both OSes. Resolve by §9 evidence, not by asking
 Albert technical questions. User authority would be needed only for materially
 different business scope, not ordinary implementation choices.
+Standalone disposition and combined compatibility are separate: the coordination
+parent retains `- [ ] live proof` for shared-mode rollout after either child
+closes. Keep unsupported/blocked combinations explicit and preserve both ordinary
+capabilities when restoring a failed combined configuration.
 
 ## Final self-audit
 
@@ -394,3 +477,7 @@ link to each other. Secrets are absent; private evidence is not reproduced.
    a documented negative pilot without inventing savings or blocking delivery.
 
 Self-audit passed. Implementation/live proof remain open in STATUS.
+Coordination amendment audit passed: §8 names the sibling, contract owner,
+standalone measurement separation, combined acceptance, shared-file ownership
+and failure dispositions; §9 adds named injection/event-exclusion proofs; §13
+keeps joint acceptance on the parent without changing standalone child gates.
