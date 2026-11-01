@@ -598,6 +598,7 @@ def summarize_read_intervals(rows, receipts):
     intervals = [row for row in rows if "interval_version" in row]
     states = collections.Counter(row["clock_state"] for row in intervals)
     known, overlaps, ttl_candidates, linked, unlinked = {}, 0, 0, 0, 0
+    continuous = all(row["clock_state"] == "local_unqualified" for row in intervals)
     for row in sorted(intervals, key=lambda item: item["arrival_utc_ms"] if item["arrival_utc_ms"] is not None else -1):
         receipt = receipts.get(row["workflow_id"])
         if row["workflow_correlation"] == "workflow" and receipt is not None:
@@ -606,7 +607,10 @@ def summarize_read_intervals(rows, receipts):
             linked += 1
         else:
             unlinked += 1
-        if (row["clock_state"] != "local_unqualified" or row["generation_ordinal"] is None
+        generation = row["generation_ordinal"]
+        if generation is not None and (row["head_matches"] is not True or row["force_refresh"]):
+            known.pop(generation, None)
+        if (not continuous or row["clock_state"] != "local_unqualified" or generation is None
                 or not row["head_known"] or row["head_matches"] is not True or row["force_refresh"]
                 or row["workflow_correlation"] != "workflow"):
             continue
@@ -627,6 +631,7 @@ def summarize_read_intervals(rows, receipts):
             "clock_states": dict(sorted(states.items())), "linked_workflow_records": linked,
             "unlinked_workflow_records": unlinked, "conditional_overlap_candidates": overlaps,
             "conditional_ttl_candidates": ttl_candidates,
+            "clock_continuity": "local_only" if continuous and intervals else "unknown",
             "qualification": "unknown: local intervals do not certify source, UTC bounds or safety latency"}
 
 
