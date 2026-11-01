@@ -270,11 +270,11 @@ check 'multiple local registrations share one query for their repository' \
 stub_gh scope-first; out="$(guard_run --check-collision)"; rc=$?
 check 'an explicit repository override preserves its original fixture route' '[ "$rc" -eq 3 ]'
 rm -rf "$RDIR_TWO"
-python3 - "$RDIR/.runner" <<'PY'
-import json,sys
-from pathlib import Path
-Path(sys.argv[1]).write_bytes(json.dumps({'agentName':'SCOPE-FIRST\r','gitHubUrl':'https://github.com/fixture-owner/first'}).encode('utf-16'))
-PY
+{
+  printf '\xff\xfe'
+  while IFS= read -r -n 1 character; do printf '%s\0' "$character"; done \
+    < <(printf '%s' '{"agentName":"SCOPE-FIRST\r","gitHubUrl":"https://github.com/fixture-owner/first"}')
+} > "$RDIR/.runner"
 out="$(scoped_guard)"; rc=$?
 check 'UTF-16 Windows registrations and CR/case normalization still detect a busy runner' '[ "$rc" -eq 3 ]'
 for malformed in '[]' '{"agentName":"first","agentName":"second"}' '{"agentName":"name","gitHubUrl":"https://github.com/../unsafe"}'; do
