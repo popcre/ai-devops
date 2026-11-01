@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -373,6 +374,65 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 remote.observe(["unused"], ["tick"], "/unused", 1, active_completion=True, sdk_coordinator=True)
             launch.assert_not_called()
+
+    def test_original_pr_cannot_admit_active_only_provenance(self):
+        started = start("a" * 64)
+        source = receipt(started, event())
+        source.update(source_verified="unknown", unknown_reason="boundary_unavailable",
+                      boundary_detail="active_original_context_unqualified")
+        self.assertFalse(remote.valid_receipt(source, started))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux parent control pipe")
+    def test_real_full_control_pipe_is_nonblocking_and_does_not_change_flags(self):
+        read, write = os.pipe()
+        try:
+            os.set_blocking(write, False)
+            for _ in range(4096):
+                try: os.write(write, b"x" * 4096)
+                except BlockingIOError: break
+            else: self.fail("finite pipe capacity not reached")
+            before = time.monotonic()
+            with os.fdopen(os.dup(write), "wb", buffering=0) as stream:
+                self.assertFalse(remote._send_active_control(stream, b"ack\n"))
+            self.assertLess(time.monotonic() - before, .250)
+            self.assertFalse(os.get_blocking(write))
+        finally:
+            os.close(read); os.close(write)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux observer pipe capacity")
+    def test_observer_survives_actual_ack_backpressure_without_replay(self):
+        arguments = ["alarm"]
+        arg_hash = hashlib.sha256(b'["alarm"]').hexdigest()
+        started = start(arg_hash); started.update(execution_profile="active_sdk_coordinator", stdin_profile="active_no_stdin")
+        source = receipt(started, event()); source.update(child_exit=0, observer_event_json=None,
+                observer_event_status="unavailable", active_channel_status="valid")
+        rows = []
+        for index in range(128):
+            identity = "%032x" % (index + 1)
+            begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin", "caller": "ai-blocker-watch",
+                     "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": None, "boundary": "alarm_scan"}
+            end = {"schema": 3, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_outcome", "caller": "ai-blocker-watch",
+                   "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": None, "boundary": "alarm_scan",
+                   "outcome": "completed", "elapsed_ms": 1, "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
+            for row in (begin, end):
+                rows.append(remote.frame("active", record={"data": json.dumps(row), "queued": False}))
+        payload = remote.frame("started", record=started) + b"".join(rows) + remote.frame("receipt", record=source)
+        payload += remote.frame("stdout", data=base64.b64encode(b"original-completed-once").decode()) + remote.frame("exit", code=0)
+        # The real child explicitly shrinks its input pipe, NEVER drains ACKs,
+        # emits 256 frames, completes its normal work once, and exits normally.
+        code = ("import sys,os,fcntl;fcntl.fcntl(0,fcntl.F_SETPIPE_SZ,4096);"
+                "sys.stdout.buffer.write(" + repr(payload) + ");sys.stdout.buffer.flush()")
+        out, err = Capture(), Capture()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
+            target = Path(directory) / "backpressure.json"
+            before = time.monotonic()
+            self.assertEqual(remote.observe([sys.executable, "-I", "-c", code], arguments, target, 5,
+                                            active_completion=True, sdk_coordinator=True), 0)
+            result = json.loads(target.read_text())
+        self.assertLess(time.monotonic() - before, 5)
+        self.assertEqual(out.buffer.getvalue(), b"original-completed-once")
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertEqual(result["active_control_status"], "unavailable")
 
 
 if __name__ == "__main__":

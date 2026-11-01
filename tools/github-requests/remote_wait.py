@@ -114,7 +114,8 @@ def valid_receipt(row, started, expected_counter_hash=None, active_completion=Fa
             and type(row["child_exit"]) is int and -2147483648 <= row["child_exit"] <= 4294967295
             and row["source_verified"] in {"verified", "unknown"}
             and row["unknown_reason"] in {"none", "boundary_unavailable"}
-            and row["boundary_detail"] in {"none", "privileged_original_context", "active_original_context_unqualified"}
+            and row["boundary_detail"] in ({"none", "privileged_original_context", "active_original_context_unqualified"}
+                                           if active_completion else {"none", "privileged_original_context"})
             and (row["source_verified"] != "verified" or (row["unknown_reason"] == "none" and row["boundary_detail"] == "none"))
             and row["clock_quality"] == "unknown" and row["clock_error_bound_ms"] is None
             and row["observer_event_status"] in {"received", "unavailable", "invalid"}
@@ -207,6 +208,20 @@ def _write_private(path, value):
         os.close(parent)
 
 
+def _send_active_control(stream, data):
+    """One atomic nonblocking write to this observer's OWN Linux control pipe."""
+    if not isinstance(data, bytes) or not 0 < len(data) <= 4096:
+        return False
+    try:
+        descriptor = stream.fileno()
+        if (os.get_blocking(descriptor) or not stat.S_ISFIFO(os.fstat(descriptor).st_mode)
+                or len(data) > os.fpathconf(descriptor, "PC_PIPE_BUF")):
+            return False
+        return os.write(descriptor, data) == len(data)
+    except (OSError, ValueError):
+        return False
+
+
 def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_hash=None,
             active_completion=False, sdk_coordinator=False):
     """Linux parent; only live frames can produce this observer receipt."""
@@ -221,6 +236,8 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     observation_started_ns = time.perf_counter_ns()  # BEFORE SSH Popen, never command-runtime-only.
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None,
                              start_new_session=True)
+    if active_completion:
+        os.set_blocking(child.stdin.fileno(), False)
     selector = selectors.DefaultSelector()
     selector.register(child.stdout, selectors.EVENT_READ)
     deadline = time.monotonic() + timeout_seconds
@@ -233,9 +250,7 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     transcript = None
     if active_completion:
         def acknowledge(identity):
-            child.stdin.write(frame("active_ack", workflow_id=identity))
-            child.stdin.flush()
-            return True
+            return _send_active_control(child.stdin, frame("active_ack", workflow_id=identity))
         transcript = get_report().ActiveCompletionTranscript(arguments[0], acknowledge)
     try:
         while time.monotonic() < deadline:
@@ -316,13 +331,21 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                                       original_privilege_equivalence=False,
                                       native_execution_profile=source["execution_profile"],
                                       detection_latency_ms=None, detection_unknown_reason="eligibility_and_delivery_not_witnessed")
+                        if not _send_active_control(child.stdin, frame("ack", observer_run_id=source["observer_run_id"])):
+                            transcript.invalid = True
+                            _, result["active_completion_records"] = transcript.result(source["child_exit"], source_verified=False)
+                            result["active_completion_qualified"] = False
+                            result["active_control_status"] = "unavailable"
+                        else:
+                            result["active_control_status"] = "delivered"
                     try:
                         _write_private(receipt_path, result)
                     except (OSError, ValueError):
                         print("request observation: receipt unavailable; original command status preserved", file=sys.stderr)
                     got_receipt = True
-                    child.stdin.write(frame("ack", observer_run_id=source["observer_run_id"]))
-                    child.stdin.flush()
+                    if not active_completion:
+                        child.stdin.write(frame("ack", observer_run_id=source["observer_run_id"]))
+                        child.stdin.flush()
                     original_exit = source["child_exit"]
                 elif row["kind"] == "exit":
                     got_exit = True
