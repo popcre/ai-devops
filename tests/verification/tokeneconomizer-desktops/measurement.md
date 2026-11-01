@@ -1,5 +1,11 @@
 # Separate optimizer smoke and cost ledger
 
+November 1: the scheduled native CLI smoke completed. The
+[actual ledger](native-smoke-2026-11-01.md) includes failed preflights, learning,
+judge/writer calls and required test recovery. Differing skill inventories
+and the missed treatment check preclude matched-cost acceptance. Desktop
+cost measurement and ten pairs per installation remain open.
+
 Owner: the implementing coordinator on [#2220](https://github.com/popcre/ai-devops/issues/2220).
 No baseline/treatment pair has run. The failed native authentication preflight
 is preparation, not a measured treatment. Reader calls never enter these arms.

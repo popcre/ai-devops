@@ -33,6 +33,11 @@ native smoke. Keep the larger step-2 tests/integration open.
 
 ## Actual native preflight
 
+November 1: revoked subscription login was repaired and a fresh native model
+response succeeded. Bounded native CLI learning/pairs, recovery, capabilities
+and separate costs are recorded in the [follow-up receipt](native-smoke-2026-11-01.md).
+This supersedes the historical authentication gap below, not desktop acceptance.
+
 Ubuntu edge-dev3, October 31, 2026. Claude Code 2.1.309 is within the pin's
 2.1.300–2.1.310 range. An empty task-owned `CLAUDE_CONFIG_DIR` contained only a
 protected copy of existing subscription login state before native startup.

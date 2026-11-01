@@ -10,6 +10,20 @@ Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desk
 
 ## STATUS — read before doing work
 
+November 1 update: subscription sign-in was repaired and a fresh native model
+request succeeded. The fixed five-loop/four-fact learning schedule and one
+native CLI pair per mechanism completed; see the
+[receipts and full cost ledger](tests/verification/tokeneconomizer-desktops/native-smoke-2026-11-01.md).
+Loop advice fired after eight failures and led to a passing check. Facts were
+learned/reused, but treatment needed a coordinator follow-up to finish its
+native test. Native skill inventories differed between arms: no matched
+adoption evidence or savings claim follows. Desktop control is unavailable in
+this chat. Desktop acceptance, ten-pair costs per installation and rollout
+remain open on #2220, owned by Codex chat
+`01a194ee-7e16-70b3-9ebd-307fdd653f15`. No global optimizer installation or
+capability removal occurred. Older no-auth/no-pair statements below are
+historical and superseded by this update.
+
 October 31 execution: [current applicability](tests/verification/tokeneconomizer-desktops/applicability.md)
 and [native preflight](tests/verification/tokeneconomizer-desktops/report.md) are
 published with a separate [bounded cost schedule](tests/verification/tokeneconomizer-desktops/measurement.md).
