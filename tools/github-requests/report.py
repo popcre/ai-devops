@@ -965,6 +965,7 @@ def installed_source(root, manifest):
         loaded_fingerprint.update(path.encode("utf-8") + b"\0" + hashlib.sha256(materialized).hexdigest().encode("ascii") + b"\n")
     return {"source_sha": sha, "source_fingerprint": fingerprint.hexdigest(),
             "loaded_source_fingerprint": loaded_fingerprint.hexdigest(), "materialization": "committed_git_eol_only",
+            "source_scope": "git_eol_bin_tools_config_attributes_v1",
             "install_generation_binding": hashlib.sha256(data).hexdigest()}, files
 
 
