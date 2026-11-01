@@ -47,15 +47,29 @@ jobs:
           [void][IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($private),$acl)
           $env:TEMP=$private;$env:TMP=$private;$env:TMPDIR=$private.Replace('\','/')
           $log=Join-Path $private 'native.log'
-          $code=1
+          $code=0
           try{
-            $prior=$ErrorActionPreference;$ErrorActionPreference='Continue'
             try{
               $fixture=Join-Path $PWD 'tests/test-source-generation-windows.ps1'
               if(-not (Test-Path -LiteralPath $fixture -PathType Leaf)){throw 'Bound native fixture missing'}
-              & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture *> $log
-              $code=$LASTEXITCODE
-            }finally{$ErrorActionPreference=$prior}
+              & $fixture *> $log
+            }catch{
+              $code=1;$failure=$_
+              $knownIds=@('CommandNotFoundException','ParameterBindingException','ParameterBindingValidationException','MethodInvocationException','RuntimeException','NativeCommandFailed')
+              $id=if($failure.FullyQualifiedErrorId -cin $knownIds){$failure.FullyQualifiedErrorId}else{'redacted'}
+              $pending=[Collections.Generic.Queue[Exception]]::new();$pending.Enqueue($failure.Exception)
+              $types=[Collections.Generic.List[object]]::new()
+              while($pending.Count -and $types.Count -lt 12){
+                $exception=$pending.Dequeue();$type=$exception.GetType().FullName
+                if($type -notmatch '^System[.][A-Za-z0-9_.+]{1,120}$'){$type='redacted'}
+                $types.Add([pscustomobject]@{type=$type;hresult=[int]$exception.HResult})
+                if($exception -is [AggregateException]){
+                  foreach($inner in $exception.InnerExceptions){if($pending.Count -lt 12){$pending.Enqueue($inner)}}
+                }elseif($null -ne $exception.InnerException){$pending.Enqueue($exception.InnerException)}
+              }
+              $lines=@([regex]::Matches($failure.ScriptStackTrace,'test-source-generation-windows[.]ps1: line ([0-9]+)')|ForEach-Object{[int]$_.Groups[1].Value}|Sort-Object -Unique|Select-Object -First 12)
+              [pscustomobject]@{native_failure=$true;error_id=$id;public_fixture_lines=$lines;exceptions=@($types)}|ConvertTo-Json -Depth 4 -Compress|Write-Output
+            }
             $matches=[regex]::Matches([IO.File]::ReadAllText($log),'(?m)^PASS ([0-9]+) native Windows source custody cases\s*$')
             if($code -ne 0 -or $matches.Count -ne 1){throw 'Native service-account proof failed; owned diagnostic log retained'}
             $cases=[int]$matches[0].Groups[1].Value
