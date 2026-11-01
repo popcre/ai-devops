@@ -130,8 +130,14 @@ BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
 PYTHON_RUNNER=''
 for candidate in python3 python; do
   command -v "$candidate" >/dev/null 2>&1 || continue
-  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 || continue
-  PYTHON_RUNNER="$(command -v "$candidate")"
+  # A Bash shim works when invoked by Bash, but native Python cannot use it
+  # as subprocess argv0 on Windows (WinError 193 in the cached-status path).
+  # Retain the actual compatible interpreter, including for shared refreshes.
+  executable="$("$candidate" -c 'import sys; print(sys.executable) if sys.version_info >= (3, 10) else sys.exit(1)' 2>/dev/null | tr -d '\r')" || continue
+  [ -n "$executable" ] || continue
+  if command -v cygpath >/dev/null 2>&1; then executable="$(cygpath -u "$executable")" || continue; fi
+  [ -x "$executable" ] || continue
+  PYTHON_RUNNER="$executable"
   break
 done
 [ -n "$PYTHON_RUNNER" ] || { printf 'ai-pr-wait: Python 3.10 or newer is not installed\n' >&2; exit 3; }
