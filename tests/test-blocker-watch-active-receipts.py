@@ -112,7 +112,13 @@ exit 0
         p = self.root / "config.json"
         p.write_text(json.dumps(self.config))
         env = dict(self.environment, AI_BLOCKER_WATCH_CONFIG=p.as_posix())
-        return subprocess.run([bash_path(), (ROOT / "bin/ai-blocker-watch").as_posix(), command, *args],
+        argv = [bash_path(), (ROOT / "bin/ai-blocker-watch").as_posix(), command, *args]
+        if getattr(self, "path_prefix", None) is not None:
+            # Native Windows PATH is translated at MSYS startup. Bind this
+            # one failure stub afterward, using the shell's own path spelling.
+            argv = [bash_path(), "-c", 'prefix="$1"; shift; if command -v cygpath >/dev/null 2>&1; then prefix="$(cygpath -u "$prefix")" || exit 2; fi; PATH="$prefix:$PATH"; export PATH; exec "$@"',
+                    "fixture", self.path_prefix, Path(bash_path()).as_posix(), *argv[1:]]
+        return subprocess.run(argv,
                               env=env, capture_output=True, text=True, timeout=45)
 
     def rows(self):
@@ -201,15 +207,18 @@ exit 0
         command = fake_bin / "rm"
         command.write_text('''#!/usr/bin/env bash
 for argument in "$@"; do
-  case "$argument" in */alarm-tick) exit 9 ;; esac
+  case "$argument" in */alarm-tick) printf '9\\n' >> "$FIXTURE/cleanup-failure-status"; exit 9 ;; esac
 done
 exec /usr/bin/rm "$@"
 ''', newline="\n")
         command.chmod(0o700)
-        self.environment["PATH"] = fake_bin.as_posix() + os.pathsep + self.environment.get("PATH", "")
+        self.path_prefix = fake_bin.as_posix()
         result = self.run_command("tick")
         # Existing tick behavior ignores this cleanup status; do not change it.
         self.assertEqual(result.returncode, 0, result.stderr)
+        status_file = self.root / "cleanup-failure-status"
+        self.assertTrue(status_file.exists(), "cleanup failure stub was not selected")
+        self.assertEqual(set(status_file.read_text().splitlines()), {"9"})
         row = self.active("alarm")
         self.assertEqual((row["outcome"], row["succeeded_count"]), ("partial", 2))
 
