@@ -37,10 +37,11 @@ five native invocations and no external/failed writes. Linux CI's fixture-only
 trusted-executable repair then merged through #2272 as
 `c403f6ca528bffd9a430efc8bc9939bcfc390c36`, with the production guard unchanged
 and the actual affected shard passing. Hetz's full c403 update passed eighteen
-required stages; its new matching 2.103.0 profile and current counted read are
-being reconciled. Local installation remains held by actual active CI workers,
+required stages; its new matching 2.103.0 profile now completed one necessary
+source-verified counted read with two primary writes, five native invocations,
+no external/failed writes and successful cleanup. Local installation remains held by actual active CI workers,
 not bypassed or asserted complete. Final current-source Linux live proof is
-still pending; Windows installed source remains 9225, not c403.
+still pending locally; Windows installed source remains 9225, not c403.
 
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as

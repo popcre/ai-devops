@@ -1107,3 +1107,24 @@ Its 29 functional and 29 offline tests establish finite profile compatibility,
 not the separately measured 2.103.3 overhead result or a vendor upgrade. Final
 current-source Linux installed/count receipts remain pending; no source changes
 from another active chat or actual CI collision were overwritten/bypassed.
+
+Hetz's final normal full update to exact `c403` then completed: all eighteen
+required stages passed, source was clean and manifest digest was
+`63f27627b76ce86ff4047fb1b5058398e6c9783e6c4e04e10b866276a9615142`.
+The independently checked install/count receipt digest is
+`5b45e0e5ab622875e8ea38846c861d23cc522a334cf8d77ea7546a168a86e5c6`;
+matching-profile qualification proof digest is
+`41a80a739e835ba88559dc83560c9bf81dcbd456bc73f04c42f5e22b23158709`.
+The installed normal-owner issue read returned OPEN, exit 0, verified source
+and complete metadata: two primary completed writes, five native invocations
+including unseparated probes, zero external/failed writes and successful cohort
+cleanup. Its actual vendor remains 2.103.0 with `historical_profile=false`.
+Full observation took 4.906495335 seconds; cohort time was 4.898709412 seconds,
+including 593.082947 ms bootstrap, of which source capture was 133.197733 ms.
+Original environment, home, cwd, authentication and descriptor limits were
+preserved. Detection and whole-account HTTP remain null. Only artifact paths
+were relocated in the private staged manifest; its digest
+`5401d8dd387d8aa88f68bcf2b9d8f445c8b1f89c06e41dae6ee981be9b734250`
+remains distinct from the original `f4c930` build manifest, with all ten sources
+and executable digests reverified. Local current-source installation/count proof
+remains pending actual physical CI clearance.
