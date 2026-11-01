@@ -384,6 +384,25 @@ validation re-binds every digest and independently checks performance gates;
 the whole HTTP total remains null and installed acceptance remains false.
 No public Windows receipt is fabricated before actual execution.
 
+The [retained native evidence](../../../tests/verification/github-requests/p1-baseline.md#first-windows-297-native-qualification)
+includes the 2.88.1 cold failure and the first actual 2.97.0 attempt's warm-gate
+failure and unknown baseline detached-telemetry parity. That older compiled 2.97 fixture could
+not decode boolean capability pins and emitted no numeric receipt; cold p95,
+warm p95 and total ratios therefore remain unknown. No performance pass follows
+from source presence, completed pair count or missing reported cold failure.
+One authorized receipt-only fixture rebuild reused the exact frozen 2.97 CLI
+images and yielded a retained failed qualification: twenty cold pairs p95
++128.40061% and total +40.88737%; twenty warm pairs p95 -42.67821% and total
+-12.57680%, passing only the warm group. Detached-telemetry parity remains
+unknown. The corrected numeric result is separate from the first missing
+receipt, not a reclassification or repeat-until-pass; it does not qualify the
+full supervised route.
+The telemetry unknown was subsequently traced to the fixture's bare-path
+classifier: the pinned vendor appends its Twirp method path. The focused
+six-line fixture repair passed both unchanged CLI images' child parity plus
+the seven environment and nine boundary cases, with zero timing pairs.
+That functional proof does not change either retained performance failure.
+
 ## Retirement
 
 #660 owns the minimal pinned patch until upstream supplies an equivalent

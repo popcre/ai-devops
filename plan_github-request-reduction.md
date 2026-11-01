@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 8:31 AM EST — current coordinator reconciliation.
+November 1, 2026, 11:08 AM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -11,16 +11,22 @@ its explicitly unchecked broader fleet/comparable-workload acceptance remains
 on #658. The work below extends that acceptance, without reopening the repair.
 
 PR #2267 delivered the measurement repairs as `9225b8c4`; #2272 delivered the
-matching Hetz 2.103.0 profile and fixture-only CI recovery as `c403f6ca`, with
-the production executable trust guard unchanged and the affected CI shard
-passing. All three Windows hosts completed normal full 9225 installations and
-source-custodied counted reads, including the repaired 916 route. Hetz completed
-its full c403 installation, all eighteen required stages and a matching-version
-counted read. Each of these four useful reads observed two primary writes,
-five native invocations and no external/failed writes. Original vendor versions,
-authentication and permissions were preserved. The local current-source full
-installation/count remains pending actual active-CI clearance; no collision
-or another chat's installed-source ownership was bypassed.
+matching Hetz profile and fixture-only CI recovery as `c403f6ca`. The
+cross-repository collision guard and literal runner-name follow-up landed
+through #2276/#2277 as `18ae4d2e`/`642a1da6`, with seventy focused checks passing
+on Linux and native Windows. Local and 916 normal full updates reached `642a1da6`;
+local passed all 21 required and 12 optional stages, and 916's installed guard
+returned exit 0. Edge-dev/4837 retain their verified full `9225` delivery, Hetz
+its full `c403` delivery. Five necessary source-custodied reads across those five
+hosts total ten covered constructor writes and twenty-five native invocations,
+including probes; these are disjoint outcomes, not matched natural cohorts.
+All ten local CI registrations and original labels were restored before the
+final read, the recovery timer retired, and no jobs or runner services stopped.
+Original vendor versions, authentication, permissions and shared admission
+were preserved; no active CI or another chat's source ownership was bypassed.
+The telemetry qualification-fixture repair #2278 landed as `58243800` without
+changing a deployed runtime entry/helper; installed `642a1da6` receipts retain
+their actual generation.
 
 The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
 shows 23.89%/25.56% lower local replay processing time with both records still
@@ -37,11 +43,14 @@ The frozen replay still uses 712 upstream reads: 0% reduction, failing the 50%
 target. Original arrivals, response heads and overlap were not recorded; natural
 savings, global irreducibility and twenty matched natural outcomes per operation
 remain unknown. The ten-second TTL, original targets and accepted busy-window
-proofs are unchanged. Windows cold performance remains failed; its sampled
+proofs are unchanged. Windows 2.88 cold performance remains failed; its sampled
 128 ms launch delay is attributed to kernel process-security LUID-index cleanup,
 not NTFS, Go GC, the numeric pipe or proven Defender/Codex causality. Kernel-table
-population and a supported OS fix remain unproven. Windows 2.97 timing remains
-unqualified; T16's documented trusted-executor access remains unavailable.
+population and a supported OS fix remain unproven. Windows 2.97 also failed its
+corrected cold gate (+128.40% p95 / +40.89% total); its warm group passed.
+The separate telemetry-fixture defect has a focused native parity repair with
+zero timing pairs; both failed timing attempts remain retained.
+T16's documented trusted-executor access remains unavailable.
 
 ## Historical delivery snapshots — superseded by current reconciliation
 

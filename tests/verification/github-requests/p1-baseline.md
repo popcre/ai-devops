@@ -1140,8 +1140,9 @@ preserved. Detection and whole-account HTTP remain null. Only artifact paths
 were relocated in the private staged manifest; its digest
 `5401d8dd387d8aa88f68bcf2b9d8f445c8b1f89c06e41dae6ee981be9b734250`
 remains distinct from the original `f4c930` build manifest, with all ten sources
-and executable digests reverified. Local current-source installation/count proof
-remains pending actual physical CI clearance.
+and executable digests reverified. The later final local `642a1da6`
+installation/restoration/count is recorded below; it does not retroactively
+change this Hetz receipt.
 
 The first bounded local maintenance window was safely aborted before any
 installer or credential call: a final physical check found an actual worker
@@ -1166,8 +1167,8 @@ overrides, UTF-16 registrations and a CI job arriving during a tiny test series.
 Every actual GitHub call was stubbed; no installation or settings changed.
 An earlier incomplete payload omitted a file used only by a listing assertion
 and produced 68 passes/one failure; that artifact remains preserved, separate
-from the corrected complete-payload result. This is candidate test proof,
-not an installed collision-guard or final local installation claim.
+from the corrected complete-payload result. At that stage this was candidate
+test proof; later installed evidence below is distinct, not inferred from it.
 
 A subsequent concrete counterexample found that a legitimate leading-dash
 runner name could be parsed as a grep option. The minimal literal-match repair
@@ -1237,3 +1238,137 @@ operation. A fabricated live privacy probe would not establish natural use;
 none was performed. No transcript content, copy/upload, API traffic or source
 input modification was introduced by this aggregate. Whole-account HTTP and
 GraphQL totals, natural savings and programme acceptance remain unknown.
+
+## First Windows 2.97 native qualification
+
+The first actual 2.97.0 native paired qualification failed and remains retained;
+it was not rerun. Protected summary digest
+`6acf881d942de1243f558a747a8a8629d6132f2e66a36ddf42d5d699e14182d7`
+binds frozen updateable manifest
+`4d14021a8697b25c475b16b14227a2d2ee952a8651a473945fb80e1079f33f2d`.
+Twenty cold and twenty warm pairs executed. The warm overhead gate failed;
+the cold gate did not report failure, but cannot be called qualified without
+its numeric receipt. Baseline detached-telemetry parity was unknown. The legacy
+compiled receipt fixture used a string-only pins map and could not decode
+boolean capability entries, so no numeric result was produced; p95 and total
+ratios remain null rather than reconstructed from console output.
+
+Seven environment and nine boundary cases passed. Stage/source SSH startup was
+24.488876673 seconds, qualification SSH execution 19.756418986 seconds and the
+whole operator envelope 44.341952399 seconds. These are separate envelopes,
+not a complete supervised-observer qualification. Actual GitHub demand was
+zero; no vendor, environment, authentication or settings changed. Earlier
+source-presence-only 2.97 descriptions are superseded by this actual failed
+attempt, not by a positive performance claim.
+
+One authorized receipt-only correction then reused the exact frozen 2.97.0
+baseline/instrumented CLI images and original source bindings; only the compiled
+fixture's typed receipt support was rebuilt. Original manifest `4d14021a` and
+derived manifest
+`73ba80e6d0a7ef7a667ac8c09915fe3204550521db1b020db8258686997da086`
+remain distinct, with the replacement fixture's provenance separately recorded
+rather than substituted into the original counter-source binding. The corrected
+attempt failed and all forty pairs remain
+retained, with no repeat after the corrected protocol. Summary digest
+`451f2c6f0b96554a7203c739fe063116747c7c09287140be428e52177d7f0a73`
+and numeric digest
+`d1d1199f049eadff5681497660efd7a3c621290504da681fb4d4f6ec6b94bb65`
+were independently checked, including all four twenty-value vectors.
+
+Cold p95 was 98.9521 / 226.0072 ms, +128.40061%, and total time
+1.585935000 / 2.234382100 seconds, +40.88737%: failed. Warm p95 was
+252.7339 / 144.8716 ms, -42.67821%, and total time
+2.245693300 / 1.963257000 seconds, -12.57680%: passed. Baseline detached
+telemetry parity remains unknown; warm performance alone does not qualify the
+profile. The first failure is not replaced or relabeled. These are native
+counter-only timings, not whole-observer overhead or natural work; the 916
+kernel profile does not establish this other host's delay cause. Whole-account
+HTTP and GraphQL remain null.
+
+A separate non-timing diagnostic then isolated the detached-telemetry failure:
+the pinned baseline successfully generated its command-event log and sent a
+loopback protobuf request to the version's actual method path,
+`/telemetry/twirp/clientappsfe.observability.v1.TelemetryAPI/RecordEvents`.
+The old fixture recognized only bare `/telemetry`. Two local-only commands
+returned exit 0, with one expected API GET, one expected telemetry POST, zero
+unexpected routes and zero actual GitHub demand. Independently checked proof
+digest `391160e14a84d1b414e68da16ad6d500e763cdd863307e715d351727cff321f4`
+binds the unchanged baseline image. This identifies a fixture classification
+defect, not a missing upstream telemetry capability. It does not rerun, repair
+or qualify the independently failed timing results, nor by itself establish
+baseline/instrumented telemetry parity.
+
+The focused repair then passed natively at exact source
+`69186aa924a841d02acbfb845fd309de26180dde`, [PR #2278](https://github.com/popcre/ai-devops/pull/2278):
+seven environment cases, nine boundary cases and only the detached-child parity
+selection, with both unchanged frozen CLI images. Zero timing pairs executed.
+The independently checked summary digest is
+`8dff9253daa979cda373515d4d9992050c0adad93df7343a67b8c4b00550e7a0`;
+derived fixture manifest digest is
+`f16b2b7f8bfcf24484c58c6081ea01e3d1c98f7a7411ff7c727387c5c8246d5e`.
+This separately proves the repaired telemetry parity; both earlier timing
+failures and all their pairs remain unchanged. It does not qualify cold
+performance or the full observer.
+
+PR #2278 then merged normally as
+`582438004500abece50ed44cbc16b9d26f15e5d9`, with the Go fixture blob identical
+to tested `69186aa9`. This is a qualification-fixture-only source change, with
+no deployed runtime entry/helper change. Actual installed local/916 `642a1da6`
+proofs retain their original generation; the fixture landing is not substituted
+into them or the earlier counters' source bindings.
+
+## Final local normal installation and capacity restoration
+
+The local normal full update to exact
+`642a1da684040bbc3cc3fa66b1d1a824595bd45d` completed with exit 0 and no timeout:
+all 21 required and 12 optional stages passed, canonical source was clean, and
+the actual installed collision guard resolved to that canonical generation
+with its hash matching committed source. The independently checked installation
+summary digest is
+`24b820bb7f217d5f33ef2ec1c9bce2b02bf5ddde8392f663d75f599086d3a200`;
+installation manifest digest is
+`a1061bf4aa0485a6a59a657476aa61f1e27f780f5a4abbe428caa50636cd97b1`.
+
+After updater completion, all ten exact runner registrations were independently
+verified online with every original/default/custom and unrelated label restored;
+five were naturally busy again. Restoration completed with exit 0, and only the
+owned recovery timer was retired and read back inactive. No jobs were canceled
+and no runner services stopped. The restoration receipt digest is
+`6c36b1650c0f44c0174a07eaadcbb2f67a9629526941aba3ecd1d9254b6ff38f`.
+The earlier safely aborted window remains separate history. A subsequent useful
+counted read must follow restoration rather than be inferred from installation.
+
+That subsequent necessary issue read actually completed after restoration:
+OPEN, exit 0, source verified at exact `642a1da6`, complete metadata and successful
+cohort cleanup. It observed two primary completed writes, five native
+invocations including unseparated admission probes, zero covered external or
+failed writes and one useful outcome. Actual ordinary/counter versions were
+both 2.103.3 with `historical_profile=false`; original context was preserved.
+Command time was 50.228600089 seconds and whole cohort 50.486612611 seconds,
+including 236.504346 ms bootstrap, of which source capture was 56.959403 ms.
+Normal shared admission is included; the source component is not added twice.
+No paired-baseline, p95, detection or whole-account claim follows.
+
+The independently checked combined install/restoration/count receipt digest is
+`dd8179a494be93d835379ed73b9ad2daaa1168a270393a1ff3235e64ddc63c72`;
+observation and cohort-summary digests are respectively
+`383d45b3573b5f9e77b601bdc60b2b96e2279ed6f5f1dca22da4e96619277b5f`
+and `3fb070870f140c2261c672bf1ef38acb00be7c770640ded19fd83edbc6974e56`.
+The truthful ten-input counter manifest is
+`aee7cdcd1b3c6596e95741e374adfad42fab01b09a3aa3c4adc31d07d766d289`;
+its instrumented image remains
+`7a0de23bbb9b0edd5a66a03bb80e5e1f37869c299936abdb6e0985f5252d0c03`.
+Raw/loaded installed-source fingerprints are
+`8d7714ee99bbef067f19bb62178a48835c17da9f7784c9d02a1d4904306e584b`
+and `70716a6e4d6e85238878f555532ee673eb1b3ec5e0f648b2f2a8ca7cd8f15feb`.
+Later test-only source work is not substituted into this actual installed
+generation or its execution receipt.
+
+The final aggregate V3 digest is
+`db7caba81440ef080b79467186bfe108ff9cba2201f597ed0c72362eebee56a4`.
+It preserves V2 unchanged and all six original bindings, adds the combined
+local receipt as its seventh independently checked input, and recomputes five
+disjoint useful reads, ten constructor-subset completed writes and twenty-five
+native invocations including probes. Original natural GraphQL observations are
+unchanged; global HTTP/GraphQL totals stay null, the external remainder stays
+unbounded, and these five observations are not a matched natural cohort.
