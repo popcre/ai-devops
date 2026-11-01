@@ -120,6 +120,47 @@ requires both p95 and total elapsed ratios at most 1.05, and exits unsuccessfull
 when either group misses. It qualifies the measured finite local workload only;
 subprocess traffic, whole-account totals and installed performance stay separate.
 
+## Bounded supervised task reads
+
+`managed_read.ManagedReadObservation` is an explicit Linux observation API,
+separate from the isolated `run.py` CLI. It requires the exact build-manifest
+digest, an exact `ai-gh` path/hash, and the existing protected authentication
+configuration. It does not install anything, replace the vendor CLI, enable
+global routing, copy authentication files, or print configuration values.
+Only explicit public `popcre/ai-devops` issue/PR/run/repository reads with JSON
+fields are admitted. Mutations, aliases/extensions, implicit repository context,
+executor flags, interactive terminals, source-injection variables and explicit
+caller `GH_PATH` decline qualification. The ordinary command remains available.
+
+The controller holds `report.retained_generation(root, install_manifest)` and
+passes its live mapping as `transport_boundary`. The observer retains sealed
+paired native images once per cohort. It launches the original `ai-gh` through
+that readonly generation boundary, with its chosen image mounted readonly in
+a namespace-only private tmpfs. `AI_GH_REAL_GH` selects that image only inside
+the owned child. Existing shared pacing, credentials, quotas, probes and backoff
+remain in force; no alternate real GitHub throttle state is created.
+
+`run(arguments, opaque_workflow_id, ...)` streams caller-owned standard
+descriptors unchanged and returns `(original_status, observation)`. Up to forty
+commands are allowed; each has a supervised timeout of 1–300 seconds (120 by
+default). Signals reach the owned group; timeout/cancellation never replays a
+command and yields unknown metadata. A complete observation sums strictly
+sequential numeric start/finish pairs once, including observed admission
+identity/quota probes. Empty, truncated, interleaved, oversized or incomplete
+pairs remain unknown. The uninstrumented image produces unknown, never zero.
+Real before/after toolkit cohorts must both use the instrumented image;
+counter-off/on pairs measure instrumentation overhead only.
+
+Source identity is attached only to an actual complete wrapped observation
+while the retained generation is held. An ordinary transport hash bookend
+alone leaves loaded source unknown. The summary includes the source boundary's
+bootstrap time, image verification and whole cohort elapsed time; missing source
+bootstrap timing is explicit. Performance qualification must include all setup
+over the same outcomes. The finite counter-only timing result does not establish
+the supervised route's overhead. Counts remain completed writes in the covered
+primary API constructors; subprocess traffic and whole-account HTTP totals stay
+unknown. No production or fleet acceptance follows from local fixtures.
+
 ## Isolated native Windows qualification
 
 This is fixture-only code owned by #660. No Windows execution receipt exists

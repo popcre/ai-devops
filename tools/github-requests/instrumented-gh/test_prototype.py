@@ -22,12 +22,14 @@ import socketserver
 import pty
 from sealed import verified_snapshot
 from urllib.parse import urlsplit, parse_qs
+from managed_read import ManagedReadObservation, managed_read_label
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
-MANIFEST = json.loads(pathlib.Path(sys.argv.pop(1)).read_text()) if len(sys.argv) > 1 else None
+MANIFEST_PATH = pathlib.Path(sys.argv.pop(1)) if len(sys.argv) > 1 else None
+MANIFEST = json.loads(MANIFEST_PATH.read_text()) if MANIFEST_PATH is not None else None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -63,6 +65,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         'PullRequestStatusChecks', 'IssueByNumber', 'RepositoryInfo', 'CommentsForIssue',
                         'CommentsForPullRequest') if name in query), 'context')
         self.server.paths.append(operation)
+        if getattr(self.server, 'pause_read', False):
+            self.server.entered.set()
+            time.sleep(2)
         page2 = bool(variables.get('endCursor'))
         connection = {'totalCount': 2, 'issueCount': 2, 'nodes': [{'number': 2 if page2 else 1}],
                       'pageInfo': {'hasNextPage': not page2, 'endCursor': 'second'}}
@@ -131,6 +136,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path in ('/', '/user'):
             self.reply({'login': 'fixture'}, headers={'X-OAuth-Scopes': 'repo, read:org'})
+            return
+        if parsed.path == '/rate_limit':
+            reset = int(time.time()) + 3600
+            self.reply({'resources': {name: {'limit': 5000, 'remaining': 4900, 'reset': reset}
+                                     for name in ('core', 'graphql', 'search')}})
             return
         if parsed.path.endswith('/actions/workflows'):
             page2 = parse_qs(parsed.query).get('page') == ['2']
@@ -373,6 +383,89 @@ class PrototypeTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'did not exercise the counter'):
                 self.parity(['issue', 'view', '1', '-R', 'owner/fixture', '--json', 'number'],
                             1, diagnostic=True, require_metadata=True)
+
+    def observation(self, environment=None):
+        # Copy only this public wrapper into private fixture custody. Helpers
+        # retain their original layout; this is intentionally source-unknown.
+        transport = pathlib.Path(self.scratch.name) / 'transport' / 'bin' / 'ai-gh'
+        if not transport.exists():
+            transport.parent.mkdir(mode=0o700, parents=True)
+            transport.write_bytes((HERE.parents[2] / 'bin' / 'ai-gh').read_bytes())
+            transport.chmod(0o700)
+            (transport.parent.parent / 'tools').symlink_to(HERE.parents[2] / 'tools', target_is_directory=True)
+        environment = dict(environment or self.raw_env())
+        environment['AI_GH_MIN_SPACING_SECONDS'] = '0'  # isolated local-server fixture only
+        return ManagedReadObservation(MANIFEST_PATH, hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest(),
+                                      transport_path=transport, transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+                                      environment=environment, cwd=self.cwd)
+
+    def test_managed_observation_preserves_streams_and_counts_public_read(self):
+        arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
+        with self.proxy(), tempfile.TemporaryFile() as baseline_output, tempfile.TemporaryFile() as output, \
+                tempfile.TemporaryFile() as baseline_error, tempfile.TemporaryFile() as error:
+            self.env['GH_HOST'] = 'github.com'
+            self.reset()
+            with self.observation() as observation:
+                baseline_status, baseline = observation.run(arguments, 'a' * 32, kind='baseline',
+                                                             stdout=baseline_output, stderr=baseline_error)
+                self.assertGreaterEqual(self.server.received, 1)
+                self.reset()
+                status, record = observation.run(arguments, 'b' * 32, stdout=output, stderr=error)
+                self.assertGreaterEqual(self.server.received, 1)
+                self.assertEqual((baseline_status, status), (0, 0))
+                for first, second in ((baseline_output, output), (baseline_error, error)):
+                    first.seek(0); second.seek(0)
+                    self.assertEqual(first.read(), second.read())
+                self.assertFalse(baseline['complete'])
+                self.assertTrue(record['complete'])
+                self.assertEqual(record['observed_completed_writes'], self.server.received)
+                self.assertGreaterEqual(record['counted_invocations'], 1)
+                self.assertEqual(record['command_label'], 'issue.view')
+                self.assertEqual(record['workflow_id'], 'b' * 32)
+                self.assertTrue(record['includes_admission_probes'])
+                self.assertEqual(record['transport_source_verified'], 'unknown')
+                self.assertIsNone(record['http_requests'])
+                self.assertEqual(observation.commands, 2)
+            self.assertGreater(observation.cohort_elapsed_ns, observation.bootstrap_ns)
+            with self.assertRaises(ValueError):
+                observation.run(arguments, 'c' * 32)
+
+    def test_managed_observation_refuses_executor_and_ambient_overrides(self):
+        for arguments in (['issue', 'comment', '1', '--repo', 'popcre/ai-devops', '--json', 'number'],
+                          ['issue', 'view', '1', '--repo', 'private/repository', '--json', 'number'],
+                          ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--web'],
+                          ['fixture-extension'], ['api', 'graphql', '-f', 'query=mutation{x}'],
+                          ['pr', 'view', 'https://github.com/popcre/ai-devops/pull/1', '--json', 'number']):
+            with self.subTest(command=arguments[:2]), self.assertRaises(ValueError):
+                managed_read_label(arguments)
+        environment = self.raw_env()
+        for key, value in (('GH_PATH', '/sentinel'), ('GH_DEBUG', 'api'),
+                           ('AI_GH_HTTP_COUNTER_FD', '99'), ('GH_HOST', 'other')):
+            with self.subTest(environment_key=key), self.assertRaises(ValueError):
+                self.observation({**environment, key: value})
+
+    def test_managed_observation_cancellation_is_unknown_without_replay(self):
+        arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
+        with self.proxy(), tempfile.TemporaryFile() as output:
+            self.env['GH_HOST'] = 'github.com'
+            self.reset()
+            self.server.entered.clear()
+            self.server.pause_read = True
+            with self.observation() as observation:
+                def cancel():
+                    if self.server.entered.wait(5):
+                        os.kill(os.getpid(), signal.SIGTERM)
+                thread = threading.Thread(target=cancel)
+                thread.start()
+                try:
+                    status, record = observation.run(arguments, 'c' * 32, stdout=output, stderr=output)
+                finally:
+                    self.server.pause_read = False
+                    thread.join(timeout=6)
+            # ai-gh preserves its existing interrupt cleanup status (130).
+            self.assertEqual(status, 130)
+            self.assertFalse(record['complete'])
+            self.assertEqual(self.server.paths.count('IssueByNumber'), 1)
 
     def test_same_api_host_redirect(self):
         self.parity(['api', 'redirect'], 2)

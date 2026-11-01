@@ -14,6 +14,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from source_binding import source_binding, validate_source_binding
 from numeric_receipt import validate_receipt
+from managed_read import aggregate_invocations, managed_read_label
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -28,6 +29,34 @@ def channel(**overrides):
 
 
 class OfflineContract(unittest.TestCase):
+    def test_admission_invocations_aggregate_only_complete_sequential_pairs(self):
+        result = aggregate_invocations(channel() + channel(observed_completed_writes=2))
+        self.assertTrue(result['complete'])
+        self.assertEqual(result['observed_completed_writes'], 6)
+        self.assertEqual(result['counted_invocations'], 2)
+        self.assertIsNone(result['http_requests'])
+        start = b'{"schema":1,"started":true}\n'
+        for raw in (b'', start, start + channel(), channel() + start,
+                    channel(incomplete=True), channel(failed_write_attempts=1),
+                    channel() + b'fake-secret-sentinel\n', channel() * 65):
+            with self.subTest(size=len(raw)):
+                result = aggregate_invocations(raw)
+                self.assertFalse(result['complete'])
+                self.assertIsNone(result['observed_completed_writes'])
+                self.assertIsNone(result['counted_invocations'])
+
+    def test_managed_builtin_profile_rejects_aliases_mutations_and_implicit_context(self):
+        self.assertEqual(managed_read_label(['issue', 'view', '658', '--repo', 'popcre/ai-devops',
+                                             '--json', 'number,state']), 'issue.view')
+        for arguments in (['issue', 'view', '658', '--json', 'number'],
+                          ['issue', 'view', '658', '-R', 'popcre/ai-devops', '--repo', 'popcre/ai-devops', '--json', 'number'],
+                          ['issue', 'view', '658', '-R', 'popcre/ai-devops', '--web'],
+                          ['pr', 'merge', '1', '-R', 'popcre/ai-devops'],
+                          ['alias', 'set', 'fake', '!executor'],
+                          ['api', 'graphql', '-f', 'query=mutation{x}']):
+            with self.subTest(command=arguments[:2]), self.assertRaises(ValueError):
+                managed_read_label(arguments)
+
     def controlled_environment(self, root, host='fixture'):
         paths = {name: root / name for name in ('config', 'home', 'cache', 'temp')}
         for path in paths.values():
