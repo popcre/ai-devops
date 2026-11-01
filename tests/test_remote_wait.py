@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -294,6 +295,242 @@ class CounterCapsuleTests(unittest.TestCase):
         self.assertIsNone(saved['counter_measurement']['http_requests'])
         self.assertEqual(saved['event_qualification']['unknown_reason'],'event_unknown')
         self.assertGreaterEqual(saved['receipt_elapsed_ns'],saved['started_frame_elapsed_ns'])
+
+
+class ActiveCompletionRemoteTests(unittest.TestCase):
+    def setUp(self):
+        self.report = canonical_report()
+        patch = mock.patch.object(remote, "get_report", return_value=self.report)
+        patch.start(); self.addCleanup(patch.stop)
+
+    def test_remote_alarm_uses_linux_bookends_not_windows_wall(self):
+        row = event()
+        row.update(caller="ai-blocker-watch", workflow="blocker_watch_alarm", event_kind="alarm_stale",
+                   delivery_boundary="alarm_batch_acknowledged")
+        begin, received = clocks()
+        result = remote.qualify_remote_alarm_facts(row, begin, received, True, True)
+        self.assertEqual(result["unknown_reason"], "none")
+        self.assertEqual(result["boundary"], "linux_parent_received_alarm_batch_ack_over_ssh")
+        self.assertFalse(result["windows_wall_clock_used"])
+        changed = dict(row, observed_utc_ms=3000000000000, delivered_utc_ms=3000000000001)
+        self.assertEqual(remote.qualify_remote_alarm_facts(changed, begin, received, True, True), result)
+        for source, sdk in ((False, True), (True, False)):
+            self.assertIsNone(remote.qualify_remote_alarm_facts(row, begin, received, source, sdk)["latency_upper_ms"])
+        for eligible in (begin["wall_ms"], received["wall_ms"] + 100):
+            self.assertIsNone(remote.qualify_remote_alarm_facts(dict(row, eligible_utc_ms=eligible), begin, received, True, True)["latency_upper_ms"])
+        jumped = dict(received, monotonic_ms=received["monotonic_ms"] + 100)
+        self.assertEqual(remote.qualify_remote_alarm_facts(row, begin, jumped, True, True)["unknown_reason"], "clock_jump")
+        self.assertIsNone(remote.qualify_remote_alarm_facts(row, None, received, True, True)["latency_upper_ms"])
+
+    def test_profiles_are_named_and_do_not_relabel_active_work(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": "C:/Windows"}):
+            ordinary = remote.windows_supervisor_command("C:/repo", b'["tick"]', 50, 51, active_completion=True)
+            sdk = remote.windows_supervisor_command("C:/repo", b'["alarm"]', 50, 51, active_completion=True, sdk_coordinator=True)
+            self.assertIn("-ActiveCompletion", ordinary)
+            self.assertIn("-ActiveNoStdin", ordinary)
+            for flag in ("-RestrictedReadProfile", "-ReadOnlyNoStdin", "-ActiveSdkProfile"):
+                self.assertNotIn(flag, ordinary)
+            self.assertIn("-ActiveSdkProfile", sdk)
+            for args in (b'["tick"]', b'["arbitrary"]', b'["alarm","extra"]'):
+                with self.assertRaises(ValueError):
+                    remote.windows_supervisor_command("C:/repo", args, 50, 51, active_completion=True, sdk_coordinator=True)
+
+    def run_transport(self, sdk=False, duplicate=False, cleanup=True, mismatch=False, drop=False, clock_unknown=False,
+                      original_status=3, storage_failure=False):
+        arguments = ["alarm"] if sdk else ["tick"]
+        arg_hash = hashlib.sha256(json.dumps(arguments, separators=(",", ":")).encode()).hexdigest()
+        started = start(arg_hash)
+        started.update(execution_profile="active_sdk_coordinator" if sdk else "original_active", stdin_profile="active_no_stdin")
+        source = receipt(started, event())
+        source.update(child_exit=original_status, observer_event_json=None, observer_event_status="unavailable", active_channel_status="valid")
+        if not sdk:
+            source.update(source_verified="unknown", unknown_reason="boundary_unavailable", boundary_detail="active_original_context_unqualified")
+        identity, parent = "1" * 32, None if sdk else "2" * 32
+        begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin", "caller": "ai-blocker-watch",
+                 "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": parent, "boundary": "alarm_scan"}
+        end = {"schema": 3, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_outcome", "caller": "ai-blocker-watch",
+               "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": parent, "boundary": "alarm_scan",
+               "outcome": "completed", "elapsed_ms": 2, "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
+        def active(row): return remote.frame("active", record={"data": json.dumps(row), "queued": False})
+        frames = active(end) + (active(end) if duplicate else b"")
+        if not sdk:
+            tick = {key: end[key] for key in self.report.RECEIPT_KEYS}
+            tick.update(workflow="blocker_watch_tick", workflow_id=parent)
+            frames += active(tick)
+        frames += remote.frame("receipt", record=source)
+        payload = b"original\x00\xff\n"
+        confirmation = {"schema": 1, "frame": "cleanup", "observer_run_id": started["observer_run_id"], "owned_cleanup_verified": cleanup}
+        terminal = remote.frame("cleanup", record=confirmation) + remote.frame("exit", code=99 if mismatch else original_status)
+        code = ("import sys,json,os;sys.stdout.buffer.write(" + repr(remote.frame("started", record=started) + active(begin))
+                + ");sys.stdout.buffer.flush();a=json.loads(sys.stdin.buffer.readline());assert a['kind']=='active_ack' and a['workflow_id']=='" + identity
+                + "';sys.stdout.buffer.write(" + repr(remote.frame("stdout", data=base64.b64encode(payload).decode()) + frames)
+                + ");sys.stdout.buffer.flush();assert json.loads(sys.stdin.buffer.readline())['kind']=='ack';assert not os.path.exists(sys.argv[1]);sys.stdout.buffer.write("
+                + repr(b"" if drop else terminal) + ");sys.stdout.buffer.flush();sys.exit("+str(original_status)+")")
+        out, err = Capture(), Capture()
+        samples = [dict(wall_ms=1000+i*10, monotonic_ms=1000+i*10, error_bound_ms=1,
+                        basis="linux_adjtimex_maxerror") for i in range(16)]
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), \
+             mock.patch.object(self.report, "qualification_clock", side_effect=([None]*16 if clock_unknown else samples)):
+            target = Path(directory) / "active.json"
+            if mismatch or drop:
+                with self.assertRaises(ValueError):
+                    remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
+                                   active_completion=True, sdk_coordinator=sdk)
+                status = original_status
+            elif storage_failure:
+                with mock.patch.object(remote, "_write_active_private", side_effect=OSError("owned storage fixture failure")):
+                    status = remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
+                                            active_completion=True, sdk_coordinator=sdk)
+                self.assertEqual(status, original_status)
+                self.assertFalse(target.exists())
+                self.assertIn(b"original command status preserved", err.buffer.getvalue())
+                return None
+            else:
+                status = remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
+                                        active_completion=True, sdk_coordinator=sdk)
+            saved = json.loads(target.read_text())
+        self.assertEqual(status, original_status)
+        self.assertEqual(out.buffer.getvalue(), payload)
+        self.assertEqual(saved["measurement"], "linux_observed_windows_active_completion")
+        self.assertEqual(saved["qualification_profile"], "sdk_only_no_provider" if sdk else "original_context")
+        self.assertFalse(saved["original_privilege_equivalence"])
+        self.assertIsNone(saved["detection_latency_ms"])
+        self.assertGreaterEqual(saved["receipt_elapsed_ns"], saved["started_frame_elapsed_ns"])
+        self.assertEqual(saved["whole_observer_budget_qualification"], "unknown")
+        self.assertIsNone(saved["receipt_storage_elapsed_ns"])
+        self.assertIn("caller_interpreter_startup", saved["unmeasured_overhead"])
+        return saved
+
+    def test_original_tick_never_upgrades_even_after_valid_ack(self):
+        result = self.run_transport()
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertTrue(result["active_completion_records"])
+        self.assertEqual(result["active_completion_records"][0]["completion_qualification"]["unknown_reason"], "source_unknown")
+
+    def test_sdk_data_requires_final_source_and_global_transcript(self):
+        self.assertTrue(self.run_transport(sdk=True)["active_completion_qualified"])
+        self.assertFalse(self.run_transport(sdk=True, duplicate=True)["active_completion_qualified"])
+
+    def test_active_cleanup_failure_exit_mismatch_and_transport_drop_never_publish_qualification(self):
+        for kwargs in ({"cleanup": False}, {"mismatch": True}, {"drop": True}):
+            saved = self.run_transport(sdk=True, **kwargs)
+            self.assertFalse(saved["active_completion_qualified"])
+            self.assertEqual(saved["transport_cleanup_status"], "unverified")
+            for row in saved["active_completion_records"]:
+                self.assertIsNone(row["completion_qualification"]["duration_upper_ms"])
+
+    def test_source_without_clock_is_never_labeled_completion_qualified(self):
+        saved = self.run_transport(sdk=True, clock_unknown=True)
+        self.assertTrue(saved["active_source_protocol_verified"])
+        self.assertFalse(saved["active_completion_qualified"])
+
+    def test_failed_private_storage_leaves_no_qualified_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "atomic.json"
+            with mock.patch.object(remote.os, "fsync", side_effect=OSError("owned fixture storage failure")):
+                with self.assertRaises(OSError):
+                    remote._write_active_private(path, {"active_completion_qualified": True})
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_actual_primary_zero_and_nonzero_survive_cleanup_and_storage_failures(self):
+        for status in (0, 7):
+            result = self.run_transport(sdk=True, cleanup=False, original_status=status)
+            self.assertFalse(result["active_completion_qualified"])
+            self.assertFalse(result["native_cleanup_verified"])
+            self.assertIsNone(self.run_transport(sdk=True, original_status=status, storage_failure=True))
+
+    def test_original_125_with_clean_teardown_is_not_observer_cleanup_failure(self):
+        record = {"schema": 1, "frame": "cleanup", "observer_run_id": "a" * 32, "owned_cleanup_verified": True}
+        status, cleanup = remote._active_terminal_status({"child_exit": 125, "observer_run_id": "a" * 32}, 125, record)
+        self.assertEqual(status, 125)
+        self.assertTrue(cleanup["owned_cleanup_verified"])
+        result = self.run_transport(sdk=True, original_status=125)
+        self.assertTrue(result["native_cleanup_verified"])
+        self.assertEqual(result["source_receipt"]["child_exit"], 125)
+        for original in (0, 7, 125):
+            status, cleanup = remote._active_terminal_status({"child_exit": original, "observer_run_id": "a" * 32}, 125, None)
+            self.assertEqual(status, original)
+            self.assertFalse(cleanup["owned_cleanup_verified"])
+
+    def test_late_failure_clears_previously_qualified_event_as_well_as_completion(self):
+        result = {"active_completion_qualified": True, "active_source_protocol_verified": True,
+                  "active_completion_records": [{"completion_qualification": {
+                      "clock_quality": "parent_monotonic_host_bookends", "duration_lower_ms": 1, "duration_upper_ms": 3},
+                      "event_qualification": {"clock_quality": "host_bound_github_utc_assumed", "latency_lower_ms": 1,
+                                              "latency_upper_ms": 1001, "clock_error_bound_ms": 1000}}]}
+        remote._finish_active_result(result, time.perf_counter_ns(), False)
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertFalse(result["active_source_protocol_verified"])
+        row = result["active_completion_records"][0]
+        self.assertIsNone(row["completion_qualification"]["duration_upper_ms"])
+        self.assertIsNone(row["event_qualification"]["latency_upper_ms"])
+        self.assertEqual(row["event_qualification"]["unknown_reason"], "transport_unverified")
+
+    def test_active_admission_refuses_before_process_creation(self):
+        with mock.patch.object(remote.subprocess, "Popen") as launch:
+            with self.assertRaises(ValueError):
+                remote.observe(["unused"], ["tick"], "/unused", 1, active_completion=True, sdk_coordinator=True)
+            launch.assert_not_called()
+
+    def test_original_pr_cannot_admit_active_only_provenance(self):
+        started = start("a" * 64)
+        source = receipt(started, event())
+        source.update(source_verified="unknown", unknown_reason="boundary_unavailable",
+                      boundary_detail="active_original_context_unqualified")
+        self.assertFalse(remote.valid_receipt(source, started))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux parent control pipe")
+    def test_real_full_control_pipe_is_nonblocking_and_does_not_change_flags(self):
+        read, write = os.pipe()
+        try:
+            os.set_blocking(write, False)
+            for _ in range(4096):
+                try: os.write(write, b"x" * 4096)
+                except BlockingIOError: break
+            else: self.fail("finite pipe capacity not reached")
+            before = time.monotonic()
+            with os.fdopen(os.dup(write), "wb", buffering=0) as stream:
+                self.assertFalse(remote._send_active_control(stream, b"ack\n"))
+            self.assertLess(time.monotonic() - before, .250)
+            self.assertFalse(os.get_blocking(write))
+        finally:
+            os.close(read); os.close(write)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux observer pipe capacity")
+    def test_observer_survives_actual_ack_backpressure_without_replay(self):
+        arguments = ["alarm"]
+        arg_hash = hashlib.sha256(b'["alarm"]').hexdigest()
+        started = start(arg_hash); started.update(execution_profile="active_sdk_coordinator", stdin_profile="active_no_stdin")
+        source = receipt(started, event()); source.update(child_exit=0, observer_event_json=None,
+                observer_event_status="unavailable", active_channel_status="valid")
+        rows = []
+        for index in range(128):
+            identity = "%032x" % (index + 1)
+            begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin", "caller": "ai-blocker-watch",
+                     "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": None, "boundary": "alarm_scan"}
+            end = {"schema": 3, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_outcome", "caller": "ai-blocker-watch",
+                   "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": None, "boundary": "alarm_scan",
+                   "outcome": "completed", "elapsed_ms": 1, "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
+            for row in (begin, end):
+                rows.append(remote.frame("active", record={"data": json.dumps(row), "queued": False}))
+        payload = remote.frame("started", record=started) + b"".join(rows) + remote.frame("receipt", record=source)
+        payload += remote.frame("stdout", data=base64.b64encode(b"original-completed-once").decode()) + remote.frame("exit", code=0)
+        # The real child explicitly shrinks its input pipe, NEVER drains ACKs,
+        # emits 256 frames, completes its normal work once, and exits normally.
+        code = ("import sys,os,fcntl;fcntl.fcntl(0,fcntl.F_SETPIPE_SZ,4096);"
+                "sys.stdout.buffer.write(" + repr(payload) + ");sys.stdout.buffer.flush()")
+        out, err = Capture(), Capture()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
+            target = Path(directory) / "backpressure.json"
+            before = time.monotonic()
+            self.assertEqual(remote.observe([sys.executable, "-I", "-c", code], arguments, target, 5,
+                                            active_completion=True, sdk_coordinator=True), 0)
+            result = json.loads(target.read_text())
+        self.assertLess(time.monotonic() - before, 5)
+        self.assertEqual(out.buffer.getvalue(), b"original-completed-once")
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertEqual(result["active_control_status"], "unavailable")
 
 
 if __name__ == "__main__":
