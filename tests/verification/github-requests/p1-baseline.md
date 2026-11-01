@@ -575,3 +575,41 @@ unique historical document: 19,432 bytes, SHA-256
 Its historical operational instructions are not current acceptance authority.
 Both existing issues retain live proof, fleet coverage and genuinely matched
 natural-workload acceptance until independently demonstrated.
+
+## November 1 native continuation — not programme acceptance
+
+The coordinator independently checked the protected numeric receipt digest
+`90679c99888637c07003d090b03f04fbc9843da48b1aa1cc0fcb782570261ce0`.
+The actual CLI 2.88.1 native Windows counter failed the cold gate twice. The
+first failure remains preserved; a typed-profile/ten-input receipt-writer repair
+allowed one controlled diagnostic without changing either executable CLI image
+or either performance threshold. No further rerun is authorized by this record.
+
+All four retained distributions contain twenty measurements. Cold baseline
+p95 was 32.6482 ms versus candidate 35.6978 ms (ratio 1.0934079061); totals were
+633.593 versus 780.8177 ms (ratio 1.2323647831). Warm p95 was 36.4771 versus
+35.0808 ms (ratio 0.9617211895); totals were 653.1579 versus 646.8241 ms
+(ratio 0.9903028043). The cold outlier remains in the distribution. Fifteen
+other top-level functional tests, seven hostile-environment and nine native
+custody cases passed. This is local synthetic qualification with no real API
+traffic; it neither accepts cold performance nor proves ordinary Windows
+authentication/context or whole-command/account costs. HTTP totals stay null.
+
+Independent sanitized installation receipts bind the three reachable Windows
+hosts to merged `8ab68085c4fee1ad00fe9b26e991c3b595c69168`, installer exit 0,
+clean canonical source and matching managed launcher. Necessary ordinary issue
+reads on 4837 and edge-dev returned OPEN with exit 0 in 14.065 and 12.745 seconds;
+916 also returned issue 658 OPEN and its correct URL with exit 0. These are
+consumer outcomes, not loaded-source counter or savings proof. No vendor CLI
+or persistent execution policy changed.
+
+Hetz's root-run installer passed all eighteen required stages at the same
+source and a necessary ordinary merged-PR read returned exit 0. Acceptance was
+reopened when the normal source owner could not read newly installed root-only
+tracked files. Preserve that regression and repair through the owning
+installation procedure; installer exit 0 alone does not prove the normal-user
+capability. Root source qualification additionally remains unknown because the
+protected read boundary drops root's special access and its SSH soft descriptor
+limit is insufficient. No canonical permission change or retained capability
+may be sacrificed solely to force a qualification result. Explicit normal-owner
+qualification must remain distinct from root execution.
