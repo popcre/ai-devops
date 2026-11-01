@@ -613,3 +613,19 @@ protected read boundary drops root's special access and its SSH soft descriptor
 limit is insufficient. No canonical permission change or retained capability
 may be sacrificed solely to force a qualification result. Explicit normal-owner
 qualification must remain distinct from root execution.
+
+The necessary PR #2252 repair subsequently merged as
+`30f235dba3305e1dfec412ae36e95f36756b5c2f`. A real 4837 waiter was observed
+running with OPEN/unqueued output before the coordinator queued that PR.
+It retained installed `8ab68085` raw Git source under the explicit restricted
+read profile and later returned MERGED with exit 0. The independently checked
+receipt digest is `141a4530c7a499987cd2fb3fde1238cd7b2aa6767d66f4c0f8f24ba8e92165b6`.
+Its event arrived after `process_resumed`; source verified and event status
+received. Linux-observed delivery bounds were 237,466–238,628 milliseconds,
+including SSH delivery, with the explicit GitHub UTC assumption and timestamp
+resolution. This passes the owning plan's 300,000-millisecond waiter ceiling;
+there is no substituted sixty-second acceptance target. Full observation was
+345.859124593 seconds, including 4.097065970 seconds startup/SSH. One genuine
+outcome does not satisfy the twenty-outcome floor, establish p95 regression,
+count actual requests or prove savings. The source witness is `8ab68085`, not
+the later merge commit being detected.
