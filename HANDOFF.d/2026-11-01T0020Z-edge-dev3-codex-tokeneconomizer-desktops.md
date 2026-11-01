@@ -16,15 +16,15 @@ None. Albert requested planning for all applicable requested desktop clients. In
 
 ## 2. Session goal
 
-Produce a self-contained implementation plan for TokenEconomizer, with genuine desktop qualification, preserved capabilities and measured net benefit. The [plan](../plan_tokeneconomizer-desktops.md) is the execution brief; portable destination is [the plan on GitHub](https://github.com/popcre/ai-devops/blob/codex/tokeneconomizer-desktop-plan/plan_tokeneconomizer-desktops.md) while this planning change is pending, then main after merge.
+Produce a self-contained implementation plan for TokenEconomizer, with genuine desktop qualification, preserved capabilities and measured net benefit. The [plan](../plan_tokeneconomizer-desktops.md) is the execution brief; portable destination is [the merged plan on GitHub](https://github.com/popcre/ai-devops/blob/main/plan_tokeneconomizer-desktops.md).
 
 ## 3. Current state
 
-Planning only. All seven implementation steps remain open. No plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. Plan and router links were committed and pushed in [d39a60ad](https://github.com/popcre/ai-devops/commit/d39a60ad). Document safety passed with 536 tracked Markdown files. Issue registration subsequently succeeded as #2220 through the repaired candidate; the earlier access blockage is superseded. The planning session retains PR delivery ownership. Publication is not implementation acceptance.
+Planning delivery is complete: [PR #2221](https://github.com/popcre/ai-devops/pull/2221) merged as [0b2cae6f259d1fe92546aaafedb70d7f27ec01b6](https://github.com/popcre/ai-devops/commit/0b2cae6f259d1fe92546aaafedb70d7f27ec01b6), with document safety passing for 536 tracked Markdown files. All seven implementation steps remain open on #2220 in the reconciled plan STATUS. This planning session installed no TokenEconomizer plugin, capture, config or provider change. Baseline and upstream candidate are pinned in plan §§5–6. The implementation successor must follow current #2220 ownership and the current plan STATUS, including its later coordination links; this file remains OPEN for that work. Publication is not implementation acceptance.
 
 ## 4. Failed approaches
 
-No install attempted. Plan §7 records shortcuts deliberately rejected. Shared GitHub throttle can delay publication; never bypass it. The skill pointer escalated the declared prose task to code. A shell command incorrectly continued to push after the first ship check refused; the class was subsequently redeclared code and the check passed. The PR must use the normal non-prose lane; do not admin-merge this change as prose.
+No TokenEconomizer install attempted. Plan §7 records shortcuts deliberately rejected. Shared GitHub throttle delayed publication; registration and delivery subsequently succeeded. The skill pointer escalated the declared prose task to code. A shell command incorrectly continued to push after the first ship check refused; the class was subsequently redeclared code and the check passed. PR #2221 used the normal non-prose lane. That historical requirement does not classify a later prose-only correction as code.
 
 ## 5. Findings
 
