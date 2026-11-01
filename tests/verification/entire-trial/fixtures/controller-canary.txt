@@ -1,0 +1,3 @@
+Public synthetic controller qualification for ai-devops issue #2022.
+Owner: the #2022 coordinator. Retain only as bounded trial evidence.
+No private context, capture, deployment, or production behavior is included.
