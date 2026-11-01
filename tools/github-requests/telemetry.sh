@@ -185,10 +185,14 @@ gh_measure_workflow_id(){
 
 gh_measure_workflow_outcome(){
   local caller="${1:-}" workflow="${2:-}" id="${3:-}" outcome="${4:-}" elapsed="${5:-}" utc record
+  local boundary="${6:-}" attempted="${7:-}" succeeded="${8:-}" failed="${9:-}" skipped="${10:-}" parent="${11:-}" extended=0 number
   case "$caller:$workflow:$outcome" in
     ai-pr-wait:pr_wait:merged|ai-pr-wait:pr_wait:closed|\
     ai-pr-wait:pr_wait:checks_failed|ai-pr-wait:pr_wait:ejected|\
     ai-pr-wait:pr_wait:deadline|ai-blocker-watch:blocker_watch_tick:completed) ;;
+    ai-blocker-watch:blocker_watch_alarm:completed|ai-blocker-watch:blocker_watch_alarm:partial|ai-blocker-watch:blocker_watch_alarm:failed|ai-blocker-watch:blocker_watch_alarm:skipped|\
+    ai-blocker-watch:blocker_watch_links:completed|ai-blocker-watch:blocker_watch_links:partial|ai-blocker-watch:blocker_watch_links:failed|ai-blocker-watch:blocker_watch_links:skipped|\
+    ai-blocker-watch:blocker_watch_wake:process_succeeded|ai-blocker-watch:blocker_watch_wake:process_failed|ai-blocker-watch:blocker_watch_wake:refused|ai-blocker-watch:blocker_watch_wake:skipped) extended=1 ;;
     ai-verify-run:verify_dispatch:dispatched|ai-verify-run:verify_dispatch:duplicate_refused|ai-verify-run:verify_dispatch:failed|\
     ai-verify-run:verify_status:completed|ai-verify-run:verify_status:failed|\
     ai-verify-run:verify_cancel:cancel_requested|ai-verify-run:verify_cancel:refused|ai-verify-run:verify_cancel:failed|\
@@ -198,9 +202,30 @@ gh_measure_workflow_outcome(){
   esac
   [[ "$id" =~ ^[0-9a-f]{32}$ && "$elapsed" =~ ^[0-9]{1,9}$ ]] || return 2
   [ "$elapsed" -le 604800000 ] || return 2
+  if [ "$extended" = 1 ]; then
+    [ "$#" = 11 ] || return 2
+    case "$workflow:$boundary" in blocker_watch_alarm:alarm_scan|blocker_watch_links:links_scan|blocker_watch_wake:wake_process_exit) ;; *) return 2 ;; esac
+    for number in "$attempted" "$succeeded" "$failed" "$skipped"; do
+      [[ "$number" =~ ^(0|[1-9][0-9]{0,8})$ ]] || return 2
+    done
+    [ "$((succeeded + failed))" -le "$attempted" ] || return 2
+    [[ -z "$parent" || "$parent" =~ ^[0-9a-f]{32}$ ]] || return 2
+    [ "$id" != "$parent" ] || return 2
+    case "$outcome" in
+      completed|process_succeeded) [ "$attempted" -gt 0 ] && [ "$succeeded" -gt 0 ] && [ "$failed" = 0 ] || return 2 ;;
+      partial) [ "$succeeded" -gt 0 ] || return 2 ;;
+      skipped|refused) [ "$succeeded" = 0 ] || return 2 ;;
+    esac
+  else
+    [ "$#" = 5 ] || return 2
+  fi
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
   record=$(printf '{"schema":3,"utc":"%s","measurement":"workflow_outcome","caller":"%s","workflow":"%s","workflow_id":"%s","outcome":"%s","elapsed_ms":%s}' \
     "$utc" "$caller" "$workflow" "$id" "$outcome" "$elapsed")
+  if [ "$extended" = 1 ]; then
+    [ -z "$parent" ] && parent=null || parent="\"$parent\""
+    record="${record%\}},\"boundary\":\"$boundary\",\"attempted_count\":$attempted,\"succeeded_count\":$succeeded,\"failed_count\":$failed,\"skipped_count\":$skipped,\"parent_workflow_id\":$parent}"
+  fi
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
@@ -314,7 +339,7 @@ gh_measure_graphql_cost(){
 gh_measure_read_observation(){
   local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" source="${4:-}" utc record cache_hit=false saved=false
   case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
-  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|blocker_watch_wake|merge_group_evidence) ;; *) return 2 ;; esac
   case "$source" in cache) cache_hit=true; saved=true ;; upstream) ;; *) return 2 ;; esac
   [ -z "$ordinal" ] || [[ "$ordinal" =~ ^[0-9]{1,10}$ ]] || return 2
   local ordinal_json=null
@@ -330,7 +355,7 @@ gh_measure_read_observation(){
 gh_measure_write_observation(){
   local caller="${1:-}" workflow="${2:-}" ordinal="${3:-}" action="${4:-}" relation="${5:-}" utc record dup=false
   case "$caller" in ai-pr-wait|ai-merge-group-evidence|ai-blocker-watch|ai-gh-wait) ;; *) return 2 ;; esac
-  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|merge_group_evidence) ;; *) return 2 ;; esac
+  case "$workflow" in pr_wait|blocker_watch_tick|blocker_watch_alarm|blocker_watch_links|blocker_watch_wake|merge_group_evidence) ;; *) return 2 ;; esac
   case "$action" in written|skipped) ;; *) return 2 ;; esac
   case "$relation" in new|unchanged|unknown) ;; *) return 2 ;; esac
   if [ "$action" = written ] && [ "$relation" = unchanged ]; then dup=true; fi

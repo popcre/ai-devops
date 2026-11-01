@@ -912,4 +912,20 @@ check 'non-raw flags skip the CR strip: -c -e -n --arg' '! bw_raw -c && ! bw_raw
 printf '{"x":"a\\rb"}' > "$TMP/cr.json"
 check 'raw jq output still has its CR stripped off Windows' "[ \"\$(bash -c 'eval \"\$(sed -n \"/^case \\\"\\\${OSTYPE/,/^jq(){/p\" \"$SCRIPT\")\"; jq -r .x \"$TMP/cr.json\"' | od -An -c | tr -d ' ')\" = 'ab\\n' ]"
 
+# Reuse this registered suite for the finite #658 active-boundary packet.
+# Resolve the actual interpreter as the waiter does, including Windows shims.
+active_python=''
+for candidate in python3 python; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  executable="$("$candidate" -c 'import sys; print(sys.executable) if sys.version_info >= (3, 10) else sys.exit(1)' 2>/dev/null | tr -d '\r')" || continue
+  if command -v cygpath >/dev/null 2>&1; then executable="$(cygpath -u "$executable")" || continue; fi
+  [ -x "$executable" ] || continue
+  active_python="$executable"; break
+done
+if [ -n "$active_python" ] && "$active_python" "$ROOT/tests/test-blocker-watch-active-receipts.py" -q; then
+  ok 'active scan/process receipts preserve outcomes, costs, privacy and legacy shapes'
+else
+  bad 'active scan/process receipts preserve outcomes, costs, privacy and legacy shapes'
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
