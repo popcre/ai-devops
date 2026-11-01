@@ -12,6 +12,7 @@ import tempfile
 import time
 import signal
 import selectors
+from contextlib import contextmanager
 import unittest
 from unittest import mock
 
@@ -184,6 +185,17 @@ class EventTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux sealed source; native Windows has its own custody suite")
 class ParentTests(unittest.TestCase):
     def setUp(self):
+        self.native_git = None
+        for candidate in ("/usr/bin/git", "/bin/git", shutil.which("git")):
+            if candidate is None:
+                continue
+            try:
+                self.native_git = report.trusted_boundary_executable(candidate)
+                break
+            except (OSError, ValueError):
+                continue
+        if self.native_git is None:
+            raise RuntimeError("Qualification fixture requires an existing root-trusted native Git")
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "source"
         for directory in ("bin", "tools", "config"):
@@ -222,15 +234,42 @@ exit "${1:-0}"
     def tearDown(self): self.temp.cleanup()
 
     def git(self, *arguments):
-        return subprocess.run(["git", "-C", str(self.root), *arguments], check=True,
+        return subprocess.run([self.native_git, "-C", str(self.root), *arguments], check=True,
                               capture_output=True, text=True).stdout
 
+    @contextmanager
     def fixture_installation(self):
         # Only tests substitute the protected canonical-I/O boundary. There
         # is no production flag/environment path to bless this private file.
-        return mock.patch.object(report, "canonical_installation",
-                                 side_effect=lambda root, manifest: (Path(manifest).read_bytes(),
-                                                                    self.launcher.parent / "ai-pr-wait"))
+        # Hosted images may put a mutable /usr/local Git before the distro Git.
+        # This synthetic positive fixture selects an actually validated native
+        # prerequisite; production keeps refusing the original untrusted PATH.
+        path = str(Path(self.native_git).parent) + os.pathsep + os.environ.get("PATH", "")
+        with mock.patch.dict(os.environ, {"PATH": path}), mock.patch.object(
+                report, "canonical_installation",
+                side_effect=lambda root, manifest: (Path(manifest).read_bytes(),
+                                                   self.launcher.parent / "ai-pr-wait")):
+            yield
+
+    def test_fixture_trusted_git_does_not_bless_original_untrusted_path(self):
+        shadow_directory = Path(self.temp.name) / "mutable-bin"
+        shadow_directory.mkdir()
+        shadow = shadow_directory / "git"
+        shadow.write_text("#!/bin/sh\nexit 89\n")
+        shadow.chmod(0o755)
+        path = str(shadow_directory) + os.pathsep + os.environ.get("PATH", "")
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            self.assertTrue(Path(shutil.which("git")).samefile(shadow))
+            with self.fixture_installation():
+                self.assertTrue(Path(shutil.which("git")).samefile(self.native_git))
+                identity, _ = report.installed_source(self.root, self.manifest)
+                self.assertEqual(identity["source_sha"], self.sha)
+            self.assertEqual(os.environ["PATH"], path)
+            self.assertTrue(Path(shutil.which("git")).samefile(shadow))
+            with mock.patch.object(report, "canonical_installation", return_value=(
+                    self.manifest.read_bytes(), self.launcher.parent / "ai-pr-wait")):
+                with self.assertRaisesRegex(ValueError, "boundary executable ancestor is untrusted"):
+                    report.installed_source(self.root, self.manifest)
 
     def run_parent(self, status=0, extra_env=None, receipt=None):
         receipt = receipt or Path(self.temp.name) / f"receipt-{status}.json"

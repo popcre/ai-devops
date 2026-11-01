@@ -39,6 +39,12 @@ class OfflineContract(unittest.TestCase):
     def test_shared_version_profiles_reject_unknown_or_unpinned_sources(self):
         runtime = version_profile(HERE / 'pins.json')
         self.assertEqual(runtime['profile_kind'], 'runtime')
+        registry = json.loads((HERE / 'pins.json').read_bytes())
+        for version in registry['profiles']:
+            with self.subTest(registered_version=version):
+                selected = version_profile(HERE / 'pins.json', version)
+                self.assertEqual(selected['upstream_version'], version)
+                self.assertEqual(selected['source_url'].rsplit('/', 1)[-1], selected['upstream_commit'])
         self.assertEqual(version_profile(HERE / 'pins.json', '2.101.0')['profile_kind'], 'historical')
         for version in ('0.0.0', '../2.101.0', True):
             with self.subTest(version=version), self.assertRaises(ValueError):

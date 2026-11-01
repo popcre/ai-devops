@@ -5,7 +5,8 @@ This extends the existing measurement namespace. It does not install, alter
 `ai-gh` routing, replace vendor `gh`, or establish programme acceptance.
 
 `pins.json` is the single finite version-profile registry owned by #660. Its
-default is the actual Linux vendor CLI 2.103.3; Windows source profiles 2.97.0
+default is the actual Linux vendor CLI 2.103.3; the separate Linux 2.103.0
+profile preserves Hetz's existing vendor version. Windows source profiles 2.97.0
 and 2.88.1 preserve those hosts' existing versions. The old 2.101.0 prototype
 profile and its evidence remain explicitly historical. Each profile binds an
 immutable official commit/archive and shares the official Go 1.27.1 Linux
@@ -19,7 +20,7 @@ unmodified/instrumented binaries in a new private output directory. It changes
 only the profile's declared upstream API client constructors, the CLI finalization point and
 the new internal counter package. Modules retain upstream `go.mod`/`go.sum`.
 The 2.88.1 profile has one constructor and no detached telemetry; 2.97.0,
-2.103.3 and historical 2.101.0 have two constructors and detached telemetry.
+2.103.0, 2.103.3 and historical 2.101.0 have two constructors and detached telemetry.
 No binary or upstream source archive belongs in this repository.
 Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
 before hashing, and extracted from those same verified immutable bytes.
