@@ -1,5 +1,27 @@
 # Entire reversible trial execution report — #2022
 
+## October 31 Alien execution follow-up
+
+A final capacity read found Alien idle again. The second bounded startup attempt
+passed its unchanged collision guard and [mirror build8](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/8)
+actually passed on `edge-alien`, agent `entire-2022-alien`, version4.9.0, at exact
+source `5c83f0596685d8be3a63c3991521da21a0c2737f`. The existing Windows phrase
+suite completed in21.654seconds; this is runner feasibility, not an end-to-end
+timing pair or whole-suite result. The one-job agent disconnected; the new
+one-hour token was revoked, vault metadata marked revoked, configuration archived
+without replacing its earlier archive, zero trial agents remained, and the
+original GitHub service read back running/automatic. Earlier build7's refusal
+and cancellation remain real history, not this attempt's result.
+
+T2 now has actual Envy and Alien Windows executions plus Linux. XPS remains
+unproved: the approved atlas, existing trusted Envy host-key store and approved
+vault title lookup supplied no independently verified key. No key was accepted.
+All16 client journeys remain0/16, whole-suite parity and timing remain unproved,
+and the canceled-base merge gap prevents replacement qualification. Three Windows
+installer completions and the remaining Linux health failure are unchanged.
+Private custody retains build8's full receipt and post-stop service readback.
+Coordinator and original ownership blocker/constraints/deadlines are unchanged.
+
 ## October 31 installation and recovery follow-up
 
 Coordinator remains `01a19481-9ceb-7592-934e-9e5a4dac240d`, edge-dev3.
