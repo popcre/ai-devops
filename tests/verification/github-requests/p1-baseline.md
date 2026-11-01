@@ -1,6 +1,40 @@
 # P1 request attribution — working baseline
 
-## Current receipt-emission supersession — November 1, 2026 EST
+## Current receipt-emission reconciliation — November 1, 2026 EST
+
+Final code #2291 merged as `10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`.
+Dispatch/privacy and finite active BlockerWatch terminal/event producers,
+governed parent completion/event consumers, native transport and literal dry-run
+parity are implemented. The original emission/consumer implementation gaps are
+repaired; full installations and source-custodied live proofs at this final
+generation remain pending. Earlier installations/read receipts below retain
+their actual source and are not silently retargeted.
+
+Only an explicitly admitted SDK-only standalone successful alarm can qualify a
+conservative batch-ack detection interval. Local Linux validates same-host
+facts against parent bookends; native uses Linux parent receipt over SSH and
+genuine eligible GitHub UTC, without Windows wall-clock subtraction. A caller's
+dry-run intent excludes both qualified intervals and active success even if
+producer rows claim completion. Original/provider context is never silently
+reduced to grant qualification. Privileged-provider authority, wake/link/tick
+detection and whole-observer budget remain unknown. Twenty matched natural
+outcomes and genuine future activity are still required, not fabricated.
+
+Repaired registration CI at actual `e04` passed all twelve Windows sections and
+executed the new fixture's 73 native assertions; its immutable proof is
+`f1f4a7f953b2b5b81e7e965725898a18537643d74f624bc49e842568798e051e`.
+Native dry-run predicate-only proof
+`4ccb6654df9760033a0c4b6ca8ca5b8ac227f23720f423d6a7a05068bd3b8bb1`
+records sixteen passing cases, zero physical workers and no body rerun/API/
+notifications. Its actual `2963` PowerShell bytes independently match final
+`10ae`; the original receipt is not retargeted. These source-scoped proofs are
+not twenty useful outcomes or current full-budget acceptance. All older cold,
+request-reduction and protocol failures remain preserved below.
+
+### Earlier source-scoped adapter snapshots — superseded by final reconciliation
+
+The following implementation-stage descriptions retain their original source;
+their pending statements do not describe the final merged code above.
 
 The current collector and reporter implement dispatch/status/cancel and
 transcript-destination privacy terminal receipts, with focused tests. The
