@@ -1,5 +1,46 @@
 # P1 request attribution — working baseline
 
+## Coordinator natural sample — October 31, 2026 EDT
+
+Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` under #658/#660.
+Only closed October 26–30 UTC daily files were copied into protected private
+machine state; October 25 UTC was absent and the live October 31 file was
+excluded. The actual interval is October 25, 2026, 8:00:05 PM EDT through
+October 30, 2026, 7:58:56 PM EDT. Originals remain unchanged; directories are
+mode 700 and files mode 600. No raw observations are published.
+
+Input digest: `b33bac05846308e04dda21524d16c671174fc6961e9e477d02552ce943b966c1`.
+Report digest: `c190c01f0e4258d5c22f64f3cc1f6c641950b46b63ed7ea1f45dbb3e16fe5e00`.
+Reporter digest: `b1caea99b0435137112aa4a4b7c58301586639d3822090b71d01247544665872`.
+The existing reporter passed. Finite-key/label privacy validation checked
+13,870 raw rows with zero violations.
+
+- 7,908 wrapper records; 7,479 opaque executions and 306 identity-probe
+  invocations. These are instrument counts, not HTTP totals.
+- 964 completed receipts: 720 ticks and 244 nondeadline PR outcomes
+  (177 checks-failed, 55 merged, nine ejected, three closed).
+  Another 269 deadline outcomes are excluded from useful completions.
+- 513 local duration observations; all 513 schema-4 safety records retain
+  unknown source/clock qualification. No qualified remote detection latency
+  or paired baseline/candidate latency ratio is established.
+- 1,243 observed GraphQL points, 1,203 linked to outcomes. Whole-account
+  GraphQL and actual HTTP totals remain null; 5,974 caller rows are unknown.
+- 972 same-target replays include 26 cache serves and 946 upstream refreshes.
+  Their 2.675% instrumented cache share is not a savings rate. There are 1,217
+  write observations and zero observed unchanged writes; completeness and
+  target qualification remain prerequisites.
+
+This is a retrospective natural-activity sample, not a newly frozen baseline.
+After measurement qualification and active-host coverage are complete, freeze
+prospective baseline/candidate cohorts before the next reduction. The bounded
+next natural sample is two business days, with at least twenty equivalent
+completed outcomes per operation type in each cohort. Include active wake,
+alarm, link and dispatch/privacy outcomes; idle ticks alone do not prove them.
+If too small, retain exactly one owned programme acceptance card on #658,
+with #660's existing instrumentation obligations, and set the next bounded
+sample there. Do not manufacture activity, weaken targets or claim background
+collection/automatic continuation from this note.
+
 ## Superseding source audit — October 31, 2026, 10:13 PM EDT
 
 Owner: current #658 coordinator, with P1 acceptance retained on #660.
