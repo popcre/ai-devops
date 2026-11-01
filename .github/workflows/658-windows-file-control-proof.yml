@@ -1,0 +1,63 @@
+# TEMPORARY owner: #658 coordinator.
+# Existing qualification only offers a 150-minute matrix or all 12 sections;
+# this bounded job proves this repair under the existing NetworkService runner.
+# RETIRE: remove this workflow from the PR before merge after PASS, retaining
+# exact production/test blob equivalence with the successful proof head.
+name: temporary 658 Windows file-control proof
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  native-network-service:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'codex/658-windows-file-control'
+    runs-on: [self-hosted, Windows, X64, ai-devops-windows-section]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prove retained file cleanup as the existing service account
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
+          if($sid.Value -ne 'S-1-5-20'){throw 'Existing NetworkService execution context required'}
+          if($env:RUNNER_NAME -cne 'EDGE-ALIEN'){throw 'Existing service-account runner required'}
+          $head=(& git rev-parse HEAD).Trim()
+          if($LASTEXITCODE -ne 0 -or $head -cne $env:EXPECTED_HEAD){throw 'Exact pull request head required'}
+          $testBlob=(& git rev-parse HEAD:tests/test-source-generation-windows.ps1).Trim()
+          $sourceBlob=(& git rev-parse HEAD:tools/github-requests/source_generation_windows.ps1).Trim()
+          if($LASTEXITCODE -ne 0 -or $testBlob -notmatch '^[a-f0-9]{40}$' -or $sourceBlob -notmatch '^[a-f0-9]{40}$'){throw 'Exact source identities required'}
+          $private=Join-Path $env:RUNNER_TEMP ('ai-devops-658-ns-'+[Guid]::NewGuid().ToString('N'))
+          if(Test-Path -LiteralPath $private){throw 'Fresh owned temporary directory required'}
+          $acl=[Security.AccessControl.DirectorySecurity]::new()
+          $acl.SetOwner($sid);$acl.SetAccessRuleProtection($true,$false)
+          foreach($principal in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))){
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($principal,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+          }
+          [void][IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($private),$acl)
+          $env:TEMP=$private;$env:TMP=$private;$env:TMPDIR=$private.Replace('\','/')
+          $log=Join-Path $private 'native.log'
+          $code=1
+          try{
+            $prior=$ErrorActionPreference;$ErrorActionPreference='Continue'
+            try{
+              & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .	ests	est-source-generation-windows.ps1 *> $log
+              $code=$LASTEXITCODE
+            }finally{$ErrorActionPreference=$prior}
+            $matches=[regex]::Matches([IO.File]::ReadAllText($log),'(?m)^PASS ([0-9]+) native Windows source custody casess*$')
+            if($code -ne 0 -or $matches.Count -ne 1){throw 'Native service-account proof failed; owned diagnostic log retained'}
+            $cases=[int]$matches[0].Groups[1].Value
+            if($cases -lt 95){throw 'Complete native proof required'}
+            Write-Output ('head='+$head+' fixture_blob='+$testBlob+' source_blob='+$sourceBlob+' sid_class=NetworkService cases='+$cases)
+            Remove-Item -LiteralPath $private -Recurse -Force -ErrorAction Stop
+          }catch{throw}

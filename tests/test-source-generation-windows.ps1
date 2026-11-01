@@ -22,6 +22,11 @@ $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.Function
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
 $root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
+    $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+    if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
+    . ([scriptblock]::Create($cleanupAst.Extent.Text))
+}
 $passed=0
 function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
 function Refuses([scriptblock]$Operation,[string]$Name){$refused=$false;try{& $Operation}catch{$refused=$true};Assert $refused $Name}
@@ -34,6 +39,8 @@ $directory=[GenerationCustody]::Hold($root,$true,$false)
 $held=[GenerationCustody]::Hold($file,$false,$true)
 $primaryFailure=$null
 $cleanupFailure=$null
+$fileControls=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+$control=$null
 try {
     Refuses { [IO.File]::WriteAllText($file,'altered') } 'Held source must reject writes'
     Refuses { [IO.File]::Move($file,(Join-Path $root 'renamed.sh')) } 'Held source must reject rename'
@@ -66,13 +73,20 @@ if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parent
 try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
 try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
 try{$a=Get-Acl -LiteralPath $root;Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
+try{$a=Get-Acl -LiteralPath (Join-Path $root 'sealed.sh');Set-Acl -LiteralPath (Join-Path $root 'sealed.sh') -AclObject $a;exit 17}catch{}
 try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
 if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
 exit 0
 '@)
-    $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+    $attackHold=$null
     $control=[GenerationCustody]::DirectoryControl($root)
+    $sealedFailure=$null
     try {
+        foreach($path in @($file,$ordinary,$attack)){$fileControls.Add([GenerationCustody]::FileControl($path))}
+        Assert ([GenerationCustody]::Same($held,$fileControls[0])) 'File cleanup control binds the held source identity'
+        $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+        Assert ([GenerationCustody]::Same($attackHold,$fileControls[2])) 'Attack helper control binds its held identity'
+        foreach($fileControl in $fileControls){[GenerationCustody]::FileAccess($fileControl,$false)}
         [GenerationCustody]::DirectoryAccess($control,$false)
         $beforePrivileges=[GenerationCustody]::PrivilegedContext()
         $beforePrivilegeState=[GenerationCustody]::PrivilegeState()
@@ -98,25 +112,31 @@ exit 0
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
         Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
-    } finally {
-        # A restoration failure must remain visible without retaining source
-        # handles that make the outer cleanup fail with a different error.
-        try {[GenerationCustody]::DirectoryAccess($control,$true)}
-        finally {try {$control.Dispose()} finally {$attackHold.Dispose()}}
+    } catch {$sealedFailure=$_}
+    finally {
+        $sealedCleanup=Close-OwnedGeneration @{DirectoryControls=@($control);FileControls=$fileControls;
+            Locks=@($attackHold);CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
+            Receipt=$null;Ack=$null;Snapshot=$null;Bootstrap=$null}
+    }
+    if($sealedFailure -or $sealedCleanup.Count){
+        $exceptions=@();if($sealedFailure){$exceptions+=$sealedFailure.Exception}
+        $exceptions+=@($sealedCleanup|ForEach-Object{$_.error.Exception})
+        throw [AggregateException]::new('Restricted fixture or explicit file restoration failed',[Exception[]]$exceptions)
     }
     [IO.File]::WriteAllText($injected,'parent restoration works')
     Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
     [IO.File]::Delete($injected)
-    foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
-        $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
-        if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
-        . ([scriptblock]::Create($cleanupAst.Extent.Text))
-    }
     $faultRoot=Join-Path $root 'cleanup-fault'
     $firstDirectory=Join-Path $faultRoot 'first';$secondDirectory=Join-Path $faultRoot 'second'
     [GenerationCustody]::PrivateDirectory($faultRoot)
     [GenerationCustody]::PrivateDirectory($firstDirectory);[GenerationCustody]::PrivateDirectory($secondDirectory)
-    [IO.File]::WriteAllText((Join-Path $secondDirectory 'owned-file'),'owned cleanup fixture')
+    $ownedFile=Join-Path $secondDirectory 'owned-file'
+    [IO.File]::WriteAllText($ownedFile,'owned cleanup fixture')
+    $invalidFile=Join-Path $firstDirectory 'owned-file'
+    [IO.File]::WriteAllText($invalidFile,'owned cleanup fixture')
+    $invalidFileControl=[GenerationCustody]::FileControl($invalidFile);$invalidFileControl.Dispose()
+    $laterFileControl=[GenerationCustody]::FileControl($ownedFile)
+    [GenerationCustody]::FileAccess($laterFileControl,$false)
     $invalidControl=[GenerationCustody]::DirectoryControl($firstDirectory);$invalidControl.Dispose()
     $laterControl=[GenerationCustody]::DirectoryControl($secondDirectory)
     [GenerationCustody]::DirectoryAccess($laterControl,$false)
@@ -127,12 +147,17 @@ exit 0
     $cleanupBootstrap=Join-Path $root 'cleanup-bootstrap'
     [GenerationCustody]::PrivateDirectory($cleanupBootstrap)
     $cleanupFailures=Close-OwnedGeneration @{Job=$recording;Child=$null;EventChannel=$recording;CounterChannel=$recording;
-        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);Locks=@($recording);
+        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);
+        FileControls=@($invalidFileControl,$laterFileControl);Locks=@($recording);
         Receipt=$recording;Ack=$recording;Snapshot=$faultRoot;Bootstrap=$cleanupBootstrap}
-    Assert ($cleanupFailures.Count -eq 2) 'Every injected cleanup failure remains visible'
+    if($cleanupFailures.Count -ne 3){
+        foreach($failure in $cleanupFailures){[Console]::Error.WriteLine(('OWNED_CLEANUP_PHASE '+$failure.phase+' '+$failure.error.Exception.GetType().Name+' '+$failure.error.Exception.HResult))}
+    }
+    Assert ($cleanupFailures.Count -eq 3) 'Every injected cleanup failure remains visible'
     Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'directory_unseal'}).Count -eq 1) 'First failed native unseal is retained'
     Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'capture_handle'}).Count -eq 1) 'First failed capture disposal is retained'
-    Assert ($laterControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'file_unseal'}).Count -eq 1) 'First failed file unseal is retained'
+    Assert ($laterControl.IsClosed -and $laterFileControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
     Assert (-not (Test-Path -LiteralPath $faultRoot) -and -not (Test-Path -LiteralPath $cleanupBootstrap)) 'Later native unseal permits actual owned directory cleanup'
     Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
@@ -379,8 +404,12 @@ else:
 } catch { $primaryFailure=$_ }
 finally {
     try {
-        try {$held.Dispose()} finally {$directory.Dispose()}
-        Remove-Item -LiteralPath $root -Recurse -Force
+        $remainingFiles=@($fileControls|Where-Object{-not $_.IsClosed})
+        $remainingDirectories=@();if($control -and -not $control.IsClosed){$remainingDirectories=@($control)}
+        $outerCleanup=Close-OwnedGeneration @{DirectoryControls=$remainingDirectories;FileControls=$remainingFiles;
+            Locks=@($directory,$held);CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
+            Receipt=$null;Ack=$null;Snapshot=$root;Bootstrap=$null}
+        if($outerCleanup.Count){throw [AggregateException]::new('Owned fixture cleanup failed',[Exception[]]@($outerCleanup|ForEach-Object{$_.error.Exception}))}
     } catch { $cleanupFailure=$_ }
 }
 if($null -ne $primaryFailure){
