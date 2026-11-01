@@ -2,10 +2,8 @@
 
 Owner: Codex chat `01a19476-0eae-7092-ad1a-43b4120a92b2` for publication;
 the successor implementing session takes ownership before §9.1.
-Tracking limitation: repeated GitHub issue-creation calls could not acquire the
-machine-wide access lock. No issue was created. Publication owner must reconcile
-creation before retrying, create one owning issue with `- [ ] live proof`, and
-replace this limitation with its link. Do not create multiple acceptance tickets.
+Owning issue: [#2222](https://github.com/popcre/ai-devops/issues/2222).
+Keep implementation and `- [ ] live proof` on that same issue.
 Planning date: October 31, 2026 (America/New_York).
 Source baseline: `7e591363634be65a6b99d7e60443afc6f1091716` in
 [popcre/ai-devops](https://github.com/popcre/ai-devops).

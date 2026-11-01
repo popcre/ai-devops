@@ -1,13 +1,11 @@
 ---
-issue: none
+issue: 2222
 status: OPEN
 owner: codex/egm-selective-plan
 ---
 
-Reason for `issue: none`: GitHub issue creation could not acquire the shared
-access lock after bounded attempts; no issue exists yet. Publication owner is
-Codex chat `01a19476-0eae-7092-ad1a-43b4120a92b2`. Reconcile possible creation
-before retrying, create one owning issue, and bind it before opening the PR.
+Owning issue: [#2222](https://github.com/popcre/ai-devops/issues/2222).
+Publication owner is Codex chat `01a19476-0eae-7092-ad1a-43b4120a92b2`.
 
 # Selective fresh-reader implementation continuation
 
@@ -40,9 +38,9 @@ Research baseline:
 The planning PR adds the plan and discovery pointers. No pilot capability,
 installation, isolation proof or savings measurement exists yet. Plan STATUS
 rows remain open. Publication evidence belongs on the same owning issue.
-Planning artifacts are committed/pushed to the task branch when the Git push
-succeeds; issue/PR/merge publication is blocked by shared GitHub access, not by
-an approval. Exact source can be recovered from the task branch URL above.
+Planning artifacts are committed/pushed to the task branch. Shared GitHub access
+initially delayed publication; issue #2222 now exists. Exact source can be
+recovered from the task branch URL above. PR/merge acceptance remains separate.
 
 ## 4. What did not work / was rejected
 
@@ -62,8 +60,7 @@ platform support claim has been verified by this planning session.
 
 ## 6. Exact next steps
 
-1. Finish publication first: reconcile issue creation, create the owning issue,
-   update the contract/link, open the checked planning PR and merge through the
+1. Finish publication first: open the checked planning PR and merge through the
    normal queue. Gate: exact landing on `main`; GitHub is authoritative.
 2. Read the plan STATUS, §§1–8 and downstream phases; verify current upstream
    and claim the existing owning issue. Gate: no conflicting owner or stale work.
