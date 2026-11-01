@@ -9,16 +9,65 @@ param(
     [Parameter(Mandatory=$true)][long]$ReceiptHandle,
     [Parameter(Mandatory=$true)][long]$ReceiptAckHandle,
     [string]$BashExe,
-    [switch]$RestrictedReadProfile
+    [switch]$RestrictedReadProfile,
+    [switch]$ObserverEvents,
+    [switch]$ReadOnlyNoStdin
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
+function Assert-StagingParent([IO.DirectoryInfo]$Directory) {
+    $trusted=@([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,'S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $cursor=$Directory
+    while($null -ne $cursor){
+        if(-not $cursor.Exists -or ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Staging ancestor unavailable or reparse point'}
+        $acl=Microsoft.PowerShell.Security\Get-Acl -LiteralPath $cursor.FullName
+        $raw=[Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(),0)
+        if($null -eq $raw.Owner -or $raw.Owner.Value -notin $trusted -or $null -eq $raw.DiscretionaryAcl -or $raw.DiscretionaryAcl.Count -eq 0){throw 'Staging ancestor ownership or DACL unavailable'}
+        $mask=0x500d0156L
+        # Standard volume roots permit creating a NEW sibling directory. That
+        # alone cannot replace an existing protected path; fresh names refuse
+        # adoption and every actual staging parent uses the full write mask.
+        if($null -eq $cursor.Parent){$mask=$mask -band (-bnot 4L)}
+        foreach($ace in $raw.DiscretionaryAcl){
+            if(([int]$ace.AceFlags -band [int][Security.AccessControl.AceFlags]::InheritOnly) -ne 0){continue}
+            if($ace -isnot [Security.AccessControl.CommonAce] -or $ace.IsCallback){throw 'Unknown staging ancestor ACE'}
+            if($ace.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessDenied){continue}
+            if($ace.AceQualifier -ne [Security.AccessControl.AceQualifier]::AccessAllowed){throw 'Unknown staging ancestor rights'}
+            if($ace.SecurityIdentifier.Value -notin $trusted -and (([long]$ace.AccessMask -band 0xffffffffL) -band $mask)){throw 'Foreign staging ancestor writer'}
+        }
+        $cursor=$cursor.Parent
+    }
+}
+function New-BootstrapPrivateDirectory([string]$Path) {
+    if(Test-Path -LiteralPath $Path){throw 'Fresh compiler namespace required'}
+    $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetOwner($sid);$acl.SetAccessRuleProtection($true,$false)
+    foreach($owner in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))){
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+    }
+    $info=[IO.DirectoryInfo]::new($Path)
+    if($PSVersionTable.PSEdition -eq 'Core'){[IO.FileSystemAclExtensions]::Create($info,$acl)}else{$info.Create($acl)}
+    return $info
+}
+# Bootstrap compilation uses ONLY a fresh private child of a verified existing
+# standard parent. Never repair a shared parent or honor arbitrary TEMP roots.
+$stagingParent=$null
+foreach($candidate in @((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),[Environment]::GetFolderPath('ProgramFiles'))){
+    try{$directory=[IO.DirectoryInfo]::new($candidate);Assert-StagingParent $directory;$stagingParent=$directory;break}catch{}
+}
+if($null -eq $stagingParent){throw 'Source boundary unavailable: no protected standard staging parent; ordinary installed tools remain available'}
+$bootstrap=New-BootstrapPrivateDirectory (Join-Path $stagingParent.FullName ('ai-gh-bootstrap-'+$PID+'-'+[Guid]::NewGuid().ToString('N')))
+$compiler=New-BootstrapPrivateDirectory (Join-Path $bootstrap.FullName 'compile')
+$savedTemp=$env:TEMP;$savedTmp=$env:TMP
+try{
+$env:TEMP=$compiler.FullName;$env:TMP=$compiler.FullName
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Security.AccessControl;
 using Microsoft.Win32.SafeHandles;
 using System.Diagnostics;
 public static class GenerationCustody {
@@ -34,9 +83,15 @@ public static class GenerationCustody {
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string s,uint revision,out IntPtr descriptor,out uint size);
  [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public uint Length; public IntPtr Descriptor; public bool Inherit; }
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateDirectoryW(string path,ref SecurityAttributes security);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateNamedPipeW(string name,uint access,uint mode,uint instances,uint output,uint input,uint timeout,ref SecurityAttributes security);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool ConnectNamedPipe(SafeFileHandle pipe,IntPtr overlapped);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetNamedPipeHandleState(SafeFileHandle pipe,ref uint mode,IntPtr count,IntPtr timeout);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool ReadFile(SafeFileHandle file,byte[] data,uint count,out uint read,IntPtr overlapped);
  [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
  [DllImport("advapi32.dll",SetLastError=true)] static extern uint SetSecurityInfo(SafeFileHandle h,uint kind,uint flags,IntPtr owner,IntPtr group,IntPtr dacl,IntPtr sacl);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern uint GetSecurityInfo(SafeFileHandle h,uint kind,uint flags,out IntPtr owner,out IntPtr group,out IntPtr dacl,out IntPtr sacl,out IntPtr descriptor);
+ [DllImport("advapi32.dll")] static extern uint GetSecurityDescriptorLength(IntPtr descriptor);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern SafeFileHandle CreateJobObjectW(IntPtr security,string name);
  [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(SafeFileHandle job,int kind,ref JobLimits limits,uint size);
  [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(SafeFileHandle job,IntPtr process);
@@ -98,9 +153,10 @@ public static class GenerationCustody {
   }finally{Marshal.FreeHGlobal(current);}
  }
  public static Process Start(SafeFileHandle job,string executable,string arguments,string cwd){return Start(job,executable,arguments,cwd,false);}
- public static Process Start(SafeFileHandle job,string executable,string arguments,string cwd,bool restricted){
+ public static Process Start(SafeFileHandle job,string executable,string arguments,string cwd,bool restricted){return Start(job,executable,arguments,cwd,restricted,false);}
+ public static Process Start(SafeFileHandle job,string executable,string arguments,string cwd,bool restricted,bool noStdin){
   Startup s=new Startup();s.Size=(uint)Marshal.SizeOf(typeof(Startup));s.Flags=0x100;s.Input=GetStdHandle(-10);s.Output=GetStdHandle(-11);s.Error=GetStdHandle(-12);ProcessInfo p;
-  bool created;using(SafeFileHandle token=restricted?RestrictedToken():null){created=restricted?CreateProcessAsUserW(token,executable,new StringBuilder(Quote(executable)+" "+arguments),IntPtr.Zero,IntPtr.Zero,true,4,IntPtr.Zero,cwd,ref s,out p):CreateProcessW(executable,new StringBuilder(Quote(executable)+" "+arguments),IntPtr.Zero,IntPtr.Zero,true,4,IntPtr.Zero,cwd,ref s,out p);}
+  bool created;using(SafeFileHandle input=noStdin?CreateFileW("NUL",0x80000000,3,IntPtr.Zero,3,0,IntPtr.Zero):null){if(noStdin){if(input.IsInvalid||!SetHandleInformation(input.DangerousGetHandle(),1,1))throw new IOException("Explicit no-stdin profile unavailable");s.Input=input.DangerousGetHandle();}using(SafeFileHandle token=restricted?RestrictedToken():null){created=restricted?CreateProcessAsUserW(token,executable,new StringBuilder(Quote(executable)+" "+arguments),IntPtr.Zero,IntPtr.Zero,true,4,IntPtr.Zero,cwd,ref s,out p):CreateProcessW(executable,new StringBuilder(Quote(executable)+" "+arguments),IntPtr.Zero,IntPtr.Zero,true,4,IntPtr.Zero,cwd,ref s,out p);}}
   if(!created)throw new IOException("Suspended child creation failed");
   try{Process child=Process.GetProcessById((int)p.ProcessId);IntPtr retained=child.Handle;if(!AssignProcessToJobObject(job,p.Process)||ResumeThread(p.Thread)==0xffffffff){TerminateProcess(p.Process,125);child.Dispose();throw new IOException("Child cancellation custody unavailable");}return child;}finally{CloseHandle(p.Thread);CloseHandle(p.Process);}
  }
@@ -133,6 +189,14 @@ public static class GenerationCustody {
   SafeFileHandle h=CreateFileW(path,0x80040000,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);Info i;
   if(h.IsInvalid||!GetFileInformationByHandle(h,out i)||(i.Attributes&0x400)!=0||(i.Attributes&0x10)==0){h.Dispose();throw new IOException("Private directory control unavailable");}return h;
  }
+ public static void AssertProtectedParent(SafeFileHandle handle,bool volumeRoot){
+  IntPtr owner,group,dacl,sacl,descriptor;if(GetSecurityInfo(handle,1,5,out owner,out group,out dacl,out sacl,out descriptor)!=0)throw new IOException("Parent security unavailable");
+  try{uint length=GetSecurityDescriptorLength(descriptor);if(length==0||length>65536)throw new IOException("Parent security unavailable");byte[] bytes=new byte[length];Marshal.Copy(descriptor,bytes,0,(int)length);RawSecurityDescriptor security=new RawSecurityDescriptor(bytes,0);
+   string current=WindowsIdentity.GetCurrent().User.Value;var trusted=new System.Collections.Generic.HashSet<string>(new string[]{current,"S-1-5-18","S-1-5-32-544","S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"});
+   if(security.Owner==null||!trusted.Contains(security.Owner.Value)||security.DiscretionaryAcl==null||security.DiscretionaryAcl.Count==0)throw new IOException("Untrusted staging parent owner or DACL");
+   uint mask=volumeRoot?0x500d0152u:0x500d0156u;foreach(GenericAce entry in security.DiscretionaryAcl){if((entry.AceFlags&AceFlags.InheritOnly)!=0)continue;CommonAce ace=entry as CommonAce;if(ace==null||ace.IsCallback)throw new IOException("Unknown staging parent ACE");if(ace.AceQualifier==AceQualifier.AccessDenied)continue;if(ace.AceQualifier!=AceQualifier.AccessAllowed||(!trusted.Contains(ace.SecurityIdentifier.Value)&&(unchecked((uint)ace.AccessMask)&mask)!=0))throw new IOException("Foreign staging parent writer");}
+  }finally{LocalFree(descriptor);}
+ }
  public static void DirectoryAccess(SafeFileHandle h,bool writable){
   string sid=WindowsIdentity.GetCurrent().User.Value;
   // OWNER RIGHTS suppresses the owner's implicit WRITE_DAC. The parent alone
@@ -159,6 +223,29 @@ public static class GenerationCustody {
    else{if(!files.Contains(relative))throw new IOException("Unexpected helper in private generation");count++;}
   }}if(count!=paths.Length)throw new IOException("Incomplete private generation");
  }
+ public sealed class EventChannel:IDisposable {
+  readonly SafeFileHandle reader,writer;readonly System.Collections.Generic.List<byte[]> messages=new System.Collections.Generic.List<byte[]>();int total;bool invalid;
+  public long WriteHandle {get{return writer.DangerousGetHandle().ToInt64();}}
+  public string Status {get{return invalid?"invalid":messages.Count==1?"received":"unavailable";}}
+  public EventChannel(){
+   string user=WindowsIdentity.GetCurrent().User.Value;IntPtr descriptor;uint size;
+   if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("O:"+user+"D:P(A;;GA;;;"+user+")(A;;GA;;;SY)S:(ML;;NW;;;ME)",1,out descriptor,out size))throw new IOException("Private event descriptor unavailable");
+   try{SecurityAttributes a=new SecurityAttributes();a.Length=(uint)Marshal.SizeOf(typeof(SecurityAttributes));a.Descriptor=descriptor;
+    string name=@"\\.\pipe\ai-gh-event-"+Guid.NewGuid().ToString("N");reader=CreateNamedPipeW(name,0x80001,15,1,4096,65536,0,ref a);
+    if(reader.IsInvalid)throw new IOException("Private event pipe unavailable");ConnectNamedPipe(reader,IntPtr.Zero);
+    writer=CreateFileW(name,0x40000000,0,IntPtr.Zero,3,0,IntPtr.Zero);uint mode=1;
+    if(writer.IsInvalid||!SetNamedPipeHandleState(writer,ref mode,IntPtr.Zero,IntPtr.Zero)||!SetHandleInformation(writer.DangerousGetHandle(),1,1))throw new IOException("Nonblocking event writer unavailable");
+   }catch{if(writer!=null)writer.Dispose();if(reader!=null)reader.Dispose();throw;}finally{LocalFree(descriptor);}
+  }
+  public void Drain(){if(invalid)return;for(int i=0;i<16;i++){
+   byte[] data=new byte[4096];uint read;bool ok=ReadFile(reader,data,4096,out read,IntPtr.Zero);int error=Marshal.GetLastWin32Error();
+   if(!ok&&(error==232||error==109||error==536))return;
+   if(!ok||read==0){invalid=true;return;}total+=(int)read;if(total>65536||messages.Count!=0){invalid=true;return;}
+   byte[] message=new byte[read];Array.Copy(data,message,read);messages.Add(message);
+  }invalid=true;}
+  public string EventText(){Drain();if(invalid||messages.Count!=1)return null;try{return new UTF8Encoding(false,true).GetString(messages[0]);}catch(DecoderFallbackException){invalid=true;return null;}}
+  public void Dispose(){writer.Dispose();reader.Dispose();}
+ }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites) {return Hold(path,directory,denyWrites,false);}
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites,bool existingExecutable) {
   SafeFileHandle h=CreateFileW(path,0x80000000,denyWrites?1u:3u,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero);
@@ -171,11 +258,13 @@ public static class GenerationCustody {
  public static string Quote(string s){if(s.Length>0&&s.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0)return s;StringBuilder b=new StringBuilder("\"");int n=0;foreach(char c in s){if(c=='\\'){n++;continue;}if(c=='"'){b.Append('\\',2*n+1);b.Append(c);n=0;continue;}b.Append('\\',n);n=0;b.Append(c);}b.Append('\\',2*n);b.Append('"');return b.ToString();}
 }
 '@
+}catch{Remove-Item -LiteralPath $bootstrap.FullName -Recurse -Force;throw}finally{$env:TEMP=$savedTemp;$env:TMP=$savedTmp}
 $locks = [Collections.Generic.List[IDisposable]]::new()
 $directoryControls = [Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
 $captureLocks = [Collections.Generic.List[IDisposable]]::new()
 $snapshot = $null
 $child = $null
+$eventChannel = $null
 $receipt = [GenerationCustody]::Pipe($ReceiptHandle,[IO.FileAccess]::Write)
 $ack = [GenerationCustody]::Pipe($ReceiptAckHandle,[IO.FileAccess]::Read)
 $exitCode = 125
@@ -226,9 +315,43 @@ function Assert-ReadArguments([string]$Entry,[object[]]$Values) {
         $Values[2] -notmatch '^[1-9][0-9]*$' -or $Values[3] -ne '--repo' -or $Values[4] -ne 'popcre/ai-devops' -or
         $Values[5] -ne '--json' -or $Values[6] -notmatch '^(number|state|title|url|mergedAt|closedAt|updatedAt)(,(number|state|title|url|mergedAt|closedAt|updatedAt))*$') { throw 'Restricted read profile requires fixed public issue or PR view' }
 }
+function Test-ObserverEvent([string]$Text) {
+    if (-not $Text -or [Text.Encoding]::UTF8.GetByteCount($Text) -gt 4096) { return $false }
+    $keys=@('schema','utc','measurement','caller','workflow','workflow_id','cohort_id','target_ordinal','source_verified','source_fingerprint_start','source_fingerprint_end','install_generation_binding','event_kind','eligible_utc_ms','observed_utc_ms','delivered_utc_ms','delivery_boundary','clock_quality','clock_error_bound_ms','latency_ms','unknown_reason')
+    # All accepted values are simple fixed labels, IDs, numbers or null. This
+    # strict key scan also rejects duplicate/escaped keys before JSON coercion.
+    $matches=[regex]::Matches($Text,'"([A-Za-z_]+)"\s*:')
+    if ($matches.Count -ne $keys.Count) { return $false }
+    $seen=@{}
+    foreach ($match in $matches) { $key=$match.Groups[1].Value;if($key -cnotin $keys -or $seen.ContainsKey($key)){return $false};$seen[$key]=$true }
+    try {$e=$Text|ConvertFrom-Json}catch{return $false}
+    if (@($e.PSObject.Properties).Count -ne $keys.Count -or $e.schema -isnot [int] -or $e.schema -ne 4 -or
+        $e.utc -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -or $e.measurement -cne 'workflow_evidence' -or
+        $e.caller -cne 'ai-pr-wait' -or $e.workflow -cne 'pr_wait' -or $e.workflow_id -notmatch '^[a-f0-9]{32}$' -or
+        ($null -ne $e.cohort_id -and $e.cohort_id -notmatch '^[a-f0-9]{32}$') -or
+        ($null -ne $e.target_ordinal -and (($e.target_ordinal -isnot [int] -and $e.target_ordinal -isnot [long]) -or $e.target_ordinal -lt 1 -or $e.target_ordinal -gt 1000000000)) -or
+        $e.source_verified -cne 'unknown' -or $e.clock_quality -cne 'unknown' -or
+        $e.event_kind -cnotin @('pr_merged','pr_closed','check_completed','unknown') -or
+        $e.delivery_boundary -cnotin @('terminal_report','unknown') -or
+        $e.unknown_reason -cnotin @('metadata_absent','metadata_untrusted','source_unknown','source_changed','event_unknown','event_invalid','clock_unknown','clock_jump','clock_negative','delivery_unknown')) { return $false }
+    foreach ($key in @('source_fingerprint_start','source_fingerprint_end','install_generation_binding','clock_error_bound_ms','latency_ms')) { if($null -ne $e.$key){return $false} }
+    foreach ($key in @('eligible_utc_ms','observed_utc_ms','delivered_utc_ms')) { $value=$e.$key;if($null -ne $value -and (($value -isnot [int] -and $value -isnot [long]) -or $value -lt 0 -or $value -gt 9999999999999)){return $false} }
+    if (($e.event_kind -eq 'unknown') -ne ($null -eq $e.eligible_utc_ms)) { return $false }
+    if ($null -ne $e.eligible_utc_ms -and ($null -eq $e.observed_utc_ms -or $e.eligible_utc_ms -gt $e.observed_utc_ms)) { return $false }
+    if ($e.delivery_boundary -eq 'terminal_report' -and ($null -eq $e.observed_utc_ms -or $null -eq $e.delivered_utc_ms -or $e.delivered_utc_ms -lt $e.observed_utc_ms)) { return $false }
+    return $true
+}
 try {
+    if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
     foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if (($key -in @('BASH_ENV','ENV') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient shell source prevents generation qualification' }
+        if (($key -in @('BASH_ENV','ENV','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient source prevents generation qualification' }
+    }
+    # Pin and recheck existing ancestors BEFORE the source snapshot is created.
+    $parents=@();$parent=$stagingParent
+    while($null -ne $parent){$parents+=$parent;$parent=$parent.Parent}
+    foreach($parent in ($parents|Sort-Object {$_.FullName.Length})){
+        $heldParent=[GenerationCustody]::Hold($parent.FullName,$true,$false)
+        try{[GenerationCustody]::AssertProtectedParent($heldParent,($null -eq $parent.Parent));$locks.Add($heldParent)}catch{$heldParent.Dispose();throw}
     }
     $root = [IO.Path]::GetFullPath($SourceRoot)
     $git = (Get-Command git.exe -ErrorAction Stop).Source
@@ -270,8 +393,11 @@ try {
     $expectedInterpreter = [GenerationCustody]::Hold($installedBash,$false,$true)
     if (-not [GenerationCustody]::Same($interpreter,$expectedInterpreter)) { throw 'Managed interpreter mismatch' }
     $locks.Add($interpreter);$locks.Add($expectedInterpreter)
-    $snapshot = Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-'+[Guid]::NewGuid().ToString('N'))
+    $snapshot = Join-Path $stagingParent.FullName ('ai-gh-generation-'+$PID+'-'+[Guid]::NewGuid().ToString('N'))
     [GenerationCustody]::PrivateDirectory($snapshot)
+    # This fresh protected object's identity is held throughout materialization,
+    # receipt capture and sealing; no replaceable pathname is adopted later.
+    $locks.Add([GenerationCustody]::Hold($snapshot,$true,$false))
     $blobs = @{}
     foreach ($entry in ((Git-Text @('ls-tree','-r',$sourceSha,'--','bin','tools','config')) -split "`n")) {
         if ($entry -notmatch '^100(644|755) blob ([a-f0-9]{40})\t(.+)$') { throw 'Unexpected Git generation object' }
@@ -304,7 +430,8 @@ try {
         if ((Git-BlobHash $sourceBytes) -ne $blobs[$relative]) { throw ('Snapshot differs from installed Git generation: '+$relative) }
         [void]$manifest.Append($relative).Append([char]0).Append((Hash-Bytes $sourceBytes)).Append("`n")
     }
-    $argumentText = [IO.File]::ReadAllText($ArgumentsFile)
+    $argumentBytes = [IO.File]::ReadAllBytes($ArgumentsFile)
+    $argumentText = [Text.Encoding]::UTF8.GetString($argumentBytes)
     if (-not $argumentText.TrimStart().StartsWith('[')) { throw 'String argument array required' }
     $arguments = $argumentText | ConvertFrom-Json
     if ($null -eq $arguments) { $arguments = @() }
@@ -319,28 +446,62 @@ try {
     $start.Arguments = (($commandArguments | ForEach-Object { [GenerationCustody]::Quote($_) }) -join ' ')
     $job = [GenerationCustody]::Job()
     $locks.Add($job)
-    $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]$RestrictedReadProfile)
-    $child.WaitForExit()
+    $fingerprint = Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
+    $observerRun = if ($ObserverEvents) {[Guid]::NewGuid().ToString('N')}else{$null}
+    $controlByte = New-Object byte[] 1
+    $controlRead = if ($ObserverEvents) {$ack.ReadAsync($controlByte,0,1)}else{$null}
+    if($ObserverEvents -and $controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before child launch')}
+    $savedEventHandle=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
+    try {
+        if ($ObserverEvents) {
+            try {$eventChannel=[GenerationCustody+EventChannel]::new()}catch{$eventChannel=$null}
+            $wireHandle=if($null -ne $eventChannel){[string]$eventChannel.WriteHandle}else{$null}
+            [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$wireHandle,'Process')
+        }
+        $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]$RestrictedReadProfile,[bool]$ReadOnlyNoStdin)
+    } finally { [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$savedEventHandle,'Process') }
+    if ($ObserverEvents) {
+        $started=@{schema=1;frame='started';observer_run_id=$observerRun;observer_arguments_sha256=(Hash-Bytes $argumentBytes);source_sha=$sourceSha;source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';execution_profile='restricted_read';stdin_profile='read_only_no_stdin';start_boundary='process_resumed'}
+        $startedBytes=[Text.Encoding]::UTF8.GetBytes((($started|ConvertTo-Json -Compress)+"`n"));$receipt.Write($startedBytes,0,$startedBytes.Length);$receipt.Flush()
+        while (-not $child.WaitForExit(20)) {
+            if($controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before terminal delivery')}
+            if($null -ne $eventChannel){$eventChannel.Drain()}
+        }
+        if($null -ne $eventChannel){$eventChannel.Drain()}
+    } else { $child.WaitForExit() }
     $exitCode = $child.ExitCode
     $verified = $RestrictedReadProfile -or -not $privilegedOriginal
     $reason = if ($verified) {'none'} else {'boundary_unavailable'}
     $detail = if ($verified) {'none'} else {'privileged_original_context'}
     $profile = if ($RestrictedReadProfile) {'restricted_read'} else {'original'}
-    $fingerprint = Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
     $record = [ordered]@{schema=1;source_sha=$sourceSha;source_fingerprint=$fingerprint;loaded_source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';install_generation_binding=(Hash-Bytes $launcherBytes);source_boundary='windows_locked_generation';child_exit=$exitCode;source_verified=$(if($verified){'verified'}else{'unknown'});unknown_reason=$reason;boundary_detail=$detail;execution_profile=$profile;clock_quality='unknown';clock_error_bound_ms=$null}
+    if ($ObserverEvents) {
+        $eventText=if($null -ne $eventChannel){$eventChannel.EventText()}else{$null}
+        $record['observer_run_id']=$observerRun
+        $record['observer_arguments_sha256']=Hash-Bytes $argumentBytes
+        $record['stdin_profile']='read_only_no_stdin'
+        $record['start_boundary']='process_resumed'
+        $record['observer_event_json']=if(Test-ObserverEvent $eventText){$eventText}else{$null}
+        $record['observer_event_status']=if($record['observer_event_json']){'received'}elseif($null -eq $eventChannel -or $eventChannel.Status -eq 'unavailable'){'unavailable'}else{'invalid'}
+    }
     $bytes = [Text.Encoding]::UTF8.GetBytes((($record | ConvertTo-Json -Compress)+"`n"))
     $receipt.Write($bytes,0,$bytes.Length);$receipt.Flush()
     # Receipt is consumed before custody ends, never certified by a later file.
-    $ackByte = New-Object byte[] 1
-    $ackRead = $ack.ReadAsync($ackByte,0,1)
-    if (-not $ackRead.Wait(30000) -or $ackRead.Result -ne 1 -or $ackByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
+    if (-not $ObserverEvents) {$controlRead=$ack.ReadAsync($controlByte,0,1)}
+    if ($controlRead.Wait(30000) -and $controlRead.Result -eq 0) { throw [OperationCanceledException]::new('Observer control closed') }
+    if (-not $controlRead.IsCompleted -or $controlRead.Result -ne 1 -or $controlByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
+} catch [OperationCanceledException] {
+    $exitCode=130
 } finally {
+    if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $child) { if (-not $child.HasExited) { $child.Kill();$child.WaitForExit() };$child.Dispose() }
+    if ($null -ne $eventChannel) { $eventChannel.Dispose() }
     foreach ($capture in $captureLocks) { $capture.Dispose() }
     foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$true) }
     foreach ($control in $directoryControls) { $control.Dispose() }
     for ($i=$locks.Count-1;$i -ge 0;$i--) { $locks[$i].Dispose() }
     $receipt.Dispose();$ack.Dispose()
     if ($snapshot -and (Test-Path -LiteralPath $snapshot)) { Remove-Item -LiteralPath $snapshot -Recurse -Force }
+    if($bootstrap -and (Test-Path -LiteralPath $bootstrap.FullName)){Remove-Item -LiteralPath $bootstrap.FullName -Recurse -Force}
 }
 exit $exitCode

@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 
-@unittest.skipUnless(sys.platform == "win32", "native Windows required")
+@unittest.skipUnless(sys.platform == "win32" and os.environ.get("RUN_MANAGED_WINDOWS_SOURCE_INTEGRATION") == "1",
+                     "explicit managed native Windows integration required")
 class WindowsGeneration(unittest.TestCase):
     def test_installed_generation_custody_and_original_exit(self):
         import msvcrt
@@ -31,7 +32,8 @@ class WindowsGeneration(unittest.TestCase):
                 environment = os.environ.copy()
                 environment["AI_GH_SOURCE_VERIFIED"] = "forged"
                 environment["AI_GH_SOURCE_SHA"] = "0" * 40
-                before = set(Path(tempfile.gettempdir()).glob("ai-gh-generation-*"))
+                snapshot_parents = [Path(os.environ["LOCALAPPDATA"]) / "Temp", Path(os.environ["ProgramFiles"])]
+                before = {path for parent in snapshot_parents for path in parent.glob("ai-gh-generation-*")}
                 command = ["powershell.exe", "-NoProfile", "-File", str(supervisor), "-SourceRoot", str(root),
                      "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(args),
                      "-ReceiptHandle", str(write_handle), "-ReceiptAckHandle", str(ack_handle)]
@@ -67,7 +69,7 @@ class WindowsGeneration(unittest.TestCase):
                     self.assertIsNone(record["clock_error_bound_ms"])
                     launcher = Path.home() / ".local/bin/ai-task-gates.cmd"
                     self.assertEqual(record["install_generation_binding"], hashlib.sha256(launcher.read_bytes()).hexdigest())
-                    snapshots = set(Path(tempfile.gettempdir()).glob("ai-gh-generation-*")) - before
+                    snapshots = {path for parent in snapshot_parents for path in parent.glob("ai-gh-generation-*")} - before
                     self.assertEqual(len(snapshots), 1)
                     snapshot = snapshots.pop()
                     sealed = snapshot / "bin/ai-pr-wait"
@@ -90,8 +92,11 @@ class WindowsGeneration(unittest.TestCase):
                 finally:
                     os.close(ack_write)
                     if child.poll() is None:
-                        child.kill()
-                        child.communicate(timeout=10)
+                        try:
+                            child.communicate(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.communicate(timeout=10)
 
 
 if __name__ == "__main__":

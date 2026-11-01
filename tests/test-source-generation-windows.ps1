@@ -1,5 +1,6 @@
 # Focused native custody tests; writes only a newly-created private directory.
-param([string]$Supervisor=(Join-Path $PSScriptRoot '..\tools\github-requests\source_generation_windows.ps1'))
+param([string]$Supervisor=(Join-Path $PSScriptRoot '..\tools\github-requests\source_generation_windows.ps1'),
+      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'))
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
 $text=[IO.File]::ReadAllText($Supervisor)
@@ -9,6 +10,8 @@ Add-Type -TypeDefinition $source
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
 $root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
 $passed=0
@@ -86,6 +89,95 @@ exit 0
     Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','other/private')} 'Other repository denied by explicit read profile'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--reviewer-approval','unbound-file')} 'Unbound helper argument denied by read profile'
+    $wireProbe=Join-Path $root 'wire_probe.py'
+    [IO.File]::WriteAllText($wireProbe,@'
+import ctypes,importlib.util,msvcrt,os,subprocess,sys,tempfile,time
+s=importlib.util.spec_from_file_location('wire',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+h=int(os.environ['AI_GH_QUALIFICATION_EVENT_HANDLE']);mode=sys.argv[2];start=time.monotonic()
+if mode=='watchdog':
+ for i in range(128):
+  if not m._write_once(h,b'x'*4096):break
+ k=m._kernel();k.SetNamedPipeHandleState.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_ulong),ctypes.c_void_p,ctypes.c_void_p]
+ state=ctypes.c_ulong(0)
+ if not k.SetNamedPipeHandleState(h,ctypes.byref(state),None,None):raise SystemExit(30)
+ # ONLY this fresh test pipe is changed. The disposable helper below sees a
+ # raced false NOWAIT report and must self-expire rather than block its caller.
+ p=subprocess.Popen([sys.executable,'-I',__file__,sys.argv[1],'blockedwriter'],stdin=subprocess.PIPE,close_fds=False)
+ p.communicate(b'x'*4096,timeout=2)
+ if p.returncode!=2 or time.monotonic()-start>2.5:raise SystemExit(31)
+elif mode=='blockedwriter':
+ actual=m._kernel()
+ class Raced:
+  def GetNamedPipeHandleStateW(self,handle,state,*rest):
+   ctypes.cast(state,ctypes.POINTER(ctypes.c_ulong))[0]=1;return 1
+  def __getattr__(self,name):return getattr(actual,name)
+ m._kernel=lambda:Raced();sys.argv=[sys.argv[1],'--write-once'];raise SystemExit(m.main())
+elif mode=='invalid':
+ with tempfile.TemporaryFile(dir=os.getcwd()) as f:
+  f.write(b'unchanged');f.flush()
+  if m._write_once(msvcrt.get_osfhandle(f.fileno()),b'altered'):raise SystemExit(32)
+  f.seek(0)
+  if f.read()!=b'unchanged':raise SystemExit(33)
+elif mode=='closed':
+ k=m._kernel();k.CloseHandle(h)
+ if m._write_once(h,b'x'):raise SystemExit(34)
+elif mode=='full':
+ for i in range(128):
+  if not m._write_once(h,b'x'*4096):break
+ else:raise SystemExit(21)
+ if time.monotonic()-start>1:raise SystemExit(22)
+elif mode=='duplicate':
+ if not m._write_once(h,b'{}') or not m._write_once(h,b'{}'):raise SystemExit(24)
+elif mode=='malformed':
+ if not m._write_once(h,b'\xff'):raise SystemExit(25)
+else:
+ if not m._write_once(h,b'{"native_chain":"ok"}'):raise SystemExit(26)
+'@)
+    $wireShell=Join-Path $root 'wire_probe.sh'
+    [IO.File]::WriteAllText($wireShell,"exec `"`$1`" `"`$2`" `"`$3`" `"`$4`"`n")
+    $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    $python=(Get-Command python.exe -ErrorAction Stop).Source
+    function Posix([string]$p){return '/'+$p.Substring(0,1)+'/'+$p.Substring(3).Replace('\','/')}
+    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog')){
+        $channel=[GenerationCustody+EventChannel]::new();$job=[GenerationCustody]::Job()
+        $saved=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
+        try{
+            [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',[string]$channel.WriteHandle,'Process')
+            $args=@((Posix $wireShell),(Posix $python),(Posix $wireProbe),(Posix $EventHelper),$mode)
+            $command=($args|ForEach-Object{[GenerationCustody]::Quote($_)}) -join ' '
+            $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true)
+            try{Assert ($process.WaitForExit(5000)) 'Native event write is bounded';Assert ($process.ExitCode -eq 0) ('Git Bash/native Python event pipe '+$mode+' exit='+$process.ExitCode)}finally{$process.Dispose()}
+            if($mode -eq 'basic'){Assert ($channel.EventText() -eq '{"native_chain":"ok"}') 'Raw handle survives actual Bash/native Python chain'}
+            elseif($mode -eq 'duplicate' -or $mode -eq 'malformed'){Assert ($null -eq $channel.EventText() -and $channel.Status -eq 'invalid') 'Duplicate or malformed event stays unknown'}
+        }finally{[Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$saved,'Process');$job.Dispose();$channel.Dispose()}
+    }
+    $fixture=@{schema=4;utc='2026-10-31T00:00:00Z';measurement='workflow_evidence';caller='ai-pr-wait';workflow='pr_wait';workflow_id=('a'*32);cohort_id=$null;target_ordinal=$null;source_verified='unknown';source_fingerprint_start=$null;source_fingerprint_end=$null;install_generation_binding=$null;event_kind='pr_merged';eligible_utc_ms=1750000000000L;observed_utc_ms=1750000001000L;delivered_utc_ms=1750000001000L;delivery_boundary='terminal_report';clock_quality='unknown';clock_error_bound_ms=$null;latency_ms=$null;unknown_reason='source_unknown'}
+    $json=$fixture|ConvertTo-Json -Compress
+    Assert (Test-ObserverEvent $json) 'Exact unqualified event schema accepted'
+    Assert (-not (Test-ObserverEvent ($json -replace '"schema":4','"schema":4,"schema":4'))) 'Duplicate JSON event keys refused'
+    $fixture.source_verified='verified'
+    Assert (-not (Test-ObserverEvent ($fixture|ConvertTo-Json -Compress))) 'Child source claim refused'
+    Assert (-not (Test-ObserverEvent ('x'*4097))) 'Oversized event refused'
+    $unsafeParent=Join-Path $root 'unsafe-parent'
+    [GenerationCustody]::PrivateDirectory($unsafeParent)
+    $parentHandle=[GenerationCustody]::Hold($unsafeParent,$true,$false)
+    try{
+        [GenerationCustody]::AssertProtectedParent($parentHandle,$false)
+        $a=Get-Acl -LiteralPath $unsafeParent
+        $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Modify','None','None','Allow'))
+        Set-Acl -LiteralPath $unsafeParent -AclObject $a
+        $candidate=Join-Path $unsafeParent 'candidate'
+        Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false);[GenerationCustody]::PrivateDirectory($candidate)} 'Unsafe parent refused BEFORE snapshot creation'
+        Assert (-not [IO.Directory]::Exists($candidate)) 'Unsafe namespace never materialized'
+        # Demonstrate the pre-lock replacement the parent check prevents;
+        # every fixture object is fresh and owned, no foreign ACL is repaired.
+        [GenerationCustody]::PrivateDirectory($candidate)
+        $replacement=Join-Path $unsafeParent 'replacement'
+        [GenerationCustody]::PrivateDirectory($replacement)
+        [IO.Directory]::Move($candidate,($candidate+'-original'))
+        [IO.Directory]::Move($replacement,$candidate)
+        Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false)} 'Pre-seal replacement cannot acquire qualified custody'
+    }finally{$parentHandle.Dispose()}
     $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $job=[GenerationCustody]::Job()
     $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
