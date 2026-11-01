@@ -167,15 +167,15 @@ The coordinator owns the same issue through live acceptance or an evidenced
 blocked disposition. Planning is already merged.
 [Fresh-session handoff](HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
 
-| Step | Status, October 30, 2026 EDT | Evidence / gate still required |
+| Step | Status, reconciled October 31, 2026 EDT | Evidence / gate still required |
 |---|---|---|
 | R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
 | R1 Inventory and supported capability map | observed baseline; authentication/live use partial | Four authenticated host reads, OS/client/root/source hashes and recoverable originals retained owner-only; missing command/app locations and unverified desktop/login behavior disclosed in the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322). No client/platform equivalence inferred. |
-| R2 Shared client workflow and safe access | source implemented; delivery/live adoption open | Canonical Claude/Codex policy and rendered MiMo/ZCode share the existing capture-free browser workflow; Linux phrase/render/adoption/install-skills fixtures pass, including CRLF machine-tail and capture-off sentinel preservation. Installed adoption remains unproved. |
-| R3 CI contract and Entire feasibility | inventory complete; execution unmet | All 12 workflows and 182 registrations inventoried. Entire project has no installed plugin; Depot's Entire integration lacks pull-request events. Full exact-head success/failure/display and admissible execution remain unproved; GitHub CI preserved. |
-| R4 Offline cross-platform verification | open | §10 named suites and adversarial cases; no fleet installation on fixture results alone. |
-| R5 Protected installation on four machines | open | §9 R5: each host's installed commit, before/after preservation and rollback receipt. |
-| R6 All 16 live client-machine journeys | open | §9 matrix: actual fresh-session behavior, source/check/Trail readback, no private capture and recovery. |
+| R2 Shared client workflow and safe access | source merged; actual adoption incomplete | PR2195 landed d7f4c10 after ordinary and queue success. Canonical/rendered policy and preservation fixtures passed; Linux default installation still omits MiMo/ZCode refresh. New controller workflow must follow the October31 amendment. |
+| R3 CI contract and Entire feasibility | inventory and bounded visibility observed; replacement unmet | All12 workflows/182 registrations inventoried. Real release success and disposable failure/repair displayed at exact heads. Buildkite documents self-hosted support but no provider connection, actual native jobs or replacement merge is proved. T1–T5 govern the new test. |
+| R4 Offline cross-platform verification | focused suites passed; broader adversarial gates open | Focused Linux and three-host Windows fixtures passed; corrected990c8b95 ordinary Linux/all12 Windows PR sections and d7f4c10 queue passed. Remaining §10/T3 cases and native execution are not passed by fixtures. |
+| R5 Protected installation on four machines | three partial transactions; none accepted complete | edge-dev3/edge-dev/4837 advanced source to d7f4c10 but Linux memory seed failed and Windows scheduler stage interrupted with stale managed receipts.916 not attempted. Handoff gives exact state/repair gates; preserve originals. |
+| R6 All 16 live client-machine journeys | 0 of16 accepted | Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; native-control/missing-client limits are explicit. |
 | R7 Live CI workflow and continuity | open | §9 R7: genuine authorized task and disposable intentional-failure branch; no weakening GitHub controls. |
 | R8 Acceptance, bounded stop and disposition | open | §13: every matrix cell and CI gate has evidence; original stop retained, missing capability stays visibly incomplete. |
 

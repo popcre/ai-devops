@@ -297,9 +297,10 @@ under the coordinator's standard local state root, Entire-trial namespace,
 dated20261030-fleet. Resolve the OS state root rather than copying this
 machine's absolute paths. The inventory contains per-host baselines, hashes,
 matrix, source/config backups and install-d7f4c10 logs/health/post-state JSON.
-Do not publish them. Temporary CI inventory and Windows-results summaries
-were staging-only; reconstruct from durable source/issue and private baselines
-if absent. They are not acceptance artifacts by themselves.
+Do not publish them. The CI inventory, Windows-results summary, cutover PR
+snapshot, issue snapshot and ruleset snapshot were also copied into its
+cutover-20261031 evidence group with owner-only permissions. Those inventories
+are supporting evidence, not native execution acceptance by themselves.
 
 Secret store is1Password vault vibe_coding. Existing Linux sudo item title
 edge-dev3 ahazan sudo password was used through an owner-only FIFO with echo
