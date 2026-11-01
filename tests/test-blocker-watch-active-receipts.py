@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual BlockerWatch boundaries with isolated fake GitHub/harness processes."""
 import copy
+import datetime
 import json
 import os
 from pathlib import Path
@@ -33,16 +34,21 @@ class ActiveReceipts(unittest.TestCase):
         self.fake.write_text('''#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "${AI_GH_WORKFLOW_ID:-unset}" >> "$FIXTURE/ids"
-args=("$@"); q=''
+printf '%s\\n' "$*" >> "$FIXTURE/calls"
+args=("$@"); q=''; n=''
 for ((i=0;i<${#args[@]};i++)); do
   case "${args[$i]}" in --jq|-q) q="${args[$((i+1))]}" ;; esac
+  case "${args[$i]}" in -F) value="${args[$((i+1))]}"; case "$value" in n=*) n="${value#n=}" ;; esac ;; esac
 done
 out(){ if [ -n "$q" ]; then printf '%s' "$1" | jq -r "$q"; else printf '%s\\n' "$1"; fi; }
 case "$*" in
  *graphql*states:OPEN*)
    [ ! -f "$FIXTURE/read-fail" ] || exit 7
    out "$(cat "$FIXTURE/snapshot.json")" ;;
- *graphql*) out "$(cat "$FIXTURE/detail.json")" ;;
+ *graphql*)
+   if [ -n "$n" ] && [ -f "$FIXTURE/detail-$n.json" ]; then out "$(cat "$FIXTURE/detail-$n.json")"
+   else out "$(cat "$FIXTURE/detail.json")"; fi ;;
+ *repos/o/r/issues/5*) out "$(cat "$FIXTURE/issue.json")" ;;
  *'-X POST'*blocked_by*)
    if [ -f "$FIXTURE/fail-all" ] || { [ -f "$FIXTURE/fail-second" ] && [[ "$*" = *issue_id=208* ]]; }; then exit 7; fi
    out '{}' ;;
@@ -82,6 +88,8 @@ exit 0
                      "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"):
             self.environment.pop(name, None)
         self.snapshot([])
+        (self.root / "issue.json").write_text(json.dumps({"state": "open", "pull_request": None,
+                                                        "title": "synthetic title", "closed_at": None}))
         self.detail = dict(updatedAt="2000-01-01T00:00:00Z", createdAt="2000-01-01T00:00:00Z",
                            body="", comments={"nodes": []}, timelineItems={"nodes": []}, blocking={"nodes": []})
         self.write_detail()
@@ -356,6 +364,257 @@ exec /usr/bin/rm "$@"
             self.assertEqual(emit(args).returncode, 2)
         self.assertEqual(emit(active[:-1]).returncode, 2)
         self.assertEqual(emit(legacy + ["private-content"]).returncode, 2)
+
+
+class BlockerEventFacts(unittest.TestCase):
+    # Reuse the original actual-caller fixture, without inheriting/repeating
+    # its stage-one tests when selecting this producer packet natively.
+    setUp = ActiveReceipts.setUp
+    write_detail = ActiveReceipts.write_detail
+    cost = ActiveReceipts.cost
+    snapshot = ActiveReceipts.snapshot
+    links = ActiveReceipts.links
+    alarm = ActiveReceipts.alarm
+    run_command = ActiveReceipts.run_command
+    rows = ActiveReceipts.rows
+    active = ActiveReceipts.active
+    make_wait = ActiveReceipts.make_wait
+
+    def fact(self, workflow):
+        row = [r for r in self.rows() if r.get("schema") == 4 and r.get("workflow") == "blocker_watch_" + workflow][-1]
+        self.assertEqual(set(row), report.EVIDENCE_KEYS)
+        self.assertTrue(report.unqualified_blocker_event(row))
+        self.assertFalse(report.unqualified_event(row))
+        self.assertEqual((row["source_verified"], row["clock_quality"]), ("unknown", "unknown"))
+        for name in ("source_fingerprint_start", "source_fingerprint_end", "install_generation_binding",
+                     "clock_error_bound_ms", "latency_ms", "cohort_id", "target_ordinal"):
+            self.assertIsNone(row[name])
+        self.assertEqual(row["workflow_id"], self.active(workflow)["workflow_id"])
+        return row
+
+    def update_wait(self, **changes):
+        path = self.root / "watch/waits/synthetic.json"
+        row = json.loads(path.read_text()); row.update(state="waiting", attempts=0); row.update(changes)
+        path.write_text(json.dumps(row))
+
+    def issue(self, **changes):
+        row = dict(state="closed", pull_request=None, title="public-title-sentinel", closed_at="2001-01-01T00:00:00Z")
+        row.update(changes)
+        (self.root / "issue.json").write_text(json.dumps(row))
+
+    def epoch_ms(self, value):
+        return int(datetime.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+
+    def test_closed_response_preserves_title_and_uses_no_additional_request(self):
+        self.make_wait(); self.update_wait(blocker="o/r#5")
+        self.issue()
+        result = self.run_command("tick")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = self.fact("wake")
+        self.assertEqual(row["event_kind"], "blocker_closed")
+        self.assertEqual(row["eligible_utc_ms"], self.epoch_ms("2001-01-01T00:00:00Z"))
+        self.assertEqual(row["delivery_boundary"], "wake_command_returned")
+        self.assertGreaterEqual(row["delivered_utc_ms"], row["observed_utc_ms"])
+        self.assertIn("public-title-sentinel", result.stderr)
+        calls = (self.root / "calls").read_text().splitlines()
+        self.assertEqual(sum(line.startswith("api repos/o/r/issues/5 ") for line in calls), 1)
+        self.assertEqual(result.stdout, "")
+
+    def test_closed_missing_invalid_and_out_of_domain_times_remain_null(self):
+        self.make_wait()
+        for value in (None, "", "not-a-date", "2026-02-30T00:00:00Z", "2400-01-01T00:00:00Z", 123):
+            with self.subTest(value=value):
+                self.update_wait(blocker="o/r#5")
+                self.issue(closed_at=value)
+                self.assertEqual(self.run_command("tick").returncode, 0)
+                row = self.fact("wake")
+                self.assertEqual(row["event_kind"], "blocker_closed")
+                self.assertIsNone(row["eligible_utc_ms"])
+                self.assertIsNotNone(row["observed_utc_ms"])
+
+    def test_future_genuine_server_time_is_retained_as_clock_uncertainty(self):
+        self.make_wait(); self.update_wait(blocker="o/r#5")
+        self.issue(closed_at="2099-01-01T00:00:00Z")
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        row = self.fact("wake")
+        self.assertEqual(row["eligible_utc_ms"], self.epoch_ms("2099-01-01T00:00:00Z"))
+        self.assertGreater(row["eligible_utc_ms"], row["observed_utc_ms"])
+        self.assertEqual(row["unknown_reason"], "clock_unknown")
+        self.assertIsNone(row["latency_ms"])
+
+    def test_timer_uses_existing_due_value_and_closed_blocker_takes_precedence(self):
+        self.make_wait()
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        row = self.fact("wake")
+        self.assertEqual((row["event_kind"], row["eligible_utc_ms"]),
+                         ("timer_due", self.epoch_ms("2000-01-01T00:00:00Z")))
+        self.update_wait(blocker="o/r#5"); self.issue()
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        self.assertEqual(self.fact("wake")["event_kind"], "blocker_closed")
+        self.update_wait(blocker="o/r#5"); self.issue(state="open", closed_at=None)
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        self.assertEqual(self.fact("wake")["event_kind"], "timer_due")
+
+    def test_future_invalid_timer_and_dry_run_never_claim_delivery(self):
+        self.make_wait()
+        for value in ("2099-01-01T00:00:00Z", "not-a-date", "2026-02-30T00:00:00Z"):
+            self.update_wait(until=value)
+            self.assertEqual(self.run_command("tick").returncode, 0)
+            row = self.fact("wake")
+            self.assertEqual((row["event_kind"], row["delivery_boundary"]), ("unknown", "unknown"))
+            self.assertIsNone(row["observed_utc_ms"])
+        self.update_wait(until="2000-01-01T00:00:00Z")
+        self.assertEqual(self.run_command("tick", "--dry-run").returncode, 0)
+        self.assertIsNone(self.fact("wake")["delivered_utc_ms"])
+
+    def test_failed_process_has_return_fact_but_refused_process_has_no_delivery(self):
+        self.make_wait()
+        self.environment["HARNESS_MODE"] = "fail"
+        self.assertEqual(self.run_command("tick").returncode, 1)
+        self.assertEqual(self.fact("wake")["delivery_boundary"], "wake_command_returned")
+        self.update_wait(); self.environment["HARNESS_MODE"] = "active"
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        row = self.fact("wake")
+        self.assertEqual(row["delivery_boundary"], "unknown")
+        self.assertIsNone(row["delivered_utc_ms"])
+        result = report.summarize(self.state / "measurements")
+        self.assertEqual(result["qualified_latency_ms"]["count"], 0)
+
+    def test_snapshot_open_hit_keeps_empty_title_and_state_in_their_fields(self):
+        self.make_wait(); self.update_wait(blocker="o/r#5", until="2099-01-01T00:00:00Z")
+        self.config.update(repos=["o/r"], links_enabled=True)
+        self.config.pop("propagate_on_host", None)
+        self.snapshot([{"number": 5, "databaseId": 205, "title": "", "body": "", "blockedBy": {"nodes": []}}])
+        self.assertEqual(self.run_command("tick").returncode, 0)
+        self.assertEqual(self.active("wake")["outcome"], "skipped")
+        self.assertIsNone(self.fact("wake")["observed_utc_ms"])
+        calls = (self.root / "calls").read_text().splitlines()
+        self.assertEqual(sum(line.startswith("api repos/o/r/issues/5 ") for line in calls), 0)
+
+    def test_links_have_observation_and_ack_but_never_invent_eligibility(self):
+        self.links()
+        snapshot = json.loads((self.root / "snapshot.json").read_text())
+        snapshot["data"]["repository"]["issues"]["nodes"][0]["updatedAt"] = "2000-01-01T00:00:00Z"
+        (self.root / "snapshot.json").write_text(json.dumps(snapshot))
+        self.assertEqual(self.run_command("links").returncode, 0)
+        row = self.fact("links")
+        self.assertEqual((row["event_kind"], row["delivery_boundary"]), ("unknown", "links_batch_acknowledged"))
+        self.assertIsNone(row["eligible_utc_ms"])
+        self.assertIsNotNone(row["observed_utc_ms"])
+        self.assertGreaterEqual(row["delivered_utc_ms"], row["observed_utc_ms"])
+
+    def test_partial_dry_and_idle_links_have_no_completed_batch_ack(self):
+        self.links("7,8"); (self.root / "fail-second").touch()
+        self.assertEqual(self.run_command("links").returncode, 1)
+        self.assertIsNone(self.fact("links")["delivered_utc_ms"])
+        (self.root / "fail-second").unlink()
+        self.assertEqual(self.run_command("links", "--dry-run").returncode, 0)
+        self.assertIsNone(self.fact("links")["delivered_utc_ms"])
+        self.links(present=True)
+        self.assertEqual(self.run_command("links").returncode, 0)
+        self.assertIsNone(self.fact("links")["observed_utc_ms"])
+
+    def test_alarm_uses_actual_activity_threshold_and_completed_final_ack(self):
+        self.alarm()
+        self.assertEqual(self.run_command("alarm").returncode, 0)
+        row = self.fact("alarm")
+        self.assertEqual(row["event_kind"], "alarm_stale")
+        self.assertEqual(row["eligible_utc_ms"], self.epoch_ms("2000-01-02T00:00:00Z"))
+        self.assertEqual(row["delivery_boundary"], "alarm_batch_acknowledged")
+        self.assertGreaterEqual(row["delivered_utc_ms"], row["observed_utc_ms"])
+
+    def two_alarm_targets(self, second_time):
+        self.alarm()
+        snapshot = json.loads((self.root / "snapshot.json").read_text())
+        extra = copy.deepcopy(snapshot["data"]["repository"]["issues"]["nodes"][0]["blockedBy"]["nodes"][0])
+        extra["number"] = 8
+        snapshot["data"]["repository"]["issues"]["nodes"][0]["blockedBy"]["nodes"].append(extra)
+        (self.root / "snapshot.json").write_text(json.dumps(snapshot))
+        detail = copy.deepcopy(self.detail); detail["updatedAt"] = second_time
+        (self.root / "detail-8.json").write_text(json.dumps({"data": {"rateLimit": self.cost(), "repository": {"issue": detail}}}))
+
+    def test_multiple_alarm_times_require_every_raw_activity_to_be_known(self):
+        self.two_alarm_targets("1999-01-01T00:00:00Z")
+        self.assertEqual(self.run_command("alarm").returncode, 0)
+        self.assertEqual(self.fact("alarm")["eligible_utc_ms"], self.epoch_ms("1999-01-02T00:00:00Z"))
+        detail = copy.deepcopy(self.detail); detail["updatedAt"] = "0000-00-00T00:00:00Z"
+        (self.root / "detail-8.json").write_text(json.dumps({"data": {"rateLimit": self.cost(), "repository": {"issue": detail}}}))
+        self.assertEqual(self.run_command("alarm").returncode, 0)
+        row = self.fact("alarm")
+        self.assertEqual(row["event_kind"], "unknown")
+        self.assertIsNone(row["eligible_utc_ms"])
+        self.assertEqual(row["delivery_boundary"], "alarm_batch_acknowledged")
+        self.assertIsNotNone(row["delivered_utc_ms"])
+
+    def test_digest_only_partial_and_idle_alarm_never_claim_delivery(self):
+        self.alarm()
+        self.detail["comments"]["nodes"] = [{"body": "<!-- ai-blocker-watch:unowned:o/r#7 -->", "createdAt": "2000-01-02T00:00:00Z"}]
+        self.write_detail()
+        self.assertEqual(self.run_command("alarm").returncode, 0)
+        self.assertIsNone(self.fact("alarm")["delivered_utc_ms"])
+        self.detail["comments"]["nodes"] = []; self.write_detail()
+        (self.root / "create-fail").touch()
+        self.assertEqual(self.run_command("alarm").returncode, 1)
+        row = self.fact("alarm")
+        self.assertEqual((row["event_kind"], row["delivery_boundary"]), ("unknown", "unknown"))
+        self.snapshot([])
+        for path in (self.root / "watch").glob("digest-*"): path.unlink()
+        self.assertEqual(self.run_command("alarm").returncode, 0)
+        self.assertIsNone(self.fact("alarm")["observed_utc_ms"])
+
+    def sample_fact(self):
+        return dict(schema=4, utc="2026-11-01T12:00:00Z", measurement="workflow_evidence", caller="ai-blocker-watch",
+                    workflow="blocker_watch_links", workflow_id="a" * 32, cohort_id=None, target_ordinal=None,
+                    source_verified="unknown", source_fingerprint_start=None, source_fingerprint_end=None,
+                    install_generation_binding=None, event_kind="unknown", eligible_utc_ms=None,
+                    observed_utc_ms=1000, delivered_utc_ms=2000, delivery_boundary="links_batch_acknowledged",
+                    clock_quality="unknown", clock_error_bound_ms=None, latency_ms=None, unknown_reason="source_unknown")
+
+    def test_strict_shape_timestamp_authority_and_pr_confusion_rejection(self):
+        row = self.sample_fact()
+        self.assertTrue(report.unqualified_blocker_event(row))
+        for name, value in (("workflow", []), ("event_kind", "pr_merged"), ("delivery_boundary", "terminal_report"),
+                            ("eligible_utc_ms", "private-response"), ("observed_utc_ms", True),
+                            ("delivered_utc_ms", -1), ("clock_quality", "verified_bound"),
+                            ("source_verified", "verified"), ("cohort_id", "b" * 32),
+                            ("latency_ms", 1000), ("private_response", "no")):
+            changed = dict(row); changed[name] = value
+            self.assertFalse(report.unqualified_blocker_event(changed), (name, value))
+        self.assertFalse(report.unqualified_event(row))
+        self.assertEqual(report.qualify_event(row, None, None, True)["unknown_reason"], "event_unknown")
+        for changes in (dict(caller="ai-pr-wait"), dict(workflow="pr_wait"), dict(caller="ai-pr-wait", workflow="pr_wait")):
+            self.assertFalse(report.unqualified_event(dict(row, **changes)))
+
+    def test_report_duplicate_fields_and_outcome_confusion_fail_closed(self):
+        directory = self.root / "report"
+        directory.mkdir(); path = directory / "2026-11-01.jsonl"
+        row = self.sample_fact()
+        path.write_text(json.dumps(row) + "\n")
+        result = report.summarize(directory)
+        self.assertEqual(result["unqualified_blocker_events"][0]["outcome"], "unmatched_unknown")
+        self.assertEqual(result["qualified_latency_ms"]["count"], 0)
+        path.write_text(json.dumps(row).replace('"observed_utc_ms": 1000', '"observed_utc_ms": 9, "observed_utc_ms": 1000') + "\n")
+        with self.assertRaises(ValueError): report.summarize(directory)
+        path.write_text(json.dumps(row) + "\n" + json.dumps(row) + "\n")
+        with self.assertRaises(ValueError): report.summarize(directory)
+        receipt = ActiveReceipts.receipt(self, outcome="partial", attempted_count=2, succeeded_count=1, failed_count=1)
+        path.write_text(json.dumps(row) + "\n" + json.dumps(receipt) + "\n")
+        with self.assertRaises(ValueError): report.summarize(directory)
+
+    def test_fact_emitter_is_durable_only_and_payload_is_private(self):
+        script = 'source "$1"; shift; gh_measure_active_channel(){ printf visited > "$FIXTURE/channel-visited"; }; gh_measure_blocker_evidence "$@"'
+        env = dict(self.environment, AI_GH_QUALIFICATION_EVENT_HANDLE="123", AI_GH_ACTIVE_EVENT_HANDLE="123")
+        result = subprocess.run([bash_path(), "-c", script, "fixture", (ROOT / "tools/github-requests/telemetry.sh").as_posix(),
+                                 "blocker_watch_links", "a" * 32, "unknown", "", "1000", "2000", "links_batch_acknowledged"],
+                                env=env, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((self.root / "channel-visited").exists())
+        row = self.rows()[0]
+        self.assertEqual(set(row), report.EVIDENCE_KEYS)
+        self.assertTrue(report.unqualified_blocker_event(row))
+        raw = json.dumps(row)
+        for text in ("private-session-sentinel", "private-prompt-sentinel", self.root.as_posix()):
+            self.assertNotIn(text, raw)
 
 
 if __name__ == "__main__":

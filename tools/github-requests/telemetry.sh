@@ -333,6 +333,38 @@ gh_measure_workflow_evidence(){
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
+# Separate ordinary BlockerWatch facts. Deliberately durable-only: neither the
+# PR event pipe nor the governed completion channel accepts this policy.
+gh_measure_blocker_evidence(){
+  [ "$#" = 7 ] || return 2
+  local workflow="$1" id="$2" event="$3" eligible="$4" observed="$5" delivered="$6" boundary="$7" number utc record reason=source_unknown
+  [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
+  case "$workflow:$event" in
+    blocker_watch_wake:blocker_closed|blocker_watch_wake:timer_due|blocker_watch_wake:unknown|\
+    blocker_watch_alarm:alarm_stale|blocker_watch_alarm:unknown|blocker_watch_links:unknown) ;;
+    *) return 2 ;;
+  esac
+  case "$workflow:$boundary" in
+    blocker_watch_wake:wake_command_returned|blocker_watch_alarm:alarm_batch_acknowledged|\
+    blocker_watch_links:links_batch_acknowledged|*:unknown) ;;
+    *) return 2 ;;
+  esac
+  for number in "$eligible" "$observed" "$delivered"; do
+    [[ -z "$number" || "$number" =~ ^(0|[1-9][0-9]{0,12})$ ]] || return 2
+  done
+  [ "$event" != unknown ] || [ -z "$eligible" ] || return 2
+  [ "$event" = unknown ] || [ -n "$observed" ] || return 2
+  [ "$event" != alarm_stale ] || [ -n "$eligible" ] || return 2
+  if [ "$boundary" = unknown ]; then [ -z "$delivered" ] || return 2
+  else [ -n "$observed" ] && [ -n "$delivered" ] || return 2; fi
+  if [ -n "$observed" ] && { { [ -n "$eligible" ] && [ "$eligible" -gt "$observed" ]; } ||
+       { [ -n "$delivered" ] && [ "$delivered" -lt "$observed" ]; }; }; then reason=clock_unknown; fi
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":4,"utc":"%s","measurement":"workflow_evidence","caller":"ai-blocker-watch","workflow":"%s","workflow_id":"%s","cohort_id":null,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"%s","eligible_utc_ms":%s,"observed_utc_ms":%s,"delivered_utc_ms":%s,"delivery_boundary":"%s","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"%s"}' \
+    "$utc" "$workflow" "$id" "$event" "${eligible:-null}" "${observed:-null}" "${delivered:-null}" "$boundary" "$reason")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
 # Observe quota fields carried by an upstream GraphQL response. Optional
 # remaining/resetAt stay null unless both fields validate; old cost-only
 # responses remain useful without inventing a reset window.
