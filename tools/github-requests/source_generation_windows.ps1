@@ -287,9 +287,32 @@ $child = $null
 $eventChannel = $null
 $counterChannel = $null
 $counterBinding = $null
-$receipt = [GenerationCustody]::Pipe($ReceiptHandle,[IO.FileAccess]::Write)
-$ack = [GenerationCustody]::Pipe($ReceiptAckHandle,[IO.FileAccess]::Read)
+$receipt = $null
+$ack = $null
 $exitCode = 125
+$primaryFailure = $null
+$cancelled = $false
+function Invoke-OwnedCleanupStep([Collections.Generic.List[object]]$Errors,[string]$Phase,[object]$Resource,[scriptblock]$Operation) {
+    if($null -eq $Resource){return}
+    try{& $Operation $Resource | Out-Null}catch{$Errors.Add([pscustomobject]@{phase=$Phase;error=$_})}
+}
+function Close-OwnedGeneration([Collections.IDictionary]$Owned) {
+    $errors=[Collections.Generic.List[object]]::new()
+    Invoke-OwnedCleanupStep $errors 'job_stop' $Owned.Job {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'child_stop' $Owned.Child {param($r)if(-not $r.HasExited){$r.Kill();if(-not $r.WaitForExit(10000)){throw 'Owned child did not stop within cleanup deadline'}}}
+    Invoke-OwnedCleanupStep $errors 'child_dispose' $Owned.Child {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'event_channel' $Owned.EventChannel {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'counter_channel' $Owned.CounterChannel {param($r)$r.Dispose()}
+    foreach($capture in $Owned.CaptureLocks){Invoke-OwnedCleanupStep $errors 'capture_handle' $capture {param($r)$r.Dispose()}}
+    foreach($control in $Owned.DirectoryControls){Invoke-OwnedCleanupStep $errors 'directory_unseal' $control {param($r)[GenerationCustody]::DirectoryAccess($r,$true)}}
+    foreach($control in $Owned.DirectoryControls){Invoke-OwnedCleanupStep $errors 'directory_control' $control {param($r)$r.Dispose()}}
+    for($index=$Owned.Locks.Count-1;$index -ge 0;$index--){Invoke-OwnedCleanupStep $errors 'custody_handle' $Owned.Locks[$index] {param($r)$r.Dispose()}}
+    Invoke-OwnedCleanupStep $errors 'receipt' $Owned.Receipt {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'ack' $Owned.Ack {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'snapshot_remove' $Owned.Snapshot {param($p)if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop}}
+    Invoke-OwnedCleanupStep $errors 'bootstrap_remove' $Owned.Bootstrap {param($p)if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop}}
+    return ,$errors
+}
 function Hash-Bytes([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
@@ -459,8 +482,13 @@ function Test-ObserverEvent([string]$Text) {
     if ($matches.Count -ne $keys.Count) { return $false }
     $seen=@{}
     foreach ($match in $matches) { $key=$match.Groups[1].Value;if($key -cnotin $keys -or $seen.ContainsKey($key)){return $false};$seen[$key]=$true }
-    try {$e=$Text|ConvertFrom-Json}catch{return $false}
-    if (@($e.PSObject.Properties).Count -ne $keys.Count -or $e.schema -isnot [int] -or $e.schema -ne 4 -or
+    try {
+        $parser=Get-Command Microsoft.PowerShell.Utility\ConvertFrom-Json -ErrorAction Stop
+        if($parser.Parameters.ContainsKey('DateKind')){$e=$Text|Microsoft.PowerShell.Utility\ConvertFrom-Json -DateKind String}
+        else{$e=$Text|Microsoft.PowerShell.Utility\ConvertFrom-Json}
+    }catch{return $false}
+    if (@($e.PSObject.Properties).Count -ne $keys.Count -or ($e.schema -isnot [int] -and $e.schema -isnot [long]) -or $e.schema -ne 4 -or
+        $e.utc -isnot [string] -or
         $e.utc -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -or $e.measurement -cne 'workflow_evidence' -or
         $e.caller -cne 'ai-pr-wait' -or $e.workflow -cne 'pr_wait' -or $e.workflow_id -notmatch '^[a-f0-9]{32}$' -or
         ($null -ne $e.cohort_id -and $e.cohort_id -notmatch '^[a-f0-9]{32}$') -or
@@ -469,6 +497,8 @@ function Test-ObserverEvent([string]$Text) {
         $e.event_kind -cnotin @('pr_merged','pr_closed','check_completed','unknown') -or
         $e.delivery_boundary -cnotin @('terminal_report','unknown') -or
         $e.unknown_reason -cnotin @('metadata_absent','metadata_untrusted','source_unknown','source_changed','event_unknown','event_invalid','clock_unknown','clock_jump','clock_negative','delivery_unknown')) { return $false }
+    $parsedUtc=[datetime]::MinValue
+    if(-not [datetime]::TryParseExact($e.utc,"yyyy-MM-dd'T'HH:mm:ss'Z'",[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$parsedUtc)){return $false}
     foreach ($key in @('source_fingerprint_start','source_fingerprint_end','install_generation_binding','clock_error_bound_ms','latency_ms')) { if($null -ne $e.$key){return $false} }
     foreach ($key in @('eligible_utc_ms','observed_utc_ms','delivered_utc_ms')) { $value=$e.$key;if($null -ne $value -and (($value -isnot [int] -and $value -isnot [long]) -or $value -lt 0 -or $value -gt 9999999999999)){return $false} }
     if (($e.event_kind -eq 'unknown') -ne ($null -eq $e.eligible_utc_ms)) { return $false }
@@ -477,6 +507,8 @@ function Test-ObserverEvent([string]$Text) {
     return $true
 }
 try {
+    $receipt = [GenerationCustody]::Pipe($ReceiptHandle,[IO.FileAccess]::Write)
+    $ack = [GenerationCustody]::Pipe($ReceiptAckHandle,[IO.FileAccess]::Read)
     if($PSCmdlet.ParameterSetName -ceq 'Inline'){
         if($ArgumentsBase64.Length -gt 10924){throw 'Bounded argument JSON required'}
         $argumentBytes=[Convert]::FromBase64String($ArgumentsBase64)
@@ -672,17 +704,17 @@ try {
     if (-not $controlRead.IsCompleted -or $controlRead.Result -ne 1 -or $controlByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
 } catch [OperationCanceledException] {
     $exitCode=130
+    $cancelled=$true
+    $primaryFailure=$_
+} catch {
+    $primaryFailure=$_
 } finally {
-    if ($null -ne $job) { $job.Dispose() }
-    if ($null -ne $child) { if (-not $child.HasExited) { $child.Kill();$child.WaitForExit() };$child.Dispose() }
-    if ($null -ne $eventChannel) { $eventChannel.Dispose() }
-    if ($null -ne $counterChannel) { $counterChannel.Dispose() }
-    foreach ($capture in $captureLocks) { $capture.Dispose() }
-    foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$true) }
-    foreach ($control in $directoryControls) { $control.Dispose() }
-    for ($i=$locks.Count-1;$i -ge 0;$i--) { $locks[$i].Dispose() }
-    $receipt.Dispose();$ack.Dispose()
-    if ($snapshot -and (Test-Path -LiteralPath $snapshot)) { Remove-Item -LiteralPath $snapshot -Recurse -Force }
-    if($bootstrap -and (Test-Path -LiteralPath $bootstrap.FullName)){Remove-Item -LiteralPath $bootstrap.FullName -Recurse -Force}
+    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
+    foreach($failure in $cleanupErrors){
+        Write-Error ('Owned generation cleanup failed at '+$failure.phase) -ErrorAction Continue
+        Write-Error -ErrorRecord $failure.error -ErrorAction Continue
+    }
+    if($cleanupErrors.Count -gt 0 -and $exitCode -eq 0){$exitCode=125}
 }
+if($primaryFailure -and -not $cancelled){throw $primaryFailure}
 exit $exitCode
