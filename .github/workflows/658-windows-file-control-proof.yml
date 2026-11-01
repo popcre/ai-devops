@@ -54,7 +54,7 @@ jobs:
               & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .	ests	est-source-generation-windows.ps1 *> $log
               $code=$LASTEXITCODE
             }finally{$ErrorActionPreference=$prior}
-            $matches=[regex]::Matches([IO.File]::ReadAllText($log),'(?m)^PASS ([0-9]+) native Windows source custody casess*$')
+            $matches=[regex]::Matches([IO.File]::ReadAllText($log),'(?m)^PASS ([0-9]+) native Windows source custody cases\s*$')
             if($code -ne 0 -or $matches.Count -ne 1){throw 'Native service-account proof failed; owned diagnostic log retained'}
             $cases=[int]$matches[0].Groups[1].Value
             if($cases -lt 95){throw 'Complete native proof required'}
