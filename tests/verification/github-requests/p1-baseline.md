@@ -77,6 +77,17 @@ registration/default-native-Python fixture successor is being prepared; changed-
 head classifier and actual Windows execution proof remain required before final
 installed delivery. No unchanged CI retry or native-proof retarget is claimed.
 
+The final finite-entry audit found native active qualification rejected the
+otherwise supported literal `--dry-run` tail. The approved successor allows only
+one finite operation plus that optional literal, keeps SDK ticks refused and
+binds receipt dry-run mode to actual arguments. Separate common caller-intent
+defense `d41eacac` passes that trusted mode into the transcript and requires exact
+false for numeric alarm-event qualification, even against forged completed
+END/facts. Twelve event-consumer and seventeen actual parent/factory regression
+cases passed. This defends caller intent; producer data still cannot grant
+source authority. Native predicate-only proof and combined landing remain
+unfinished; no real active action or timing acceptance run was generated.
+
 Coverage aggregate V4 has digest
 `fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.
 It preserves all seven V3 input bindings and adds the immutable context-scope

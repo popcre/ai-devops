@@ -77,6 +77,9 @@ code/test blobs equal to reviewed `e406`. Its CI run failed the new suite's
 missing registration manifest; Windows execution and the aggregate report then
 skipped. A changed-head registration/default-native-Python fixture repair is
 underway; its actual CI execution and final installed delivery remain pending.
+The final parity audit also found the native entry omitted literal `--dry-run`;
+its finite successor and common caller-intent guard are being composed, without
+new authority or live actions.
 This does not retarget or negate the earlier native component proof. Accepted
 P5/headroom proof stays accepted.
 
