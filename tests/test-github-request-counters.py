@@ -144,6 +144,48 @@ class ProspectiveReadIntervals(unittest.TestCase):
         self.assertEqual(interval["workflow_id"], "e" * 32)
         self.assertEqual(interval["workflow_correlation"], "workflow")
 
+    def test_publication_failure_cannot_become_a_sharing_generation(self):
+        from types import SimpleNamespace
+        import io
+        rows = []
+        result = subprocess.CompletedProcess(["fixture"], 0, self.body("a" * 40), b"")
+        interval = single.begin_read("k", "a" * 40, 10, False)
+        single.bind_read_scope(interval, self.state)
+        with mock.patch.object(single.subprocess, "run", return_value=result), \
+             mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=io.BytesIO()),
+                                                             stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+             mock.patch.object(single, "atomic_write", side_effect=OSError("fixture publication unavailable")), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            status = single.run(["fixture"], self.state / "cache.json", self.state / "age", self.state / "source",
+                                args_key="k", interval=interval)
+        self.assertEqual(status, 0)
+        reads = [row for row in rows if row["measurement"] == "read_observation"]
+        self.assertEqual(len(reads), 1)
+        self.assertIsNone(reads[0]["generation_ordinal"])
+
+    def test_read_finish_precedes_write_observer_bookkeeping(self):
+        from types import SimpleNamespace
+        import io
+        rows = []
+        result = subprocess.CompletedProcess(["fixture"], 0, self.body("a" * 40), b"")
+        actual_write_observer = single.emit_write_observation
+        def slow_observer(*args, **kwargs):
+            single.read_clock()  # a later bookkeeping-only sample
+            return actual_write_observer(*args, **kwargs)
+        clocks = [(0, 1000, 0), (100000000, 1100, 100000000),
+                  (200000000, 1200, 200000000), (500000000, 1500, 500000000)]
+        with mock.patch.object(single, "read_clock", side_effect=clocks), \
+             mock.patch.object(single.subprocess, "run", return_value=result), \
+             mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=io.BytesIO()),
+                                                             stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+             mock.patch.object(single, "emit_write_observation", side_effect=slow_observer), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            interval = single.begin_read("k", "a" * 40, 10, False); single.bind_read_scope(interval, self.state)
+            self.assertEqual(single.run(["fixture"], self.state / "cache.json", self.state / "age", self.state / "source",
+                                        args_key="k", interval=interval), 0)
+        read = next(row for row in rows if row["measurement"] == "read_observation")
+        self.assertEqual(read["finish_utc_ms"], 1200)
+
 
 class TargetOrdinal(unittest.TestCase):
     def setUp(self):

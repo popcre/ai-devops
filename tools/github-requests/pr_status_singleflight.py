@@ -137,7 +137,9 @@ def read_interval(key, interval, raw, cache_age_ms, cache_policy):
 def emit_read_observation(key, source, caller=None, interval=None, raw=None, cache_age_ms=None, cache_policy="upstream"):
     """Count a completed status read: cache saves an upstream read."""
     if interval is not None:
-        interval = dict(interval, finish=read_clock())
+        interval = dict(interval)
+        if "finish" not in interval:
+            interval["finish"] = read_clock()
     ordinal = _target_ordinal(key)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     record = {
@@ -502,6 +504,8 @@ def run(command, cache, age_file, source_file, expected_head=None,
     if not complete(result.stdout):
         print("ai-pr-wait: incomplete or invalid pull-request status; refusing cached success", file=sys.stderr)
         return 4
+    if interval is not None:
+        interval["finish"] = read_clock()
     if cache is not None and len(result.stdout) <= 1048576 and complete(result.stdout):
         previous = None
         if cache.is_file() and not cache.is_symlink():
@@ -517,18 +521,26 @@ def run(command, cache, age_file, source_file, expected_head=None,
             # completed read instead of re-hitting upstream.
             try:
                 os.utime(cache, None)
+                if interval is not None:
+                    interval["finish"] = read_clock()
             except OSError:
-                pass
+                if interval is not None:
+                    interval["sharing_scope"] = None
             if args_key:
                 emit_write_observation(args_key, "skipped", False)
         else:
             try:
                 atomic_write(cache, result.stdout)
+                if interval is not None:
+                    interval["finish"] = read_clock()
                 if args_key:
                     emit_write_observation(args_key, "written", True)
             except OSError:
                 # A cache write must not erase an otherwise valid fresh outcome.
-                pass
+                if interval is not None:
+                    interval["sharing_scope"] = None
+    elif interval is not None:
+        interval["sharing_scope"] = None
     if args_key:
         emit_read_observation(args_key, "upstream", interval=interval, raw=result.stdout)
     return 0
