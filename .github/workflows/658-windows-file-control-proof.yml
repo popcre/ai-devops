@@ -51,7 +51,9 @@ jobs:
           try{
             $prior=$ErrorActionPreference;$ErrorActionPreference='Continue'
             try{
-              & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .	ests	est-source-generation-windows.ps1 *> $log
+              $fixture=Join-Path $PWD 'tests/test-source-generation-windows.ps1'
+              if(-not (Test-Path -LiteralPath $fixture -PathType Leaf)){throw 'Bound native fixture missing'}
+              & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture *> $log
               $code=$LASTEXITCODE
             }finally{$ErrorActionPreference=$prior}
             $matches=[regex]::Matches([IO.File]::ReadAllText($log),'(?m)^PASS ([0-9]+) native Windows source custody cases\s*$')
