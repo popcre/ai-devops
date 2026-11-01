@@ -18,7 +18,7 @@ the repair reduced local total time by 23.89% (stable-open) and 25.56%
 (unknown-head); both local p95 comparisons stayed within the 5% budget. The
 [bounded comparison record](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
 retains the earlier failure and source/input digests. All 712 upstream fixture
-reads remain necessary under the replay assumptions, so observed read reduction
+reads remain unchanged under the replay assumptions, so observed read reduction
 is still 0%, failing the 50% replay target. Original arrivals, response heads and
 overlap were not recorded; natural savings and global irreducibility remain
 unknown. This is candidate code/local replay proof, not a merged installation or
