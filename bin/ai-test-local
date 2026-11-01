@@ -18,7 +18,9 @@ JOBS=""
 MODE="all"
 FORCE=0
 CHECK_COLLISION=0
-AI_TEST_RUNNER_REPO="${AI_TEST_RUNNER_REPO:-popcre/ai-devops}"
+# An explicit override retains the single-repository fixture/custom route.
+# Otherwise each installed registration supplies its actual repository.
+AI_TEST_RUNNER_REPO="${AI_TEST_RUNNER_REPO:-}"
 AI_TEST_SHARED_RUNTIME_LOCK="${AI_TEST_SHARED_RUNTIME_LOCK:-}"
 SHARED_RUNTIME_LOCK="$AI_TEST_SHARED_RUNTIME_LOCK"
 SHARED_RUNTIME_LOCK_HELD=0
@@ -123,16 +125,59 @@ AI_TEST_RUNNER_DIRS="${AI_TEST_RUNNER_DIRS:-/c/actions-runner* $HOME/actions-run
 # turning the guard off.
 normalise_names() { tr -d '\000\r' | tr '[:upper:]' '[:lower:]' | sed '/^$/d'; }
 
-local_runner_names() {
-  local d f name
+local_runner_bindings() {
+  local d f py='' candidate executable
   for d in $AI_TEST_RUNNER_DIRS; do
     f="$d/.runner"
     [ -f "$f" ] || continue
-    name="$(tr -d '\000' < "$f" |
-              sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-              head -1)"
-    [ -n "$name" ] && printf '%s\n' "$name"
-  done | normalise_names
+    if [ -z "$py" ]; then
+      # Reuse ai-pr-wait's native-interpreter resolution. A Store alias is
+      # not a usable interpreter and must not launch an interactive installer.
+      for candidate in python3 python; do
+        executable="$(command -v "$candidate" 2>/dev/null || true)"
+        [ -n "$executable" ] || continue
+        case "${executable,,}" in */windowsapps/*) continue ;; esac
+        executable="$("$executable" -I -S -c 'import sys; print(sys.executable) if sys.version_info >= (3, 8) else sys.exit(1)' 2>/dev/null | tr -d '\r')" || continue
+        if command -v cygpath >/dev/null 2>&1; then executable="$(cygpath -u "$executable")" || continue; fi
+        [ -x "$executable" ] || continue
+        py="$executable"; break
+      done
+      [ -n "$py" ] || return 4
+    fi
+    "$py" -I -S -c '
+import json,re,sys
+from urllib.parse import urlsplit
+def unique(pairs):
+ result={}
+ for key,value in pairs:
+  if key in result:raise ValueError()
+  result[key]=value
+ return result
+try:
+ raw=sys.stdin.buffer.read(1048577)
+ if len(raw)>1048576:raise ValueError()
+ encoding="utf-16" if raw.startswith((b"\xff\xfe",b"\xfe\xff")) else "utf-8-sig"
+ if b"\0" in raw and encoding=="utf-8-sig":encoding="utf-16-le"
+ data=json.loads(raw.decode(encoding),object_pairs_hook=unique)
+ if type(data) is not dict:raise ValueError()
+ name=data["agentName"]
+ if not isinstance(name,str):raise ValueError()
+ name=name.replace("\0", "").replace("\r", "")
+ if not name or any(ord(c)<32 or ord(c)==127 for c in name):raise ValueError()
+ repository=sys.argv[1]
+ if not repository:
+  address=data["gitHubUrl"]
+  if not isinstance(address,str) or any(ord(c)<32 or ord(c)==127 for c in address):raise ValueError()
+  url=urlsplit(address)
+  if url.scheme!="https" or url.netloc.lower()!="github.com" or url.query or url.fragment:raise ValueError()
+  repository=url.path.strip("/")
+  if repository.endswith(".git"):repository=repository[:-4]
+ if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",repository) is None:raise ValueError()
+ if any(part in (".","..") for part in repository.split("/")):raise ValueError()
+ print(repository+"\t"+name)
+except (ValueError,KeyError,TypeError,UnicodeError,AttributeError):sys.exit(4)
+' "$AI_TEST_RUNNER_REPO" < "$f" || return 4
+  done
 }
 
 refuse_if_local_runner_busy() {
@@ -142,8 +187,17 @@ refuse_if_local_runner_busy() {
     echo 'ai-test-local: --force given; skipping the same-host CI check.' >&2
     return 0
   fi
-  local names; names="$(local_runner_names)"
-  if [ -z "$names" ]; then
+  local bindings names
+  bindings="$(local_runner_bindings 2>/dev/null)" || {
+    if [ "$CHECK_COLLISION" -eq 1 ]; then
+      echo 'ai-test-local: unknown -- local runner registration is unavailable; no safe scheduling decision was made.' >&2
+      exit 4
+    fi
+    return 0
+  }
+  bindings="$(printf '%s\n' "$bindings" | normalise_names | LC_ALL=C sort -u)"
+  names="$(printf '%s\n' "$bindings" | cut -f2 | sed '/^$/d')"
+  if [ -z "$bindings" ]; then
     [ "$CHECK_COLLISION" -eq 0 ] || echo 'ai-test-local: clear -- no GitHub runner installation is shared with this host.'
     return 0
   fi
@@ -155,21 +209,27 @@ refuse_if_local_runner_busy() {
     return 0
   fi
 
-  local busy_remote
-  busy_remote="$(AI_GH_CALLER=ai-test-local "$GH" api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
-                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || {
+  local repository registered_repo n busy_remote busy="" unavailable=0
+  while IFS= read -r repository; do
+    [ -n "$repository" ] || continue
+    busy_remote="$(AI_GH_CALLER=ai-test-local "$GH" api "repos/$repository/actions/runners" --paginate \
+                     --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || {
+      unavailable=1
+      continue
+    }
+    while IFS=$'\t' read -r registered_repo n; do
+      [ "$registered_repo" = "$repository" ] || continue
+      printf '%s\n' "$busy_remote" | grep -qxF "$n" && busy="$busy $n"
+    done <<< "$bindings"
+  done < <(printf '%s\n' "$bindings" | cut -f1 | LC_ALL=C sort -u)
+
+  if [ -z "$busy" ] && [ "$unavailable" -eq 1 ]; then
     if [ "$CHECK_COLLISION" -eq 1 ]; then
       echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2
       exit 4
     fi
     return 0
-  }
-
-  local n busy=""
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    printf '%s\n' "$busy_remote" | grep -qxF "$n" && busy="$busy $n"
-  done <<< "$names"
+  fi
 
   if [ -z "$busy" ]; then
     [ "$CHECK_COLLISION" -eq 0 ] || printf 'ai-test-local: clear -- this host\x27s runner(s) are idle: %s\n' "$(printf '%s' "$names" | tr '\n' ' ')"
