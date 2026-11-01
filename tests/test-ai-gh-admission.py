@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -184,6 +185,34 @@ fi
                        AI_GH_NO_WAIT_LOCK_SECONDS="0", FAKE_CALL_LOG=calls.as_posix())
         self.finish(p, 2)
         self.assertFalse(calls.exists())
+
+    def test_python_shell_shim_preserves_cached_status_coalescing(self):
+        shimdir = self.base / "shim"
+        shimdir.mkdir()
+        shim = shimdir / "python3"
+        shim.write_text('''#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_PYTHON_LOG"
+exec "$FAKE_NATIVE_PYTHON" "$@"
+''')
+        shim.chmod(0o700)
+        python_log = self.base / "python-shim-calls"
+        gh_log = self.base / "gh-calls"
+        settings = dict(AI_DEVOPS_TEST_MODE="1", AI_TASK_GATES_MODE="none",
+                        AI_PR_WAIT_TEST_CONTEXT_KEY="synthetic credential context",
+                        AI_PR_WAIT_SNAPSHOT_DIR=(self.base / "snapshots").as_posix(),
+                        FAKE_NATIVE_PYTHON=Path(sys.executable).as_posix(),
+                        FAKE_PYTHON_LOG=python_log.as_posix(),
+                        FAKE_CALL_LOG=gh_log.as_posix(), FAKE_GRAPHQL="merged", FAKE_DELAY="2",
+                        PATH=shimdir.as_posix() + os.pathsep + self.env["PATH"])
+        args = ["1", "--repo", "popcre/ai-devops", "--timeout-minutes", "1", "--api-timeout-seconds", "10"]
+        first = self.start("cached-a", waiter="ai-pr-wait", arguments=args, **settings)
+        second = self.start("cached-b", waiter="ai-pr-wait", arguments=args, **settings)
+        self.assertIn("MERGED", self.finish(first, timeout=75))
+        self.assertIn("MERGED", self.finish(second, timeout=75))
+        self.assertEqual(len(gh_log.read_text().splitlines()), 1)
+        # The shim may perform compatibility probes, but native subprocess
+        # argv0 must be sys.executable, never this shell script.
+        self.assertNotIn("pr_status_singleflight.py", python_log.read_text())
 
     def test_cancelled_waiter_removes_only_its_ticket(self):
         lock = self.hold()
