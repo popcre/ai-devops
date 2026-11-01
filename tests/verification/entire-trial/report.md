@@ -1,5 +1,119 @@
 # Entire reversible trial execution report — #2022
 
+## October 31 installation and recovery follow-up
+
+Coordinator remains `01a19481-9ceb-7592-934e-9e5a4dac240d`, edge-dev3.
+The preceding execution report was delivered through prose-only
+[PR2237](https://github.com/popcre/ai-devops/pull/2237): source
+`794014faec057d740b238ae340bdddd8d4155500`, landing
+`0a710176ad6dafaf2ed88a790faf2e5a7686cfae`. Exact-head doc-safety passed;
+the three delivered files matched origin/main. The existing mirror
+[Trail350/change158](https://entire.com/gh/popcre/ai-devops/-/trails/350/changes/158)
+showed that exact source merged, **Checks Not checked**, not an archived pass.
+Repair PR2230's existing
+[Trail340/change153](https://entire.com/gh/popcre/ai-devops/-/trails/340/changes/153)
+showed source `5e7071c4b3771c4fcdc68812d3281597f32e5fc3` merged. Its displayed
+two passing checks were only prepare/review-fixer, not all PR/queue suites.
+Authoritative landing remains `7a80853bba5d7ce4c467277ca33783d5961b013d`;
+all three repair-source hashes were independently matched at that landing.
+
+### Existing runners and credentials
+
+The revoked original trial agent token was tested by a real agent registration:
+startup exited1 with authentication denied. Envy and Linux had zero trial agents;
+their owned configurations were renamed to `.revoked` for recoverable custody.
+Envy's original GitHub service remained running/automatic. The vault entry now
+explicitly says revoked. The isolated Entire refresh-family revocation still
+does not establish immediate invalidation of its already-issued access token.
+
+At10:10PM EDT, a fresh read found Alien idle. Its task-owned private directory
+was created and official binaries were hash-verified against the already verified
+archives; no full toolkit/service install occurred. A new one-hour agent token
+was kept only in the approved vault/private configuration. The existing repaired
+canary at `5c83f0596685d8be3a63c3991521da21a0c2737f` was requested for that host.
+Before agent startup, a GitHub worker became active; the collision guard refused
+launch. Only owned [mirror build7](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/7)
+was canceled before execution. The new token was revoked and marked revoked in
+the vault, its configuration archived, zero trial agents remained, and the
+original GitHub worker/service stayed active. This is a protected capacity
+refusal, **not** an Alien execution pass. No existing GitHub job was canceled.
+
+XPS SSH remains unqualified: neither the approved atlas nor the already trusted
+Envy known-hosts file supplied its independently verified key. No new key was
+accepted, known-hosts protection weakened or remote access invented. T2 remains
+partial on the requested runner set. The successful Envy/Linux executions below
+are unchanged; no additional timing pair or whole-suite proof follows.
+
+### Protected installation disposition
+
+The public repair is contained in pinned merged release
+`9c9121872455ae6356a75d8ccdedaca8d236c672`, verified in official origin/main
+history. Current source/launcher receipts were reconciled before each host write.
+An existing edge-dev installer was observed, then allowed to exit before the
+new serialized maintenance attempt. No foreign installation lock was released.
+Only supported same-source installation routes were used; no plain pull or
+source-gate-only result was counted as a full installation.
+
+Edge-dev's native installer reached `==> Done`, with gate0 and completed native
+installer0. Clean source and both managed launcher source/hash receipts matched
+the pinned release; all four existing global files matched their templates.
+The full UTF-16 log was recovered rather than treating an apparently empty
+readback/outer wrapper status as acceptance. Two native Git stderr
+RemoteException entries were retained; successful source/receipt checks and
+the completion marker distinguish those messages from a required-stage failure.
+Claude/ZCode command version probes succeeded; Codex/MiMo commands were absent
+from the SSH environment, which does not establish desktop absence or use.
+Existing Claude/Codex/ZCode backups were retained. MiMo was already identical
+and had no new backup. No machine tail was present in those four current files:
+live tail comparison is not applicable, not a passed byte-preservation trial.
+
+Al8960ofc/4837's native installer also reached `==> Done` with gate0/native
+child0. A changed task record initially stopped automatic restoration (exit97);
+the guard preserved it. Read-only inspection proved the remaining change was
+this task's own gate check; compare-and-restore then returned0 and the previous
+record was restored byte-identically. No foreign state was overwritten.
+
+Final postflights on all three Windows hosts confirmed clean pinned9c source,
+matching Bash/CMD launcher source/hash receipts and all four existing global
+files equal to templates. 4837 and916 retain all four clients' earlier backups;
+all three hosts have no machine tails, so no live byte-tail comparison is claimed.
+4837/916 have Claude/Codex commands; MiMo/ZCode commands were absent from SSH.
+That is command availability only, not a desktop absence or native-use verdict.
+
+916's first attempt used the wrong checkout route and refused before client
+writes; only remote-tracking metadata there advanced. The correct documented
+D-drive primary was clean at9c. An argument spelling mismatch also refused
+same-source maintenance. The corrected physical/native drive spelling and
+canonical launcher produced equal normalized guard operands, `ai_same_path=true`
+and identical Git/common directories. The unchanged gate then passed; native
+child0 reached `==> Done`, compare-and-restore returned0, and no installer remained.
+This was corrected invocation, not a source defect or weakened guard.
+
+Preservation limitation: edge-dev's earlier wrapper restored its previous task
+record without a compare-first check. Its final read is byte-identical to the
+saved prior record and no installer remains, but this does not retrospectively
+prove absence of concurrent task-metadata writes. Later4837/916 wrappers used
+compare-and-restore; their exact receipts are retained. No object claim,
+predecessor identity, private memory or shared integration was released.
+
+The three Windows **installer completion** receipts are now established;
+four-host/full-original-client R5 acceptance remains incomplete. A full
+native-client capability verdict and cross-host journeys still require R6.
+
+Linux's fresh read-only private-hub health audit still exited1. No private
+facts, rejected transaction, clone or health limits were altered; no install
+retry was used to bypass that failure. The configuration-sync procedure says
+“On failure, STOP and report” and “Do not manipulate the private clone after a
+failure.” Its recovery limitation is owned by this coordinator. This remains
+an incomplete installation, not successful fleet adoption.
+
+All16 actual fresh-client journeys remain0/16; source/installer/file/version
+checks do not substitute for native instruction adoption and cross-host use.
+The coordinator still owns the computer-surface limitation, canceled-base merge
+gap, whole-suite parity and zero-of-five natural timing pairs. Original ownership
+checker timeout is preserved; no old identity or foreign claim was released.
+Discovery November2,2026,5:00PM EST; stop November12,2026,5:58AM EST, unchanged.
+
 ## October 31 runner permission, native execution and isolated merge
 
 Coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d`, edge-dev3. Observed

@@ -31,6 +31,21 @@ The original R1–R8 work remains, with updates below.
 
 ### Trial sequence, dependencies and completion gates
 
+Later October31 follow-up: all three development Windows native installers
+completed at merged `9c9121872455ae6356a75d8ccdedaca8d236c672`, with clean
+postflights, matching managed launcher receipts and all four existing global
+files equal to templates. Native-client acceptance remains0/16; no machine
+tails existed on these hosts, so live tail comparison is not applicable.
+Linux read-only memory health still fails and was not bypassed. The
+[follow-up report](tests/verification/entire-trial/report.md#october-31-installation-and-recovery-follow-up)
+records corrected916 invocation, prior-record restoration evidence/limitations,
+completed prose delivery and mirrored Trail readback. A later idle Alien window
+closed when GitHub work arrived: its guard refused launch, only the queued trial
+job was canceled, its second short-lived token revoked and owned config archived.
+No Alien execution pass or new timing pair follows. XPS still has no independently
+verified SSH key. Original services, GitHub controls, ownership blocker and
+deadlines are preserved. R5 full acceptance, T2/T3/T5/T6/T7/R8 remain partial/open.
+
 October31 execution update,9:52PM EDT: Albert explicitly granted trial management
 of test runners/jobs. Official checksum-verified portable agents ran the existing
 focused check on Envy and edge-dev3. Native Trail1 passed pending/fail/cancel/
@@ -214,7 +229,7 @@ blocked disposition. Planning is already merged.
 | R2 Shared client workflow and safe access | source repair merged; actual adoption incomplete | PR2195 landed d7f4c10. PR2230 landed7a80853: default Linux MiMo/ZCode refresh and exact Windows machine-tail preservation repaired, focused Linux/Windows proof. Accepted installed adoption remains separate. |
 | R3 CI contract and Entire feasibility | actual native jobs and isolated merge/publication proved; replacement unqualified | All12 workflows/182 registrations inventoried. Existing Envy/Linux agents ran focused checks, native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-base gate gap, other runners, whole-suite parity and protected-main transition remain unmet. |
 | R4 Offline cross-platform verification | focused suites passed; broader adversarial gates open | Focused Linux and three-host Windows fixtures passed; corrected990c8b95 ordinary Linux/all12 Windows PR sections and d7f4c10 queue passed. Remaining §10/T3 cases and native execution are not passed by fixtures. |
-| R5 Protected installation on four machines | prior partial transactions; acceptance unresolved | All four checkouts moved after outgoing handoff; latest receipts supersede its source assumptions. Preserve other rollout activity, existing authorizations and private-memory health limits. Current coordinator reconciles each protected transaction before writes. |
+| R5 Protected installation on four machines | three Windows installer completions; full acceptance incomplete | edge-dev/4837/916 native installers reachedDone at merged9c912187, gate/child0, clean matching launcher/global postflights. Linux read-only memory health still exits1, not bypassed. Native original-client/cross-host acceptance remains unproved; task-record restoration limitation is disclosed in the follow-up report. |
 | R6 All 16 live client-machine journeys | 0 of16 accepted | Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; native-control/missing-client limits are explicit. |
 | R7 Live CI workflow and continuity | focused native chain and isolated publication passed; broad acceptance open | T3/T4 report binds pass/fail/repair and actual merge to exact source. No protected-main replacement or full parity; GitHub controls unchanged. |
 | R8 Acceptance, bounded stop and disposition | open | §13: every matrix cell and CI gate has evidence; original stop retained, missing capability stays visibly incomplete. |
