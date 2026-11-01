@@ -63,6 +63,12 @@ detection, privileged-provider authority and whole-observer budgets remain
 unknown. Accepted P5/headroom proof is unchanged. Genuine future activity and
 twenty matched natural outcomes remain necessary; no traffic is manufactured.
 
+One actual installed edge-dev SDK `links --dry-run` subsequently proved the live
+source/protocol/cleanup path: one skipped operation with 24 skipped items and
+zero attempted/succeeded/failed actions. Both interval types stayed null and
+active success false. It is component proof, not an active/business outcome,
+counter cohort, detection sample or original-privilege acceptance.
+
 The five finite read observations preserve environment, working directory,
 authentication, streams and original descriptor limits within their declared
 source-isolated profiles. They do not prove identical OS privileges or arbitrary

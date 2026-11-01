@@ -56,6 +56,22 @@ manifest, clean source and launcher bind final `10ae`. Existing history was
 preserved; an older baseline field inside the completion record is not asserted
 as the current installed head. No new measurement or SDK workload was generated.
 
+### One actual installed SDK dry-run — component scope only
+
+One subsequent edge-dev `links --dry-run` operation executed once at installed
+`10ae`, with source/protocol/native cleanup and original exit zero verified.
+Proof `1128584a4ce6943f5c86a8a32205c10d7994a323028dffd344adfe2e4795396c`
+and all four bound artifacts were independently hashed. There is exactly one
+outcome row: skipped, 24 skipped items, attempted/succeeded/failed counts zero.
+Active-success is false and both completion/event interval types are null.
+The explicit `sdk_only_no_provider` profile does not assert original privileged
+context. Parent bookends are valid; native clock and whole-observer budget remain
+unknown. Full diagnostic observer elapsed 284.986169826 seconds includes transport;
+the started-frame elapsed is 3.206400544 seconds. Neither is p95/before-after
+acceptance. This live component proof creates no active/business outcome,
+request-counter cohort or detection sample; it does not add 24 completions to a
+denominator or reclassify the older five counted reads.
+
 ### Earlier source-scoped adapter snapshots — superseded by final reconciliation
 
 The following implementation-stage descriptions retain their original source;

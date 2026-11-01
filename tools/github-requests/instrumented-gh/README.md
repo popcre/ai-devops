@@ -445,6 +445,12 @@ flag, rather than producer frames, excludes simulated work from both qualified
 completion/event intervals and active-success classification. Raw diagnostics
 and original execution remain available; simulation cannot establish acceptance.
 
+The one actual installed `links --dry-run` live proof at `10ae` verified
+source/protocol/cleanup and exited zero, with one skipped operation/24 skipped
+items and zero attempted actions. Both interval types remained null and active
+success false. This proves the live component path, not active business work,
+request reduction, detection, privileged-provider authority or a budget verdict.
+
 ## Retirement
 
 #660 owns the minimal pinned patch until upstream supplies an equivalent
