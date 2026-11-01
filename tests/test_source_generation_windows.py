@@ -27,6 +27,9 @@ class OwnedCleanup(unittest.TestCase):
         # and owned resources with in-memory fault fixtures. No ACLs or files.
         template = r'''
 $ErrorActionPreference='Stop'
+class GenerationCustody {
+ static [void] FileAccess([object]$resource,[bool]$writable){$resource.Unseal()}
+}
 $text=[IO.File]::ReadAllText('__SOURCE__');$tokens=$null;$parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Production parser error'}
@@ -46,6 +49,11 @@ $job=Fake-Resource 'job' $false;$child=Fake-Resource 'child' $false
 $eventChannel=Fake-Resource 'event' $false;$counterChannel=Fake-Resource 'counter' $false
 $captureLocks=@((Fake-Resource 'capture-first' __FAULT__),(Fake-Resource 'capture-last' $false))
 $directoryControls=@();$locks=@((Fake-Resource 'lock-first' $false),(Fake-Resource 'lock-last' $false))
+$fileControls=@((Fake-Resource 'file-first' $false),(Fake-Resource 'file-last' $false))
+foreach($file in $fileControls){
+ $file|Add-Member NoteProperty failUnseal (__FAULT__ -and $file.name -eq 'file-first')
+ $file|Add-Member ScriptMethod Unseal {$global:closed.Add('unseal-'+$this.name);if($this.failUnseal){throw ('unseal-failure-'+$this.name)}}
+}
 $receipt=Fake-Resource 'receipt' $false;$ack=Fake-Resource 'ack' $false
 $snapshot=$null;$bootstrap=$null;$exitCode=__EXIT__;$primaryFailure=$null;$cancelled=$false
 $catches=($main.CatchClauses|ForEach-Object{$_.Extent.Text}) -join "`n"
@@ -67,11 +75,13 @@ try{& ([scriptblock]::Create($execution))}finally{
                     self.assertEqual(len(rows), 1, result.stderr.decode(errors="replace"))
                     row = json.loads(rows[0].split("=", 1)[1])
                     self.assertEqual(row["closed"], ["job", "child", "event", "counter", "capture-first", "capture-last",
+                                                      "unseal-file-first", "unseal-file-last", "file-first", "file-last",
                                                       "lock-last", "lock-first", "receipt", "ack"])
                     if primary:
                         self.assertIn(b"primary-work-failure", result.stderr)
                     if fault:
                         self.assertIn(b"dispose-failure-capture-first", result.stderr)
+                        self.assertIn(b"unseal-failure-file-first", result.stderr)
 
 
 @unittest.skipUnless(sys.platform == "win32" and os.environ.get("RUN_MANAGED_WINDOWS_SOURCE_INTEGRATION") == "1",
