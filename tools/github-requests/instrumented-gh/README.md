@@ -6,8 +6,8 @@ This extends the existing measurement namespace. It does not install, alter
 
 `pins.json` is the single finite version-profile registry owned by #660. Its
 default is the actual Linux vendor CLI 2.103.3; the separate Linux 2.103.0
-profile preserves Hetz's existing vendor version. Windows source profiles 2.97.0
-and 2.88.1 preserve those hosts' existing versions. The old 2.101.0 prototype
+profile preserves Hetz's existing vendor version. Windows source profiles 2.97.0,
+2.95.0 and 2.88.1 preserve those hosts' existing versions. The old 2.101.0 prototype
 profile and its evidence remain explicitly historical. Each profile binds an
 immutable official commit/archive and shares the official Go 1.27.1 Linux
 toolchain archive/hash. `build.py --upstream-version VERSION` selects a recorded
@@ -19,7 +19,7 @@ verified archives (`gh.tar.gz`, `go.tar.gz`) from a private directory and builds
 unmodified/instrumented binaries in a new private output directory. It changes
 only the profile's declared upstream API client constructors, the CLI finalization point and
 the new internal counter package. Modules retain upstream `go.mod`/`go.sum`.
-The 2.88.1 profile has one constructor and no detached telemetry; 2.97.0,
+The 2.88.1 profile has one constructor and no detached telemetry; 2.95.0, 2.97.0,
 2.103.0, 2.103.3 and historical 2.101.0 have two constructors and detached telemetry.
 No binary or upstream source archive belongs in this repository.
 Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
@@ -294,7 +294,7 @@ windows_cli_fixture_test.go, native_fixture.ps1 and pins.json, in that order.
 The locked registry is the same single version map used by the builder and
 native guard; the guard contains no duplicate commit/archive pin table.
 The finite capabilities declare one constructor and no detached CLI telemetry
-for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.0/2.103.3 (and the
+for 2.88.1, and two constructors with telemetry for 2.95.0/2.97.0/2.103.0/2.103.3 (and the
 historical 2.101.0 profile). The common patch checks the exact declared return,
 import, source-directory and finalization hooks before any edit. The older
 profile's native child test exercises both actual images with telemetry
@@ -433,7 +433,7 @@ wakes, ticks and original/provider context remain unknown. Native integration
 landed through #2289; #2290 repaired suite registration and actual changed-head
 CI passed all twelve Windows sections with the new fixture executed. Final
 normal full installations/source verification at final successor #2291
-(`10ae0b93`) are complete on all five reachable toolkit hosts, with local CI
+(`10ae0b93`) are complete on the five originally reachable toolkit hosts, with local CI
 capacity restored. Older read/counter receipts keep their actual generations.
 No completion envelope is
 event-detection latency.
@@ -447,6 +447,24 @@ The finite dry-run parity successor merged through #2291. Its actual caller-argu
 flag, rather than producer frames, excludes simulated work from both qualified
 completion/event intervals and active-success classification. Raw diagnostics
 and original execution remain available; simulation cannot establish acceptance.
+
+T16 accepts its documented existing SSH identity and returns fresh output, but
+owned SSH termination/EOF remains unknown at the twenty-second bound even with
+no stdin/PTY. Its installed source/ownership and process cleanup remain unproved;
+no T16 install/count is safe yet. Existing local session repair is required.
+Actual vendor output reports 2.95. Its finite profile merged through #2293
+(`34170e89`), with two constructors/detached telemetry, paired updateable builds
+and verified go-gh v2.13 configuration-directory precedence. The first native
+functional run on existing host 916 passed 26 top-level functions/four subcases
+and the environment/boundary, ledger, child, stream/status and cancellation
+checks; fourteen frozen artifacts were unchanged and owned processes zero.
+No real GitHub demand, timing pair or vendor change was introduced. This
+fixture sets `GH_NO_UPDATE_NOTIFIER=1`; updateable build tags/source features
+remain present, but actual TTY updater lifecycle behavior is not qualified. The
+`6233`/V3/916 fixture does not prove T16 vendor-image hash, installed source,
+custody, original privileges or timing, and does not retarget the five installed
+`10ae` toolkits or their older measurement receipts. Actual runtime admission
+must still satisfy the unchanged source/version/configuration guards.
 
 The one actual installed `links --dry-run` live proof at `10ae` verified
 source/protocol/cleanup and exited zero, with one skipped operation/24 skipped
