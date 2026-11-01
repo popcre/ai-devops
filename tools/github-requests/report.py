@@ -831,6 +831,13 @@ def canonical_installation(root, manifest):
     return data, launcher
 
 
+class SourceFiles(dict):
+    """Exact public file bytes plus Git's executable-bit metadata."""
+    def __init__(self):
+        super().__init__()
+        self.modes = {}
+
+
 def installed_source(root, manifest):
     """Verify canonical installed identity and immutable raw Git objects."""
     root = pathlib.Path(root).resolve(strict=True)
@@ -886,16 +893,17 @@ def installed_source(root, manifest):
             if mode == b"40000":
                 yield from source_entries(child, path)
             elif mode in (b"100644", b"100755") and prefix:
-                yield path, child
+                yield path, child, mode
             else:
                 raise ValueError("unsupported source tree entry")
-    files, fingerprint, total_bytes = {}, hashlib.sha256(), 0
-    for path, blob in source_entries(first_line[5:].decode("ascii")):
+    files, fingerprint, total_bytes = SourceFiles(), hashlib.sha256(), 0
+    for path, blob, mode in source_entries(first_line[5:].decode("ascii")):
         content = object_bytes("blob", blob)
         total_bytes += len(content)
         if len(content) > 4 * 1024 * 1024 or total_bytes > 64 * 1024 * 1024 or len(files) >= 4096:
             raise ValueError("source file exceeds bound")
         files[path] = content
+        files.modes[path] = 0o500 if mode == b"100755" else 0o400
     if not files or len(files) > 4096 or "bin/ai-pr-wait" not in files:
         raise ValueError("source generation is incomplete")
     if hashlib.sha256(files["bin/ai-pr-wait"]).hexdigest() != entries[0][3]:
@@ -951,7 +959,7 @@ def retained_generation(root, manifest):
         for name, content in files.items():
             fd = sealed_source(content)
             descriptors.append(fd)
-            command += ["--perms", "0500", "--ro-bind-data", str(fd), str(root / name)]
+            command += ["--perms", f"{files.modes[name]:04o}", "--ro-bind-data", str(fd), str(root / name)]
         for directory in ("bin", "tools", "config"):
             command += ["--remount-ro", str(root / directory)]
         identity["source_boundary"] = "linux_sealed_generation"
