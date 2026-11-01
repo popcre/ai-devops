@@ -10,6 +10,15 @@ Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desk
 
 ## STATUS — read before doing work
 
+October 31 execution: [current applicability](tests/verification/tokeneconomizer-desktops/applicability.md)
+and [native preflight](tests/verification/tokeneconomizer-desktops/report.md) are
+published with a separate [bounded cost schedule](tests/verification/tokeneconomizer-desktops/measurement.md).
+Execution owner is Codex chat `01a194ee-7e16-70b3-9ebd-307fdd653f15` on #2220.
+Discovery is partial; a Claude native SessionStart hook ran, but revoked OAuth
+stopped its model call. No pair, native desktop acceptance or saving is claimed.
+The reader pilot found and the coordinator accepted the merge-order and
+per-installation measurement clarifications below; it did not review a runtime.
+
 October 31 closeout: Muse's corrected static source/plan review approved narrow
 qualification pilots only. Read the
 [decision record](docs/muse-egm-tokeneconomizer-review-2026-10-31.md) and
@@ -21,15 +30,18 @@ installation was performed by this review/closeout session; rows remain open.
 
 | Step | State | Evidence / next gate |
 |---|---|---|
-| 1 Inventory and classify all four desktops | ⬜ open | Publish versioned applicability report |
-| 2 Qualify privacy, hooks and recovery | ⬜ open | Synthetic isolation and recovery tests |
+| 1 Inventory and classify all four desktops | 🟨 partial | Current package/process inventory published; embedded desktop engines/native control remain unverified |
+| 2 Qualify privacy, hooks and recovery | 🟨 partial/blocked | Pinned offline tests and isolated native start receipt; working model access, full adversarial/recovery and capability proof remain open |
 | 3 Build managed installation and diagnostics | ⬜ open | Cross-platform fixture tests |
 | 4 Prove applicable Ubuntu desktops | ⬜ open | Actual desktop session receipts |
 | 5 Resolve Windows applicability | ⬜ open | Actual MiMo/ZCode supported-or-inapplicable evidence |
 | 6 Measure benefit and decide rollout | ⬜ open | Paired cost and quality report |
 | 7 Land, install, restore and close | ⬜ open | Exact landing plus per-target live proof |
 
-Fresh session starts at step 1. Planning is delivered separately from implementation; no plugin has been installed by this planning session. All implementation rows remain open. At each phase boundary re-read downstream steps and update this table; use the fresh-session skill when transferring execution.
+Execution resumes at the remaining native access/privacy gates in steps 1–2,
+not by replaying the published planning work. The earlier closeout paragraphs
+describe their own historical session. No managed installation, smoke pair or
+desktop acceptance has been delivered. Re-read downstream steps at each boundary.
 
 ## 1. Ultimate goal
 
@@ -165,6 +177,11 @@ Implementer judgment: select a supported current upstream release if the pinned 
 
 **3. Integrate supported installation.** Add the minimum helper `bin/ai-tokeneconomizer` with `doctor`, `preview`, `install` and `restore` modes, and a Windows shim/catalog entry only if Windows applicability is proven. Reuse `install.sh`, `update.sh`, `bin/install-ai-devops-windows.ps1` and `config/machine-tools.tsv`; never install the plugin unconditionally during a generic toolkit update. Store a public-safe upstream pin/eligibility manifest in `config/tokeneconomizer.json` and documented behavior in `docs/tokeneconomizer.md`. Report diagnostics separately for installed, trusted, desktop-proven, measurement-accepted and unsupported; no silent successful skip. Use native marketplace/plugin installation and normal exact-hook trust. Preserve every foreign setting, hook, permission, MCP and skill. Gate: preview makes no changes; install twice is idempotent; restore removes only owned additions; tests pass on Ubuntu and Windows for shared code.
 
+Land that opt-in, disabled-by-default integration through the normal PR route
+after its offline gates pass and before step 4 needs a merged candidate. This
+source landing is not desktop acceptance or rollout. Step 7 subsequently lands
+the actual acceptance/diagnostic documentation and installs only accepted targets.
+
 **4. Ubuntu desktop proofs.** On each discovered Ubuntu installation, first snapshot original configuration and protect recovery privately. Declare installation/deployment class and pass the corresponding task gate before writes. Install the merged supported candidate through the documented machine route, with allowlisted public synthetic sessions first. Start a genuinely new session in each actual desktop. Capture synthetic evidence of SessionStart, a successful tool event, a failed event, injected context consumption, turn completion and session folding. Establish the required number of clean turns before provoking a bounded synthetic repeated failure; demonstrate a visible redirect, then a productive recovery without changing task requirements. Gate: screenshot plus sanitized event/ledger receipt from the desktop, not merely CLI status; original MCP/skills and one ordinary edit/test journey still work. If native desktop control is unavailable, route to a session with that access; do not ask Albert to operate it.
 
 **5. Windows disposition and conditional proof.** Recheck current MiMo and ZCode loader/hooks using `bin/ai-mimo`, `bin/ai-zcode`, their doctors and the actual desktops. No provider inference or engine substitution. If an official native loader plus compatible lifecycle/config/payload contract now exists, apply steps 2–4 separately and add Windows path, CRLF, spaces and PowerShell 5.1 coverage before managed rollout. If not, publish exact vendor/version evidence and mark that combination inapplicable. Keep both apps fully functioning with existing integration; no replacement token optimizer is added. Gate: each Windows app has either real desktop receipts or a defensible unsupported disposition. Historically inert hooks and absent hooks must not be confused with current failures.
@@ -172,6 +189,10 @@ Implementer judgment: select a supported current upstream release if the pinned 
 ### Phase C — benefit, delivery and acceptance
 
 **6. Paired measurement.** Add public synthetic task fixtures and scoring instructions under `tests/verification/tokeneconomizer-desktops/tasks/`, with a measurement CSV schema documented in `measurement.md`. Freeze ten task pairs per applicable desktop: repository discovery, repeated known command error, bounded synthetic failure loop, ordinary edit/test, and unchanged-status handling (two pairs each). Alternate baseline/treatment order; use the same repository commit, model, effort, starting facts, cache warm/cold condition and success criteria within a pair. Use fresh chats and controlled state snapshots to prevent treatment leaking into baseline. Collect input/output/cache tokens, extra judge/proposer calls, elapsed time, completed checks, correct outputs and interruptions. Score all ten pairs. Acceptance: no additional failed task, missing required check or capability loss; at least 10% lower aggregate priced token cost including optimizer overhead on each desktop adopted. Report raw tokens separately. If subscription billing has no per-run monetary figure, use explicit published cache-aware equivalent prices and label them estimated, never dollars saved. Unknown token counters invalidate the savings claim; do not invent them. At most one repeat batch for a documented measurement error; no open-ended tuning. Gate: reproducible per-pair artifacts and acceptance calculation. A failed benefit gate means no broad adoption, preserve recovery and record a measured rejection.
+
+Here “desktop” means each intended app/host installation, not one machine's
+result extrapolated to every host with the same app/OS. Shared offline tests may
+be reused; native model/settings/cache and priced benefit require local evidence.
 
 **7. Land and roll out accepted targets.** Update this STATUS, `docs/tokeneconomizer.md`, `docs/task-router.md`, `docs/compression-and-process-fixes.md`, `docs/deployment.md` and relevant client support plans with exact supported/inapplicable/blocked states. Follow existing GitHub issue, PR and merge policy; advisory review never blocks. Run required safety checks, verify identity, commit only owned files, push and use the queue for code/config changes. Confirm exact landing on origin/main; do not repeat an already-passing landing test. Install from that merged candidate using protected update routes on each accepted target. Repeat one actual desktop smoke/recovery journey per installed app/host. Gate: issue checklist reconciles all four requested combinations; applicable targets have installed proof, unsupported targets have evidence, blocked targets retain named execution ownership and `- [ ] live proof` on this same issue. Retire the paired handoff only when all obligations are met or explicitly carried forward.
 

@@ -357,6 +357,10 @@ always be more detailed" is NOT a checklist item — do not treat it as one.
 
 ## Mandatory self-audit gate (Mode A — BEFORE showing the handoff)
 
+For an eligible complex handoff, the optional [fresh-reader procedure](../../../docs/fresh-reader-check.md)
+may follow this self-audit. Record skip, unsupported or incomplete honestly;
+none makes the mandatory self-audit fail or introduces approval.
+
 After drafting, grade the handoff against the checklist above. If ANY item is
 "no," expand and re-grade — loop until all pass. The FIRST version you present to
 the user MUST already pass; do not show a draft you know is thin and plan to

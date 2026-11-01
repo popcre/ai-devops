@@ -135,6 +135,10 @@ could always be more detailed" is NOT an item on this list.
 
 ## Mandatory self-audit gate (Mode A — BEFORE showing the plan)
 
+For an eligible complex plan, the optional [fresh-reader procedure](../../../docs/fresh-reader-check.md)
+may follow this self-audit. Record skip, unsupported or incomplete honestly;
+none makes the mandatory self-audit fail or introduces approval.
+
 After drafting, grade the plan against the checklist. If ANY item is "no,"
 expand and re-grade — loop until all pass. The FIRST version presented MUST
 already pass; never show a draft you know is thin intending to fix it after
