@@ -165,11 +165,15 @@ egress/overhead. Local state does not prove no outgoing session-derived data.
    **Gate:** launch/schema receipt, visible child input inventory and successful
    required-read receipts show the boundary; a missing canary echo alone is not proof.
    List unavailable hidden platform input as unknown; do not expose or hash it.
-6. Run named hostile-input, reading-boundary, snapshot-mismatch, incomplete-output,
-   memory-injection and reader-event-exclusion cases from the plan. Use only
-   harmless synthetic markers; do not publish their values or private state.
-   **Gate:** unsupported native isolation is explicit and never called a pass;
-   ordinary author capability still works and reader events cannot train optimizer.
+6. Run named hostile-input, reading-boundary, snapshot-mismatch, incomplete-output
+   and memory-injection cases from the plan. Use only harmless synthetic markers;
+   do not publish their values or private state. If a qualified synthetic optimizer
+   fixture already exists, coordinate `reader-event-exclusion` with its owner.
+   Otherwise leave active-optimizer event exclusion for parent combined proof;
+   its absence is not a dependency on the sibling for this standalone reader trial.
+   **Gate:** unsupported native reader isolation is explicit and never called a
+   pass; ordinary author capability works. Optimizer absence proves only absence,
+   not successful exclusion from an active optimizer. Do not overclaim the latter.
 7. Select three already-authorized public complex plans/handoffs before reading
    results. Freeze their exact versions and baseline self-audits. Run one reader
    pass each, bounded by the plan's ten-minute invocation limit. Reader first
@@ -210,8 +214,11 @@ egress/overhead. Local state does not prove no outgoing session-derived data.
     repeated failures followed by an ordinary edit/test recovery; seed the required
     clean-turn history before expecting a judge. Environment-facts tasks repeat
     harmless known setup/command errors across synthetic sessions until the source's
-    confirmation threshold is met. A three-pair cap is not a three-session cap;
-    count and price all warm-up/learning sessions, not just the final pair.
+    confirmation threshold is met. Before starting, derive and freeze a finite
+    warm-up schedule from the pinned thresholds; stop inconclusive if it does not
+    seed the mechanism as expected, rather than adding sessions indefinitely.
+    A three-pair cap is not a three-session cap; count and price all warm-up/learning
+    sessions, not just the final pair.
     **Gate:** actual desktop events/notices/state plus expected recovery/fact behavior
     are observed, and ordinary work/capabilities still succeed. CLI-only proof
     stays CLI-only and cannot close requested desktop acceptance.
