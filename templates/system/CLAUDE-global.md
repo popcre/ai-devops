@@ -84,7 +84,7 @@ deadline at runtime.
   the step to a session that can.
 - **Restate a short job plan** (goal, scope, done-when), then execute.
 - **Live proof is required before an outcome is closed** (details). One issue per application need.
-- **Complete the authorized scope** on its existing issue. Completing one child or phase is never a reason to stop.
+- **Complete authorized scope** on its existing issue. Completing one child or phase is never a reason to stop.
 - **Own coordinator progress.** Before claiming agents are working, verify
   with a fresh message or existing status view; otherwise report activity
   unverified. Distinguish working, preparation complete but waiting, blocked
