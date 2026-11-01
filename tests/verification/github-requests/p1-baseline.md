@@ -6,9 +6,10 @@ Final code #2291 merged as `10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`.
 Dispatch/privacy and finite active BlockerWatch terminal/event producers,
 governed parent completion/event consumers, native transport and literal dry-run
 parity are implemented. The original emission/consumer implementation gaps are
-repaired; full installations and source-custodied live proofs at this final
-generation remain pending. Earlier installations/read receipts below retain
-their actual source and are not silently retargeted.
+repaired. Four remote normal full installs now verify this generation; the local
+final installation remains pending. Earlier read receipts below retain their
+actual source and are not silently retargeted; no new SDK/counter workload was
+created by the remote installations.
 
 Only an explicitly admitted SDK-only standalone successful alarm can qualify a
 conservative batch-ack detection interval. Local Linux validates same-host
@@ -30,6 +31,30 @@ notifications. Its actual `2963` PowerShell bytes independently match final
 `10ae`; the original receipt is not retargeted. These source-scoped proofs are
 not twenty useful outcomes or current full-budget acceptance. All older cold,
 request-reduction and protocol failures remain preserved below.
+
+### Final remote normal installations at `10ae0b93`
+
+The three Windows normal full installers exited zero, canonical source/managed
+launcher are exact `10ae` and clean, and all retained full-install log hashes
+match their readbacks. Each reports twelve phases and completed normal required
+stages; the numeric required-stage count is null because no native stage
+registry exists. Do not substitute Linux stage counts. Index digest
+`066734c4f580552120cfbec07878576cdc38b6eae9dd6e0711e844e12bc5f4b4`
+binds the independently hashed readbacks: 916
+`759627dadef95cc7d4da24c69f6e8efb480f1cdddd836736efbfe338d85fbe35`, 4837
+`bfb43575a62265bb22063fbdcf2c7f9d14efcc7abfd930f1461f28d694dd703f`, and edge-dev
+`2f642d74ad7a8462201c24eed46b2e344495e07d3ac029d467771baf6318d722`.
+Actual installed task-gate bytes match the final Git source. No additional
+counter/detection workload or full observer qualification follows from this.
+
+Hetz's normal full resume completed all 21 required stages with zero failures;
+the existing normal-owner/user-bus capability was restored and its pending
+ordinary transaction consumed. Receipt
+`21bd7e33e1b44ad76a77910a40f493d032de533fc09cb603fd98b3a9b5ebb3d7`
+and all five bound artifact hashes were independently verified: actual head,
+manifest, clean source and launcher bind final `10ae`. Existing history was
+preserved; an older baseline field inside the completion record is not asserted
+as the current installed head. No new measurement or SDK workload was generated.
 
 ### Earlier source-scoped adapter snapshots — superseded by final reconciliation
 

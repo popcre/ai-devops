@@ -15,15 +15,18 @@ The final code repair merged through #2291 as
 governed completion/event consumers, native transport, registered Windows CI and
 literal dry-run parity. The registration repair's actual `e04` CI passed its classifier and all twelve
 Windows sections, with the new fixture executed and 73 native assertions;
-earlier registration failure remains retained. Normal full installation and
-source-custodied live proof at `10ae0b93` remain pending and are not yet claimed.
+earlier registration failure remains retained. Four remote normal full installs
+now verify exact `10ae0b93`: all three Windows hosts report twelve completed
+phases with numeric required-stage counts unknown; Hetz passed all 21 required
+stages with zero failures after supported normal-owner/bus recovery. Local final
+installation remains pending; its last completed source is `642a1da6`.
 
-The last completed installations remain local/916 `642a1da6`, edge-dev/4837
-`9225b8c4` and Hetz `c403f6ca`. Their five necessary source-custodied reads total
+The earlier five necessary source-custodied reads total
 ten covered constructor writes and twenty-five native invocations including
 probes: disjoint outcomes, not matched natural cohorts. All original local CI
 capacity was restored before the local read; no jobs or services were stopped.
-These immutable receipts and coverage aggregate V4 keep their actual generations.
+These immutable receipts and coverage aggregate V4 keep their actual older
+generations; the remote installations created no new counter/detection workload.
 
 The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
 shows 23.89%/25.56% lower local replay processing time with both records still
