@@ -75,8 +75,10 @@ component proof, with original privileged source and full observer budget
 unknown. Native integration merged through #2289 as `6932559d`, with nine
 code/test blobs equal to reviewed `e406`. Its CI run failed the new suite's
 missing registration manifest; Windows execution and the aggregate report then
-skipped. A changed-head registration/default-native-Python fixture repair is
-underway; its actual CI execution and final installed delivery remain pending.
+skipped. The changed-head registration/default-native-Python fixture repair
+merged through #2290 as `fba13b43`; actual CI then passed the classifier and all
+twelve Windows sections, including the new fixture's 73 native assertions.
+Final installed delivery remains pending.
 The final parity audit also found the native entry omitted literal `--dry-run`;
 its finite successor and common caller-intent guard are being composed, without
 new authority or live actions, in joint #2291 at `20c2f01b`. Read-only integrated

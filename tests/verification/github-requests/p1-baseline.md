@@ -73,9 +73,15 @@ landed through #2289 as `6932559d`, with nine code/test blobs equal to `e406`.
 Run `41340783808` / job `124950122563` failed because the new PowerShell suite
 registration manifest was absent; Windows aggregate sections and the final
 report were downstream skips, not runtime component failures. A two-file
-registration/default-native-Python fixture successor is being prepared; changed-
-head classifier and actual Windows execution proof remain required before final
-installed delivery. No unchanged CI retry or native-proof retarget is claimed.
+registration/default-native-Python fixture successor merged through #2290 as
+`fba13b43`. Repaired proof
+`f1f4a7f953b2b5b81e7e965725898a18537643d74f624bc49e842568798e051e`
+was independently hashed: actual `e04a60d1` run `41341891090` passed the classifier,
+all twelve Windows sections and aggregate, with the new fixture actually
+executed and 73 native assertions recorded. These are assertions, not independent
+useful outcomes or timing pairs. The original failed run remains preserved;
+no unchanged retry or native-proof retarget is claimed. Final installed delivery
+still requires the dry-run successor below.
 
 The final finite-entry audit found native active qualification rejected the
 otherwise supported literal `--dry-run` tail. The approved successor allows only

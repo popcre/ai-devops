@@ -430,8 +430,9 @@ live-channel facts after matching acknowledged END, with a separate receive
 clock, default-off explicit SDK scope and one fact per ID. Only successful
 standalone SDK alarms can receive conservative batch-ack detection; links,
 wakes, ticks and original/provider context remain unknown. Native integration
-landed through #2289; repaired suite registration/actual CI execution and final
-installed proof remain required. No completion envelope is
+landed through #2289; #2290 repaired suite registration and actual changed-head
+CI passed all twelve Windows sections with the new fixture executed. Final
+dry-run successor/installed proof remain required. No completion envelope is
 event-detection latency.
 
 The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
