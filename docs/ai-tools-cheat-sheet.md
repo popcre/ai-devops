@@ -91,6 +91,13 @@ timestamp resolution. Bootstrap and total observation time remain in receipts.
 Cancellation reaps only the owned child group. Use this for necessary real PR
 work; never manufacture activity to reach sample thresholds.
 
+For an installed-owner Linux observation whose canonical manifest is readable
+only by the installer, `--manifest-fd READ_ONLY_FD` accepts an inherited,
+read-only descriptor to that same canonical manifest. It does not accept a
+copied manifest or grant source authority to arbitrary descriptors. A bounded
+parent descriptor-limit lease restores the child's original limit before
+execution; neither checkout permissions nor the owner's credentials change.
+
 Replay is Linux-only offline analysis of the frozen historical helper pair,
 using a local upstream stub and virtual clock. It does not make HTTP requests
 or recreate missing historical arrivals, heads or live detection times. The
@@ -125,6 +132,20 @@ resolution are explicit assumptions; this grants no Windows clock bound.
 Connection loss, timeout and cancellation stop only owned work and clean up its
 snapshot. Internal Windows controller handles are not operator-supplied source
 or clock authority.
+
+An explicitly counted native Windows read adds
+`--counter-manifest WINDOWS_BUILD_JSON --expected-counter-manifest-sha256 SHA256`
+to that controller and replaces the trailing waiter arguments with the supported
+finite `issue view` or `pr view` read. The counter build must match the actual
+vendor version and its complete source binding. Installed-source custody and
+counter-build custody are separate checks. This mode preserves the original
+shared admission, authentication, output and exit status; it does not replace
+the vendor executable or enable global routing. Configuration metadata must
+prove the original credential namespace is private to trusted principals.
+An unsupported namespace refuses qualification without reading credentials or
+changing permissions; the ordinary installed route remains available. Numeric
+receipts distinguish primary writes, external writes and invocations; absent
+whole-program HTTP or GraphQL costs remain unknown.
 
 ## shared-db scripts (in a `popcre/shared-db` checkout, run with `node`)
 
