@@ -271,7 +271,7 @@ else:
         try{[Environment]::SetEnvironmentVariable($key,'unsupported-test-context','Process');Refuses {Assert-CounterContext} ('Ambient counter context refused: '+$key);Assert ([Environment]::GetEnvironmentVariable($key,'Process') -ceq 'unsupported-test-context') 'Counter guard preserves original environment'}finally{[Environment]::SetEnvironmentVariable($key,$saved,'Process')}
     }
     $savedConfigEnvironment=@{}
-    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN','SSH_CONNECTION')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
     $savedConfigLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
     try{
         foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
