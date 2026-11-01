@@ -31,6 +31,16 @@ The original R1–R8 work remains, with updates below.
 
 ### Trial sequence, dependencies and completion gates
 
+Latest October31 T2 result: a second bounded attempt used Alien's next idle
+window and [build8](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/8)
+passed at exact5c83f059 on actualedge-alien. Its one-job agent disconnected,
+short-lived token was revoked and configuration archived; original GitHub service
+remained running/automatic. This supersedes the earlier Alien nonexecution limit,
+not build7's preserved refusal. T2 now proves Envy/Alien Windows and Linux focused
+execution; XPS SSH trust remains blocked. See the [new receipt](tests/verification/entire-trial/report.md#october-31-alien-execution-follow-up).
+No new natural timing pair, full parity or native-client acceptance follows;
+all16 cells, canceled-base safety gap and original ownership blocker remain open.
+
 Later October31 follow-up: all three development Windows native installers
 completed at merged `9c9121872455ae6356a75d8ccdedaca8d236c672`, with clean
 postflights, matching managed launcher receipts and all four existing global
@@ -227,7 +237,7 @@ blocked disposition. Planning is already merged.
 | R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
 | R1 Inventory and supported capability map | observed baseline; authentication/live use partial | Four authenticated host reads, OS/client/root/source hashes and recoverable originals retained owner-only; missing command/app locations and unverified desktop/login behavior disclosed in the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322). No client/platform equivalence inferred. |
 | R2 Shared client workflow and safe access | source repair merged; actual adoption incomplete | PR2195 landed d7f4c10. PR2230 landed7a80853: default Linux MiMo/ZCode refresh and exact Windows machine-tail preservation repaired, focused Linux/Windows proof. Accepted installed adoption remains separate. |
-| R3 CI contract and Entire feasibility | actual native jobs and isolated merge/publication proved; replacement unqualified | All12 workflows/182 registrations inventoried. Existing Envy/Linux agents ran focused checks, native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-base gate gap, other runners, whole-suite parity and protected-main transition remain unmet. |
+| R3 CI contract and Entire feasibility | actual jobs and isolated merge/publication proved; replacement unqualified | All12 workflows/182 registrations inventoried. Envy/Alien Windows and Linux agents ran focused checks; native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-base gate gap, XPS trust, whole-suite parity and protected-main transition remain unmet. |
 | R4 Offline cross-platform verification | focused suites passed; broader adversarial gates open | Focused Linux and three-host Windows fixtures passed; corrected990c8b95 ordinary Linux/all12 Windows PR sections and d7f4c10 queue passed. Remaining §10/T3 cases and native execution are not passed by fixtures. |
 | R5 Protected installation on four machines | three Windows installer completions; full acceptance incomplete | edge-dev/4837/916 native installers reachedDone at merged9c912187, gate/child0, clean matching launcher/global postflights. Linux read-only memory health still exits1, not bypassed. Native original-client/cross-host acceptance remains unproved; task-record restoration limitation is disclosed in the follow-up report. |
 | R6 All 16 live client-machine journeys | 0 of16 accepted | Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; native-control/missing-client limits are explicit. |

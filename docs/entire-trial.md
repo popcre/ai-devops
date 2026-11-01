@@ -1,5 +1,17 @@
 # Entire trial operating record — #2022
 
+## October 31 Alien runner execution
+
+The second bounded Alien attempt passed its collision guard during a fresh idle
+window. [Build8](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/8)
+passed the existing phrase suite at exact5c83f059 on actualedge-alien, agent4.9.0.
+Its one-job agent disconnected, token was revoked and config archived; original
+GitHub service remained running/automatic. T2 now has Envy/Alien Windows plus
+Linux execution; XPS trust remains unqualified. The [receipt](../tests/verification/entire-trial/report.md#october-31-alien-execution-follow-up)
+supersedes the earlier nonexecution limit without erasing the first refusal.
+All16 live-client cells, whole-suite parity, timing, canceled-base safety gap and
+the original ownership blocker remain open. Original constraints/deadlines stand.
+
 ## October 31 protected installation and bounded recovery follow-up
 
 Three Windows native installers completed at merged9c912187, with clean source,
