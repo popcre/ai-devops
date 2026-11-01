@@ -21,7 +21,7 @@ gh_measure_init(){
   case "${AI_GH_CALLER:-}" in
     ai-pr-wait|ai-gh-wait|ai-blocker-watch|ai-verify-run|ai-memory-sync|ai-test-local|\
     ai-merge-group-evidence|ai-transcript-destination-check|ai-workspace-status|\
-    ai-reviewer-membership-drift|ai-devops-doctor|ai-devops-installer|interactive)
+    ai-reviewer-membership-drift|ai-devops-doctor|ai-devops-installer|ai-task-gates|review-fixer|interactive)
       GH_MEASURE_CALLER="$AI_GH_CALLER" ;;
   esac
   if [ "$GH_MEASURE_CALLER" = ai-blocker-watch ]; then
@@ -189,6 +189,11 @@ gh_measure_workflow_outcome(){
     ai-pr-wait:pr_wait:merged|ai-pr-wait:pr_wait:closed|\
     ai-pr-wait:pr_wait:checks_failed|ai-pr-wait:pr_wait:ejected|\
     ai-pr-wait:pr_wait:deadline|ai-blocker-watch:blocker_watch_tick:completed) ;;
+    ai-verify-run:verify_dispatch:dispatched|ai-verify-run:verify_dispatch:duplicate_refused|ai-verify-run:verify_dispatch:failed|\
+    ai-verify-run:verify_status:completed|ai-verify-run:verify_status:failed|\
+    ai-verify-run:verify_cancel:cancel_requested|ai-verify-run:verify_cancel:refused|ai-verify-run:verify_cancel:failed|\
+    ai-transcript-destination-check:transcript_privacy:verified|ai-transcript-destination-check:transcript_privacy:refused|\
+    ai-transcript-destination-check:transcript_privacy:failed|ai-transcript-destination-check:transcript_privacy:skipped) ;;
     *) return 2 ;;
   esac
   [[ "$id" =~ ^[0-9a-f]{32}$ && "$elapsed" =~ ^[0-9]{1,9}$ ]] || return 2
@@ -248,6 +253,26 @@ gh_measure_workflow_evidence(){
   [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" != unknown ] || PR_WAIT_DELIVERED_UTC_MS=''
   record=$(printf '{"schema":4,"utc":"%s","measurement":"workflow_evidence","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","cohort_id":%s,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"%s","eligible_utc_ms":%s,"observed_utc_ms":%s,"delivered_utc_ms":%s,"delivery_boundary":"%s","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"%s"}' \
     "$utc" "$id" "$cohort_json" "${PR_WAIT_EVENT_KIND:-unknown}" "${PR_WAIT_ELIGIBLE_UTC_MS:-null}" "${PR_WAIT_OBSERVED_UTC_MS:-null}" "${PR_WAIT_DELIVERED_UTC_MS:-null}" "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" "$reason")
+  # An explicit qualification parent may consume this *unqualified* event.
+  # A caller-supplied descriptor never grants source or clock authority.
+  local event_python="${PYTHON_RUNNER:-}" event_helper='' event_windows=0
+  case "${OSTYPE:-}" in msys*|cygwin*|win32*) event_windows=1 ;; esac
+  if [ "$event_windows" = 1 ] && [[ "${AI_GH_QUALIFICATION_EVENT_HANDLE:-}" =~ ^[0-9]{1,20}$ ]]; then
+    # This is data only. The native writer verifies a bounded nonblocking
+    # message pipe; neither this handle nor its environment grants authority.
+    event_helper="${BASH_SOURCE[0]%/*}/windows_event.py"
+    [ -n "$event_python" ] || event_python="$(command -v python3 || command -v python || true)"
+    if [ -n "$event_python" ] && [ -f "$event_helper" ]; then
+      printf '%s\n' "$record" | "$event_python" "$event_helper" 2>/dev/null || :
+    fi
+  elif [[ "${AI_GH_QUALIFICATION_EVENT_FD:-}" =~ ^[0-9]{1,5}$ ]] &&
+    [ "$AI_GH_QUALIFICATION_EVENT_FD" -ge 3 ] && [ -p "/proc/self/fd/$AI_GH_QUALIFICATION_EVENT_FD" ]; then
+    event_helper="${BASH_SOURCE[0]%/*}/measure_append.py"
+    [ -n "$event_python" ] || event_python="$(command -v python3 || command -v python || true)"
+    if [ -n "$event_python" ] && [ -f "$event_helper" ]; then
+      printf '%s' "$record" | "$event_python" "$event_helper" --event-fd "$AI_GH_QUALIFICATION_EVENT_FD" 2>/dev/null || :
+    fi
+  fi
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 

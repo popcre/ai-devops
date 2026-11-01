@@ -4,6 +4,24 @@ set -euo pipefail
 
 destination="${1:-}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRIVACY_MEASURE_ID=''; PRIVACY_MEASURE_OUTCOME=refused
+if [[ -f "$ROOT/tools/github-requests/telemetry.sh" ]]; then
+  source "$ROOT/tools/github-requests/telemetry.sh"
+  PRIVACY_MEASURE_ID="$(gh_measure_workflow_id)" || printf 'transcript guard: request measurement unavailable: ID not created\n' >&2
+  gh_measure_clock; PRIVACY_MEASURE_START="$GH_MEASURE_CLOCK"
+fi
+export AI_GH_WORKFLOW_ID="$PRIVACY_MEASURE_ID"
+privacy_measure_exit() {
+  local status=$? elapsed
+  if [[ -n "$PRIVACY_MEASURE_ID" ]]; then
+    gh_measure_clock; elapsed=$((GH_MEASURE_CLOCK - PRIVACY_MEASURE_START))
+    [[ "$elapsed" -ge 0 ]] || elapsed=0
+    gh_measure_workflow_outcome ai-transcript-destination-check transcript_privacy "$PRIVACY_MEASURE_ID" "$PRIVACY_MEASURE_OUTCOME" "$elapsed" ||
+      printf 'transcript guard: request measurement unavailable: outcome not saved\n' >&2
+  fi
+  return "$status"
+}
+trap privacy_measure_exit EXIT
 [[ -n "$destination" ]] || { echo "usage: ai-transcript-destination-check <checkout>" >&2; exit 2; }
 [[ -d "$destination/.git" || -f "$destination/.git" ]] || {
   echo "BLOCKED: destination is not a Git checkout" >&2; exit 1; }
@@ -22,12 +40,15 @@ origin="$(git -C "$destination" config --get remote.origin.url 2>/dev/null || tr
 }
 
 if [[ "${AI_TRANSCRIPT_TEST_MODE:-}" == "1" && "${AI_TRANSCRIPT_TEST_PRIVATE:-}" == "1" ]]; then
-  :
+  PRIVACY_MEASURE_OUTCOME=skipped
 else
   [[ -x "$ROOT/bin/ai-gh" ]] || { echo "BLOCKED: shared GitHub transport is required to prove privacy" >&2; exit 1; }
   private="$(AI_GH_CALLER=ai-transcript-destination-check "$ROOT/bin/ai-gh" api repos/u2giants/ai-devops-transcripts --jq '.private' 2>/dev/null)" || {
+    PRIVACY_MEASURE_OUTCOME=failed
     echo "BLOCKED: could not verify transcript repository privacy" >&2; exit 1; }
   [[ "$private" == "true" ]] || { echo "BLOCKED: transcript repository is not private" >&2; exit 1; }
+  PRIVACY_MEASURE_OUTCOME=verified
 fi
 
-echo "PASS: canonical private transcript destination verified"
+echo "PASS: canonical private transcript destination verified" || {
+  status=$?; PRIVACY_MEASURE_OUTCOME=failed; exit "$status"; }

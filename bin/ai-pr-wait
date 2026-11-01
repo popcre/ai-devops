@@ -400,6 +400,7 @@ if [ "$GH_COST_READY" = 1 ]; then
   PR_WAIT_LOCAL_CLOCK_BASIS="${GH_MEASURE_LOCAL_CLOCK_BASIS:-unknown}"
 fi
 export PR_WAIT_RECEIPT_ID
+export AI_GH_WORKFLOW_ID="$PR_WAIT_RECEIPT_ID" AI_GH_WORKFLOW=pr_wait
 pr_wait_cleanup(){
   local rc=$? elapsed_ms
   if [ -n "$PR_WAIT_RECEIPT_ID" ] && [ -n "$PR_WAIT_OUTCOME" ]; then

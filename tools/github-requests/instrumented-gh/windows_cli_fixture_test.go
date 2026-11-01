@@ -476,6 +476,10 @@ func TestWindowsLockedAncestorUseRace(t *testing.T) {
 }
 
 func TestWindowsNativeChildParity(t *testing.T) {
+	capability := os.Getenv("AI_GH_COUNTER_FIXTURE_DETACHED_TELEMETRY")
+	if capability != "true" && capability != "false" {
+		t.Fatal("verified telemetry capability required")
+	}
 	var telemetry, requests atomic.Uint64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/telemetry" {
@@ -490,6 +494,25 @@ func TestWindowsNativeChildParity(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AI_GH_COUNTER_FIXTURE_TELEMETRY_URL", server.URL+"/telemetry")
 	baseline := pairedCommand(t, false, server.URL+"/fixture")
+	if capability == "false" {
+		// The pinned older source has no detached telemetry implementation.
+		// Exercise both real images with telemetry requested and retain their
+		// actual API/counter metadata; never disable a supported feature.
+		observed := pairedCommand(t, true, server.URL+"/fixture")
+		requireParity(t, baseline, observed)
+		if telemetry.Load() != 0 || requests.Load() != 2 {
+			t.Fatal("declared absent telemetry capability differs from actual images")
+		}
+		var final struct {
+			Writes uint64  `json:"observed_completed_writes"`
+			Total  *uint64 `json:"http_requests"`
+		}
+		json.Unmarshal(bytes.Split(observed.metadata, []byte("\n"))[1], &final)
+		if final.Writes != 1 || final.Total != nil {
+			t.Fatal("non-telemetry profile falsely changed request coverage")
+		}
+		return
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for telemetry.Load() < 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

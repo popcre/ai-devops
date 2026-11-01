@@ -24,7 +24,10 @@ DEFERRED = "fixer-deferred"
 
 def gh(*args):
     wrapper = Path(__file__).resolve().parents[2] / "bin/ai-gh"
-    result = subprocess.run(["bash", str(wrapper), *map(str, args)], text=True, capture_output=True)
+    environment = os.environ.copy()
+    environment["AI_GH_CALLER"] = "review-fixer"
+    result = subprocess.run(["bash", str(wrapper), *map(str, args)], text=True,
+                            capture_output=True, env=environment)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
     return result.stdout.strip()

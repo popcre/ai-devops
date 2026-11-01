@@ -12,8 +12,10 @@ from unittest.mock import patch
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from source_binding import source_binding, validate_source_binding
+from source_binding import source_binding, validate_source_binding, version_profile
 from numeric_receipt import validate_receipt
+from managed_read import aggregate_invocations, managed_read_label
+from build import patch as patch_counter_source
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -28,6 +30,85 @@ def channel(**overrides):
 
 
 class OfflineContract(unittest.TestCase):
+    def test_shared_version_profiles_reject_unknown_or_unpinned_sources(self):
+        runtime = version_profile(HERE / 'pins.json')
+        self.assertEqual(runtime['profile_kind'], 'runtime')
+        self.assertEqual(version_profile(HERE / 'pins.json', '2.101.0')['profile_kind'], 'historical')
+        for version in ('0.0.0', '../2.101.0', True):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                version_profile(HERE / 'pins.json', version)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'pins.json'
+            registry = json.loads((HERE / 'pins.json').read_text())
+            registry['profiles'][registry['default_profile']]['source_url'] = 'https://untrusted.invalid/archive'
+            path.write_text(json.dumps(registry))
+            with self.assertRaises(ValueError):
+                version_profile(path)
+
+    def test_patch_profiles_reject_missing_unexpected_constructor_and_import(self):
+        def source(root, hooks, imported, directory, final=True):
+            (root / 'api').mkdir()
+            (root / 'internal').mkdir()
+            (root / 'cmd/gh').mkdir(parents=True)
+            if directory:
+                (root / 'internal/gh/ghtelemetry').mkdir(parents=True)
+            client = root / 'api/http_client.go'
+            client.write_text('package api\nimport (\n\t"net/http"\n'
+                              + ('\t"github.com/cli/cli/v2/internal/gh/ghtelemetry"\n' if imported else '')
+                              + ')\n' + '\treturn client, nil\n' * hooks)
+            (root / 'cmd/gh/main.go').write_text('package main\nimport "github.com/cli/cli/v2/internal/ghcmd"\n'
+                                               + ('\tcode := ghcmd.Main()\n' if final else ''))
+            return client
+        for expected, telemetry in ((1, False), (2, True)):
+            capabilities = {'api_constructor_hooks': expected, 'detached_telemetry': telemetry}
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                client = source(root, expected, telemetry, telemetry)
+                patch_counter_source(root, capabilities)
+                self.assertEqual(client.read_text().count('httpcounter.Wrap(client.Transport)'), expected)
+                self.assertIn('httpcounter.Finish()', (root / 'cmd/gh/main.go').read_text())
+            for actual_hooks, imported, directory, final in (
+                    (3 - expected, telemetry, telemetry, True),
+                    (expected, not telemetry, telemetry, True),
+                    (expected, telemetry, not telemetry, True),
+                    (expected, telemetry, telemetry, False)):
+                with self.subTest(expected_hooks=expected, actual_hooks=actual_hooks, imported=imported, final=final):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        root = pathlib.Path(temporary)
+                        client = source(root, actual_hooks, imported, directory, final)
+                        before = client.read_bytes()
+                        with self.assertRaises(ValueError):
+                            patch_counter_source(root, capabilities)
+                        self.assertEqual(client.read_bytes(), before)
+
+    def test_admission_invocations_aggregate_only_complete_sequential_pairs(self):
+        result = aggregate_invocations(channel() + channel(observed_completed_writes=2))
+        self.assertTrue(result['complete'])
+        self.assertEqual(result['observed_completed_writes'], 6)
+        self.assertEqual(result['counted_invocations'], 2)
+        self.assertIsNone(result['http_requests'])
+        start = b'{"schema":1,"started":true}\n'
+        for raw in (b'', start, start + channel(), channel() + start,
+                    channel(incomplete=True), channel(failed_write_attempts=1),
+                    channel() + b'fake-secret-sentinel\n', channel() * 65):
+            with self.subTest(size=len(raw)):
+                result = aggregate_invocations(raw)
+                self.assertFalse(result['complete'])
+                self.assertIsNone(result['observed_completed_writes'])
+                self.assertIsNone(result['counted_invocations'])
+
+    def test_managed_builtin_profile_rejects_aliases_mutations_and_implicit_context(self):
+        self.assertEqual(managed_read_label(['issue', 'view', '658', '--repo', 'popcre/ai-devops',
+                                             '--json', 'number,state']), 'issue.view')
+        for arguments in (['issue', 'view', '658', '--json', 'number'],
+                          ['issue', 'view', '658', '-R', 'popcre/ai-devops', '--repo', 'popcre/ai-devops', '--json', 'number'],
+                          ['issue', 'view', '658', '-R', 'popcre/ai-devops', '--web'],
+                          ['pr', 'merge', '1', '-R', 'popcre/ai-devops'],
+                          ['alias', 'set', 'fake', '!executor'],
+                          ['api', 'graphql', '-f', 'query=mutation{x}']):
+            with self.subTest(command=arguments[:2]), self.assertRaises(ValueError):
+                managed_read_label(arguments)
+
     def controlled_environment(self, root, host='fixture'):
         paths = {name: root / name for name in ('config', 'home', 'cache', 'temp')}
         for path in paths.values():
@@ -140,7 +221,7 @@ class OfflineContract(unittest.TestCase):
 
     def test_windows_numeric_receipt_schema_and_bindings(self):
         import copy
-        pins = json.loads((HERE / "pins.json").read_text())
+        pins = version_profile(HERE / "pins.json")
         binding = source_binding(HERE)
         manifest = {"pins": pins, "counter_source_binding": binding,
                     "compiled_counter_source_binding": binding,

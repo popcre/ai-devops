@@ -1,19 +1,29 @@
-# Linux outgoing-write counter prototype
+# Outgoing-write counter qualification
 
 Owner: [#660](https://github.com/popcre/ai-devops/issues/660), under #658.
 This extends the existing measurement namespace. It does not install, alter
 `ai-gh` routing, replace vendor `gh`, or establish programme acceptance.
 
-`pins.json` binds upstream CLI 2.101.0 to an immutable commit/archive and the
-official Go 1.27.1 Linux toolchain archive/hash. `build.py` accepts those two
+`pins.json` is the single finite version-profile registry owned by #660. Its
+default is the actual Linux vendor CLI 2.103.3; Windows source profiles 2.97.0
+and 2.88.1 preserve those hosts' existing versions. The old 2.101.0 prototype
+profile and its evidence remain explicitly historical. Each profile binds an
+immutable official commit/archive and shares the official Go 1.27.1 Linux
+toolchain archive/hash. `build.py --upstream-version VERSION` selects a recorded
+profile using the same code path; profile presence is not native qualification.
+Retire redundant profiles when the actual fleet versions converge through their
+normal maintenance routes, without changing a host merely for measurement.
+`build.py` accepts those two
 verified archives (`gh.tar.gz`, `go.tar.gz`) from a private directory and builds
 unmodified/instrumented binaries in a new private output directory. It changes
-only the two upstream API client constructors, the CLI finalization point and
+only the profile's declared upstream API client constructors, the CLI finalization point and
 the new internal counter package. Modules retain upstream `go.mod`/`go.sum`.
+The 2.88.1 profile has one constructor and no detached telemetry; 2.97.0,
+2.103.3 and historical 2.101.0 have two constructors and detached telemetry.
 No binary or upstream source archive belongs in this repository.
 Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
 before hashing, and extracted from those same verified immutable bytes.
-Qualification execution likewise uses a verified sealed ELF snapshot held by
+Linux qualification execution likewise uses a verified sealed ELF snapshot held by
 the parent; replacing the original pathname cannot select a different program.
 Every fixture and measurement artifact invocation uses that boundary. Builds
 require an already-created owner-only output directory beneath trusted ancestors;
@@ -53,8 +63,10 @@ these client constructors, not every command, transport, external client or
 host. Completed writes are not proof of server acceptance or quota cost.
 Missing finish, malformed/oversized metadata or interrupted commands yield
 unknown. Late hooks/custom transports and full constructor coverage remain
-qualification work. Windows is unsupported until true inherited HANDLE
-isolation has been proved; compiling a Windows binary is not that proof.
+qualification work. Windows has a separate native fixture and HANDLE-isolation
+path below; source presence and cross-compilation do not establish its native
+proof. Current runtime-version native proof, installed useful-work acceptance
+and global HTTP totals are not claimed by this document or the profile registry.
 
 ## Verification
 
@@ -63,6 +75,7 @@ bash tests/test-gh-http-counter-prototype.sh
 python3 tools/github-requests/instrumented-gh/build.py --archives /PRIVATE/archives --output /PRIVATE/new-build
 python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
+python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --managed-commands
 ```
 
 Create the private output directory first. The ordinary development build
@@ -73,8 +86,9 @@ fixture command against that manifest exercises TTY update success and
 concurrent command failure. Original-build results explicitly skip this
 case and cannot qualify updater behavior or installed release feature parity.
 All proxy destinations are mapped to the local trusted server; no updater or
-telemetry request reaches GitHub. Enabled telemetry still sends one detached
-local request, excluded from the primary process observation. Global HTTP
+telemetry request reaches GitHub. Profiles declaring detached telemetry exercise
+one separate local request, excluded from the primary process observation.
+The 2.88.1 profile instead verifies its declared absence. Global HTTP
 total remains unknown. Source-bound coverage receipts are in
 `tests/verification/github-requests/http-counter-coverage-linux-2026-10-07.json`.
 
@@ -105,11 +119,83 @@ Future integration reuses the existing Bash caller's protected channel after
 independent exact-head security review, checks and each host's guarded install.
 Source/stat digest validation and invalidation need their own security proof.
 
+The finite managed-command fixture census additionally exercises auth status,
+issue/PR lists and views (including comment pagination), PR checks, run and
+workflow reads, repository view and raw GraphQL. Every case now requires an
+actual complete counter receipt matching the local server ledger. Identical
+command output without counter metadata fails qualification. This test-only
+execution preserves the narrower qualification CLI restrictions; it does not
+enable an ordinary-environment runner or installed routing. The separate
+`--managed-commands` timing mode runs twenty alternating pairs in each of
+cold-config and warm-config groups with independent baseline/candidate state.
+It includes sealed-image verification, private pipe and metadata validation,
+requires both p95 and total elapsed ratios at most 1.05, and exits unsuccessfully
+when either group misses. It qualifies the measured finite local workload only;
+subprocess traffic, whole-account totals and installed performance stay separate.
+
+## Bounded supervised task reads
+
+`managed_read.ManagedReadObservation` is an explicit Linux observation API,
+separate from the isolated `run.py` CLI. It requires the exact build-manifest
+digest, an exact `ai-gh` path/hash, and the existing protected authentication
+configuration. It does not install anything, replace the vendor CLI, enable
+global routing, copy authentication files, or print configuration values.
+Only explicit public `popcre/ai-devops` issue/PR/run/repository reads with JSON
+fields are admitted. Mutations, aliases/extensions, implicit repository context,
+executor flags, interactive terminals, source-injection variables and explicit
+caller `GH_PATH` decline qualification. The ordinary command remains available.
+An ambient `AI_GH_REAL_GH` also declines qualification. A local version read
+of the original protected vendor ELF must match the bound source release;
+historical profiles require explicit `historical_profile=True` and cannot
+establish current runtime acceptance. No system CLI is changed.
+Literal `cat` pager settings remain unchanged in this noninteractive JSON
+profile. Configuration-directory group access is accepted only when NSS
+explicit members plus primary-group users resolve exclusively to its owner;
+foreign/world-write access is refused. Existing fixed configuration files are
+inspected through anchored no-follow metadata handles only, never read: each
+must be a singly linked owner file with mode 0600. Symlinks, hard links and
+public file permissions decline qualification without changing configuration.
+
+The controller holds `report.retained_generation(root, install_manifest)` and
+passes its live mapping as `transport_boundary`.
+The boundary is an opaque active capsule produced by canonical `import report`,
+not a serializable dictionary. Each actual launch borrows independent sealed
+source/image descriptors so repeated `ro-bind-data` mounts cannot consume the
+next launch's bytes. Closed or forged capsules decline qualification.
+The observer retains sealed
+paired native images once per cohort. It launches the original `ai-gh` through
+that readonly generation boundary, with its chosen image mounted readonly in
+a namespace-only private tmpfs. `AI_GH_REAL_GH` selects that image only inside
+the owned child. Existing shared pacing, credentials, quotas, probes and backoff
+remain in force; no alternate real GitHub throttle state is created.
+
+`run(arguments, opaque_workflow_id, ...)` streams caller-owned standard
+descriptors unchanged and returns `(original_status, observation)`. Up to forty
+commands are allowed; each has a supervised timeout of 1–300 seconds (120 by
+default). Signals reach the owned group; timeout/cancellation never replays a
+command and yields unknown metadata. A complete observation sums strictly
+sequential numeric start/finish pairs once, including observed admission
+identity/quota probes. Empty, truncated, interleaved, oversized or incomplete
+pairs remain unknown. The uninstrumented image produces unknown, never zero.
+Real before/after toolkit cohorts must both use the instrumented image;
+counter-off/on pairs measure instrumentation overhead only.
+
+Source identity is attached only to an actual complete wrapped observation
+while the retained generation is held. An ordinary transport hash bookend
+alone leaves loaded source unknown. The summary includes the source boundary's
+bootstrap time, image verification and whole cohort elapsed time; missing source
+bootstrap timing is explicit. Performance qualification must include all setup
+over the same outcomes. The finite counter-only timing result does not establish
+the supervised route's overhead. Counts remain completed writes in the covered
+primary API constructors; subprocess traffic and whole-account HTTP totals stay
+unknown. No production or fleet acceptance follows from local fixtures.
+
 ## Isolated native Windows qualification
 
-This is fixture-only code owned by #660. No Windows execution receipt exists
-until the reviewed fixture runs; compilation and offline tests are separate
-evidence. Neither success qualifies installation, production routing, MSYS
+This is fixture-only code owned by #660. Current runtime-profile native
+execution requires its actual reviewed fixture receipt; historical receipts,
+compilation and offline tests are separate evidence. None alone qualifies
+installation, production routing, MSYS
 result transport, Windows TLS/auth/context coverage or a global HTTP total.
 Native commands and the OS-installed gh remain untouched. The pinned build
 does not supply vendor signing, Windows resources or official release parity.
@@ -124,7 +210,17 @@ tags disable the updater. Windows race execution is not claimed.
 The versioned `counter_source_binding` binds the complete finite input closure:
 httpcounter.go, httpcounter_test.go, channel.go, channel_linux.go,
 channel_windows.go, channel_unsupported.go, channel_windows_test.go,
-windows_cli_fixture_test.go and native_fixture.ps1, in that order.
+windows_cli_fixture_test.go, native_fixture.ps1 and pins.json, in that order.
+The locked registry is the same single version map used by the builder and
+native guard; the guard contains no duplicate commit/archive pin table.
+The finite capabilities declare one constructor and no detached CLI telemetry
+for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.3 (and the
+historical 2.101.0 profile). The common patch checks the exact declared return,
+import, source-directory and finalization hooks before any edit. The older
+profile's native child test exercises both actual images with telemetry
+requested, asserts its declared absence and verifies actual API counter output;
+it does not skip or remove an implemented feature. Authentication-login and
+other out-of-profile clients remain outside this finite coverage.
 `compiled_counter_source_binding` binds the post-gofmt copied closure. The
 existing `patch_sha256` still means only httpcounter.go's input bytes; it is
 insufficient alone. Missing, altered and extra source files are rejected.
@@ -185,7 +281,8 @@ inheritance sentinel and grandchildren, separate concurrent channels, capacity,
 paused/closed readers, strict two-record parsing, record sizing, verify/use image
 and ancestor replacement, pagination/hidden retry/redirect server ledgers,
 Unicode/header/stdio/status parity, forced cancellation without replay, actual
-console cancellation, detached telemetry, and numeric receipt shape. Absence
+console cancellation, the profile's detached-telemetry capability or declared
+absence, and numeric receipt shape. Absence
 of a console is a genuine unknown failure, never a successful skip. The
 offline source-binding and numeric-schema cases additionally reject missing,
 mismatched/extra source and receipt fields, text, forged digests and NaN.
@@ -214,6 +311,6 @@ private structured outgoing-write counter. Retire the patch/build helper when
 native retry/privacy/parity evidence meets the same contract; preserve existing
 unknown and measured-subset history. Requalify each upstream version change.
 
-Primary sources: [GitHub CLI client constructors](https://github.com/cli/cli/blob/v2.101.0/api/http_client.go),
-[CLI exit boundary](https://github.com/cli/cli/blob/v2.101.0/cmd/gh/main.go), and
+Primary sources: [GitHub CLI client constructors](https://github.com/cli/cli/blob/v2.103.3/api/http_client.go),
+[CLI exit boundary](https://github.com/cli/cli/blob/v2.103.3/cmd/gh/main.go), and
 [Go httptrace](https://pkg.go.dev/net/http/httptrace).

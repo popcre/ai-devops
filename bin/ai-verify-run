@@ -37,6 +37,32 @@ done
 [ -x "$GH" ] || die 'the shared GitHub transport is required'
 [ -n "$repo" ] || die '--repo is required'
 
+# These receipts describe this command boundary, never completion of the
+# dispatched remote verification. No arguments or repository values are saved.
+VERIFY_MEASURE_ID=''; VERIFY_MEASURE_WORKFLOW=''; VERIFY_MEASURE_OUTCOME=failed
+case "$command_name" in
+  start) VERIFY_MEASURE_WORKFLOW=verify_dispatch ;;
+  status) VERIFY_MEASURE_WORKFLOW=verify_status ;;
+  cancel) VERIFY_MEASURE_WORKFLOW=verify_cancel; VERIFY_MEASURE_OUTCOME=refused ;;
+esac
+if [ -n "$VERIFY_MEASURE_WORKFLOW" ] && [ -f "$ROOT/tools/github-requests/telemetry.sh" ]; then
+  source "$ROOT/tools/github-requests/telemetry.sh"
+  VERIFY_MEASURE_ID="$(gh_measure_workflow_id)" || printf 'ai-verify-run: request measurement unavailable: ID not created\n' >&2
+  gh_measure_clock; VERIFY_MEASURE_START="$GH_MEASURE_CLOCK"
+fi
+export AI_GH_WORKFLOW_ID="$VERIFY_MEASURE_ID"
+verify_measure_exit() {
+  local status=$? elapsed
+  if [ -n "$VERIFY_MEASURE_ID" ]; then
+    gh_measure_clock; elapsed=$((GH_MEASURE_CLOCK - VERIFY_MEASURE_START))
+    [ "$elapsed" -ge 0 ] || elapsed=0
+    gh_measure_workflow_outcome ai-verify-run "$VERIFY_MEASURE_WORKFLOW" "$VERIFY_MEASURE_ID" "$VERIFY_MEASURE_OUTCOME" "$elapsed" ||
+      printf 'ai-verify-run: request measurement unavailable: outcome not saved\n' >&2
+  fi
+  return "$status"
+}
+trap verify_measure_exit EXIT
+
 case "$command_name" in
   start)
     [ -n "$ref" ] || die '--ref is required'
@@ -47,6 +73,7 @@ case "$command_name" in
     active="$(gh_call run list --repo "$repo" --workflow verify.yml --event workflow_dispatch --limit 100 \
       --json databaseId,status,headSha,url --jq ".[] | select(.headSha == \"$sha\" and (.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\" or .status == \"requested\")) | [.databaseId,.status,.url] | @tsv")" || exit 1
     if [ -n "$active" ]; then
+      VERIFY_MEASURE_OUTCOME=duplicate_refused
       printf 'SAFE REFUSAL: exact-SHA manual verification is already active:\n%s\n' "$active" >&2
       exit 3
     fi
@@ -63,27 +90,33 @@ case "$command_name" in
     before="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     gh_call workflow run verify.yml --repo "$repo" --ref "$dispatch_ref" \
       -f "requester_task=$task" -f "purpose=$purpose" || exit 1
-    printf 'Dispatched %s at %s for %s (%s). No run was cancelled.\n' "$sha" "$before" "$task" "$purpose"
+    printf 'Dispatched %s at %s for %s (%s). No run was cancelled.\n' "$sha" "$before" "$task" "$purpose" || exit "$?"
+    VERIFY_MEASURE_OUTCOME=dispatched
     ;;
   status)
     filter='.[]'
     [ -z "$sha" ] || filter=".[] | select(.headSha == \"$sha\")"
     gh_call run list --repo "$repo" --workflow verify.yml --limit 100 \
       --json databaseId,event,status,conclusion,headSha,createdAt,url \
-      --jq "$filter | [.databaseId,.event,.status,(.conclusion // \"\"),.headSha,.createdAt,.url] | @tsv"
+      --jq "$filter | [.databaseId,.event,.status,(.conclusion // \"\"),.headSha,.createdAt,.url] | @tsv" || exit "$?"
+    VERIFY_MEASURE_OUTCOME=completed
     ;;
   cancel)
     [ -n "$run_id" ] || die '--run-id is required'
     [ -n "$reason" ] || die '--reason is required'
     [ "$confirm" = true ] || die '--confirm-discard-running-proof is required'
+    VERIFY_MEASURE_OUTCOME=failed
     event_and_workflow="$(gh_call run view "$run_id" --repo "$repo" --json event,workflowName \
       --jq '[.event,.workflowName] | @tsv')" || exit 1
-    [ "$event_and_workflow" = $'workflow_dispatch\tverify' ] ||
+    if [ "$event_and_workflow" != $'workflow_dispatch\tverify' ]; then
+      VERIFY_MEASURE_OUTCOME=refused
       die 'refusing to cancel: target is not a manual verify workflow run'
+    fi
     details="$(gh_call run view "$run_id" --repo "$repo" --json databaseId,event,status,headSha,createdAt,url \
       --jq '[.databaseId,.event,.status,.headSha,.createdAt,.url] | @tsv')" || exit 1
     printf 'Explicitly discarding run proof: %s\nReason: %s\n' "$details" "$reason" >&2
-    gh_call run cancel "$run_id" --repo "$repo"
+    gh_call run cancel "$run_id" --repo "$repo" || exit "$?"
+    VERIFY_MEASURE_OUTCOME=cancel_requested
     ;;
   *) usage >&2; exit 2 ;;
 esac

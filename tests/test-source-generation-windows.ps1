@@ -1,0 +1,197 @@
+# Focused native custody tests; writes only a newly-created private directory.
+param([string]$Supervisor=(Join-Path $PSScriptRoot '..\tools\github-requests\source_generation_windows.ps1'),
+      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'))
+$ErrorActionPreference='Stop'
+if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
+$text=[IO.File]::ReadAllText($Supervisor)
+$source=[regex]::Match($text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+if (-not $source) { throw 'Supervisor native custody class missing' }
+Add-Type -TypeDefinition $source
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
+$root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+$passed=0
+function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
+function Refuses([scriptblock]$Operation,[string]$Name){$refused=$false;try{& $Operation}catch{$refused=$true};Assert $refused $Name}
+[GenerationCustody]::PrivateDirectory($root)
+$file=Join-Path $root 'sealed.sh'
+$ordinary=Join-Path $root 'canonical.sh'
+[IO.File]::WriteAllText($file,'sealed bytes')
+[IO.File]::WriteAllText($ordinary,'canonical bytes')
+$directory=[GenerationCustody]::Hold($root,$true,$false)
+$held=[GenerationCustody]::Hold($file,$false,$true)
+try {
+    Refuses { [IO.File]::WriteAllText($file,'altered') } 'Held source must reject writes'
+    Refuses { [IO.File]::Move($file,(Join-Path $root 'renamed.sh')) } 'Held source must reject rename'
+    Refuses { [IO.File]::Delete($file) } 'Held source must reject delete'
+    Refuses { [IO.Directory]::Move($root,($root+'-renamed')) } 'Held ancestor must reject rename'
+    [IO.File]::WriteAllText($ordinary,'canonical still writable')
+    Assert (([IO.File]::ReadAllText($ordinary)) -eq 'canonical still writable') 'Canonical remains writable'
+    Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Held source remains readable'
+    $again=[GenerationCustody]::Hold($file,$false,$true)
+    try { Assert ([GenerationCustody]::Same($held,$again)) 'Identity binds same bytes' } finally { $again.Dispose() }
+    $other=[GenerationCustody]::Hold($ordinary,$false,$true)
+    try { Assert (-not [GenerationCustody]::Same($held,$other)) 'Different identity refuses' } finally { $other.Dispose() }
+    Assert ([GenerationCustody]::Quote('') -eq '""') 'Empty argument preserved'
+    Assert ([GenerationCustody]::Quote('plain') -eq 'plain') 'Plain argument preserved'
+    Assert ([GenerationCustody]::Quote('two words') -eq '"two words"') 'Spaced argument preserved'
+    Assert ([GenerationCustody]::Quote('a"b') -eq '"a\"b"') 'Quote argument preserved'
+    $injected=Join-Path $root 'unexpected_module.py'
+    [IO.File]::WriteAllText($injected,'unexpected module')
+    Refuses {[GenerationCustody]::AssertClosure($root,@('sealed.sh','canonical.sh'))} 'Pre-seal helper insertion refuses qualification'
+    [IO.File]::Delete($injected)
+    [GenerationCustody]::AssertClosure($root,@('sealed.sh','canonical.sh'))
+    $attack=Join-Path $root 'attack.ps1'
+    [IO.File]::WriteAllText($attack,@'
+$ErrorActionPreference='Stop'
+$root=$args[0]
+if([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $args[1]){exit 10}
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);}'
+$parentHandle=[ParentIsolationProbe]::OpenProcess(0x68,$false,[int]$args[2])
+if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parentHandle)|Out-Null;if($args[3] -eq '1'){exit 16}}
+try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
+try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
+try{$a=Get-Acl -LiteralPath $root;Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
+try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
+if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
+exit 0
+'@)
+    $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+    $control=[GenerationCustody]::DirectoryControl($root)
+    try {
+        [GenerationCustody]::DirectoryAccess($control,$false)
+        $beforePrivileges=[GenerationCustody]::PrivilegedContext()
+        $beforePrivilegeState=[GenerationCustody]::PrivilegeState()
+        Assert ([GenerationCustody]::DisabledBypassStillDetected()) 'Present disabled bypass privileges remain unqualified'
+        $job=[GenerationCustody]::Job()
+        $executable=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $arguments='-NoProfile -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
+        $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
+        try {$process.WaitForExit();Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)} finally {$process.Dispose();$job.Dispose()}
+        $job=[GenerationCustody]::Job()
+        $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
+        try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'} finally {$process.Dispose();$job.Dispose()}
+        Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
+        Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
+        Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
+    } finally {[GenerationCustody]::DirectoryAccess($control,$true);$control.Dispose();$attackHold.Dispose()}
+    [IO.File]::WriteAllText($injected,'parent restoration works')
+    Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
+    [IO.File]::Delete($injected)
+    Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
+    Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
+    Assert $true 'Finite public read arguments accepted'
+    Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','other/private')} 'Other repository denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--reviewer-approval','unbound-file')} 'Unbound helper argument denied by read profile'
+    $wireProbe=Join-Path $root 'wire_probe.py'
+    [IO.File]::WriteAllText($wireProbe,@'
+import ctypes,importlib.util,msvcrt,os,subprocess,sys,tempfile,time
+s=importlib.util.spec_from_file_location('wire',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+h=int(os.environ['AI_GH_QUALIFICATION_EVENT_HANDLE']);mode=sys.argv[2];start=time.monotonic()
+if mode=='watchdog':
+ for i in range(128):
+  if not m._write_once(h,b'x'*4096):break
+ k=m._kernel();k.SetNamedPipeHandleState.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_ulong),ctypes.c_void_p,ctypes.c_void_p]
+ state=ctypes.c_ulong(0)
+ if not k.SetNamedPipeHandleState(h,ctypes.byref(state),None,None):raise SystemExit(30)
+ # ONLY this fresh test pipe is changed. The disposable helper below sees a
+ # raced false NOWAIT report and must self-expire rather than block its caller.
+ p=subprocess.Popen([sys.executable,'-I',__file__,sys.argv[1],'blockedwriter'],stdin=subprocess.PIPE,close_fds=False)
+ p.communicate(b'x'*4096,timeout=2)
+ if p.returncode!=2 or time.monotonic()-start>2.5:raise SystemExit(31)
+elif mode=='blockedwriter':
+ actual=m._kernel()
+ class Raced:
+  def GetNamedPipeHandleStateW(self,handle,state,*rest):
+   ctypes.cast(state,ctypes.POINTER(ctypes.c_ulong))[0]=1;return 1
+  def __getattr__(self,name):return getattr(actual,name)
+ m._kernel=lambda:Raced();sys.argv=[sys.argv[1],'--write-once'];raise SystemExit(m.main())
+elif mode=='invalid':
+ with tempfile.TemporaryFile(dir=os.getcwd()) as f:
+  f.write(b'unchanged');f.flush()
+  if m._write_once(msvcrt.get_osfhandle(f.fileno()),b'altered'):raise SystemExit(32)
+  f.seek(0)
+  if f.read()!=b'unchanged':raise SystemExit(33)
+elif mode=='closed':
+ k=m._kernel();k.CloseHandle(h)
+ if m._write_once(h,b'x'):raise SystemExit(34)
+elif mode=='full':
+ for i in range(128):
+  if not m._write_once(h,b'x'*4096):break
+ else:raise SystemExit(21)
+ if time.monotonic()-start>1:raise SystemExit(22)
+elif mode=='duplicate':
+ if not m._write_once(h,b'{}') or not m._write_once(h,b'{}'):raise SystemExit(24)
+elif mode=='malformed':
+ if not m._write_once(h,b'\xff'):raise SystemExit(25)
+else:
+ if not m._write_once(h,b'{"native_chain":"ok"}'):raise SystemExit(26)
+'@)
+    $wireShell=Join-Path $root 'wire_probe.sh'
+    [IO.File]::WriteAllText($wireShell,"exec `"`$1`" `"`$2`" `"`$3`" `"`$4`"`n")
+    $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    $python=(Get-Command python.exe -ErrorAction Stop).Source
+    function Posix([string]$p){return '/'+$p.Substring(0,1)+'/'+$p.Substring(3).Replace('\','/')}
+    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog')){
+        $channel=[GenerationCustody+EventChannel]::new();$job=[GenerationCustody]::Job()
+        $saved=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
+        try{
+            [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',[string]$channel.WriteHandle,'Process')
+            $args=@((Posix $wireShell),(Posix $python),(Posix $wireProbe),(Posix $EventHelper),$mode)
+            $command=($args|ForEach-Object{[GenerationCustody]::Quote($_)}) -join ' '
+            $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true)
+            try{Assert ($process.WaitForExit(5000)) 'Native event write is bounded';Assert ($process.ExitCode -eq 0) ('Git Bash/native Python event pipe '+$mode+' exit='+$process.ExitCode)}finally{$process.Dispose()}
+            if($mode -eq 'basic'){Assert ($channel.EventText() -eq '{"native_chain":"ok"}') 'Raw handle survives actual Bash/native Python chain'}
+            elseif($mode -eq 'duplicate' -or $mode -eq 'malformed'){Assert ($null -eq $channel.EventText() -and $channel.Status -eq 'invalid') 'Duplicate or malformed event stays unknown'}
+        }finally{[Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$saved,'Process');$job.Dispose();$channel.Dispose()}
+    }
+    $fixture=@{schema=4;utc='2026-10-31T00:00:00Z';measurement='workflow_evidence';caller='ai-pr-wait';workflow='pr_wait';workflow_id=('a'*32);cohort_id=$null;target_ordinal=$null;source_verified='unknown';source_fingerprint_start=$null;source_fingerprint_end=$null;install_generation_binding=$null;event_kind='pr_merged';eligible_utc_ms=1750000000000L;observed_utc_ms=1750000001000L;delivered_utc_ms=1750000001000L;delivery_boundary='terminal_report';clock_quality='unknown';clock_error_bound_ms=$null;latency_ms=$null;unknown_reason='source_unknown'}
+    $json=$fixture|ConvertTo-Json -Compress
+    Assert (Test-ObserverEvent $json) 'Exact unqualified event schema accepted'
+    Assert (-not (Test-ObserverEvent ($json -replace '"schema":4','"schema":4,"schema":4'))) 'Duplicate JSON event keys refused'
+    $fixture.source_verified='verified'
+    Assert (-not (Test-ObserverEvent ($fixture|ConvertTo-Json -Compress))) 'Child source claim refused'
+    Assert (-not (Test-ObserverEvent ('x'*4097))) 'Oversized event refused'
+    $unsafeParent=Join-Path $root 'unsafe-parent'
+    [GenerationCustody]::PrivateDirectory($unsafeParent)
+    $parentHandle=[GenerationCustody]::Hold($unsafeParent,$true,$false)
+    try{
+        [GenerationCustody]::AssertProtectedParent($parentHandle,$false)
+        $a=Get-Acl -LiteralPath $unsafeParent
+        $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Modify','None','None','Allow'))
+        Set-Acl -LiteralPath $unsafeParent -AclObject $a
+        $candidate=Join-Path $unsafeParent 'candidate'
+        Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false);[GenerationCustody]::PrivateDirectory($candidate)} 'Unsafe parent refused BEFORE snapshot creation'
+        Assert (-not [IO.Directory]::Exists($candidate)) 'Unsafe namespace never materialized'
+        # Demonstrate the pre-lock replacement the parent check prevents;
+        # every fixture object is fresh and owned, no foreign ACL is repaired.
+        [GenerationCustody]::PrivateDirectory($candidate)
+        $replacement=Join-Path $unsafeParent 'replacement'
+        [GenerationCustody]::PrivateDirectory($replacement)
+        [IO.Directory]::Move($candidate,($candidate+'-original'))
+        [IO.Directory]::Move($replacement,$candidate)
+        Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false)} 'Pre-seal replacement cannot acquire qualified custody'
+    }finally{$parentHandle.Dispose()}
+    $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $job=[GenerationCustody]::Job()
+    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
+    try {$process.WaitForExit();Assert ($process.ExitCode -eq 17) 'Original child exit preserved'} finally {$process.Dispose();$job.Dispose()}
+    $job=[GenerationCustody]::Job()
+    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root)
+    try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Cancellation closes child job'} finally {$process.Dispose();$job.Dispose()}
+    $junction=Join-Path $root 'junction'
+    New-Item -ItemType Junction -Path $junction -Target $root | Out-Null
+    try { Refuses {$h=[GenerationCustody]::Hold($junction,$true,$false);$h.Dispose()} 'Reparse directory refuses' } finally {[IO.Directory]::Delete($junction)}
+    $link=Join-Path $root 'hardlink.sh'
+    & fsutil hardlink create $link $file | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Hardlink fixture unavailable' }
+    Refuses { $h=[GenerationCustody]::Hold($link,$false,$true);$h.Dispose() } 'Hardlinked source refuses'
+    Remove-Item -LiteralPath $link
+} finally { $held.Dispose();$directory.Dispose();Remove-Item -LiteralPath $root -Recurse -Force }
+Write-Output "PASS $passed native Windows source custody cases"

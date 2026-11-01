@@ -24,6 +24,7 @@ case "$*" in
     [ "${FAKE_TAG_MODE:-}" != create-fails ] || exit 1
     : > "$GH_LOG.tag-created" ;;
   *'run list'*'--event workflow_dispatch'*) printf '%s' "${FAKE_ACTIVE:-}" ;;
+  'run list '*) [ "${FAKE_STATUS_FAIL:-0}" = 0 ] || exit 7 ;;
   *'run view 42'*'--json event,workflowName'*) printf '%s\n' $'workflow_dispatch\tverify' ;;
   *'run view 42'*) printf '%s\n' $'42\tworkflow_dispatch\tin_progress\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t2026-09-03T00:00:00Z\thttps://example/run/42' ;;
   *'run view 99'*'--json event,workflowName'*) printf '%s\n' $'pull_request\tverify' ;;
@@ -89,5 +90,31 @@ grep -Fq 'run cancel 99' "$LOG" && fail 'non-manual run reached cancellation'
 "$ROOT/bin/ai-verify-run" cancel --repo acme/tool --run-id 42 --reason obsolete --confirm-discard-running-proof >/dev/null 2>&1 || fail 'confirmed exact cancel failed'
 grep -Fq 'run view 42 --repo acme/tool' "$LOG" || fail 'cancel did not inspect the exact target'
 grep -Fq 'run cancel 42 --repo acme/tool' "$LOG" || fail 'confirmed cancel did not target the exact run'
+
+AI_GH_WORKFLOW_ID=UNTRUSTED_CORRELATION "$ROOT/bin/ai-verify-run" status --repo acme/tool >/dev/null || fail 'status failed'
+FAKE_STATUS_FAIL=1 "$ROOT/bin/ai-verify-run" status --repo acme/tool >/dev/null 2>&1
+[ "$?" -eq 7 ] || fail 'status lost the original upstream exit code'
+mkdir -p "$TMP/broken-measurement"
+: > "$TMP/broken-measurement/measurements"
+AI_GH_STATE_DIR="$TMP/broken-measurement" "$ROOT/bin/ai-verify-run" status --repo acme/tool >/dev/null 2>&1 ||
+  fail 'unavailable measurement changed successful status result'
+
+python3 - "$AI_GH_STATE_DIR/measurements" <<'PY' || fail 'dispatch command receipts are missing or misclassified'
+import json, pathlib, re, sys
+rows = [json.loads(line) for p in pathlib.Path(sys.argv[1]).glob('????-??-??.jsonl') for line in p.read_text().splitlines()]
+receipts = [r for r in rows if r.get('measurement') == 'workflow_outcome' and r.get('caller') == 'ai-verify-run']
+assert receipts
+outcomes = {(r['workflow'], r['outcome']) for r in receipts}
+assert {('verify_dispatch', 'dispatched'), ('verify_dispatch', 'duplicate_refused'), ('verify_dispatch', 'failed'),
+        ('verify_cancel', 'cancel_requested'), ('verify_cancel', 'refused'),
+        ('verify_status', 'completed'), ('verify_status', 'failed')} <= outcomes
+assert len({r['workflow_id'] for r in receipts}) == len(receipts)
+for r in receipts:
+    assert re.fullmatch('[0-9a-f]{32}', r['workflow_id'])
+    assert set(r) == {'schema','utc','measurement','caller','workflow','workflow_id','outcome','elapsed_ms'}
+    assert r['outcome'] not in {'verified', 'merged'}  # No remote-run completion invented.
+    if r['workflow'] != 'verify_status':
+        assert r['outcome'] != 'completed'
+PY
 
 printf 'PASS: safe start never cancels, active duplicates are refused, provenance is sent, and cancellation needs exact destructive confirmation\n'

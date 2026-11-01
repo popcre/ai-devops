@@ -19,6 +19,25 @@ HEAD = "a" * 40
 NEXT = "b" * 40
 
 
+class TransportAttribution(unittest.TestCase):
+    def test_fixed_label_preserves_shared_transport_environment_and_result(self):
+        with patch.dict(os.environ, AI_GH_CALLER="untrusted-caller", GH_HOST="github.com"), patch.object(
+                m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, " result\n", "")) as run:
+            self.assertEqual(m.gh("api", "repos/o/r"), "result")
+            args, options = run.call_args
+            self.assertEqual(args[0], ["bash", str(ROOT / "bin/ai-gh"), "api", "repos/o/r"])
+            self.assertEqual(options["env"]["AI_GH_CALLER"], "review-fixer")
+            self.assertEqual(options["env"]["GH_HOST"], "github.com")
+            self.assertEqual(os.environ["AI_GH_CALLER"], "untrusted-caller")
+
+    def test_attribution_never_converts_a_transport_failure_to_success(self):
+        with patch.object(m.subprocess, "run", return_value=subprocess.CompletedProcess([], 19, "", "failure")):
+            with self.assertRaises(subprocess.CalledProcessError) as failure:
+                m.gh("api", "repos/o/r")
+            self.assertEqual(failure.exception.returncode, 19)
+            self.assertEqual(failure.exception.stderr, "failure")
+
+
 def finding(number=7):
     return {"number": number, "state": "open", "labels": [{"name": "review-finding"}],
             "body": f"PR: https://github.com/o/r/pull/2\nHead SHA: `{HEAD}`\nReviewer: glm\n"}

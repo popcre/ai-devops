@@ -22,12 +22,14 @@ import socketserver
 import pty
 from sealed import verified_snapshot
 from urllib.parse import urlsplit, parse_qs
+from managed_read import ManagedReadObservation, managed_read_label
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
-MANIFEST = json.loads(pathlib.Path(sys.argv.pop(1)).read_text()) if len(sys.argv) > 1 else None
+MANIFEST_PATH = pathlib.Path(sys.argv.pop(1)) if len(sys.argv) > 1 else None
+MANIFEST = json.loads(MANIFEST_PATH.read_text()) if MANIFEST_PATH is not None else None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -63,6 +65,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         'PullRequestStatusChecks', 'IssueByNumber', 'RepositoryInfo', 'CommentsForIssue',
                         'CommentsForPullRequest') if name in query), 'context')
         self.server.paths.append(operation)
+        if getattr(self.server, 'pause_read', False):
+            self.server.entered.set()
+            time.sleep(2)
         page2 = bool(variables.get('endCursor'))
         connection = {'totalCount': 2, 'issueCount': 2, 'nodes': [{'number': 2 if page2 else 1}],
                       'pageInfo': {'hasNextPage': not page2, 'endCursor': 'second'}}
@@ -118,7 +123,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.updater_entered.set()
             if mode == 'error':
                 self.server.updater_release.wait(5)
-            self.reply({'tag_name': 'v2.101.0', 'html_url': 'https://github.com/cli/cli/releases/v2.101.0',
+            version = MANIFEST['pins']['upstream_version']
+            self.reply({'tag_name': 'v' + version, 'html_url': 'https://github.com/cli/cli/releases/v' + version,
                         'published_at': '2026-10-07T00:00:00Z'})
             return
         if mode and parsed.path in ('/private', '/denied'):
@@ -131,6 +137,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path in ('/', '/user'):
             self.reply({'login': 'fixture'}, headers={'X-OAuth-Scopes': 'repo, read:org'})
+            return
+        if parsed.path == '/rate_limit':
+            reset = int(time.time()) + 3600
+            self.reply({'resources': {name: {'limit': 5000, 'remaining': 4900, 'reset': reset}
+                                     for name in ('core', 'graphql', 'search')}})
             return
         if parsed.path.endswith('/actions/workflows'):
             page2 = parse_qs(parsed.query).get('page') == ['2']
@@ -283,7 +294,8 @@ class PrototypeTests(unittest.TestCase):
         # guard is bypassed or extended, and no qualifying receipt is emitted.
         host = getattr(self, 'observation_host', self.host)
         self.assertTrue(args in (['fixture-self'], ['fixture-extension'], ['fixture-counter-env'])
-                        or runner.eligible(args, host))
+                        or runner.eligible(args, host)
+                        or args in [command for command, _ in self.managed_fixture_cases()])
         artifact = MANIFEST['artifacts']['instrumented']
         read_fd, write_fd = os.pipe()
         try:
@@ -322,23 +334,31 @@ class PrototypeTests(unittest.TestCase):
             if write_fd >= 0:
                 os.close(write_fd)
 
-    def parity(self, args, expected, retry=False, diagnostic=False):
+    def parity(self, args, expected, retry=False, diagnostic=False, require_metadata=False, require_success=False):
         self.reset(retry)
         baseline, _ = self.execute("baseline", args, instrument=False)
-        self.assertEqual(self.server.received, expected)
+        baseline_requests = self.server.received
+        if expected is not None:
+            self.assertEqual(baseline_requests, expected)
         self.reset(retry)
         patched, metadata = self.diagnostic(args) if diagnostic else self.execute("instrumented", args)
-        self.assertEqual(self.server.received, expected)
+        self.assertEqual(self.server.received, baseline_requests)
         self.assertEqual((patched.returncode, patched.stdout, patched.stderr),
                          (baseline.returncode, baseline.stdout, baseline.stderr))
+        if require_success:
+            self.assertEqual(patched.returncode, 0, 'finite managed positive outcome failed')
+        if require_metadata:
+            self.assertIsNotNone(metadata, 'managed command ran without the counter channel')
         if metadata is None:
             return
-        self.assertEqual(metadata["observed_completed_writes"], expected)
+        self.assertEqual(metadata["observed_completed_writes"], baseline_requests)
         self.assertTrue(metadata["complete"])
         self.assertIsNone(metadata["http_requests"])
 
-    def test_builtin_api_host_coverage(self):
-        for args, expected in [
+    def managed_fixture_cases(self):
+        # This finite local-server census is fixture coverage, not permission
+        # to expand run.py's deliberately narrower qualification profile.
+        return [
             (['auth', 'status', '--hostname', self.host], 2),
             (['issue', 'list', '-R', 'owner/fixture', '--limit', '2', '--json', 'number'], 2),
             (['pr', 'list', '-R', 'owner/fixture', '--limit', '2', '--json', 'number'], 2),
@@ -351,10 +371,177 @@ class PrototypeTests(unittest.TestCase):
             (['run', 'view', '1', '-R', 'owner/fixture', '--json', 'databaseId'], 2),
             (['workflow', 'list', '-R', 'owner/fixture', '--limit', '101', '--json', 'id'], 2),
             (['workflow', 'view', '1', '-R', 'owner/fixture'], 3),
-        ]:
+            (['repo', 'view', 'owner/fixture', '--json', 'nameWithOwner'], 1),
+            (['api', 'graphql', '-f', 'query=query{viewer{login}}'], 1),
+        ]
+
+    def test_builtin_api_host_coverage(self):
+        for args, expected in self.managed_fixture_cases():
             with self.subTest(command=args[:2]):
-                self.parity(args, expected)
-                self.assertEqual(self.execute('instrumented', args)[0].returncode, 0)
+                # Some vendor releases satisfy a selector-only JSON read
+                # locally. The trusted ledger, not the verb, defines demand.
+                self.parity(args, None, diagnostic=True, require_metadata=True, require_success=True)
+
+    def test_managed_coverage_refuses_missing_counter_finish(self):
+        from unittest.mock import patch
+        # Output parity alone must not qualify a managed request path. A
+        # baseline image has identical output but emits no counter finish.
+        with patch.dict(MANIFEST['artifacts'], instrumented=MANIFEST['artifacts']['baseline']):
+            with self.assertRaisesRegex(AssertionError, 'did not exercise the counter'):
+                self.parity(['issue', 'view', '1', '-R', 'owner/fixture', '--json', 'number'],
+                            1, diagnostic=True, require_metadata=True)
+
+    def observation(self, environment=None, **options):
+        # Copy only this public wrapper into private fixture custody. Helpers
+        # retain their original layout; this is intentionally source-unknown.
+        transport = pathlib.Path(self.scratch.name) / 'transport' / 'bin' / 'ai-gh'
+        if not transport.exists():
+            transport.parent.mkdir(mode=0o700, parents=True)
+            transport.write_bytes((HERE.parents[2] / 'bin' / 'ai-gh').read_bytes())
+            transport.chmod(0o700)
+            (transport.parent.parent / 'tools').symlink_to(HERE.parents[2] / 'tools', target_is_directory=True)
+        environment = dict(environment or self.raw_env())
+        environment['AI_GH_MIN_SPACING_SECONDS'] = '0'  # isolated local-server fixture only
+        return ManagedReadObservation(MANIFEST_PATH, hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest(),
+                                      transport_path=transport, transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+                                      environment=environment, cwd=self.cwd, **options)
+
+    def test_managed_observation_preserves_streams_and_counts_public_read(self):
+        arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
+        with self.proxy(), tempfile.TemporaryFile() as baseline_output, tempfile.TemporaryFile() as output, \
+                tempfile.TemporaryFile() as baseline_error, tempfile.TemporaryFile() as error:
+            self.env['GH_HOST'] = 'github.com'
+            self.reset()
+            with self.observation() as observation:
+                baseline_status, baseline = observation.run(arguments, 'a' * 32, kind='baseline',
+                                                             stdout=baseline_output, stderr=baseline_error)
+                self.assertGreaterEqual(self.server.received, 1)
+                self.reset()
+                status, record = observation.run(arguments, 'b' * 32, stdout=output, stderr=error)
+                self.assertGreaterEqual(self.server.received, 1)
+                self.assertEqual((baseline_status, status), (0, 0))
+                for first, second in ((baseline_output, output), (baseline_error, error)):
+                    first.seek(0); second.seek(0)
+                    self.assertEqual(first.read(), second.read())
+                self.assertFalse(baseline['complete'])
+                self.assertTrue(record['complete'])
+                self.assertEqual(record['observed_completed_writes'], self.server.received)
+                self.assertGreaterEqual(record['counted_invocations'], 1)
+                self.assertEqual(record['command_label'], 'issue.view')
+                self.assertEqual(record['workflow_id'], 'b' * 32)
+                self.assertTrue(record['includes_admission_probes'])
+                self.assertEqual(record['transport_source_verified'], 'unknown')
+                self.assertIsNone(record['http_requests'])
+                self.assertEqual(observation.commands, 2)
+            self.assertGreater(observation.cohort_elapsed_ns, observation.bootstrap_ns)
+            with self.assertRaises(ValueError):
+                observation.run(arguments, 'c' * 32)
+
+    def test_managed_observation_refuses_executor_and_ambient_overrides(self):
+        for arguments in (['issue', 'comment', '1', '--repo', 'popcre/ai-devops', '--json', 'number'],
+                          ['issue', 'view', '1', '--repo', 'private/repository', '--json', 'number'],
+                          ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--web'],
+                          ['fixture-extension'], ['api', 'graphql', '-f', 'query=mutation{x}'],
+                          ['pr', 'view', 'https://github.com/popcre/ai-devops/pull/1', '--json', 'number']):
+            with self.subTest(command=arguments[:2]), self.assertRaises(ValueError):
+                managed_read_label(arguments)
+        environment = self.raw_env()
+        for key, value in (('GH_PATH', '/sentinel'), ('GH_DEBUG', 'api'),
+                           ('AI_GH_HTTP_COUNTER_FD', '99'), ('AI_GH_REAL_GH', '/sentinel'),
+                           ('BASH_ENV', '/sentinel'), ('GH_HOST', 'other')):
+            with self.subTest(environment_key=key), self.assertRaises(ValueError):
+                self.observation({**environment, key: value})
+
+    def test_managed_observation_refuses_forged_generation_and_wrong_release(self):
+        from unittest.mock import patch
+        import managed_read
+        environment = self.raw_env()
+        environment['GH_HOST'] = 'github.com'
+        with self.assertRaisesRegex(ValueError, 'serialized boundary'):
+            self.observation(environment, transport_boundary={})
+        original = managed_read.ordinary_cli_profile(environment)
+        changed = (original[0], '0.0.0', original[2], original[3])
+        with patch.object(managed_read, 'ordinary_cli_profile', return_value=changed):
+            with self.assertRaisesRegex(ValueError, 'counter release differs'):
+                self.observation(environment)
+            with self.observation(environment, historical_profile=True) as observation:
+                self.assertTrue(observation.summary()['historical_profile'])
+
+    def test_managed_observation_preserves_literal_cat_pagers(self):
+        environment = self.raw_env()
+        environment.update(GH_HOST='github.com', GH_PAGER='cat', PAGER='cat')
+        with self.observation(environment) as observation:
+            self.assertEqual(observation.environment['GH_PAGER'], 'cat')
+            self.assertEqual(observation.environment['PAGER'], 'cat')
+        for pager in ('/bin/cat', 'cat; executor', 'less', '!executor'):
+            with self.subTest(pager=pager), self.assertRaises(ValueError):
+                self.observation({**environment, 'GH_PAGER': pager})
+
+    def test_config_metadata_private_group_and_foreign_access(self):
+        from unittest.mock import patch
+        from managed_read import _protected_config
+        with tempfile.TemporaryDirectory() as directory:
+            config = pathlib.Path(directory) / 'config'
+            config.mkdir()
+            config.chmod(0o771)
+            environment = {'HOME': directory, 'GH_CONFIG_DIR': str(config)}
+            for name in ('hosts.yml', 'config.yml'):
+                (config / name).write_text('synthetic fixture only')
+                (config / name).chmod(0o600)
+            with patch('managed_read._owner_private_group', return_value=True):
+                self.assertTrue(_protected_config(environment))
+                (config / 'hosts.yml').chmod(0o640)
+                self.assertFalse(_protected_config(environment))
+                (config / 'hosts.yml').chmod(0o600)
+                linked = pathlib.Path(directory) / 'linked'
+                os.link(config / 'hosts.yml', linked)
+                self.assertFalse(_protected_config(environment))
+                linked.unlink()
+                (config / 'hosts.yml').unlink()
+                (config / 'hosts.yml').symlink_to(config / 'config.yml')
+                self.assertFalse(_protected_config(environment))
+                (config / 'hosts.yml').unlink()
+            with patch('managed_read._owner_private_group', return_value=False):
+                self.assertFalse(_protected_config(environment))
+
+    def test_private_group_nss_includes_primary_group_users(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from managed_read import _owner_private_group
+        import grp
+        import pwd
+        owner = os.getuid()
+        with patch.object(grp, 'getgrgid', return_value=SimpleNamespace(gr_mem=['owner'])), \
+                patch.object(pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=owner)), \
+                patch.object(pwd, 'getpwall', return_value=[SimpleNamespace(pw_uid=owner, pw_gid=123)]):
+            self.assertTrue(_owner_private_group(123, owner))
+            with patch.object(pwd, 'getpwall', return_value=[SimpleNamespace(pw_uid=owner + 1, pw_gid=123)]):
+                self.assertFalse(_owner_private_group(123, owner))
+            with patch.object(pwd, 'getpwnam', side_effect=KeyError('unknown member')):
+                self.assertFalse(_owner_private_group(123, owner))
+
+    def test_managed_observation_cancellation_is_unknown_without_replay(self):
+        arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
+        with self.proxy(), tempfile.TemporaryFile() as output:
+            self.env['GH_HOST'] = 'github.com'
+            self.reset()
+            self.server.entered.clear()
+            self.server.pause_read = True
+            with self.observation() as observation:
+                def cancel():
+                    if self.server.entered.wait(5):
+                        os.kill(os.getpid(), signal.SIGTERM)
+                thread = threading.Thread(target=cancel)
+                thread.start()
+                try:
+                    status, record = observation.run(arguments, 'c' * 32, stdout=output, stderr=output)
+                finally:
+                    self.server.pause_read = False
+                    thread.join(timeout=6)
+            # ai-gh preserves its existing interrupt cleanup status (130).
+            self.assertEqual(status, 130)
+            self.assertFalse(record['complete'])
+            self.assertEqual(self.server.paths.count('IssueByNumber'), 1)
 
     def test_same_api_host_redirect(self):
         self.parity(['api', 'redirect'], 2)
@@ -439,6 +626,14 @@ class PrototypeTests(unittest.TestCase):
             self.assertIsNone(metadata)
             self.assertEqual((result.returncode, result.stdout, result.stderr),
                              (baseline.returncode, baseline.stdout, baseline.stderr))
+            if MANIFEST['pins'].get('detached_telemetry') is False:
+                self.reset()
+                result, metadata = self.diagnostic(['api', 'private'])
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(self.server.received, 1)
+                self.assertEqual(self.server.telemetry_received, 0)
+                self.assertTrue(metadata['complete'])
+                self.assertEqual(metadata['observed_completed_writes'], 1)
 
     def test_explicit_caller_self_path_is_preserved(self):
         self.env['GH_PATH'] = '/fixture-caller-explicit'

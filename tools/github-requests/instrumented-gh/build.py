@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 from contextlib import ExitStack
 from sealed import verified_snapshot, private_directory
-from source_binding import FILES, source_binding
+from source_binding import FILES, source_binding, version_profile
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -27,23 +27,30 @@ def build_environment(build_root, toolchain):
     return env
 
 
-def patch(source, package_bytes=None):
+def patch(source, capabilities, package_bytes=None):
     path = source / "api/http_client.go"
     text = path.read_text()
-    if text.count("\treturn client, nil\n") != 2:
+    hooks = capabilities["api_constructor_hooks"]
+    telemetry = capabilities["detached_telemetry"]
+    if (type(hooks) is not int or hooks not in (1, 2) or type(telemetry) is not bool
+            or hooks != (2 if telemetry else 1)
+            or text.count("\treturn client, nil\n") != hooks):
         raise ValueError("upstream patch boundary changed")
-    text = text.replace('"github.com/cli/cli/v2/internal/gh/ghtelemetry"',
-                        '"github.com/cli/cli/v2/internal/gh/ghtelemetry"\n'
-                        '\t"github.com/cli/cli/v2/internal/httpcounter"')
+    if (text.count('\t"net/http"\n') != 1
+            or text.count('"github.com/cli/cli/v2/internal/gh/ghtelemetry"') != int(telemetry)
+            or (source / "internal/gh/ghtelemetry").is_dir() != telemetry):
+        raise ValueError("upstream client capability boundary changed")
+    main = source / "cmd/gh/main.go"
+    main_text = main.read_text()
+    if (main_text.count('"github.com/cli/cli/v2/internal/ghcmd"') != 1
+            or main_text.count("\tcode := ghcmd.Main()\n") != 1):
+        raise ValueError("upstream finalize boundary changed")
+    text = text.replace('\t"net/http"\n', '\t"net/http"\n\t"github.com/cli/cli/v2/internal/httpcounter"\n')
     text = text.replace("\treturn client, nil\n", "\tclient.Transport = httpcounter.Wrap(client.Transport)\n\treturn client, nil\n")
     path.write_text(text)
-    path = source / "cmd/gh/main.go"
-    text = path.read_text()
-    text = text.replace('"github.com/cli/cli/v2/internal/ghcmd"',
+    text = main_text.replace('"github.com/cli/cli/v2/internal/ghcmd"',
                         '"github.com/cli/cli/v2/internal/ghcmd"\n\t"github.com/cli/cli/v2/internal/httpcounter"')
-    if text.count("\tcode := ghcmd.Main()\n") != 1:
-        raise ValueError("upstream finalize boundary changed")
-    path.write_text(text.replace("\tcode := ghcmd.Main()\n", "\tcode := ghcmd.Main()\n\thttpcounter.Finish()\n"))
+    main.write_text(text.replace("\tcode := ghcmd.Main()\n", "\tcode := ghcmd.Main()\n\thttpcounter.Finish()\n"))
     counter = source / "internal/httpcounter"
     counter.mkdir()
     for name in FILES:
@@ -60,6 +67,7 @@ def build(snapshots):
     parser.add_argument("--archives", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--target", choices=("linux-amd64", "windows-amd64"), default="linux-amd64")
+    parser.add_argument("--upstream-version", help="select one registered fleet CLI source profile")
     parser.add_argument("--compile-native-fixture", action="store_true")
     parser.add_argument("--qualify-updater", action="store_true",
                         help="local fixture variant using upstream updateable build tag")
@@ -72,7 +80,7 @@ def build(snapshots):
         raise ValueError("counter source changed while capturing inputs")
     if os.name != "posix" or os.uname().sysname != "Linux":
         raise ValueError("Linux prototype only")
-    pins = json.loads((HERE / "pins.json").read_text())
+    pins = version_profile(HERE / "pins.json", args.upstream_version, raw=package_bytes["pins.json"])
     source_tar, go_tar = args.archives / "gh.tar.gz", args.archives / "go.tar.gz"
     source_snapshot = snapshots.enter_context(verified_snapshot(source_tar, pins["source_sha256"]))
     go_snapshot = snapshots.enter_context(verified_snapshot(go_tar, pins["toolchain_sha256"]))
@@ -98,7 +106,7 @@ def build(snapshots):
             archive.extractall(extracted, filter="data")
         source = extracted / ("cli-" + pins["upstream_commit"])
         if kind == "instrumented":
-            patch(source, package_bytes)
+            patch(source, pins, package_bytes)
             subprocess.run([str(toolchain / "go/bin/gofmt"), "-w", "api/http_client.go", "cmd/gh/main.go", *["internal/httpcounter/" + name for name in FILES if name.endswith(".go")]], cwd=source, env=env, check=True)
             compiled_binding = source_binding(source / "internal/httpcounter")
             if compiled_binding != binding:
