@@ -116,8 +116,11 @@ exit 0
         if getattr(self, "path_prefix", None) is not None:
             # Native Windows PATH is translated at MSYS startup. Bind this
             # one failure stub afterward, using the shell's own path spelling.
-            argv = [bash_path(), "-c", 'prefix="$1"; shift; if command -v cygpath >/dev/null 2>&1; then prefix="$(cygpath -u "$prefix")" || exit 2; fi; PATH="$prefix:$PATH"; export PATH; exec "$@"',
-                    "fixture", self.path_prefix, Path(bash_path()).as_posix(), *argv[1:]]
+            # Keep the original source/arguments in this same shell: a second
+            # native Bash startup can reset PATH again. The caller uses
+            # BASH_SOURCE (not $0), and retains its own set-e and EXIT cleanup.
+            argv = [bash_path(), "-c", 'prefix="$1"; script="$2"; shift 2; if command -v cygpath >/dev/null 2>&1; then prefix="$(cygpath -u "$prefix")" || exit 2; fi; PATH="$prefix:$PATH"; export PATH; source "$script" "$@"',
+                    "fixture", self.path_prefix, *argv[1:]]
         return subprocess.run(argv,
                               env=env, capture_output=True, text=True, timeout=45)
 
@@ -206,6 +209,7 @@ exit 0
         fake_bin.mkdir()
         command = fake_bin / "rm"
         command.write_text('''#!/usr/bin/env bash
+printf 'entered\\n' >> "$FIXTURE/cleanup-stub-entry"
 for argument in "$@"; do
   case "$argument" in */alarm-tick) printf '9\\n' >> "$FIXTURE/cleanup-failure-status"; exit 9 ;; esac
 done
@@ -216,8 +220,9 @@ exec /usr/bin/rm "$@"
         result = self.run_command("tick")
         # Existing tick behavior ignores this cleanup status; do not change it.
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "cleanup-stub-entry").exists(), "cleanup failure stub was not selected")
         status_file = self.root / "cleanup-failure-status"
-        self.assertTrue(status_file.exists(), "cleanup failure stub was not selected")
+        self.assertTrue(status_file.exists(), "cleanup nonzero status was not injected")
         self.assertEqual(set(status_file.read_text().splitlines()), {"9"})
         row = self.active("alarm")
         self.assertEqual((row["outcome"], row["succeeded_count"]), ("partial", 2))
