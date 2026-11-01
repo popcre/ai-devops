@@ -53,8 +53,10 @@ update and source-qualified owner read at that source passed, including actual
 same-inode owner preservation. The final combined code is now merged through
 normal PR #2256 as `a98131576c3a092fc19ec938d24650ab98469c8a`, including that
 Linux owner repair. Final normal full installations and source-qualified useful
-reads on both Linux hosts now pass at `a9813157`; the three Windows final
-installation and two counted-read receipts remain pending. Merge is
+reads now pass at `a9813157` on both Linux hosts and all three Windows hosts.
+Edge-dev and 4837 each completed one necessary counted read with two primary
+writes and five native invocations; 916 preserved its ordinary source-qualified
+read while its counter namespace guard refused a foreign parent writer. Merge is
 not actual-context acceptance. The earlier Windows counter guard inspected the
 default configuration instead of the private SSH namespace actually selected by
 `ai-gh`; that implementation bug is repaired in merged PR #2256. Metadata-only
@@ -75,8 +77,11 @@ runner in run `41285694553`; the temporary proof workflow was retired before
 PR #2256's normal merge with unchanged proven code/test blobs. Required safety
 passed; Entire's result was neutral, not independent CI execution. This zero-API
 proof repairs the demonstrated cleanup capability, without erasing the prior
-CI or separate cold-counter failures. Final combined installation and counted
-Windows read receipts remain pending.
+CI or separate cold-counter failures. All five reachable hosts have completed
+the final combined installation and useful read. Windows 2.97 counter timing
+remains unqualified, 2.88 cold timing remains failed, T16 remains unreachable
+through documented trusted executors, and matched programme savings remain
+unknown. The completed bounded delivery does not close #658 acceptance.
 
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains

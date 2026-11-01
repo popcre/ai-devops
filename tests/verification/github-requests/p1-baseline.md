@@ -840,6 +840,40 @@ is normal-owner-owned. Eligibility preceded observation, so detection remains
 null; HTTP totals remain null. Neither final Linux receipt establishes matched
 before/after savings, the twenty-outcome floor or qualified p95 regression.
 
+Final normal full Windows installations on edge-dev, 4837 and 916 then completed
+at exact `a9813157`, each with exit 0, clean canonical source and matching managed
+launcher. The independently checked delivery index digest is
+`1746454ced28f8c8c8735500f38ab85750d4c2ce19409f80a85871f72f7f95db`;
+its respective verified-summary digests are
+`7730fcf88f293a26e19d2bab45825030841b70edb40cdef621780b8e902ca62d`,
+`161f0f4ca33f9a72bf41f3353fcd02473609bdb548543c4c6149db2467887470`
+and `929db8a1a8d86430c4fb4dfe2b010940f3aea2ed342d0dc9f3343b31e2a99e40`.
+All three necessary issue reads returned OPEN and exit 0 under verified loaded
+source fingerprint `ba5212412cad7e669927fe83b24133f9fbd2f073ae816b269b49ad4eda00bb01`.
+
+Edge-dev and 4837 used the existing effective private SSH context and finite
+2.97.0 counter image under explicit native custody. Each numeric observation
+was complete: five native invocations, two primary completed writes, zero
+external writes and zero failed write attempts. Full Linux-observed elapsed
+times, including SSH/controller bootstrap, were 14.443682553 and 34.360151487
+seconds, respectively. These counts cover the primary-constructor subset and
+unseparated admission probes; they are one useful outcome per host, not five.
+Whole-account HTTP, GraphQL operations, costs and detection latency remain null.
+The counter is qualification-only: native 2.97.0 overhead is unqualified and
+the preserved 2.88.1 cold failures still stand. The 916 ordinary source-qualified
+read succeeded in 11.319618800 seconds before receipt acknowledgement, while its
+fresh metadata counter guard refused a foreign staging-parent writer before any
+counter API call. Its counts remain null; original authentication, permissions,
+environment and ordinary CLI capability were preserved.
+
+The bounded code delivery, final five-host installation and useful live proof
+are complete. Programme acceptance stays open on #658: no twenty matched
+baseline/candidate outcomes per operation, natural savings or qualified p95
+regression result has been fabricated. Existing accepted busy windows remain
+accepted. #660 remains the instrumentation owner, not a duplicate programme
+acceptance issue. T16's documented trusted-executor access gap, the failed or
+unqualified timing evidence and broader request/client coverage remain explicit.
+
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
 sealed-generation custody. Its receipt digest is
