@@ -77,6 +77,14 @@ class ObserverTests(unittest.TestCase):
         self.patch.start()
         self.addCleanup(self.patch.stop)
 
+    def test_native_supervisor_uses_only_process_scoped_script_policy(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": "C:/Windows"}):
+            command = remote.windows_supervisor_command("C:/repos/ai-devops", "owned-arguments.json", 123, 456)
+        self.assertEqual(command[1:5], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        self.assertTrue(command[0].replace("\\", "/").endswith("System32/WindowsPowerShell/v1.0/powershell.exe"))
+        self.assertNotIn("Set-ExecutionPolicy", command)
+        self.assertIn("-ReadOnlyNoStdin", command)
+
     def test_linux_receive_bound_includes_transport_not_windows_wall(self):
         row = event()
         row["observed_utc_ms"] += 500000

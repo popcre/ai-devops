@@ -280,6 +280,15 @@ def _peek(stream):
                                                    ctypes.byref(available), None) else 0
 
 
+def windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle):
+    """Documented process-only script execution; never changes persistent/GPO policy."""
+    powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    return [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(HERE / "source_generation_windows.ps1"),
+            "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(argument_file),
+            "-ReceiptHandle", str(receipt_handle), "-ReceiptAckHandle", str(ack_handle),
+            "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
+
+
 def windows_controller(source_root, argument_bytes, timeout_seconds):
     """Windows native controller: stream bytes; hold receipt custody until Linux ACK."""
     import msvcrt
@@ -313,11 +322,7 @@ def windows_controller(source_root, argument_bytes, timeout_seconds):
     with tempfile.TemporaryDirectory(prefix="ai-gh-observer-") as temporary:
         argument_file = Path(temporary) / "arguments.json"
         argument_file.write_bytes(argument_bytes)
-        powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-        command = [powershell, "-NoProfile", "-File", str(HERE / "source_generation_windows.ps1"),
-                   "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(argument_file),
-                   "-ReceiptHandle", str(receipt_handle), "-ReceiptAckHandle", str(ack_handle),
-                   "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
+        command = windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle)
         try:
             child = subprocess.Popen(command, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
