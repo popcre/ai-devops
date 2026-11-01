@@ -251,6 +251,7 @@ bw_active_finish(){
   if [ "$BW_ACTIVE_KIND" = wake ]; then
     boundary=wake_process_exit; outcome="$BW_WAKE_RESULT"
   else
+    [ "${1:-0}" = 0 ] || BW_ACTIVE_ERROR=1
     boundary="${BW_ACTIVE_KIND}_scan"
     if [ "$BW_ACTIVE_ERROR" = 1 ]; then
       if [ "$BW_ACTIVE_SUCCEEDED" -gt 0 ]; then outcome=partial; else outcome=failed; fi
@@ -713,7 +714,7 @@ wake(){
   bw_active_begin
   wake_body "$@"
   local status=$?
-  bw_active_finish
+  bw_active_finish "$status"
   return "$status"
 }
 wake_body(){ # wake <wait file>
@@ -1041,7 +1042,7 @@ alarm_scan(){
   bw_active_begin
   alarm_scan_body "$@"
   local status=$?
-  bw_active_finish
+  bw_active_finish "$status"
   return "$status"
 }
 alarm_scan_body(){ # alarm_scan <dry 0|1>
@@ -1304,7 +1305,7 @@ maintain_links(){
   bw_active_begin
   maintain_links_body "$@"
   local status=$?
-  bw_active_finish
+  bw_active_finish "$status"
   return "$status"
 }
 maintain_links_body(){ # maintain_links <dry 0|1>

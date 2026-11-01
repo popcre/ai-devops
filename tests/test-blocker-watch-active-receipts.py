@@ -193,6 +193,26 @@ exit 0
         self.assertEqual(self.run_command("alarm").returncode, 1)
         self.assertEqual(self.active("alarm")["outcome"], "failed")
 
+    def test_scan_cleanup_failure_cannot_emit_completed(self):
+        self.alarm()
+        self.config["links_enabled"] = False
+        fake_bin = self.root / "fake-bin"
+        fake_bin.mkdir()
+        command = fake_bin / "rm"
+        command.write_text('''#!/usr/bin/env bash
+for argument in "$@"; do
+  case "$argument" in */alarm-tick) exit 9 ;; esac
+done
+exec /usr/bin/rm "$@"
+''', newline="\n")
+        command.chmod(0o700)
+        self.environment["PATH"] = fake_bin.as_posix() + os.pathsep + self.environment.get("PATH", "")
+        result = self.run_command("tick")
+        # Existing tick behavior ignores this cleanup status; do not change it.
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = self.active("alarm")
+        self.assertEqual((row["outcome"], row["succeeded_count"]), ("partial", 2))
+
     def make_wait(self):
         self.config.update(repos=[], alarm_enabled=False, links_enabled=False, propagate_on_host="synthetic-other-host")
         directory = self.root / "watch/waits"
