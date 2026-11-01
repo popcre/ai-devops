@@ -25,9 +25,11 @@ Three parallel audits reconciled source, fleet and measurement evidence.
   A useful installed #658 read returned OPEN and its title, exit 0 in 12.21
   seconds. Existing SSH identity selection repaired private-hub visibility;
   no required stage was skipped or private memory content changed. This is
-  capability proof, not a speed comparison. ALBT16 is online but its strict
-  SSH connection timed out; no trusted executor was established or host trust
-  changed. P7 remains open for actual complete coverage.
+  capability proof, not a speed comparison. ALBT16 was initially online but
+  its strict SSH connection timed out. At 10:18:10 PM EDT it was offline;
+  the approved atlas documents no alternative trusted execution route and
+  no native chat is connected. No host trust changed. The coordinator owns
+  this external access blocker; P7 remains open for complete coverage.
 - A fresh immutable closed-file natural sample validates with zero privacy
   violations; [the baseline supplement](tests/verification/github-requests/p1-baseline.md#coordinator-natural-sample--october-31-2026-edt)
   records its digests and limits. It does not establish paired savings.
