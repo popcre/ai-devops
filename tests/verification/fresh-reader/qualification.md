@@ -45,6 +45,11 @@ preparation overhead belongs to #2222, never to the optimizer's baseline.
 
 ## Actual synthetic receipts
 
+The [frozen public packet receipt](native-packets.json) retains exact user
+packets, protocol bytes, source references and their verified hashes. It is
+immutable trial evidence, not a second maintained procedure or an export of
+hidden platform instructions. Live guidance stays in the protocol owner above.
+
 Each case used its own empty native profile and frozen two-file packet: target
 and protocol. The expected-results file and author history were not passed.
 Model `gpt-6.1-sol`, medium effort, fresh ephemeral read-only execution; same
