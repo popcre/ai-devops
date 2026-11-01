@@ -82,6 +82,22 @@ class StateTests(unittest.TestCase):
             return [{"filename": "file.py"}]
         raise AssertionError(endpoint)
 
+    def test_cleanup_scan_filters_target_without_narrowing_sweep_or_collision_inventory(self):
+        with patch.object(m, "paged", return_value=[]) as pages:
+            self.state.retire("owner/work")
+            pages.assert_called_once_with("repos/o/r/pulls?state=open&per_page=100&base=owner%2Fwork")
+            pages.reset_mock()
+            self.state.pulls()
+            pages.assert_called_once_with("repos/o/r/pulls?state=open&per_page=100")
+
+    def test_cleanup_plan_uses_event_branch_filter(self):
+        with tempfile.TemporaryDirectory() as folder:
+            event = Path(folder) / "event.json"
+            event.write_text(json.dumps({"ref": "refs/heads/owner/work"}))
+            with patch.dict(os.environ, GITHUB_EVENT_NAME="push", GITHUB_EVENT_PATH=str(event)), patch.object(m, "paged", return_value=[]) as pages:
+                self.assertEqual(self.state.plan(), {"include": []})
+                pages.assert_called_once_with("repos/o/r/pulls?state=open&per_page=100&base=owner%2Fwork")
+
     def deferred(self):
         return any("--add-label" in c and "fixer-deferred" in c for c in self.commands)
 

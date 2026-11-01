@@ -13,6 +13,7 @@
 #
 # What it enforces, across every process that uses the same state directory:
 #   - Serialization: GitHub call starts are spaced through a lock directory (released before gh runs).
+#     FIFO admission prevents newer upgraded callers from starving old waiters.
 #   - Spacing: at least AI_GH_MIN_SPACING_SECONDS (default 3) between calls.
 #   - Back-off: a secondary rate-limit refusal (a 403/429 whose message says
 #     "secondary rate limit", "abuse detection", or Retry-After; an ordinary
@@ -118,6 +119,12 @@ for state_file in "$STATE/quota-context" "$STATE/quota-context-key"; do
   fi
 done
 now(){ date +%s; }
+now_ms(){
+  local t="${EPOCHREALTIME:-}"; t="${t//[!0-9]/}"
+  if [ "${#t}" -eq 16 ]; then echo $(( 10#$t / 1000 )); return; fi
+  t="$(date +%s%N)"
+  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); else echo $(( $(now) * 1000 )); fi
+}
 readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
 safe_state_file(){
   local file="$1" parent="${1%/*}"
@@ -162,6 +169,55 @@ private_dir(){
 # Back-off only ever moves later: never shorten a back-off another process recorded.
 extend_backoff(){ [ "$1" -gt "$(readnum "$STATE/backoff_until")" ] && put "$STATE/backoff_until" "$1"; return 0; }
 
+# Admission is FIFO among upgraded callers; the original mutex remains the
+# authority for every reservation, including callers running older copies.
+QUEUE="$STATE/admission.d"
+TICKET=''
+leave_queue(){
+  [ -z "$TICKET" ] || rm -f -- "$TICKET"
+  TICKET=''
+}
+queue_head(){
+  local queued age stamp first='' ticket_name LC_ALL=C
+  private_dir "$QUEUE" || private_dir "$QUEUE" || { say "invalid GitHub admission directory"; exit 3; }
+  if [ -z "$TICKET" ]; then
+    stamp="$(now_ms)"
+    # Clamp new arrivals after all visible tickets even when wall time moves
+    # backwards. Same-millisecond races have a stable random-suffix tie-break.
+    for queued in "$QUEUE"/[0-9]*; do
+      [[ "${queued##*/}" =~ ^([0-9]{13})\.[A-Za-z0-9]{6}$ ]] || continue
+      [ "${BASH_REMATCH[1]}" -lt "$stamp" ] || stamp=$(( 10#${BASH_REMATCH[1]} + 1 ))
+    done
+    TICKET="$(umask 077; mktemp "$QUEUE/$stamp.XXXXXX")" || exit 3
+  fi
+  ticket_name="${TICKET##*/}"
+  # Heartbeat does not use PID liveness: Windows/WSL PID namespaces differ.
+  [ ! -L "$TICKET" ] && [ -f "$TICKET" ] || { say "invalid own GitHub admission ticket"; exit 3; }
+  touch -- "$TICKET" || { say "cannot refresh GitHub admission ticket"; exit 3; }
+  for queued in "$QUEUE"/*; do
+    [ -e "$queued" ] || [ -L "$queued" ] || continue
+    [[ "${queued##*/}" =~ ^[0-9]{13}\.[A-Za-z0-9]{6}$ ]] &&
+      [ ! -L "$queued" ] && [ -f "$queued" ] || {
+        # Another admitted or cancelled caller may remove its ticket during
+        # this scan. Disappearance is normal; unsafe surviving entries aren't.
+        [ ! -e "$queued" ] && [ ! -L "$queued" ] && continue
+        say "invalid GitHub admission ticket"; exit 3
+      }
+    if [ "${queued##*/}" != "$ticket_name" ]; then
+      stamp="$(stat -c %Y "$queued" 2>/dev/null)" || continue
+      age=$(( $(now) - stamp ))
+      if [ "$age" -gt "$STALE" ]; then
+        # Expired tickets are only queue hints, never the reservation mutex.
+        # Rename before removal, so cleanup cannot unlink a replacement.
+        local retired="$QUEUE/.expired.$TOKEN"
+        if mv -- "$queued" "$retired" 2>/dev/null; then rm -f -- "$retired"; fi
+        continue
+      fi
+    fi
+    [ -n "$first" ] || first="${queued##*/}"
+  done
+  [ "$first" = "$ticket_name" ]
+}
 HELD=0
 TOKEN="$$.$RANDOM.$RANDOM.$(date +%s)"
 # Reclaim by atomic rename to a private quarantine name, never rm of the live
@@ -206,6 +262,7 @@ reclaim(){
 }
 # Release only a lock this process still owns (token match).
 release(){
+  leave_queue
   if [ "$HELD" = 1 ]; then
     local info; info="$(cat "$LOCK/owner" 2>/dev/null)"
     [ "${info##* }" = "$TOKEN" ] && quarantine
@@ -219,12 +276,12 @@ trap 'release; exit 130' INT TERM
 acquire(){
   local waited=0
   while :; do
-    if mkdir "$LOCK" 2>/dev/null; then
+    if queue_head && mkdir "$LOCK" 2>/dev/null; then
       echo "$$ $(now) $TOKEN" > "$LOCK/owner"
       # Confirm the lock we hold is still ours (a racing reclaimer could have
       # carried the directory off between mkdir and this read).
       local check; check="$(cat "$LOCK/owner" 2>/dev/null)"
-      if [ "${check##* }" = "$TOKEN" ]; then HELD=1; return 0; fi
+      if [ "${check##* }" = "$TOKEN" ]; then HELD=1; leave_queue; return 0; fi
       continue
     fi
     local info ts age
@@ -273,12 +330,6 @@ reserve_start(){
 # Never use date's three-digit fraction format: uutils coreutils 0.10 drops the fraction's leading
 # zeros (12.045s prints as 12.450s), so the clock jumps up to ~0.9s and spacing
 # collapses. Bash's EPOCHREALTIME needs no child process; full %N is the fallback.
-now_ms(){
-  local t="${EPOCHREALTIME:-}"; t="${t//[!0-9]/}"
-  if [ "${#t}" -eq 16 ]; then echo $(( 10#$t / 1000 )); return; fi
-  t="$(date +%s%N)"
-  if [[ "$t" =~ ^[0-9]{19}$ ]]; then echo $(( 10#$t / 1000000 )); else echo $(( $(now) * 1000 )); fi
-}
 sleep_ms(){ [ "$1" -gt 0 ] && sleep "$(( $1 / 1000 )).$(printf '%03d' $(( $1 % 1000 )))"; return 0; }
 # Launch latency varies across Git Bash/WSL processes. Leave a small margin so
 # observed gh process starts, not just wrapper bookkeeping, respect spacing.

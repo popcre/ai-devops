@@ -2,6 +2,23 @@
 
 ## STATUS — read first
 
+October 31, 2026 EDT congestion repair under #658: edge-dev3 showed normal
+mutex turnover, but unqueued acquisition could starve foreground requests
+behind recurring runner calls. A 15-second local observation saw four lock
+owners and four quota-context switches, with pacing sleeps rather than a dead
+holder. FIFO admission is being added in `bin/ai-gh`; it preserves the same
+reservation mutex, credential context accounting, quotas and backoff. Source
+reduction now also targets the concrete recurring source:
+`tools/ci/review-fixer-state.py` uses server-side base-branch filters for
+event-targeted cleanup planning and retirement, while full scheduled sweeps and
+collision checks retain complete scope. Source reduction remains governed by
+this plan and `plan_cut-unneeded-github-traffic.md`; fair admission and narrower
+pages do not establish measured whole-account savings. Installation/live
+proof remain open until a merged candidate is installed and exercised. New and
+old copies still share the mutex; FIFO ordering is guaranteed only among copies
+that implement admission, so runner/toolkit rollout matters.
+Qualification: [admission repair evidence](tests/verification/github-requests/admission-20261031.md).
+
 Resume reconciliation — October 21, 2026, 2:12 PM EDT. Owner: current Codex
 session on edge-dev3, tracking #658 and #660. Their cleanup closures did not
 establish acceptance; both issues are reopened. The October 15 successor handoff

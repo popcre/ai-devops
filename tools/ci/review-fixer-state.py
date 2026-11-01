@@ -111,8 +111,13 @@ class State:
     def issue(self, number):
         return api(f"{self.prefix}/issues/{number}")
 
-    def pulls(self):
-        return paged(f"{self.prefix}/pulls?state=open&per_page=100")
+    def pulls(self, base=None):
+        # Cleanup already knows its target branch. Ask GitHub for that branch
+        # rather than paging through every unrelated open PR on each event.
+        endpoint = f"{self.prefix}/pulls?state=open&per_page=100"
+        if base is not None:
+            endpoint += "&base=" + quote(base, safe="")
+        return paged(endpoint)
 
     def candidate_files(self, candidates):
         """Read the same collision candidates in bounded GraphQL batches.
@@ -263,7 +268,7 @@ class State:
         return True
 
     def retire(self, target):
-        for pr in self.pulls():
+        for pr in self.pulls(base=target):
             if pr["base"]["ref"] != target or not pr["head"]["ref"].startswith("review-fix/"):
                 continue
             if (pr["head"].get("repo") or {}).get("full_name") != self.repo:
@@ -370,7 +375,7 @@ class State:
             data, _ = self.source(issue)
             target = data["target_branch"]
             issues = [issue]
-        for pr in self.pulls():
+        for pr in self.pulls(base=target):
             if pr["head"]["ref"].startswith("review-fix/") and (target is None or pr["base"]["ref"] == target):
                 groups.setdefault(pr["base"]["ref"], [])
         if not cleanup and not number:
