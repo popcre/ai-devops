@@ -214,7 +214,7 @@ def summarize(directory):
                     row = json.loads(line, object_pairs_hook=unique_object)
                     measurement = row.get("measurement")
                     if measurement == "read_observation":
-                        if (type(row.get("schema")) is not int or set(row) != READ_OBSERVATION_KEYS
+                        if (type(row.get("schema")) is not int or set(row) not in (READ_OBSERVATION_KEYS, READ_OBSERVATION_KEYS | READ_INTERVAL_KEYS)
                                 or row.get("caller") not in CALLERS
                                 or row.get("workflow") not in OBSERVATION_WORKFLOWS
                                 or not valid_target_ordinal(row.get("target_ordinal"))
@@ -224,6 +224,8 @@ def summarize(directory):
                                 or row["cache_hit"] != (row["source"] == "cache")
                                 or row["saved_upstream_read"] != (row["source"] == "cache")):
                             raise ValueError("invalid read observation")
+                        if "interval_version" in row and not valid_read_interval(row):
+                            raise ValueError("invalid read interval")
                         read_observations.append(row)
                         continue
                     if measurement == "write_observation":
@@ -445,6 +447,7 @@ def summarize(directory):
             "note": ("denominator is same_target_replay_reads; unknown is never zero"
                      if replay_total else "no same-target replay denominator in this sample"),
         },
+        "prospective_read_intervals": summarize_read_intervals(read_observations, receipts),
         "section13_item2_duplicate_writes": {
             "write_observations": write_total,
             "written_new": written_new,
@@ -533,6 +536,10 @@ LOCAL_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id
               "source_verified", "acceptance", "unknown_reason"}
 READ_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "target_ordinal", "source",
                          "cache_hit", "saved_upstream_read"}
+READ_INTERVAL_KEYS = {"interval_version", "workflow_id", "workflow_correlation", "generation_ordinal",
+                      "head_known", "head_matches", "arrival_utc_ms", "finish_utc_ms", "elapsed_monotonic_ms",
+                      "clock_basis", "clock_state", "ttl_seconds", "force_refresh", "cache_age_ms", "cache_policy",
+                      "ttl_cacheable", "clock_resolution_ms"}
 WRITE_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "target_ordinal", "action",
                           "content_relation", "duplicate_unchanged_write"}
 # Keep in lockstep with telemetry.sh gh_measure_read_observation /
@@ -553,6 +560,74 @@ UNKNOWN_REASONS = {"none", "metadata_absent", "metadata_untrusted", "source_unkn
 
 def valid_workflow_id(value):
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
+
+
+def valid_read_interval(row):
+    elapsed = row["elapsed_monotonic_ms"]
+    if (type(row["interval_version"]) is not int or row["interval_version"] != 1
+            or not valid_workflow_id(row["workflow_id"])
+            or row["workflow_correlation"] not in ("workflow", "unknown")
+            or not valid_target_ordinal(row["generation_ordinal"])
+            or type(row["head_known"]) is not bool or row["head_matches"] is not None and type(row["head_matches"]) is not bool
+            or not row["head_known"] and (row["head_matches"] is not None or row["generation_ordinal"] is not None)
+            or not valid_timestamp_ms(row["arrival_utc_ms"]) or not valid_timestamp_ms(row["finish_utc_ms"])
+            or row["clock_basis"] != "python_monotonic" or row["clock_state"] not in ("local_unqualified", "jump", "unavailable")
+            or row["clock_resolution_ms"] is not None and (type(row["clock_resolution_ms"]) is not int or not 1 <= row["clock_resolution_ms"] <= 1000)
+            or row["ttl_seconds"] is not None and (type(row["ttl_seconds"]) is not int or not 1 <= row["ttl_seconds"] <= 1000000000)
+            or type(row["force_refresh"]) is not bool or type(row["ttl_cacheable"]) is not bool
+            or row["cache_age_ms"] is not None and not valid_latency(row["cache_age_ms"])
+            or row["cache_policy"] not in ("upstream", "in_flight", "ttl")
+            or row["source"] == "upstream" and (row["cache_policy"] != "upstream" or row["cache_age_ms"] is not None)
+            or row["source"] == "cache" and (row["cache_policy"] == "upstream" or row["cache_age_ms"] is None)):
+        return False
+    if elapsed is not None and (type(elapsed) is not list or len(elapsed) != 2
+            or not all(type(value) is int and 0 <= value <= 604800000 for value in elapsed)
+            or elapsed[0] > elapsed[1]):
+        return False
+    if row["clock_state"] == "local_unqualified":
+        if elapsed is None or row["arrival_utc_ms"] is None or row["finish_utc_ms"] is None or row["clock_resolution_ms"] is None:
+            return False
+        margin = 2 * row["clock_resolution_ms"]
+        return elapsed[0] - margin <= row["finish_utc_ms"] - row["arrival_utc_ms"] <= elapsed[1] + margin
+    if row["clock_state"] == "unavailable":
+        return elapsed is None and (row["arrival_utc_ms"] is None or row["finish_utc_ms"] is None or row["clock_resolution_ms"] is None)
+    return True
+
+
+def summarize_read_intervals(rows, receipts):
+    intervals = [row for row in rows if "interval_version" in row]
+    states = collections.Counter(row["clock_state"] for row in intervals)
+    known, overlaps, ttl_candidates, linked, unlinked = {}, 0, 0, 0, 0
+    for row in sorted(intervals, key=lambda item: item["arrival_utc_ms"] if item["arrival_utc_ms"] is not None else -1):
+        receipt = receipts.get(row["workflow_id"])
+        if row["workflow_correlation"] == "workflow" and receipt is not None:
+            if receipt[:2] != (row["caller"], row["workflow"]):
+                raise ValueError("read interval and workflow labels disagree")
+            linked += 1
+        else:
+            unlinked += 1
+        if (row["clock_state"] != "local_unqualified" or row["generation_ordinal"] is None
+                or not row["head_known"] or row["head_matches"] is not True or row["force_refresh"]
+                or row["workflow_correlation"] != "workflow"):
+            continue
+        prior = known.get(row["generation_ordinal"])
+        if prior is not None and prior["workflow_id"] != row["workflow_id"]:
+            margin = row["clock_resolution_ms"] + prior["clock_resolution_ms"]
+            if row["arrival_utc_ms"] + margin < prior["finish_utc_ms"]:
+                overlaps += 1
+            elif (prior["ttl_cacheable"] and row["ttl_seconds"] is not None
+                    and 0 <= row["arrival_utc_ms"] - prior["finish_utc_ms"] < row["ttl_seconds"] * 1000 - margin):
+                ttl_candidates += 1
+        # A cache consumer does not refresh the underlying snapshot. Using its
+        # finish as a new TTL origin would invent eligibility after a slow
+        # consumer or a chain of reads of an aging response.
+        if row["source"] == "upstream":
+            known[row["generation_ordinal"]] = row
+    return {"records": len(intervals), "legacy_records": len(rows) - len(intervals),
+            "clock_states": dict(sorted(states.items())), "linked_workflow_records": linked,
+            "unlinked_workflow_records": unlinked, "conditional_overlap_candidates": overlaps,
+            "conditional_ttl_candidates": ttl_candidates,
+            "qualification": "unknown: local intervals do not certify source, UTC bounds or safety latency"}
 
 
 def valid_nullable_id(value):

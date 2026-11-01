@@ -16,6 +16,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import math
+import re
+import secrets
 
 if os.name == "nt":
     import msvcrt
@@ -52,11 +55,92 @@ def _emit_record(record_obj):
         pass
 
 
-def emit_read_observation(key, source, caller=None):
+def read_clock():
+    """Bracket the UTC sample with actual local monotonic readings."""
+    try:
+        before = time.monotonic_ns()
+        wall = time.time_ns() // 1000000
+        after = time.monotonic_ns()
+        if before < 0 or after < before or not 0 <= wall <= 9999999999999:
+            return None
+        return before, wall, after
+    except (OSError, AttributeError, OverflowError):
+        return None
+
+
+def begin_read(key, expected_head, ttl, force_refresh):
+    arrival = read_clock()
+    parent = os.environ.get("AI_GH_WORKFLOW_ID", "")
+    if re.fullmatch(r"[0-9a-f]{32}", parent) is None:
+        parent = os.environ.get("PR_WAIT_RECEIPT_ID", "")
+    correlated = re.fullmatch(r"[0-9a-f]{32}", parent) is not None
+    return {"arrival": arrival, "expected_head": expected_head,
+            "workflow_id": parent if correlated else secrets.token_hex(16),
+            "workflow_correlation": "workflow" if correlated else "unknown",
+            "head_known": re.fullmatch(r"[0-9a-f]{40}", expected_head) is not None,
+            "ttl_seconds": ttl, "force_refresh": force_refresh, "sharing_scope": None}
+
+
+def bind_read_scope(interval, directory):
+    if interval is None:
+        return
+    try:
+        info = os.stat(directory, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode) and info.st_ino > 0:
+            interval["sharing_scope"] = f"{info.st_dev}:{info.st_ino}"
+    except OSError:
+        pass
+
+
+def read_interval(key, interval, raw, cache_age_ms, cache_policy):
+    finish = interval.get("finish")
+    arrival = interval["arrival"]
+    clock_state, elapsed = "unavailable", None
+    try:
+        resolution = max(1, math.ceil(max(time.get_clock_info("time").resolution,
+                                        time.get_clock_info("monotonic").resolution) * 1000))
+    except (OSError, AttributeError, ValueError):
+        resolution = None
+    if arrival is not None and finish is not None and resolution is not None:
+        lower = finish[0] - arrival[2]
+        upper = finish[2] - arrival[0]
+        if lower >= 0 and upper >= lower:
+            elapsed = [max(0, lower // 1000000 - resolution), math.ceil(upper / 1000000) + resolution]
+            wall_elapsed = finish[1] - arrival[1]
+            clock_state = "local_unqualified" if elapsed[0] - 2 * resolution <= wall_elapsed <= elapsed[1] + 2 * resolution else "jump"
+        else:
+            clock_state = "jump"
+    matched = None
+    if interval["head_known"]:
+        try:
+            actual = json.loads(raw)["data"]["repository"]["pullRequest"].get("headRefOid")
+            if isinstance(actual, str) and re.fullmatch(r"[0-9a-f]{40}", actual):
+                matched = actual == interval["expected_head"]
+        except (ValueError, TypeError, KeyError):
+            pass
+    generation = None
+    if interval["head_known"] and interval["sharing_scope"] is not None:
+        generation = _target_ordinal("read-generation-v1\0" + key + "\0" + interval["expected_head"] + "\0" + interval["sharing_scope"])
+    return {"interval_version": 1, "workflow_id": interval["workflow_id"],
+            "workflow_correlation": interval["workflow_correlation"], "generation_ordinal": generation,
+            "head_known": interval["head_known"], "head_matches": matched,
+            "arrival_utc_ms": arrival[1] if arrival is not None else None,
+            "finish_utc_ms": finish[1] if finish is not None else None,
+            "elapsed_monotonic_ms": elapsed, "clock_basis": "python_monotonic", "clock_state": clock_state,
+            "clock_resolution_ms": resolution,
+            "ttl_seconds": interval["ttl_seconds"] if 1 <= interval["ttl_seconds"] <= 1000000000 else None,
+            "force_refresh": interval["force_refresh"],
+            "cache_age_ms": cache_age_ms, "cache_policy": cache_policy,
+            "ttl_cacheable": cacheable(raw, interval["expected_head"])}
+
+
+def emit_read_observation(key, source, caller=None, interval=None, raw=None, cache_age_ms=None, cache_policy="upstream"):
     """Count a completed status read: cache saves an upstream read."""
+    if interval is not None:
+        interval = dict(interval, finish=read_clock())
     ordinal = _target_ordinal(key)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    _emit_record({
+    record = {
         "schema": 6,
         "utc": now,
         "measurement": "read_observation",
@@ -66,7 +150,15 @@ def emit_read_observation(key, source, caller=None):
         "source": source,
         "cache_hit": source == "cache",
         "saved_upstream_read": source == "cache",
-    })
+    }
+    if interval is not None:
+        try:
+            record.update(read_interval(key, interval, raw, cache_age_ms, cache_policy))
+        except Exception:
+            # Optional observation cannot alter the original read or emit a
+            # second, misleading legacy row after partial collection.
+            return
+    _emit_record(record)
 
 
 def emit_write_observation(key, action, content_changed, caller=None):
@@ -283,11 +375,16 @@ def main():
         return 3
     command = args.command[1:]
     deadline = time.monotonic() + args.wait_seconds
+    try:
+        interval = begin_read(args.key, args.expected_head, args.ttl, args.force_refresh)
+    except Exception:
+        interval = None
     joined_ns = time.time_ns()
 
     def upstream(cache_path):
+        observation_interval = interval if cache_path is not None or interval is None else dict(interval, sharing_scope=None)
         return run(command, cache_path, args.age_file, args.source_file, args.expected_head,
-                   deadline, args.cap_supervisor_timeout, args.defer_source_mark, args.key)
+                   deadline, args.cap_supervisor_timeout, args.defer_source_mark, args.key, observation_interval)
 
     directory = Path(args.state_dir)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
@@ -306,6 +403,7 @@ def main():
                 return upstream(None)
         except OSError:
             return upstream(None)
+    bind_read_scope(interval, directory)
     prune(directory)
     digest = hashlib.sha256(args.key.encode()).hexdigest()
     cache = directory / f"{digest}.json"
@@ -366,8 +464,10 @@ def main():
                         age = 0 if same_flight else int(wall_age)
                         Path(args.age_file).write_text(str(age))
                         Path(args.source_file).write_text("cache")
-                        emit_read_observation(args.key, "cache")
                         sys.stdout.buffer.write(raw)
+                        emit_read_observation(args.key, "cache", interval=interval, raw=raw,
+                                              cache_age_ms=max(0, int(wall_age * 1000)),
+                                              cache_policy="in_flight" if same_flight else "ttl")
                         return 0
             return upstream(cache)
         finally:
@@ -375,7 +475,7 @@ def main():
 
 
 def run(command, cache, age_file, source_file, expected_head=None,
-        deadline=None, cap_supervisor_timeout=False, defer_source_mark=False, args_key=None):
+        deadline=None, cap_supervisor_timeout=False, defer_source_mark=False, args_key=None, interval=None):
     if cap_supervisor_timeout:
         try:
             index = command.index("--timeout-seconds")
@@ -402,8 +502,6 @@ def run(command, cache, age_file, source_file, expected_head=None,
     if not complete(result.stdout):
         print("ai-pr-wait: incomplete or invalid pull-request status; refusing cached success", file=sys.stderr)
         return 4
-    if args_key:
-        emit_read_observation(args_key, "upstream")
     if cache is not None and len(result.stdout) <= 1048576 and complete(result.stdout):
         previous = None
         if cache.is_file() and not cache.is_symlink():
@@ -431,6 +529,8 @@ def run(command, cache, age_file, source_file, expected_head=None,
             except OSError:
                 # A cache write must not erase an otherwise valid fresh outcome.
                 pass
+    if args_key:
+        emit_read_observation(args_key, "upstream", interval=interval, raw=result.stdout)
     return 0
 
 

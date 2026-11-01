@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "tools/github-requests/target_ordinal.py"
@@ -17,6 +18,129 @@ SINGLE = ROOT / "tools/github-requests/pr_status_singleflight.py"
 sys.path.insert(0, str(ROOT / "tools/github-requests"))
 import measure_append  # noqa: E402
 import target_ordinal  # noqa: E402
+import pr_status_singleflight as single  # noqa: E402
+import report as report_module  # noqa: E402
+
+
+class ProspectiveReadIntervals(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
+        self.state = Path(self.temporary.name) / "state"; self.state.mkdir(mode=0o700)
+        self.environment = mock.patch.dict(os.environ, {"AI_GH_STATE_DIR": str(self.state),
+                                  "AI_GH_WORKFLOW_ID": "c" * 32, "AI_GH_CALLER": "ai-pr-wait"})
+        self.environment.start(); self.addCleanup(self.environment.stop)
+
+    def body(self, head):
+        return json.dumps({"data": {"repository": {"pullRequest": {
+            "state": "OPEN", "headRefOid": head, "isInMergeQueue": False,
+            "commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": {
+                "state": "SUCCESS", "contexts": {"nodes": [], "totalCount": 0,
+                    "pageInfo": {"hasPreviousPage": False}}}}}]}}}}}).encode()
+
+    def record(self, key="private-context private/repo 77", head="a" * 40,
+               actual=None, start=1000, finish=1100, force=False, correlation=None, scope=None):
+        rows = []
+        if correlation is not None: os.environ["AI_GH_WORKFLOW_ID"] = correlation
+        arrival = (start * 1000000, start, start * 1000000)
+        end = (finish * 1000000, finish, finish * 1000000)
+        with mock.patch.object(single, "read_clock", side_effect=[arrival, end]), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            interval = single.begin_read(key, head, 10, force)
+            single.bind_read_scope(interval, scope or self.state)
+            single.emit_read_observation(key, "upstream", interval=interval, raw=self.body(actual or head))
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(report_module.valid_read_interval(rows[0]))
+        return rows[0]
+
+    def test_parent_id_and_actual_bracketed_interval_without_raw_identity(self):
+        row = self.record()
+        self.assertEqual(row["workflow_id"], "c" * 32)
+        self.assertEqual(row["workflow_correlation"], "workflow")
+        self.assertEqual(row["elapsed_monotonic_ms"], [99, 101])
+        self.assertEqual(row["clock_state"], "local_unqualified")
+        self.assertTrue(row["head_matches"])
+        self.assertNotIn("private/repo", json.dumps(row))
+        self.assertNotIn("a" * 40, json.dumps(row))
+
+    def test_generation_changes_with_head_or_context_and_mutations_are_not_eligible(self):
+        first = self.record()
+        same = self.record(start=1050, finish=1200, correlation="d" * 32)
+        head_change = self.record(head="b" * 40, correlation="e" * 32)
+        context_change = self.record(key="other-private-context private/repo 77", correlation="f" * 32)
+        self.assertEqual(first["generation_ordinal"], same["generation_ordinal"])
+        self.assertNotEqual(first["generation_ordinal"], head_change["generation_ordinal"])
+        self.assertNotEqual(first["generation_ordinal"], context_change["generation_ordinal"])
+        other_scope = self.state / "other-cache"; other_scope.mkdir(mode=0o700)
+        scoped = self.record(scope=other_scope)
+        self.assertNotEqual(first["generation_ordinal"], scoped["generation_ordinal"])
+        changed = self.record(actual="b" * 40, correlation="e" * 32)
+        forced = self.record(force=True, correlation="f" * 32)
+        metrics = report_module.summarize_read_intervals([first, same, changed, forced], {})
+        self.assertEqual(metrics["conditional_overlap_candidates"], 1)
+        self.assertTrue(metrics["qualification"].startswith("unknown"))
+
+    def test_sequential_ttl_vs_overlap_vs_unknown_head(self):
+        first = self.record(start=1000, finish=1100)
+        later = self.record(start=1200, finish=1300, correlation="d" * 32)
+        expired = self.record(start=12000, finish=12100, correlation="e" * 32)
+        metrics = report_module.summarize_read_intervals([first, later, expired], {})
+        self.assertEqual(metrics["conditional_overlap_candidates"], 0)
+        self.assertEqual(metrics["conditional_ttl_candidates"], 1)
+        unknown = self.record(head="any")
+        self.assertFalse(unknown["head_known"])
+        self.assertIsNone(unknown["generation_ordinal"])
+        self.assertIsNone(unknown["head_matches"])
+
+    def test_bad_parent_id_is_not_linked_and_wall_jump_is_not_qualified(self):
+        with mock.patch.dict(os.environ, {"AI_GH_WORKFLOW_ID": "raw-private-ID", "PR_WAIT_RECEIPT_ID": ""}):
+            first = self.record(); second = self.record()
+        self.assertEqual(first["workflow_correlation"], "unknown")
+        self.assertNotEqual(first["workflow_id"], second["workflow_id"])
+        rows = []
+        with mock.patch.object(single, "read_clock", side_effect=[(0, 1000, 0), (100000000, 9000, 100000000)]), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            interval = single.begin_read("k", "a" * 40, 10, False)
+            single.emit_read_observation("k", "upstream", interval=interval, raw=self.body("a" * 40))
+        self.assertEqual(rows[0]["clock_state"], "jump")
+        self.assertTrue(report_module.valid_read_interval(rows[0]))
+        self.assertEqual(report_module.summarize_read_intervals(rows, {})["conditional_overlap_candidates"], 0)
+
+    def test_strict_variant_preserves_legacy_and_missing_clock_stays_unknown(self):
+        row = self.record()
+        for field, value in (("arrival_utc_ms", "private-time"), ("workflow_id", "target"),
+                             ("head_known", 1), ("elapsed_monotonic_ms", [20, 10]), ("ttl_seconds", True)):
+            bad = dict(row, **{field: value})
+            self.assertFalse(report_module.valid_read_interval(bad))
+        legacy = {name: value for name, value in row.items() if name in report_module.READ_OBSERVATION_KEYS}
+        self.assertEqual(report_module.summarize_read_intervals([legacy], {})["legacy_records"], 1)
+        rows = []
+        with mock.patch.object(single, "read_clock", return_value=None), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            interval = single.begin_read("k", "a" * 40, 10, False)
+            single.emit_read_observation("k", "upstream", interval=interval, raw=self.body("a" * 40))
+        self.assertEqual(rows[0]["clock_state"], "unavailable")
+        self.assertIsNone(rows[0]["elapsed_monotonic_ms"])
+        self.assertTrue(report_module.valid_read_interval(rows[0]))
+
+    def test_output_failure_emits_no_successful_read_and_fallback_id_is_explicit(self):
+        class Failing:
+            def write(self, data): raise BrokenPipeError("fixture output closed")
+        from types import SimpleNamespace
+        import io
+        rows = []
+        result = subprocess.CompletedProcess(["fixture"], 0, self.body("a" * 40), b"")
+        with mock.patch.object(single.subprocess, "run", return_value=result), \
+             mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=Failing()),
+                                                             stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append):
+            with self.assertRaises(BrokenPipeError):
+                single.run(["fixture"], None, self.state / "age", self.state / "source", args_key="k",
+                           interval=single.begin_read("k", "a" * 40, 10, False))
+        self.assertEqual(rows, [])
+        with mock.patch.dict(os.environ, {"AI_GH_WORKFLOW_ID": "invalid", "PR_WAIT_RECEIPT_ID": "e" * 32}):
+            interval = single.begin_read("k", "a" * 40, 10, False)
+        self.assertEqual(interval["workflow_id"], "e" * 32)
+        self.assertEqual(interval["workflow_correlation"], "workflow")
 
 
 class TargetOrdinal(unittest.TestCase):
