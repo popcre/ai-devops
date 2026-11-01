@@ -662,5 +662,342 @@ assert resource.getrlimit(resource.RLIMIT_NOFILE)==(1024,old[1])
             finally: os.close(descriptor)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux reciprocal completion; native transport tested separately")
+class ActiveParentTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = ParentTests()
+        self.fixture.setUp()
+        self.root, self.manifest = self.fixture.root, self.fixture.manifest
+        folder = self.root / "tools/github-requests"
+        folder.mkdir()
+        for name in ("report.py", "telemetry.sh", "measure_append.py", "pr_status_singleflight.py", "target_ordinal.py"):
+            shutil.copyfile(ROOT / "tools/github-requests" / name, folder / name)
+        self.script = self.root / "bin/ai-blocker-watch"
+        self.script.write_text('''#!/usr/bin/env bash
+set -u
+printf 'original active stdout\\n'; printf 'original active stderr\\n' >&2
+printf x >> "$ACTIVE_TEST_INVOCATIONS"
+source "$(dirname "$0")/../tools/github-requests/telemetry.sh"
+op="$1"; parent=''; [ "$op" != tick ] || parent="$(gh_measure_workflow_id)"
+for kind in $(if [ "$op" = tick ]; then printf 'alarm links'; else printf '%s' "$op"; fi); do
+  workflow="blocker_watch_$kind"; id="$(gh_measure_workflow_id)"; boundary="${kind}_scan"
+  BW_ACTIVE_OBSERVER_READY=0
+  if gh_measure_active_begin "$workflow" "$id" "$parent" "$boundary"; then BW_ACTIVE_OBSERVER_READY=1; fi
+  sleep 0.02
+  outcome="${ACTIVE_TEST_OUTCOME:-completed}"; succeeded=1; attempted=1; failed=0; skipped=0
+  case "$outcome" in skipped) succeeded=0;attempted=0;skipped=1;; partial) attempted=2;failed=1;; failed) succeeded=0;failed=1;; esac
+  gh_measure_workflow_outcome ai-blocker-watch "$workflow" "$id" "$outcome" 1 "$boundary" "$attempted" "$succeeded" "$failed" "$skipped" "$parent" || :
+done
+if [ "$op" = tick ] && [ "${ACTIVE_TEST_STATUS:-0}" = 0 ]; then
+  gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$parent" completed 1 || :
+fi
+exit "${ACTIVE_TEST_STATUS:-0}"
+''')
+        self.script.chmod(0o755)
+        self.fixture.git("add", "bin/ai-blocker-watch", "tools")
+        self.fixture.git("-c", "user.name=Albert Hazan", "-c", "user.email=u2giants@users.noreply.github.com",
+                         "commit", "-qm", "active source fixture")
+        self.sha = self.fixture.git("rev-parse", "HEAD").strip()
+        self.manifest.write_text(self.manifest.read_text().replace(self.fixture.sha, self.sha))
+        self.state = Path(self.fixture.temp.name) / "state"
+        self.state.mkdir(mode=0o700)
+        self.invocations = Path(self.fixture.temp.name) / "invocations"
+        self.credentials = Path(self.fixture.temp.name) / "credential-context"
+        self.credentials.mkdir(mode=0o700)
+        for name in ("hosts.yml", "config.yml"):
+            (self.credentials / name).write_text("fixture credential bytes must not be read\n")
+            (self.credentials / name).chmod(0o600)
+
+    def tearDown(self): self.fixture.tearDown()
+
+    @staticmethod
+    def clock():
+        value = time.monotonic_ns() // 1_000_000
+        return {"monotonic_ms": value, "wall_ms": value + 100000, "error_bound_ms": 1}
+
+    def run_active(self, operation="alarm", profile="sdk_only_no_provider", **environment):
+        receipt = Path(self.fixture.temp.name) / f"active-{time.monotonic_ns()}.json"
+        stdout, stderr = tempfile.TemporaryFile(), tempfile.TemporaryFile()
+        original = subprocess.Popen
+        def capture(*args, **kwargs):
+            if len(args[0]) >= 2 and str(args[0][-2]).endswith("/bin/ai-blocker-watch"):
+                kwargs.update(stdout=stdout, stderr=stderr)
+            return original(*args, **kwargs)
+        with self.fixture.fixture_installation(), mock.patch.dict(os.environ, {
+                "AI_DEVOPS_TEST_MODE": "1", "AI_GH_STATE_DIR": str(self.state),
+                "ACTIVE_TEST_INVOCATIONS": str(self.invocations), "GH_CONFIG_DIR": str(self.credentials), **environment}), \
+                mock.patch.object(report, "qualification_clock", side_effect=self.clock), \
+                mock.patch.object(report.subprocess, "Popen", side_effect=capture):
+            status = report.qualify_blocker_watch(self.root, self.manifest, [operation], receipt, profile)
+        stdout.seek(0); stderr.seek(0)
+        output, diagnostic = stdout.read(), stderr.read()
+        stdout.close(); stderr.close()
+        return status, json.loads(receipt.read_text()), output, diagnostic
+
+    def test_real_custody_acknowledged_envelope_and_original_streams_once(self):
+        status, receipt, out, error = self.run_active()
+        self.assertEqual((status, out, error), (0, b"original active stdout\n", b"original active stderr\n"))
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertEqual(receipt["workload_kind"], "fixture")
+        self.assertEqual(receipt["source_verified"], "verified")
+        self.assertEqual(receipt["source_sha"], self.sha)
+        q = receipt["active_outcomes"][0]["completion_qualification"]
+        self.assertEqual(q["boundary"], "parent_acknowledged_active_begin_to_end")
+        self.assertGreater(q["duration_upper_ms"], 10)
+        self.assertIsNone(q["detection_latency_ms"])
+        self.assertEqual(receipt["programme_acceptance"], "unknown")
+
+    def test_multiple_child_boundaries_have_own_envelopes_and_parent(self):
+        _, receipt, _, _ = self.run_active("tick")
+        self.assertEqual(receipt["source_verified"], "unknown")
+        self.assertEqual(receipt["active_outcomes"], [])
+        self.assertFalse(receipt["provider_acceptance"])
+
+    def test_idle_partial_failed_and_failed_tick_do_not_become_useful_success(self):
+        for outcome in ("skipped", "partial", "failed"):
+            with self.subTest(outcome=outcome):
+                status, receipt, _, _ = self.run_active(ACTIVE_TEST_OUTCOME=outcome, ACTIVE_TEST_STATUS="9")
+                self.assertEqual(status, 9)
+                self.assertFalse(receipt["active_outcomes"][0]["active_success"])
+        status, receipt, _, _ = self.run_active("tick", ACTIVE_TEST_STATUS="7")
+        self.assertEqual(status, 7)
+        self.assertEqual(receipt["source_verified"], "unknown")
+        self.assertEqual(receipt["active_outcomes"], [])
+
+    def test_rejected_namespace_falls_back_once_without_forged_authority(self):
+        with mock.patch.object(report, "retained_generation", side_effect=ValueError("fixture refusal")):
+            status, receipt, _, _ = self.run_active(ACTIVE_TEST_STATUS="6", AI_GH_ACTIVE_EVENT_FD="1",
+                                                   AI_GH_ACTIVE_ACK_FD="2", AI_GH_ACTIVE_PYTHON="forged")
+        self.assertEqual(status, 6)
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertEqual(receipt["source_verified"], "unknown")
+
+    def test_source_replacement_after_capture_cannot_replace_loaded_operation(self):
+        original = subprocess.Popen
+        def replace(*args, **kwargs):
+            if len(args[0]) >= 2 and str(args[0][-2]).endswith("/bin/ai-blocker-watch"):
+                self.script.write_text("#!/usr/bin/env bash\nexit 89\n")
+            return original(*args, **kwargs)
+        with mock.patch.object(report.subprocess, "Popen", side_effect=replace):
+            status, receipt, output, _ = self.run_active()
+        self.assertEqual(status, 0)
+        self.assertEqual(output, b"original active stdout\n")
+        self.assertEqual(receipt["source_sha"], self.sha)
+        self.assertEqual(receipt["source_verified"], "verified")
+
+    def test_clock_jump_and_producer_elapsed_never_create_clock_authority(self):
+        start = self.clock(); end = dict(start, wall_ms=start["wall_ms"] + 5000)
+        self.assertEqual(report.active_completion_interval(start, end, True)["unknown_reason"], "clock_jump")
+        self.assertEqual(report.active_completion_interval(start, end, False)["unknown_reason"], "source_unknown")
+
+    def test_real_privilege_comparison_is_explicit_and_default_preserves_original(self):
+        _, receipt, _, _ = self.run_active()
+        context = receipt["privilege_context"]
+        self.assertIsNotNone(context)
+        self.assertIn("user_namespace_inode", context["difference_fields"])
+        self.assertFalse(receipt["original_privilege_equivalence"])
+        _, declined, _, _ = self.run_active(profile="original_context")
+        self.assertEqual(declined["source_verified"], "unknown")
+        self.assertEqual(self.invocations.read_text(), "xx")
+        state = report.active_privilege_state()
+        for field in ("Uid", "Gid", "Seccomp"):
+            changed = dict(state, **{field: "not equivalent"})
+            self.assertFalse(report.active_sdk_profile(state, changed))
+        for field in ("CapEff", "CapPrm", "CapAmb"):
+            self.assertFalse(report.active_sdk_profile(state, dict(state, **{field: "1"})))
+
+    def test_credential_probe_reads_no_contents_and_decline_exposes_no_paths(self):
+        with mock.patch.object(report.os, "read", side_effect=AssertionError("credential contents read")):
+            access = report.active_credential_access({"GH_CONFIG_DIR": str(self.credentials)})
+        self.assertEqual(access["mode"], "fixed_config_readability")
+        (self.credentials / "hosts.yml").chmod(0o644)
+        _, declined, _, _ = self.run_active()
+        self.assertEqual(declined["source_verified"], "unknown")
+        self.assertFalse(declined["credential_context"]["metadata_guard_passed"])
+        text = json.dumps(declined)
+        self.assertNotIn(str(self.credentials), text)
+        self.assertNotIn("fixture credential bytes", text)
+        self.assertEqual(self.invocations.read_text(), "x")
+
+    def test_mismatched_fixed_credential_objects_decline_before_original_work(self):
+        with mock.patch.object(report, "active_credential_access", return_value={
+                "mode": "fixed_config_readability", "fixed_files": {"hosts.yml": [0], "config.yml": None}}):
+            status, receipt, _, _ = self.run_active(ACTIVE_TEST_STATUS="5")
+        self.assertEqual(status, 5)
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertFalse(receipt["credential_context"]["readability_preserved"])
+        self.assertEqual(receipt["source_verified"], "unknown")
+
+    def test_actual_fifo_credential_substitution_is_promptly_refused(self):
+        path = self.credentials / "hosts.yml"
+        path.unlink(); os.mkfifo(path, 0o600)
+        code = '''import sys
+sys.path.insert(0,sys.argv[1]);import report
+try:report.active_credential_access({'GH_CONFIG_DIR':sys.argv[2]})
+except ValueError:print('refused')
+else:raise SystemExit('FIFO unexpectedly accepted')
+'''
+        result = subprocess.run([sys.executable, "-I", "-S", "-c", code,
+                                 str(ROOT / "tools/github-requests"), str(self.credentials)],
+                                capture_output=True, timeout=2)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, b"refused\n")
+
+    def test_original_fallback_preserves_legitimate_fd_and_session_not_observer_pipes(self):
+        import fcntl
+        output = Path(self.fixture.temp.name) / "context-result.json"
+        sentinel = tempfile.TemporaryFile()
+        sentinel.write(b"sentinel"); sentinel.flush(); sentinel.seek(0)
+        reader, writer = os.pipe()
+        legit = fcntl.fcntl(sentinel.fileno(), fcntl.F_DUPFD, 180)
+        reserved = fcntl.fcntl(writer, fcntl.F_DUPFD, 190)
+        os.set_inheritable(legit, True); os.set_inheritable(reserved, True)
+        identity = os.fstat(reserved)
+        self.script.write_text('''#!/usr/bin/env bash
+printf x >> "$ACTIVE_TEST_INVOCATIONS"
+/usr/bin/python3 - "$ACTIVE_TEST_LEGIT" "$ACTIVE_TEST_RESERVED" "$ACTIVE_TEST_RESULT" <<'PY'
+import json,os,sys
+try:
+ s=os.fstat(int(sys.argv[2])); reserved=[s.st_dev,s.st_ino]
+except OSError: reserved=None
+with open(sys.argv[3],'w') as f:json.dump({'session':os.getsid(0),'sentinel':os.read(int(sys.argv[1]),8).decode(),'reserved':reserved,'observer_env':any(x.startswith('AI_GH_ACTIVE_') for x in os.environ)},f)
+PY
+exit 7
+''')
+        try:
+            status, receipt, _, _ = self.run_active(profile="original_context", AI_GH_ACTIVE_EVENT_FD=str(reserved),
+                ACTIVE_TEST_LEGIT=str(legit), ACTIVE_TEST_RESERVED=str(reserved), ACTIVE_TEST_RESULT=str(output))
+            observed = json.loads(output.read_text())
+            self.assertEqual(status, 7)
+            self.assertEqual(observed["session"], os.getsid(0))
+            self.assertEqual(observed["sentinel"], "sentinel")
+            self.assertNotEqual(observed["reserved"], [identity.st_dev, identity.st_ino])
+            self.assertFalse(observed["observer_env"])
+            self.assertTrue(os.get_inheritable(legit)); self.assertTrue(os.get_inheritable(reserved))
+            self.assertFalse(receipt["control_session_isolated"])
+            self.assertEqual(self.invocations.read_text(), "x")
+        finally:
+            for fd in (reader, writer, legit, reserved): os.close(fd)
+            sentinel.close()
+
+    def test_forged_typed_custody_reordered_duplicate_and_unknown_fields_rejected(self):
+        begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin",
+                 "caller": "ai-blocker-watch", "workflow": "blocker_watch_alarm", "workflow_id": "a" * 32,
+                 "parent_workflow_id": None, "boundary": "alarm_scan"}
+        row = {"schema": 3, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_outcome",
+               "caller": "ai-blocker-watch", "workflow": "blocker_watch_alarm", "workflow_id": "a" * 32,
+               "parent_workflow_id": None, "boundary": "alarm_scan", "outcome": "completed", "elapsed_ms": 0,
+               "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
+        for data in (dict(row, source_verified="verified"), dict(begin, clock_quality="verified")):
+            self.assertFalse(report.active_begin_valid(data) or report.active_outcome_valid(data))
+        observer = report.ActiveCompletionObserver({"identity": {"source_verified": "verified"}}, "alarm", lambda _: True)
+        observer.receive(begin, self.clock())
+        self.assertFalse(observer.result(0)[0])
+        with self.fixture.fixture_installation(), report.retained_generation(self.root, self.manifest) as generation:
+            for sequence in ((row,), (begin, begin, row), (begin, row, row)):
+                observer = report.ActiveCompletionObserver(generation, "alarm", lambda _: True)
+                for item in sequence: observer.receive(item, self.clock())
+                self.assertFalse(observer.result(0)[0])
+            observer = report.ActiveCompletionObserver(generation, "alarm", lambda _: True)
+            observer.receive(begin, self.clock(), queued=True)
+            observer.receive(row, self.clock())
+            self.assertFalse(observer.result(0)[0])
+
+    def test_dead_parent_ack_is_bounded_and_never_returns_success(self):
+        read, write = os.pipe(); ack_read, ack_write = os.pipe()
+        row = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin",
+               "caller": "ai-blocker-watch", "workflow": "blocker_watch_alarm", "workflow_id": "a" * 32,
+               "parent_workflow_id": None, "boundary": "alarm_scan"}
+        try:
+            with mock.patch.dict(os.environ, {"AI_GH_ACTIVE_EVENT_FD": str(write), "AI_GH_ACTIVE_ACK_FD": str(ack_read)}):
+                started = time.monotonic()
+                self.assertFalse(report.active_channel_helper("begin", json.dumps(row).encode()))
+                self.assertLess(time.monotonic() - started, 0.75)
+        finally:
+            for fd in (read, write, ack_read, ack_write): os.close(fd)
+
+    def test_late_ack_cannot_qualify_and_data_only_transcript_cannot_grant_source(self):
+        import threading
+        read, write = os.pipe(); ack_read, ack_write = os.pipe()
+        begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin",
+                 "caller": "ai-blocker-watch", "workflow": "blocker_watch_alarm", "workflow_id": "a" * 32,
+                 "parent_workflow_id": None, "boundary": "alarm_scan"}
+        def late():
+            os.read(read, 4096)
+            time.sleep(0.30)
+            os.write(ack_write, (json.dumps({"schema": 1, "phase": "ack", "workflow_id": "a" * 32}) + "\n").encode())
+        thread = threading.Thread(target=late)
+        thread.start()
+        try:
+            with mock.patch.dict(os.environ, {"AI_GH_ACTIVE_EVENT_FD": str(write), "AI_GH_ACTIVE_ACK_FD": str(ack_read)}):
+                self.assertFalse(report.active_channel_helper("begin", json.dumps(begin).encode()))
+        finally:
+            thread.join(timeout=2)
+            for fd in (read, write, ack_read, ack_write): os.close(fd)
+        transcript = report.ActiveCompletionTranscript("alarm", lambda _: True)
+        row = receipt_fixture("ai-blocker-watch", "blocker_watch_alarm", "completed", "a" * 32)
+        row.update(workflow_id="a" * 32, parent_workflow_id=None)
+        transcript.receive(begin, self.clock())
+        transcript.receive(row, self.clock())
+        self.assertTrue(transcript.protocol_result(0)[0])
+        verified, records = transcript.result(0)
+        self.assertFalse(verified)
+        self.assertEqual(records[0]["completion_qualification"]["unknown_reason"], "source_unknown")
+        for invalid in (dict(begin, workflow=[]), dict(row, outcome={}), dict(row, elapsed_ms=True)):
+            self.assertFalse(report.active_begin_valid(invalid) or report.active_outcome_valid(invalid))
+
+    def test_multiple_correlated_child_envelopes_are_not_whole_tick_duration(self):
+        transcript = report.ActiveCompletionTranscript("tick", lambda _: True)
+        for index, workflow in enumerate(("blocker_watch_alarm", "blocker_watch_links")):
+            row = receipt_fixture("ai-blocker-watch", workflow, "completed", str(index + 1) * 32)
+            row.update(workflow_id=str(index + 1) * 32, parent_workflow_id="f" * 32)
+            begin = {key: row[key] for key in ("caller", "workflow", "workflow_id", "parent_workflow_id", "boundary")}
+            begin.update(schema=1, measurement="active_completion_boundary", phase="begin")
+            start = {"wall_ms": 1000 + index * 1000, "monotonic_ms": 1000 + index * 1000, "error_bound_ms": 1}
+            end = dict(start, wall_ms=start["wall_ms"] + 50 + index * 25,
+                       monotonic_ms=start["monotonic_ms"] + 50 + index * 25)
+            transcript.receive(begin, start); transcript.receive(row, end)
+        parent = receipt_fixture("ai-blocker-watch", "blocker_watch_tick", "completed", "f" * 32)
+        parent["workflow_id"] = "f" * 32
+        transcript.receive(parent, self.clock())
+        self.assertTrue(transcript.protocol_result(0)[0])
+        _, records = transcript.result(0, source_verified=True)  # Unit input only; no live authority receipt.
+        self.assertEqual([x["completion_qualification"]["duration_upper_ms"] for x in records], [54, 79])
+
+    def test_observer_failure_after_launch_does_not_replay_or_change_original_status(self):
+        with mock.patch.object(report.ActiveCompletionObserver, "result", side_effect=ValueError("fixture observer failure")):
+            status, receipt, _, _ = self.run_active(ACTIVE_TEST_STATUS="4")
+        self.assertEqual(status, 4)
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertEqual(receipt["source_verified"], "unknown")
+        self.assertTrue(receipt["observer_cleanup_complete"])
+        self.assertGreaterEqual(receipt["qualification_elapsed_ns"], receipt["observer_setup_elapsed_ns"])
+        self.assertEqual(receipt["whole_observer_budget_qualification"], "unknown")
+
+    def test_provider_cannot_inherit_channels_and_status_argv_streams_survive(self):
+        read, write = os.pipe(); ack_read, ack_write = os.pipe()
+        environment = dict(os.environ, AI_GH_ACTIVE_EVENT_FD=str(write), AI_GH_ACTIVE_ACK_FD=str(ack_read),
+                           AI_GH_ACTIVE_PYTHON=sys.executable)
+        program = '''import os,sys
+assert not any(k.startswith("AI_GH_ACTIVE_") for k in os.environ)
+for fd in map(int,sys.argv[1:3]):
+ try: os.fstat(fd)
+ except OSError: pass
+ else: raise AssertionError("inherited observer descriptor")
+assert sys.argv[3] == 'space "quote" Ω'
+print("provider stdout");print("provider stderr",file=sys.stderr);sys.exit(7)
+'''
+        arguments = [sys.executable, "-c", program, str(write), str(ack_read), 'space "quote" Ω']
+        try:
+            child = subprocess.run([sys.executable, str(ROOT / "tools/github-requests/report.py"), "--active-harness"],
+                input=b"\0".join(os.fsencode(x) for x in arguments) + b"\0", capture_output=True,
+                env=environment, pass_fds=(write, ack_read), timeout=5)
+            self.assertEqual(child.returncode, 7)
+            self.assertEqual(child.stdout, b"provider stdout\n")
+            self.assertEqual(child.stderr, b"provider stderr\n")
+        finally:
+            for fd in (read, write, ack_read, ack_write): os.close(fd)
+
+
 if __name__ == "__main__":
     unittest.main()

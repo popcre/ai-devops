@@ -244,6 +244,14 @@ bw_active_begin(){
   [ "$GH_COST_READY" = 1 ] || return 0
   BW_TICK_RECEIPT_ID="$(gh_measure_workflow_id)" || { note 'request measurement unavailable: active ID not created'; return 0; }
   gh_measure_clock; BW_ACTIVE_START="$GH_MEASURE_CLOCK"
+  local boundary="${BW_ACTIVE_KIND}_scan"
+  [ "$BW_ACTIVE_KIND" != wake ] || boundary=wake_process_exit
+  BW_ACTIVE_OBSERVER_READY=0
+  if gh_measure_active_begin "$BW_WORKFLOW" "$BW_TICK_RECEIPT_ID" "$BW_ACTIVE_PARENT" "$boundary"; then
+    BW_ACTIVE_OBSERVER_READY=1
+  else
+    GH_MEASURE_ACTIVE_DISABLED=1
+  fi
 }
 bw_active_finish(){
   local outcome elapsed boundary
@@ -864,7 +872,13 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
   note "$mode $h session $s in $cwd (wait released: $why); log $log"
   bw_active_count attempted
   BW_WAKE_RESULT=process_failed
-  if (cd "$cwd" && timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}") >"$log" 2>&1 </dev/null; then
+  if (cd "$cwd" && {
+    if [ -n "${AI_GH_ACTIVE_PYTHON:-}" ] &&
+      { [ -n "${AI_GH_ACTIVE_EVENT_FD:-}" ] || [ -n "${AI_GH_ACTIVE_ACK_FD:-}" ] ||
+        [ -n "${AI_GH_ACTIVE_EVENT_HANDLE:-}" ] || [ -n "${AI_GH_ACTIVE_ACK_HANDLE:-}" ]; }; then
+      gh_measure_active_harness timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}"
+    else timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}"; fi
+  }) >"$log" 2>&1 </dev/null; then
     bw_active_count succeeded; BW_WAKE_RESULT=process_succeeded
     jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
