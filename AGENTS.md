@@ -162,6 +162,10 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
+TokenEconomizer for Ubuntu Claude/Codex desktops and Windows MiMo/ZCode desktops:
+read [plan_tokeneconomizer-desktops.md](plan_tokeneconomizer-desktops.md) STATUS
+first. Qualify actual desktop support; do not infer it from CLI compatibility.
+
 Shared-db migration gate trimming (plan, not active): read
 [`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) STATUS first;
 [popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
