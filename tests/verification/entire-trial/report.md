@@ -1,5 +1,146 @@
 # Entire reversible trial execution report — #2022
 
+## October 31 runner permission, native execution and isolated merge
+
+Coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d`, edge-dev3. Observed
+October31,2026,9:52PM EDT. This supersedes the earlier access/execution boundary
+below, not the acceptance requirements. Albert explicitly authorized:
+
+> Yes, grant the trial permission to manage test runners and jobs, then continue #2022 through the remaining proofs. Preserve the ownership blocker, existing runners, constraints and deadlines.
+
+### T2 actual execution
+
+The supported Buildkite device grant succeeded with read user/organization,
+read/write clusters, pipelines and builds. The short-lived trial agent token was
+stored in the approved vault and revoked after the owned jobs disconnected.
+No read-agents expansion, hosted compute, purchase, paid Entire Agent, private
+capture, org-wide repository grant or protected-main change occurred.
+
+Pinned official components: Entire0.12.2, Buildkite CLI3.67.0 and agent4.9.0;
+published archive checksums verified. Checkout plugin
+`entire#3c4e507a4a2152e8701639c2758f87982632a029` was inspected and pinned.
+Only the public ai-devops mirror and the dedicated public native trial repository
+were selected in their provider connections. Self-hosted checkout uses the
+provider's short-lived read-only credentials with login fallback disabled.
+
+The existing Envy runner executed one-job portable agents, below-normal priority,
+only after refusing overlap with a GitHub worker. Its original GitHub service
+remained running/automatic. Linux jobs used an isolated portable agent on
+edge-dev3 with a minimal environment. No service or full toolkit was installed
+on a networking-only host. Alien remained busy with its original GitHub worker;
+XPS SSH host verification still refused access. Neither protection was changed.
+
+The mirror pipeline `entire-2022-existing-windows-runner` is scoped to disposable
+trial branches. [Build3](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/3)
+passed at `0b2cae6f259d1fe92546aaafedb70d7f27ec01b6` after a first setup failure:
+the task-owned no-local-hooks flag also disabled the required checkout plugin;
+removing that flag repaired the original checkout capability. Builds4/5/6 then
+proved baseline pass, deliberately newer failure and repair on another disposable
+branch. Those experimental changes were never merged into official main.
+
+### T3 native merge cases
+
+Public native repository:
+`et/ai-devops-trial-2022-20261031/ai-devops-entire-2022-control`.
+Owner#2022; necessity is isolated merge-controller qualification; disposition
+is required at the original stop, with no permanent alternative harness.
+The system-managed GitHub mirror correctly refused native repository creation;
+a separate supported public project was used. No private submodules were imported.
+
+[Trail1/change1](https://entire.com/et/ai-devops-trial-2022-20261031/-/trails/1/changes/ai-devops-entire-2022-control/1)
+used the existing `tests/test-client-globals-required-phrases.sh` command on both
+Windows/Git Bash and Linux. This is a focused canary, not all182 registrations.
+Native pipeline `entire-2022-native-control` has two self-hosted queue steps,
+five-minute jobs and the same pinned plugin. Actual receipts:
+
+| Build | Exact source | Windows / Linux | Meaning |
+|---|---|---|---|
+| [1](https://buildkite.com/u2giants/entire-2022-native-control/builds/1) | `89e41e72e6159d58bc6a6711b86a9817f1816aaf` | pass / pass | Public canary; clean export proved before trusting native-only work. |
+| [2](https://buildkite.com/u2giants/entire-2022-native-control/builds/2) | `0b2cae6f259d1fe92546aaafedb70d7f27ec01b6` | pass / pass | Original base. |
+| [3](https://buildkite.com/u2giants/entire-2022-native-control/builds/3) | `21f05f77e3a8d294e805b5489553c8e963d70e52` | fail / fail | Newer intentional missing-phrase canary. |
+| [4](https://buildkite.com/u2giants/entire-2022-native-control/builds/4) | `24e3d13884640be0fe26235c1df0e37157f44b8a` | canceled / canceled | Repair's first run canceled before execution. |
+| [5](https://buildkite.com/u2giants/entire-2022-native-control/builds/5) | `24e3d13884640be0fe26235c1df0e37157f44b8a` | pass / pass | Same repair rebuilt, accepted only after current success. |
+| [6](https://buildkite.com/u2giants/entire-2022-native-control/builds/6) | `25c6e6d299cd843503035626ce4dbc5076d051dd` | canceled / canceled | Independent base movement; no earlier passing check at this SHA. |
+| [7](https://buildkite.com/u2giants/entire-2022-native-control/builds/7) | `9742612a71b0301225ded708cf7fb21aa3b9a0fd` | pass / pass | Reconciled current head includes the moved base. |
+| [8](https://buildkite.com/u2giants/entire-2022-native-control/builds/8) | `25c6e6d299cd843503035626ce4dbc5076d051dd` | pass / pass | Base repaired before actual merge. |
+
+Actual server/CLI dry runs refused the pending newer head, failed newer head,
+canceled current head and a temporarily added nonexistent required provider check.
+The nonexistent requirement was then removed, restoring exactly the original named
+trial check. The older passing89e result did not authorize21f. Base movement
+refused24e as one commit behind. Up-to-date and Checks on main were enabled,
+base explicitly `main`, named check `u2giants/entire-2022-native-control`, bypass
+policy `nobody`; approvals/findings stayed off and no paid reviewer was enabled.
+
+**Negative result:** after build7 passed while base build6 remained canceled,
+the actual merge dry run reported `mergeable:true`, no blockers. Thus the configured
+Checks on main gate did not stop that canceled-base case. The settings-page
+animated preview is synthetic and is not evidence. No merge was attempted in this
+unsafe state. Base build8 was required to pass before the isolated merge. Full
+controller qualification therefore fails this acceptance condition; the coordinator
+owns diagnosis. Concurrent independent merge races remain untested. A current-head
+pass followed by another canceled attempt is also not proved to invalidate that pass.
+
+### T4 publication and T7 bounded recovery
+
+After both exact head7 and base8 passed, Entire actually merged Trail1 without
+force/bypass and preserved the source branch. Native main fast-forwarded to
+`9742612a71b0301225ded708cf7fb21aa3b9a0fd`, the already tested head. Its tree is
+`0803dd6100e1181d8400ba75f680939acf62ac12`; parents are
+`24e3d13884640be0fe26235c1df0e37157f44b8a` and
+`25c6e6d299cd843503035626ce4dbc5076d051dd`. No altered-ID mapping is needed.
+This accepted result was pushed unchanged to official GitHub's dedicated
+[`codex/entire-trial-accepted-20261031`](https://github.com/popcre/ai-devops/tree/codex/entire-trial-accepted-20261031).
+Remote readback, clean GitHub-only clone and offline bundle restoration all
+matched commit/tree/parents and passed strict full fsck. No Entire credential
+was needed for either restoration. Duplicate native-main build9 was canceled
+before execution because build7 already tested the exact fast-forward landing;
+it does not count as additional parity evidence.
+
+This is isolated merge and GitHub trial-branch publication success, **not**
+protected-main replacement. The frozen GitHub policy still requires PR,
+verification-closure and merge queue. No policy, integration or required check
+was weakened. Replacing that final barrier needs a separately specified,
+repository-scoped supported transition through the normal code/config route,
+after safety qualification; no permanent cutover was authorized here.
+
+Private custody `entire-2022-control-20261031` contains pinned configurations,
+all build/API/gate receipts, source bundles, restore results and the public merge
+screenshot. The trial agent token is revoked. Only this newly created Entire
+CLI session's refresh family was revoked using the vendor's current-session
+endpoint: exactly one session disappeared and nine preexisting session IDs
+remained. Broad CLI logout was deliberately not invoked: its documented effect
+is to terminate other machines' CLI logins too. Status confirms this login cannot
+renew; its already-issued access token still reports about7h validity. Immediate
+access invalidation/old Trail erasure therefore remain unproved, not called done.
+No shared connection or other session was removed.
+
+### T5/T6/R8 accounting
+
+No natural matched timing pair was collected: sample count0, five required.
+Adversarial canaries and their job durations are excluded from end-to-end utility
+claims. Whole-trigger/suite/advisory-review/fixer/artifact parity remains unmet.
+Alien busy/XPS trust refusal and the destination-check gap prevent declaring the
+replacement qualified; no fabricated work was created to improve timing.
+
+R2 default four-client global refresh and Windows machine-section byte preservation
+were repaired in [PR2230](https://github.com/popcre/ai-devops/pull/2230), merged
+normally as `7a80853bba5d7ce4c467277ca33783d5961b013d`, confirmed in origin/main.
+Installer/adoption/render focused suites passed on Linux; installer/adoption
+passed on actual Windows/Git Bash with matching source hashes. Source repair
+does not prove installed adoption. Current per-host protected-install recovery
+is separately recorded; existing partial transactions and private-memory limits
+are preserved. No private facts were trimmed and no health limit relaxed.
+
+All16 live-client cells remain0/16: Codex, Claude, MiMo/MiMoCode and ZCode on
+edge-dev, edge-dev3, al8960ofc and916. This session's computer surface has no native
+app control. SSH/CLI checks, instruction files and browser use are not substitutes.
+Coordinator owns this platform/access limitation and per-cell receipts remain
+required. The outgoing ownership checker still has no successful zero-claim proof;
+its timeout is preserved and no predecessor identity/foreign claim was released.
+R8 remains open on#2022, including original retention/access questions.
+Discovery November2,2026,5:00PM EST; stop November12,2026,5:58AM EST, unchanged.
+
 ## October 31 T1/T2 continuation
 
 Observed by Codex chat `01a19481-9ceb-7592-934e-9e5a4dac240d` on edge-dev3,
