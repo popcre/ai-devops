@@ -1104,9 +1104,9 @@ baseline/instrumented image digests are
 `3b56f16a90ef57c8b3bb3fcf5585b070facf84f61a00c45d600206a3c2b435fb`
 and `66b89b94f7527894882898feba33c10efd28e639338fd453d719010e5f119ccc`.
 Its 29 functional and 29 offline tests establish finite profile compatibility,
-not the separately measured 2.103.3 overhead result or a vendor upgrade. Final
-current-source Linux installed/count receipts remain pending; no source changes
-from another active chat or actual CI collision were overwritten/bypassed.
+not the separately measured 2.103.3 overhead result or a vendor upgrade. No
+source changes from another active chat or actual CI collision were
+overwritten/bypassed.
 
 Hetz's final normal full update to exact `c403` then completed: all eighteen
 required stages passed, source was clean and manifest digest was
@@ -1128,3 +1128,14 @@ were relocated in the private staged manifest; its digest
 remains distinct from the original `f4c930` build manifest, with all ten sources
 and executable digests reverified. Local current-source installation/count proof
 remains pending actual physical CI clearance.
+
+The first bounded local maintenance window was safely aborted before any
+installer or credential call: a final physical check found an actual worker
+despite the earlier repository-scoped idle answer. All ten original runner
+identities and label sets were restored and verified online; unrelated labels
+were preserved, and the owned restoration timer was retired after restoration.
+The independently checked restoration receipt digest is
+`6593929dd2f0d13df907a367fcb2e20c73dac2760efe425b6f97268e1f2dea86`.
+This preserves CI capability; it proves neither a local installation nor a
+performance improvement. The cross-repository collision guard needs its own
+finished repair and native proof before another local installation attempt.

@@ -5,6 +5,11 @@
 November 1, 2026, 8:31 AM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
+The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
+completed the scoped #2219/#2225/#2229 repair and both-system live proof;
+its explicitly unchecked broader fleet/comparable-workload acceptance remains
+on #658. The work below extends that acceptance, without reopening the repair.
+
 PR #2267 delivered the measurement repairs as `9225b8c4`; #2272 delivered the
 matching Hetz 2.103.0 profile and fixture-only CI recovery as `c403f6ca`, with
 the production executable trust guard unchanged and the affected CI shard
