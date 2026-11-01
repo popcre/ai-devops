@@ -2,22 +2,50 @@
 
 ## STATUS — read first
 
-October 31, 2026 EDT congestion repair under #658: edge-dev3 showed normal
-mutex turnover, but unqueued acquisition could starve foreground requests
-behind recurring runner calls. A 15-second local observation saw four lock
-owners and four quota-context switches, with pacing sleeps rather than a dead
-holder. FIFO admission is being added in `bin/ai-gh`; it preserves the same
-reservation mutex, credential context accounting, quotas and backoff. Source
-reduction now also targets the concrete recurring source:
-`tools/ci/review-fixer-state.py` uses server-side base-branch filters for
-event-targeted cleanup planning and retirement, while full scheduled sweeps and
-collision checks retain complete scope. Source reduction remains governed by
-this plan and `plan_cut-unneeded-github-traffic.md`; fair admission and narrower
-pages do not establish measured whole-account savings. Installation/live
-proof remain open until a merged candidate is installed and exercised. New and
-old copies still share the mutex; FIFO ordering is guaranteed only among copies
-that implement admission, so runner/toolkit rollout matters.
-Qualification: [admission repair evidence](tests/verification/github-requests/admission-20261031.md).
+October 31, 2026 EDT admission repair under #658 — the first-stage repair is
+merged and installed on both proved hosts. The bounded-admission follow-up
+also landed and was installed; its Linux terminal-state proof passed, but the
+real Windows cached path exposed a separate native-interpreter failure. The
+tested cache-preserving fix is now merged and installed on both proved hosts;
+both actual installed cached waiters observed the real merged PR. This scoped
+congestion repair is complete. The current #658 coordinator retains broader
+fleet/source-reduction and comparable-workload programme acceptance.
+
+| Admission repair step | State | Evidence |
+|---|---|---|
+| FIFO admission and narrower cleanup source | Done; do not redo | [Merged source edfb85ae](https://github.com/popcre/ai-devops/commit/edfb85ae52fd2be5c8cb499249e846e6e12ea271), PR #2219 |
+| Ubuntu focused tests | Done | [Qualification commands and outcomes](tests/verification/github-requests/admission-20261031.md#changes-and-checks): 280 existing-suite checks, 6 admission tests, 55 fixer tests |
+| Windows first-stage tests | Done | [Windows qualification](tests/verification/github-requests/admission-20261031.md#live-qualification-and-remaining-acceptance): 280 checks, 6 admission tests and 55 fixer tests pass |
+| Ubuntu installed capability | Done | [Installed proof](tests/verification/github-requests/admission-20261031.md#merged-installation-and-installed-command-proof): exact merged source, required stages and final install verification pass; useful issue read exit 0 in 119.21 seconds |
+| Windows installed capability | Done | [Installed proof](tests/verification/github-requests/admission-20261031.md#merged-installation-and-installed-command-proof): full installer exit 0 at the same source; installed issue read exit 0; duration unknown |
+| Bounded-waiter follow-up qualification | Done | [Follow-up evidence](tests/verification/github-requests/admission-20261031.md#bounded-waiter-gap-and-follow-up): source `7ce3954d`, Linux 280 throttle and 101 waiter checks plus 15+1 focused cases; Windows 15+1 focused cases pass |
+| Bounded-admission follow-up delivery/install | Done | [Merged source 190dd4e4](https://github.com/popcre/ai-devops/commit/190dd4e4100a7eceeab59a4f3d79f21ba25ee384), PR #2225; full normal installs on both hosts exited 0 |
+| Historical #2225 installed observation | Superseded; failure retained | [Installed follow-up evidence](tests/verification/github-requests/admission-20261031.md#installed-bounded-waiter-result-and-windows-cache-failure): Linux observed MERGED in 94.01 seconds; Windows WinError 193 was excluded from acceptance and fixed by #2229 |
+| Native cached-interpreter fix qualification | Done | [Cache-preserving qualification](tests/verification/github-requests/admission-20261031.md#native-cached-interpreter-fix): source `09287c4f`, Linux 101 waiter checks and before/after regression; Windows cached two-waiter regression passes in 11.624 seconds |
+| Final cached-waiter delivery/install | Done | [Merged source d36de907](https://github.com/popcre/ai-devops/commit/d36de907ab91414aa54446f1c91aedc8d3292e5c), PR #2229; full protected Linux update and full Windows installer completed with exit 0 |
+| Final installed cached-waiter proof | Done | [Final-source installed proof](tests/verification/github-requests/admission-20261031.md#final-source-installed-proof): Linux MERGED in 69.87 seconds; Windows MERGED in 18.43 seconds, exit 0, with 2 files written in the real cache since call start |
+| Active-copy rollout and workload acceptance | Open | [Remaining limits](tests/verification/github-requests/admission-20261031.md#remaining-long-term-mitigation-and-acceptance): observed upgraded and old callers coexist; no paired latency or demand improvement proved |
+
+**Fresh session starts:** continue broader active-copy rollout and comparable
+natural-workload acceptance on #658. Do not redo the completed scoped repair,
+final installations or both installed proofs unless a new regression or
+source drift warrants it. The #2219/#2225 stages remain historical evidence.
+Keep #658 open and retain its `live proof` checklist for broader outcomes not
+yet proved. A source-path inventory alone does not prove the Bash source each
+already-running process loaded.
+
+The incident was normal mutex turnover with starvation risk, not an abandoned
+lock. FIFO admission preserves the original reservation mutex, credential
+accounting, quotas and backoff. The durable source mitigation now uses
+server-side base-branch filters in `tools/ci/review-fixer-state.py` for targeted
+cleanup, while full scheduled sweeps and collision checks retain complete
+scope. Broader source reduction remains governed by this plan and
+`plan_cut-unneeded-github-traffic.md`; neither fair admission nor narrower pages
+establishes measured whole-account savings or cleared congestion. FIFO order
+applies only among upgraded copies; existing old jobs were preserved rather
+than editing a running checkout. The follow-up keeps waiter tickets admitted
+for a bounded busy window while separately supervising actual API calls;
+rate-limit backoff and the whole waiter deadline remain enforced.
 
 Resume reconciliation — October 21, 2026, 2:12 PM EDT. Owner: current Codex
 session on edge-dev3, tracking #658 and #660. Their cleanup closures did not
