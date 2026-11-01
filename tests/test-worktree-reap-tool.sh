@@ -17,9 +17,19 @@ PASS=0; FAIL=0
 # A fake shared-db checkout whose reaper script is a recording stub.
 CHECKOUT="$WORK/shared-db"
 mkdir -p "$CHECKOUT/scripts"
+git init -q "$CHECKOUT"
 
 stub_reaper(){ # $1 = exit code the stub returns, $2 = extra arg check ('apply'|'none')
   cat > "$CHECKOUT/scripts/reap-merged-worktrees.mjs" <<EOF
+import { execSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+let verdict = 'RAN-IN-REPO';
+try {
+  execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+} catch (e) {
+  verdict = 'GIT-FAIL';
+}
+writeFileSync('REAP_STUB_RAN_FROM_CWD', verdict);
 console.log('stub argv: ' + process.argv.slice(2).join(' '))
 process.exit($1)
 EOF
@@ -44,6 +54,16 @@ stub_reaper 0
 run >/dev/null 2>&1; rc_ok=$?
 [ "$rc_ok" -eq 0 ] && ok "clean sweep exits 0" || bad "clean sweep exited $rc_ok"
 grep -q -- "--apply" "$WORK/home/.ai-devops/worktree-reap/reap.log" && ok "a scheduled run sweeps with --apply (the reaper's own guards still apply)" || bad "scheduled run did not pass --apply"
+
+# Issue #2242: the reaper runs `git worktree list` and treats its cwd as the
+# checkout it must never reap, so the wrapper has to invoke it from inside the
+# shared-db checkout. Scheduled runs start in $HOME, where git answers
+# "fatal: not a git repository" and the reaper crashes having removed nothing.
+if grep -q '^RAN-IN-REPO' "$CHECKOUT/REAP_STUB_RAN_FROM_CWD" 2>/dev/null; then
+  ok "the reaper runs inside the shared-db checkout, where git can list its worktrees (issue #2242)"
+else
+  bad "the reaper did not run inside the checkout — a scheduled run hits 'not a git repository' (issue #2242)"
+fi
 
 run --dry-run >/dev/null 2>&1
 if ! grep -c "stub argv: --apply" "$WORK/home/.ai-devops/worktree-reap/reap.log" | tail -1 | grep -q "^2$"; then :; fi

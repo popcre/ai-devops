@@ -72,6 +72,7 @@ reap_script(){ printf '%s/scripts/reap-merged-worktrees.mjs' "$1"; }
 cmd_run(){
   local checkout script rc log="$HOME_DIR/reap.log"
   checkout="$(find_checkout)" || { note "no shared-db checkout found (set AI_SHARED_DB_CHECKOUT if this machine has one); nothing to reap"; return 0; }
+  checkout="$(cd "$checkout" && pwd)" || die "shared-db checkout is not a directory: $checkout"
   script="$(reap_script "$checkout")"
   [ -f "$script" ] || die "checkout at $checkout has no scripts/reap-merged-worktrees.mjs — update the checkout or point AI_SHARED_DB_CHECKOUT at a current one"
   command -v node >/dev/null 2>&1 || die "node is not on PATH; the reaper cannot run"
@@ -79,10 +80,14 @@ cmd_run(){
   [ "${1:-}" = "--dry-run" ] && mode="dry-run"
   {
     note "run start ($mode, checkout $checkout)"
+    # The reaper lists worktrees with a bare `git worktree list` and treats
+    # process.cwd() as the checkout it must never reap, so it only works when
+    # run from inside the shared-db checkout (issue #2242: cron/Task Scheduler
+    # start in $HOME, and git answers "not a git repository").
     if [ "$mode" = apply ]; then
-      node "$script" --apply; rc=$?
+      (cd "$checkout" && node "$script" --apply); rc=$?
     else
-      node "$script"; rc=$?
+      (cd "$checkout" && node "$script"); rc=$?
     fi
     # rc 0: swept (or dry run). rc 1: the reaper's SAFE refusal — an orchestrator
     # is active and open claims were unreadable, so it removed nothing. That is
