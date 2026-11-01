@@ -856,12 +856,22 @@ try {
 } catch {
     $primaryFailure=$_
 } finally {
-    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;ActiveAckChannel=$activeAckChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;FileControls=$fileControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
+    # Active custody is consumed before ACK. Keep ONLY its parent-private
+    # streams until all other owned cleanup has actually been attempted.
+    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;ActiveAckChannel=$activeAckChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;FileControls=$fileControls;Locks=$locks;Receipt=$(if($ActiveCompletion){$null}else{$receipt});Ack=$(if($ActiveCompletion){$null}else{$ack});Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
+    if($ActiveCompletion){
+        try{
+            $confirmation=@{schema=1;frame='cleanup';observer_run_id=$observerRun;owned_cleanup_verified=($cleanupErrors.Count -eq 0)}
+            $bytes=[Text.Encoding]::ASCII.GetBytes((($confirmation|ConvertTo-Json -Compress)+"`n"));$receipt.Write($bytes,0,$bytes.Length);$receipt.Flush()
+        }catch{$cleanupErrors.Add([pscustomobject]@{phase='cleanup_confirmation';error=$_})}
+        Invoke-OwnedCleanupStep $cleanupErrors 'receipt' $receipt {param($r)$r.Dispose()}
+        Invoke-OwnedCleanupStep $cleanupErrors 'ack' $ack {param($r)$r.Dispose()}
+    }
     foreach($failure in $cleanupErrors){
         Write-Error ('Owned generation cleanup failed at '+$failure.phase) -ErrorAction Continue
         Write-Error -ErrorRecord $failure.error -ErrorAction Continue
     }
-    if($cleanupErrors.Count -gt 0 -and $exitCode -eq 0){$exitCode=125}
+    if($cleanupErrors.Count -gt 0 -and ($ActiveCompletion -or $exitCode -eq 0)){$exitCode=125}
 }
 if($primaryFailure -and -not $cancelled){throw $primaryFailure}
 exit $exitCode

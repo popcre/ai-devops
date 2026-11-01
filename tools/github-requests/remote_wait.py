@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 HERE = Path(__file__).resolve().parent
 MAX_FRAME = 131072
@@ -177,7 +178,7 @@ def parse_frame(line):
     if not isinstance(row, dict) or type(row.get("protocol")) is not int or row["protocol"] != 1:
         raise ValueError("invalid observer protocol")
     kind = row.get("kind")
-    expected = {"stdout": "data", "stderr": "data", "started": "record", "receipt": "record", "exit": "code", "active": "record"}
+    expected = {"stdout": "data", "stderr": "data", "started": "record", "receipt": "record", "exit": "code", "active": "record", "cleanup": "record"}
     if kind not in expected or set(row) != {"protocol", "kind", expected[kind]}:
         raise ValueError("invalid observer frame shape")
     if kind in {"stdout", "stderr"}:
@@ -222,6 +223,58 @@ def _send_active_control(stream, data):
         return False
 
 
+def _write_active_private(path, value):
+    """Publish a complete active verdict only after private storage succeeds."""
+    path = Path(path)
+    parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = ".active-" + uuid.uuid4().hex
+    linked = False
+    identity = None
+    try:
+        info = os.fstat(parent)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077 or not stat.S_ISDIR(info.st_mode):
+            raise ValueError("private owned active receipt directory required")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+        identity = os.fstat(descriptor)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(json.dumps(value, sort_keys=True).encode("utf-8") + b"\n")
+            output.flush(); os.fsync(output.fileno())
+        os.fsync(parent)
+        os.link(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+        linked = True
+        os.fsync(parent)
+        os.unlink(temporary, dir_fd=parent)
+        os.fsync(parent)
+    except BaseException:
+        if linked:
+            current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise RuntimeError("owned active publication identity changed")
+            os.unlink(path.name, dir_fd=parent)
+        raise
+    finally:
+        try: os.unlink(temporary, dir_fd=parent)
+        except FileNotFoundError: pass
+        os.close(parent)
+def _finish_active_result(result, observation_started_ns, verified):
+    result.update(transport_cleanup_status="verified" if verified else "unverified",
+                  observer_transport_elapsed_ns=time.perf_counter_ns() - observation_started_ns,
+                  observer_elapsed_boundary=("parent_entry_before_popen_through_owned_transport_exit_before_storage" if verified
+                                             else "parent_entry_through_unverified_terminal_or_failure_before_storage"),
+                  setup_ssh_and_native_bootstrap_included=True,
+                  receipt_storage_elapsed_ns=None,
+                  unmeasured_overhead=["caller_interpreter_startup", "pre_entry_argument_preparation",
+                                       "receipt_storage_and_fsync", "post_return_cleanup"],
+                  whole_observer_budget_qualification="unknown")
+    if not verified:
+        result["active_completion_qualified"] = False
+        result["active_source_protocol_verified"] = False
+        for record in result["active_completion_records"]:
+            record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
+                    duration_upper_ms=None, unknown_reason="transport_unverified")
+    return result
+
+
 def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_hash=None,
             active_completion=False, sdk_coordinator=False):
     """Linux parent; only live frames can produce this observer receipt."""
@@ -248,6 +301,8 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     got_exit = False
     original_exit = None
     transcript = None
+    active_result = None
+    got_cleanup = cleanup_verified = False
     if active_completion:
         def acknowledge(identity):
             return _send_active_control(child.stdin, frame("active_ack", workflow_id=identity))
@@ -325,28 +380,44 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                         if source["active_channel_status"] != "valid":
                             transcript.invalid = True
                         qualified, records = transcript.result(source["child_exit"], source_verified=source["source_verified"] == "verified")
+                        interval_verified = bool(qualified and records and all(
+                            item["completion_qualification"]["unknown_reason"] == "none" for item in records))
                         result.update(measurement="linux_observed_windows_active_completion", active_completion_records=records,
-                                      active_completion_qualified=qualified, stdin_profile="active_no_stdin",
+                                      active_source_protocol_verified=qualified,
+                                      active_completion_qualified=interval_verified, stdin_profile="active_no_stdin",
                                       qualification_profile="sdk_only_no_provider" if sdk_coordinator else "original_context",
                                       original_privilege_equivalence=False,
                                       native_execution_profile=source["execution_profile"],
                                       detection_latency_ms=None, detection_unknown_reason="eligibility_and_delivery_not_witnessed")
+                        result.pop("event_qualification", None)
                         if not _send_active_control(child.stdin, frame("ack", observer_run_id=source["observer_run_id"])):
                             transcript.invalid = True
                             _, result["active_completion_records"] = transcript.result(source["child_exit"], source_verified=False)
                             result["active_completion_qualified"] = False
+                            result["active_source_protocol_verified"] = False
                             result["active_control_status"] = "unavailable"
                         else:
                             result["active_control_status"] = "delivered"
-                    try:
-                        _write_private(receipt_path, result)
-                    except (OSError, ValueError):
-                        print("request observation: receipt unavailable; original command status preserved", file=sys.stderr)
+                        active_result = result  # Never publish active qualification before cleanup/exit.
+                    else:
+                        try:
+                            _write_private(receipt_path, result)
+                        except (OSError, ValueError):
+                            print("request observation: receipt unavailable; original command status preserved", file=sys.stderr)
                     got_receipt = True
                     if not active_completion:
                         child.stdin.write(frame("ack", observer_run_id=source["observer_run_id"]))
                         child.stdin.flush()
                     original_exit = source["child_exit"]
+                elif row["kind"] == "cleanup":
+                    record = row["record"]
+                    if (not active_completion or not got_receipt or got_cleanup or not isinstance(record, dict)
+                            or set(record) != {"schema", "frame", "observer_run_id", "owned_cleanup_verified"}
+                            or type(record["schema"]) is not int or record["schema"] != 1 or record["frame"] != "cleanup"
+                            or record["observer_run_id"] != started["observer_run_id"]
+                            or type(record["owned_cleanup_verified"]) is not bool):
+                        raise ValueError("active owned cleanup confirmation unavailable")
+                    got_cleanup, cleanup_verified = True, record["owned_cleanup_verified"]
                 elif row["kind"] == "exit":
                     got_exit = True
                     if original_exit is None:
@@ -358,7 +429,17 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
         code = child.wait(timeout=max(1, deadline - time.monotonic()))
         if pending or not got_exit or original_exit is None or code != original_exit:
             raise ValueError("observer transport ended without original exit")
+        if active_completion and active_result is not None:
+            _finish_active_result(active_result, observation_started_ns, got_cleanup and cleanup_verified)
+            _write_active_private(receipt_path, active_result)
         return original_exit
+    except BaseException:
+        if active_completion and active_result is not None:
+            try:
+                _write_active_private(receipt_path, _finish_active_result(active_result, observation_started_ns, False))
+            except (OSError, ValueError):
+                pass
+        raise
     finally:
         selector.close()
         if child.stdin:
@@ -504,6 +585,10 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                             active_control_failed = True
                         else:
                             sys.stdout.buffer.write(frame("active", record={"data": record["data"], "queued": record["queued"]}))
+                    elif active_completion and record.get("frame") == "cleanup":
+                        if not got_receipt:
+                            raise ValueError("cleanup before source custody receipt")
+                        sys.stdout.buffer.write(frame("cleanup", record=record))
                     else:
                         if got_receipt:
                             raise ValueError("duplicate native receipt")
@@ -544,6 +629,10 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                     break
                 os.write(ack_write, b"\x01")
             if child.poll() is not None:
+                if active_completion and _peek(reader):
+                    continue  # Drain the final parent-private cleanup frame before terminal exit.
+                if active_completion and pending:
+                    raise ValueError("partial terminal active source frame")
                 output_frames()
                 sys.stdout.buffer.write(frame("exit", code=child.returncode))
                 sys.stdout.buffer.flush()
