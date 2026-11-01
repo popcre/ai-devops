@@ -256,6 +256,12 @@ public static class GenerationCustody {
   public void Dispose(){writer.Dispose();reader.Dispose();}
  }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites) {return Hold(path,directory,denyWrites,false);}
+ public static SafeFileHandle Metadata(string path,bool directory){
+  SafeFileHandle h=CreateFileW(path,0x20080,3,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero);
+  if(h.IsInvalid){int error=Marshal.GetLastWin32Error();h.Dispose();if(error==2||error==3)return null;throw new IOException("Config metadata unavailable");}
+  Info i;if(!GetFileInformationByHandle(h,out i)||(i.Attributes&0x400)!=0||((i.Attributes&0x10)!=0)!=directory||(!directory&&i.Links!=1)){h.Dispose();throw new IOException("Config alias or wrong object type refused");}
+  return h;
+ }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites,bool existingExecutable) {
   SafeFileHandle h=CreateFileW(path,0x80000000,denyWrites?1u:3u,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero);
   if(h.IsInvalid){h.Dispose();throw new IOException("Source custody handle unavailable");}
@@ -315,10 +321,40 @@ function Read-LockedBytes([string]$Path) {
 }
 function Assert-CounterContext {
     foreach($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','PAGER','GH_PAGER','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
+        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
     }
+    foreach($key in @('GH_PAGER','PAGER')){if([Environment]::GetEnvironmentVariable($key,'Process') -and [Environment]::GetEnvironmentVariable($key,'Process') -cne 'cat'){throw 'Only literal cat pager is qualified for nonTTY read'}}
     if($env:GH_HOST -and $env:GH_HOST -cne 'github.com'){throw 'Counter supports original github.com context only'}
     if([Console]::IsInputRedirected -eq $false -or [Console]::IsOutputRedirected -eq $false){throw 'Counter requires explicit nonTTY read capsule'}
+}
+function Config-Directory {
+    # cli2.97.0 internal/config/config.go delegates to go-gh/v2@v2.13.0
+    # pkg/config/config.go:250. Windows UserHomeDir is USERPROFILE, not HOME.
+    if($env:GH_CONFIG_DIR){return $env:GH_CONFIG_DIR}
+    if($env:XDG_CONFIG_HOME){return [IO.Path]::Combine($env:XDG_CONFIG_HOME,'gh')}
+    if($env:APPDATA){return [IO.Path]::Combine($env:APPDATA,'GitHub CLI')}
+    if($env:USERPROFILE){return [IO.Path]::Combine($env:USERPROFILE,'.config','gh')}
+    throw 'Original gh configuration location unavailable'
+}
+function Assert-ConfigMetadata {
+    $path=Config-Directory
+    # Match native Go absolute semantics. Reject drive-relative/root-relative
+    # and UNC namespaces rather than resolving them against a different cwd.
+    if($path -notmatch '^[A-Za-z]:[\\/]' -or $path.StartsWith('\\')){throw 'Absolute original gh configuration required'}
+    $directory=[IO.DirectoryInfo]::new([IO.Path]::GetFullPath($path))
+    $parents=@();$cursor=$directory
+    while($null -ne $cursor){$parents+=$cursor;$cursor=$cursor.Parent}
+    $tokenPresent=([bool]$env:GH_TOKEN -or [bool]$env:GITHUB_TOKEN)
+    foreach($parent in ($parents|Sort-Object {$_.FullName.Length})){
+        $held=[GenerationCustody]::Metadata($parent.FullName,$true)
+        if($null -eq $held){if($tokenPresent){return};throw 'Missing original gh config requires existing token environment'}
+        try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $parent.Parent));$script:locks.Add($held)}catch{$held.Dispose();throw}
+    }
+    foreach($name in @('config.yml','hosts.yml')){
+        $held=[GenerationCustody]::Metadata((Join-Path $directory.FullName $name),$false)
+        if($null -eq $held){if($name -ceq 'hosts.yml' -and -not $tokenPresent){throw 'Missing original gh hosts metadata requires existing token environment'};continue}
+        try{[GenerationCustody]::AssertProtectedParent($held,$false);$script:locks.Add($held)}catch{$held.Dispose();throw}
+    }
 }
 function Local-OnlyProbe([string]$Executable,[string[]]$Values) {
     $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$Executable;$info.UseShellExecute=$false
@@ -462,6 +498,7 @@ try {
     if($countRequests){
         if(-not $CounterManifest -or -not $ExpectedCounterManifestSha256 -or -not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -cne 'bin/ai-gh' -or $ObserverEvents){throw 'Counter requires explicit restricted finite ai-gh read with no stdin'}
         Assert-CounterContext
+        Assert-ConfigMetadata
     }
     if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
     foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {

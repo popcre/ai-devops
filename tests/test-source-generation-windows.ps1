@@ -13,7 +13,7 @@ $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref
 if($errors.Count){throw 'Supervisor PowerShell syntax invalid'}
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
-foreach($name in @('Hash-Bytes','Read-LockedBytes','Local-OnlyProbe','Capture-Counter','Bash-Path')){
+foreach($name in @('Hash-Bytes','Read-LockedBytes','Local-OnlyProbe','Capture-Counter','Bash-Path','Config-Directory','Assert-ConfigMetadata')){
     $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     . ([scriptblock]::Create($guard.Extent.Text))
 }
@@ -174,6 +174,58 @@ else:
     foreach($key in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_PAGER','AI_GH_HTTP_COUNTER_HANDLE','AI_GH_HTTP_COUNTER_FD','MSYS2_ARG_CONV_EXCL')){
         $saved=[Environment]::GetEnvironmentVariable($key,'Process')
         try{[Environment]::SetEnvironmentVariable($key,'unsupported-test-context','Process');Refuses {Assert-CounterContext} ('Ambient counter context refused: '+$key);Assert ([Environment]::GetEnvironmentVariable($key,'Process') -ceq 'unsupported-test-context') 'Counter guard preserves original environment'}finally{[Environment]::SetEnvironmentVariable($key,$saved,'Process')}
+    }
+    $savedConfigEnvironment=@{}
+    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    $savedConfigLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
+    try{
+        foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+        $config=Join-Path $root 'metadata-config';[GenerationCustody]::PrivateDirectory($config)
+        $env:USERPROFILE=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root '.config\gh')) 'Pinned Windows default uses USERPROFILE'
+        $env:APPDATA=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root 'GitHub CLI')) 'Pinned Windows APPDATA precedence'
+        $env:XDG_CONFIG_HOME=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root 'gh')) 'Pinned XDG precedence'
+        $env:GH_CONFIG_DIR=$config
+        Assert ((Config-Directory) -ceq $config) 'Explicit original config precedence'
+        Refuses {Assert-ConfigMetadata} 'Missing auth config without original token refuses'
+        [IO.File]::WriteAllText((Join-Path $config 'hosts.yml'),'owned synthetic fixture, not credentials')
+        Assert-ConfigMetadata;Assert $true 'Safe metadata-only configuration admitted'
+        $meta=[GenerationCustody]::Metadata((Join-Path $config 'hosts.yml'),$false)
+        try{Refuses {[GenerationCustody]::Read($meta)} 'Metadata handle cannot read credential bytes'}finally{$meta.Dispose()}
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)
+        $acl=Get-Acl -LiteralPath $hostFile
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Write,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $hostFile -AclObject $acl
+        Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
+        $acl=Get-Acl -LiteralPath $unsafe
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $unsafe -AclObject $acl;$env:GH_CONFIG_DIR=$unsafe
+        Refuses {Assert-ConfigMetadata} 'Foreign-writable config namespace refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $env:GH_CONFIG_DIR=$config
+        $alias=Join-Path $config 'config.yml'
+        & fsutil hardlink create $alias (Join-Path $config 'hosts.yml')|Out-Null
+        if($LASTEXITCODE -ne 0){throw 'Config alias fixture unavailable'}
+        Refuses {Assert-ConfigMetadata} 'Config file alias refused without reading'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();Remove-Item -LiteralPath $alias
+        $junction=Join-Path $root 'metadata-junction';New-Item -ItemType Junction -Path $junction -Target $config|Out-Null;$env:GH_CONFIG_DIR=$junction
+        Refuses {Assert-ConfigMetadata} 'Config directory alias refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();[IO.Directory]::Delete($junction)
+        $env:GH_CONFIG_DIR=Join-Path $root 'metadata-missing'
+        Refuses {Assert-ConfigMetadata} 'Missing directory cannot invent authentication'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $env:GH_TOKEN='owned-test-presence-only'
+        Assert-ConfigMetadata;Assert $true 'Missing config only admitted with existing token presence'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+    }finally{
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks=$savedConfigLocks
+        foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$savedConfigEnvironment[$key],'Process')}
     }
     if($CounterManifest){
         # Optional owned native integration: direct local --version only. Never
