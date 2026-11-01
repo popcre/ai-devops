@@ -1,5 +1,7 @@
 # Explicit #658 parent supervisor. Ordinary waiters never trust environment claims.
 # Windows PowerShell 5.1 compatible; no installation or machine-policy changes.
+# Scope: raw committed bin/tools/config bytes, not checkout EOL/.gitattributes
+# equivalence. Fixed issue/PR reads preserve the caller's working directory.
 param(
     [Parameter(Mandatory=$true)][string]$SourceRoot,
     [Parameter(Mandatory=$true)][ValidateSet('bin/ai-pr-wait','bin/ai-gh')][string]$EntryPoint,
@@ -44,6 +46,8 @@ public static class GenerationCustody {
  [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out SafeFileHandle token);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool DuplicateTokenEx(SafeFileHandle token,uint access,IntPtr security,int impersonation,int kind,out SafeFileHandle result);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool AdjustTokenPrivileges(SafeFileHandle token,bool disableAll,IntPtr state,uint size,IntPtr previous,IntPtr returned);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(SafeFileHandle token,int kind,IntPtr information,uint size,out uint needed);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool LookupPrivilegeNameW(string system,ref Luid luid,StringBuilder name,ref uint length);
  [StructLayout(LayoutKind.Sequential)] struct Luid {public uint Low;public int High;}
@@ -63,7 +67,12 @@ public static class GenerationCustody {
  public static SafeFileHandle Job(){SafeFileHandle j=CreateJobObjectW(IntPtr.Zero,null);JobLimits l=new JobLimits();l.Basic.Flags=0x2000;if(j.IsInvalid||!SetInformationJobObject(j,9,ref l,(uint)Marshal.SizeOf(typeof(JobLimits)))){j.Dispose();throw new IOException("Cancellation job unavailable");}return j;}
  static Privilege[] Privileges(SafeFileHandle token){uint needed;GetTokenInformation(token,3,IntPtr.Zero,0,out needed);if(needed<4||needed>65536)throw new IOException("Token privilege information unavailable");IntPtr buffer=Marshal.AllocHGlobal((int)needed);try{if(!GetTokenInformation(token,3,buffer,needed,out needed))throw new IOException("Token privilege information unavailable");int count=Marshal.ReadInt32(buffer);Privilege[] items=new Privilege[count];for(int i=0;i<count;i++)items[i]=(Privilege)Marshal.PtrToStructure(new IntPtr(buffer.ToInt64()+4+12*i),typeof(Privilege));return items;}finally{Marshal.FreeHGlobal(buffer);}}
  static string PrivilegeName(Luid id){uint length=256;StringBuilder text=new StringBuilder(256);if(!LookupPrivilegeNameW(null,ref id,text,ref length))throw new IOException("Token privilege name unavailable");return text.ToString();}
- public static bool PrivilegedContext(){SafeFileHandle token;if(!OpenProcessToken(GetCurrentProcess(),8,out token))throw new IOException("Token qualification unavailable");using(token){foreach(Privilege item in Privileges(token))if((item.Attributes&2)!=0){string name=PrivilegeName(item.Id);if(name=="SeRestorePrivilege"||name=="SeTakeOwnershipPrivilege"||name=="SeDebugPrivilege"||name=="SeTcbPrivilege")return true;}}return false;}
+ static bool HasBypassPrivilege(SafeFileHandle token){foreach(Privilege item in Privileges(token)){string name=PrivilegeName(item.Id);if(name=="SeRestorePrivilege"||name=="SeTakeOwnershipPrivilege"||name=="SeDebugPrivilege"||name=="SeTcbPrivilege")return true;}return false;}
+ public static bool PrivilegedContext(){SafeFileHandle token;if(!OpenProcessToken(GetCurrentProcess(),8,out token))throw new IOException("Token qualification unavailable");using(token){return HasBypassPrivilege(token);}}
+ public static string PrivilegeState(){SafeFileHandle token;if(!OpenProcessToken(GetCurrentProcess(),8,out token))throw new IOException("Token qualification unavailable");using(token){var names=new System.Collections.Generic.List<string>();foreach(Privilege p in Privileges(token))names.Add(PrivilegeName(p.Id)+":"+p.Attributes);names.Sort(StringComparer.Ordinal);return String.Join(";",names.ToArray());}}
+ public static bool DisabledBypassStillDetected(){
+  SafeFileHandle original;if(!OpenProcessToken(GetCurrentProcess(),0xf01ff,out original))throw new IOException("Owned token fixture unavailable");using(original){bool expected=HasBypassPrivilege(original);SafeFileHandle duplicate;if(!DuplicateTokenEx(original,0xf01ff,IntPtr.Zero,2,1,out duplicate))throw new IOException("Owned token duplication unavailable");using(duplicate){if(!AdjustTokenPrivileges(duplicate,true,IntPtr.Zero,0,IntPtr.Zero,IntPtr.Zero))throw new IOException("Owned token disable fixture unavailable");foreach(Privilege item in Privileges(duplicate))if((item.Attributes&2)!=0)throw new IOException("Fixture privilege remains enabled");return HasBypassPrivilege(duplicate)==expected;}}
+ }
  static SafeFileHandle RestrictedToken(){
   SafeFileHandle token;if(!OpenProcessToken(GetCurrentProcess(),0xf01ff,out token))throw new IOException("Read capsule token unavailable");
   using(token){var deleted=new System.Collections.Generic.List<Privilege>();foreach(Privilege item in Privileges(token))if(PrivilegeName(item.Id)!="SeChangeNotifyPrivilege")deleted.Add(item);
@@ -317,7 +326,8 @@ try {
     $reason = if ($verified) {'none'} else {'boundary_unavailable'}
     $detail = if ($verified) {'none'} else {'privileged_original_context'}
     $profile = if ($RestrictedReadProfile) {'restricted_read'} else {'original'}
-    $record = [ordered]@{schema=1;source_sha=$sourceSha;source_fingerprint=(Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString())));install_generation_binding=(Hash-Bytes $launcherBytes);source_boundary='windows_locked_generation';child_exit=$exitCode;source_verified=$(if($verified){'verified'}else{'unknown'});unknown_reason=$reason;boundary_detail=$detail;execution_profile=$profile;clock_quality='unknown';clock_error_bound_ms=$null}
+    $fingerprint = Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
+    $record = [ordered]@{schema=1;source_sha=$sourceSha;source_fingerprint=$fingerprint;loaded_source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';install_generation_binding=(Hash-Bytes $launcherBytes);source_boundary='windows_locked_generation';child_exit=$exitCode;source_verified=$(if($verified){'verified'}else{'unknown'});unknown_reason=$reason;boundary_detail=$detail;execution_profile=$profile;clock_quality='unknown';clock_error_bound_ms=$null}
     $bytes = [Text.Encoding]::UTF8.GetBytes((($record | ConvertTo-Json -Compress)+"`n"))
     $receipt.Write($bytes,0,$bytes.Length);$receipt.Flush()
     # Receipt is consumed before custody ends, never certified by a later file.

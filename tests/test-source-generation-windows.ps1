@@ -62,6 +62,8 @@ exit 0
     try {
         [GenerationCustody]::DirectoryAccess($control,$false)
         $beforePrivileges=[GenerationCustody]::PrivilegedContext()
+        $beforePrivilegeState=[GenerationCustody]::PrivilegeState()
+        Assert ([GenerationCustody]::DisabledBypassStillDetected()) 'Present disabled bypass privileges remain unqualified'
         $job=[GenerationCustody]::Job()
         $executable=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -72,6 +74,7 @@ exit 0
         $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
         try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'} finally {$process.Dispose();$job.Dispose()}
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
+        Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
     } finally {[GenerationCustody]::DirectoryAccess($control,$true);$control.Dispose();$attackHold.Dispose()}
     [IO.File]::WriteAllText($injected,'parent restoration works')
