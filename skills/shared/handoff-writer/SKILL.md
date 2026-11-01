@@ -5,6 +5,10 @@ description: Write or audit a fresh-developer-grade, write-once HANDOFF.d file. 
 
 # handoff-writer
 
+For the selective fresh-reader pilot, read
+[`plan_selective-fresh-reader.md`](../../../plan_selective-fresh-reader.md) STATUS
+first. It is opt-in and does not replace the self-audit below.
+
 The user works across many short sessions with clean context windows; the handoff
 IS the memory carried forward. A thin handoff forces them to babysit long
 sessions — the exact thing this skill prevents. It applies to two situations:

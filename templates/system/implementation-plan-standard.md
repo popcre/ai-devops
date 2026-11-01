@@ -1,5 +1,9 @@
 # IMPLEMENTATION PLAN standard — how EVERY session must write a plan
 
+For the selective fresh-reader pilot, read
+[`plan_selective-fresh-reader.md`](../../plan_selective-fresh-reader.md) STATUS
+first. It is opt-in and does not replace the self-audit below.
+
 Hard standard, not a suggestion. Applies to Claude AND Codex, every time.
 Companion to `handoff-standard.md`: the handoff records what happened, the plan
 directs what happens next. Skill: `implementation-plan-writer`.

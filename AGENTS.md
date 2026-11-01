@@ -162,6 +162,10 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
+Selective EGM-inspired fresh-reader checks for complex plans or handoffs: read
+[`plan_selective-fresh-reader.md`](plan_selective-fresh-reader.md) STATUS first;
+opt-in pilot only, no new review gate or full EGM rollout.
+
 Shared-db migration gate trimming (plan, not active): read
 [`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) STATUS first;
 [popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
