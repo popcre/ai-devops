@@ -1088,6 +1088,19 @@ class ActiveEventConsumerTests(unittest.TestCase):
         transcript.receive(self.facts(), self.clock(4100))
         self.assertEqual(transcript.result(0, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
 
+    def test_caller_dry_run_intent_blocks_forged_completed_alarm_facts(self):
+        for dry_run in (True, "false", 0, None):
+            with self.subTest(dry_run=dry_run):
+                transcript, _ = self.transcript()
+                transcript.dry_run = dry_run  # Trusted caller policy; frames cannot set this.
+                transcript.receive(self.facts(), self.clock(4100))
+                verified, records = transcript.result(0, source_verified=True)  # Protocol fixture only.
+                self.assertTrue(verified)
+                qualification = records[0]["event_qualification"]
+                self.assertEqual(qualification["unknown_reason"], "event_unknown")
+                self.assertIsNone(qualification["latency_lower_ms"])
+                self.assertIsNone(qualification["latency_upper_ms"])
+
     def test_actual_telemetry_append_precedes_forward_and_failure_preserves_status(self):
         script = '''source "$1"
 gh_measure_append(){ printf 'APPEND\\n'; return "$APPEND_STATUS"; }
