@@ -36,7 +36,8 @@ class PublicGitTests(unittest.TestCase):
         (directory / "read.py").write_text("print('fixture')\n")
         (directory / "run").write_text("#!/bin/sh\nexit 0\n")
         (directory / "run").chmod(0o755)
-        self.git("add", "new-directory")
+        (self.repo / "old").write_text("modified fixture\n")
+        self.git("add", "old", "new-directory")
         self.git("commit", "-qm", "after")
         self.after = self.git("rev-parse", "HEAD").strip()
         self.git("checkout", "-q", "--detach", self.before)
@@ -70,7 +71,7 @@ class PublicGitTests(unittest.TestCase):
             descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.close(descriptor)
             self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
         finally: os.umask(original)
-        for name, mode in [("new-directory", 0o755), ("new-directory/read.py", 0o644), ("new-directory/run", 0o755)]:
+        for name, mode in [("old", 0o644), ("new-directory", 0o755), ("new-directory/read.py", 0o644), ("new-directory/run", 0o755)]:
             info = (self.repo / name).stat()
             self.assertEqual((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)),
                              (self.owner.pw_uid, self.owner.pw_gid, mode))
@@ -120,6 +121,44 @@ class PublicGitTests(unittest.TestCase):
                         "user.email=fixture@example.invalid", "commit", "-qm", "root fixture"], check=True)
         self.assertEqual(helper.public_git(owned, ["checkout", "--detach", "HEAD"]), 0)
         self.assertEqual((owned / "file").stat().st_uid, 0)
+
+    @unittest.skipUnless(os.geteuid() == 0, "actual ownership transition requires root")
+    def test_existing_file_new_inode_transition_restores_source_owner(self):
+        path = self.repo / "old"
+        descriptor = os.open(path, os.O_RDONLY)
+        before = os.fstat(descriptor)
+        try:
+            self.assertEqual(helper.public_git(self.repo, ["checkout", "--detach", self.after]), 0)
+            after = path.stat()
+            # Holding the old inode prevents its reuse: exercise the normal
+            # distinct-inode case alongside the unheld modified-file case above.
+            self.assertNotEqual((after.st_dev, after.st_ino), (before.st_dev, before.st_ino))
+            self.assertEqual(after.st_uid, self.owner.pw_uid)
+            self.assertEqual(path.read_text(), "modified fixture\n")
+            self.assertEqual(os.read(descriptor, 100), b"old\n")
+        finally: os.close(descriptor)
+
+    @unittest.skipUnless(os.geteuid() == 0, "actual preexisting root-owned file requires root")
+    def test_preexisting_root_file_same_inode_inplace_edit_keeps_owner(self):
+        path = self.repo / "old"
+        os.chown(path, 0, 0)
+        before = helper.metadata(path)
+        real_run = subprocess.run
+        def git_then_inplace_edit(*args, **kwargs):
+            result = real_run(*args, **kwargs)
+            if "reset" in args[0]:
+                path.write_text("modified fixture\n")
+                directory = self.repo / "new-directory"; directory.mkdir()
+                (directory / "read.py").write_text("print('fixture')\n")
+                (directory / "run").write_text("#!/bin/sh\nexit 0\n")
+                (directory / "run").chmod(0o755)
+            return result
+        with mock.patch.object(helper.subprocess, "run", side_effect=git_then_inplace_edit):
+            self.assertEqual(helper.public_git(self.repo, ["reset", "--mixed", self.after]), 0)
+        after = helper.metadata(path)
+        self.assertEqual(after[:4], before[:4])
+        self.assertNotEqual(after[5], before[5])
+        self.assertEqual(path.read_text(), "modified fixture\n")
 
     def test_fetch_outputs_remain_readable_by_source_owner(self):
         upstream = self.parent / "upstream"; upstream.mkdir()
