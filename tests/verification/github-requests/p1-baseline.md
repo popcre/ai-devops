@@ -680,7 +680,7 @@ showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
 behind in the squash context. This is sanitized continuity, not mirror CI
 execution parity; GitHub's required safety result remains authoritative.
 
-The final overview subsequently showed exact landing
+That earlier delivery's overview subsequently showed exact landing
 `a98131576c3a092fc19ec938d24650ab98469c8a`.
 [Existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
 showed Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
