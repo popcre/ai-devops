@@ -1,5 +1,38 @@
 # Entire reversible trial execution report — #2022
 
+## October 31 replacement target and execution boundary
+
+The owner now authorizes testing Entire controlling testing and merging, with
+GitHub retaining official code. Read the
+[controlling amendment](../../../plan_entire-reversible-trial.md#october-31-controlling-amendment--entire-testing-and-merge-trial)
+and [full continuity handoff](../../../HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
+This is a change in test authority, not a replacement result. The
+[feasibility receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550148920)
+distinguishes documented Buildkite self-hosted support, unqualified actual
+Windows jobs and the still-active GitHub PR/check/queue constraints.
+
+Delivered source: [PR2195](https://github.com/popcre/ai-devops/pull/2195),
+landing [d7f4c10](https://github.com/popcre/ai-devops/commit/d7f4c10d4fcd6cf3038366cd03e17c53820d869f).
+Ordinary exact-head Linux aggregate/all12 Windows PR sections passed at990c8b95
+in [run41117625277](https://github.com/popcre/ai-devops/actions/runs/41117625277);
+queue [run41120242623](https://github.com/popcre/ai-devops/actions/runs/41120242623)
+passed at the landing. Existing GitHub CI did this work, not a native provider.
+
+Protected installations are incomplete: edge-dev/4837 advanced source to the
+landing but retain old managed receipts after a PowerShell5.1 absent-task query
+failure. Linux advanced source but the required private-memory seed rejected
+its over-limit index; no private facts/limit/health gate were modified.916 was
+not attempted. Linux default global distribution also omits MiMo/ZCode, unlike
+the explicit four-client adopter. Original settings and recoverable baselines
+must be preserved during repair. All16 actual fresh-client journeys remain
+unpassed. Native UI access and missing apps are separate unqualified gates.
+
+Disposable PR2196's failed9257823b showed real GitHub/Entire failure parity;
+repair4e244108 now has26 successful CI checks and3 skipped jobs, with only the
+nonrequired Entire Gates still in progress at cutover reconciliation. No old
+pass was accepted while repair was pending. This is display/fault evidence,
+not native execution, complete newer-failure rejection or whole-process parity.
+
 ## Fleet and CI implementation baseline
 
 October 30, 2026 continuation, coordinator Codex chat
