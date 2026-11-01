@@ -493,7 +493,7 @@ OPERATIONS.update("run." + value for value in ("view", "list", "cancel"))
 CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run",
            "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence",
            "ai-transcript-destination-check", "ai-workspace-status", "ai-reviewer-membership-drift",
-           "ai-devops-doctor", "ai-devops-installer"}
+           "ai-devops-doctor", "ai-devops-installer", "ai-task-gates", "review-fixer"}
 COST_KEYS = {"schema", "utc", "measurement", "caller", "operation", "workflow", "graphql_points", "http_requests"}
 COST_KEYS_WITH_ID = COST_KEYS | {"workflow_id"}
 COST_SHAPES = {frozenset(keys | extra) for keys in (COST_KEYS, COST_KEYS_WITH_ID)

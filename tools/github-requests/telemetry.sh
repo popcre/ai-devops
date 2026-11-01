@@ -21,7 +21,7 @@ gh_measure_init(){
   case "${AI_GH_CALLER:-}" in
     ai-pr-wait|ai-gh-wait|ai-blocker-watch|ai-verify-run|ai-memory-sync|ai-test-local|\
     ai-merge-group-evidence|ai-transcript-destination-check|ai-workspace-status|\
-    ai-reviewer-membership-drift|ai-devops-doctor|ai-devops-installer|interactive)
+    ai-reviewer-membership-drift|ai-devops-doctor|ai-devops-installer|ai-task-gates|review-fixer|interactive)
       GH_MEASURE_CALLER="$AI_GH_CALLER" ;;
   esac
   if [ "$GH_MEASURE_CALLER" = ai-blocker-watch ]; then

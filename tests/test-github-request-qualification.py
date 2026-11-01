@@ -117,6 +117,18 @@ class EventTests(unittest.TestCase):
             summary = report.summarize(Path(directory) / "measurements")
             self.assertEqual(summary["completed_workflow_receipts"], 6)
 
+    def test_fixed_gate_and_fixer_callers_do_not_widen_arbitrary_labels(self):
+        collector = str(ROOT / "tools/github-requests/telemetry.sh")
+        for caller, expected in (("ai-task-gates", "ai-task-gates"), ("review-fixer", "review-fixer"),
+                                 ("review-fixer:private-target", "unknown")):
+            result = subprocess.run(["bash", "-c", 'source "$1"; gh_measure_init api graphql; printf "%s" "$GH_MEASURE_CALLER"',
+                                     "bash", collector], env=dict(os.environ, AI_GH_CALLER=caller),
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, expected)
+        self.assertIn("ai-task-gates", report.CALLERS)
+        self.assertIn("review-fixer", report.CALLERS)
+        self.assertNotIn("review-fixer:private-target", report.CALLERS)
+
 
 class ParentTests(unittest.TestCase):
     def setUp(self):
