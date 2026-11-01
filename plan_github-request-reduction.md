@@ -34,15 +34,25 @@ Three parallel audits reconciled source, fleet and measurement evidence.
   violations; [the baseline supplement](tests/verification/github-requests/p1-baseline.md#coordinator-natural-sample--october-31-2026-edt)
   records its digests and limits. It does not establish paired savings.
 
-Acceptance prerequisites remain real, rather than something longer observation
-alone can fix: schema-4 deliberately leaves loaded-source and remote-clock
-qualification unknown; the outgoing-write prototype is not an installed
-whole-command/whole-account census; dispatch/privacy terminal outcome receipts
-are absent. Preserve these unknowns, the accepted two busy windows, and all
-existing capability/safety boundaries. Keep `live proof` on #658/#660.
-Do not retrofit the new sample as a prospective baseline or activate the
-qualification-only counter in production. Measurement qualification must
-precede the next matched natural-workload comparison.
+October 31, 2026, 11:53 PM EDT measurement follow-through: the
+[measured comparison](tests/verification/github-requests/p1-baseline.md#coordinator-measured-comparison--october-31-2026-edt)
+now records literal historical-helper replay and six necessary source-qualified
+live reads. Replay retained 712 reads (0% saving), removed 488 unchanged-content
+writes and preserved outcomes; local p95 failed the 5% budget. This cannot be
+relabeled natural-workload savings or qualified remote detection latency.
+The six real commands observed 13 primary writes including admission/identity
+probes, not whole-account HTTP or GraphQL consumption. Direct counter overhead
+passed; the full observer route did not and stays qualification-only.
+
+Explicit live-parent source/clock qualification, finite version-matched counter
+profiles, prospective read intervals, dispatch/privacy outcome receipts and
+strict comparison are being delivered by the current coordinator. Ordinary
+schema-4 and historical records remain unknown. PR #1709 was superseded in full;
+PR #1567's unique historical document was recovered exactly before closure.
+T16 is now online but SSH failed from two trusted hosts; no alternative executor
+is documented. Retain existing accepted busy windows, safety boundaries and
+`live proof` on #658/#660. No manufactured demand, weakened thresholds or
+global observer routing is authorized by these measurements.
 
 ### Preserved scoped-repair and historical records
 
