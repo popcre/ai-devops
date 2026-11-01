@@ -167,7 +167,15 @@ def restore_outputs(root, common, owner, before):
     for path, intended_mode in candidates.items():
         observed = metadata(path)
         prior = before.get(path)
-        if observed is None or observed[2] != 0 or (prior is not None and observed[:2] == prior[:2]):
+        if observed is None or observed[2] != 0:
+            continue
+        if (prior is not None and observed[:2] == prior[:2]
+                and not (prior[2] != 0 and observed[5] != prior[5])):
+            # Git may unlink and recreate a tracked file while the filesystem
+            # immediately reuses its inode. A changed ctime plus non-root→root
+            # owner transition still identifies this root-created generation.
+            # Preserve a preexisting root-owned same-inode file even when its
+            # contents/ctime changed; that is not an authorized ownership repair.
             continue
         # Existing directories keep established ownership/permissions. Only
         # exact new directories and new/replaced public file inodes qualify.
