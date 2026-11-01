@@ -21,7 +21,36 @@ $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.Function
 . ([scriptblock]::Create($guard.Extent.Text))
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
-$root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+$root=$null
+$fixtureParentPins=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+# Synthetic config fixtures need the same trusted ancestry their guard tests.
+# Runner TEMP/profile ancestry can legitimately be foreign-writable for a
+# service account. Verify and pin existing standard parents; never repair them.
+# The final local-volume candidate uses only existing create-new-folder rights.
+$candidates=@([Environment]::GetFolderPath('UserProfile'),(Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),'C:\')
+foreach($candidate in $candidates){
+    if(-not $candidate){continue}
+    $pins=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+    try{
+        $parent=[IO.DirectoryInfo]::new($candidate)
+        if(-not $parent.Exists){throw 'Existing fixture parent required'}
+        if($parent.Parent -eq $null -and [IO.DriveInfo]::new($parent.FullName).DriveType -ne [IO.DriveType]::Fixed){throw 'Local fixed volume required'}
+        $ancestors=@();$cursor=$parent
+        while($null -ne $cursor){$ancestors+=$cursor;$cursor=$cursor.Parent}
+        foreach($ancestor in ($ancestors|Sort-Object {$_.FullName.Length})){
+            $pin=[GenerationCustody]::Metadata($ancestor.FullName,$true)
+            if($null -eq $pin){throw 'Fixture ancestor unavailable'}
+            try{[GenerationCustody]::AssertProtectedParent($pin,($null -eq $ancestor.Parent));$pins.Add($pin)}
+            catch{$pin.Dispose();throw}
+        }
+    }catch{foreach($pin in $pins){$pin.Dispose()};continue}
+    $root=Join-Path $parent.FullName ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+    try{[GenerationCustody]::PrivateDirectory($root)}
+    catch{foreach($pin in $pins){$pin.Dispose()};throw}
+    $fixtureParentPins=$pins
+    break
+}
+if(-not $root){throw 'No verified existing fixture parent; no permissions changed'}
 foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
     $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
@@ -30,7 +59,6 @@ foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
 $passed=0
 function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
 function Refuses([scriptblock]$Operation,[string]$Name){$refused=$false;try{& $Operation}catch{$refused=$true};Assert $refused $Name}
-[GenerationCustody]::PrivateDirectory($root)
 $file=Join-Path $root 'sealed.sh'
 $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($file,'sealed bytes')
@@ -256,18 +284,18 @@ else:
         $meta=[GenerationCustody]::Metadata((Join-Path $config 'hosts.yml'),$false)
         try{Refuses {[GenerationCustody]::Read($meta)} 'Metadata handle cannot read credential bytes'}finally{$meta.Dispose()}
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)
+        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
         $acl=Get-Acl -LiteralPath $hostFile
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Write,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $hostFile -AclObject $acl
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),[Security.AccessControl.FileSystemRights]::ReadData,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $hostFile -AclObject $acl
         Refuses {Assert-ConfigMetadata} 'Foreign credential file reader refused without reading bytes'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
         $acl=Get-Acl -LiteralPath $unsafe
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
@@ -276,8 +304,7 @@ else:
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $env:GH_CONFIG_DIR=$config
         $alias=Join-Path $config 'config.yml'
-        & fsutil hardlink create $alias (Join-Path $config 'hosts.yml')|Out-Null
-        if($LASTEXITCODE -ne 0){throw 'Config alias fixture unavailable'}
+        New-Item -ItemType HardLink -Path $alias -Value (Join-Path $config 'hosts.yml') -ErrorAction Stop|Out-Null
         Refuses {Assert-ConfigMetadata} 'Config file alias refused without reading'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();Remove-Item -LiteralPath $alias
         $junction=Join-Path $root 'metadata-junction';New-Item -ItemType Junction -Path $junction -Target $config|Out-Null;$env:GH_CONFIG_DIR=$junction
@@ -397,8 +424,7 @@ else:
     New-Item -ItemType Junction -Path $junction -Target $root | Out-Null
     try { Refuses {$h=[GenerationCustody]::Hold($junction,$true,$false);$h.Dispose()} 'Reparse directory refuses' } finally {[IO.Directory]::Delete($junction)}
     $link=Join-Path $root 'hardlink.sh'
-    & fsutil hardlink create $link $file | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Hardlink fixture unavailable' }
+    New-Item -ItemType HardLink -Path $link -Value $file -ErrorAction Stop | Out-Null
     Refuses { $h=[GenerationCustody]::Hold($link,$false,$true);$h.Dispose() } 'Hardlinked source refuses'
     Remove-Item -LiteralPath $link
 } catch { $primaryFailure=$_ }
@@ -407,7 +433,7 @@ finally {
         $remainingFiles=@($fileControls|Where-Object{-not $_.IsClosed})
         $remainingDirectories=@();if($control -and -not $control.IsClosed){$remainingDirectories=@($control)}
         $outerCleanup=Close-OwnedGeneration @{DirectoryControls=$remainingDirectories;FileControls=$remainingFiles;
-            Locks=@($directory,$held);CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
+            Locks=(@($fixtureParentPins.ToArray())+@($directory,$held));CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
             Receipt=$null;Ack=$null;Snapshot=$root;Bootstrap=$null}
         if($outerCleanup.Count){throw [AggregateException]::new('Owned fixture cleanup failed',[Exception[]]@($outerCleanup|ForEach-Object{$_.error.Exception}))}
     } catch { $cleanupFailure=$_ }
