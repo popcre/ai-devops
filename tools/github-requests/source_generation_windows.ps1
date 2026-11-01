@@ -203,6 +203,11 @@ public static class GenerationCustody {
   AssertProtectedMetadata(handle,volumeRoot,false);
  }
  public static void AssertPrivateConfigFile(SafeFileHandle handle){AssertProtectedMetadata(handle,false,true);}
+ public static void AssertPrivateConfigDirectory(SafeFileHandle handle){
+  IntPtr owner,group,dacl,sacl,descriptor;if(GetSecurityInfo(handle,1,5,out owner,out group,out dacl,out sacl,out descriptor)!=0)throw new IOException("Config directory security unavailable");
+  try{uint length=GetSecurityDescriptorLength(descriptor);if(length==0||length>65536)throw new IOException("Config directory security unavailable");byte[] bytes=new byte[length];Marshal.Copy(descriptor,bytes,0,(int)length);RawSecurityDescriptor security=new RawSecurityDescriptor(bytes,0);if((security.ControlFlags&ControlFlags.DiscretionaryAclProtected)==0)throw new IOException("Original config directory must have protected DACL");}finally{LocalFree(descriptor);}
+  AssertProtectedMetadata(handle,false,false);
+ }
  static void AssertProtectedMetadata(SafeFileHandle handle,bool volumeRoot,bool privateFile){
   IntPtr owner,group,dacl,sacl,descriptor;if(GetSecurityInfo(handle,1,5,out owner,out group,out dacl,out sacl,out descriptor)!=0)throw new IOException("Parent security unavailable");
   try{uint length=GetSecurityDescriptorLength(descriptor);if(length==0||length>65536)throw new IOException("Parent security unavailable");byte[] bytes=new byte[length];Marshal.Copy(descriptor,bytes,0,(int)length);RawSecurityDescriptor security=new RawSecurityDescriptor(bytes,0);
@@ -276,7 +281,10 @@ public static class GenerationCustody {
  }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites) {return Hold(path,directory,denyWrites,false);}
  public static SafeFileHandle Metadata(string path,bool directory){
-  SafeFileHandle h=CreateFileW(path,0x20080,3,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero);
+  // Directory LIST_DIRECTORY makes this a real read-sharing lease: metadata-
+  // only handles do not reliably prevent recursive deletion. Files never gain
+  // FILE_READ_DATA here; credential contents remain inaccessible to this handle.
+  SafeFileHandle h=CreateFileW(path,directory?0x20081u:0x20080u,3,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero);
   if(h.IsInvalid){int error=Marshal.GetLastWin32Error();h.Dispose();if(error==2||error==3)return null;throw new IOException("Config metadata unavailable");}
   Info i;if(!GetFileInformationByHandle(h,out i)||(i.Attributes&0x400)!=0||((i.Attributes&0x10)!=0)!=directory||(!directory&&i.Links!=1)){h.Dispose();throw new IOException("Config alias or wrong object type refused");}
   return h;
@@ -405,11 +413,20 @@ function Assert-ConfigMetadata {
     $parents=@();$cursor=$directory
     while($null -ne $cursor){$parents+=$cursor;$cursor=$cursor.Parent}
     $tokenPresent=([bool]$env:GH_TOKEN -or [bool]$env:GITHUB_TOKEN)
+    $configPins=@()
     foreach($parent in ($parents|Sort-Object {$_.FullName.Length})){
         $held=[GenerationCustody]::Metadata($parent.FullName,$true)
         if($null -eq $held){if($tokenPresent){return};throw 'Missing original gh config requires existing token environment'}
-        try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $parent.Parent));$script:locks.Add($held)}catch{$held.Dispose();throw}
+        # Metadata denies delete sharing and refuses reparses. Pin every ancestor
+        # before the next lookup; its DACL does not govern the protected child.
+        # Only this config path permits writable ancestors. Snapshot/staging and
+        # vendor ancestors retain AssertProtectedParent's stricter policy.
+        try{if([object]::ReferenceEquals($parent,$directory)){[GenerationCustody]::AssertPrivateConfigDirectory($held)};$script:locks.Add($held);$configPins+=@{path=$parent.FullName;held=$held}}catch{$held.Dispose();throw}
     }
+    # An ancestor could have acquired a reparse tag before its child was pinned.
+    # Now every child is held against deletion: verify the whole pinned chain
+    # again without following reparses, binding each pathname to the same object.
+    foreach($pin in $configPins){$check=[GenerationCustody]::Metadata($pin.path,$true);try{if($null -eq $check -or -not [GenerationCustody]::Same($pin.held,$check)){throw 'Original config ancestor identity changed'}}finally{if($null -ne $check){$check.Dispose()}}}
     foreach($name in @('config.yml','hosts.yml')){
         $held=[GenerationCustody]::Metadata((Join-Path $directory.FullName $name),$false)
         if($null -eq $held){if($name -ceq 'hosts.yml' -and -not $tokenPresent){throw 'Missing original gh hosts metadata requires existing token environment'};continue}
