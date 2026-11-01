@@ -26,7 +26,7 @@ from full caller-through-cleanup costs; neither alone supplies a whole-observer
 budget verdict. Default original-context and provider-capable work executes once
 outside reduced-rights qualification. Explicit SDK-only alarm/links is component
 scope, not arbitrary privileged-provider acceptance. Native integration and final
-installed proof are still required. Candidate `e6ed1ac8` adds durable-only
+installed proof are still required. `e6ed1ac8`, merged through #2285 as `4bee93ba`, adds durable-only
 unqualified event facts (185 BlockerWatch and 31 receipt/fact cases passed on
 Linux). Its first native controller exceeded its aggregate deadline without
 preserving streams; the corrected bounded protocol then passed all 31 native
@@ -36,12 +36,13 @@ retains actual `e6ed` source; separate executed-closure equivalence to PR #2285
 head `7f926` is bound by
 `7e6e997c7a2031d74243142d848727c0f590555a372d05f14a87e281cd61deb7`.
 The original 180-second timeout remains historical protocol failure evidence.
-The separately finished governed consumer `f2a90c12` now joins one bounded
+The separately finished governed consumer `f2a90c12` is open in #2286 at
+`1196f133`, with all four tested code/test blobs exactly equivalent. It joins one bounded
 facts frame per acknowledged completed active ID, using a separate parent
 receive clock and unchanged END completion clock. Only a successful standalone
 explicit SDK alarm can receive its conservative batch-ack interval. Default
 original-context, links, wakes, ticks and failed/partial/refused operations
-cannot receive numeric detection. Producer/consumer landing, native integration
+cannot receive numeric detection. Consumer landing, native integration
 and installed proof remain required; future facts alone cannot supply them.
 Its Linux gates passed 60 qualification, 31 caller/fact, 185 BlockerWatch and
 38 counter cases. A caught no-observer dispatch regression was fixed by requiring
