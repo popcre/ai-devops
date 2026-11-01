@@ -510,6 +510,14 @@ class CohortContract(unittest.TestCase):
                     _packet_receive(channel)
             finally: os.close(descriptor)
 
+    def test_malformed_close_cannot_report_successful_cleanup(self):
+        for value in (True, 1.0):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                channel, process = self.worker(directory, 'exit 0')
+                _packet_send(channel, {'close': value})
+                process.wait(timeout=4)
+                self.assertNotEqual(process.returncode, 0)
+
     def test_isolated_worker_ignores_hostile_user_site_without_changing_child_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             home = pathlib.Path(directory)
