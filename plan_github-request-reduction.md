@@ -2,6 +2,50 @@
 
 ## STATUS — read first
 
+October 31, 2026 EDT coordinator reconciliation — the [linked completion
+comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
+is still accurate: #2219/#2225/#2229 and their installed Linux/Windows proofs
+are complete; broader fleet and comparable-workload acceptance is not.
+Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
+Three parallel audits reconciled source, fleet and measurement evidence.
+
+- Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
+  `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains
+  accepted. The companion plan and baseline now distinguish these completed
+  landings from remaining measurement qualification. Do not repeat them.
+- Read-only fleet audit found the final `ai-gh` hash on edge-dev3, all three
+  active Windows launcher destinations and all ten local runner toolkit
+  copies. Windows receipts name `9c912187`; edge-dev3 names `d36de907`.
+  Source presence is not a full installation receipt or proof of code already
+  loaded by a running Bash process. Old alternate Windows copies were preserved.
+- Hetz's active installation was still `b2a9fb8d`; the full protected update
+  and required-stage recovery now pass at exact `0a710176ad6dafaf2ed88a790faf2e5a7686cfae`.
+  Its manifest matches and installed `ai-gh` digest is
+  `cc062b97f56423e0b8699dca9310431bf767a909b8f7c214f0668f1015f7c19f`.
+  A useful installed #658 read returned OPEN and its title, exit 0 in 12.21
+  seconds. Existing SSH identity selection repaired private-hub visibility;
+  no required stage was skipped or private memory content changed. This is
+  capability proof, not a speed comparison. ALBT16 was initially online but
+  its strict SSH connection timed out. At 10:18:10 PM EDT it was offline;
+  the approved atlas documents no alternative trusted execution route and
+  no native chat is connected. No host trust changed. The coordinator owns
+  this external access blocker; P7 remains open for complete coverage.
+- A fresh immutable closed-file natural sample validates with zero privacy
+  violations; [the baseline supplement](tests/verification/github-requests/p1-baseline.md#coordinator-natural-sample--october-31-2026-edt)
+  records its digests and limits. It does not establish paired savings.
+
+Acceptance prerequisites remain real, rather than something longer observation
+alone can fix: schema-4 deliberately leaves loaded-source and remote-clock
+qualification unknown; the outgoing-write prototype is not an installed
+whole-command/whole-account census; dispatch/privacy terminal outcome receipts
+are absent. Preserve these unknowns, the accepted two busy windows, and all
+existing capability/safety boundaries. Keep `live proof` on #658/#660.
+Do not retrofit the new sample as a prospective baseline or activate the
+qualification-only counter in production. Measurement qualification must
+precede the next matched natural-workload comparison.
+
+### Preserved scoped-repair and historical records
+
 October 31, 2026 EDT admission repair under #658 — the first-stage repair is
 merged and installed on both proved hosts. The bounded-admission follow-up
 also landed and was installed; its Linux terminal-state proof passed, but the
