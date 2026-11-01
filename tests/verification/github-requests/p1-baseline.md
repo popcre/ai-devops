@@ -61,6 +61,16 @@ SSH, including transport, not an exact native SDK acknowledgement interval.
 Native integration and proof remain unfinished; whole-observer budget remains
 unknown for both routes.
 
+The native completion/facts component subsequently passed eight native Python
+tests with at least fifty actual assertions in 7.604 seconds at `acb359c1`.
+Receipt `46f5542dd3ac2573b5b9ed2c48d8df611fb523e8880877c522eda52e35f9b0b5`
+was independently hashed; it records zero owned processes, no API/notifications,
+component-only scope and original-active qualification false. Its delivery
+`c796afc7` preserves executed native source bytes; the separate common
+`AI_GH_ACTIVE_BASH` cleanup hardening `7e0e0f93` has one actual Linux fallback
+FD/session regression pass, not retargeted native execution. Final combined
+landing/installed proof remain required.
+
 Coverage aggregate V4 has digest
 `fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.
 It preserves all seven V3 input bindings and adds the immutable context-scope

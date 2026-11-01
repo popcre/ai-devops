@@ -69,7 +69,10 @@ code/test blobs equal to tested `f2a90c12` and 60 qualification, 31 caller/fact,
 and 38 counter cases passing. It admits only successful standalone explicit
 SDK alarms, conservatively bounds batch acknowledgement and leaves links,
 wakes, original-context/provider work and whole-observer budgets unknown.
-Native integration and final installation remain
+Native completion/facts candidate `acb359c1` passed eight native tests with at
+least fifty actual assertions and zero owned processes remaining; this is
+component proof, with original privileged source and full observer budget
+unknown. Its delivery and final installation remain
 unfinished; genuine future activity alone is not their substitute. Accepted
 P5/headroom proof stays accepted.
 
