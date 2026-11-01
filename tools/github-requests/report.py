@@ -774,24 +774,67 @@ def sealed_source(data):
         raise
 
 
-def installed_source(root, manifest):
-    """Bind exact Git blobs to the real installed waiter manifest entry.
-
-    The manifest is read through its verified descriptor. Source comes from
-    immutable Git blobs, not from path bytes that could change after hashing.
-    No config values or local paths enter the public receipt.
-    """
-    root = pathlib.Path(root).resolve(strict=True)
-    manifest = pathlib.Path(manifest)
-    descriptor = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+def protected_directory(path):
+    """Open a fixed system directory through root-owned, non-writable ancestors."""
+    path = pathlib.Path(path)
+    descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
+        for part in path.parts[1:]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                              dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_fd
+            info = os.fstat(descriptor)
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError("canonical installation ancestor is untrusted")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def canonical_installation(root, manifest):
+    """Only the actual protected installation can certify current source.
+
+    The public CLI has no fixture-manifest or generation-override mode. Tests
+    substitute this internal I/O boundary, never a runtime environment switch.
+    The supported installer owns its 0600 manifest as the installing account;
+    its system directory and public launcher ancestors remain root-owned.
+    """
+    directory = protected_directory("/etc/ai-devops")
+    descriptor = None
+    try:
+        descriptor = os.open("install-manifest.tsv", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                             dir_fd=directory)
         info = os.fstat(descriptor)
+        supplied = os.stat(manifest, follow_symlinks=False)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.geteuid())
-                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 4 * 1024 * 1024):
-            raise ValueError("manifest custody is untrusted")
+                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 4 * 1024 * 1024
+                or not stat.S_ISREG(supplied.st_mode) or (info.st_dev, info.st_ino) != (supplied.st_dev, supplied.st_ino)):
+            raise ValueError("canonical manifest custody differs")
         data = os.read(descriptor, 4 * 1024 * 1024 + 1)
     finally:
-        os.close(descriptor)
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(directory)
+    directory = protected_directory("/usr/local/bin")
+    try:
+        info = os.stat("ai-pr-wait", dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISLNK(info.st_mode) or info.st_uid != 0:
+            raise ValueError("canonical launcher custody differs")
+        launcher = pathlib.Path("/usr/local/bin/ai-pr-wait")
+        target = launcher.resolve(strict=True)
+        if not root.samefile(target.parent.parent) or not (root / "bin/ai-pr-wait").samefile(target):
+            raise ValueError("canonical source root differs")
+    finally:
+        os.close(directory)
+    return data, launcher
+
+
+def installed_source(root, manifest):
+    """Verify canonical installed identity and immutable raw Git objects."""
+    root = pathlib.Path(root).resolve(strict=True)
+    data, launcher = canonical_installation(root, manifest)
     rows = [row.split("\t") for row in data.decode("utf-8").splitlines()]
     sha_rows = [row for row in rows if len(row) == 4 and row[:2] == ["meta", "source_sha"]]
     if len(sha_rows) != 1 or re.fullmatch(r"[0-9a-f]{40}", sha_rows[0][2]) is None:
@@ -801,28 +844,57 @@ def installed_source(root, manifest):
                and pathlib.Path(row[1]).name == "ai-pr-wait"]
     if len(entries) != 1 or not pathlib.Path(entries[0][2]).samefile(root / "bin/ai-pr-wait"):
         raise ValueError("installed waiter differs")
-    if not pathlib.Path(entries[0][1]).samefile(root / "bin/ai-pr-wait"):
+    if not pathlib.Path(entries[0][1]).samefile(launcher):
         raise ValueError("installed launcher differs")
     git = trusted_boundary_executable(shutil.which("git") or "")
-    listing = subprocess.run([git, "-C", str(root), "ls-tree", "-rz", sha, "--", "bin", "tools", "config"],
-                             capture_output=True, check=True, timeout=20).stdout
+    git_environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    git_environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    def git_read(*arguments):
+        return subprocess.run([git, "--no-replace-objects", "-C", str(root), *arguments],
+                              env=git_environment, capture_output=True, check=True, timeout=20).stdout
+    if git_read("rev-parse", "--verify", "HEAD^{commit}").strip().decode("ascii") != sha:
+        raise ValueError("installed HEAD differs from completed manifest")
+    # Read-only source inspection is isolated from the command's GIT_* values;
+    # the actual command below inherits every ordinary runtime setting intact.
+    git_read("diff", "--quiet", "--ignore-submodules=all", sha, "--")
+    def object_bytes(kind, oid):
+        value = git_read("cat-file", kind, oid)
+        if hashlib.sha1(kind.encode("ascii") + b" " + str(len(value)).encode("ascii") + b"\0" + value).hexdigest() != oid:
+            raise ValueError("Git object identity differs")
+        return value
+    commit = object_bytes("commit", sha)
+    first_line = commit.split(b"\n", 1)[0]
+    if re.fullmatch(b"tree [0-9a-f]{40}", first_line) is None:
+        raise ValueError("commit source tree differs")
+    def tree_entries(oid):
+        raw, offset, names = object_bytes("tree", oid), 0, set()
+        while offset < len(raw):
+            space = raw.index(b" ", offset)
+            zero = raw.index(b"\0", space + 1)
+            mode, name = raw[offset:space], raw[space + 1:zero].decode("utf-8")
+            end = zero + 21
+            if end > len(raw) or name in ("", ".", "..") or "/" in name or name in names:
+                raise ValueError("tree source entry differs")
+            names.add(name)
+            yield mode, name, raw[zero + 1:end].hex()
+            offset = end
+    def source_entries(oid, prefix=""):
+        for mode, name, child in tree_entries(oid):
+            path = f"{prefix}/{name}" if prefix else name
+            if not prefix and name not in ("bin", "tools", "config"):
+                continue
+            if mode == b"40000":
+                yield from source_entries(child, path)
+            elif mode in (b"100644", b"100755") and prefix:
+                yield path, child
+            else:
+                raise ValueError("unsupported source tree entry")
     files, fingerprint, total_bytes = {}, hashlib.sha256(), 0
-    for entry in listing.split(b"\0"):
-        if not entry:
-            continue
-        metadata, raw_path = entry.split(b"\t", 1)
-        mode, kind, blob = metadata.split()
-        path = raw_path.decode("utf-8")
-        if (kind != b"blob" or mode not in (b"100644", b"100755")
-                or pathlib.PurePosixPath(path).is_absolute() or ".." in pathlib.PurePosixPath(path).parts):
-            raise ValueError("generation contains an unsupported source entry")
-        content = subprocess.run([git, "-C", str(root), "cat-file", "blob", blob.decode("ascii")],
-                                 capture_output=True, check=True, timeout=10).stdout
+    for path, blob in source_entries(first_line[5:].decode("ascii")):
+        content = object_bytes("blob", blob)
         total_bytes += len(content)
         if len(content) > 4 * 1024 * 1024 or total_bytes > 64 * 1024 * 1024 or len(files) >= 4096:
             raise ValueError("source file exceeds bound")
-        if hashlib.sha1(b"blob " + str(len(content)).encode("ascii") + b"\0" + content).hexdigest() != blob.decode("ascii"):
-            raise ValueError("Git source blob identity differs")
         files[path] = content
     if not files or len(files) > 4096 or "bin/ai-pr-wait" not in files:
         raise ValueError("source generation is incomplete")
@@ -842,6 +914,7 @@ def retained_generation(root, manifest):
     in that subprocess only. Identity alone is preparation, never execution
     proof; only an actual observed child result can qualify loaded source.
     """
+    bootstrap_started = time.perf_counter_ns()
     root = pathlib.Path(root).resolve(strict=True)
     # Preserve ambient behavior on the ordinary path. An explicit qualifier
     # cannot attribute code injected by shell/Python startup or native-loader
@@ -884,7 +957,8 @@ def retained_generation(root, manifest):
         identity["source_boundary"] = "linux_sealed_generation"
         bash = trusted_boundary_executable(shutil.which("bash") or "")
         yield {"identity": identity, "argv_prefix": [*command, "--"], "pass_fds": tuple(descriptors),
-               "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash}
+               "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash,
+               "bootstrap_ns": time.perf_counter_ns() - bootstrap_started}
     finally:
         for fd in descriptors:
             os.close(fd)
@@ -898,6 +972,7 @@ def qualify_wait(root, manifest, arguments, receipt_path):
     Network, cwd, authentication, stdio and command status remain inherited.
     Only the pinned public source directories are replaced inside the child.
     """
+    qualification_started = time.perf_counter_ns()
     root = pathlib.Path(root).resolve(strict=True)
     receipt = {"schema": 1, "measurement": "live_parent_wait_qualification",
                "receipt_origin": "live_parent", "source_verified": "unknown",
@@ -905,7 +980,7 @@ def qualify_wait(root, manifest, arguments, receipt_path):
                "source_boundary": "unknown", "unknown_reason": "boundary_unavailable",
                "source_sha": None, "source_fingerprint": None, "install_generation_binding": None,
                "child_exit": None, "clock_start": None, "clock_end": None, "event": None,
-               "event_qualification": None}
+               "event_qualification": None, "source_bootstrap_ns": None, "qualification_elapsed_ns": None}
     descriptors, command, generation_context = [], None, None
     read_fd = write_fd = None
     environment = os.environ.copy()
@@ -921,7 +996,7 @@ def qualify_wait(root, manifest, arguments, receipt_path):
         command += [generation["bash_path"],
                     str(root / "bin/ai-pr-wait"), *arguments]
         receipt.update(generation["identity"], source_verified="verified",
-                       unknown_reason="none")
+                       unknown_reason="none", source_bootstrap_ns=generation["bootstrap_ns"])
     except (OSError, ValueError, subprocess.SubprocessError, UnicodeError):
         command = [shutil.which("bash") or "/bin/bash", str(root / "bin/ai-pr-wait"), *arguments]
         environment.pop("AI_GH_QUALIFICATION_EVENT_FD", None)
@@ -984,7 +1059,8 @@ def qualify_wait(root, manifest, arguments, receipt_path):
             receipt["source_verified"] = "unknown"
             receipt["unknown_reason"] = "child_observation_missing"
         receipt.update(child_exit=status, clock_start=start, clock_end=end, event=event,
-                       event_qualification=qualify_event(event, start, end, receipt["source_verified"] == "verified"))
+                       event_qualification=qualify_event(event, start, end, receipt["source_verified"] == "verified"),
+                       qualification_elapsed_ns=time.perf_counter_ns() - qualification_started)
         # The qualification parent consumes and assembles evidence under live
         # sealed-FD custody. This saved artifact is a historical receipt, never
         # an offline input that upgrades ordinary report/schema-4 evidence.

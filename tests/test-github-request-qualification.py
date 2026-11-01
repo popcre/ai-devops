@@ -152,6 +152,7 @@ fi
 exit "${1:-0}"
 """.replace("EVENT_PLACEHOLDER", repr(event())))
         self.waiter.chmod(0o755)
+        (self.root / "tools/helper.py").write_text("ORIGINAL_HELPER = True\n")
         self.git("init", "-q")
         self.git("add", "bin", "tools", "config")
         self.git("-c", "user.name=Albert Hazan", "-c", "user.email=u2giants@users.noreply.github.com",
@@ -170,6 +171,13 @@ exit "${1:-0}"
         return subprocess.run(["git", "-C", str(self.root), *arguments], check=True,
                               capture_output=True, text=True).stdout
 
+    def fixture_installation(self):
+        # Only tests substitute the protected canonical-I/O boundary. There
+        # is no production flag/environment path to bless this private file.
+        return mock.patch.object(report, "canonical_installation",
+                                 side_effect=lambda root, manifest: (Path(manifest).read_bytes(),
+                                                                    self.launcher.parent / "ai-pr-wait"))
+
     def run_parent(self, status=0, extra_env=None, receipt=None):
         receipt = receipt or Path(self.temp.name) / f"receipt-{status}.json"
         environment = os.environ.copy(); environment.update(extra_env or {})
@@ -182,22 +190,48 @@ exit "${1:-0}"
         return result, json.loads(text) if text.startswith("{") else None
 
     def test_manifest_duplicate_tampered_symlink_and_moving_launcher_refused(self):
-        identity, files = report.installed_source(self.root, self.manifest)
+        with self.fixture_installation():
+            identity, files = report.installed_source(self.root, self.manifest)
         self.assertEqual(identity["source_sha"], self.sha)
         self.assertIn("bin/ai-pr-wait", files)
         original = self.manifest.read_text()
         for bad in (original + f"meta\tsource_sha\t{self.sha}\t-\n",
                     original.replace(hashlib.sha256(self.waiter.read_bytes()).hexdigest(), "0" * 64)):
             self.manifest.write_text(bad)
-            with self.assertRaises(ValueError): report.installed_source(self.root, self.manifest)
+            with self.fixture_installation(), self.assertRaises(ValueError):
+                report.installed_source(self.root, self.manifest)
         self.manifest.write_text(original); self.manifest.chmod(0o644)
         with self.assertRaises(ValueError): report.installed_source(self.root, self.manifest)
         self.manifest.chmod(0o600)
         linked = self.manifest.with_name("linked.tsv"); linked.symlink_to(self.manifest)
-        with self.assertRaises(OSError): report.installed_source(self.root, linked)
+        with self.assertRaises((OSError, ValueError)): report.installed_source(self.root, linked)
         launcher = self.launcher.parent / "ai-pr-wait"
         launcher.unlink(); launcher.symlink_to(ROOT / "bin/ai-gh")
         with self.assertRaises(ValueError): report.installed_source(self.root, self.manifest)
+
+    def test_arbitrary_owner_private_manifest_cannot_certify_installation(self):
+        with self.assertRaises((ValueError, OSError)):
+            report.installed_source(self.root, self.manifest)
+
+    def test_git_environment_and_replace_objects_do_not_rewrite_generation(self):
+        original = (self.root / "tools/helper.py").read_bytes()
+        (self.root / "tools/helper.py").write_text("REPLACED_HELPER = True\n")
+        self.git("add", "tools/helper.py")
+        self.git("-c", "user.name=Albert Hazan", "-c", "user.email=u2giants@users.noreply.github.com",
+                 "commit", "-qm", "replacement fixture")
+        replacement = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "--detach", self.sha)
+        self.git("replace", self.sha, replacement)
+        with self.fixture_installation(), mock.patch.dict(os.environ,
+                 {"GIT_DIR": str(self.root / "not-a-git-repository"), "GIT_WORK_TREE": "/untrusted"}):
+            identity, files = report.installed_source(self.root, self.manifest)
+        self.assertEqual(identity["source_sha"], self.sha)
+        self.assertEqual(files["tools/helper.py"], original)
+
+    def test_partial_or_stale_installed_generation_is_unknown(self):
+        (self.root / "tools/helper.py").write_text("DIRTY = True\n")
+        with self.fixture_installation(), self.assertRaises(subprocess.CalledProcessError):
+            report.installed_source(self.root, self.manifest)
 
     def test_missing_manifest_preserves_stdout_stderr_status_and_unknown_source(self):
         self.manifest.unlink()
@@ -224,7 +258,7 @@ exit "${1:-0}"
             self.waiter.write_text("#!/usr/bin/env bash\nprintf 'REPLACED\\n'\nexit 9\n")
             return result
         receipt = Path(self.temp.name) / "sealed.json"
-        with mock.patch.object(report, "installed_source", side_effect=replaced):
+        with self.fixture_installation(), mock.patch.object(report, "installed_source", side_effect=replaced):
             status = report.qualify_wait(self.root, self.manifest, ["0"], receipt)
         self.assertEqual(status, 0)
         row = json.loads(receipt.read_text())
@@ -249,7 +283,7 @@ exit "${1:-0}"
         finally:
             os.close(descriptor)
         (self.root / "tools/UNTRACKED").write_text("private local helper")
-        with report.retained_generation(self.root, self.manifest) as generation:
+        with self.fixture_installation(), report.retained_generation(self.root, self.manifest) as generation:
             result = subprocess.run([*generation["argv_prefix"], generation["bash_path"], "-c",
                                      ': >/dev/null && test ! -e "$1/tools/UNTRACKED" && ! touch "$1/tools/ADDED"', "bash", str(self.root)],
                                     pass_fds=generation["pass_fds"], capture_output=True)
