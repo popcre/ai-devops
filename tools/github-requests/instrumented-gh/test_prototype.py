@@ -283,7 +283,8 @@ class PrototypeTests(unittest.TestCase):
         # guard is bypassed or extended, and no qualifying receipt is emitted.
         host = getattr(self, 'observation_host', self.host)
         self.assertTrue(args in (['fixture-self'], ['fixture-extension'], ['fixture-counter-env'])
-                        or runner.eligible(args, host))
+                        or runner.eligible(args, host)
+                        or args in [command for command, _ in self.managed_fixture_cases()])
         artifact = MANIFEST['artifacts']['instrumented']
         read_fd, write_fd = os.pipe()
         try:
@@ -322,7 +323,7 @@ class PrototypeTests(unittest.TestCase):
             if write_fd >= 0:
                 os.close(write_fd)
 
-    def parity(self, args, expected, retry=False, diagnostic=False):
+    def parity(self, args, expected, retry=False, diagnostic=False, require_metadata=False):
         self.reset(retry)
         baseline, _ = self.execute("baseline", args, instrument=False)
         self.assertEqual(self.server.received, expected)
@@ -331,14 +332,18 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(self.server.received, expected)
         self.assertEqual((patched.returncode, patched.stdout, patched.stderr),
                          (baseline.returncode, baseline.stdout, baseline.stderr))
+        if require_metadata:
+            self.assertIsNotNone(metadata, 'managed command ran without the counter channel')
         if metadata is None:
             return
         self.assertEqual(metadata["observed_completed_writes"], expected)
         self.assertTrue(metadata["complete"])
         self.assertIsNone(metadata["http_requests"])
 
-    def test_builtin_api_host_coverage(self):
-        for args, expected in [
+    def managed_fixture_cases(self):
+        # This finite local-server census is fixture coverage, not permission
+        # to expand run.py's deliberately narrower qualification profile.
+        return [
             (['auth', 'status', '--hostname', self.host], 2),
             (['issue', 'list', '-R', 'owner/fixture', '--limit', '2', '--json', 'number'], 2),
             (['pr', 'list', '-R', 'owner/fixture', '--limit', '2', '--json', 'number'], 2),
@@ -351,10 +356,23 @@ class PrototypeTests(unittest.TestCase):
             (['run', 'view', '1', '-R', 'owner/fixture', '--json', 'databaseId'], 2),
             (['workflow', 'list', '-R', 'owner/fixture', '--limit', '101', '--json', 'id'], 2),
             (['workflow', 'view', '1', '-R', 'owner/fixture'], 3),
-        ]:
+            (['repo', 'view', 'owner/fixture', '--json', 'nameWithOwner'], 1),
+            (['api', 'graphql', '-f', 'query=query{viewer{login}}'], 1),
+        ]
+
+    def test_builtin_api_host_coverage(self):
+        for args, expected in self.managed_fixture_cases():
             with self.subTest(command=args[:2]):
-                self.parity(args, expected)
-                self.assertEqual(self.execute('instrumented', args)[0].returncode, 0)
+                self.parity(args, expected, diagnostic=True, require_metadata=True)
+
+    def test_managed_coverage_refuses_missing_counter_finish(self):
+        from unittest.mock import patch
+        # Output parity alone must not qualify a managed request path. A
+        # baseline image has identical output but emits no counter finish.
+        with patch.dict(MANIFEST['artifacts'], instrumented=MANIFEST['artifacts']['baseline']):
+            with self.assertRaisesRegex(AssertionError, 'did not exercise the counter'):
+                self.parity(['issue', 'view', '1', '-R', 'owner/fixture', '--json', 'number'],
+                            1, diagnostic=True, require_metadata=True)
 
     def test_same_api_host_redirect(self):
         self.parity(['api', 'redirect'], 2)

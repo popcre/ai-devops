@@ -63,6 +63,7 @@ bash tests/test-gh-http-counter-prototype.sh
 python3 tools/github-requests/instrumented-gh/build.py --archives /PRIVATE/archives --output /PRIVATE/new-build
 python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
+python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --managed-commands
 ```
 
 Create the private output directory first. The ordinary development build
@@ -104,6 +105,20 @@ fixture timing nor offline validation proves installed workflow latency.
 Future integration reuses the existing Bash caller's protected channel after
 independent exact-head security review, checks and each host's guarded install.
 Source/stat digest validation and invalidation need their own security proof.
+
+The finite managed-command fixture census additionally exercises auth status,
+issue/PR lists and views (including comment pagination), PR checks, run and
+workflow reads, repository view and raw GraphQL. Every case now requires an
+actual complete counter receipt matching the local server ledger. Identical
+command output without counter metadata fails qualification. This test-only
+execution preserves the narrower qualification CLI restrictions; it does not
+enable an ordinary-environment runner or installed routing. The separate
+`--managed-commands` timing mode runs twenty alternating pairs in each of
+cold-config and warm-config groups with independent baseline/candidate state.
+It includes sealed-image verification, private pipe and metadata validation,
+requires both p95 and total elapsed ratios at most 1.05, and exits unsuccessfully
+when either group misses. It qualifies the measured finite local workload only;
+subprocess traffic, whole-account totals and installed performance stay separate.
 
 ## Isolated native Windows qualification
 
