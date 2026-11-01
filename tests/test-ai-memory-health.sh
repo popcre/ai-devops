@@ -172,15 +172,15 @@ LINK_HOME="$TMP/linked-command-home"
 mkdir -p "$TMP/link-one/bin" "$TMP/link-two" "$TMP/unrelated" "$LINK_HOME" \
          "$LINK_REPO/bin" "$LINK_REPO/memory/synthetic" "$OVERRIDE_REPO/memory/override"
 cp "$SCRIPT" "$LINK_REPO/bin/ai-memory-health"
-ln -s ../../link-two/ai-memory-health "$TMP/link-one/bin/ai-memory-health"
-ln -s "$LINK_REPO/bin/ai-memory-health" "$TMP/link-two/ai-memory-health"
 printf 'synthetic fact\n' > "$LINK_REPO/memory/synthetic/fact.md"
 printf '# Memory index\n\n- [Missing](default-missing.md) — fixture\n' \
   > "$LINK_REPO/memory/synthetic/MEMORY.md"
 printf 'override fact\n' > "$OVERRIDE_REPO/memory/override/fact.md"
 printf '# Memory index\n\n- [Missing](override-missing.md) — fixture\n' \
   > "$OVERRIDE_REPO/memory/override/MEMORY.md"
-if [[ -L "$TMP/link-one/bin/ai-memory-health" && -L "$TMP/link-two/ai-memory-health" ]]; then
+if ln -s "$LINK_REPO/bin/ai-memory-health" "$TMP/link-two/ai-memory-health" &&
+   ln -s ../../link-two/ai-memory-health "$TMP/link-one/bin/ai-memory-health" &&
+   [[ -L "$TMP/link-one/bin/ai-memory-health" && -L "$TMP/link-two/ai-memory-health" ]]; then
   out="$(cd "$TMP/unrelated" && env HOME="$LINK_HOME" \
     AI_MEMORY_HEALTH_STATE="$TMP/linked-health-state" \
     "$TMP/link-one/bin/ai-memory-health" --hub-only --coverage-only \
