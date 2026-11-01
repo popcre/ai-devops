@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("replay", ROOT / "tools/github-requests/replay.py")
@@ -18,6 +19,7 @@ def row(second, target=1):
             "source": "upstream", "cache_hit": False, "saved_upstream_read": False}
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux offline trace replay; not Windows runtime qualification")
 class ReplayTests(unittest.TestCase):
     def test_empty_malformed_digest_backward_and_duplicate_fields_refused(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -42,6 +42,8 @@ def unique(pairs):
 
 
 def read_trace(directory, expected_digest):
+    if not sys.platform.startswith("linux"):
+        raise ValueError("Linux offline replay boundary required")
     paths = sorted(Path(directory).glob("????-??-??.jsonl"))
     if not paths or len(paths) > 31: raise ValueError("bounded daily trace required")
     digest, result, previous = hashlib.sha256(), [], None
