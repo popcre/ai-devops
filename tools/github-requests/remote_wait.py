@@ -167,6 +167,45 @@ def qualify_remote_event(event, started_clock, received_clock, source_verified):
     return result
 
 
+def qualify_remote_alarm_facts(event, begin_clock, received_clock, source_verified, successful_sdk_alarm):
+    """Parent delivery bound over SSH, never a Windows UTC/error claim."""
+    result = {"clock_quality": "unknown", "unknown_reason": "source_unknown", "latency_lower_ms": None,
+              "latency_upper_ms": None, "clock_error_bound_ms": None, "event_kind": "unknown",
+              "boundary": "linux_parent_received_alarm_batch_ack_over_ssh", "includes_batch_ack_bound": True,
+              "includes_ssh_and_facts_transport": True, "github_utc_assumption": True, "windows_wall_clock_used": False}
+    if not source_verified:
+        return result
+    result["unknown_reason"] = "event_unknown"
+    if not (successful_sdk_alarm and get_report().unqualified_blocker_event(event)
+            and event["workflow"] == "blocker_watch_alarm" and event["event_kind"] == "alarm_stale"
+            and event["delivery_boundary"] == "alarm_batch_acknowledged"):
+        return result
+    result["event_kind"] = event["event_kind"]
+    result["unknown_reason"] = "clock_unknown"
+    if not valid_clock(begin_clock) or not valid_clock(received_clock):
+        return result
+    wall = received_clock["wall_ms"] - begin_clock["wall_ms"]
+    monotonic = received_clock["monotonic_ms"] - begin_clock["monotonic_ms"]
+    bound = begin_clock["error_bound_ms"] + received_clock["error_bound_ms"] + 2
+    if wall < 0 or monotonic < 0 or abs(wall - monotonic) > bound:
+        result["unknown_reason"] = "clock_jump"
+        return result
+    eligible = event["eligible_utc_ms"]
+    if eligible is None or eligible > received_clock["wall_ms"] + received_clock["error_bound_ms"]:
+        result["unknown_reason"] = "event_invalid"
+        return result
+    if eligible <= begin_clock["wall_ms"] + begin_clock["error_bound_ms"] + 1:
+        result["unknown_reason"] = "eligibility_not_observed"
+        return result
+    elapsed = received_clock["wall_ms"] - eligible
+    error = bound + 1000  # The same conservative GitHub UTC-resolution assumption.
+    if elapsed > 604800000 or error > 60000:
+        return result
+    result.update(clock_quality="host_bound_github_utc_assumed", unknown_reason="none",
+                  latency_lower_ms=max(0, elapsed-error), latency_upper_ms=elapsed+error, clock_error_bound_ms=error)
+    return result
+
+
 def frame(kind, **fields):
     return (json.dumps({"protocol": 1, "kind": kind, **fields}, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
 
@@ -309,7 +348,8 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     if active_completion:
         def acknowledge(identity):
             return _send_active_control(child.stdin, frame("active_ack", workflow_id=identity))
-        transcript = get_report().ActiveCompletionTranscript(arguments[0], acknowledge)
+        transcript = get_report().ActiveCompletionTranscript(arguments[0], acknowledge,
+                       qualification_profile="original_context")
     try:
         while time.monotonic() < deadline:
             if not selector.select(min(0.2, max(0, deadline - time.monotonic()))):
@@ -383,6 +423,16 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                         if source["active_channel_status"] != "valid":
                             transcript.invalid = True
                         qualified, records = transcript.result(source["child_exit"], source_verified=source["source_verified"] == "verified")
+                        beginnings = {row["workflow_id"]: clock for row, clock, *_ in transcript.completed}
+                        for record in records:
+                            outcome = record["outcome_record"]
+                            # Replace the SAME-HOST common result before it can
+                            # be published: Windows wall observations are DATA.
+                            record["event_qualification"] = qualify_remote_alarm_facts(
+                                record.get("event_record"), beginnings.get(outcome["workflow_id"]),
+                                record.get("event_parent_clock"), qualified,
+                                sdk_coordinator and arguments == ["alarm"] and source["child_exit"] == 0
+                                and outcome["parent_workflow_id"] is None and outcome["outcome"] == "completed")
                         interval_verified = bool(qualified and records and all(
                             item["completion_qualification"]["unknown_reason"] == "none" for item in records))
                         result.update(measurement="linux_observed_windows_active_completion", active_completion_records=records,

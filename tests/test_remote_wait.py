@@ -303,6 +303,25 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         patch = mock.patch.object(remote, "get_report", return_value=self.report)
         patch.start(); self.addCleanup(patch.stop)
 
+    def test_remote_alarm_uses_linux_bookends_not_windows_wall(self):
+        row = event()
+        row.update(caller="ai-blocker-watch", workflow="blocker_watch_alarm", event_kind="alarm_stale",
+                   delivery_boundary="alarm_batch_acknowledged")
+        begin, received = clocks()
+        result = remote.qualify_remote_alarm_facts(row, begin, received, True, True)
+        self.assertEqual(result["unknown_reason"], "none")
+        self.assertEqual(result["boundary"], "linux_parent_received_alarm_batch_ack_over_ssh")
+        self.assertFalse(result["windows_wall_clock_used"])
+        changed = dict(row, observed_utc_ms=3000000000000, delivered_utc_ms=3000000000001)
+        self.assertEqual(remote.qualify_remote_alarm_facts(changed, begin, received, True, True), result)
+        for source, sdk in ((False, True), (True, False)):
+            self.assertIsNone(remote.qualify_remote_alarm_facts(row, begin, received, source, sdk)["latency_upper_ms"])
+        for eligible in (begin["wall_ms"], received["wall_ms"] + 100):
+            self.assertIsNone(remote.qualify_remote_alarm_facts(dict(row, eligible_utc_ms=eligible), begin, received, True, True)["latency_upper_ms"])
+        jumped = dict(received, monotonic_ms=received["monotonic_ms"] + 100)
+        self.assertEqual(remote.qualify_remote_alarm_facts(row, begin, jumped, True, True)["unknown_reason"], "clock_jump")
+        self.assertIsNone(remote.qualify_remote_alarm_facts(row, None, received, True, True)["latency_upper_ms"])
+
     def test_profiles_are_named_and_do_not_relabel_active_work(self):
         with mock.patch.dict(os.environ, {"SystemRoot": "C:/Windows"}):
             ordinary = remote.windows_supervisor_command("C:/repo", b'["tick"]', 50, 51, active_completion=True)

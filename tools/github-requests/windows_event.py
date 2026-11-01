@@ -86,7 +86,8 @@ def _active_direct(phase, row, timeout_seconds):
     import report
     if ((phase == "begin" and not report.active_begin_valid(row))
             or (phase == "end" and not report.active_outcome_valid(row, parent=True))
-            or phase not in ("begin", "end")):
+            or (phase == "facts" and not report.active_event_frame_valid(row))
+            or phase not in ("begin", "end", "facts")):
         return False
     event, ack = _active_handles()
     kernel = _kernel()
@@ -96,7 +97,7 @@ def _active_direct(phase, row, timeout_seconds):
     data = json.dumps(row, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     if not _write_once(event, data):
         return False
-    if phase == "end":
+    if phase in ("end", "facts"):
         return True
     while time.monotonic() < deadline:
         if not _message_pipe(kernel, ack):
@@ -135,7 +136,7 @@ def active_completion_io(phase, row, timeout_seconds=0.250):
         startup = subprocess.STARTUPINFO()
         startup.lpAttributeList = {"handle_list": duplicates}
         data = json.dumps(row, separators=(",", ":"), ensure_ascii=True).encode("ascii")
-        if not 0 < len(data) <= MAX_MESSAGE or phase not in ("begin", "end"):
+        if not 0 < len(data) <= MAX_MESSAGE or phase not in ("begin", "end", "facts"):
             return False
         child = subprocess.Popen([sys.executable, "-I", "-S", str(Path(__file__).resolve()), "--active-once", phase],
                                  env=environment, startupinfo=startup, close_fds=True, stdin=subprocess.PIPE,
@@ -253,7 +254,7 @@ def emit_event(value):
 
 
 def main():
-    active = len(sys.argv) == 3 and sys.argv[1] == "--active-once" and sys.argv[2] in ("begin", "end")
+    active = len(sys.argv) == 3 and sys.argv[1] == "--active-once" and sys.argv[2] in ("begin", "end", "facts")
     if not active and sys.argv[1:] not in ([], ["--write-once"]):
         return 2
     # This timer kills ONLY the disposable writer, never its importing tool.
