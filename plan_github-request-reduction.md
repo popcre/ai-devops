@@ -52,9 +52,12 @@ transition repair then merged through #2254 as `87790de4`; Hetz's normal full
 update and source-qualified owner read at that source passed, including actual
 same-inode owner preservation. Local Linux's `87790de4` rollout remains pending.
 Windows runtime blobs are unchanged. Merge is
-not actual-context acceptance:
-foreign credential readers and unsafe namespaces remain qualification refusals,
-and the native cold counter gate remains failed. The existing Windows waiter
+not actual-context acceptance. The earlier Windows counter guard inspected the
+default configuration instead of the private SSH namespace actually selected by
+`ai-gh`; that implementation bug is repaired in queued PR #2256. Metadata-only
+checks now pass on edge-dev and 4837; 916 still refuses its actual context. No
+group trust, credential, permission or environment setting changed. The native
+cold counter gate remains failed. The existing Windows waiter
 has separately proved source-bound event delivery within the five-minute ceiling.
 A genuine installed-source Linux waiter began for #2253 while it was OPEN and
 unqueued, then observed its merge with exit 0 and a source-qualified conditional
@@ -62,11 +65,14 @@ unqueued, then observed its merge with exit 0 and a source-qualified conditional
 waiter witnessed installed `8ab68085`, not the new final source. Keep P1/P7/P8, twenty matched
 outcomes, before/after comparison and live proof open until demonstrated.
 
-The exact final-source Windows fixture passed 95 native cases on PowerShell
-7.6.8, including valid event parsing and injected cleanup failures followed by
-verified cleanup of later owned handles and trees. It made no API request and
-did not execute the optional counter image. This repairs the native fixture
-and cleanup capability; it does not erase the separate cold-counter failure.
+The earlier focused Windows fixture passed 95 native cases on PowerShell 7.6.8,
+but full CI later exposed a service-account cleanup discrepancy. Explicit retained
+file ACL controls now pass 100 native cases under the actual NetworkService
+runner in run `41285694553`; the temporary proof workflow was retired before
+PR #2256's queued merge with unchanged proven code/test blobs. This zero-API
+proof repairs the demonstrated cleanup capability, without erasing the prior
+CI or separate cold-counter failures. Final combined installation and counted
+Windows read receipts remain pending.
 
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains

@@ -680,18 +680,24 @@ showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
 behind in the squash context. This is sanitized continuity, not mirror CI
 execution parity; GitHub's required safety result remains authoritative.
 
-The final same-guard metadata-only Windows audits still refuse ordinary
-counter qualification: 4837 and 916 have foreign configuration-ancestor
-writers; edge-dev has foreign credential-file readers. Bounded local-group
-closure did not establish an owner-only or existing-administrator-only
-equivalence. The protected sanitized receipt digests are
+The earlier default-namespace metadata-only Windows audits refused qualification:
+4837 and 916 had configuration-ancestor writers outside the finite trusted set;
+edge-dev had file readers outside that set. The protected sanitized receipt digests are
 `fc0cef9a8d014ea867e4b3ca54964bb8fa59e47bcec9004fbffbe0d119b5a134`
 (4837), `a4aac61c6f11be6c5a265a1af26c60c546c9a80cb648e8d0e559b68103a9c4ab`
 (916) and `cf2294d2fab1619adec648c5da45f065ca52000bf652ee97e550fa7be81bb9f8`
 (edge-dev). No configuration contents, permission changes, copied credentials,
-alternative authentication context or API request was used for these audits.
-These qualification refusals preserve ordinary working CLI capability; they
-are not zero-request observations. T16 remains a separate external trusted
+alternative authentication context or API request was used for those audits.
+Subsequent source inspection found that the guard had inspected the default
+configuration rather than the private SSH namespace already selected by `ai-gh`.
+Those default-namespace audits therefore do not establish the actual command's
+credential context. The corrected guard follows the existing selection without
+changing environment or copying credentials: metadata checks pass on edge-dev
+and 4837, while 916's actual context remains refused. The CodexSandboxUsers
+read/execute settings grant is an intentional low-privilege sandbox role, not
+evidence that unidentified human users were granted credentials; no group-trust
+exception or ACL change was made to obtain qualification. These refusals are
+not zero-request observations. T16 remains a separate external trusted
 execution/access gap despite being online, not evidence of installed coverage.
 Its final protected access digest is
 `003e5b8e6dd0f88a85ccfa4d1479cb29984a648153f1a0763826179eba93f9d3`:
@@ -782,9 +788,23 @@ Linux offline and doc-safety passed. The failed native assertion was
 `Every injected cleanup failure remains visible`, followed by actual denial
 deleting the second owned cleanup-fault fixture file. The protected failed-log
 digest is `ca5394d851a1c1d821c64d4bba381b0c1b46ab27ee8a239a9f4c396e8fb04b9c`.
-The source/fleet owners are repairing this demonstrated discrepancy; the 95-case
-focused native result remains separate and does not erase the CI failure.
-No unchanged whole-CI rerun or performance-threshold change is claimed.
+The later affected-account repair is recorded below; the 95-case focused native
+result remains separate and does not erase this CI failure. No unchanged
+whole-CI rerun or performance-threshold change is claimed.
+
+The final explicit per-file cleanup repair passed 100 native cases as the actual
+NetworkService runner account in run `41285694553`, exit 0, owned cleanup
+successful and zero API requests. Its protected receipt digest is
+`eb89d6a3a2acacbe51bea5fae5d70596d37ca1e1bc9a623fbde4487f8eedc1bd`.
+The proof head is `57eed81f76da773511352928d17df7940866a332`, source blob
+`9b3b488e6064265302fd3a511f4e95a061c8a6ad` and fixture blob
+`12bd7027529b97708ceed072e7946df13beef6b8`. Retained metadata-only file controls
+bind fresh snapshot files before sealing and explicitly restore them after the
+owned child stops, preserving each cleanup error. Original, vendor and credential
+permissions remain unchanged. The temporary proof workflow was removed before
+queued PR #2256 head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`; the three
+production/test blobs are identical to the successful proof head. This establishes
+the repaired service-account capability, not a new counter-performance result.
 
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
