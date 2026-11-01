@@ -21,6 +21,8 @@ class AdmissionTests(unittest.TestCase):
         self.fake = self.base / "fake-gh"
         self.fake.write_text('''#!/usr/bin/env bash
 [ -z "${FAKE_CALL_LOG:-}" ] || printf '%s\\n' "$*" >> "$FAKE_CALL_LOG"
+if [ "${FAKE_IGNORE_TERM:-}" = 1 ]; then trap '' TERM; while :; do sleep 1; done; fi
+[ -z "${FAKE_EXIT:-}" ] || exit "$FAKE_EXIT"
 [ -z "${FAKE_DELAY:-}" ] || sleep "$FAKE_DELAY"
 if [ "${FAKE_GRAPHQL:-}" = merged ] && [ "$1 $2" = 'api graphql' ]; then
   printf '%s\\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeCommit":{"oid":"fixture123"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}}}}}'
@@ -128,6 +130,18 @@ fi
         for value in ("0", "off", "-1"):
             with self.subTest(value=value):
                 self.finish(self.start("invalid", AI_GH_CALL_TIMEOUT_SECONDS=value), 2)
+
+    def test_network_timeout_kills_term_ignoring_backend(self):
+        for kind in ("ordinary", "graphql"):
+            with self.subTest(kind=kind):
+                start = time.monotonic()
+                self.finish(self.start(kind, AI_GH_CALL_TIMEOUT_SECONDS="1", FAKE_IGNORE_TERM="1"), 124)
+                self.assertLess(time.monotonic() - start, 12)
+
+    def test_natural_exit_137_is_not_relabelled_timeout(self):
+        for kind in ("ordinary", "graphql"):
+            with self.subTest(kind=kind):
+                self.finish(self.start(kind, AI_GH_CALL_TIMEOUT_SECONDS="5", FAKE_EXIT="137"), 137)
 
     def test_generic_waiter_keeps_ticket_past_old_short_default(self):
         self.waiter_after_busy_lock("ai-gh-wait", ["--until-regex", "api observed", "--timeout-minutes", "1", "--", "api", "observed"])

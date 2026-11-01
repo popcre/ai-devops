@@ -115,6 +115,27 @@ fi
 # so it skips the throttle: queuing it behind API spacing stalls every fetch.
 if [ "${1:-}" = auth ] && [ "${2:-}" = git-credential ]; then exec "$REAL" "$@"; fi
 
+# Waiters already use this owned-tree supervisor for their whole deadline.
+# Resolve its actual-call boundary before admission; missing supervision must
+# fail before a request or queue reservation, never become an unbounded call.
+CALL_PYTHON=''; CALL_SUPERVISOR=''; CALL_BASH=''
+if [ -n "${AI_GH_CALL_TIMEOUT_SECONDS:-}" ]; then
+  CALL_SUPERVISOR="$(dirname "$self")/ai-process-supervisor"
+  CALL_BASH="$(command -v bash 2>/dev/null || true)"
+  for candidate in python3 python; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' >/dev/null 2>&1 || continue
+    CALL_PYTHON="$(command -v "$candidate")"; break
+  done
+  [ -x "$CALL_SUPERVISOR" ] && [ -n "$CALL_BASH" ] && [ -n "$CALL_PYTHON" ] || {
+    say 'actual-call supervision is unavailable; no GitHub call was made'; exit 3;
+  }
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+    CALL_SUPERVISOR="$(cygpath -w "$CALL_SUPERVISOR")"
+    CALL_BASH="$(cygpath -w "$CALL_BASH")"; CALL_PYTHON="$(cygpath -w "$CALL_PYTHON")" ;;
+  esac
+fi
+
 [ ! -L "$STATE" ] || { say "invalid GitHub state directory"; exit 3; }
 (umask 077; mkdir -p "$STATE") || { say "cannot create $STATE"; exit 3; }
 [ ! -L "$STATE" ] && chmod 700 "$STATE" 2>/dev/null || { say "cannot protect GitHub state"; exit 3; }
@@ -708,7 +729,8 @@ real_call(){
   # Waiters budget queue admission separately from the actual network call.
   # This timer starts only after admission, probes and mutex release.
   if [ -n "${AI_GH_CALL_TIMEOUT_SECONDS:-}" ]; then
-    timeout "$AI_GH_CALL_TIMEOUT_SECONDS" "$REAL" "$@"
+    "$CALL_PYTHON" "$CALL_SUPERVISOR" --timeout-seconds "$AI_GH_CALL_TIMEOUT_SECONDS" -- \
+      "$CALL_BASH" -c 'exec "$@"' bash "$REAL" "$@"
   else
     "$REAL" "$@"
   fi
