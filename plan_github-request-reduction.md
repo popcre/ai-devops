@@ -45,7 +45,11 @@ CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
 failures remain preserved. The finite native Windows read/counter adapter and
 metadata-only actual-context guards merged through PR #2253 as
 `813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on origin/main.
-Final-source installation receipts remain pending; merge is not actual-context acceptance:
+Local Linux full installation and a necessary counted read now verify final
+`813baf8b`; all three reachable Windows hosts also have full final-source
+installation and source-custodied useful-read receipts. Hetz's final-source
+receipt remains pending. Merge is
+not actual-context acceptance:
 foreign credential readers and unsafe namespaces remain qualification refusals,
 and the native cold counter gate remains failed. The existing Windows waiter
 has separately proved source-bound event delivery within the five-minute ceiling.

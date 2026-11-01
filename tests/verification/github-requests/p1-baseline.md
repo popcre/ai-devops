@@ -700,6 +700,50 @@ from a trusted peer. The atlas names no alternative SSH port, WinRM route or
 native executor. No broad probe, new trust or authentication-setting change
 was made; a reachable supported executor is still required.
 
+The final local Linux full installation independently verifies exact clean
+`813baf8b`, exit 0, all 21 required stages passed and none failed. Its manifest
+digest is `01ac7b2fc8bb30aa70d67301268a587e4f3cdce5f8ceefd003e6f9d71bac9bc0`;
+the sanitized installation-summary digest is
+`0508c87c8a24a820fcd01dc0eba9c8e2a8ac0702a8d35b75d20e2aed3e27d6fe`.
+A necessary installed-source issue read returned exit 0 and complete, verified
+numeric metadata: two primary writes, zero external writes and five native
+invocations including unseparated admission/identity/quota probes. Command time
+was 4.189972613 seconds and total cohort time 4.367105921 seconds, including
+168.921321 ms counter/bootstrap; 62.982448 ms source bootstrap is a component,
+not an additional amount. Observation and summary digests are
+`72b9d3788c3ee6a7e613fc0c9449d078363119a481946a9f7dcbe41be855790c`
+and `905ef87b9c4c16f998a2142a0d67488b9219688fa8f12a5dcfd1307d4af4b459`.
+This proves one useful final-installed-source outcome, not five useful outcomes,
+matched savings, detection latency, GraphQL points or whole-account HTTP totals.
+
+Final normal full installations on 4837, edge-dev and 916 each returned exit 0,
+with clean canonical source and matching managed launchers at exact `813baf8b`.
+One necessary installed-source issue read per host returned OPEN and exit 0;
+each source receipt was consumed while native custody remained held, with
+verified raw/loaded fingerprint
+`48ef2a3e321f02e430d0efdbef5687aa4ac73e6960ccf3e211c3a35a97347442`.
+The three sanitized delivery receipt digests, respectively, are
+`8aad3c400f620244f819d736b6a489fed206e885323886f909e9c3bb35b658f4`,
+`0fe9d141f470d7f612400bb4c368daeafd3cf1f34e9540fd85ec079806948c68`
+and `f8def5afc355c99debf9dc03461453aa3d658e914dbba77a63b3afcae348739b`.
+Elapsed time before receipt acknowledgement was 17.0356866, 16.2493993 and
+11.2757293 seconds, respectively. Clock qualification remains unknown and
+request counts remain null: the actual-context counter refusal is preserved.
+These are final-installed-source capability outcomes, not counted Windows
+acceptance, detection measurements or a matched savings comparison.
+
+A later necessary PR #2254 waiter provides a genuine post-start event sample
+from installed `813baf8b`, not merely the earlier `8ab68085` source witness.
+It returned the merge and exit 0 under verified sealed source custody, manifest
+`01ac7b2fc8bb30aa70d67301268a587e4f3cdce5f8ceefd003e6f9d71bac9bc0`.
+The independently checked receipt digest is
+`50e24f81a6d2b3db956d491ab209d1cd6e8f9a07c9e9043effbe27b0cc3f051e`.
+Conditional GitHub-UTC delivery was 200,946–203,432 ms with 1,243 ms combined
+uncertainty, passing the configured 300,000 ms ceiling. Total qualification was
+322.206112627 seconds including 61.658457 ms source bootstrap. This preserves
+the distinction between total elapsed time and event delivery. It adds one
+real outcome, not a matched twenty-outcome cohort, p95 regression or savings.
+
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
 sealed-generation custody. Its receipt digest is
