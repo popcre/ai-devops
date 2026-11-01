@@ -295,9 +295,9 @@ echo "13/13 chained linked entrypoint finds repo templates from an unrelated cwd
 LINK_HOME="$TMP_ROOT/linked-home"
 mkdir -p "$TMP_ROOT/link-one/bin" "$TMP_ROOT/link-two" "$TMP_ROOT/unrelated" \
          "$LINK_HOME/.claude" "$LINK_HOME/.codex" "$LINK_HOME/.zcode" "$LINK_HOME/.config/mimocode"
-ln -s ../../link-two/ai-adopt-globals "$TMP_ROOT/link-one/bin/ai-adopt-globals"
-ln -s "$REPO_ROOT/bin/ai-adopt-globals" "$TMP_ROOT/link-two/ai-adopt-globals"
-if [[ -L "$TMP_ROOT/link-one/bin/ai-adopt-globals" && -L "$TMP_ROOT/link-two/ai-adopt-globals" ]]; then
+if ln -s "$REPO_ROOT/bin/ai-adopt-globals" "$TMP_ROOT/link-two/ai-adopt-globals" &&
+   ln -s ../../link-two/ai-adopt-globals "$TMP_ROOT/link-one/bin/ai-adopt-globals" &&
+   [[ -L "$TMP_ROOT/link-one/bin/ai-adopt-globals" && -L "$TMP_ROOT/link-two/ai-adopt-globals" ]]; then
   cp "$REPO_ROOT/templates/system/CLAUDE-global.md" "$LINK_HOME/.claude/CLAUDE.md"
   cp "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$LINK_HOME/.codex/AGENTS.md"
   cp "$REPO_ROOT/templates/system/AGENTS-global-zcode.md" "$LINK_HOME/.zcode/AGENTS.md"
