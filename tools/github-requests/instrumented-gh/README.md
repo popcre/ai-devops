@@ -459,6 +459,8 @@ functional run on existing host 916 passed 26 top-level functions/four subcases
 and the environment/boundary, ledger, child, stream/status and cancellation
 checks; fourteen frozen artifacts were unchanged and owned processes zero.
 No real GitHub demand, timing pair or vendor change was introduced. This
+fixture sets `GH_NO_UPDATE_NOTIFIER=1`; updateable build tags/source features
+remain present, but actual TTY updater lifecycle behavior is not qualified. The
 `6233`/V3/916 fixture does not prove T16 vendor-image hash, installed source,
 custody, original privileges or timing, and does not retarget the five installed
 `10ae` toolkits or their older measurement receipts. Actual runtime admission

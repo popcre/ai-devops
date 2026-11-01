@@ -65,7 +65,9 @@ paired updateable build passed 26 native top-level functions and four subcases
 on existing host 916, plus the environment/boundary and parity checks, with no
 real API demand, timing pairs or vendor replacement. This does not prove T16
 installation, custody, vendor-image hash, timing or original privileges. No
-borrowed-version qualification is allowed.
+borrowed-version qualification is allowed. Updateable build tags/source features
+are preserved, but the fixture disables update notification and does not qualify
+the actual TTY updater lifecycle.
 Dispatch/privacy and finite active BlockerWatch terminal/event emission are now
 implemented and tested; the earlier emission/consumer code gaps are repaired.
 The governed SDK component profile admits only successful standalone alarms

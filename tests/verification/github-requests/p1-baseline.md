@@ -97,9 +97,10 @@ denominator or reclassify the older five counted reads.
 
 ### T16 authenticated output — reliable completion and delivery unproved
 
-The documented existing edge-dev identity authenticated to T16 and produced
-fresh output on November 1, 2026, at 4:16:35 PM EST. This limited witness does
-not establish reliable command/session completion.
+The documented existing edge-dev identity authenticated to T16 at 4:16:35 PM EST
+on November 1, 2026; that minimal command exited zero with empty stdout. Later
+bounded commands returned fresh output. The earlier authentication/exit witness
+does not establish reliable completion of those later commands/sessions.
 Proof `3144c2f284662bfef108c4a7a7f96a4ef87062286522efb1cd45cdd9c32a052b`
 preserves the original evidence; no key, trust or configuration was introduced.
 The preceding 4:10:14 PM EST attempt reached the trusted endpoint but its default
@@ -132,6 +133,8 @@ or failures, including seven environment/nine boundary cases and ledger,
 metadata-schema, native-child, stream/status and cancellation parity checks.
 All fourteen frozen artifacts remained unchanged and no owned process remained;
 real GitHub demand and timing pairs were zero and the vendor was not replaced.
+The fixture sets `GH_NO_UPDATE_NOTIFIER=1`: updateable build tags/source features
+are preserved, but actual TTY updater lifecycle behavior is not qualified.
 Native proof
 `768f87d4e0b6cfe1dcf773984c8cf022998df363e1126f99788ce5e0e39801b4`
 and independently audited build approval
