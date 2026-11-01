@@ -160,22 +160,18 @@ class Controls(unittest.TestCase):
             self.assertEqual(packet.public_document_context(repo,registry['paths'],packet.PUBLIC_PRODUCER_PROFILE),packet.PUBLIC_PRODUCER_PROFILE)
         self.assertNotIn(('remote','get-url','origin'),calls)
 
-    def test_full_source_oracle_action_refuses_before_summary_or_publisher(self):
-        report=self.root/'report';report.write_text('PUBLIC NONAUTHORIZING FIXTURE')
-        digest=__import__('hashlib').sha256(report.read_bytes()).hexdigest()
-        key='a'*64; head='b'*40; source='c'*64
-        scripts=self.root/'bin';scripts.mkdir()
-        identity=scripts/'ai-review-lifecycle'
-        identity.write_text("#!/bin/sh\nprintf '%s\\n' '"+json.dumps({"repository_key":key,"source_digest":source})+"'\n")
-        identity.chmod(0o700)
-        state=self.root/'runs'/key/'deepseek'/'codex'/'fixture.json';state.parent.mkdir(parents=True)
-        state.write_text(json.dumps(dict(status='completed',verdict='APPROVE',stale=False,head=head,repository_key=key,source_digest=source,report_path=str(report),report_sha256=digest,provider='deepseek',implementer_engine='codex',review_mode='security-review')))
-        shell=(ROOT/'bin/ai-task-gates').read_text();function=shell[shell.index('reviewer_approval_summary(){'):shell.index('# Application source-release admission')]
-        for publish in ('0','1'):
-            program='set -eu\n'+function+'\nreviewer_approval_summary "$1" offline-private-capture-transform "$2" "$3" "" initial-forward "$4"\n'
-            env={**os.environ,'SCRIPT_DIR':str(scripts),'REAL_DIR':str(scripts),'AI_REVIEW_LIFECYCLE_DIR':str(self.root)}
-            result=subprocess.run(['/bin/bash','-c',program,'fixture',str(report),head,str(ROOT),publish],env=env,capture_output=True)
-            self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,b'');self.assertNotIn(b'unbound',result.stderr)
+    def test_oracle_route_reads_no_reviewer_verdict(self):
+        # #2041: the offline Oracle route is descriptor-only; neither the
+        # gate branch nor the shared approval reader handles its verdict.
+        shell=(ROOT/'bin/ai-task-gates').read_text()
+        begin=shell.index('  if [ "$action" = offline-private-capture-transform ]; then',shell.index('effective_gate="$(merged_gate'))
+        branch=shell[begin:shell.index('  if printf',begin)]
+        self.assertNotIn('reviewer_approval_summary',branch);self.assertIn(' admit --repo ',branch)
+        reader=shell[shell.index('reviewer_approval_summary(){'):shell.index('# approval_refused ACTION')]
+        self.assertNotIn('offline-private-capture-transform',reader);self.assertNotIn('oracle_native',reader)
+        for name in ('oracle_native_alternate_profile.py','oracle_native_alternate_v2_profile.py','oracle_native_alternate_guardian.py','oracle_native_alternate_v2_guardian.py'):
+            source=(ROOT/'tools'/name).read_text()
+            self.assertNotIn("'APPROVE'",source);self.assertNotIn('verdict\')',source)
 
     def test_explicit_foreign_unknown_profile_in_oracle_context_never_reads(self):
         spec=importlib.util.spec_from_file_location('explicit_routing',ROOT/'tools/review_action_profile.py')

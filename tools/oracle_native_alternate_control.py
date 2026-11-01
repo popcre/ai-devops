@@ -48,6 +48,73 @@ def roots():
     return lifecycle,descriptors
 
 
+def admission_root():
+    """Descriptor-only admissions (#2041); no review lifecycle is involved."""
+    home=canonical_path(pwd.getpwuid(os.getuid()).pw_dir)
+    root=home/'.local/state/ai-devops/oracle-native-alternate-admissions'
+    override=os.environ.get('AI_ORACLE_NATIVE_TEST_ADMISSION_ROOT')
+    if os.environ.get('AI_DEVOPS_TEST_MODE')=='1':
+        if override:root=canonical_path(override)
+    else:require(not override,'test admission root cannot select actual control storage')
+    return root
+
+
+def admission_basename(profile):
+    return 'oracle-native-admission'+('-v2' if profile.endswith('-v2') else '')+'.json'
+
+
+def admission(path,profile):
+    require(profile in PROFILES,'unknown closed admission profile')
+    path=canonical_path(path);root=admission_root()
+    require(path.is_relative_to(root),'admission is outside known metadata storage')
+    parts=path.relative_to(root).parts
+    require(len(parts)==3 and parts[0]==profile and re.fullmatch('[a-f0-9]{32}',parts[1])
+        and parts[2]==admission_basename(profile),'fixed admission metadata identity required')
+    return stat_control(path,root,lambda _:True),parts[1]
+
+
+def read_admission(path,profile,reader,decode):
+    before,action_id=admission(path,profile);value=decode(reader(Path(path)))
+    require(type(value) is dict and value.get('profile')==profile and value.get('action_id')==action_id
+        and value.get('kind')=='descriptor-only-admission','admission profile/action directory differs')
+    require(admission(path,profile)==(before,action_id),'admission metadata moved during reading')
+    return value
+
+
+def publish_admission(record,profile,canonical):
+    """Exclusive one-use admission write; an existing admission always refuses."""
+    require(profile in PROFILES and type(record) is dict and record.get('profile')==profile
+        and type(record.get('action_id')) is str and re.fullmatch('[a-f0-9]{32}',record['action_id']),'closed admission header required')
+    raw=canonical(record)
+    require(len(raw)+1<=1024**2,'admission exceeds fixed bound')
+    root=admission_root();os.makedirs(root,mode=0o700,exist_ok=True)
+    stat_control(root,root,lambda _:False,directory=True)
+    fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        info=os.fstat(fd)
+        require(info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o700,'owned private admission storage required')
+        try:os.mkdir(profile,0o700,dir_fd=fd)
+        except FileExistsError:pass
+        directory=os.open(profile,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+        try:
+            info=os.fstat(directory)
+            require(info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o700,'owned private profile storage required')
+            os.mkdir(record['action_id'],0o700,dir_fd=directory)
+            action=os.open(record['action_id'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+            try:
+                os.fchmod(action,0o700)
+                file=os.open(admission_basename(profile),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=action)
+                with os.fdopen(file,'wb') as output:
+                    os.fchmod(output.fileno(),0o600);output.write(raw+b'\n');output.flush();os.fsync(output.fileno())
+                os.fsync(action)
+            finally:os.close(action)
+            os.fsync(directory)
+        finally:os.close(directory)
+        os.fsync(fd)
+    finally:os.close(fd)
+    return root/profile/record['action_id']/admission_basename(profile)
+
+
 def stat_control(path,root,private_parent,directory=False):
     """O_PATH only; no regular file is opened for content here."""
     fd=os.open('/',os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW)

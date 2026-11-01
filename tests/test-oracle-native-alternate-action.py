@@ -94,12 +94,58 @@ class OracleTests(unittest.TestCase):
         self.assertTrue(scope.has_exact_action_scope(action+'\n'+purpose,binding))
         for text in (action,purpose,' '+action+'\n'+purpose,action+'\n'+purpose+'\n'+purpose,action+'\n'+purpose.replace('b'*64,'c'*64)):
             self.assertFalse(scope.has_exact_action_scope(text,binding))
-    def test_advisory_boolean_or_test_fixture_cannot_register_or_consume(self):
+    def test_test_fixture_admission_cannot_be_consumed(self):
         binding={'installed_enforcement':{'kind':'NONAUTHORIZING_TEST_FIXTURE'}}
-        state={'status':'completed','verdict':'APPROVE','stale':False,'failure_class':None,'active':True}
-        with self.assertRaisesRegex(ValueError,'test fixture'):profile.completed(self.root/'state',state,binding)
-        with self.assertRaises(ValueError):guardian.consume(self.root/'state',state,self.manifest,binding)
+        record={'schema_version':profile.ADMISSION_SCHEMA,'kind':'descriptor-only-admission','profile':profile.PROFILE,'binding':binding,
+            'action_id':self.manifest['action_id'],'expires_at':self.manifest['expires_at']}
+        with self.assertRaisesRegex(ValueError,'test fixture'):guardian.consume(self.root/'admission.json',record,self.manifest,binding)
+        for damage in ({'kind':'reviewer-approval'},{'action_id':'f'*32},{'binding':{}},{'expires_at':int(time.time())}):
+            with self.assertRaisesRegex(ValueError,'descriptor-only admission'):guardian.consume(self.root/'admission.json',{**record,**damage},self.manifest,binding)
         self.assertFalse(list(self.root.glob('*.spent')))
+    def test_real_gate_admits_descriptor_without_any_reviewer_verdict(self):
+        # Real ai-task-gates run (#2041): no review lifecycle, report or verdict
+        # exists; a valid descriptor admits, invalid ones and replays refuse.
+        repo=self.root/'oracle-repo';repo.mkdir()
+        env=dict(os.environ,AI_DEVOPS_TEST_MODE='1',AI_TASK_GATES_DIR=str(self.root/'gates'),
+            AI_ORACLE_NATIVE_TEST_ADMISSION_ROOT=str(self.root/'admissions'),AI_REVIEW_LIFECYCLE_DIR=str(self.root/'no-reviews'))
+        def git(*args):return subprocess.check_output(['git','-C',str(repo),*args],env=env).decode().strip()
+        git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@invalid.local')
+        git('remote','add','origin','https://github.com/u2giants/theoracle')
+        registry,_=profile.profile()
+        for name in registry['paths']:
+            target=repo/name;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(json.dumps({'schema_version':1,'gates':{'private-tooling':{'required':['oracle-native-alternate-descriptor-only-admission'],'forbidden_actions':[]}}}).encode()
+                if name=='.ai-devops/task-gates.json' else b'# Invented public source fixture only\n')
+        git('add','--all');git('commit','-qm','public source fixture')
+        identity=json.loads(subprocess.check_output([str(ROOT/'bin/ai-review-lifecycle'),'identity',str(repo)],env=env))
+        gates=str(ROOT/'bin/ai-task-gates')
+        def check(m):
+            return subprocess.run([gates,'check','--before',profile.ACTION,'--action-manifest-stdin'],cwd=repo,env=env,
+                input=json.dumps(m).encode(),capture_output=True)
+        self.assertEqual(subprocess.run([gates,'start','--class','private-tooling'],cwd=repo,env=env,capture_output=True).returncode,0)
+        with mock.patch.dict(os.environ,env):
+            manifest=self.bound_manifest(identity) if hasattr(self,'bound_manifest') else copy.deepcopy(self.manifest)
+        manifest.update(source_head=identity['head'],source_digest=identity['source_digest'])
+        manifest['output_parent']['stat']=profile.descriptor_stat(str(self.root),True)
+        for index,damage in enumerate(({'source_head':'0'*40},{'limits':{**profile.LIMITS,'network':'host'}},{'profile':'unknown'})):
+            bad=copy.deepcopy(manifest);bad.update(damage);bad['action_id']=str(index)*32
+            self.assertEqual(check(bad).returncode,3)
+        admitted=check(manifest)
+        self.assertEqual(admitted.returncode,0,admitted.stderr)
+        self.assertIn(b'descriptor-only admission',admitted.stdout);self.assertNotIn(b'INVENTED',admitted.stdout+admitted.stderr)
+        files=list((self.root/'admissions').rglob('*.json'));self.assertEqual(len(files),1)
+        record=json.loads(files[0].read_text())
+        self.assertIs(record['reviewer_verdict_required'],False);self.assertIsNone(record['advisory_review_report_sha256'])
+        self.assertEqual(record['schema_version'],1);self.assertEqual(record['binding']['source_head'],identity['head'])
+        self.assertEqual(record['binding']['installed_enforcement']['kind'],'NONAUTHORIZING_TEST_FIXTURE')
+        self.assertEqual(check(manifest).returncode,3)  # one admission per action, no replay
+        (repo/'docs/operations/offline-original-locators.md').write_text('uncommitted change')
+        dirty=copy.deepcopy(manifest);dirty['action_id']='9'*32;self.assertEqual(check(dirty).returncode,3)
+        with mock.patch.dict(os.environ,env):
+            result=subprocess.run([sys.executable,str(ROOT/'tools'/('oracle_native_alternate_v2_guardian.py' if 'False'=='True' else 'oracle_native_alternate_guardian.py')),'--admission',str(files[0])],
+                input=profile.canonical(manifest),env=env,capture_output=True)
+        self.assertNotEqual(result.returncode,0);self.assertFalse(list((self.root/'admissions').rglob('*.spent')))
+        self.assertFalse((self.root/manifest['output_leaf']).exists())
     def test_plain_manifest_is_not_provider_attachment(self):
         b={'profile':profile.PROFILE,'permission_registration_descriptor_sha256':'a'*64,'manifest_descriptor_sha256':'b'*64}
         text=profile.prompt({'action_profile_binding':b})
@@ -169,7 +215,7 @@ print('distinct namespace; only loopback usable; no egress')
 
     def test_direct_guardian_cannot_self_issue(self):
         state=self.root/'state';state.write_text('{}');state.chmod(0o600)
-        result=subprocess.run([sys.executable,str(ROOT/'tools/oracle_native_alternate_guardian.py'),'--state',str(state)],
+        result=subprocess.run([sys.executable,str(ROOT/'tools/oracle_native_alternate_guardian.py'),'--admission',str(state)],
             input=profile.canonical(self.manifest),capture_output=True)
         self.assertNotEqual(result.returncode,0);self.assertNotIn(b'INVENTED',result.stderr)
         self.assertFalse(list(self.root.glob('*.spent')))
@@ -246,14 +292,6 @@ print('distinct namespace; only loopback usable; no egress')
                     with self.assertRaises(ValueError):profile.validate_lock_fd(fd)
         finally:os.close(fd)
 
-    def test_task_override_requires_full_exact_summary_and_class(self):
-        state=dict(provider='deepseek',implementer_engine='codex',run_id='invented',review_mode='security-review',head='a'*40,report_sha256='b'*64)
-        row=dict(kind='reviewer-approval',action=profile.ACTION,observed_class='private-tooling',reason=profile.approval_summary(state))
-        self.assertTrue(profile.has_exact_task_override({'overrides':[row]},state))
-        for reason in ('b'*64,'prefix '+row['reason'],row['reason']+' suffix'):
-            self.assertFalse(profile.has_exact_task_override({'overrides':[{**row,'reason':reason}]},state))
-        self.assertFalse(profile.has_exact_task_override({'overrides':[{**row,'observed_class':'production'}]},state))
-
     def test_full_postclaim_stat_includes_uid_mode_and_link_count(self):
         from types import SimpleNamespace
         item=self.manifest['captures'][0];fd=os.open(item['path'],os.O_RDONLY|os.O_NOFOLLOW)
@@ -266,41 +304,6 @@ print('distinct namespace; only loopback usable; no egress')
                     with self.assertRaises(ValueError):guardian.validate_input_fd(fd,item)
         finally:os.close(fd)
 
-
-
-    def test_native_gate_actual_branch_rechecks_persistence_and_summary(self):
-        source=(ROOT/'bin/ai-task-gates').read_text()
-        begin=source.index('  if [ "$action" = offline-private-capture-transform ]; then',source.index('effective_gate="$(merged_gate'))
-        end=source.index('  if printf',begin);branch=source[begin:end]
-        state=self.root/'fake-task.json'
-        # Exercise actual shell branch control flow with NONAUTHORIZING stubs;
-        # no native provider/lifecycle/admission code runs and no grant is issued.
-        for damage in ('missing-persistence','changed-summary','changed-post-state'):
-            state.write_text('{"overrides":[]}')
-            preamble="""blocked(){ exit 77; }
-state_path(){ printf '%s' "$FIXTURE_STATE"; }
-state_record_override(){
- [ "$DAMAGE" != missing-persistence ] || return 0
- jq --arg k "$1" --arg a "$2" --arg r "$3" --arg c "$4" '.overrides=[{kind:$k,action:$a,reason:$r,observed_class:$c}]' "$FIXTURE_STATE" > "$FIXTURE_STATE.next"
- mv "$FIXTURE_STATE.next" "$FIXTURE_STATE"
-}
-reviewer_approval_summary(){
- if [ "${7:-}" = 1 ]; then
-  [ "$DAMAGE" != changed-post-state ] || printf '{"overrides":[]}' > "$FIXTURE_STATE"
-  if [ "$DAMAGE" = changed-summary ]; then printf changed; return; fi
- fi
- printf NONAUTHORIZING_FIXTURE_SUMMARY
-}
-exercise(){
- action=offline-private-capture-transform;IDENTITY=u2giants/theoracle;declared=private-tooling;effective=private-tooling
- action_manifest_stdin=1;action_stage=initial-forward;reviewer_approval=invented;acknowledge=;small_entry=
- effective_gate=$'required\toracle-native-alternate-descriptor-only-admission';action_manifest_file=invented
- TOPLEVEL="$FIXTURE_REPO"
-"""
-            script=preamble+branch+'\n}\nexercise\n'
-            result=subprocess.run(['bash','-c',script],env={**os.environ,'FIXTURE_STATE':str(state),'FIXTURE_REPO':str(ROOT),'DAMAGE':damage},capture_output=True)
-            self.assertEqual(result.returncode,77,result.stderr)
-            self.assertFalse(list(self.root.glob('*.spent')))
 
 
     def test_exclusive_metadata_publisher_is_not_authority_and_preserves_collisions(self):

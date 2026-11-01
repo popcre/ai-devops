@@ -6,63 +6,59 @@ source/business acceptance. New shared helpers exist only for this named
 profile; retire them through reviewed source when this serialization purpose is
 reconciled, preserving historical lifecycle/spent evidence.
 
-## Supported registrar and bootstrap
+## Descriptor-only admission (no reviewer verdict)
 
-The existing trusted technical reviewer is the independent attachment-only
-DeepSeek native lifecycle. Its **new closed Oracle profile** may register one
-conditional current-purpose permission after a genuine prospective
-final-check/security-review completion. An ordinary code-only advisory cannot
-register a purpose, even if its report copies these words. Only the actual
-prospective lifecycle, exact original/export/source/installed enforcement,
-descriptor binding and independent provider completion can satisfy this path.
-There is no new cryptographic signer and no hash is called a signature.
+Owner rulings 2026-10-29 ("reviews advisory"; "reviewers preferred, never
+required") retired the reviewer registrar (#2041). No reviewer APPROVE,
+lifecycle record, report line or verdict is required or read anywhere on this
+route. An AI review of the action stays optional advisory evidence: when
+`--reviewer-approval <report>` is passed, only its SHA-256 is recorded in the
+admission as `advisory_review_report_sha256`.
 
 Root prepares fresh metadata/stat observations and historical claimed hashes
-without opening captures. The descriptor must cover the exact historical33 page files and15 controls,26 upload aliases,eight original groups, immutable historical completion/operator/configuration/
-custody commitments, exact alias/group/page inventories, current applicable owner/license/
-custodian contract metadata, current ownership, exact scope and expiry.
-Captures remain stat-only before review. A claimed historical SHA is explicitly
-**unverified during this new action**. Metadata is not a qualified SourceRef or a
-new reading/source-processing grant. Existing source/worker permits and spent
-jobs remain expired/spent and are never edited, renewed or replayed.
-
-After the Oracle operator/contract and toolkit profile are independently reviewed,
-merged and actually installed by the supported updater, root declares the actual
-Oracle action task `private-tooling` and uses the supported `ai-review deepseek`
-front door with `--code-only`, exact selected paths/head, this action profile and
-the protected `oracle-native-action.manifest.json`. Native evidence/prompt exposes
-only allowlisted commitments/counts, never control values, filenames, private
-paths or document contents. The reviewer must accept the applicable current
-contract facts, or withhold approval. Both unique standalone lines are required:
+without opening captures, and publishes the descriptor with the existing
+exclusive metadata publisher. Root declares the Oracle task `private-tooling`
+and runs:
 
 ```
-Purpose registration: oracle-native-alternate-serialization-v1 descriptor sha256:<exact permission/custody commitment>
-Action scope: oracle-native-alternate-serialization-v1 descriptor sha256:<exact entire action descriptor>
+ai-task-gates check --before offline-private-capture-transform --action-manifest-stdin < oracle-native-action.manifest.json
 ```
 
-The native completion verifier binds both lines to the authentic provider
-response. `ai-task-gates check --before offline-private-capture-transform` then
-requires the lifecycle-recorded independent exact-head report and descriptor on
-stdin. Its explicit Oracle/private-tooling/local-opt-in branch persists both
-the conditional current-purpose registration and action receipt. It never
-releases generic production, private-evidence, database, infrastructure or
-foreign770 actions. Sticky private-evidence, missing opt-in, advisory-only,
-wrong source/mode/engine/descriptor, unsupported installation, stale clock,
-absent current contract or a fake/synthetic receipt all deny.
+The gate opens only for `u2giants/theoracle`, declared and effective class
+`private-tooling`, initial-forward stage, no `--acknowledge` or small-owner
+entry, and the committed local opt-in gate that matches the descriptor's
+profile (`oracle-native-alternate-descriptor-only-admission` for v1,
+`oracle-native-alternate-v2-descriptor-only-admission` for v2). The profile
+tool's `admit` phase then requires, without reading any capture bytes:
 
-If an applicable original-license/custodian contract requires another registrar,
-the closed profile stops with `applicable external custodian registration needs
-its supported verifier`. Root must obtain that actual contract's supported
-registration; a caller boolean, forged provenance or new signer cannot bypass it.
-This implementation does not add that external registrar or invent a contract.
+- a clean committed Oracle checkout (`working_tree_sha256` of empty), its exact
+  canonical origin, every public closure path present at HEAD, and the
+  descriptor's `source_head`/`source_digest` equal to that source identity;
+- for v2, the frozen public contract and three code pins at HEAD;
+- the truthful `ai-task-gates explain` classification and committed opt-in;
+- the complete stat-only descriptor contract: schema, census, fixed control
+  roles and commitments, 33 pages, owned private single-link inputs, no
+  duplicate inodes, size bounds, fresh output leaf, current custody with no
+  unsupported external registrar, observation and expiry windows, the fixed
+  public `/usr/bin/bwrap` identity and the verified public runtime closure;
+- the installed enforcement identity (`VERIFIED_INSTALLED_SOURCE`) with the
+  installed Oracle guard bytes equal to committed source.
+
+It writes one exclusive 0600 admission at
+`~/.local/state/ai-devops/oracle-native-alternate-admissions/<profile>/<action_id>/`
+(expiry at most 300 seconds, never past the descriptor). A second admission for
+the same action refuses. The task records a `native-admission` override with the
+admission digest. Test mode can admit only a `NONAUTHORIZING_TEST_FIXTURE`
+admission, which the guardian refuses to consume.
 
 ## Execution boundary
 
-`ai-oracle-native-alternate` requires the actual native gate receipt and rechecks
-genuine completion/registration. It atomically consumes one durable spent marker
+`ai-oracle-native-alternate --admission <admission file>` re-derives the
+binding from the clean committed source and descriptor and requires it to equal
+the admission. It atomically consumes one durable spent marker
 **before the first content-capable capture open**. Failure/crash leaves it spent;
-there is no automatic retry or refresh. Admission start is at most300 seconds
-after genuine completion, with at least180 seconds of remaining scope. Metadata/
+there is no automatic retry or refresh. An admission lasts at most 300 seconds
+and needs at least 180 seconds of remaining scope. Metadata/
 custody observations are at most600 seconds old, never future observations.
 The guard uses a monotonic deadline and rejects wall-clock divergence over2
 seconds or registration movement/revocation.
@@ -94,7 +90,8 @@ semantic/business permission is issued.
 ## Source verification
 
 `tests/test-oracle-native-alternate-action.sh` proves real nofollow/stat privacy,
-dual scope syntax, advisory/boolean/fixture denial, current metadata/contract/
+a real `ai-task-gates` descriptor-only admission with no review present,
+refusal of bad/dirty/replayed descriptors, test-fixture consumption denial, current metadata/contract/
 expiry, source/budget/custody neighbors, closed mounts and genuine local Linux
 namespace/resource probes. The actual private action is never run by these tests.
 Existing `tests/test-ai-review-action-profile.sh` and
