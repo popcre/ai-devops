@@ -1,5 +1,36 @@
 # Entire trial operating record — #2022
 
+## October 31 authorized runner and native merge execution
+
+At9:52PM EDT, coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d` recorded
+Albert's explicit runner/job management grant and subsequent live execution.
+This supersedes the earlier8:36PM permission blocker below. Buildkite's scoped
+management grant and self-hosted checkout were used only for the public ai-devops
+mirror and dedicated public native trial repository. Official verified portable
+agents on existing Envy and edge-dev3 ran the existing focused globals phrase
+check; no full toolkit or service was installed on networking-only hosts.
+Alien stayed busy with its original GitHub worker; XPS trust refusal was preserved.
+
+[Native Trail1](https://entire.com/et/ai-devops-trial-2022-20261031/-/trails/1/changes/ai-devops-entire-2022-control/1)
+actually merged tested `9742612a71b0301225ded708cf7fb21aa3b9a0fd` without bypass.
+Its identical commit/tree/parents were published to official GitHub's dedicated
+trial branch and recovered from a clean GitHub clone and offline bundle.
+Pending/failed/canceled/missing-provider/current-head/base-movement refusals have
+actual receipts. **Checks on main failed the canceled-base acceptance case:**
+it reported ready before the base was repaired. Actual merge waited for that
+repair. No replacement qualification or protected-main transition follows.
+
+Full [execution report](../tests/verification/entire-trial/report.md#october-31-runner-permission-native-execution-and-isolated-merge)
+records pinned components, commands, builds and limitations. Agent token revoked;
+only this trial's new Entire refresh family revoked, nine prior sessions preserved.
+Already-issued access still has residual validity. Other integrations remain.
+PR2230's cross-platform global-distribution repair is merged; protected installation
+and native adoption are separate. All16 actual-client journeys, whole-suite parity,
+concurrent merge races and five natural timing pairs remain unmet. Coordinator owns
+those gaps and the preserved outgoing ownership-check timeout. No private capture,
+paid Agents, billing change, private import, policy weakening or clock reset.
+Discovery November2,2026,5:00PM EST; stop November12,2026,5:58AM EST, unchanged.
+
 ## October 31 T1/T2 continuation
 
 Coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d` started from main

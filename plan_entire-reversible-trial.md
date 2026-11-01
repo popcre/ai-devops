@@ -25,10 +25,34 @@ EST; stop remains November 12, 2026, 5:58 AM EST. No extension is authorized.
 Current evidence and full continuity:
 [investigation receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550148920)
 and [new execution handoff](HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
-No native CI execution, replacement merge, latency benefit or 16-cell app
-acceptance has passed. The original R1–R8 work remains, with updates below.
+Native CI and an isolated merge/publication now have receipts below. Full
+replacement, latency benefit and 16-cell app acceptance remain unmet.
+The original R1–R8 work remains, with updates below.
 
 ### Trial sequence, dependencies and completion gates
+
+October31 execution update,9:52PM EDT: Albert explicitly granted trial management
+of test runners/jobs. Official checksum-verified portable agents ran the existing
+focused check on Envy and edge-dev3. Native Trail1 passed pending/fail/cancel/
+missing-provider/stale-head/base-movement negative checks, then actually merged
+without bypass after exact head and base passed. The identical accepted result
+`9742612a71b0301225ded708cf7fb21aa3b9a0fd` was published to a dedicated official
+GitHub trial branch and restored independently from GitHub and offline bundle.
+[Full source-bound receipts and limitations](tests/verification/entire-trial/report.md#october-31-runner-permission-native-execution-and-isolated-merge).
+
+**Qualification is incomplete:** configured Checks on main allowed a ready verdict
+while the moved base's only run was canceled. No merge occurred until that base
+was separately repaired/passed. Coordinator owns this safety gap; protected-main
+PR/verification-closure/queue remain unchanged. Alien was busy; XPS SSH trust still
+refuses. Concurrent merge races, whole-suite parity, five natural timing pairs,
+four accepted installations and all16 native-client journeys are unmet.
+R2 distribution/Windows byte-preservation repair PR2230 is merged at
+`7a80853bba5d7ce4c467277ca33783d5961b013d`; installation is separate.
+Trial runner token revoked; only the new Entire CLI refresh family revoked,
+nine prior session IDs preserved; issued access retains residual validity.
+The outgoing ownership-check timeout remains owned by this coordinator; no foreign
+claim or predecessor identity was released. Original deadlines remain unchanged.
+The8:36PM entry below is historical, superseded for permission/execution only.
 
 October 31 continuation, 8:36 PM EDT: coordinator Codex chat
 `01a19481-9ceb-7592-934e-9e5a4dac240d` claimed
@@ -187,12 +211,12 @@ blocked disposition. Planning is already merged.
 |---|---|---|
 | R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
 | R1 Inventory and supported capability map | observed baseline; authentication/live use partial | Four authenticated host reads, OS/client/root/source hashes and recoverable originals retained owner-only; missing command/app locations and unverified desktop/login behavior disclosed in the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322). No client/platform equivalence inferred. |
-| R2 Shared client workflow and safe access | source merged; actual adoption incomplete | PR2195 landed d7f4c10 after ordinary and queue success. Canonical/rendered policy and preservation fixtures passed; Linux default installation still omits MiMo/ZCode refresh. New controller workflow must follow the October31 amendment. |
-| R3 CI contract and Entire feasibility | inventory and bounded visibility observed; replacement unmet | All12 workflows/182 registrations inventoried. Real release success and disposable failure/repair displayed at exact heads. Buildkite documents self-hosted support but no provider connection, actual native jobs or replacement merge is proved. T1–T5 govern the new test. |
+| R2 Shared client workflow and safe access | source repair merged; actual adoption incomplete | PR2195 landed d7f4c10. PR2230 landed7a80853: default Linux MiMo/ZCode refresh and exact Windows machine-tail preservation repaired, focused Linux/Windows proof. Accepted installed adoption remains separate. |
+| R3 CI contract and Entire feasibility | actual native jobs and isolated merge/publication proved; replacement unqualified | All12 workflows/182 registrations inventoried. Existing Envy/Linux agents ran focused checks, native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-base gate gap, other runners, whole-suite parity and protected-main transition remain unmet. |
 | R4 Offline cross-platform verification | focused suites passed; broader adversarial gates open | Focused Linux and three-host Windows fixtures passed; corrected990c8b95 ordinary Linux/all12 Windows PR sections and d7f4c10 queue passed. Remaining §10/T3 cases and native execution are not passed by fixtures. |
-| R5 Protected installation on four machines | three partial transactions; none accepted complete | edge-dev3/edge-dev/4837 advanced source to d7f4c10 but Linux memory seed failed and Windows scheduler stage interrupted with stale managed receipts.916 not attempted. Handoff gives exact state/repair gates; preserve originals. |
+| R5 Protected installation on four machines | prior partial transactions; acceptance unresolved | All four checkouts moved after outgoing handoff; latest receipts supersede its source assumptions. Preserve other rollout activity, existing authorizations and private-memory health limits. Current coordinator reconciles each protected transaction before writes. |
 | R6 All 16 live client-machine journeys | 0 of16 accepted | Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; native-control/missing-client limits are explicit. |
-| R7 Live CI workflow and continuity | open | §9 R7: genuine authorized task and disposable intentional-failure branch; no weakening GitHub controls. |
+| R7 Live CI workflow and continuity | focused native chain and isolated publication passed; broad acceptance open | T3/T4 report binds pass/fail/repair and actual merge to exact source. No protected-main replacement or full parity; GitHub controls unchanged. |
 | R8 Acceptance, bounded stop and disposition | open | §13: every matrix cell and CI gate has evidence; original stop retained, missing capability stays visibly incomplete. |
 
 **Fresh session starts at R1**, not another mirror demo. Re-read §§1–13 below,
