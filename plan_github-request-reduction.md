@@ -2,46 +2,46 @@
 
 ## STATUS — read first
 
-October 31, 2026 EDT coordinator reconciliation — the [linked completion
-comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
-is still accurate: #2219/#2225/#2229 and their installed Linux/Windows proofs
-are complete; broader fleet and comparable-workload acceptance is not.
+November 1, 2026, 8:31 AM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
-Three parallel audits reconciled source, fleet and measurement evidence.
 
-Measurement continuation: the frozen 712-read replay's helper latency regression
-has a concrete cause: separate durable write/read telemetry appends and repeated
-ordinal-map work. A same-operation two-row commit preserves both records and
-durability with one append/fsync, without changing the ten-second TTL, request
-freshness, terminal outcomes or targets. One unprofiled exact-source replay of
-the repair reduced local total time by 23.89% (stable-open) and 25.56%
-(unknown-head); both local p95 comparisons stayed within the 5% budget. The
-[bounded comparison record](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
-retains the earlier failure and source/input digests. All 712 upstream fixture
-reads remain unchanged under the replay assumptions, so observed read reduction
-is still 0%, failing the 50% replay target. Original arrivals, response heads and
-overlap were not recorded; natural savings and global irreducibility remain
-unknown. This is candidate code/local replay proof, not a merged installation or
-programme acceptance. The repaired complete Linux observer now passed one
-unchanged strict qualification using the correctly matched updateable build:
-twenty cold pairs p95 +4.66224%/total +0.74847%, twenty warm pairs p95
-+1.14350%/total -0.62509%, including bootstrap and teardown, matched request
-ledgers and successful cleanup. Earlier failed/development variants remain
-preserved. Windows focused proofs passed, while native cold-performance cause
-analysis remains active; no Defender attribution or unverified installed result
-is claimed. PR #2267 merged normally as `9225b8c430f3abc315698e2d847f61d460647d81`.
-All three Windows hosts completed normal full installation and counted useful
-reads at that exact source, including the repaired 916 route with unchanged
-2.88.1 vendor/authentication context. Each read observed two primary writes,
-five native invocations and no external/failed writes. Linux CI's fixture-only
-trusted-executable repair then merged through #2272 as
-`c403f6ca528bffd9a430efc8bc9939bcfc390c36`, with the production guard unchanged
-and the actual affected shard passing. Hetz's full c403 update passed eighteen
-required stages; its new matching 2.103.0 profile now completed one necessary
-source-verified counted read with two primary writes, five native invocations,
-no external/failed writes and successful cleanup. Local installation remains held by actual active CI workers,
-not bypassed or asserted complete. Final current-source Linux live proof is
-still pending locally; Windows installed source remains 9225, not c403.
+PR #2267 delivered the measurement repairs as `9225b8c4`; #2272 delivered the
+matching Hetz 2.103.0 profile and fixture-only CI recovery as `c403f6ca`, with
+the production executable trust guard unchanged and the affected CI shard
+passing. All three Windows hosts completed normal full 9225 installations and
+source-custodied counted reads, including the repaired 916 route. Hetz completed
+its full c403 installation, all eighteen required stages and a matching-version
+counted read. Each of these four useful reads observed two primary writes,
+five native invocations and no external/failed writes. Original vendor versions,
+authentication and permissions were preserved. The local current-source full
+installation/count remains pending actual active-CI clearance; no collision
+or another chat's installed-source ownership was bypassed.
+
+The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
+shows 23.89%/25.56% lower local replay processing time with both records still
+durable and local p95 within 5%. The complete Linux observer also passed one
+strict matching-updateable-build qualification: twenty cold pairs p95 +4.66224%
+and total +0.74847%; twenty warm pairs p95 +1.14350% and total -0.62509%, with
+all setup/teardown charged, equal request ledgers and successful cleanup.
+Earlier failures remain preserved; this finite qualification is not a natural
+useful-work or programme acceptance claim.
+
+The frozen replay still uses 712 upstream reads: 0% reduction, failing the 50%
+target. Original arrivals, response heads and overlap were not recorded; natural
+savings, global irreducibility and twenty matched natural outcomes per operation
+remain unknown. The ten-second TTL, original targets and accepted busy-window
+proofs are unchanged. Windows cold performance remains failed; its sampled
+128 ms launch delay is attributed to kernel process-security LUID-index cleanup,
+not NTFS, Go GC, the numeric pipe or proven Defender/Codex causality. Kernel-table
+population and a supported OS fix remain unproven. Windows 2.97 timing remains
+unqualified; T16's documented trusted-executor access remains unavailable.
+
+## Historical delivery snapshots — superseded by current reconciliation
+
+October 31, 2026 EDT snapshot — the [linked completion
+comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
+covered completed #2219/#2225/#2229 and their installed Linux/Windows proofs;
+it did not establish broader fleet or comparable-workload acceptance.
 
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
