@@ -635,15 +635,6 @@ try {
         if((Hash-Bytes ([GenerationCustody]::Read($counterHold))) -cne $counterBinding.image_sha256){throw 'Private counter image copy mismatch'}
         $closurePaths+='extra/counter.exe'
     }
-    # Retain exact fresh file data/security identities BEFORE any inheritable
-    # directory denial can reach them. Never open original/vendor/config ACLs.
-    foreach($relative in $closurePaths){
-        $path=Join-Path $snapshot $relative
-        $fileHold=[GenerationCustody]::Hold($path,$false,$true)
-        $locks.Add($fileHold)
-        $fileControl=[GenerationCustody]::FileControl($path)
-        try{if(-not [GenerationCustody]::Same($fileHold,$fileControl)){throw 'Fresh file security identity mismatch'};$fileControls.Add($fileControl)}catch{$fileControl.Dispose();throw}
-    }
     # Freeze only the private generation. Canonical files stay writable.
     $ancestors = @()
     $ancestor = [IO.Directory]::GetParent($snapshot)
@@ -652,6 +643,16 @@ try {
     foreach ($directory in ($directories | Sort-Object { $_.FullName.Length })) { $locks.Add([GenerationCustody]::Hold($directory.FullName,$true,$false)) }
     $snapshotDirectories = @((Get-Item -LiteralPath $snapshot)) + @(Get-ChildItem -LiteralPath $snapshot -Directory -Recurse -Force)
     foreach ($directory in $snapshotDirectories) { $directoryControls.Add([GenerationCustody]::DirectoryControl($directory.FullName)) }
+    # Retain exact fresh file data/security identities BEFORE any inheritable
+    # directory denial can reach them. Never open original/vendor/config ACLs.
+    foreach($relative in $closurePaths){
+        $path=Join-Path $snapshot $relative
+        $fileHold=[GenerationCustody]::Hold($path,$false,$true)
+        $locks.Add($fileHold)
+        if($countRequests -and $relative -ceq 'extra/counter.exe' -and -not [GenerationCustody]::Same($counterHold,$fileHold)){throw 'Pinned counter image identity mismatch'}
+        $fileControl=[GenerationCustody]::FileControl($path)
+        try{if(-not [GenerationCustody]::Same($fileHold,$fileControl)){throw 'Fresh file security identity mismatch'};$fileControls.Add($fileControl)}catch{$fileControl.Dispose();throw}
+    }
     foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$false) }
     foreach ($control in $fileControls) { [GenerationCustody]::FileAccess($control,$false) }
     [GenerationCustody]::AssertClosure($snapshot,[string[]]$closurePaths)
