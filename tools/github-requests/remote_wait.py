@@ -171,6 +171,7 @@ def observe(command, arguments, receipt_path, timeout_seconds):
         raise ValueError("Linux parent clock required")
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     argument_hash = hashlib.sha256(argument_bytes).hexdigest()
+    observation_started_ns = time.perf_counter_ns()  # BEFORE SSH Popen, never command-runtime-only.
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None,
                              start_new_session=True)
     selector = selectors.DefaultSelector()
@@ -178,6 +179,7 @@ def observe(command, arguments, receipt_path, timeout_seconds):
     deadline = time.monotonic() + timeout_seconds
     pending = bytearray()
     started = start_clock = received = None
+    started_frame_elapsed_ns = None
     got_receipt = False
     got_exit = False
     original_exit = None
@@ -207,9 +209,11 @@ def observe(command, arguments, receipt_path, timeout_seconds):
                     if started is not None or got_receipt or not valid_start(row["record"], argument_hash):
                         raise ValueError("observer start unavailable")
                     start_clock = get_report().qualification_clock()
+                    started_frame_elapsed_ns = time.perf_counter_ns() - observation_started_ns
                     started = row["record"]
                 elif row["kind"] == "receipt":
                     received = get_report().qualification_clock()  # BEFORE ACK, while source custody remains held.
+                    receipt_elapsed_ns = time.perf_counter_ns() - observation_started_ns
                     source = row["record"]
                     if got_receipt or not valid_receipt(source, started):
                         raise ValueError("observer source receipt unavailable")
@@ -228,6 +232,9 @@ def observe(command, arguments, receipt_path, timeout_seconds):
                         evidence["unknown_reason"] = "event_invalid"
                     result = {"schema": 1, "measurement": "linux_observed_windows_pr_wait", "source_receipt": source,
                               "started_clock": start_clock, "received_clock": received, "event_qualification": evidence,
+                              "observation_timing_basis": "linux_parent_perf_counter_ns_before_ssh_popen",
+                              "started_frame_elapsed_ns": started_frame_elapsed_ns,
+                              "receipt_elapsed_ns": receipt_elapsed_ns,
                               "stdin_profile": "read_only_no_stdin", "transport": "ssh_included"}
                     try:
                         _write_private(receipt_path, result)
