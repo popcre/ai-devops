@@ -197,8 +197,11 @@ descriptors unchanged and returns `(original_status, observation)`. Up to forty
 commands are allowed; each has a supervised timeout of 1–300 seconds (120 by
 default). A cohort has a fixed 12,030-second maximum lifetime (40 times the
 300-second command budget plus 30 seconds of bootstrap/cleanup allowance), not
-a renewable background lifetime. Twenty cold pairs and twenty warm pairs
-therefore require separate forty-command cohorts. Worker-only subreaper custody
+a renewable background lifetime. Cold and warm qualification groups use separate
+cohorts. Twenty pairs consume forty worker slots only when both members execute
+inside the worker; an ordinary outside-capsule baseline is counted separately,
+never relabeled as a worker command or dropped from the paired denominator.
+Worker-only subreaper custody
 reaps actual direct/adopted descendants on close, timeout or cancellation;
 unrelated parent/host processes are not adopted. The ready worker is bound by a
 retained pidfd before signals are forwarded, avoiding numeric-PID reuse; cleanup
