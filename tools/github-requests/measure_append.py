@@ -56,9 +56,9 @@ def append_record(measurements_dir: Path, record: str) -> bool:
 def append_records(measurements_dir: Path, records) -> bool:
     """Commit at most two same-operation rows with one durable append.
 
-    No data survives this call in memory. A failed append restores the prior
-    length while its existing writer lock is held, so a short write cannot
-    leave a partial JSON row ahead of a later successful observation.
+    No data survives this call in memory. On append failure, attempt to restore
+    the prior length while its existing writer lock is held. Return False even
+    if that recovery also fails; never claim a failed commit was durable.
     """
     try:
         if (not isinstance(records, (list, tuple)) or not 1 <= len(records) <= 2
