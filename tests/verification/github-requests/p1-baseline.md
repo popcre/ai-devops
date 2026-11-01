@@ -508,3 +508,59 @@ comparison; safety-event equivalence; qualified useful-work latency (schema-4
 qualified latency count is 0; 563 evidence rows lack cohort, source fingerprint
 and clock bound). Missing values stay unknown, never zero. No manufactured
 demand, no raw secrets and no savings claim.
+
+## Coordinator measured comparison — October 31, 2026 EDT
+
+Owner: current #658/#660 coordinator. This supplement separates observations
+from acceptance; it does not retrospectively qualify the historical baseline.
+
+The frozen October 14–20 input has SHA-256
+`f8477e7532d881905a4e3c7dda07500ea47863576c4bb2739a6d42a3f868cb28`.
+Offline replay ran the literal helpers from baseline `f55c1a6` and candidate
+`3b9ac286` using a virtual clock and local upstream stub. Both stable-open and
+unknown-head profiles retained 712 reads and equivalent paired command outcomes:
+**0% read reduction**. All 495 same-target gaps were at least 16 seconds,
+outside the ten-second TTL. Original arrival times, overlap and heads are
+unknown; this replay cannot prove the natural workload irreducible.
+
+Unchanged-content writes fell from 488 to zero; 488 necessary metadata refreshes
+were retained. Replay p95 intervals increased from [3,4] to [8,9] milliseconds,
+failing the 5% local budget. This is local helper timing, not useful-work or
+remote detection latency. Shared input bootstrap was 52.914 milliseconds;
+four replay cohorts took 13.034 seconds including capture, setup and cleanup.
+HTTP totals and GraphQL points remain unknown.
+
+Six necessary live coordinator reads completed successfully through the
+original shared admission state, retained installed source and a finite
+version-matched CLI counter. They covered the two owning issues, current PR
+and run inventories, and two superseded PRs. The numeric channel observed
+13 primary API writes across 30 native invocations, including admission and
+identity probes; this is **six useful command outcomes**, not thirty workflow
+completions or a whole-account census. All six source qualifications passed;
+external writes were zero within the counter's declared scope. Individual
+command durations were 26.208, 28.085, 39.806, 42.078, 23.596 and 27.815 seconds.
+The first four-command cohort additionally retained 155.89 milliseconds of
+bootstrap and 136.35 seconds total elapsed time. These are current observations,
+not matched historical savings.
+
+Twenty-pair direct counter fixtures on the actual Linux CLI version passed
+the 5% p95 and total timing budgets with no added requests. The complete
+observer route, including source capture and per-call isolation, did not:
+bootstrap-amortized p95 ratios were approximately 1.532 cold and 1.626 warm.
+It remains explicit bounded qualification machinery, never global routing.
+Neither result establishes installed useful-work performance acceptance.
+
+The comparison command enforces paired cases, matching outcomes, twenty cases
+per operation, conservative latency intervals and existing thresholds. Missing
+counts stay null and programme acceptance always requires independent live
+evidence. New prospective read receipts retain arrivals, publication times,
+head/cache generation, reuse policy and clock limitations. Historical records
+are never upgraded by inference. Raw artifacts remain protected locally.
+
+PR #1709 was closed after proving all three changes already present upstream.
+PR #1567 was closed without deleting its branch after exact recovery of its
+unique historical document: 19,432 bytes, SHA-256
+`6ede7fb6622eaab6cebc2ad704fb8e91f9076e2d769358a863a18e719f670bfa`.
+Its historical operational instructions are not current acceptance authority.
+Both existing issues retain live proof, fleet coverage and genuinely matched
+natural-workload acceptance until independently demonstrated.
