@@ -52,8 +52,9 @@ transition repair then merged through #2254 as `87790de4`; Hetz's normal full
 update and source-qualified owner read at that source passed, including actual
 same-inode owner preservation. The final combined code is now merged through
 normal PR #2256 as `a98131576c3a092fc19ec938d24650ab98469c8a`, including that
-Linux owner repair. Final normal full installations on both Linux hosts and
-all three Windows hosts are active; their final receipts remain pending. Merge is
+Linux owner repair. Final normal full installations and source-qualified useful
+reads on both Linux hosts now pass at `a9813157`; the three Windows final
+installation and two counted-read receipts remain pending. Merge is
 not actual-context acceptance. The earlier Windows counter guard inspected the
 default configuration instead of the private SSH namespace actually selected by
 `ai-gh`; that implementation bug is repaired in merged PR #2256. Metadata-only

@@ -815,6 +815,31 @@ progress on the five reachable hosts; no completed final-source receipt or
 counted Windows observation is inferred from the merge. The code also includes
 the Linux-only owner-transition repair; no intermediate repeat rollout is needed.
 
+The final combined `a9813157` Linux receipts subsequently completed. Local full
+installation passed all 21 required stages with no failure, exact clean source
+and owner-private manifest
+`a52d5527de34fd82e866646f47073cbf9b2664288deffd09e2a65ed8abbf7de9`.
+The independently checked sanitized receipt digest is
+`9d34eba4e26db7e353c6afcb001adaa4a6aacb1891392123deb2900114387137`.
+Its necessary issue read returned exit 0, verified source and complete numeric
+metadata: two primary writes, zero external writes and five native invocations
+including unseparated probes. Command time was 4.184242573 seconds; total cohort
+time was 4.341196403 seconds including 149.248337 ms bootstrap. Source bootstrap
+56.108856 ms is a component of that bootstrap, not an additional amount.
+
+Hetz's normal full `a9813157` installation passed all eighteen required stages,
+exit 0, exact clean source and manifest
+`9af44ff5d950ff9f58e691a3e87051fb2f2ac195a83e586d4a36d6fec86e227e`.
+The protected combined receipt digest is
+`9671b2847073493dd1e0868dda80ab08eb77e85552ccd38e990704ef5e625a95`.
+The subsequent normal-owner read returned MERGED and exit 0 with verified source
+in 11.994158959 seconds including 140.314219 ms source bootstrap. Ordinary import,
+Git/index/reference access and parent descriptor-limit restoration passed; no
+manual metadata repair was made. This does not claim every readable source file
+is normal-owner-owned. Eligibility preceded observation, so detection remains
+null; HTTP totals remain null. Neither final Linux receipt establishes matched
+before/after savings, the twenty-outcome floor or qualified p95 regression.
+
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
 sealed-generation custody. Its receipt digest is
