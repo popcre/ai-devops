@@ -501,9 +501,11 @@ func TestWindowsNativeChildParity(t *testing.T) {
 	}
 	var telemetry, requests atomic.Uint64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/telemetry" {
+		// The pinned Twirp client appends its service method to the endpoint.
+		if r.URL.Path == "/telemetry/twirp/clientappsfe.observability.v1.TelemetryAPI/RecordEvents" {
 			telemetry.Add(1)
-			w.WriteHeader(204)
+			w.Header().Set("Content-Type", "application/protobuf")
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		requests.Add(1)
