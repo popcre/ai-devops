@@ -28,19 +28,22 @@ recovery toolkit for Ubuntu and Windows, not a hosted application. See its
 Assess Google's EGM and turn the selective fresh-reader recommendation into a
 self-contained implementation plan. The user said “make a plan to do this”.
 The deliverable is [the plan](../plan_selective-fresh-reader.md), published at
-[its task branch](https://github.com/popcre/ai-devops/blob/codex/egm-selective-plan/plan_selective-fresh-reader.md)
-before landing. After merge use the same path on `main`.
+[its published source](https://github.com/popcre/ai-devops/blob/main/plan_selective-fresh-reader.md).
 
 ## 3. Current state
 
 Research baseline:
 [7e591363634be65a6b99d7e60443afc6f1091716](https://github.com/popcre/ai-devops/commit/7e591363634be65a6b99d7e60443afc6f1091716).
-The planning PR adds the plan and discovery pointers. No pilot capability,
+The [planning PR #2224](https://github.com/popcre/ai-devops/pull/2224) landed as
+[b2a9fb8d](https://github.com/popcre/ai-devops/commit/b2a9fb8d7a6baa069d59589f02c59cb12cbcf500).
+No pilot capability,
 installation, isolation proof or savings measurement exists yet. Plan STATUS
 rows remain open. Publication evidence belongs on the same owning issue.
-Planning artifacts are committed/pushed to the task branch. Shared GitHub access
-initially delayed publication; issue #2222 now exists. Exact source can be
-recovered from the task branch URL above. PR/merge acceptance remains separate.
+Planning artifacts are published on main; do not repeat their original PR.
+October 31 coordination amendment: [parent #2227](https://github.com/popcre/ai-devops/issues/2227)
+coordinates this issue and [TokenEconomizer #2220](https://github.com/popcre/ai-devops/issues/2220).
+The plans remain separate; §8 of the current plan owns clean-reader exclusion,
+separate measurement, shared-file ownership and combined compatibility rules.
 
 ## 4. What did not work / was rejected
 
@@ -52,7 +55,7 @@ controlled cost study. Never replace the existing self-audit with reader approva
 
 ## 5. Findings
 
-[Plan §§5–8](https://github.com/popcre/ai-devops/blob/codex/egm-selective-plan/plan_selective-fresh-reader.md)
+[Plan §§5–8](https://github.com/popcre/ai-devops/blob/main/plan_selective-fresh-reader.md)
 contains source anchors, rejected options and locked decisions. Existing writing
 skills already require self-audit; missing independent comprehension testing is
 the narrow opportunity. Google sources are linked in §3. No native isolation or
@@ -60,8 +63,9 @@ platform support claim has been verified by this planning session.
 
 ## 6. Exact next steps
 
-1. Finish publication first: open the checked planning PR and merge through the
-   normal queue. Gate: exact landing on `main`; GitHub is authoritative.
+1. Read the parent and both children's current STATUS; record intended shared
+   files and their writer before editing. Gate: independent standalone scopes
+   and clean-reader exclusions remain intact; parent owns combined acceptance.
 2. Read the plan STATUS, §§1–8 and downstream phases; verify current upstream
    and claim the existing owning issue. Gate: no conflicting owner or stale work.
 3. Execute §9.1 then §9.2 in a dedicated worktree. Gate: named focused checks
