@@ -1,7 +1,14 @@
 # Native protocol components only. No source qualification or real workload.
-param([string]$SourceRoot=(Split-Path $PSScriptRoot -Parent),[Parameter(Mandatory=$true)][string]$PythonExe)
+param([string]$SourceRoot=(Split-Path $PSScriptRoot -Parent),[string]$PythonExe)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if($env:OS -ne 'Windows_NT'){throw 'Native Windows required'}
+function Resolve-NativeTestPython([string]$ExplicitPath){
+ if(-not $ExplicitPath){$ExplicitPath=@(Get-Command python.exe -CommandType Application -ErrorAction Stop)[0].Source}
+ & $ExplicitPath -I -S -c 'import sys; sys.exit(sys.platform != bytes([119,105,110,51,50]).decode() or sys.version_info < (3,10))'
+ if($LASTEXITCODE -ne 0){throw 'Existing native Python 3.10 or later required'}
+ return $ExplicitPath
+}
+$PythonExe=Resolve-NativeTestPython $PythonExe
 $supervisor=Join-Path $SourceRoot 'tools/github-requests/source_generation_windows.ps1'
 $text=[IO.File]::ReadAllText($supervisor);$tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
