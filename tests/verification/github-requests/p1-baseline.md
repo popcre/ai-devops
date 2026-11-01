@@ -1,5 +1,219 @@
 # P1 request attribution — working baseline
 
+## Current receipt-emission reconciliation — November 1, 2026 EST
+
+Final code #2291 merged as `10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`.
+Dispatch/privacy and finite active BlockerWatch terminal/event producers,
+governed parent completion/event consumers, native transport and literal dry-run
+parity are implemented. The original emission/consumer implementation gaps are
+repaired. All five normal full installs now verify this generation, and local
+maintenance capacity is fully restored with the owned recovery timer retired. Earlier read receipts below retain their
+actual source and are not silently retargeted; no new SDK/counter workload was
+created by the remote installations.
+
+Only an explicitly admitted SDK-only standalone successful alarm can qualify a
+conservative batch-ack detection interval. Local Linux validates same-host
+facts against parent bookends; native uses Linux parent receipt over SSH and
+genuine eligible GitHub UTC, without Windows wall-clock subtraction. A caller's
+dry-run intent excludes both qualified intervals and active success even if
+producer rows claim completion. Original/provider context is never silently
+reduced to grant qualification. Privileged-provider authority, wake/link/tick
+detection and whole-observer budget remain unknown. Twenty matched natural
+outcomes and genuine future activity are still required, not fabricated.
+
+Repaired registration CI at actual `e04` passed all twelve Windows sections and
+executed the new fixture's 73 native assertions; its immutable proof is
+`f1f4a7f953b2b5b81e7e965725898a18537643d74f624bc49e842568798e051e`.
+Native dry-run predicate-only proof
+`4ccb6654df9760033a0c4b6ca8ca5b8ac227f23720f423d6a7a05068bd3b8bb1`
+records sixteen passing cases, zero physical workers and no body rerun/API/
+notifications. Its actual `2963` PowerShell bytes independently match final
+`10ae`; the original receipt is not retargeted. These source-scoped proofs are
+not twenty useful outcomes or current full-budget acceptance. All older cold,
+request-reduction and protocol failures remain preserved below.
+
+### Final normal installations at `10ae0b93`
+
+The three Windows normal full installers exited zero, canonical source/managed
+launcher are exact `10ae` and clean, and all retained full-install log hashes
+match their readbacks. Each reports twelve phases and completed normal required
+stages; the numeric required-stage count is null because no native stage
+registry exists. Do not substitute Linux stage counts. Index digest
+`066734c4f580552120cfbec07878576cdc38b6eae9dd6e0711e844e12bc5f4b4`
+binds the independently hashed readbacks: 916
+`759627dadef95cc7d4da24c69f6e8efb480f1cdddd836736efbfe338d85fbe35`, 4837
+`bfb43575a62265bb22063fbdcf2c7f9d14efcc7abfd930f1461f28d694dd703f`, and edge-dev
+`2f642d74ad7a8462201c24eed46b2e344495e07d3ac029d467771baf6318d722`.
+Actual installed task-gate bytes match the final Git source. No additional
+counter/detection workload or full observer qualification follows from this.
+
+Hetz's normal full resume completed all 21 required stages with zero failures;
+the existing normal-owner/user-bus capability was restored and its pending
+ordinary transaction consumed. Receipt
+`21bd7e33e1b44ad76a77910a40f493d032de533fc09cb603fd98b3a9b5ebb3d7`
+and all five bound artifact hashes were independently verified: actual head,
+manifest, clean source and launcher bind final `10ae`. Existing history was
+preserved; an older baseline field inside the completion record is not asserted
+as the current installed head. No new measurement or SDK workload was generated.
+
+Local normal full installation also completed at exact clean `10ae`, with all
+21 required and twelve optional stages passed, exit zero/no timeout, matching
+manifest/completion and actual installed-command exit zero. Receipt
+`78c27319770be1ad29513a2fa1da5ed47a939acd10aeaae7637f6a5d69779439`
+and its copied manifest/completion/full-log hashes were independently verified;
+actual task-gate bytes match final Git source. Its older baseline completion
+field is not asserted as current. No new counter/timing cohort was generated.
+Separate capacity proof
+`86462ea051d2d87aadbb51a08731897c089d3ad1a7843ee9fe3839ddb31161fc`
+verifies ten original registrations online, every original/unrelated label
+preserved, two naturally busy, zero restore errors and recovery-service exit
+zero. The owned timer and all four owned units are inactive/unloaded; no foreign
+unit or job was stopped. Combined local proof
+`92ff4e195341f4e34c9057b671726e2a77771ba15af79dc4070d8acc9a07d383`
+binds installation, capacity and retirement without rewriting the earlier
+installation receipt. These bindings were independently hashed/read. This
+operational recovery is not a new counter/timing cohort or programme acceptance.
+Independent final audit
+`ff1fb73cb0167a0188cb601dffe41d90fd327ff2fe109d01379fe93666ebded1`
+binds all five normal full installations, the single SDK dry-run and restored
+capacity at final `10ae`, explicitly without additional workloads, retargeted
+older counts or detection/programme acceptance.
+
+### One actual installed SDK dry-run — component scope only
+
+One subsequent edge-dev `links --dry-run` operation executed once at installed
+`10ae`, with source/protocol/native cleanup and original exit zero verified.
+Proof `1128584a4ce6943f5c86a8a32205c10d7994a323028dffd344adfe2e4795396c`
+and all four bound artifacts were independently hashed. There is exactly one
+outcome row: skipped, 24 skipped items, attempted/succeeded/failed counts zero.
+Active-success is false and both completion/event interval types are null.
+The explicit `sdk_only_no_provider` profile does not assert original privileged
+context. Parent bookends are valid; native clock and whole-observer budget remain
+unknown. Full diagnostic observer elapsed 284.986169826 seconds includes transport;
+the started-frame elapsed is 3.206400544 seconds. Neither is p95/before-after
+acceptance. This live component proof creates no active/business outcome,
+request-counter cohort or detection sample; it does not add 24 completions to a
+denominator or reclassify the older five counted reads.
+
+### Earlier source-scoped adapter snapshots — superseded by final reconciliation
+
+The following implementation-stage descriptions retain their original source;
+their pending statements do not describe the final merged code above.
+
+The current collector and reporter implement dispatch/status/cancel and
+transcript-destination privacy terminal receipts, with focused tests. The
+earlier October 31 statement below that only PR waiting and BlockerWatch ticks
+are accepted describes its historical source and is superseded. Current
+emission exists in the shared collector, both actual callers and the reporter;
+absence from a retained natural cohort is a natural-use/sample gap, not an
+unimplemented emission path. Dispatch receipts describe the command boundary,
+not completion of dispatched remote work. No dispatch or transcript traffic is
+manufactured to fill a sample, and no old observation is reclassified.
+
+Active BlockerWatch terminal emission now exists in merged #2281 (`e178`):
+distinct child IDs, parent-tick linkage, finite boundaries and attempted,
+succeeded, failed and skipped counts. Idle, dry-run, partial and refused work
+does not become successful active work or change the useful-work denominator.
+Its actual native proof passed sixteen cases; earlier fixture-selection failures
+remain retained. The legacy/active CI-fixture repair #2282 (`aaca50a8`) passed
+on the same physical CI environment without relaxing the validator.
+
+Common parent-completion adapter #2283 merged as `49dec38d`, with exact code
+equivalence to tested `d5d3d0fa` and 49 qualification cases passing. It distinguishes the acknowledged active envelope
+from full caller-through-cleanup costs; neither alone supplies a whole-observer
+budget verdict. Default original-context and provider-capable work executes once
+outside reduced-rights qualification. Explicit SDK-only alarm/links is component
+scope, not arbitrary privileged-provider acceptance. Native integration and final
+installed proof are still required. `e6ed1ac8`, merged through #2285 as `4bee93ba`, adds durable-only
+unqualified event facts (185 BlockerWatch and 31 receipt/fact cases passed on
+Linux). Its first native controller exceeded its aggregate deadline without
+preserving streams; the corrected bounded protocol then passed all 31 native
+cases in 186.212 seconds, with zero owned processes/fixtures remaining. Receipt
+`e5414303ba9872c1bcdd30509b22a7a7b0bb8ee096ec103c74d822de84eeb79e`
+retains actual `e6ed` source; separate executed-closure equivalence to PR #2285
+head `7f926` is bound by
+`7e6e997c7a2031d74243142d848727c0f590555a372d05f14a87e281cd61deb7`.
+The original 180-second timeout remains historical protocol failure evidence.
+The separately finished governed consumer `f2a90c12` merged through #2286 as
+`221cb504`, with all four tested code/test blobs exactly equivalent to PR head
+`1196f133`. It joins one bounded
+facts frame per acknowledged completed active ID, using a separate parent
+receive clock and unchanged END completion clock. Only a successful standalone
+explicit SDK alarm can receive its conservative batch-ack interval. Default
+original-context, links, wakes, ticks and failed/partial/refused operations
+cannot receive numeric detection. Native integration
+and installed proof remain required; future facts alone cannot supply them.
+Its Linux gates passed 60 qualification, 31 caller/fact, 185 BlockerWatch and
+38 counter cases. A caught no-observer dispatch regression was fixed by requiring
+both reserved channels/helper before forwarding; only a partial recovered
+failure excerpt remains because the first test log was overwritten. Corrected
+31-case proof is separate. PR event qualification remains strictly PR-only.
+Historical P5 and busy-window proofs remain accepted.
+
+Local Linux event qualification validates local observed/delivered times against
+its own parent bookends. The native Windows consumer must instead use the
+Linux parent's acknowledged BEGIN and facts-receive clocks with genuine eligible
+GitHub UTC; Windows wall-clock fields cannot be subtracted from Linux clocks.
+That remote boundary is parent receipt of the alarm batch acknowledgement over
+SSH, including transport, not an exact native SDK acknowledgement interval.
+Native installed proof remains unfinished; the component proof below does not
+close the unknown whole-observer budget for either route.
+
+The native completion/facts component subsequently passed eight native Python
+tests with at least fifty actual assertions in 7.604 seconds at `acb359c1`.
+Receipt `46f5542dd3ac2573b5b9ed2c48d8df611fb523e8880877c522eda52e35f9b0b5`
+was independently hashed; it records zero owned processes, no API/notifications,
+component-only scope and original-active qualification false. Its delivery
+`c796afc7` preserves executed native source bytes; the separate common
+`AI_GH_ACTIVE_BASH` cleanup hardening `7e0e0f93` has one actual Linux fallback
+FD/session regression pass, not retargeted native execution. Native integration
+landed through #2289 as `6932559d`, with nine code/test blobs equal to `e406`.
+Run `41340783808` / job `124950122563` failed because the new PowerShell suite
+registration manifest was absent; Windows aggregate sections and the final
+report were downstream skips, not runtime component failures. A two-file
+registration/default-native-Python fixture successor merged through #2290 as
+`fba13b43`. Repaired proof
+`f1f4a7f953b2b5b81e7e965725898a18537643d74f624bc49e842568798e051e`
+was independently hashed: actual `e04a60d1` run `41341891090` passed the classifier,
+all twelve Windows sections and aggregate, with the new fixture actually
+executed and 73 native assertions recorded. These are assertions, not independent
+useful outcomes or timing pairs. The original failed run remains preserved;
+no unchanged retry or native-proof retarget is claimed. Final installed delivery
+still requires the dry-run successor below.
+
+The final finite-entry audit found native active qualification rejected the
+otherwise supported literal `--dry-run` tail. The approved successor allows only
+one finite operation plus that optional literal, keeps SDK ticks refused and
+binds receipt dry-run mode to actual arguments. Separate common caller-intent
+defense `d41eacac` passes that trusted mode into the transcript and requires exact
+false for numeric alarm-event qualification, even against forged completed
+END/facts. Its `8701f3af` follow-up consistently clears both interval types and
+active-success classification with `dry_run_not_active_work`, preserving source
+custody and diagnostic clocks/elapsed. Twenty-nine focused cases passed at that
+source. Test-only `87082eac` additionally proves the actual retained factory
+receives the dry-run arguments and excludes a forged completed fixture; two
+focused actual-intent cases passed. This defends caller intent; producer data still cannot grant
+source authority. Native predicate-only proof and combined landing remain
+unfinished; no real active action or timing acceptance run was generated.
+The joint successor merged through #2291 as
+`10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`, from `20c2f01b` based on the merged suite-
+registration repair `fba13b43`. Independent read-only review found no concrete
+defect in its predicates, actual-argument dry-run flag, interval clearing or
+cleanup downgrade. This is advice, not an acceptance gate or a substitute for
+the source-scoped CI evidence and final installed proofs still required. The
+earlier `e04` Windows CI proof is not retargeted to this successor.
+
+Coverage aggregate V4 has digest
+`fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.
+It preserves all seven V3 input bindings and adds the immutable context-scope
+clarification (`a37434319f4a0466d6cba479f12d97af0e7be96553f89750d92913390d2b3ce0`).
+Five disjoint useful reads still mean ten covered constructor writes and
+twenty-five native invocations including probes, not a matched cohort. Preserved
+environment/cwd/authentication/streams/descriptor limits do not imply identical
+OS privileges. These finite source-isolated read counts remain valid; arbitrary
+privileged active qualification, whole-account totals and matched natural
+savings remain unknown. V3 and its original receipts were not rewritten.
+
 ## Coordinator natural sample — October 31, 2026 EDT
 
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` under #658/#660.
@@ -680,7 +894,7 @@ showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
 behind in the squash context. This is sanitized continuity, not mirror CI
 execution parity; GitHub's required safety result remains authoritative.
 
-The final overview subsequently showed exact landing
+That earlier delivery's overview subsequently showed exact landing
 `a98131576c3a092fc19ec938d24650ab98469c8a`.
 [Existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
 showed Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
@@ -895,3 +1109,504 @@ including 59.376810 ms source bootstrap; total waiting time is not event deliver
 latency. The original 25-minute deadline was unchanged and no replay was run.
 This is one genuine useful outcome, not twenty matched baseline/candidate
 outcomes, a p95 regression result, an HTTP census or savings evidence.
+
+## Same-operation durable telemetry repair comparison
+
+The frozen input remains
+`f8477e7532d881905a4e3c7dda07500ea47863576c4bb2739a6d42a3f868cb28`:
+712 recorded read completions, 217 anonymous targets and 495 same-target gaps.
+Minimum gap is 16 seconds, median 305 seconds and 25th percentile 304 seconds;
+none is inside the existing ten-second TTL. Only 52 gaps are below 300 seconds.
+The serial replay therefore cannot show savings from that TTL. These are
+completion timestamps, not original arrivals, response heads or overlap; no
+claim of natural duplicate demand, global irreducibility or revised target
+follows. No TTL or freshness bound was extended.
+
+Diagnostic profiling of the literal pinned helpers identifies actual extra
+work: the original helper made 712 fsync calls; the historical candidate made
+1,866, including 1,424 separately durable measurement appends. The current
+pre-repair helper made 2,083 fsync calls and 2,136 ordinal lookups; its telemetry
+appends accounted for 2.072 seconds and ordinal work for 1.468 seconds in that
+profiled cohort. Profiling affects timings, so these figures diagnose work,
+not latency acceptance. The historical original-to-candidate p95 failure remains
+preserved; it has not been replaced with a new baseline by inference.
+
+The bounded repair commits the same operation's write and read rows in their
+original order with one append/flush/fsync before returning. It retains both
+schemas, unknowns, privacy checks, daily ceiling and original command results.
+Only the immediate same-key ordinal result is reused; new ordinals still take
+the mapping lock. There is no cross-operation buffer/cache, durability removal,
+request change or target amendment. Short/late writes attempt rollback under
+the existing lock; any commit or recovery failure returns false without turning
+the original command into a failure. Focused tests cover nested/concurrent
+isolation, cancellation, serialization, short writes, flush/fsync and rollback
+errors, lock refusal, caps and symlink refusal.
+
+One unprofiled before/after execution used exact pre-repair source
+`bdcbf84e9c40c91a7b577f9c84cfecde40ad7370` and repair source
+`55ef580d9a7c4188001791aa420a217fb310760d`, with the frozen workload and literal
+existing sharing code. Each profile preserved all 712 paired local terminal
+outcomes, 712 upstream fixture invocations, 224 content writes, 488 metadata
+refreshes and zero duplicate unchanged-content writes.
+
+| Local replay profile | Total before / after | Local p95 before / after |
+|---|---|---|
+| Stable open | 5.024190088 / 3.823920970 seconds (23.89% lower) | [10,11] / [9,10] ms; within 5% |
+| Unknown head | 4.923124611 / 3.665008221 seconds (25.56% lower) | [10,11] / [8,9] ms; within 5% |
+
+Each phase includes its source/bootstrap in its first normalized row. Shared
+input bootstrap was 73.545734 ms; all four cohorts, setup and cleanup took
+17.529304466 seconds. The protected summary digest is
+`0261aab6cc0003a6caca0a1793ef3a5ed3ee308354c39dd1771fb8b4661e85a3`;
+stable-open comparison digest
+`a9442cc8f3dff7c22020f5465cbed442e4802d86ece19b079f6ffb1a34772297`;
+unknown-head comparison digest
+`52de9afa07dacd8dde8ffde25ee9c76f7bd9e971167f67da06a84a749af314d3`.
+
+The exact replayed helper SHA-256 is
+`9d91fb29a7fd659051a6325f8bddc03f6bbb0c17a0922af46cc01f7ee64610b2`
+before and `e973cf3bafb4ec66f35322808f269c3546f18c0a7f6ecc701abba296fd585968`
+after. Append-helper digests are
+`4c6656af4dd9df0bd6e336c5f3d6a2287751403a72cc9930d4ed30bb2f309052`
+and `23f9ee78788243458a184c8a678eb7d9263f3b0a626fb712dd5c6317fbba4296`;
+the unchanged ordinal helper is
+`86834061ba75e904520c93e2a35191f8ca947d5af5ae17c7c99a8b962d2fcc24`.
+A later docstring-only clarification is not retroactively substituted for this
+executed candidate source binding.
+
+This is an honest matched offline comparison of this repair, not a natural
+twenty-outcome cohort, useful-work/detection p95 or a whole-observer overhead
+qualification. The repeated-read reduction remains 0%, failing the 50% target;
+actual HTTP requests, GraphQL points and natural per-outcome savings remain
+unknown. Subsequent Windows and full Linux observer proof is recorded below;
+neither follows from this helper-only comparison. The p95 pass compares the
+literal pre-repair source with this repair; it does not clear the retained
+original-to-historical-candidate latency failure.
+
+The first strict bounded Linux cohort qualification also remains a measured
+failure: protected receipt digest
+`4afc5d7d2d740091c87c962dbaed2477f3f8b13862f0e46afcee8d1a2a6156bd`, source
+`341a05bc035fba485d7dd1f798ad2f32429de909`. Twenty cold pairs had equal 84/84
+requests, successful cleanup, total ratio 1.0292534577 and bootstrap-amortized
+p95 ratio 1.0669898085, failing 5%. Twenty warm pairs had equal 60/60 requests,
+successful cleanup, total ratio 1.0161382597 and p95 ratio 1.0482486041, passing
+that group only. All setup, matched warmup and teardown remain counted. This
+receipt used the retained non-updateable local fixture build
+`c8e762079b6a2490e7962da7cccf4dbef7630b3a6f163b45e5b839f09421df58`; it
+does not replace the separate updateable-image runtime-parity binding or prove
+installed acceptance. The later private-tmpfs copy optimization is a concrete
+candidate setup repair with adversarial source/mode/alias tests, not a positive
+performance result until its unchanged strict qualification actually completes.
+
+The later repaired observer completed its one approved actual-feature
+qualification at source `53107ea9534e05ca951bc22b517277308b3dc5fe`, measurement
+helper digest `cf437f86554cf7b77b44d2acbbe0e92eaa5d4805c914479bac056e9bd6f75ebf`.
+The protected receipt digest is
+`7257394fc50b4fd8c92e4c75518e8251a1da1c6c3780d94088df5a91ef80e615`.
+It binds approved build manifest
+`2f0464b78ce8a614412eb3297cbeef328cedd3a40313c2b54437a3123abc5f5a`,
+`updateable` feature tags and baseline/instrumented images
+`ac3d854a7b293ccd4874339d50b4bdafa941b2ebd6968ef4b99db552dfa0495b`
+and `7a0de23bbb9b0edd5a66a03bb80e5e1f37869c299936abdb6e0985f5252d0c03`.
+
+Twenty cold pairs passed: total ratio 1.0074846744 and p95 ratio 1.0466224155.
+Twenty warm pairs passed: total ratio 0.9937490669 and p95 ratio 1.0114350436.
+These are forty paired fixture outcomes across two independent groups, not a
+changed denominator or a natural twenty-per-operation sample. The ordinary
+baseline ran outside the observer capsule; each instrumented cohort ran twenty
+commands. All source/image/bootstrap, matched warmup, command processing and
+teardown were included. Cold/warm bootstrap was 333.221634/276.840736 ms; final
+cohort times were 20.688972892/24.708721293 seconds. Both cleanup flags were true.
+Actual fixture request ledgers matched 84/84 cold and 60/60 warm, with equivalent
+output/status. No pacing or external CI delay was added to obtain the pass.
+
+The earlier `4afc` cold failure and default-feature development result are
+retained, not upgraded to matching-runtime evidence. The new local result
+establishes only this finite complete Linux observer qualification. Windows
+native cold performance remains failed. A later symbolized trace isolates the
+observed launch spike to Windows kernel process-security LUID-index cleanup,
+not NTFS, Go GC or the numeric pipe; the cause of the accumulated kernel table
+remains unknown and no Defender attribution is made. Windows batch tests (38 with two declared platform
+skips), sharing tests (19 with five declared platform skips), 107 native source
+fixtures and seven-pin original-config preflight are candidate proofs, not
+already-installed outcomes. At this candidate stage PR #2267 delivery and final
+installed live proof were pending; the completed receipts below supersede that
+delivery status. Natural request reduction, useful-work p95 and broader account
+coverage remain separate open measurements.
+
+The independently checked Windows launch-cause digest is
+`849a4fdf45c55c3bcae0714b7e9bbcb19f21a36f41f9beb7962ec125eac0d9ff`.
+Candidate parent launch took 131.8351 ms versus baseline 3.3516 ms; child wait
+was 32.9182 versus 32.8564 ms. Of 132 parent CPU samples during the delayed
+launch, 129 were in the symbolized process-security path through
+`SepCleanupMarkedForDeletionEntries` and `RtlEnumerateEntryHashTable`, spanning
+about 128 ms. No trace events were lost and the owned recording stopped.
+This diagnoses the sampled delay, not a kernel repair or counter timing pass.
+
+The actual host is Windows 11 26H2 build 26300.9711. Microsoft's
+[installed-update notice](https://support.microsoft.com/en-au/servicing/os/windows-11/2026/10/kb5127648-windows-11-24h2-25h2-26h2-security-update),
+[newer preview notice](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/10/kb5127936-windows-11-25h2-26h2-update)
+and [current release health](https://learn.microsoft.com/en-us/windows/release-health/status-windows-11-26h2)
+do not identify a targeted fix for this LUID-index cleanup slowdown. The newer
+preview's token-related RDP fix concerns a different symptom. OpenAI's
+[Windows guidance](https://learn.chatgpt.com/docs/windows/windows-sandbox) and
+[changelog](https://learn.chatgpt.com/docs/changelog) likewise do not establish
+a targeted fix. The [existing Codex discussion](https://github.com/openai/codex/discussions/29949)
+contains user-reported process/token churn, not a confirmed fix or evidence
+that Codex caused this host's accumulated state. Patched vendors, disabled
+features, changed foreground/security settings and a reboot are not asserted
+as a supported repair by this record.
+
+## Repaired measurement delivery and actual Windows counting
+
+PR #2267 merged normally as `9225b8c430f3abc315698e2d847f61d460647d81`.
+Required GitHub doc-safety and verification closure passed; Entire was neutral.
+The observed public overview showed short `9225`, while
+[existing Trail 394/change 179](https://entire.com/gh/popcre/ai-devops/-/trails/394/changes/179)
+showed Merged at exact head `c542181fe74899ddc799c9ad45bb0a507bfebf12`, one of
+28 checks failed and six commits behind. This preserves the advisory failure
+rather than presenting mirror status as independent CI parity.
+
+All three Windows hosts completed normal full installation at exact `9225` with
+exit 0, clean canonical source and matching managed launchers. One necessary
+counted issue read per host then returned exit 0 under active source custody,
+with matching loaded fingerprint
+`a9b1497b1b77ff1c10ef5db9a568c038930f0e86fd034ef5e8bcdaadbd9e09cd`.
+Each receipt was complete: five native invocations, two primary completed
+writes, zero external writes and zero failed write attempts. The original
+authentication, permissions and vendor CLI were preserved, including 916's
+unchanged 2.88.1 version; its previously refused observation route is now
+actually counted, not merely a fixture/preflight claim.
+
+The independently checked index digest is
+`4f784f5f302a6c32630c57a0bf8741e607330037389571da0aae00ddeadc1c48`.
+Verified-summary digests for edge-dev, 4837 and 916 are respectively
+`1c7b2293889ed4a198659317a1d1b40d366e3b7bd5cdaa883ea3e463664594a0`,
+`0da88fb8d6c9c121917d83f9313668c6ceed47ef5e85d644db100b1966ce18f6`
+and `b779047c94d2838a089e442f9dd09db4cd53fd86a28533057dc23d1ab73abe50`.
+Whole observer times before acknowledgement, including SSH/bootstrap, were
+19.210870665, 34.636154932 and 17.655045724 seconds. These are three useful
+outcomes, not fifteen; requests cover the finite constructors and unseparated
+probes only. Whole-account HTTP, GraphQL/cost, Windows clock/detection and
+natural savings remain unknown. Windows 2.88.1 cold failure and 2.97.0
+unqualified performance remain preserved.
+
+The necessary #2267 Linux waiter also completed a genuine post-start merge
+observation with exit 0 and verified actual source
+`39aaa8b59d4d52609c357aaff9f20f4305330727`, rather than assumed `a981`.
+Receipt digest `d8e17c093247175ef01d6aab59bec31ac93958760f717363c815766ca161a8e0`
+binds its conditional delivery interval of 225,813–228,043 ms, within the
+configured 300,000 ms ceiling. Total qualification was 1,206.079460167 seconds,
+including 61.460346 ms source bootstrap. This is the fourth distinct single
+genuine event observation, not a matched twenty-outcome cohort or a new
+instrumentation-performance timing run.
+
+The full #2267 advisory run `41308418097` exposed one Linux shard-two fixture
+defect: a positive fixture selected an untrusted ancestor through PATH's
+`/usr/local/bin/git` and hit the unchanged production executable guard. PR #2272
+repaired the fixture and added the hostile-PATH negative case; it merged as
+`c403f6ca528bffd9a430efc8bc9939bcfc390c36`. Exact repaired head
+`33ce42b080de73d7e260bb0b2f4296e390fa4607`, run `41310463472`, job
+`124860024518` passed the actual same Git 2.55 route with 32 qualification tests
+and companion checks. The protected proof digest is
+`fbdb78ca39e05d72bf79e1dd4ef3a0f1e5550c592061c5d2a9c128a6f82d6d85`.
+No production trust guard changed and no unchanged failing-CI rerun is claimed.
+
+Hetz's actual vendor 2.103.0 is preserved through an explicit matching profile:
+upstream commit `7948e8056e45ac3c729b829e0eafe2d0797a95c6`, source archive
+`5a1bb92aac825129136c8b6efd989965fe78895217015e08df39b31b8d5370ec`.
+The original new updateable build manifest digest is
+`f4c930072fe87aea4626f17c10861a2a09b59ca00a63189b94f00f4ef2e6c749`;
+baseline/instrumented image digests are
+`3b56f16a90ef57c8b3bb3fcf5585b070facf84f61a00c45d600206a3c2b435fb`
+and `66b89b94f7527894882898feba33c10efd28e639338fd453d719010e5f119ccc`.
+Its 29 functional and 29 offline tests establish finite profile compatibility,
+not the separately measured 2.103.3 overhead result or a vendor upgrade. No
+source changes from another active chat or actual CI collision were
+overwritten/bypassed.
+
+Hetz's final normal full update to exact `c403` then completed: all eighteen
+required stages passed, source was clean and manifest digest was
+`63f27627b76ce86ff4047fb1b5058398e6c9783e6c4e04e10b866276a9615142`.
+The independently checked install/count receipt digest is
+`5b45e0e5ab622875e8ea38846c861d23cc522a334cf8d77ea7546a168a86e5c6`;
+matching-profile qualification proof digest is
+`41a80a739e835ba88559dc83560c9bf81dcbd456bc73f04c42f5e22b23158709`.
+The installed normal-owner issue read returned OPEN, exit 0, verified source
+and complete metadata: two primary completed writes, five native invocations
+including unseparated probes, zero external/failed writes and successful cohort
+cleanup. Its actual vendor remains 2.103.0 with `historical_profile=false`.
+Full observation took 4.906495335 seconds; cohort time was 4.898709412 seconds,
+including 593.082947 ms bootstrap, of which source capture was 133.197733 ms.
+Original environment, home, cwd, authentication and descriptor limits were
+preserved. Detection and whole-account HTTP remain null. Only artifact paths
+were relocated in the private staged manifest; its digest
+`5401d8dd387d8aa88f68bcf2b9d8f445c8b1f89c06e41dae6ee981be9b734250`
+remains distinct from the original `f4c930` build manifest, with all ten sources
+and executable digests reverified. The later final local `642a1da6`
+installation/restoration/count is recorded below; it does not retroactively
+change this Hetz receipt.
+
+The first bounded local maintenance window was safely aborted before any
+installer or credential call: a final physical check found an actual worker
+despite the earlier repository-scoped idle answer. All ten original runner
+identities and label sets were restored and verified online; unrelated labels
+were preserved, and the owned restoration timer was retired after restoration.
+The independently checked restoration receipt digest is
+`6593929dd2f0d13df907a367fcb2e20c73dac2760efe425b6f97268e1f2dea86`.
+This preserves CI capability; it proves neither a local installation nor a
+performance improvement.
+
+The cross-repository collision-guard candidate at exact source
+`de58db0f764ada1736c723157ebcd6fae9efc31b` then passed 69 focused native
+Windows checks, exit 0, through the original Git Bash. Its sixteen-file payload
+matched raw committed Git bytes, archive digest
+`dfbcb3b82553a4f2c23f8b21193afa8681d56a14798203d72bcc9a832e3b86a2`;
+the independently retained native result digest is
+`233d138969a46e6babaa19ecbdd290535b62575db2ce84983cc58d6cd109e4c1`.
+Tests covered another repository's busy local runner, identical names in the
+wrong repository, independent remote hosts, unknown status, explicit fixture
+overrides, UTF-16 registrations and a CI job arriving during a tiny test series.
+Every actual GitHub call was stubbed; no installation or settings changed.
+An earlier incomplete payload omitted a file used only by a listing assertion
+and produced 68 passes/one failure; that artifact remains preserved, separate
+from the corrected complete-payload result. At that stage this was candidate
+test proof; later installed evidence below is distinct, not inferred from it.
+
+A subsequent concrete counterexample found that a legitimate leading-dash
+runner name could be parsed as a grep option. The minimal literal-match repair
+and one new assertion passed the changed focused suite on native Windows:
+70 passes, zero failures, exit 0, actual source
+`b7430721f963f9d8fa3b936a374fc3992293aa85`. Result digest
+`fbe7e4339da52347a88e3453f34b01b4f5b82b3fed990fc6e15a8642adc1ccbd`
+retains that original source, with archive digest
+`e0141df1a1c9fb8444f610045ccb959989f8ff9f886a4c9d920a7f99fbb0f012`.
+All sixteen raw payload files were independently compared with successor
+`fb428a3c1214ed35571970887dd1ddd4e0130109`: exact equality, separate equivalence
+record digest `ed1fde23a89e59c31c4aa101d8f6db34d206ae3fa5b3b3e770a9f26bbee17e76`.
+Neither the original receipt nor its source was rewritten, and identical bytes
+were not retested merely to change the source label. No actual GitHub call,
+installed runtime or configuration change occurred during either native proof.
+
+The main cross-repository guard landed through #2276 as `18ae4d2e`;
+the literal leading-dash follow-up landed normally through #2277 as
+`642a1da684040bbc3cc3fa66b1d1a824595bd45d`. Its production/test blobs match
+the separately verified `fb428a3c` successor; counter components are unchanged
+from `c403`. This is source delivery, distinct from subsequent installation.
+The public overview observed at 10:35 AM EST showed short `642a1da`; the
+[existing Trail 412/change 186](https://entire.com/gh/popcre/ai-devops/-/trails/412/changes/186)
+showed Merged at exact head `fb428a3c1214ed35571970887dd1ddd4e0130109`,
+with Checks Not checked and Up to date Not checked. This establishes observed
+source-display parity only, not independent CI execution. No capture, hook or
+integration setting changed.
+
+916 then completed a normal full `642a1da6` installation, exit 0, with clean
+canonical source and matching managed launcher. Actual installed collision
+guard execution returned exit 0 through its Windows no-runner route. The
+independently checked installation and guard receipt digests are respectively
+`19676ce981276299eefb50a2e5b268b8360576903f872e24917123ad8c941cf8`
+and `652d74b37f50f48750bd82feb6a0c051dfae89cc1f8e7374cc0c1a7976163a28`.
+The earlier `9225` counted-read proof remains at its original source; unchanged
+counter components were not requalified and no extra counted GitHub read was
+generated merely to change a source label.
+
+The final bounded T16 recheck still found a unique online peer but SSH port 22
+timed out after 6,000 ms from the existing trusted Windows route. Receipt digest
+`ca9cb7797cb9d2a55ca6190168c8cdd4d62d9f24af621887e9db94e2a15321e5`
+retains one recheck, zero new ports/executors/trust/settings changes and no
+target login. T16 is not installed or qualified by an online-peer indication.
+
+## Existing-evidence coverage aggregate
+
+The independently checked public-safe aggregate digest is
+`6a179437752c892bb3ed69772ea226b642f05a8934fde73124af1aa1dce7380f`;
+all six frozen input digests still match. Its three Windows `9225` reads plus
+Hetz's `c403` read total four necessary outcomes, eight completed writes in the
+qualified constructor subset and twenty native invocations including probes.
+They are disjoint observations, not a matched baseline/candidate cohort. The
+natural October 25–30 New York sample separately retains 1,243 observed GraphQL
+points, 1,203 outcome-linked; it is not added to a whole-account total.
+
+The path dispositions remain explicit: managed CLI is a finite constructor
+subset; waiter/BlockerWatch GraphQL uses same-response costs where available;
+dispatch/status/cancel receipts cover their command boundaries; normal updater
+Git transport is outside REST/GraphQL counting; watchdog SDK runtime and external
+clients remain unmeasured. Managed-user, declared watchdog-App, CI-token and
+external principal classes are not pooled; historical principal bindings are
+not upgraded. The external remainder has no finite numeric bound.
+
+Privacy terminal emission is implemented and tested, but the legacy transcript
+destination is frozen and this public delivery performs no transcript-copy
+operation. A fabricated live privacy probe would not establish natural use;
+none was performed. No transcript content, copy/upload, API traffic or source
+input modification was introduced by this aggregate. Whole-account HTTP and
+GraphQL totals, natural savings and programme acceptance remain unknown.
+
+## First Windows 2.97 native qualification
+
+The first actual 2.97.0 native paired qualification failed and remains retained;
+it was not rerun. Protected summary digest
+`6acf881d942de1243f558a747a8a8629d6132f2e66a36ddf42d5d699e14182d7`
+binds frozen updateable manifest
+`4d14021a8697b25c475b16b14227a2d2ee952a8651a473945fb80e1079f33f2d`.
+Twenty cold and twenty warm pairs executed. The warm overhead gate failed;
+the cold gate did not report failure, but cannot be called qualified without
+its numeric receipt. Baseline detached-telemetry parity was unknown. The legacy
+compiled receipt fixture used a string-only pins map and could not decode
+boolean capability entries, so no numeric result was produced; p95 and total
+ratios remain null rather than reconstructed from console output.
+
+Seven environment and nine boundary cases passed. Stage/source SSH startup was
+24.488876673 seconds, qualification SSH execution 19.756418986 seconds and the
+whole operator envelope 44.341952399 seconds. These are separate envelopes,
+not a complete supervised-observer qualification. Actual GitHub demand was
+zero; no vendor, environment, authentication or settings changed. Earlier
+source-presence-only 2.97 descriptions are superseded by this actual failed
+attempt, not by a positive performance claim.
+
+One authorized receipt-only correction then reused the exact frozen 2.97.0
+baseline/instrumented CLI images and original source bindings; only the compiled
+fixture's typed receipt support was rebuilt. Original manifest `4d14021a` and
+derived manifest
+`73ba80e6d0a7ef7a667ac8c09915fe3204550521db1b020db8258686997da086`
+remain distinct, with the replacement fixture's provenance separately recorded
+rather than substituted into the original counter-source binding. The corrected
+attempt failed and all forty pairs remain
+retained, without another performance-acceptance attempt. Summary digest
+`451f2c6f0b96554a7203c739fe063116747c7c09287140be428e52177d7f0a73`
+and numeric digest
+`d1d1199f049eadff5681497660efd7a3c621290504da681fb4d4f6ec6b94bb65`
+were independently checked, including all four twenty-value vectors.
+
+Cold p95 was 98.9521 / 226.0072 ms, +128.40061%, and total time
+1.585935000 / 2.234382100 seconds, +40.88737%: failed. Warm p95 was
+252.7339 / 144.8716 ms, -42.67821%, and total time
+2.245693300 / 1.963257000 seconds, -12.57680%: passed. Baseline detached
+telemetry parity was unknown in that timing attempt; warm performance alone
+does not qualify the
+profile. The first failure is not replaced or relabeled. These are native
+counter-only timings, not whole-observer overhead or natural work; the 916
+kernel profile does not establish this other host's delay cause. Whole-account
+HTTP and GraphQL remain null.
+
+A separate non-timing diagnostic then isolated the detached-telemetry failure:
+the pinned baseline successfully generated its command-event log and sent a
+loopback protobuf request to the version's actual method path,
+`/telemetry/twirp/clientappsfe.observability.v1.TelemetryAPI/RecordEvents`.
+The old fixture recognized only bare `/telemetry`. Two local-only commands
+returned exit 0, with one expected API GET, one expected telemetry POST, zero
+unexpected routes and zero actual GitHub demand. Independently checked proof
+digest `391160e14a84d1b414e68da16ad6d500e763cdd863307e715d351727cff321f4`
+binds the unchanged baseline image. This identifies a fixture classification
+defect, not a missing upstream telemetry capability. It does not rerun, repair
+or qualify the independently failed timing results, nor by itself establish
+baseline/instrumented telemetry parity.
+
+The focused repair then passed natively at exact source
+`69186aa924a841d02acbfb845fd309de26180dde`, [PR #2278](https://github.com/popcre/ai-devops/pull/2278):
+seven environment cases, nine boundary cases and only the detached-child parity
+selection, with both unchanged frozen CLI images. Zero timing pairs executed.
+The independently checked summary digest is
+`8dff9253daa979cda373515d4d9992050c0adad93df7343a67b8c4b00550e7a0`;
+derived fixture manifest digest is
+`f16b2b7f8bfcf24484c58c6081ea01e3d1c98f7a7411ff7c727387c5c8246d5e`.
+This separately proves the repaired telemetry parity; both earlier timing
+failures and all their pairs remain unchanged. It does not qualify cold
+performance or the full observer.
+
+PR #2278 then merged normally as
+`582438004500abece50ed44cbc16b9d26f15e5d9`, with the Go fixture blob identical
+to tested `69186aa9`. This is a qualification-fixture-only source change, with
+no deployed runtime entry/helper change. Actual installed local/916 `642a1da6`
+proofs retain their original generation; the fixture landing is not substituted
+into them or the earlier counters' source bindings.
+
+The latest bounded public-mirror read at 11:11 AM EST showed overview short
+`5824380` and [existing Trail 416/change 187](https://entire.com/gh/popcre/ai-devops/-/trails/416/changes/187)
+Merged at exact tested head `69186aa924a841d02acbfb845fd309de26180dde`,
+with Checks Not checked. This is observed source-display parity only, with no
+independent CI, automatic-memory or utility qualification. No settings,
+capture, hooks or integration changed.
+
+## Separate Windows 2.97 cause-only capture
+
+One authorized traced diagnostic retained twenty cold diagnostic pairs using
+the same frozen CLI images, with no performance-acceptance claim or replacement
+of either failed qualification. Independently checked diagnostic digest
+`74cf3c761a3901d8ff74a9f13b5b457792b48b5f4b176c08b9a24ffe46be288d`
+records zero lost trace events. The first captured pair was 121.21 / 135.75 ms;
+baseline/candidate OnOpen Defender image scans of 66.2038 / 75.95 ms align with
+their process-creation callbacks and wait stacks through WdFilter and
+FltSendMessage. Report interpretation was checked against the
+[Microsoft performance-report reference](https://learn.microsoft.com/en-us/powershell/module/defenderperformance/get-mpperformancereport?view=windowsserver2025-ps).
+
+The historical 280 ms launch stall was not reproduced and remains unattributed.
+These first-pair scans do not explain that earlier stall or the separate 916
+kernel process-security LUID-cleanup evidence. No security exclusion, disabled
+feature, vendor change or operating-system fix follows from the capture; cold
+gates remain failed.
+
+The diagnostic's original privacy-pending field was preserved and resolved by
+a separate independently checked closure digest
+`1bd90ee2ac0e408cfef899edc71637385b2bb96732633292f9de7e71ed8bc0f8`:
+twenty fresh generated files and three decoder directories are owner/system/
+administrator-only, recoverable access backups exist, every byte hash is
+unchanged and the decoder still reads them. The owned recording and children
+are inactive; original vendor/authentication and host permissions are unchanged.
+Raw traces remain private and no new GitHub traffic was generated.
+
+## Final local normal installation and capacity restoration
+
+The local normal full update to exact
+`642a1da684040bbc3cc3fa66b1d1a824595bd45d` completed with exit 0 and no timeout:
+all 21 required and 12 optional stages passed, canonical source was clean, and
+the actual installed collision guard resolved to that canonical generation
+with its hash matching committed source. The independently checked installation
+summary digest is
+`24b820bb7f217d5f33ef2ec1c9bce2b02bf5ddde8392f663d75f599086d3a200`;
+installation manifest digest is
+`a1061bf4aa0485a6a59a657476aa61f1e27f780f5a4abbe428caa50636cd97b1`.
+
+After updater completion, all ten exact runner registrations were independently
+verified online with every original/default/custom and unrelated label restored;
+five were naturally busy again. Restoration completed with exit 0, and only the
+owned recovery timer was retired and read back inactive. No jobs were canceled
+and no runner services stopped. The restoration receipt digest is
+`6c36b1650c0f44c0174a07eaadcbb2f67a9629526941aba3ecd1d9254b6ff38f`.
+The earlier safely aborted window remains separate history. A subsequent useful
+counted read must follow restoration rather than be inferred from installation.
+
+That subsequent necessary issue read actually completed after restoration:
+OPEN, exit 0, source verified at exact `642a1da6`, complete metadata and successful
+cohort cleanup. It observed two primary completed writes, five native
+invocations including unseparated admission probes, zero covered external or
+failed writes and one useful outcome. Actual ordinary/counter versions were
+both 2.103.3 with `historical_profile=false`; original context was preserved.
+Command time was 50.228600089 seconds and whole cohort 50.486612611 seconds,
+including 236.504346 ms bootstrap, of which source capture was 56.959403 ms.
+Normal shared admission is included; the source component is not added twice.
+No paired-baseline, p95, detection or whole-account claim follows.
+
+The independently checked combined install/restoration/count receipt digest is
+`dd8179a494be93d835379ed73b9ad2daaa1168a270393a1ff3235e64ddc63c72`;
+observation and cohort-summary digests are respectively
+`383d45b3573b5f9e77b601bdc60b2b96e2279ed6f5f1dca22da4e96619277b5f`
+and `3fb070870f140c2261c672bf1ef38acb00be7c770640ded19fd83edbc6974e56`.
+The truthful ten-input counter manifest is
+`aee7cdcd1b3c6596e95741e374adfad42fab01b09a3aa3c4adc31d07d766d289`;
+its instrumented image remains
+`7a0de23bbb9b0edd5a66a03bb80e5e1f37869c299936abdb6e0985f5252d0c03`.
+Raw/loaded installed-source fingerprints are
+`8d7714ee99bbef067f19bb62178a48835c17da9f7784c9d02a1d4904306e584b`
+and `70716a6e4d6e85238878f555532ee673eb1b3ec5e0f648b2f2a8ca7cd8f15feb`.
+Later test-only source work is not substituted into this actual installed
+generation or its execution receipt.
+
+The final aggregate V3 digest is
+`db7caba81440ef080b79467186bfe108ff9cba2201f597ed0c72362eebee56a4`.
+It preserves V2 unchanged and all six original bindings, adds the combined
+local receipt as its seventh independently checked input, and recomputes five
+disjoint useful reads, ten constructor-subset completed writes and twenty-five
+native invocations including probes. Original natural GraphQL observations are
+unchanged; global HTTP/GraphQL totals stay null, the external remainder stays
+unbounded, and these five observations are not a matched natural cohort.

@@ -77,6 +77,7 @@ python3 tools/github-requests/instrumented-gh/build.py --archives /PRIVATE/archi
 python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --managed-commands
+python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --full-observer
 ```
 
 Create the private output directory first. The ordinary development build
@@ -160,21 +161,57 @@ public file permissions decline qualification without changing configuration.
 The controller holds `report.retained_generation(root, install_manifest)` and
 passes its live mapping as `transport_boundary`.
 The boundary is an opaque active capsule produced by canonical `import report`,
-not a serializable dictionary. Each actual launch borrows independent sealed
-source/image descriptors so repeated `ro-bind-data` mounts cannot consume the
-next launch's bytes. Closed or forged capsules decline qualification.
-The observer retains sealed
-paired native images once per cohort. It launches the original `ai-gh` through
-that readonly generation boundary, with its chosen image mounted readonly in
-a namespace-only private tmpfs. `AI_GH_REAL_GH` selects that image only inside
-the owned child. Existing shared pacing, credentials, quotas, probes and backoff
-remain in force; no alternate real GitHub throttle state is created.
+not a serializable dictionary. Closed or forged capsules decline qualification.
+The bounded Linux cohort implementation borrows independent sealed source/image
+descriptors once, mounts the readonly source and both verified native images in
+one owned Bubblewrap namespace, and closes the borrowed descriptions after
+bootstrap. Its frozen source is the capsule's exact generation; no later mutable
+controller import replaces it. The original `ai-gh` executes inside that boundary
+with the selected readonly image in a namespace-only private tmpfs.
+`AI_GH_REAL_GH` selects that image only inside the owned child. Existing shared
+pacing, credentials, quotas, probes and backoff remain in force; no alternate
+real GitHub throttle state is created.
+
+The candidate setup copies captured files only into the three fresh private
+`bin`, `tools` and `config` tmpfs trees with explicit captured modes, closes setup
+writers, then remounts each whole tree readonly before execution. This avoids
+hundreds of individual source bind mounts without a writable host alias. The
+top-level `.gitattributes` capture remains an individual readonly bind, since it
+is outside those fresh trees. Each launch borrows independent readonly source
+descriptions for both `--file` and `--ro-bind-data`; no consumed offset is reused.
+Qualification checks cover file/tree mutation, mode changes, hardlinks, remounts,
+inherited writer descriptors, repeat launches and canonical-file immutability.
+
+This is Linux-only, private cohort custody, not a global service, persistent
+daemon or production route. A literal `python -I -S` bootstrap loads only the
+sealed worker and excludes user-site/source-injection startup. The frozen original
+environment and working directory are preserved for the actual command. An
+inherited noninheritable `AF_UNIX/SOCK_SEQPACKET` capability carries bounded
+unique-key JSON, strict monotonically increasing command ordinals and exactly
+four transferred descriptors: caller stdin/stdout/stderr and the numeric writer.
+Packets, ancillary truncation, unexpected handles, unsupported arguments and
+nonfinite values are refused without command replay. No socket name or listener
+is published on the host.
 
 `run(arguments, opaque_workflow_id, ...)` streams caller-owned standard
 descriptors unchanged and returns `(original_status, observation)`. Up to forty
 commands are allowed; each has a supervised timeout of 1–300 seconds (120 by
-default). Signals reach the owned group; timeout/cancellation never replays a
-command and yields unknown metadata. A complete observation sums strictly
+default). A cohort has a fixed 12,030-second maximum lifetime (40 times the
+300-second command budget plus 30 seconds of bootstrap/cleanup allowance), not
+a renewable background lifetime. Cold and warm qualification groups use separate
+cohorts. Twenty pairs consume forty worker slots only when both members execute
+inside the worker; an ordinary outside-capsule baseline is counted separately,
+never relabeled as a worker command or dropped from the paired denominator.
+Worker-only subreaper custody
+reaps actual direct/adopted descendants on close, timeout or cancellation;
+unrelated parent/host processes are not adopted. The ready worker is bound by a
+retained pidfd before signals are forwarded, avoiding numeric-PID reuse; cleanup
+signals only owned pidfd-bound or still-unreaped descendants. Signals reach the
+owned workload; timeout/cancellation never replays a command and yields unknown
+metadata. The inherited controller socket is never passed to ordinary children.
+`cohort_cleanup_complete` is explicit; unsuccessful cleanup cannot qualify a
+timing cohort. Source/image descriptors are also excluded from the ordinary child.
+A complete observation sums strictly
 sequential numeric start/finish pairs once, including observed admission
 identity/quota probes. Empty, truncated, interleaved, oversized or incomplete
 pairs remain unknown. The uninstrumented image produces unknown, never zero.
@@ -184,12 +221,31 @@ counter-off/on pairs measure instrumentation overhead only.
 Source identity is attached only to an actual complete wrapped observation
 while the retained generation is held. An ordinary transport hash bookend
 alone leaves loaded source unknown. The summary includes the source boundary's
-bootstrap time, image verification and whole cohort elapsed time; missing source
-bootstrap timing is explicit. Performance qualification must include all setup
-over the same outcomes. The finite counter-only timing result does not establish
+bootstrap time, image verification and whole cohort elapsed time after teardown;
+missing source bootstrap timing is explicit. Performance qualification must
+include source/image verification, worker/namespace/socket startup, all command
+work, numeric validation and final worker/descendant teardown over the same
+outcomes. No setup, cleanup, shared pacing or external CI latency is hidden to
+obtain a timing pass. The bounded cohort implementation remains qualification
+machinery until actual complete measured receipts establish its result; earlier
+per-command namespace/hash failures stay preserved. The finite counter-only timing result does not establish
 the supervised route's overhead. Counts remain completed writes in the covered
 primary API constructors; subprocess traffic and whole-account HTTP totals stay
 unknown. No production or fleet acceptance follows from local fixtures.
+
+The exact-source `--full-observer` qualification compares the ordinary
+outside-capsule baseline against the complete observer using two independent
+twenty-pair cold/warm groups. The approved matching `updateable` CLI build and
+source `53107ea9` passed once: cold bootstrap-amortized p95 +4.66224% and total
++0.74847%; warm p95 +1.14350% and total -0.62509%. All bootstrap, matched warm
+setup, command work and teardown were charged; both groups cleaned up and their
+actual fixture request ledgers matched (84/84 cold, 60/60 warm). The protected
+receipt digest is
+`7257394fc50b4fd8c92e4c75518e8251a1da1c6c3780d94088df5a91ef80e615`.
+The earlier strict cold failure and non-updateable development variant remain
+preserved; neither was retroactively relabeled. This qualifies that finite
+Linux fixture workload only, not installed useful-work, natural savings,
+Windows cold performance or whole-account traffic.
 
 ## Explicit native Windows managed reads
 
@@ -210,8 +266,9 @@ does not read credential bytes, create substitute authentication, change ACLs,
 or relax a refusal to obtain a measurement. Ordinary vendor routing remains
 available. A passing source/controller fixture is not a useful counted read,
 and a complete numeric receipt is not whole-program HTTP or GraphQL accounting.
-The measured native cold overhead and full observer-route overhead failures
-remain failures; this mode stays explicit qualification machinery.
+The measured Windows native cold overhead remains failed; earlier full Linux
+observer failures remain preserved separately from the later repaired finite
+Linux qualification. This Windows mode stays explicit qualification machinery.
 
 ## Isolated native Windows qualification
 
@@ -237,7 +294,7 @@ windows_cli_fixture_test.go, native_fixture.ps1 and pins.json, in that order.
 The locked registry is the same single version map used by the builder and
 native guard; the guard contains no duplicate commit/archive pin table.
 The finite capabilities declare one constructor and no detached CLI telemetry
-for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.3 (and the
+for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.0/2.103.3 (and the
 historical 2.101.0 profile). The common patch checks the exact declared return,
 import, source-directory and finalization hooks before any edit. The older
 profile's native child test exercises both actual images with telemetry
@@ -326,6 +383,76 @@ headers, tokens, bodies or diagnostics enter this file. Numeric receipt
 validation re-binds every digest and independently checks performance gates;
 the whole HTTP total remains null and installed acceptance remains false.
 No public Windows receipt is fabricated before actual execution.
+
+The [retained native evidence](../../../tests/verification/github-requests/p1-baseline.md#first-windows-297-native-qualification)
+includes the 2.88.1 cold failure and the first actual 2.97.0 attempt's warm-gate
+failure and unknown baseline detached-telemetry parity. That older compiled 2.97 fixture could
+not decode boolean capability pins and emitted no numeric receipt; cold p95,
+warm p95 and total ratios therefore remain unknown. No performance pass follows
+from source presence, completed pair count or missing reported cold failure.
+One authorized receipt-only fixture rebuild reused the exact frozen 2.97 CLI
+images and yielded a retained failed qualification: twenty cold pairs p95
++128.40061% and total +40.88737%; twenty warm pairs p95 -42.67821% and total
+-12.57680%, passing only the warm group. Detached-telemetry parity was unknown
+in that timing attempt. The corrected numeric result is separate from the
+first missing
+receipt, not a reclassification or repeat-until-pass; it does not qualify the
+full supervised route.
+The telemetry unknown was subsequently traced to the fixture's bare-path
+classifier: the pinned vendor appends its Twirp method path. The focused
+six-line fixture repair passed both unchanged CLI images' child parity plus
+the seven environment and nine boundary cases, with zero timing pairs.
+That functional proof does not change either retained performance failure.
+A separate cause-only capture aligned its first pair with Defender OnOpen
+waits; the historical long launch stall was not reproduced and remains
+unattributed. That diagnostic neither clears a cold gate nor transfers 916's
+different kernel-cleanup attribution to the 2.97 host. No security setting or
+vendor capability was changed.
+
+## Active-operation scope
+
+Finite source-isolated read profiles preserve environment, cwd, authentication,
+streams and original descriptor limits; they do not assert identical OS
+privileges or arbitrary privileged-provider compatibility. Existing immutable
+read receipts and constructor counts retain that narrower scope.
+
+The separate common BlockerWatch completion adapter merged through PR #2283 is not a counter
+performance qualification. Its default original-context/provider path declines
+qualification before executing the original command once outside the namespace.
+The explicit `sdk_only_no_provider` alarm/links profile records actual privilege
+restrictions and measures `parent_acknowledged_active_begin_to_end`, including
+control transport. Full caller-through-cleanup elapsed/setup costs remain
+separate, and external caller startup/final storage are not silently excluded
+from a whole-observer verdict: that verdict stays unknown. Native integration
+and installed proof remain required. Durable producer event facts grant neither
+source nor clock authority. Consumer #2286 (`221cb504`, tested `f2a90c12`) can join only actual
+live-channel facts after matching acknowledged END, with a separate receive
+clock, default-off explicit SDK scope and one fact per ID. Only successful
+standalone SDK alarms can receive conservative batch-ack detection; links,
+wakes, ticks and original/provider context remain unknown. Native integration
+landed through #2289; #2290 repaired suite registration and actual changed-head
+CI passed all twelve Windows sections with the new fixture executed. Final
+normal full installations/source verification at final successor #2291
+(`10ae0b93`) are complete on all five reachable toolkit hosts, with local CI
+capacity restored. Older read/counter receipts keep their actual generations.
+No completion envelope is
+event-detection latency.
+
+The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
+and genuine eligible GitHub UTC, never subtract Windows wall clocks. Its named
+boundary is parent-received alarm batch acknowledgement over SSH and includes
+transport; it does not claim an exact native SDK-ack interval or full-budget pass.
+
+The finite dry-run parity successor merged through #2291. Its actual caller-argument
+flag, rather than producer frames, excludes simulated work from both qualified
+completion/event intervals and active-success classification. Raw diagnostics
+and original execution remain available; simulation cannot establish acceptance.
+
+The one actual installed `links --dry-run` live proof at `10ae` verified
+source/protocol/cleanup and exited zero, with one skipped operation/24 skipped
+items and zero attempted actions. Both interval types remained null and active
+success false. This proves the live component path, not active business work,
+request reduction, detection, privileged-provider authority or a budget verdict.
 
 ## Retirement
 

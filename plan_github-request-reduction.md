@@ -2,12 +2,88 @@
 
 ## STATUS — read first
 
-October 31, 2026 EDT coordinator reconciliation — the [linked completion
-comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
-is still accurate: #2219/#2225/#2229 and their installed Linux/Windows proofs
-are complete; broader fleet and comparable-workload acceptance is not.
+November 1, 2026, 3:47 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
-Three parallel audits reconciled source, fleet and measurement evidence.
+
+The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
+completed the scoped #2219/#2225/#2229 repair and both-system live proof;
+its explicitly unchecked broader fleet/comparable-workload acceptance remains
+on #658. The work below extends that acceptance, without reopening the repair.
+
+The final code repair merged through #2291 as
+`10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`, including durable active receipts,
+governed completion/event consumers, native transport, registered Windows CI and
+literal dry-run parity. The registration repair's actual `e04` CI passed its classifier and all twelve
+Windows sections, with the new fixture executed and 73 native assertions;
+earlier registration failure remains retained. All five normal full installs
+now verify exact `10ae0b93`: all three Windows hosts report twelve completed
+phases with numeric required-stage counts unknown; Hetz passed all 21 required
+stages with zero failures after supported normal-owner/bus recovery. Local passed
+all 21 required and twelve optional stages and its installed command returned
+zero. Fresh readback verifies all ten original local runner registrations online,
+all original/unrelated labels restored and two naturally busy; recovery exited
+zero and its timer/owned units are inactive. No jobs or services were stopped.
+
+The earlier five necessary source-custodied reads total
+ten covered constructor writes and twenty-five native invocations including
+probes: disjoint outcomes, not matched natural cohorts. All original local CI
+capacity was restored before the local read; no jobs or services were stopped.
+These immutable receipts and coverage aggregate V4 keep their actual older
+generations; the remote installations created no new counter/detection workload.
+
+The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
+shows 23.89%/25.56% lower local replay processing time with both records still
+durable and local p95 within 5% relative to the literal pre-repair source.
+It does not clear the retained original-to-historical-candidate latency failure.
+The complete Linux observer also passed one
+strict matching-updateable-build qualification: twenty cold pairs p95 +4.66224%
+and total +0.74847%; twenty warm pairs p95 +1.14350% and total -0.62509%, with
+all setup/teardown charged, equal request ledgers and successful cleanup.
+Earlier failures remain preserved; this finite qualification is not a natural
+useful-work or programme acceptance claim.
+
+The frozen replay still uses 712 upstream reads: 0% reduction, failing the 50%
+target. Original arrivals, response heads and overlap were not recorded; natural
+savings, global irreducibility and twenty matched natural outcomes per operation
+remain unknown. The ten-second TTL, original targets and accepted busy-window
+proofs are unchanged. Windows 2.88 cold performance remains failed; its sampled
+128 ms launch delay is attributed to kernel process-security LUID-index cleanup,
+not NTFS, Go GC, the numeric pipe or proven Defender/Codex causality. Kernel-table
+population and a supported OS fix remain unproven. Windows 2.97 also failed its
+corrected cold gate (+128.40% p95 / +40.89% total); its warm group passed.
+The separate telemetry-fixture defect has a focused native parity repair with
+zero timing pairs; both failed timing attempts remain retained.
+T16's documented trusted-executor access remains unavailable.
+Dispatch/privacy and finite active BlockerWatch terminal/event emission are now
+implemented and tested; the earlier emission/consumer code gaps are repaired.
+The governed SDK component profile admits only successful standalone alarms
+for conservative detection bounds. Local Linux uses local parent bookends;
+native Windows uses Linux parent receipt over SSH, never cross-host wall-clock
+subtraction. Dry-run work cannot qualify either interval or active success,
+regardless of producer data. No simulation is live acceptance. Default original-
+context/provider work runs once without a qualification claim; wake/link/tick
+detection, privileged-provider authority and whole-observer budgets remain
+unknown. Accepted P5/headroom proof is unchanged. Genuine future activity and
+twenty matched natural outcomes remain necessary; no traffic is manufactured.
+
+One actual installed edge-dev SDK `links --dry-run` subsequently proved the live
+source/protocol/cleanup path: one skipped operation with 24 skipped items and
+zero attempted/succeeded/failed actions. Both interval types stayed null and
+active success false. It is component proof, not an active/business outcome,
+counter cohort, detection sample or original-privilege acceptance.
+
+The five finite read observations preserve environment, working directory,
+authentication, streams and original descriptor limits within their declared
+source-isolated profiles. They do not prove identical OS privileges or arbitrary
+privileged-provider acceptance; the immutable context clarification and coverage
+aggregate V4 preserve their ten-write/twenty-five-invocation counts.
+
+## Historical delivery snapshots — superseded by current reconciliation
+
+October 31, 2026 EDT snapshot — the [linked completion
+comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
+covered completed #2219/#2225/#2229 and their installed Linux/Windows proofs;
+it did not establish broader fleet or comparable-workload acceptance.
 
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
@@ -21,7 +97,7 @@ source `628d2cf` was shown Merged with Checks Not checked. This is mirror
 continuity, not independent check execution or adoption. Full offline CI results
 remain independently tracked.
 
-The final public mirror overview shows exact landing
+The earlier #2256 public mirror overview showed exact landing
 `a98131576c3a092fc19ec938d24650ab98469c8a`;
 [existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
 shows Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
@@ -29,6 +105,14 @@ Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
 GitHub's required safety result is authoritative;
 mirror CI parity remains unverified. No capture, hooks or paid/integration
 settings changed.
+
+For the later #2267 delivery, the observed overview shows short `9225` and
+[existing Trail 394/change 179](https://entire.com/gh/popcre/ai-devops/-/trails/394/changes/179)
+shows Merged at exact PR head `c542181fe74899ddc799c9ad45bb0a507bfebf12`,
+one failed check out of 28 and six commits behind, with GitHub links. Required
+GitHub doc-safety and verification closure passed; the advisory Linux shard
+failure was subsequently repaired by #2272. Entire was neutral and is not
+independent CI parity or a final #2272 mirror claim.
 
 Normal full installations on local Linux, Hetz and the three reachable Windows
 hosts now bind `8ab68085`; necessary ordinary reads passed. Hetz's subsequent
