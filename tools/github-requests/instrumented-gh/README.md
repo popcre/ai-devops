@@ -425,11 +425,11 @@ control transport. Full caller-through-cleanup elapsed/setup costs remain
 separate, and external caller startup/final storage are not silently excluded
 from a whole-observer verdict: that verdict stays unknown. Native integration
 and installed proof remain required. Durable producer event facts grant neither
-source nor clock authority. Candidate consumer `f2a90c12` can join only actual
+source nor clock authority. Consumer #2286 (`221cb504`, tested `f2a90c12`) can join only actual
 live-channel facts after matching acknowledged END, with a separate receive
 clock, default-off explicit SDK scope and one fact per ID. Only successful
 standalone SDK alarms can receive conservative batch-ack detection; links,
-wakes, ticks and original/provider context remain unknown. Its landing/native
+wakes, ticks and original/provider context remain unknown. Native
 integration/installed proof remain required. No completion envelope is
 event-detection latency.
 
