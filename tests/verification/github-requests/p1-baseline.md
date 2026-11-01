@@ -1137,5 +1137,20 @@ were preserved, and the owned restoration timer was retired after restoration.
 The independently checked restoration receipt digest is
 `6593929dd2f0d13df907a367fcb2e20c73dac2760efe425b6f97268e1f2dea86`.
 This preserves CI capability; it proves neither a local installation nor a
-performance improvement. The cross-repository collision guard needs its own
-finished repair and native proof before another local installation attempt.
+performance improvement.
+
+The cross-repository collision-guard candidate at exact source
+`de58db0f764ada1736c723157ebcd6fae9efc31b` then passed 69 focused native
+Windows checks, exit 0, through the original Git Bash. Its sixteen-file payload
+matched raw committed Git bytes, archive digest
+`dfbcb3b82553a4f2c23f8b21193afa8681d56a14798203d72bcc9a832e3b86a2`;
+the independently retained native result digest is
+`233d138969a46e6babaa19ecbdd290535b62575db2ce84983cc58d6cd109e4c1`.
+Tests covered another repository's busy local runner, identical names in the
+wrong repository, independent remote hosts, unknown status, explicit fixture
+overrides, UTF-16 registrations and a CI job arriving during a tiny test series.
+Every actual GitHub call was stubbed; no installation or settings changed.
+An earlier incomplete payload omitted a file used only by a listing assertion
+and produced 68 passes/one failure; that artifact remains preserved, separate
+from the corrected complete-payload result. This is candidate test proof,
+not an installed collision-guard or final local installation claim.
