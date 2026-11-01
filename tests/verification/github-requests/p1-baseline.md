@@ -1154,3 +1154,18 @@ An earlier incomplete payload omitted a file used only by a listing assertion
 and produced 68 passes/one failure; that artifact remains preserved, separate
 from the corrected complete-payload result. This is candidate test proof,
 not an installed collision-guard or final local installation claim.
+
+A subsequent concrete counterexample found that a legitimate leading-dash
+runner name could be parsed as a grep option. The minimal literal-match repair
+and one new assertion passed the changed focused suite on native Windows:
+70 passes, zero failures, exit 0, actual source
+`b7430721f963f9d8fa3b936a374fc3992293aa85`. Result digest
+`fbe7e4339da52347a88e3453f34b01b4f5b82b3fed990fc6e15a8642adc1ccbd`
+retains that original source, with archive digest
+`e0141df1a1c9fb8444f610045ccb959989f8ff9f886a4c9d920a7f99fbb0f012`.
+All sixteen raw payload files were independently compared with successor
+`fb428a3c1214ed35571970887dd1ddd4e0130109`: exact equality, separate equivalence
+record digest `ed1fde23a89e59c31c4aa101d8f6db34d206ae3fa5b3b3e770a9f26bbee17e76`.
+Neither the original receipt nor its source was rewritten, and identical bytes
+were not retested merely to change the source label. No actual GitHub call,
+installed runtime or configuration change occurred during either native proof.
