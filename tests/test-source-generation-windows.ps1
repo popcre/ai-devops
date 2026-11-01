@@ -6,6 +6,10 @@ $text=[IO.File]::ReadAllText($Supervisor)
 $source=[regex]::Match($text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
 if (-not $source) { throw 'Supervisor native custody class missing' }
 Add-Type -TypeDefinition $source
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
 $root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
 $passed=0
 function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
@@ -33,7 +37,53 @@ try {
     Assert ([GenerationCustody]::Quote('plain') -eq 'plain') 'Plain argument preserved'
     Assert ([GenerationCustody]::Quote('two words') -eq '"two words"') 'Spaced argument preserved'
     Assert ([GenerationCustody]::Quote('a"b') -eq '"a\"b"') 'Quote argument preserved'
-    $powershell=Join-Path $PSHOME 'powershell.exe'
+    $injected=Join-Path $root 'unexpected_module.py'
+    [IO.File]::WriteAllText($injected,'unexpected module')
+    Refuses {[GenerationCustody]::AssertClosure($root,@('sealed.sh','canonical.sh'))} 'Pre-seal helper insertion refuses qualification'
+    [IO.File]::Delete($injected)
+    [GenerationCustody]::AssertClosure($root,@('sealed.sh','canonical.sh'))
+    $attack=Join-Path $root 'attack.ps1'
+    [IO.File]::WriteAllText($attack,@'
+$ErrorActionPreference='Stop'
+$root=$args[0]
+if([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $args[1]){exit 10}
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);}'
+$parentHandle=[ParentIsolationProbe]::OpenProcess(0x68,$false,[int]$args[2])
+if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parentHandle)|Out-Null;if($args[3] -eq '1'){exit 16}}
+try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
+try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
+try{$a=Get-Acl -LiteralPath $root;Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
+try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
+if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
+exit 0
+'@)
+    $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+    $control=[GenerationCustody]::DirectoryControl($root)
+    try {
+        [GenerationCustody]::DirectoryAccess($control,$false)
+        $beforePrivileges=[GenerationCustody]::PrivilegedContext()
+        $job=[GenerationCustody]::Job()
+        $executable=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $arguments='-NoProfile -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
+        $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
+        try {$process.WaitForExit();Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)} finally {$process.Dispose();$job.Dispose()}
+        $job=[GenerationCustody]::Job()
+        $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
+        try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'} finally {$process.Dispose();$job.Dispose()}
+        Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
+        Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
+    } finally {[GenerationCustody]::DirectoryAccess($control,$true);$control.Dispose();$attackHold.Dispose()}
+    [IO.File]::WriteAllText($injected,'parent restoration works')
+    Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
+    [IO.File]::Delete($injected)
+    Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
+    Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
+    Assert $true 'Finite public read arguments accepted'
+    Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','other/private')} 'Other repository denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--reviewer-approval','unbound-file')} 'Unbound helper argument denied by read profile'
+    $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $job=[GenerationCustody]::Job()
     $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
     try {$process.WaitForExit();Assert ($process.ExitCode -eq 17) 'Original child exit preserved'} finally {$process.Dispose();$job.Dispose()}

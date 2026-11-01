@@ -16,7 +16,7 @@ class WindowsGeneration(unittest.TestCase):
 
         supervisor = Path(os.environ.get("GENERATION_SUPERVISOR", Path(__file__).parents[1] / "tools/github-requests/source_generation_windows.ps1"))
         root = Path(os.environ.get("GENERATION_INSTALLED_ROOT", "C:/repos/ai-devops"))
-        for arguments, expected_exit in [(["--help"], 0), (["not-a-pr"], 3)]:
+        for arguments, expected_exit, restricted in [(["--help"], 0, False), (["not-a-pr"], 3, False), (["--help"], 0, True)]:
             with self.subTest(arguments=arguments), tempfile.TemporaryDirectory(prefix="ai-generation-parent-") as temporary:
                 args = Path(temporary) / "args.json"
                 args.write_text(json.dumps(arguments), encoding="utf-8")
@@ -32,10 +32,13 @@ class WindowsGeneration(unittest.TestCase):
                 environment["AI_GH_SOURCE_VERIFIED"] = "forged"
                 environment["AI_GH_SOURCE_SHA"] = "0" * 40
                 before = set(Path(tempfile.gettempdir()).glob("ai-gh-generation-*"))
-                child = subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-File", str(supervisor), "-SourceRoot", str(root),
+                command = ["powershell.exe", "-NoProfile", "-File", str(supervisor), "-SourceRoot", str(root),
                      "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(args),
-                     "-ReceiptHandle", str(write_handle), "-ReceiptAckHandle", str(ack_handle)],
+                     "-ReceiptHandle", str(write_handle), "-ReceiptAckHandle", str(ack_handle)]
+                if restricted:
+                    command.append("-RestrictedReadProfile")
+                child = subprocess.Popen(
+                    command,
                     startupinfo=startup, close_fds=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     cwd=temporary, env=environment,
                 )
@@ -50,9 +53,16 @@ class WindowsGeneration(unittest.TestCase):
                         self.fail("supervisor did not produce a live source receipt: " + stderr.decode(errors="replace"))
                     self.assertLessEqual(len(line), 65536)
                     record = json.loads(line)
-                    self.assertEqual(record["source_verified"], "verified")
+                    self.assertIn(record["source_verified"], ["verified", "unknown"])
+                    if restricted:
+                        self.assertEqual(record["source_verified"], "verified")
+                    elif record["source_verified"] == "unknown":
+                        self.assertEqual(record["boundary_detail"], "privileged_original_context")
                     self.assertNotEqual(record["source_sha"], "0" * 40)
-                    self.assertEqual(record["child_exit"], expected_exit)
+                    if record["child_exit"] != expected_exit:
+                        os.write(ack_write, b"\x01")
+                        stdout, stderr = child.communicate(timeout=40)
+                        self.fail(f"child exit {record['child_exit']} != {expected_exit}: {stderr.decode(errors='replace')}")
                     self.assertEqual(record["source_boundary"], "windows_locked_generation")
                     self.assertIsNone(record["clock_error_bound_ms"])
                     launcher = Path.home() / ".local/bin/ai-task-gates.cmd"
