@@ -999,5 +999,131 @@ print("provider stdout");print("provider stderr",file=sys.stderr);sys.exit(7)
             for fd in (read, write, ack_read, ack_write): os.close(fd)
 
 
+class ActiveEventConsumerTests(unittest.TestCase):
+    def clock(self, value):
+        return {"wall_ms": value, "monotonic_ms": value, "error_bound_ms": 1}
+
+    def transcript(self, operation="alarm", outcome="completed", ack=True):
+        row = receipt_fixture("ai-blocker-watch", "blocker_watch_" + operation, outcome, "a" * 32)
+        begin = {key: row[key] for key in ("caller", "workflow", "workflow_id", "parent_workflow_id", "boundary")}
+        begin.update(schema=1, measurement="active_completion_boundary", phase="begin")
+        transcript = report.ActiveCompletionTranscript(operation, lambda _: ack,
+                                                       qualification_profile="sdk_only_no_provider")
+        transcript.receive(begin, self.clock(1000)); transcript.receive(row, self.clock(4000))
+        return transcript, row
+
+    def facts(self, operation="alarm"):
+        value = event()
+        value.update(caller="ai-blocker-watch", workflow="blocker_watch_" + operation,
+                     target_ordinal=None, event_kind="alarm_stale" if operation == "alarm" else "unknown",
+                     eligible_utc_ms=2000 if operation == "alarm" else None,
+                     observed_utc_ms=2500, delivered_utc_ms=3000,
+                     delivery_boundary=operation + "_batch_acknowledged", unknown_reason="source_unknown")
+        return {"schema": 1, "measurement": "active_event_facts", "phase": "facts", "event": value}
+
+    def test_alarm_parent_envelope_and_facts_clock_are_distinct(self):
+        transcript, _ = self.transcript()
+        transcript.receive(self.facts(), self.clock(4100))
+        valid, records = transcript.result(0, source_verified=True)  # Unit protocol input, not live authority.
+        self.assertTrue(valid)
+        self.assertEqual(records[0]["completion_qualification"]["duration_upper_ms"], 3004)
+        self.assertEqual(records[0]["event_parent_clock"], self.clock(4100))
+        qualified = records[0]["event_qualification"]
+        self.assertEqual(qualified["unknown_reason"], "none")
+        self.assertEqual(qualified["latency_upper_ms"], 2004)
+        self.assertEqual(qualified["latency_lower_ms"], 0)
+
+    def test_duplicate_unknown_reordered_and_forged_facts_invalidate(self):
+        for mutation in ("duplicate", "unknown_id", "before_end", "authority", "malformed"):
+            with self.subTest(mutation=mutation):
+                transcript, _ = self.transcript()
+                frame = self.facts()
+                if mutation == "unknown_id": frame["event"]["workflow_id"] = "b" * 32
+                if mutation == "before_end": transcript.completed.clear()
+                if mutation == "authority": frame["event"]["source_verified"] = "verified"
+                if mutation == "malformed": frame["extra"] = True
+                transcript.receive(frame, self.clock(4100))
+                if mutation == "duplicate": transcript.receive(frame, self.clock(4200))
+                self.assertFalse(transcript.result(0, source_verified=True)[0])
+
+    def test_source_false_and_unacknowledged_never_qualify(self):
+        for ack in (True, False):
+            transcript, _ = self.transcript(ack=ack)
+            transcript.receive(self.facts(), self.clock(4100))
+            self.assertEqual(transcript.result(0)[1][0]["event_qualification"]["unknown_reason"], "source_unknown")
+
+    def test_partial_failed_refused_or_links_are_not_detection(self):
+        for operation, outcome in (("alarm", "partial"), ("alarm", "failed"), ("alarm", "skipped"),
+                                   ("links", "completed")):
+            transcript, _ = self.transcript(operation, outcome)
+            transcript.receive(self.facts(operation), self.clock(4100))
+            self.assertEqual(transcript.result(0, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
+
+    def test_eligibility_before_begin_and_future_or_jumping_clocks_unknown(self):
+        for mutation, reason in (("old", "eligibility_not_observed"), ("future", "event_invalid"),
+                                 ("jump", "clock_jump"), ("missing", "clock_unknown")):
+            frame = self.facts(); end = self.clock(4100)
+            if mutation == "old": frame["event"]["eligible_utc_ms"] = 999
+            if mutation == "future": frame["event"]["delivered_utc_ms"] = 5000
+            if mutation == "jump": end["wall_ms"] += 100
+            if mutation == "missing": end = None
+            self.assertEqual(report.qualify_blocker_event(frame["event"], self.clock(1000), end, True, True)["unknown_reason"], reason)
+
+    def test_fact_limit_shares_existing_transcript_budget(self):
+        transcript, _ = self.transcript()
+        transcript.frames = report.ACTIVE_MAX_FRAMES
+        transcript.receive(self.facts(), self.clock(4100))
+        self.assertFalse(transcript.result(0, source_verified=True)[0])
+
+    def test_nonzero_original_status_cannot_qualify_alarm_detection(self):
+        transcript, _ = self.transcript()
+        transcript.receive(self.facts(), self.clock(4100))
+        self.assertEqual(transcript.result(7, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
+
+    def test_original_profile_never_qualifies_even_with_source_verified(self):
+        transcript, _ = self.transcript()
+        transcript.qualification_profile = "original_context"
+        transcript.receive(self.facts(), self.clock(4100))
+        self.assertEqual(transcript.result(0, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
+
+    def test_actual_telemetry_append_precedes_forward_and_failure_preserves_status(self):
+        script = '''source "$1"
+gh_measure_append(){ printf 'APPEND\\n'; return "$APPEND_STATUS"; }
+gh_measure_active_channel(){ printf 'FORWARD:%s:%s\\n' "$1" "$2"; return 1; }
+gh_measure_blocker_evidence blocker_watch_alarm aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa alarm_stale 2000 2500 3000 alarm_batch_acknowledged
+exit $?'''
+        for append_status in (0, 9):
+            child = subprocess.run(["bash", "-c", script, "fixture", str(ROOT / "tools/github-requests/telemetry.sh")],
+                                   env=dict(os.environ, APPEND_STATUS=str(append_status), AI_GH_ACTIVE_EVENT_FD="3",
+                                            AI_GH_ACTIVE_ACK_FD="4", AI_GH_ACTIVE_PYTHON=sys.executable),
+                                   capture_output=True, timeout=5)
+            self.assertEqual(child.returncode, append_status)
+            lines = child.stdout.decode().splitlines()
+            self.assertEqual(lines[0], "APPEND")
+            if append_status:
+                self.assertEqual(len(lines), 1)
+            else:
+                prefix, phase, payload = lines[1].split(":", 2)
+                self.assertEqual((prefix, phase), ("FORWARD", "facts"))
+                self.assertTrue(report.active_event_frame_valid(json.loads(payload)))
+
+    def test_actual_facts_pipe_needs_no_ack_and_rejects_oversize(self):
+        read, write = os.pipe(); ack_read, ack_write = os.pipe()
+        try:
+            with mock.patch.dict(os.environ, AI_GH_ACTIVE_EVENT_FD=str(write), AI_GH_ACTIVE_ACK_FD=str(ack_read)):
+                data = json.dumps(self.facts()).encode()
+                self.assertTrue(report.active_channel_helper("facts", data))
+                self.assertTrue(report.active_event_frame_valid(json.loads(os.read(read, 4096))))
+                self.assertFalse(report.active_channel_helper("facts", b" " * 4097))
+        finally:
+            for fd in (read, write, ack_read, ack_write): os.close(fd)
+
+    def test_saved_event_data_does_not_become_a_pr_event(self):
+        frame = self.facts()
+        self.assertTrue(report.unqualified_blocker_event(frame["event"]))
+        self.assertFalse(report.unqualified_event(frame["event"]))
+        self.assertEqual(report.qualify_event(frame["event"], self.clock(1000), self.clock(4100), True)["unknown_reason"], "event_unknown")
+
+
 if __name__ == "__main__":
     unittest.main()

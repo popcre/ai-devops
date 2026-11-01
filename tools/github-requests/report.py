@@ -1653,6 +1653,9 @@ def active_channel_helper(phase, data):
         if phase == "begin":
             if not active_begin_valid(row):
                 return False
+        elif phase == "facts":
+            if not active_event_frame_valid(row):
+                return False
         elif phase != "end" or not active_outcome_valid(row, parent=True):
             return False
         if os.name == "nt":
@@ -1667,7 +1670,7 @@ def active_channel_helper(phase, data):
         started = time.monotonic()
         if not write_event_fd(event_fd, json.dumps(row, separators=(",", ":"))):
             return False
-        if phase == "end":
+        if phase in {"end", "facts"}:
             return True
         remaining = ACTIVE_ACK_SECONDS - (time.monotonic() - started)
         if remaining <= 0 or not select.select([ack_fd], [], [], remaining)[0]:
@@ -1747,17 +1750,80 @@ def active_completion_interval(start, end, source_verified):
     return result
 
 
+def active_event_frame_valid(row):
+    return (isinstance(row, dict) and set(row) == {"schema", "measurement", "phase", "event"}
+            and type(row["schema"]) is int and row["schema"] == 1
+            and row["measurement"] == "active_event_facts" and row["phase"] == "facts"
+            and unqualified_blocker_event(row["event"]))
+
+
+def qualify_blocker_event(event, start, end, source_verified, successful_alarm=False):
+    """Governed standalone SDK alarm batch ACK; never PR, link or wake policy."""
+    result = {"clock_quality": "unknown", "unknown_reason": "source_unknown",
+              "latency_lower_ms": None, "latency_upper_ms": None,
+              "clock_error_bound_ms": None, "event_kind": "unknown",
+              "boundary": "alarm_batch_acknowledged", "includes_batch_ack_bound": True}
+    if not source_verified:
+        return result
+    result["unknown_reason"] = "event_unknown"
+    if not (successful_alarm and unqualified_blocker_event(event)
+            and event["workflow"] == "blocker_watch_alarm" and event["event_kind"] == "alarm_stale"
+            and event["delivery_boundary"] == "alarm_batch_acknowledged"):
+        return result
+    result["event_kind"] = event["event_kind"]
+    result["unknown_reason"] = "clock_unknown"
+    if start is None or end is None:
+        return result
+    wall, mono = end["wall_ms"] - start["wall_ms"], end["monotonic_ms"] - start["monotonic_ms"]
+    bound = start["error_bound_ms"] + end["error_bound_ms"] + 2
+    if wall < 0 or mono < 0 or abs(wall - mono) > bound:
+        result["unknown_reason"] = "clock_jump"
+        return result
+    eligible, observed, delivered = (event[name] for name in
+                                    ("eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms"))
+    if (eligible is None or observed is None or delivered is None or not eligible <= observed <= delivered
+            or observed < start["wall_ms"] - bound or delivered > end["wall_ms"] + bound):
+        result["unknown_reason"] = "event_invalid"
+        return result
+    if eligible < start["wall_ms"] + start["error_bound_ms"] + 1:
+        result["unknown_reason"] = "eligibility_not_observed"
+        return result
+    error = bound + 1000
+    elapsed = delivered - eligible
+    if elapsed > 604800000 or error > 60000:
+        return result
+    result.update(clock_quality="host_bound_github_utc_assumed", unknown_reason="none",
+                  latency_lower_ms=max(0, elapsed - error), latency_upper_ms=elapsed + error,
+                  clock_error_bound_ms=error)
+    return result
+
+
 class ActiveCompletionTranscript:
     """Shared finite DATA parser. Its result never grants source authority."""
-    def __init__(self, operation, acknowledge):
+    def __init__(self, operation, acknowledge, qualification_profile="original_context"):
         self.operation, self.acknowledge = operation, acknowledge
+        self.qualification_profile = qualification_profile
         self.pending, self.completed, self.parents, self.seen = {}, [], {}, set()
+        self.facts = {}
         self.invalid, self.frames = False, 0
 
     def receive(self, row, clock, queued=False):
         self.frames += 1
         if self.frames > ACTIVE_MAX_FRAMES:
             self.invalid = True
+            return
+        if isinstance(row, dict) and row.get("phase") == "facts":
+            if not active_event_frame_valid(row):
+                self.invalid = True
+                return
+            event = row["event"]
+            identity = event["workflow_id"]
+            matching = next((item for item in self.completed if item[0]["workflow_id"] == identity), None)
+            if (matching is None or identity in self.facts or not matching[3]
+                    or event["workflow"] != matching[0]["workflow"]):
+                self.invalid = True
+                return
+            self.facts[identity] = (event, clock)
             return
         if active_begin_valid(row):
             if queued:
@@ -1807,8 +1873,14 @@ class ActiveCompletionTranscript:
         source_ok = protocol_ok and source_verified is True
         records = []
         for row, start, end, acknowledged in completed:
+            event, facts_clock = self.facts.get(row["workflow_id"], (None, None))
             records.append({"outcome_record": row,
                 "completion_qualification": active_completion_interval(start, end, source_ok and acknowledged),
+                "event_record": event, "event_parent_clock": facts_clock,
+                "event_qualification": qualify_blocker_event(event, start, facts_clock, source_ok,
+                    self.qualification_profile == "sdk_only_no_provider" and status == 0
+                    and self.operation == "alarm" and row["parent_workflow_id"] is None
+                    and row["outcome"] == "completed"),
                 "active_success": row["outcome"] in {"completed", "process_succeeded"},
                 "parent_state": "matched" if row["parent_workflow_id"] in parents else
                                 "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"})
@@ -1817,8 +1889,8 @@ class ActiveCompletionTranscript:
 
 class ActiveCompletionObserver(ActiveCompletionTranscript):
     """Linux owner: JSON cannot substitute for its active opaque custody."""
-    def __init__(self, generation, operation, acknowledge):
-        super().__init__(operation, acknowledge)
+    def __init__(self, generation, operation, acknowledge, qualification_profile="original_context"):
+        super().__init__(operation, acknowledge, qualification_profile)
         self.generation = generation
 
     def receive(self, row, clock, queued=False):
@@ -2023,7 +2095,8 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
             command = list(launch["argv_prefix"]) + [generation["bash_path"], str(root / "bin/ai-blocker-watch"), *arguments]
             from measure_append import write_event_fd
             observer = ActiveCompletionObserver(generation, arguments[0], lambda identity: write_event_fd(
-                ack_write, json.dumps({"schema": 1, "phase": "ack", "workflow_id": identity}, separators=(",", ":"))))
+                ack_write, json.dumps({"schema": 1, "phase": "ack", "workflow_id": identity}, separators=(",", ":"))),
+                qualification_profile=profile)
             inherited = launch["pass_fds"] + (event_write, ack_read)
             receipt.update(generation["identity"], source_bootstrap_ns=generation["bootstrap_ns"])
         except Exception:
