@@ -103,6 +103,29 @@ in [the existing counter guide](../tools/github-requests/instrumented-gh/README.
 The full observer route failed local timing overhead and must remain explicit
 qualification machinery; passing direct counter timing is a separate result.
 
+For a native Windows waiter observed by a Linux parent with existing verified
+SSH access:
+
+```text
+python3 -I tools/github-requests/remote_wait.py --host WINDOWS_HOST --source-root WINDOWS_INSTALLED_CHECKOUT --receipt PRIVATE_NEW_RECEIPT --read-only-no-stdin --timeout-seconds 3600 -- PR --repo popcre/ai-devops --timeout-minutes 55
+```
+
+Create the receipt's owned mode-700 parent first. `--read-only-no-stdin`
+explicitly reserves input for controller acknowledgments; it is not a general
+interactive-command wrapper. Binary output and original exit status are
+preserved. Windows snapshots use only verified existing standard temporary or
+Program Files parents, pinned before fresh private creation, without changing
+existing permissions. Source scope is raw Git `bin/tools/config`; Linux EOL
+attribute materialization is a distinct scope. Dangerous privileges present in
+the original context leave immutability unknown. The explicit finite read
+profile removes privileges only from its owned child, preserving the parent.
+The Linux parent's bounded clock brackets `process_resumed` through event
+arrival; startup and SSH delay are included. GitHub UTC and one-second timestamp
+resolution are explicit assumptions; this grants no Windows clock bound.
+Connection loss, timeout and cancellation stop only owned work and clean up its
+snapshot. Internal Windows controller handles are not operator-supplied source
+or clock authority.
+
 ## shared-db scripts (in a `popcre/shared-db` checkout, run with `node`)
 
 These have no `--help`; an unknown flag prints the supported list. The lane
