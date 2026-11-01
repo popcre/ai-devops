@@ -1,5 +1,17 @@
 # P1 request attribution — working baseline
 
+## Current receipt-emission supersession — November 1, 2026 EST
+
+The current collector and reporter implement dispatch/status/cancel and
+transcript-destination privacy terminal receipts, with focused tests. The
+earlier October 31 statement below that only PR waiting and BlockerWatch ticks
+are accepted describes its historical source and is superseded. Current
+emission exists in the shared collector, both actual callers and the reporter;
+absence from a retained natural cohort is a natural-use/sample gap, not an
+unimplemented emission path. Dispatch receipts describe the command boundary,
+not completion of dispatched remote work. No dispatch or transcript traffic is
+manufactured to fill a sample, and no old observation is reclassified.
+
 ## Coordinator natural sample — October 31, 2026 EDT
 
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` under #658/#660.
@@ -964,8 +976,10 @@ This is an honest matched offline comparison of this repair, not a natural
 twenty-outcome cohort, useful-work/detection p95 or a whole-observer overhead
 qualification. The repeated-read reduction remains 0%, failing the 50% target;
 actual HTTP requests, GraphQL points and natural per-outcome savings remain
-unknown. Candidate Windows and full Linux observer verification/installation
-remain separate pending outcomes until their actual receipts are available.
+unknown. Subsequent Windows and full Linux observer proof is recorded below;
+neither follows from this helper-only comparison. The p95 pass compares the
+literal pre-repair source with this repair; it does not clear the retained
+original-to-historical-candidate latency failure.
 
 The first strict bounded Linux cohort qualification also remains a measured
 failure: protected receipt digest
@@ -1169,3 +1183,57 @@ record digest `ed1fde23a89e59c31c4aa101d8f6db34d206ae3fa5b3b3e770a9f26bbee17e76`
 Neither the original receipt nor its source was rewritten, and identical bytes
 were not retested merely to change the source label. No actual GitHub call,
 installed runtime or configuration change occurred during either native proof.
+
+The main cross-repository guard landed through #2276 as `18ae4d2e`;
+the literal leading-dash follow-up landed normally through #2277 as
+`642a1da684040bbc3cc3fa66b1d1a824595bd45d`. Its production/test blobs match
+the separately verified `fb428a3c` successor; counter components are unchanged
+from `c403`. This is source delivery, distinct from subsequent installation.
+The public overview observed at 10:35 AM EST showed short `642a1da`; the
+[existing Trail 412/change 186](https://entire.com/gh/popcre/ai-devops/-/trails/412/changes/186)
+showed Merged at exact head `fb428a3c1214ed35571970887dd1ddd4e0130109`,
+with Checks Not checked and Up to date Not checked. This establishes observed
+source-display parity only, not independent CI execution. No capture, hook or
+integration setting changed.
+
+916 then completed a normal full `642a1da6` installation, exit 0, with clean
+canonical source and matching managed launcher. Actual installed collision
+guard execution returned exit 0 through its Windows no-runner route. The
+independently checked installation and guard receipt digests are respectively
+`19676ce981276299eefb50a2e5b268b8360576903f872e24917123ad8c941cf8`
+and `652d74b37f50f48750bd82feb6a0c051dfae89cc1f8e7374cc0c1a7976163a28`.
+The earlier `9225` counted-read proof remains at its original source; unchanged
+counter components were not requalified and no extra counted GitHub read was
+generated merely to change a source label.
+
+The final bounded T16 recheck still found a unique online peer but SSH port 22
+timed out after 6,000 ms from the existing trusted Windows route. Receipt digest
+`ca9cb7797cb9d2a55ca6190168c8cdd4d62d9f24af621887e9db94e2a15321e5`
+retains one recheck, zero new ports/executors/trust/settings changes and no
+target login. T16 is not installed or qualified by an online-peer indication.
+
+## Existing-evidence coverage aggregate
+
+The independently checked public-safe aggregate digest is
+`6a179437752c892bb3ed69772ea226b642f05a8934fde73124af1aa1dce7380f`;
+all six frozen input digests still match. Its three Windows `9225` reads plus
+Hetz's `c403` read total four necessary outcomes, eight completed writes in the
+qualified constructor subset and twenty native invocations including probes.
+They are disjoint observations, not a matched baseline/candidate cohort. The
+natural October 25–30 New York sample separately retains 1,243 observed GraphQL
+points, 1,203 outcome-linked; it is not added to a whole-account total.
+
+The path dispositions remain explicit: managed CLI is a finite constructor
+subset; waiter/BlockerWatch GraphQL uses same-response costs where available;
+dispatch/status/cancel receipts cover their command boundaries; normal updater
+Git transport is outside REST/GraphQL counting; watchdog SDK runtime and external
+clients remain unmeasured. Managed-user, declared watchdog-App, CI-token and
+external principal classes are not pooled; historical principal bindings are
+not upgraded. The external remainder has no finite numeric bound.
+
+Privacy terminal emission is implemented and tested, but the legacy transcript
+destination is frozen and this public delivery performs no transcript-copy
+operation. A fabricated live privacy probe would not establish natural use;
+none was performed. No transcript content, copy/upload, API traffic or source
+input modification was introduced by this aggregate. Whole-account HTTP and
+GraphQL totals, natural savings and programme acceptance remain unknown.

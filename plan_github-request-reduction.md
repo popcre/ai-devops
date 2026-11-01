@@ -24,7 +24,9 @@ or another chat's installed-source ownership was bypassed.
 
 The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
 shows 23.89%/25.56% lower local replay processing time with both records still
-durable and local p95 within 5%. The complete Linux observer also passed one
+durable and local p95 within 5% relative to the literal pre-repair source.
+It does not clear the retained original-to-historical-candidate latency failure.
+The complete Linux observer also passed one
 strict matching-updateable-build qualification: twenty cold pairs p95 +4.66224%
 and total +0.74847%; twenty warm pairs p95 +1.14350% and total -0.62509%, with
 all setup/teardown charged, equal request ledgers and successful cleanup.

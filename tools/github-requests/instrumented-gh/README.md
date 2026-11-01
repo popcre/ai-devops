@@ -294,7 +294,7 @@ windows_cli_fixture_test.go, native_fixture.ps1 and pins.json, in that order.
 The locked registry is the same single version map used by the builder and
 native guard; the guard contains no duplicate commit/archive pin table.
 The finite capabilities declare one constructor and no detached CLI telemetry
-for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.3 (and the
+for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.0/2.103.3 (and the
 historical 2.101.0 profile). The common patch checks the exact declared return,
 import, source-directory and finalization hooks before any edit. The older
 profile's native child test exercises both actual images with telemetry
