@@ -36,13 +36,14 @@ retains actual `e6ed` source; separate executed-closure equivalence to PR #2285
 head `7f926` is bound by
 `7e6e997c7a2031d74243142d848727c0f590555a372d05f14a87e281cd61deb7`.
 The original 180-second timeout remains historical protocol failure evidence.
-The separately finished governed consumer `f2a90c12` is open in #2286 at
-`1196f133`, with all four tested code/test blobs exactly equivalent. It joins one bounded
+The separately finished governed consumer `f2a90c12` merged through #2286 as
+`221cb504`, with all four tested code/test blobs exactly equivalent to PR head
+`1196f133`. It joins one bounded
 facts frame per acknowledged completed active ID, using a separate parent
 receive clock and unchanged END completion clock. Only a successful standalone
 explicit SDK alarm can receive its conservative batch-ack interval. Default
 original-context, links, wakes, ticks and failed/partial/refused operations
-cannot receive numeric detection. Consumer landing, native integration
+cannot receive numeric detection. Native integration
 and installed proof remain required; future facts alone cannot supply them.
 Its Linux gates passed 60 qualification, 31 caller/fact, 185 BlockerWatch and
 38 counter cases. A caught no-observer dispatch regression was fixed by requiring

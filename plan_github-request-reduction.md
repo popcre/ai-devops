@@ -64,12 +64,12 @@ final installed proof remain unfinished. The separate `e6ed1ac8` durable-only
 event-fact producer passed 185 BlockerWatch and 31 receipt/fact cases on Linux;
 its corrected bounded native run passed all 31 cases in 186.212 seconds, with
 owned-process/fixture absence verified; it merged through #2285 as `4bee93ba`.
-Its separate governed consumer is open in #2286 at `1196f133`, with all four
+Its separate governed consumer merged through #2286 as `221cb504`, with all four
 code/test blobs equal to tested `f2a90c12` and 60 qualification, 31 caller/fact, 185 BlockerWatch
 and 38 counter cases passing. It admits only successful standalone explicit
 SDK alarms, conservatively bounds batch acknowledgement and leaves links,
 wakes, original-context/provider work and whole-observer budgets unknown.
-Consumer landing, native integration and final installation remain
+Native integration and final installation remain
 unfinished; genuine future activity alone is not their substitute. Accepted
 P5/headroom proof stays accepted.
 
