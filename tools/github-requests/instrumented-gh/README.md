@@ -190,6 +190,28 @@ the supervised route's overhead. Counts remain completed writes in the covered
 primary API constructors; subprocess traffic and whole-account HTTP totals stay
 unknown. No production or fleet acceptance follows from local fixtures.
 
+## Explicit native Windows managed reads
+
+The existing Linux SSH controller `../remote_wait.py` can compose its restricted
+read-only Windows source supervisor with a matching counter build using
+`--counter-manifest` and `--expected-counter-manifest-sha256`. See the
+[operator guide](../../../docs/ai-tools-cheat-sheet.md#github-measurement-qualification-660-under-658)
+for the bounded invocation. This is separate from the synthetic fixture below.
+Only finite public `issue view` and `pr view` commands qualify. Arguments are
+bound before execution through bounded inline transport. The parent retains
+the matching image, complete source closure and separate bounded numeric pipe;
+the original shared admission, authentication, output and status remain intact.
+
+The pinned upstream configuration-directory precedence is preserved. Native
+metadata-only handles check its original ancestors and credential files before
+any command; foreign readers or writers decline qualification. The controller
+does not read credential bytes, create substitute authentication, change ACLs,
+or relax a refusal to obtain a measurement. Ordinary vendor routing remains
+available. A passing source/controller fixture is not a useful counted read,
+and a complete numeric receipt is not whole-program HTTP or GraphQL accounting.
+The measured native cold overhead and full observer-route overhead failures
+remain failures; this mode stays explicit qualification machinery.
+
 ## Isolated native Windows qualification
 
 This is fixture-only code owned by #660. Current runtime-profile native

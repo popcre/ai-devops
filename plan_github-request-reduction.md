@@ -9,6 +9,42 @@ are complete; broader fleet and comparable-workload acceptance is not.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 Three parallel audits reconciled source, fleet and measurement evidence.
 
+November 1, 2026 EDT continuation: measurement PR #2249 merged as
+`e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
+`8ab68085c4fee1ad00fe9b26e991c3b595c69168`, both verified on origin/main.
+The timing receipt includes SSH/source setup from before SSH launch. The
+temporary Entire advisory failure later read back NEUTRAL; GitHub's required
+doc-safety and verification closure passed. The first bounded mirror lookup
+found no corresponding Trail. A later existing mirror, including Trail 369,
+was reconciled in [the coordinator's evidence note](https://github.com/popcre/ai-devops/issues/658#issuecomment-6553983391):
+source `628d2cf` was shown Merged with Checks Not checked. This is mirror
+continuity, not independent check execution or adoption. Full offline CI results
+remain independently tracked.
+
+Normal full installations on local Linux, Hetz and the three reachable Windows
+hosts now bind `8ab68085`; necessary ordinary reads passed. Hetz's subsequent
+owner-readability regression was repaired without content changes, and all
+eighteen required stages plus normal-owner source-custodied use passed. A fresh
+local installed-source counted read observed two primary writes across five
+native invocations for one useful outcome; whole-account totals and matched
+savings remain unknown. Hetz's older `u2giants` origin is a GitHub-confirmed
+redirect to `popcre`, not a different repository; preserve it. T16 is online
+but its trusted execution route remains unavailable; no new trust was introduced.
+
+The real native Windows counter run passed environment and hostile custody
+fixtures but failed its cold-start overhead gate twice. The receipt-writer schema
+repair retained all twenty cold and twenty warm pairs without changing either
+CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
+failures remain preserved. The finite native Windows read/counter adapter and
+metadata-only actual-context guards are implemented in open, unmerged PR #2253.
+This is candidate implementation, not installed or actual-context acceptance:
+foreign credential readers and unsafe namespaces remain qualification refusals,
+and the native cold counter gate remains failed. The existing Windows waiter
+has separately proved source-bound event delivery within the five-minute ceiling.
+A genuine installed-source Linux waiter began for #2253 while it was OPEN and
+unqueued; its final event receipt remains pending. Keep P1/P7/P8, twenty matched
+outcomes, before/after comparison and live proof open until demonstrated.
+
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains
   accepted. The companion plan and baseline now distinguish these completed

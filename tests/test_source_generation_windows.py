@@ -1,12 +1,77 @@
 """Native Windows supervisor integration; no network requests or machine changes."""
 import hashlib
 import json
+import base64
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+import shutil
+
+
+def cleanup_interpreters():
+    if sys.platform == "win32":
+        return [path for path in [Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe",
+                                  Path(os.environ["ProgramFiles"]) / "PowerShell/7/pwsh.exe"] if path.is_file()]
+    found = shutil.which("pwsh")
+    return [Path(found)] if found else []
+
+
+@unittest.skipUnless(cleanup_interpreters(), "native PowerShell runtime required")
+class OwnedCleanup(unittest.TestCase):
+    def test_actual_finalizer_preserves_primary_and_attempts_later_resources(self):
+        source = str(Path(__file__).parents[1] / "tools/github-requests/source_generation_windows.ps1").replace("'", "''")
+        # Execute the actual production catch/finally/tail, replacing only work
+        # and owned resources with in-memory fault fixtures. No ACLs or files.
+        template = r'''
+$ErrorActionPreference='Stop'
+$text=[IO.File]::ReadAllText('__SOURCE__');$tokens=$null;$parseErrors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$parseErrors)
+if($parseErrors.Count){throw 'Production parser error'}
+foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
+ $f=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true)
+ . ([scriptblock]::Create($f.Extent.Text))
+}
+$main=$ast.Find({param($n)$n -is [Management.Automation.Language.TryStatementAst] -and $n.Finally -and $n.Finally.Extent.Text.Contains('$cleanupErrors=Close-OwnedGeneration')},$true)
+if(-not $main){throw 'Production finalizer missing'}
+$global:closed=[Collections.Generic.List[string]]::new()
+function Fake-Resource([string]$name,[bool]$fail){
+ $r=[pscustomobject]@{name=$name;fail=$fail;HasExited=$true}
+ $r|Add-Member ScriptMethod Dispose {$global:closed.Add($this.name);if($this.fail){throw ('dispose-failure-'+$this.name)}}
+ return $r
+}
+$job=Fake-Resource 'job' $false;$child=Fake-Resource 'child' $false
+$eventChannel=Fake-Resource 'event' $false;$counterChannel=Fake-Resource 'counter' $false
+$captureLocks=@((Fake-Resource 'capture-first' __FAULT__),(Fake-Resource 'capture-last' $false))
+$directoryControls=@();$locks=@((Fake-Resource 'lock-first' $false),(Fake-Resource 'lock-last' $false))
+$receipt=Fake-Resource 'receipt' $false;$ack=Fake-Resource 'ack' $false
+$snapshot=$null;$bootstrap=$null;$exitCode=__EXIT__;$primaryFailure=$null;$cancelled=$false
+$catches=($main.CatchClauses|ForEach-Object{$_.Extent.Text}) -join "`n"
+$execution='try { __WORK__ } '+$catches+' finally '+$main.Finally.Extent.Text+"`n"+$text.Substring($main.Extent.EndOffset)
+try{& ([scriptblock]::Create($execution))}finally{
+ [Console]::Out.WriteLine('CLEANUP_FIXTURE='+(@{closed=@($global:closed);primary=$(if($primaryFailure){$primaryFailure.Exception.Message}else{$null});exit_code=$exitCode}|ConvertTo-Json -Compress))
+}
+'''.replace("__SOURCE__", source)
+        cases = [(True, True, 0, 1), (False, True, 0, 125), (False, False, 0, 0), (False, False, 17, 17)]
+        for interpreter in cleanup_interpreters():
+            for primary, fault, original, expected in cases:
+                with self.subTest(interpreter=interpreter.name, primary=primary, fault=fault, original=original):
+                    script = template.replace("__FAULT__", "$true" if fault else "$false").replace("__EXIT__", str(original))
+                    script = script.replace("__WORK__", 'throw "primary-work-failure"' if primary else "$null=$null")
+                    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+                    result = subprocess.run([str(interpreter), "-NoProfile", "-EncodedCommand", encoded], capture_output=True, timeout=30)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode(errors="replace"))
+                    rows = [line for line in result.stdout.decode(errors="replace").splitlines() if line.startswith("CLEANUP_FIXTURE=")]
+                    self.assertEqual(len(rows), 1, result.stderr.decode(errors="replace"))
+                    row = json.loads(rows[0].split("=", 1)[1])
+                    self.assertEqual(row["closed"], ["job", "child", "event", "counter", "capture-first", "capture-last",
+                                                      "lock-last", "lock-first", "receipt", "ack"])
+                    if primary:
+                        self.assertIn(b"primary-work-failure", result.stderr)
+                    if fault:
+                        self.assertIn(b"dispose-failure-capture-first", result.stderr)
 
 
 @unittest.skipUnless(sys.platform == "win32" and os.environ.get("RUN_MANAGED_WINDOWS_SOURCE_INTEGRATION") == "1",
@@ -19,8 +84,7 @@ class WindowsGeneration(unittest.TestCase):
         root = Path(os.environ.get("GENERATION_INSTALLED_ROOT", "C:/repos/ai-devops"))
         for arguments, expected_exit, restricted in [(["--help"], 0, False), (["not-a-pr"], 3, False), (["--help"], 0, True)]:
             with self.subTest(arguments=arguments), tempfile.TemporaryDirectory(prefix="ai-generation-parent-") as temporary:
-                args = Path(temporary) / "args.json"
-                args.write_text(json.dumps(arguments), encoding="utf-8")
+                argument_payload = base64.b64encode(json.dumps(arguments).encode("utf-8")).decode("ascii")
                 read_fd, write_fd = os.pipe()
                 ack_read, ack_write = os.pipe()
                 write_handle = msvcrt.get_osfhandle(write_fd)
@@ -34,8 +98,8 @@ class WindowsGeneration(unittest.TestCase):
                 environment["AI_GH_SOURCE_SHA"] = "0" * 40
                 snapshot_parents = [Path(os.environ["LOCALAPPDATA"]) / "Temp", Path(os.environ["ProgramFiles"])]
                 before = {path for parent in snapshot_parents for path in parent.glob("ai-gh-generation-*")}
-                command = ["powershell.exe", "-NoProfile", "-File", str(supervisor), "-SourceRoot", str(root),
-                     "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(args),
+                command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(supervisor), "-SourceRoot", str(root),
+                     "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsBase64", argument_payload,
                      "-ReceiptHandle", str(write_handle), "-ReceiptAckHandle", str(ack_handle)]
                 if restricted:
                     command.append("-RestrictedReadProfile")

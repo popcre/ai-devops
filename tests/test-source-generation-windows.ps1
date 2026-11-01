@@ -1,6 +1,7 @@
 # Focused native custody tests; writes only a newly-created private directory.
 param([string]$Supervisor=(Join-Path $PSScriptRoot '..\tools\github-requests\source_generation_windows.ps1'),
-      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'))
+      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'),
+      [string]$CounterManifest,[string]$ExpectedCounterManifestSha256)
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
 $text=[IO.File]::ReadAllText($Supervisor)
@@ -9,7 +10,14 @@ if (-not $source) { throw 'Supervisor native custody class missing' }
 Add-Type -TypeDefinition $source
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Supervisor PowerShell syntax invalid'}
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
+foreach($name in @('Hash-Bytes','Read-LockedBytes','Local-OnlyProbe','Capture-Counter','Bash-Path','Config-Directory','Assert-ConfigMetadata')){
+    $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+    . ([scriptblock]::Create($guard.Extent.Text))
+}
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CounterContext'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
@@ -24,6 +32,8 @@ $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($ordinary,'canonical bytes')
 $directory=[GenerationCustody]::Hold($root,$true,$false)
 $held=[GenerationCustody]::Hold($file,$false,$true)
+$primaryFailure=$null
+$cleanupFailure=$null
 try {
     Refuses { [IO.File]::WriteAllText($file,'altered') } 'Held source must reject writes'
     Refuses { [IO.File]::Move($file,(Join-Path $root 'renamed.sh')) } 'Held source must reject rename'
@@ -73,11 +83,18 @@ exit 0
         # Only this owned test child uses a process-scoped script policy. The
         # restricted token and sealed source/ACL attack checks stay unchanged.
         $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
-        $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
-        try {$process.WaitForExit();Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)} finally {$process.Dispose();$job.Dispose()}
+        $process=$null
+        try {
+            $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
+            Assert ($process.WaitForExit(30000)) 'Restricted attack child must terminate within its deadline'
+            Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)
+        } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
         $job=[GenerationCustody]::Job()
-        $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
-        try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'} finally {$process.Dispose();$job.Dispose()}
+        $process=$null
+        try {
+            $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
+            $job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'
+        } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
         Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
@@ -90,10 +107,38 @@ exit 0
     [IO.File]::WriteAllText($injected,'parent restoration works')
     Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
     [IO.File]::Delete($injected)
+    foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
+        $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+        if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
+        . ([scriptblock]::Create($cleanupAst.Extent.Text))
+    }
+    $faultRoot=Join-Path $root 'cleanup-fault'
+    $firstDirectory=Join-Path $faultRoot 'first';$secondDirectory=Join-Path $faultRoot 'second'
+    [GenerationCustody]::PrivateDirectory($faultRoot)
+    [GenerationCustody]::PrivateDirectory($firstDirectory);[GenerationCustody]::PrivateDirectory($secondDirectory)
+    [IO.File]::WriteAllText((Join-Path $secondDirectory 'owned-file'),'owned cleanup fixture')
+    $invalidControl=[GenerationCustody]::DirectoryControl($firstDirectory);$invalidControl.Dispose()
+    $laterControl=[GenerationCustody]::DirectoryControl($secondDirectory)
+    [GenerationCustody]::DirectoryAccess($laterControl,$false)
+    $throwing=[pscustomobject]@{}
+    $throwing|Add-Member ScriptMethod Dispose {throw 'Expected first capture cleanup failure'}
+    $recording=[pscustomobject]@{Count=0}
+    $recording|Add-Member ScriptMethod Dispose {$this.Count++}
+    $cleanupBootstrap=Join-Path $root 'cleanup-bootstrap'
+    [GenerationCustody]::PrivateDirectory($cleanupBootstrap)
+    $cleanupFailures=Close-OwnedGeneration @{Job=$recording;Child=$null;EventChannel=$recording;CounterChannel=$recording;
+        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);Locks=@($recording);
+        Receipt=$recording;Ack=$recording;Snapshot=$faultRoot;Bootstrap=$cleanupBootstrap}
+    Assert ($cleanupFailures.Count -eq 2) 'Every injected cleanup failure remains visible'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'directory_unseal'}).Count -eq 1) 'First failed native unseal is retained'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'capture_handle'}).Count -eq 1) 'First failed capture disposal is retained'
+    Assert ($laterControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
+    Assert (-not (Test-Path -LiteralPath $faultRoot) -and -not (Test-Path -LiteralPath $cleanupBootstrap)) 'Later native unseal permits actual owned directory cleanup'
     Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
     Assert $true 'Finite public read arguments accepted'
     Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-gh' @('--version')} 'Local version fixture does not authorize managed admission'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','other/private')} 'Other repository denied by explicit read profile'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--reviewer-approval','unbound-file')} 'Unbound helper argument denied by read profile'
     $wireProbe=Join-Path $root 'wire_probe.py'
@@ -133,6 +178,9 @@ elif mode=='full':
   if not m._write_once(h,b'x'*4096):break
  else:raise SystemExit(21)
  if time.monotonic()-start>1:raise SystemExit(22)
+elif mode=='counter':
+ for value in (b'{"schema":1,"started":true}\n',b'{"schema":1,"finished":true}\n'):
+  if not m._write_once(h,value):raise SystemExit(35)
 elif mode=='duplicate':
  if not m._write_once(h,b'{}') or not m._write_once(h,b'{}'):raise SystemExit(24)
 elif mode=='malformed':
@@ -145,8 +193,8 @@ else:
     $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
     $python=(Get-Command python.exe -ErrorAction Stop).Source
     function Posix([string]$p){return '/'+$p.Substring(0,1)+'/'+$p.Substring(3).Replace('\','/')}
-    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog')){
-        $channel=[GenerationCustody+EventChannel]::new();$job=[GenerationCustody]::Job()
+    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog','counter')){
+        $channel=if($mode -eq 'counter'){[GenerationCustody+EventChannel]::new(128)}else{[GenerationCustody+EventChannel]::new()};$job=[GenerationCustody]::Job()
         $saved=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
         try{
             [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',[string]$channel.WriteHandle,'Process')
@@ -155,12 +203,133 @@ else:
             $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true)
             try{Assert ($process.WaitForExit(5000)) 'Native event write is bounded';Assert ($process.ExitCode -eq 0) ('Git Bash/native Python event pipe '+$mode+' exit='+$process.ExitCode)}finally{$process.Dispose()}
             if($mode -eq 'basic'){Assert ($channel.EventText() -eq '{"native_chain":"ok"}') 'Raw handle survives actual Bash/native Python chain'}
+            elseif($mode -eq 'counter'){Assert ($channel.CounterText() -ceq "{`"schema`":1,`"started`":true}`n{`"schema`":1,`"finished`":true}`n") 'Separate numeric pipe retains sequential complete messages'}
             elseif($mode -eq 'duplicate' -or $mode -eq 'malformed'){Assert ($null -eq $channel.EventText() -and $channel.Status -eq 'invalid') 'Duplicate or malformed event stays unknown'}
         }finally{[Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$saved,'Process');$job.Dispose();$channel.Dispose()}
+    }
+    foreach($key in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_PAGER','AI_GH_HTTP_COUNTER_HANDLE','AI_GH_HTTP_COUNTER_FD','MSYS2_ARG_CONV_EXCL')){
+        $saved=[Environment]::GetEnvironmentVariable($key,'Process')
+        try{[Environment]::SetEnvironmentVariable($key,'unsupported-test-context','Process');Refuses {Assert-CounterContext} ('Ambient counter context refused: '+$key);Assert ([Environment]::GetEnvironmentVariable($key,'Process') -ceq 'unsupported-test-context') 'Counter guard preserves original environment'}finally{[Environment]::SetEnvironmentVariable($key,$saved,'Process')}
+    }
+    $savedConfigEnvironment=@{}
+    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    $savedConfigLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
+    try{
+        foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+        $config=Join-Path $root 'metadata-config';[GenerationCustody]::PrivateDirectory($config)
+        $env:USERPROFILE=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root '.config\gh')) 'Pinned Windows default uses USERPROFILE'
+        $env:APPDATA=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root 'GitHub CLI')) 'Pinned Windows APPDATA precedence'
+        $env:XDG_CONFIG_HOME=$root
+        Assert ((Config-Directory) -ceq (Join-Path $root 'gh')) 'Pinned XDG precedence'
+        $env:GH_CONFIG_DIR=$config
+        Assert ((Config-Directory) -ceq $config) 'Explicit original config precedence'
+        Refuses {Assert-ConfigMetadata} 'Missing auth config without original token refuses'
+        [IO.File]::WriteAllText((Join-Path $config 'hosts.yml'),'owned synthetic fixture, not credentials')
+        Assert-ConfigMetadata;Assert $true 'Safe metadata-only configuration admitted'
+        $meta=[GenerationCustody]::Metadata((Join-Path $config 'hosts.yml'),$false)
+        try{Refuses {[GenerationCustody]::Read($meta)} 'Metadata handle cannot read credential bytes'}finally{$meta.Dispose()}
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)
+        $acl=Get-Acl -LiteralPath $hostFile
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Write,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $hostFile -AclObject $acl
+        Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),[Security.AccessControl.FileSystemRights]::ReadData,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $hostFile -AclObject $acl
+        Refuses {Assert-ConfigMetadata} 'Foreign credential file reader refused without reading bytes'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
+        $acl=Get-Acl -LiteralPath $unsafe
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $unsafe -AclObject $acl;$env:GH_CONFIG_DIR=$unsafe
+        Refuses {Assert-ConfigMetadata} 'Foreign-writable config namespace refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $env:GH_CONFIG_DIR=$config
+        $alias=Join-Path $config 'config.yml'
+        & fsutil hardlink create $alias (Join-Path $config 'hosts.yml')|Out-Null
+        if($LASTEXITCODE -ne 0){throw 'Config alias fixture unavailable'}
+        Refuses {Assert-ConfigMetadata} 'Config file alias refused without reading'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();Remove-Item -LiteralPath $alias
+        $junction=Join-Path $root 'metadata-junction';New-Item -ItemType Junction -Path $junction -Target $config|Out-Null;$env:GH_CONFIG_DIR=$junction
+        Refuses {Assert-ConfigMetadata} 'Config directory alias refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();[IO.Directory]::Delete($junction)
+        $env:GH_CONFIG_DIR=Join-Path $root 'metadata-missing'
+        Refuses {Assert-ConfigMetadata} 'Missing directory cannot invent authentication'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $env:GH_TOKEN='owned-test-presence-only'
+        Assert-ConfigMetadata;Assert $true 'Missing config only admitted with existing token presence'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+    }finally{
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks=$savedConfigLocks
+        foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$savedConfigEnvironment[$key],'Process')}
+    }
+    if($CounterManifest){
+        # Optional owned native integration: direct local --version only. Never
+        # enter ai-gh admission here: even --version can refresh its quota.
+        $script:locks=[Collections.Generic.List[IDisposable]]::new()
+        $script:installedBash=$bash
+        $capsule=Join-Path $root 'counter-capsule'
+        [GenerationCustody]::PrivateDirectory($capsule)
+        $capsuleHold=[GenerationCustody]::Hold($capsule,$true,$false)
+        $capsuleControl=[GenerationCustody]::DirectoryControl($capsule)
+        $channel=[GenerationCustody+EventChannel]::new(128);$job=[GenerationCustody]::Job();$imageHold=$null
+        $savedHandle=$env:AI_GH_HTTP_COUNTER_HANDLE;$savedHost=$env:AI_GH_HTTP_COUNTER_HOST
+        try{
+            Refuses {Capture-Counter $CounterManifest ('0'*64)} 'Wrong approved manifest refused before image execution'
+            $captured=Capture-Counter $CounterManifest $ExpectedCounterManifestSha256
+            # Metadata attacks use a fresh private copy, never the approved
+            # frozen source/image. Every case must fail before any execution.
+            $negative=Join-Path $root 'counter-negative';[GenerationCustody]::PrivateDirectory($negative)
+            $negativeSource=Join-Path $negative 'source';[void][IO.Directory]::CreateDirectory($negativeSource)
+            $originalStage=Split-Path $CounterManifest -Parent
+            foreach($sourceFile in (Get-ChildItem -LiteralPath (Join-Path $originalStage 'source') -File)){
+                [IO.File]::WriteAllBytes((Join-Path $negativeSource $sourceFile.Name),[IO.File]::ReadAllBytes($sourceFile.FullName))
+            }
+            [IO.File]::WriteAllBytes((Join-Path $negative 'gh-instrumented.exe'),$captured.bytes)
+            foreach($attackCase in @('target','installed','version','compiled-binding','extra-helper')){
+                $metadata=[IO.File]::ReadAllText($CounterManifest)|ConvertFrom-Json
+                switch($attackCase){
+                    target {$metadata.target='linux-amd64'}
+                    installed {$metadata.installed=$true}
+                    version {$metadata.pins.upstream_version='2.101.0'}
+                    compiled-binding {$metadata.compiled_counter_source_binding.files.'channel_windows.go'='0'*64}
+                    extra-helper {[IO.File]::WriteAllText((Join-Path $negativeSource 'unexpected.go'),'not approved')}
+                }
+                $negativeManifest=Join-Path $negative 'build.json'
+                [IO.File]::WriteAllText($negativeManifest,($metadata|ConvertTo-Json -Depth 20 -Compress),[Text.UTF8Encoding]::new($false))
+                $savedLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
+                try{Refuses {Capture-Counter $negativeManifest (Hash-Bytes ([IO.File]::ReadAllBytes($negativeManifest)))} ('Counter metadata/helper attack refused: '+$attackCase)}finally{foreach($lock in $script:locks){$lock.Dispose()};$script:locks=$savedLocks}
+            }
+            Remove-Item -LiteralPath $negative -Recurse -Force
+            $image=Join-Path $capsule 'counter.exe';[IO.File]::WriteAllBytes($image,$captured.bytes)
+            $imageHold=[GenerationCustody]::Hold($image,$false,$true)
+            [GenerationCustody]::DirectoryAccess($capsuleControl,$false)
+            [GenerationCustody]::AssertClosure($capsule,@('counter.exe'))
+            Refuses {[IO.File]::WriteAllBytes($image,[byte[]]@(0))} 'Held copied counter image mutation refused'
+            $env:AI_GH_HTTP_COUNTER_HANDLE=[string]$channel.WriteHandle;$env:AI_GH_HTTP_COUNTER_HOST='api.github.com'
+            $command=(@('-c','exec "$1" --version','owned-counter-fixture',(Bash-Path $image))|ForEach-Object{[GenerationCustody]::Quote($_)}) -join ' '
+            $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true,$true)
+            try{Assert ($process.WaitForExit(5000)) 'Native instrumented local version is bounded';Assert ($process.ExitCode -eq 0) 'Native local version preserves original success'}finally{$process.Dispose()}
+            $wire=$channel.CounterText();$rows=@($wire -split "`n"|Where-Object{$_}|ForEach-Object{$_|ConvertFrom-Json})
+            Assert ($rows.Count -eq 2 -and $rows[0].started -eq $true -and $rows[1].finished -eq $true) 'Actual Bash to native counter handle retains complete invocation'
+            Assert ($rows[1].observed_completed_writes -eq 0 -and $rows[1].failed_write_attempts -eq 0 -and $rows[1].observed_external_writes -eq 0 -and $rows[1].incomplete -eq $false -and $null -eq $rows[1].http_requests) 'Direct local native version emits complete zero writes without global HTTP claim'
+        }finally{
+            $env:AI_GH_HTTP_COUNTER_HANDLE=$savedHandle;$env:AI_GH_HTTP_COUNTER_HOST=$savedHost;$job.Dispose();$channel.Dispose()
+            try{[GenerationCustody]::DirectoryAccess($capsuleControl,$true)}finally{$capsuleControl.Dispose();if($imageHold){$imageHold.Dispose()};$capsuleHold.Dispose();foreach($lock in $script:locks){$lock.Dispose()};Remove-Item -LiteralPath $capsule -Recurse -Force}
+        }
     }
     $fixture=@{schema=4;utc='2026-10-31T00:00:00Z';measurement='workflow_evidence';caller='ai-pr-wait';workflow='pr_wait';workflow_id=('a'*32);cohort_id=$null;target_ordinal=$null;source_verified='unknown';source_fingerprint_start=$null;source_fingerprint_end=$null;install_generation_binding=$null;event_kind='pr_merged';eligible_utc_ms=1750000000000L;observed_utc_ms=1750000001000L;delivered_utc_ms=1750000001000L;delivery_boundary='terminal_report';clock_quality='unknown';clock_error_bound_ms=$null;latency_ms=$null;unknown_reason='source_unknown'}
     $json=$fixture|ConvertTo-Json -Compress
     Assert (Test-ObserverEvent $json) 'Exact unqualified event schema accepted'
+    foreach($value in @('4.0','"4"','true')){
+        Assert (-not (Test-ObserverEvent ($json.Replace('"schema":4',('"schema":'+$value))))) 'Noninteger JSON schema stays refused'
+    }
+    Assert (-not (Test-ObserverEvent ($json.Replace('2026-10-31T00:00:00Z','2026-10-31T00:00:00+00:00')))) 'Noncanonical UTC string stays refused'
     Assert (-not (Test-ObserverEvent ($json -replace '"schema":4','"schema":4,"schema":4'))) 'Duplicate JSON event keys refused'
     $fixture.source_verified='verified'
     Assert (-not (Test-ObserverEvent ($fixture|ConvertTo-Json -Compress))) 'Child source claim refused'
@@ -187,11 +356,18 @@ else:
     }finally{$parentHandle.Dispose()}
     $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $job=[GenerationCustody]::Job()
-    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
-    try {$process.WaitForExit();Assert ($process.ExitCode -eq 17) 'Original child exit preserved'} finally {$process.Dispose();$job.Dispose()}
+    $process=$null
+    try {
+        $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
+        Assert ($process.WaitForExit(30000)) 'Ordinary child must terminate within its deadline'
+        Assert ($process.ExitCode -eq 17) 'Original child exit preserved'
+    } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
     $job=[GenerationCustody]::Job()
-    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root)
-    try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Cancellation closes child job'} finally {$process.Dispose();$job.Dispose()}
+    $process=$null
+    try {
+        $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root)
+        $job.Dispose();Assert ($process.WaitForExit(10000)) 'Cancellation closes child job'
+    } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
     $junction=Join-Path $root 'junction'
     New-Item -ItemType Junction -Path $junction -Target $root | Out-Null
     try { Refuses {$h=[GenerationCustody]::Hold($junction,$true,$false);$h.Dispose()} 'Reparse directory refuses' } finally {[IO.Directory]::Delete($junction)}
@@ -200,5 +376,19 @@ else:
     if ($LASTEXITCODE -ne 0) { throw 'Hardlink fixture unavailable' }
     Refuses { $h=[GenerationCustody]::Hold($link,$false,$true);$h.Dispose() } 'Hardlinked source refuses'
     Remove-Item -LiteralPath $link
-} finally { $held.Dispose();$directory.Dispose();Remove-Item -LiteralPath $root -Recurse -Force }
+} catch { $primaryFailure=$_ }
+finally {
+    try {
+        try {$held.Dispose()} finally {$directory.Dispose()}
+        Remove-Item -LiteralPath $root -Recurse -Force
+    } catch { $cleanupFailure=$_ }
+}
+if($null -ne $primaryFailure){
+    if($null -ne $cleanupFailure){
+        throw [AggregateException]::new('Native source fixture and cleanup both failed',
+            [Exception[]]@($primaryFailure.Exception,$cleanupFailure.Exception))
+    }
+    throw $primaryFailure
+}
+if($null -ne $cleanupFailure){throw $cleanupFailure}
 Write-Output "PASS $passed native Windows source custody cases"

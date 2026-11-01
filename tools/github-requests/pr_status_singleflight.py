@@ -137,7 +137,9 @@ def read_interval(key, interval, raw, cache_age_ms, cache_policy):
             "clock_resolution_ms": resolution,
             "ttl_seconds": interval["ttl_seconds"] if 1 <= interval["ttl_seconds"] <= 1000000000 else None,
             "force_refresh": interval["force_refresh"],
-            "cache_age_ms": cache_age_ms, "cache_policy": cache_policy,
+            "cache_age_ms": (cache_age_ms if type(cache_age_ms) is int
+                             and 0 <= cache_age_ms <= 604800000 else None),
+            "cache_policy": cache_policy,
             "ttl_cacheable": cacheable(raw, interval["expected_head"])}
 
 

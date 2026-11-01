@@ -74,7 +74,11 @@ func TestMain(m *testing.M) {
 		os.Exit(code)
 	}
 	var manifest struct {
-		Pins      map[string]string `json:"pins"`
+		Pins struct {
+			UpstreamCommit string `json:"upstream_commit"`
+			SourceSHA      string `json:"source_sha256"`
+			ToolchainSHA   string `json:"toolchain_sha256"`
+		} `json:"pins"`
 		Artifacts map[string]struct {
 			SHA string `json:"sha256"`
 		} `json:"artifacts"`
@@ -92,19 +96,19 @@ func TestMain(m *testing.M) {
 		os.Exit(98)
 	}
 	receipt := numericReceipt{Schema: 1, ExitCode: code, SelectionVerified: flag.Lookup("test.run").Value.String() == "^TestWindows", ColdBase: measured.coldBase, ColdCandidate: measured.coldCandidate, WarmBase: measured.warmBase, WarmCandidate: measured.warmCandidate}
-	receipt.SourceCommit, err = digestNumbers(manifest.Pins["upstream_commit"], 20)
+	receipt.SourceCommit, err = digestNumbers(manifest.Pins.UpstreamCommit, 20)
 	if err != nil {
 		os.Exit(98)
 	}
-	receipt.SourceArchive, err = digestNumbers(manifest.Pins["source_sha256"], 32)
+	receipt.SourceArchive, err = digestNumbers(manifest.Pins.SourceSHA, 32)
 	if err != nil {
 		os.Exit(98)
 	}
-	receipt.ToolchainArchive, err = digestNumbers(manifest.Pins["toolchain_sha256"], 32)
+	receipt.ToolchainArchive, err = digestNumbers(manifest.Pins.ToolchainSHA, 32)
 	if err != nil {
 		os.Exit(98)
 	}
-	files := []string{"httpcounter.go", "httpcounter_test.go", "channel.go", "channel_linux.go", "channel_windows.go", "channel_unsupported.go", "channel_windows_test.go", "windows_cli_fixture_test.go", "native_fixture.ps1"}
+	files := []string{"httpcounter.go", "httpcounter_test.go", "channel.go", "channel_linux.go", "channel_windows.go", "channel_unsupported.go", "channel_windows_test.go", "windows_cli_fixture_test.go", "native_fixture.ps1", "pins.json"}
 	if manifest.Input.Schema != 1 || manifest.Compiled.Schema != 1 || len(manifest.Input.Files) != len(files) || len(manifest.Compiled.Files) != len(files) {
 		os.Exit(98)
 	}

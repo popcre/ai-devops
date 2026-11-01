@@ -33,6 +33,13 @@ VALUE_FLAGS = {"--json", "--jq", "--repo", "-R", "--limit", "-L",
                "--state", "--base", "--head", "--branch", "--workflow"}
 
 
+def native_mount_prefix(launch, mount, descriptor, executable):
+    """Mount options precede Bubblewrap's terminator; workload limits follow."""
+    return [*launch["mount_prefix"][:-1], "--tmpfs", mount, "--perms", "0500",
+            "--ro-bind-data", str(descriptor), executable, "--remount-ro", mount,
+            "--", *launch["execution_prefix"]]
+
+
 def same_execution_layout(transport, expected_transport, bash, expected_bash):
     """Aliases may identify the same loaded files; external helper layouts may not.
 
@@ -389,10 +396,7 @@ class ManagedReadObservation:
                 # immutable and reusable for subsequent observations.
                 borrowed_image = os.open(f"/proc/self/fd/{image.fileno()}", os.O_RDONLY | os.O_CLOEXEC)
                 launch_stack.callback(os.close, borrowed_image)
-                prefix = [*launch["argv_prefix"][:-1],
-                          "--tmpfs", self._native_mount, "--perms", "0500",
-                          "--ro-bind-data", str(borrowed_image), executable,
-                          "--remount-ro", self._native_mount, "--"]
+                prefix = native_mount_prefix(launch, self._native_mount, borrowed_image, executable)
                 retained = (*launch["pass_fds"], borrowed_image)
             environment = self.environment.copy()
             # Bind supported upstream self-execution to the retained image.
