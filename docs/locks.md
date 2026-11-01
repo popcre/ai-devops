@@ -97,7 +97,7 @@ because `flock` does not exist in Git Bash.
 |---|---|---|---|
 | `bin/ai-blocker-watch` | tick lock (`1073`, release `1080`) | `mkdir` / `rmdir` on EXIT | age > wake timeout + 5 min → `rmdir` + re-`mkdir` |
 | `bin/ai-reviewer-start-watch` | tick lock (`46`, stale config read `66`) | `mkdir` / `rm -rf` on EXIT | age > `lock_stale_minutes` → break with a note |
-| `bin/ai-gh` | throttle lock `lock.d` (`61`) | `mkdir` + owner record; serialized reclaim gate | stale after `AI_GH_LOCK_STALE_SECONDS` (90 s); reclaim itself gated, gate self-heals after 30 s |
+| `bin/ai-gh` | throttle lock `lock.d`; admission tickets `admission.d/` | FIFO admission among upgraded callers, then the existing `mkdir` + owner record; serialized reclaim gate | Waiting tickets heartbeat on each acquisition pass; expired tickets are renamed/removed after `AI_GH_LOCK_STALE_SECONDS` (90 s), never by PID. Cancellation removes only the caller's ticket. Ticket cleanup never removes the reservation mutex. Original lock reclaim remains gated, gate self-heals after 30 s. |
 | `bin/ai-memory-sync` | hub lock (`95`) | `mkdir` / `rmdir` on EXIT | none: concurrent sync fails loudly |
 | `bin/ai-review-scoreboard` | ledger lock (`22`) | `mkdir`, waits `LOCK_WAIT` s / `rmdir` on EXIT | none: busy after the wait → die |
 | `bin/ai-run-task` | run lock (`44`) | `mkdir` / `rmdir` on EXIT INT TERM | none: an active run refuses a second runner |

@@ -1003,4 +1003,9 @@ AI_GH_STATE_DIR="$qualified_state" gh_measure_workflow_outcome ai-pr-wait pr_wai
 AI_GH_STATE_DIR="$qualified_state" gh_measure_local_observation "$local_id" merged 500 1600 linux_boottime_centiseconds 0
 check 'qualified observation emits acceptance qualified with real bounds' \
   "jq -se '[.[]|select(.schema==5)] | .[0].acceptance == \"qualified\" and .[0].unknown_reason == \"source_unknown\" and .[0].duration_lower_ms == 1080 and .[0].duration_upper_ms == 1120 and .[0].start_monotonic_ms == 500' '$qualified_state/measurements/'*.jsonl"
+admission_bash="$(command -v bash)"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) admission_bash="$(cygpath -w "$admission_bash")";; esac
+AI_TEST_BASH="$admission_bash" "$PYTHON_RUNNER" "$ROOT/tests/test-ai-gh-admission.py"
+admission_rc=$?
+check 'FIFO admission, continuing arrivals, cancellation and stale ticket safety' "[ '$admission_rc' -eq 0 ]"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
