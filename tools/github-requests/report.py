@@ -1808,7 +1808,7 @@ def active_credential_access(environment):
             os.close(descriptor); descriptor = child
         for name in ("config.yml", "hosts.yml"):
             try:
-                handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=descriptor)
+                handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=descriptor)
             except FileNotFoundError:
                 files[name] = None
                 continue

@@ -828,6 +828,21 @@ exit "${ACTIVE_TEST_STATUS:-0}"
         self.assertFalse(receipt["credential_context"]["readability_preserved"])
         self.assertEqual(receipt["source_verified"], "unknown")
 
+    def test_actual_fifo_credential_substitution_is_promptly_refused(self):
+        path = self.credentials / "hosts.yml"
+        path.unlink(); os.mkfifo(path, 0o600)
+        code = '''import sys
+sys.path.insert(0,sys.argv[1]);import report
+try:report.active_credential_access({'GH_CONFIG_DIR':sys.argv[2]})
+except ValueError:print('refused')
+else:raise SystemExit('FIFO unexpectedly accepted')
+'''
+        result = subprocess.run([sys.executable, "-I", "-S", "-c", code,
+                                 str(ROOT / "tools/github-requests"), str(self.credentials)],
+                                capture_output=True, timeout=2)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, b"refused\n")
+
     def test_original_fallback_preserves_legitimate_fd_and_session_not_observer_pipes(self):
         import fcntl
         output = Path(self.fixture.temp.name) / "context-result.json"
