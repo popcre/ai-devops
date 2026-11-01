@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 3:03 PM EST — current coordinator reconciliation.
+November 1, 2026, 3:47 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -20,8 +20,9 @@ now verify exact `10ae0b93`: all three Windows hosts report twelve completed
 phases with numeric required-stage counts unknown; Hetz passed all 21 required
 stages with zero failures after supported normal-owner/bus recovery. Local passed
 all 21 required and twelve optional stages and its installed command returned
-zero. The local maintenance window's full-capacity restoration and timer
-retirement are still pending; publication remains held for that separate proof.
+zero. Fresh readback verifies all ten original local runner registrations online,
+all original/unrelated labels restored and two naturally busy; recovery exited
+zero and its timer/owned units are inactive. No jobs or services were stopped.
 
 The earlier five necessary source-custodied reads total
 ten covered constructor writes and twenty-five native invocations including

@@ -6,8 +6,8 @@ Final code #2291 merged as `10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`.
 Dispatch/privacy and finite active BlockerWatch terminal/event producers,
 governed parent completion/event consumers, native transport and literal dry-run
 parity are implemented. The original emission/consumer implementation gaps are
-repaired. All five normal full installs now verify this generation; local
-maintenance-capacity restoration remains separately pending. Earlier read receipts below retain their
+repaired. All five normal full installs now verify this generation, and local
+maintenance capacity is fully restored with the owned recovery timer retired. Earlier read receipts below retain their
 actual source and are not silently retargeted; no new SDK/counter workload was
 created by the remote installations.
 
@@ -63,9 +63,16 @@ manifest/completion and actual installed-command exit zero. Receipt
 and its copied manifest/completion/full-log hashes were independently verified;
 actual task-gate bytes match final Git source. Its older baseline completion
 field is not asserted as current. No new counter/timing cohort was generated.
-Local maintenance-capacity restoration/timer retirement are still pending and
-require their own proof before publication; installation exit zero is not that
-proof.
+Separate capacity proof
+`86462ea051d2d87aadbb51a08731897c089d3ad1a7843ee9fe3839ddb31161fc`
+verifies ten original registrations online, every original/unrelated label
+preserved, two naturally busy, zero restore errors and recovery-service exit
+zero. The owned timer and all four owned units are inactive/unloaded; no foreign
+unit or job was stopped. Combined local proof
+`92ff4e195341f4e34c9057b671726e2a77771ba15af79dc4070d8acc9a07d383`
+binds installation, capacity and retirement without rewriting the earlier
+installation receipt. These bindings were independently hashed/read. This
+operational recovery is not a new counter/timing cohort or programme acceptance.
 
 ### One actual installed SDK dry-run — component scope only
 

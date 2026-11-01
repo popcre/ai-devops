@@ -432,7 +432,10 @@ standalone SDK alarms can receive conservative batch-ack detection; links,
 wakes, ticks and original/provider context remain unknown. Native integration
 landed through #2289; #2290 repaired suite registration and actual changed-head
 CI passed all twelve Windows sections with the new fixture executed. Final
-installed proof at final dry-run successor #2291 (`10ae0b93`) remains required. No completion envelope is
+normal full installations/source verification at final successor #2291
+(`10ae0b93`) are complete on all five reachable toolkit hosts, with local CI
+capacity restored. Older read/counter receipts keep their actual generations.
+No completion envelope is
 event-detection latency.
 
 The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
