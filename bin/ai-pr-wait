@@ -101,6 +101,7 @@ fi
   exit 3
 }
 export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+export AI_GH_CALL_TIMEOUT_SECONDS="$API_TIMEOUT_SECONDS"
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
   if [ -z "${AI_GH_STATE_DIR:-}" ]; then
     AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
@@ -113,7 +114,9 @@ GH_RUNNER="$THROTTLE"
 # spacing). Without it the supervisor could kill a healthy call and leave the
 # shared lock behind.
 [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
-export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
+# Keep the fair-admission ticket through an ordinary busy window. Backoff
+# still returns immediately; the outer supervisor caps the whole deadline.
+export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-300}"
 # lock wait + call spacing + the spacing the budget probe adds before the call
 # + the time-limited budget probe made while holding the lock
 [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"

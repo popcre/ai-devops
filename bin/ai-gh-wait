@@ -49,6 +49,21 @@ esac
 [ "$INTERVAL" -ge "$MIN" ] || { say "--interval ${INTERVAL}s is below the 300-second minimum for GitHub waits"; exit 3; }
 GH="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/ai-gh"
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+SUPERVISOR="$(dirname "$GH")/ai-process-supervisor"
+BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
+PYTHON_RUNNER=''
+for candidate in python3 python; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' >/dev/null 2>&1 || continue
+  PYTHON_RUNNER="$(command -v "$candidate")"; break
+done
+[ -x "$SUPERVISOR" ] && [ -n "$BASH_RUNNER" ] && [ -n "$PYTHON_RUNNER" ] || {
+  say 'owned process supervision is unavailable; no GitHub call was made'; exit 3;
+}
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  GH="$(cygpath -w "$GH")"; SUPERVISOR="$(cygpath -w "$SUPERVISOR")"
+  BASH_RUNNER="$(cygpath -w "$BASH_RUNNER")"; PYTHON_RUNNER="$(cygpath -w "$PYTHON_RUNNER")" ;;
+esac
 deadline=$(( $(date +%s) + TIMEOUT * 60 ))
 # Offline tests (AI_DEVOPS_TEST_MODE=1 only) pin the deadline without sleeping
 # a real minute. Production ignores the hook so a stray env cannot defeat the
@@ -58,7 +73,16 @@ if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_GH_WAIT_TEST_DEADLINE_EPOCH
 fi
 prev=''; fails=0
 while :; do
-  out="$(AI_GH_CALLER=ai-gh-wait AI_GH_NO_WAIT=1 "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible
+  remaining=$(( deadline - $(date +%s) ))
+  [ "$remaining" -gt 0 ] || { say 'deadline reached'; exit 2; }
+  admission_budget="${AI_GH_NO_WAIT_LOCK_SECONDS:-300}"
+  case "$admission_budget" in ''|*[!0-9]*) say 'AI_GH_NO_WAIT_LOCK_SECONDS must be whole seconds'; exit 3;; esac
+  [ "$admission_budget" -le "$remaining" ] || admission_budget="$remaining"
+  out="$(AI_GH_CALLER=ai-gh-wait AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS="$admission_budget" \
+    "$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$remaining" -- \
+    "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; exec "$runner" "$@"' bash \
+    "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible
+  [ "$rc" -ne 124 ] || { say 'deadline reached'; exit 2; }
   delay="$INTERVAL"
   if [ "$rc" -eq 75 ]; then
     until_ts="$(cat "$STATE/backoff_until" 2>/dev/null)"; case "$until_ts" in ''|*[!0-9]*) until_ts=0;; esac
