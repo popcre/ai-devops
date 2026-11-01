@@ -20,11 +20,11 @@ Produce a self-contained implementation plan for TokenEconomizer, with genuine d
 
 ## 3. Current state
 
-Planning only. All seven implementation steps remain open. No plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. Publication is not implementation acceptance.
+Planning only. All seven implementation steps remain open. No plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. Plan and router links were committed and pushed in [d39a60ad](https://github.com/popcre/ai-devops/commit/d39a60ad). Document safety passed with 536 tracked Markdown files. Issue/PR creation is blocked by the shared GitHub throttle lock (exit 75); the planning session owns retry and registration. Publication is not implementation acceptance.
 
 ## 4. Failed approaches
 
-No install attempted. Plan §7 records shortcuts deliberately rejected. Shared GitHub throttle can delay publication; never bypass it.
+No install attempted. Plan §7 records shortcuts deliberately rejected. Shared GitHub throttle can delay publication; never bypass it. The skill pointer escalated the declared prose task to code. A shell command incorrectly continued to push after the first ship check refused; the class was subsequently redeclared code and the check passed. The PR must use the normal non-prose lane; do not admin-merge this change as prose.
 
 ## 5. Findings
 
