@@ -1,0 +1,2 @@
+Public #2022 disposable base movement canary.
+GitHub remains authoritative; no runtime or private data.
