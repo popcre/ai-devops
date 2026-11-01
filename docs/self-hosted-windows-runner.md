@@ -231,8 +231,14 @@ until the failed cleanup is diagnosed and the proof succeeds.
 
 ## Running a local test series alongside CI
 
-First run `bin/ai-test-local --check-collision`. It matches only runner names
-installed on this physical host. A busy independent self-hosted runner does not
+First run `bin/ai-test-local --check-collision`. It binds each local `.runner`
+name to its registered `gitHubUrl` repository and checks each distinct
+repository once. A single repository's idle roster cannot clear a shared host
+whose other registration is busy. `AI_TEST_RUNNER_REPO` remains an explicit
+single-repository override for controlled fixtures or scoped inventories;
+missing or malformed registration/status evidence makes the explicit probe
+unknown. It matches only runner names installed on this physical host.
+A busy independent self-hosted runner does not
 block this host, and GitHub-hosted or Blacksmith work remains available. Treat a
 shared installed runtime as same-host contention even when the job was launched
 elsewhere. Such a runtime must expose one common lock-directory path through

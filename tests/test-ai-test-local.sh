@@ -21,6 +21,9 @@ PASS=0; FAIL=0
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 export AI_GH_STATE_DIR="$WORK/gh-state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
+# These dispatches run only three owned echo/exit fixture suites. Actual host
+# workers must not turn their expected green/red results into arrival aborts.
+export AI_TEST_IGNORE_CI=1
 SUITES="$WORK/suites"; LOGS="$WORK/logs"
 mkdir -p "$SUITES" "$LOGS"
 
@@ -134,6 +137,7 @@ stub_gh() {
 fixture_runner() { printf '{ "agentId": 1, "agentName": "%s" }\n' "$1" > "$RDIR/.runner"; }
 guard_run() {
   PATH="$GHBIN:$PATH" AI_TEST_RUNNER_DIRS="$WORK/runners/actions-runner*" \
+    AI_TEST_RUNNER_REPO=popcre/ai-devops \
     AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
     bash "$LAUNCHER" --bash "$@" 2>&1
 }
@@ -218,6 +222,68 @@ unknown_out="$(guard_run --check-collision)"; unknown_rc=$?
 check 'the explicit collision probe never reports clear without runner status' \
   '[ "$unknown_rc" -eq 4 ] && printf "%s" "$unknown_out" | grep -q unknown'
 
+# A physical host can register runners against several repositories. Busy
+# names must be compared within their registration scope, not one global pool.
+RDIR_TWO="$WORK/runners/actions-runner-two"; mkdir -p "$RDIR_TWO"
+printf '{"agentName":"scope-first","gitHubUrl":"https://github.com/fixture-owner/first"}\n' > "$RDIR/.runner"
+printf '{"agentName":"scope-second","gitHubUrl":"https://github.com/fixture-owner/second"}\n' > "$RDIR_TWO/.runner"
+cat > "$GHBIN/gh" <<'GH'
+#!/usr/bin/env bash
+[ "${1:-}" = api ] || exit 0
+case "${2:-}" in
+  repos/*/actions/runners)
+    printf '%s\n' "$2" >> "$AI_TEST_API_LOG"
+    case "$2" in
+      repos/fixture-owner/first/actions/runners) printf '%s\n' "${FIXTURE_FIRST_BUSY:-}"; exit "${FIXTURE_FIRST_EXIT:-0}" ;;
+      repos/fixture-owner/second/actions/runners) printf '%s\n' "${FIXTURE_SECOND_BUSY:-}"; exit "${FIXTURE_SECOND_EXIT:-0}" ;;
+    esac
+    ;;
+esac
+exit 0
+GH
+chmod +x "$GHBIN/gh"
+scoped_guard() {
+  PATH="$GHBIN:$PATH" AI_TEST_RUNNER_DIRS="$WORK/runners/actions-runner*" \
+    AI_TEST_RUNNER_REPO= AI_TEST_API_LOG="$WORK/api.log" \
+    bash "$LAUNCHER" --check-collision 2>&1
+}
+out="$(FIXTURE_SECOND_BUSY=scope-second scoped_guard)"; rc=$?
+check 'a busy local runner registered to another repository blocks' \
+  '[ "$rc" -eq 3 ] && printf "%s" "$out" | grep -q scope-second'
+check 'every distinct registered repository is checked' \
+  '[ "$(sort -u "$WORK/api.log" | wc -l)" -eq 2 ]'
+out="$(FIXTURE_FIRST_BUSY=scope-second scoped_guard)"; rc=$?
+check 'a busy name from the wrong repository does not match an idle local registration' '[ "$rc" -eq 0 ]'
+out="$(FIXTURE_SECOND_BUSY=remote-host scoped_guard)"; rc=$?
+check 'an independent physical host in another repository does not block' '[ "$rc" -eq 0 ]'
+out="$(FIXTURE_FIRST_EXIT=1 scoped_guard)"; rc=$?
+check 'one unavailable repository cannot produce a false clear' \
+  '[ "$rc" -eq 4 ] && printf "%s" "$out" | grep -q unknown'
+out="$(FIXTURE_FIRST_EXIT=1 FIXTURE_SECOND_BUSY=scope-second scoped_guard)"; rc=$?
+check 'a known busy registration still blocks when another repository is unavailable' '[ "$rc" -eq 3 ]'
+printf '{"agentName":"scope-third","gitHubUrl":"https://github.com/fixture-owner/first/"}\n' > "$RDIR_TWO/.runner"
+: > "$WORK/api.log"; scoped_guard >/dev/null; rc=$?
+check 'multiple local registrations share one query for their repository' \
+  '[ "$rc" -eq 0 ] && [ "$(wc -l < "$WORK/api.log")" -eq 1 ]'
+# The old single-repository fixture override remains authoritative even when
+# the registration carries a different URL.
+stub_gh scope-first; out="$(guard_run --check-collision)"; rc=$?
+check 'an explicit repository override preserves its original fixture route' '[ "$rc" -eq 3 ]'
+rm -rf "$RDIR_TWO"
+python3 - "$RDIR/.runner" <<'PY'
+import json,sys
+from pathlib import Path
+Path(sys.argv[1]).write_bytes(json.dumps({'agentName':'SCOPE-FIRST\r','gitHubUrl':'https://github.com/fixture-owner/first'}).encode('utf-16'))
+PY
+out="$(scoped_guard)"; rc=$?
+check 'UTF-16 Windows registrations and CR/case normalization still detect a busy runner' '[ "$rc" -eq 3 ]'
+for malformed in '[]' '{"agentName":"first","agentName":"second"}' '{"agentName":"name","gitHubUrl":"https://github.com/../unsafe"}'; do
+  printf '%s\n' "$malformed" > "$RDIR/.runner"
+  out="$(scoped_guard)"; rc=$?
+  check 'malformed or ambiguous registration never reports clear' \
+    '[ "$rc" -eq 4 ] && printf "%s" "$out" | grep -q unknown'
+done
+
 # --- mid-run CI arrival ----------------------------------------------------
 # The launcher checks once, at start-up. A 65-minute series started while idle
 # is still handed a job halfway through, so run-parallel.sh watches for the
@@ -226,7 +292,7 @@ check 'the explicit collision probe never reports clear without runner status' \
 # A real process is started so the detector exercises its real code path; only
 # the name it looks for is overridden. `sleep` exists on both platforms.
 sleep 45 & sleeper=$!
-AI_TEST_RUNNER_PROC=sleep AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+AI_TEST_IGNORE_CI=0 AI_TEST_RUNNER_PROC=sleep AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
   bash "$RUNNER" -l "$LOGS/ciabort" >"$WORK/abort.out" 2>&1; arc=$?
 kill "$sleeper" 2>/dev/null
 check 'a CI job appearing mid-series stops further launches' \
