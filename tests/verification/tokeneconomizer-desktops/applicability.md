@@ -19,6 +19,11 @@ because this chat's computer-control surface exposes browsers, not native apps.
 
 ## Ubuntu Claude
 
+November 1: subscription sign-in and native CLI model/tool execution now work;
+see the [isolated smoke receipt](native-smoke-2026-11-01.md). The revoked
+OAuth observation below is historical. Desktop access remains unavailable;
+CLI success does not establish desktop engine, hooks or visible behavior.
+
 edge-dev3 installed desktop package: `4.4212.0`; separate Claude Code CLI:
 `2.1.309`. The selected desktop's coding engine and Code-tab state are unknown.
 Native CLI has supported session-local plugin loading and events, and is in the
