@@ -202,6 +202,11 @@ else:
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),[Security.AccessControl.FileSystemRights]::ReadData,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $hostFile -AclObject $acl
+        Refuses {Assert-ConfigMetadata} 'Foreign credential file reader refused without reading bytes'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
         $acl=Get-Acl -LiteralPath $unsafe
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))

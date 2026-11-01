@@ -193,11 +193,16 @@ public static class GenerationCustody {
   if(h.IsInvalid||!GetFileInformationByHandle(h,out i)||(i.Attributes&0x400)!=0||(i.Attributes&0x10)==0){h.Dispose();throw new IOException("Private directory control unavailable");}return h;
  }
  public static void AssertProtectedParent(SafeFileHandle handle,bool volumeRoot){
+  AssertProtectedMetadata(handle,volumeRoot,false);
+ }
+ public static void AssertPrivateConfigFile(SafeFileHandle handle){AssertProtectedMetadata(handle,false,true);}
+ static void AssertProtectedMetadata(SafeFileHandle handle,bool volumeRoot,bool privateFile){
   IntPtr owner,group,dacl,sacl,descriptor;if(GetSecurityInfo(handle,1,5,out owner,out group,out dacl,out sacl,out descriptor)!=0)throw new IOException("Parent security unavailable");
   try{uint length=GetSecurityDescriptorLength(descriptor);if(length==0||length>65536)throw new IOException("Parent security unavailable");byte[] bytes=new byte[length];Marshal.Copy(descriptor,bytes,0,(int)length);RawSecurityDescriptor security=new RawSecurityDescriptor(bytes,0);
    string current=WindowsIdentity.GetCurrent().User.Value;var trusted=new System.Collections.Generic.HashSet<string>(new string[]{current,"S-1-5-18","S-1-5-32-544","S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"});
    if(security.Owner==null||!trusted.Contains(security.Owner.Value)||security.DiscretionaryAcl==null||security.DiscretionaryAcl.Count==0)throw new IOException("Untrusted staging parent owner or DACL");
-   uint mask=volumeRoot?0x500d0152u:0x500d0156u;foreach(GenericAce entry in security.DiscretionaryAcl){if((entry.AceFlags&AceFlags.InheritOnly)!=0)continue;CommonAce ace=entry as CommonAce;if(ace==null||ace.IsCallback)throw new IOException("Unknown staging parent ACE");if(ace.AceQualifier==AceQualifier.AccessDenied)continue;if(ace.AceQualifier!=AceQualifier.AccessAllowed||(!trusted.Contains(ace.SecurityIdentifier.Value)&&(unchecked((uint)ace.AccessMask)&mask)!=0))throw new IOException("Foreign staging parent writer");}
+   uint mask=volumeRoot?0x500d0152u:0x500d0156u;if(privateFile)mask|=0x90000001u;
+   foreach(GenericAce entry in security.DiscretionaryAcl){if((entry.AceFlags&AceFlags.InheritOnly)!=0)continue;CommonAce ace=entry as CommonAce;if(ace==null||ace.IsCallback)throw new IOException("Unknown staging parent ACE");if(ace.AceQualifier==AceQualifier.AccessDenied)continue;if(ace.AceQualifier!=AceQualifier.AccessAllowed||(!trusted.Contains(ace.SecurityIdentifier.Value)&&(unchecked((uint)ace.AccessMask)&mask)!=0))throw new IOException(privateFile?"Foreign config file reader or writer":"Foreign staging parent writer");}
   }finally{LocalFree(descriptor);}
  }
  public static void DirectoryAccess(SafeFileHandle h,bool writable){
@@ -353,7 +358,7 @@ function Assert-ConfigMetadata {
     foreach($name in @('config.yml','hosts.yml')){
         $held=[GenerationCustody]::Metadata((Join-Path $directory.FullName $name),$false)
         if($null -eq $held){if($name -ceq 'hosts.yml' -and -not $tokenPresent){throw 'Missing original gh hosts metadata requires existing token environment'};continue}
-        try{[GenerationCustody]::AssertProtectedParent($held,$false);$script:locks.Add($held)}catch{$held.Dispose();throw}
+        try{[GenerationCustody]::AssertPrivateConfigFile($held);$script:locks.Add($held)}catch{$held.Dispose();throw}
     }
 }
 function Local-OnlyProbe([string]$Executable,[string[]]$Values) {
