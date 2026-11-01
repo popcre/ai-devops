@@ -255,9 +255,19 @@ gh_measure_workflow_evidence(){
     "$utc" "$id" "$cohort_json" "${PR_WAIT_EVENT_KIND:-unknown}" "${PR_WAIT_ELIGIBLE_UTC_MS:-null}" "${PR_WAIT_OBSERVED_UTC_MS:-null}" "${PR_WAIT_DELIVERED_UTC_MS:-null}" "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" "$reason")
   # An explicit qualification parent may consume this *unqualified* event.
   # A caller-supplied descriptor never grants source or clock authority.
-  if [[ "${AI_GH_QUALIFICATION_EVENT_FD:-}" =~ ^[0-9]{1,5}$ ]] &&
+  local event_python="${PYTHON_RUNNER:-}" event_helper='' event_windows=0
+  case "${OSTYPE:-}" in msys*|cygwin*|win32*) event_windows=1 ;; esac
+  if [ "$event_windows" = 1 ] && [[ "${AI_GH_QUALIFICATION_EVENT_HANDLE:-}" =~ ^[0-9]{1,20}$ ]]; then
+    # This is data only. The native writer verifies a bounded nonblocking
+    # message pipe; neither this handle nor its environment grants authority.
+    event_helper="${BASH_SOURCE[0]%/*}/windows_event.py"
+    [ -n "$event_python" ] || event_python="$(command -v python3 || command -v python || true)"
+    if [ -n "$event_python" ] && [ -f "$event_helper" ]; then
+      printf '%s\n' "$record" | "$event_python" "$event_helper" 2>/dev/null || :
+    fi
+  elif [[ "${AI_GH_QUALIFICATION_EVENT_FD:-}" =~ ^[0-9]{1,5}$ ]] &&
     [ "$AI_GH_QUALIFICATION_EVENT_FD" -ge 3 ] && [ -p "/proc/self/fd/$AI_GH_QUALIFICATION_EVENT_FD" ]; then
-    local event_python="${PYTHON_RUNNER:-}" event_helper="${BASH_SOURCE[0]%/*}/measure_append.py"
+    event_helper="${BASH_SOURCE[0]%/*}/measure_append.py"
     [ -n "$event_python" ] || event_python="$(command -v python3 || command -v python || true)"
     if [ -n "$event_python" ] && [ -f "$event_helper" ]; then
       printf '%s' "$record" | "$event_python" "$event_helper" --event-fd "$AI_GH_QUALIFICATION_EVENT_FD" 2>/dev/null || :
