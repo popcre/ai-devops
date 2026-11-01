@@ -35,6 +35,22 @@ def event():
             "latency_ms": None, "unknown_reason": "metadata_absent"}
 
 
+def receipt_fixture(caller, workflow, outcome, identifier):
+    row = {"schema": 3, "utc": "2026-10-31T00:00:00Z", "measurement": "workflow_outcome",
+           "caller": caller, "workflow": workflow, "outcome": outcome,
+           "workflow_id": identifier, "elapsed_ms": 3}
+    if workflow in report.ACTIVE_RECEIPT_BOUNDARIES:
+        attempted, succeeded, failed, skipped = {
+            "completed": (1, 1, 0, 0), "partial": (2, 1, 1, 0), "failed": (1, 0, 1, 0),
+            "skipped": (0, 0, 0, 1), "process_succeeded": (1, 1, 0, 0),
+            "process_failed": (1, 0, 1, 0), "refused": (1, 0, 0, 1),
+        }[outcome]
+        row.update(boundary=report.ACTIVE_RECEIPT_BOUNDARIES[workflow], attempted_count=attempted,
+                   succeeded_count=succeeded, failed_count=failed, skipped_count=skipped,
+                   parent_workflow_id=None)
+    return row
+
+
 class EventTests(unittest.TestCase):
     def test_unsupported_native_event_pipe_is_explicitly_unknown(self):
         with mock.patch.object(measure_append.sys, "platform", "win32"):
@@ -109,13 +125,13 @@ class EventTests(unittest.TestCase):
             rows = []
             for index, labels in enumerate(sorted(report.RECEIPT_LABELS)):
                 caller, workflow, outcome = labels
-                rows.append({"schema": 3, "utc": "2026-10-31T00:00:00Z", "measurement": "workflow_outcome",
-                             "caller": caller, "workflow": workflow, "outcome": outcome,
-                             "workflow_id": f"{index:032x}", "elapsed_ms": 3})
+                rows.append(receipt_fixture(caller, workflow, outcome, f"{index:032x}"))
             path = Path(directory) / "2026-10-31.jsonl"
             path.write_text("".join(json.dumps(row) + "\n" for row in rows))
             result = report.summarize(directory)
             self.assertEqual(result["completed_workflow_receipts"], 6)
+            self.assertEqual(sum(row["successful_active_operations"]
+                                 for row in result["active_blocker_watch_operations"]), 3)
             self.assertTrue(any(row["outcome"] == "skipped" for row in result["workflow_outcomes"]))
             rows[-1]["outcome"] = "private-response"
             path.write_text("".join(json.dumps(row) + "\n" for row in rows))
@@ -126,13 +142,23 @@ class EventTests(unittest.TestCase):
             environment = dict(os.environ, AI_GH_STATE_DIR=directory)
             collector = str(ROOT / "tools/github-requests/telemetry.sh")
             for index, (caller, workflow, outcome) in enumerate(sorted(report.RECEIPT_LABELS)):
+                row = receipt_fixture(caller, workflow, outcome, f"{index:032x}")
+                arguments = [caller, workflow, row["workflow_id"], outcome, "3"]
+                if workflow in report.ACTIVE_RECEIPT_BOUNDARIES:
+                    arguments += [row["boundary"], *[str(row[name]) for name in
+                                  ("attempted_count", "succeeded_count", "failed_count", "skipped_count")], ""]
                 result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
-                                         "bash", collector, caller, workflow, f"{index:032x}", outcome, "3"],
+                                         "bash", collector, *arguments],
                                         env=environment, capture_output=True)
                 self.assertEqual(result.returncode, 0, (caller, workflow, outcome))
             result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
                                      "bash", collector, "ai-verify-run", "verify_dispatch", "private-target", "dispatched", "3"],
                                     env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 2)
+            # New active labels cannot silently reuse the old receipt shape.
+            result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
+                                     "bash", collector, "ai-blocker-watch", "blocker_watch_alarm", "a" * 32,
+                                     "completed", "3"], env=environment, capture_output=True)
             self.assertEqual(result.returncode, 2)
             summary = report.summarize(Path(directory) / "measurements")
             self.assertEqual(summary["completed_workflow_receipts"], 6)
