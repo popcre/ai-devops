@@ -439,6 +439,11 @@ and genuine eligible GitHub UTC, never subtract Windows wall clocks. Its named
 boundary is parent-received alarm batch acknowledgement over SSH and includes
 transport; it does not claim an exact native SDK-ack interval or full-budget pass.
 
+The finite dry-run parity successor is not yet landed. Its actual caller-argument
+flag, rather than producer frames, excludes simulated work from both qualified
+completion/event intervals and active-success classification. Raw diagnostics
+and original execution remain available; simulation cannot establish acceptance.
+
 ## Retirement
 
 #660 owns the minimal pinned patch until upstream supplies an equivalent

@@ -83,8 +83,12 @@ one finite operation plus that optional literal, keeps SDK ticks refused and
 binds receipt dry-run mode to actual arguments. Separate common caller-intent
 defense `d41eacac` passes that trusted mode into the transcript and requires exact
 false for numeric alarm-event qualification, even against forged completed
-END/facts. Twelve event-consumer and seventeen actual parent/factory regression
-cases passed. This defends caller intent; producer data still cannot grant
+END/facts. Its `8701f3af` follow-up consistently clears both interval types and
+active-success classification with `dry_run_not_active_work`, preserving source
+custody and diagnostic clocks/elapsed. Twenty-nine focused cases passed at that
+source. Test-only `87082eac` additionally proves the actual retained factory
+receives the dry-run arguments and excludes a forged completed fixture; two
+focused actual-intent cases passed. This defends caller intent; producer data still cannot grant
 source authority. Native predicate-only proof and combined landing remain
 unfinished; no real active action or timing acceptance run was generated.
 
