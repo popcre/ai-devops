@@ -204,7 +204,17 @@ tags disable the updater. Windows race execution is not claimed.
 The versioned `counter_source_binding` binds the complete finite input closure:
 httpcounter.go, httpcounter_test.go, channel.go, channel_linux.go,
 channel_windows.go, channel_unsupported.go, channel_windows_test.go,
-windows_cli_fixture_test.go and native_fixture.ps1, in that order.
+windows_cli_fixture_test.go, native_fixture.ps1 and pins.json, in that order.
+The locked registry is the same single version map used by the builder and
+native guard; the guard contains no duplicate commit/archive pin table.
+The finite capabilities declare one constructor and no detached CLI telemetry
+for 2.88.1, and two constructors with telemetry for 2.97.0/2.103.3 (and the
+historical 2.101.0 profile). The common patch checks the exact declared return,
+import, source-directory and finalization hooks before any edit. The older
+profile's native child test exercises both actual images with telemetry
+requested, asserts its declared absence and verifies actual API counter output;
+it does not skip or remove an implemented feature. Authentication-login and
+other out-of-profile clients remain outside this finite coverage.
 `compiled_counter_source_binding` binds the post-gofmt copied closure. The
 existing `patch_sha256` still means only httpcounter.go's input bytes; it is
 insufficient alone. Missing, altered and extra source files are rejected.

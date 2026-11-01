@@ -396,22 +396,39 @@ function Digest([IO.Stream]$Stream) {
     $reader = [IO.StreamReader]::new($manifestStream, [Text.Encoding]::UTF8, $true, 4096, $true)
     try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
     if ($manifest.target -ne 'windows-amd64' -or $manifest.installed -ne $false -or $manifest.counter_source_binding.schema -ne 1) { throw 'Wrong qualification manifest' }
-    if ($manifest.pins.upstream_commit -ne '0cf1092493af067646fc5f3db9421c6a6ec9c938' -or
-        $manifest.pins.source_sha256 -ne '057c1bfc07ecee96fcb0a121b482464a3f10063532bace358ee37d57214ea150' -or
-        $manifest.pins.toolchain_sha256 -ne '63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445') { throw 'Official input pin mismatch' }
-    $sources = @('httpcounter.go','httpcounter_test.go','channel.go','channel_linux.go','channel_windows.go','channel_unsupported.go','channel_windows_test.go','windows_cli_fixture_test.go','native_fixture.ps1')
+    $sources = @('httpcounter.go','httpcounter_test.go','channel.go','channel_linux.go','channel_windows.go','channel_unsupported.go','channel_windows_test.go','windows_cli_fixture_test.go','native_fixture.ps1','pins.json')
     $keys = @($manifest.counter_source_binding.files.PSObject.Properties.Name | Sort-Object)
     if (($keys -join ',') -ne (($sources | Sort-Object) -join ',')) { throw 'Finite source closure mismatch' }
     $sourceRoot = Join-Path $root 'source'
     if ([IO.Path]::GetFullPath($PSCommandPath) -ne (Join-Path $sourceRoot 'native_fixture.ps1')) { throw 'Launch fixture must be staged with its source closure' }
     [void](Lock-Directory $sourceRoot $true)
-    $actual = @(Get-ChildItem -LiteralPath $sourceRoot -File | Where-Object { $_.Extension -in @('.go','.ps1') } | ForEach-Object Name | Sort-Object)
+    $actual = @(Get-ChildItem -LiteralPath $sourceRoot -File | Where-Object { $_.Extension -in @('.go','.ps1','.json') } | ForEach-Object Name | Sort-Object)
     if (($actual -join ',') -ne ($keys -join ',')) { throw 'Extra or missing source file' }
+    $sourceEntries = @{}
     foreach ($name in $sources) {
         $path = Join-Path $sourceRoot $name
         $entry = Lock-File $path
         if ((Digest $entry.Stream) -ne $manifest.counter_source_binding.files.$name) { throw 'Source digest mismatch' }
+        $sourceEntries[$name] = $entry
     }
+    # One locked source registry owns all finite runtime/version capabilities.
+    $registryStream = $sourceEntries['pins.json'].Stream
+    $registryStream.Position = 0
+    $registryReader = [IO.StreamReader]::new($registryStream, [Text.Encoding]::UTF8, $true, 4096, $true)
+    try { $registry = $registryReader.ReadToEnd() | ConvertFrom-Json } finally { $registryReader.Dispose() }
+    $version = [string]$manifest.pins.upstream_version
+    if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Unknown version profile' }
+    $profileProperty = $registry.profiles.PSObject.Properties[$version]
+    if ($null -eq $profileProperty) { throw 'Unknown version profile' }
+    $profile = $profileProperty.Value
+    if ($manifest.pins.upstream_commit -ne $profile.upstream_commit -or
+        $manifest.pins.source_sha256 -ne $profile.source_sha256 -or
+        $manifest.pins.toolchain_sha256 -ne $registry.toolchain_sha256 -or
+        $manifest.pins.api_constructor_hooks -ne $profile.api_constructor_hooks -or
+        $manifest.pins.detached_telemetry -ne $profile.detached_telemetry -or
+        $manifest.pins.profile_kind -ne $profile.profile_kind -or
+        -not ($profile.detached_telemetry -is [bool]) -or
+        $profile.api_constructor_hooks -notin @(1,2)) { throw 'Official input profile mismatch' }
     $names = @{baseline='gh-baseline.exe'; instrumented='gh-instrumented.exe'; native_fixture='httpcounter-windows-fixture.exe'}
     $images = @{}
     foreach ($kind in @('baseline','instrumented','native_fixture')) {
@@ -452,6 +469,7 @@ function Digest([IO.Stream]$Stream) {
     $start.EnvironmentVariables['PATH'] = ''
     $start.EnvironmentVariables['AI_GH_COUNTER_FIXTURE_BASELINE'] = $images.baseline.Path
     $start.EnvironmentVariables['AI_GH_COUNTER_FIXTURE_INSTRUMENTED'] = $images.instrumented.Path
+    $start.EnvironmentVariables['AI_GH_COUNTER_FIXTURE_DETACHED_TELEMETRY'] = ([string]$profile.detached_telemetry).ToLowerInvariant()
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     $ownedConsole = $false

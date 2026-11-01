@@ -15,6 +15,7 @@ sys.path.insert(0, str(HERE))
 from source_binding import source_binding, validate_source_binding, version_profile
 from numeric_receipt import validate_receipt
 from managed_read import aggregate_invocations, managed_read_label
+from build import patch as patch_counter_source
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -43,6 +44,42 @@ class OfflineContract(unittest.TestCase):
             path.write_text(json.dumps(registry))
             with self.assertRaises(ValueError):
                 version_profile(path)
+
+    def test_patch_profiles_reject_missing_unexpected_constructor_and_import(self):
+        def source(root, hooks, imported, directory, final=True):
+            (root / 'api').mkdir()
+            (root / 'internal').mkdir()
+            (root / 'cmd/gh').mkdir(parents=True)
+            if directory:
+                (root / 'internal/gh/ghtelemetry').mkdir(parents=True)
+            client = root / 'api/http_client.go'
+            client.write_text('package api\nimport (\n\t"net/http"\n'
+                              + ('\t"github.com/cli/cli/v2/internal/gh/ghtelemetry"\n' if imported else '')
+                              + ')\n' + '\treturn client, nil\n' * hooks)
+            (root / 'cmd/gh/main.go').write_text('package main\nimport "github.com/cli/cli/v2/internal/ghcmd"\n'
+                                               + ('\tcode := ghcmd.Main()\n' if final else ''))
+            return client
+        for expected, telemetry in ((1, False), (2, True)):
+            capabilities = {'api_constructor_hooks': expected, 'detached_telemetry': telemetry}
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                client = source(root, expected, telemetry, telemetry)
+                patch_counter_source(root, capabilities)
+                self.assertEqual(client.read_text().count('httpcounter.Wrap(client.Transport)'), expected)
+                self.assertIn('httpcounter.Finish()', (root / 'cmd/gh/main.go').read_text())
+            for actual_hooks, imported, directory, final in (
+                    (3 - expected, telemetry, telemetry, True),
+                    (expected, not telemetry, telemetry, True),
+                    (expected, telemetry, not telemetry, True),
+                    (expected, telemetry, telemetry, False)):
+                with self.subTest(expected_hooks=expected, actual_hooks=actual_hooks, imported=imported, final=final):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        root = pathlib.Path(temporary)
+                        client = source(root, actual_hooks, imported, directory, final)
+                        before = client.read_bytes()
+                        with self.assertRaises(ValueError):
+                            patch_counter_source(root, capabilities)
+                        self.assertEqual(client.read_bytes(), before)
 
     def test_admission_invocations_aggregate_only_complete_sequential_pairs(self):
         result = aggregate_invocations(channel() + channel(observed_completed_writes=2))

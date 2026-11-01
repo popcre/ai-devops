@@ -7,25 +7,33 @@
       "upstream_commit": "55dbb4dc6b7edb10b48e3d7fc5bccd32318d1b55",
       "source_url": "https://codeload.github.com/cli/cli/tar.gz/55dbb4dc6b7edb10b48e3d7fc5bccd32318d1b55",
       "source_sha256": "c4ee0ab20406291616de45ad771c8b8a927bc8f3fd00ca61a50d0e8ffa582130",
-      "profile_kind": "runtime"
+      "profile_kind": "runtime",
+      "api_constructor_hooks": 2,
+      "detached_telemetry": true
     },
     "2.88.1": {
       "upstream_commit": "37800dd56a536e69b20d682b770e983c3829c164",
       "source_url": "https://codeload.github.com/cli/cli/tar.gz/37800dd56a536e69b20d682b770e983c3829c164",
       "source_sha256": "910e15ecdd2712282d5ffac5ead0a149a6c7adc00f3c97e62f04f9cd03640245",
-      "profile_kind": "runtime"
+      "profile_kind": "runtime",
+      "api_constructor_hooks": 1,
+      "detached_telemetry": false
     },
     "2.103.3": {
       "upstream_commit": "63837fb778d6a39f02be0ce76ff89f2bc8d74bdc",
       "source_url": "https://codeload.github.com/cli/cli/tar.gz/63837fb778d6a39f02be0ce76ff89f2bc8d74bdc",
       "source_sha256": "1a64dc5be667fa8c6458c0e639292ee1a5e215854705db267882e1bcf865b335",
-      "profile_kind": "runtime"
+      "profile_kind": "runtime",
+      "api_constructor_hooks": 2,
+      "detached_telemetry": true
     },
     "2.101.0": {
       "upstream_commit": "0cf1092493af067646fc5f3db9421c6a6ec9c938",
       "source_url": "https://codeload.github.com/cli/cli/tar.gz/0cf1092493af067646fc5f3db9421c6a6ec9c938",
       "source_sha256": "057c1bfc07ecee96fcb0a121b482464a3f10063532bace358ee37d57214ea150",
-      "profile_kind": "historical"
+      "profile_kind": "historical",
+      "api_constructor_hooks": 2,
+      "detached_telemetry": true
     }
   },
   "toolchain_version": "go1.27.1",
