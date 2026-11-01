@@ -41,7 +41,7 @@ try{
  $refused=$false;try{Assert-ActiveArguments 'bin/ai-blocker-watch' @('tick') $true}catch{$refused=$true};Check $refused 'SDK cannot admit provider ticks'
  $refused=$false;try{Assert-ReadArguments 'bin/ai-blocker-watch' @('alarm')}catch{$refused=$true};Check $refused 'Active work cannot masquerade as read profile'
  $bash=Join-Path $env:ProgramFiles 'Git/bin/bash.exe';$actor=Join-Path $PSScriptRoot 'windows_active_actor.py'
- foreach($mode in @('valid','ack-malformed','ack-partial','ack-late','closed','nonpipe','alias','full-event','full-ack','forged-claim','raw-duplicate','raw-overflow','raw-oversize','legacy-pr','provider-exit','provider-uncertain','provider-timeout')){
+ foreach($mode in @('valid','bash-facts','ack-malformed','ack-partial','ack-late','closed','nonpipe','alias','full-event','full-ack','forged-claim','raw-duplicate','raw-overflow','raw-oversize','legacy-pr','provider-exit','provider-uncertain','provider-timeout')){
   $event=$null;$ack=$null;$child=$null
   try{
    $event=if($mode -eq 'legacy-pr'){[GenerationCustody+EventChannel]::new()}else{[GenerationCustody+EventChannel]::new(256)};$ack=[GenerationCustody+EventChannel]::new(1,$true)
@@ -52,6 +52,14 @@ try{
    $runner=Join-Path $root 'actor.sh'
    $pythonPath=$PythonExe.Replace('\','/');$actorPath=$actor.Replace('\','/')
    [IO.File]::WriteAllText($runner,("#!/usr/bin/env bash`nexec `""+$pythonPath+"`" -I -S `""+$actorPath+"`" "+$mode+"`n"),[Text.UTF8Encoding]::new($false))
+   if($mode -eq 'bash-facts'){
+    $env:AI_GH_ACTIVE_PYTHON=$PythonExe;$env:AI_GH_STATE_DIR=Join-Path $root 'measure-state'
+    $telemetry=(Join-Path $SourceRoot 'tools/github-requests/telemetry.sh').Replace('\','/')
+    $script="#!/usr/bin/env bash`nset -e`nsource `"$telemetry`"`ngh_measure_active_begin blocker_watch_alarm $('a'*32) '' alarm_scan`n"
+    $end='{"schema":3,"measurement":"workflow_outcome","utc":"2026-11-01T00:00:00Z","caller":"ai-blocker-watch","workflow":"blocker_watch_alarm","workflow_id":"'+('a'*32)+'","parent_workflow_id":null,"boundary":"alarm_scan","outcome":"completed","elapsed_ms":1,"attempted_count":1,"succeeded_count":1,"failed_count":0,"skipped_count":0}'
+    $script+="gh_measure_active_channel end '$end'`ngh_measure_blocker_evidence blocker_watch_alarm $('a'*32) alarm_stale 2000000000000 2000000001000 2000000002000 alarm_batch_acknowledged`n"
+    [IO.File]::WriteAllText($runner,$script,[Text.UTF8Encoding]::new($false))
+   }
    $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$bash;$start.Arguments=([GenerationCustody]::Quote($runner));$start.WorkingDirectory=$root;$start.UseShellExecute=$false;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true;$start.RedirectStandardInput=$true
    $child=[Diagnostics.Process]::new();$child.StartInfo=$start;Check $child.Start() 'Native actor started';$child.StandardInput.Close()
    $stdout=[IO.MemoryStream]::new();$stderr=[IO.MemoryStream]::new();$output=$child.StandardOutput.BaseStream.CopyToAsync($stdout);$errorOutput=$child.StandardError.BaseStream.CopyToAsync($stderr)
@@ -78,6 +86,10 @@ try{
    $expected=if($mode -eq 'provider-timeout'){124}elseif($mode -in @('provider-exit','provider-uncertain')){7}else{0}
    if($child.ExitCode -ne $expected){throw ('Native actor '+$mode+' exit '+$child.ExitCode+': '+[Text.Encoding]::UTF8.GetString($stderr.ToArray()))};Check $true ('Native actor '+$mode)
    if($mode -eq 'valid'){Check ($messages.Count -eq 2) 'Reciprocal BEGIN/END transported'}
+   if($mode -eq 'bash-facts'){
+    Check ($messages.Count -eq 3 -and $messages[2] -like '*active_event_facts*') 'Actual Bash durable append forwards facts after END'
+    Check (@(Get-ChildItem -LiteralPath (Join-Path $root 'measure-state/measurements') -File).Count -gt 0) 'Original durable measurement retained'
+   }
    if($mode -in @('raw-overflow','raw-oversize')){Check $event.Invalid 'Oversize/frame-cap invalidates channel'}
    if($mode -eq 'raw-duplicate'){
     $data=Join-Path $root 'data.json';[IO.File]::WriteAllText($data,(ConvertTo-Json -InputObject @($messages.ToArray()) -Compress))

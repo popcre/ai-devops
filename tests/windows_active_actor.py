@@ -64,7 +64,7 @@ def main():
         command = [timeout, duration, sys.executable, "-I", "-S", str(Path(__file__).resolve()), "provider",
                    "sleep" if mode in ("provider-timeout", "provider-cancel") else "exit", str(event), str(ack),
                    os.getcwd(), "quoted space", 'quote"backslash\\', "日本語"]
-        return wire.active_harness_exec(command)
+        return report.active_harness_exec(command)
     if mode == "legacy-pr":
         event = {"schema": 4, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_evidence",
                  "caller": "ai-pr-wait", "workflow": "pr_wait", "workflow_id": "b" * 32,
@@ -94,10 +94,10 @@ def main():
     row = dict(BEGIN)
     if mode == "forged-claim":
         row["source_verified"] = "verified"
-    accepted = wire.active_completion_io("begin", row, .250)
+    accepted = report.active_channel_helper("begin", json.dumps(row).encode())
     assert accepted == (mode == "valid"), (mode, accepted)
     if accepted:
-        assert wire.active_completion_io("end", END, .250)
+        assert report.active_channel_helper("end", json.dumps(END).encode())
     return 0
 
 
