@@ -1007,7 +1007,8 @@ class ActiveEventConsumerTests(unittest.TestCase):
         row = receipt_fixture("ai-blocker-watch", "blocker_watch_" + operation, outcome, "a" * 32)
         begin = {key: row[key] for key in ("caller", "workflow", "workflow_id", "parent_workflow_id", "boundary")}
         begin.update(schema=1, measurement="active_completion_boundary", phase="begin")
-        transcript = report.ActiveCompletionTranscript(operation, lambda _: ack)
+        transcript = report.ActiveCompletionTranscript(operation, lambda _: ack,
+                                                       qualification_profile="sdk_only_no_provider")
         transcript.receive(begin, self.clock(1000)); transcript.receive(row, self.clock(4000))
         return transcript, row
 
@@ -1079,6 +1080,12 @@ class ActiveEventConsumerTests(unittest.TestCase):
         transcript.receive(self.facts(), self.clock(4100))
         self.assertEqual(transcript.result(7, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
 
+    def test_original_profile_never_qualifies_even_with_source_verified(self):
+        transcript, _ = self.transcript()
+        transcript.qualification_profile = "original_context"
+        transcript.receive(self.facts(), self.clock(4100))
+        self.assertEqual(transcript.result(0, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
+
     def test_actual_telemetry_append_precedes_forward_and_failure_preserves_status(self):
         script = '''source "$1"
 gh_measure_append(){ printf 'APPEND\\n'; return "$APPEND_STATUS"; }
@@ -1087,7 +1094,9 @@ gh_measure_blocker_evidence blocker_watch_alarm aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 exit $?'''
         for append_status in (0, 9):
             child = subprocess.run(["bash", "-c", script, "fixture", str(ROOT / "tools/github-requests/telemetry.sh")],
-                                   env=dict(os.environ, APPEND_STATUS=str(append_status)), capture_output=True, timeout=5)
+                                   env=dict(os.environ, APPEND_STATUS=str(append_status), AI_GH_ACTIVE_EVENT_FD="3",
+                                            AI_GH_ACTIVE_ACK_FD="4", AI_GH_ACTIVE_PYTHON=sys.executable),
+                                   capture_output=True, timeout=5)
             self.assertEqual(child.returncode, append_status)
             lines = child.stdout.decode().splitlines()
             self.assertEqual(lines[0], "APPEND")

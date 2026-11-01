@@ -364,7 +364,11 @@ gh_measure_blocker_evidence(){
     "$utc" "$workflow" "$id" "$event" "${eligible:-null}" "${observed:-null}" "${delivered:-null}" "$boundary" "$reason")
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record" || return $?
   # Only this live observer transport can join facts; saved rows grant no authority.
-  gh_measure_active_channel facts "{\"schema\":1,\"measurement\":\"active_event_facts\",\"phase\":\"facts\",\"event\":$record}" || :
+  if { [[ "${AI_GH_ACTIVE_EVENT_FD:-}" =~ ^[0-9]{1,5}$ && "${AI_GH_ACTIVE_ACK_FD:-}" =~ ^[0-9]{1,5}$ ]] ||
+       [[ "${AI_GH_ACTIVE_EVENT_HANDLE:-}" =~ ^[0-9]{1,20}$ && "${AI_GH_ACTIVE_ACK_HANDLE:-}" =~ ^[0-9]{1,20}$ ]]; } &&
+       [ -n "${AI_GH_ACTIVE_PYTHON:-}" ]; then
+    gh_measure_active_channel facts "{\"schema\":1,\"measurement\":\"active_event_facts\",\"phase\":\"facts\",\"event\":$record}" || :
+  fi
   return 0
 }
 
