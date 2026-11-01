@@ -353,7 +353,7 @@ class CohortContract(unittest.TestCase):
             cohort.interrupt(signal.SIGTERM)
 
     def test_packet_rejects_duplicate_nonfinite_oversized_and_closes_received_handles(self):
-        for raw in (b'{"sequence":1,"sequence":2}', b'{"number":NaN}', b'x' * 4097, b'[]'):
+        for raw in (b'{"sequence":1,"sequence":2}', b'{"number":NaN}', b'{"number":1e999}', b'x' * 4097, b'[]'):
             with self.subTest(raw_length=len(raw)):
                 left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 descriptor = os.open(os.devnull, os.O_RDONLY)

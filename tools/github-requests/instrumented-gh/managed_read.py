@@ -76,7 +76,8 @@ def _packet_receive(channel):
             return result
         def invalid_constant(_value):
             raise ValueError("nonfinite cohort value")
-        value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+        value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant,
+                           parse_float=invalid_constant)
         if type(value) is not dict:
             raise ValueError("cohort packet must be an object")
         result = descriptors
@@ -110,7 +111,8 @@ def _cohort_worker(descriptor, bash, transport, baseline, instrumented, lifetime
         try:
             channel.settimeout(max(0.001, deadline - time.monotonic()))
             value, descriptors = _packet_receive(channel)
-            if value == {"close": 1} and not descriptors:
+            if (set(value) == {"close"} and type(value['close']) is int
+                    and value['close'] == 1 and not descriptors):
                 _reap_cohort_children()
                 return 0
             if (set(value) != {"sequence", "kind", "arguments", "workflow_id", "timeout_seconds"}
