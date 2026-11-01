@@ -58,8 +58,8 @@ Linux parent's acknowledged BEGIN and facts-receive clocks with genuine eligible
 GitHub UTC; Windows wall-clock fields cannot be subtracted from Linux clocks.
 That remote boundary is parent receipt of the alarm batch acknowledgement over
 SSH, including transport, not an exact native SDK acknowledgement interval.
-Native combined delivery and installed proof remain unfinished; the component
-proof below does not close the unknown whole-observer budget for either route.
+Native installed proof remains unfinished; the component proof below does not
+close the unknown whole-observer budget for either route.
 
 The native completion/facts component subsequently passed eight native Python
 tests with at least fifty actual assertions in 7.604 seconds at `acb359c1`.
@@ -68,8 +68,14 @@ was independently hashed; it records zero owned processes, no API/notifications,
 component-only scope and original-active qualification false. Its delivery
 `c796afc7` preserves executed native source bytes; the separate common
 `AI_GH_ACTIVE_BASH` cleanup hardening `7e0e0f93` has one actual Linux fallback
-FD/session regression pass, not retargeted native execution. Final combined
-landing/installed proof remain required.
+FD/session regression pass, not retargeted native execution. Native integration
+landed through #2289 as `6932559d`, with nine code/test blobs equal to `e406`.
+Run `41340783808` / job `124950122563` failed because the new PowerShell suite
+registration manifest was absent; Windows aggregate sections and the final
+report were downstream skips, not runtime component failures. A two-file
+registration/default-native-Python fixture successor is being prepared; changed-
+head classifier and actual Windows execution proof remain required before final
+installed delivery. No unchanged CI retry or native-proof retarget is claimed.
 
 Coverage aggregate V4 has digest
 `fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.

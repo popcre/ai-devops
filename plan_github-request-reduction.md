@@ -72,8 +72,12 @@ wakes, original-context/provider work and whole-observer budgets unknown.
 Native completion/facts candidate `acb359c1` passed eight native tests with at
 least fifty actual assertions and zero owned processes remaining; this is
 component proof, with original privileged source and full observer budget
-unknown. Its delivery and final installation remain
-unfinished; genuine future activity alone is not their substitute. Accepted
+unknown. Native integration merged through #2289 as `6932559d`, with nine
+code/test blobs equal to reviewed `e406`. Its CI run failed the new suite's
+missing registration manifest; Windows execution and the aggregate report then
+skipped. A changed-head registration/default-native-Python fixture repair is
+underway; its actual CI execution and final installed delivery remain pending.
+This does not retarget or negate the earlier native component proof. Accepted
 P5/headroom proof stays accepted.
 
 The five finite read observations preserve environment, working directory,

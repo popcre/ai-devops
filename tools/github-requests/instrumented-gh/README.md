@@ -429,8 +429,9 @@ source nor clock authority. Consumer #2286 (`221cb504`, tested `f2a90c12`) can j
 live-channel facts after matching acknowledged END, with a separate receive
 clock, default-off explicit SDK scope and one fact per ID. Only successful
 standalone SDK alarms can receive conservative batch-ack detection; links,
-wakes, ticks and original/provider context remain unknown. Native
-integration/installed proof remain required. No completion envelope is
+wakes, ticks and original/provider context remain unknown. Native integration
+landed through #2289; repaired suite registration/actual CI execution and final
+installed proof remain required. No completion envelope is
 event-detection latency.
 
 The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
