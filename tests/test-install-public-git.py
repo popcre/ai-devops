@@ -202,6 +202,39 @@ class PublicGitTests(unittest.TestCase):
         self.assertGreaterEqual(len(environments), 2)
         self.assertTrue(all(env["GIT_SSH_COMMAND"] == "ssh fixture-identity" for env in environments))
 
+    def test_new_private_primary_artifacts_are_never_repaired(self):
+        real_run = subprocess.run
+        snapshots = {}
+        def run_and_create_private(*args, **kwargs):
+            result = real_run(*args, **kwargs)
+            if "checkout" in args[0] and not snapshots:
+                common = self.repo / ".git"
+                bucket = next(path for path in (common / "objects").iterdir()
+                              if len(path.name) == 2 and path.is_dir())
+                paths = [common / "objects/private-root-artifact", bucket / "private-root-artifact",
+                         common / "objects/pack/private-root-artifact",
+                         common / "objects/info/private-root-artifact",
+                         common / "refs/private-root-artifact", common / "logs/private-root-artifact",
+                         common / "objects/private-dir/artifact", common / "refs/private-dir/artifact",
+                         common / "logs/private-dir/artifact"]
+                for path in paths:
+                    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    os.write(descriptor, b"private fixture only"); os.close(descriptor)
+                    snapshots[path] = (helper.metadata(path), path.read_bytes())
+                for path in paths[-3:]:
+                    snapshots[path.parent] = (helper.metadata(path.parent), None)
+            return result
+        with mock.patch.object(helper.subprocess, "run", side_effect=run_and_create_private):
+            self.assertEqual(helper.public_git(self.repo, ["checkout", "--detach", self.after]), 0)
+        allowed = helper.primary_metadata(self.repo / ".git")
+        for path, (info, content) in snapshots.items():
+            self.assertNotIn(path, allowed)
+            self.assertEqual(helper.metadata(path), info)
+            if content is not None: self.assertEqual(path.read_bytes(), content)
+        if os.geteuid() == 0:
+            self.assertTrue(all(info[2] == 0 and info[4] in (0o600, 0o700) for info, _ in snapshots.values()))
+
     def test_foreign_replacement_is_not_modified(self):
         path = self.repo / "old"
         with mock.patch.object(helper, "subprocess") as commands:

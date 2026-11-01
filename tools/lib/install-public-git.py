@@ -6,9 +6,14 @@ the invoking installer retains its private umask. Only new/replaced root-owned
 tracked paths and an explicit primary-Git metadata allowlist change ownership.
 Private configuration, submodules, other worktrees and untracked files are out
 of scope. This is not a general permission-repair command.
+
+Owner: #658 coordinator. Necessary only while supported root-run updates write
+an installed owner's public Git checkout. Retire this updater-only helper when
+Git writes run as that owner with demonstrated authentication and mode parity.
 """
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -54,26 +59,53 @@ def primary_metadata(common):
     entries = {common / name: 0o644 for name in ("HEAD", "index", "packed-refs", "FETCH_HEAD", "ORIG_HEAD")}
     # The shared container is needed by future owner worktree creation. No
     # registered worktree's administrative contents are ever enumerated.
-    entries[common / "worktrees"] = 0o755
-    for name in ("refs", "objects", "logs"):
-        base = common / name
-        if not base.exists():
+    def directory(path):
+        try: info = path.lstat()
+        except FileNotFoundError: return False
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("known primary metadata directory is not a directory")
+        entries[path] = 0o755
+        return True
+
+    directory(common / "worktrees")
+
+    # Updater fetches/advances only main. Private refs, other branches and their
+    # reflogs are not updater outputs, even when another writer creates them.
+    for name in ("refs/heads/main", "refs/remotes/origin/main", "logs/HEAD",
+                 "logs/refs/heads/main", "logs/refs/remotes/origin/main"):
+        relative = pathlib.PurePosixPath(name)
+        for depth in range(1, len(relative.parts)):
+            directory(common.joinpath(*relative.parts[:depth]))
+        entries[common / name] = 0o644
+
+    objects = common / "objects"
+    if not directory(objects):
+        return entries
+    # Only Git's two-hex loose-object buckets are examined. Unknown directories,
+    # temporary files, locks and private names are neither opened nor traversed.
+    for bucket in objects.iterdir():
+        if not re.fullmatch(r"[0-9a-f]{2}", bucket.name):
             continue
-        if base.is_symlink():
-            raise ValueError("primary metadata root is a symlink")
-        for directory, children, files in os.walk(base, followlinks=False):
-            directory = pathlib.Path(directory)
-            entries[directory] = 0o755
-            if any((directory / child).is_symlink() for child in children):
-                raise ValueError("primary metadata directory is a symlink")
-            for filename in files:
-                # Lock files belong to their live Git writer, never this repair.
-                if filename.endswith(".lock") or name == "objects" and filename == "alternates":
-                    continue
-                path = directory / filename
-                if path.is_symlink():
-                    raise ValueError("primary metadata file is a symlink")
-                entries[path] = 0o444 if name == "objects" else 0o644
+        if directory(bucket):
+            for path in bucket.iterdir():
+                if re.fullmatch(r"(?:[0-9a-f]{38}|[0-9a-f]{62})", path.name):
+                    entries[path] = 0o444
+    pack = objects / "pack"
+    if directory(pack):
+        for path in pack.iterdir():
+            if (re.fullmatch(r"pack-(?:[0-9a-f]{40}|[0-9a-f]{64})\.(?:pack|idx|rev|bitmap|promisor|keep)", path.name)
+                    or path.name == "multi-pack-index"):
+                entries[path] = 0o444
+    info = objects / "info"
+    if directory(info):
+        for name in ("commit-graph", "packs"):
+            entries[info / name] = 0o444
+        graphs = info / "commit-graphs"
+        if directory(graphs):
+            entries[graphs / "commit-graph-chain"] = 0o444
+            for path in graphs.iterdir():
+                if re.fullmatch(r"graph-(?:[0-9a-f]{40}|[0-9a-f]{64})\.graph", path.name):
+                    entries[path] = 0o444
     return entries
 
 
