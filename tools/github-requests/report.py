@@ -103,6 +103,7 @@ def summarize(directory):
     outcome_counts = collections.Counter()
     receipts = {}
     evidence = {}
+    blocker_events = {}
     local_observations = {}
     local_counts = collections.Counter()
     local_reasons = collections.Counter()
@@ -143,6 +144,11 @@ def summarize(directory):
                 stamps.append(stamp)
                 if row.get("schema") == 4:
                     row = json.loads(line, object_pairs_hook=unique_object)
+                    if row.get("caller") == "ai-blocker-watch":
+                        if not unqualified_blocker_event(row) or row["workflow_id"] in blocker_events:
+                            raise ValueError("invalid unqualified BlockerWatch event")
+                        blocker_events[row["workflow_id"]] = row
+                        continue
                     if (type(row.get("schema")) is not int or set(row) != EVIDENCE_KEYS or row.get("measurement") != "workflow_evidence"
                             or row.get("caller") != "ai-pr-wait" or row.get("workflow") != "pr_wait"
                             or not valid_workflow_id(row.get("workflow_id")) or row["workflow_id"] in evidence
@@ -364,6 +370,20 @@ def summarize(directory):
             raise ValueError("workflow evidence and outcome disagree")
         if row["latency_ms"] is not None:
             qualified_groups[(row["event_kind"], row["delivery_boundary"], receipt[2])].append(row["latency_ms"])
+    blocker_event_groups = collections.Counter()
+    for identifier, row in blocker_events.items():
+        receipt = receipts.get(identifier)
+        outcome = "unmatched_unknown" if receipt is None else receipt[2]
+        if receipt is not None:
+            if receipt[:2] != ("ai-blocker-watch", row["workflow"]):
+                raise ValueError("BlockerWatch event and outcome labels disagree")
+            if outcome in {"skipped", "refused"} and row["delivery_boundary"] != "unknown":
+                raise ValueError("refused or skipped BlockerWatch delivery")
+            if row["workflow"] != "blocker_watch_wake" and row["delivery_boundary"] != "unknown" and outcome != "completed":
+                raise ValueError("incomplete BlockerWatch batch delivery")
+        blocker_event_groups[(row["workflow"], row["event_kind"], row["delivery_boundary"], outcome,
+                              row["eligible_utc_ms"] is not None, row["observed_utc_ms"] is not None,
+                              row["delivered_utc_ms"] is not None, row["unknown_reason"])] += 1
     for workflow_id, row in local_observations.items():
         receipt = receipts.get(workflow_id)
         if receipt is None:
@@ -452,6 +472,12 @@ def summarize(directory):
             for (context, reset_at), window in sorted(cost_windows.items())],
         "completed_workflow_receipts": completed,
         "workflow_evidence_records": len(evidence),
+        "unqualified_blocker_events": [
+            dict(workflow=key[0], event_kind=key[1], delivery_boundary=key[2], outcome=key[3],
+                 eligibility_present=key[4], observation_present=key[5], acknowledgement_present=key[6],
+                 unknown_reason=key[7], count=value, source_verified="unknown", clock_quality="unknown",
+                 qualified_latency_count=0)
+            for key, value in sorted(blocker_event_groups.items())],
         "local_workflow_observations": {
             "count": len(local_observations),
             "by_outcome": [{"outcome": outcome, "count": count} for outcome, count in sorted(local_counts.items())],
@@ -884,6 +910,50 @@ def unqualified_event(row):
             and isinstance(row["delivery_boundary"], str) and row["delivery_boundary"] in DELIVERY_BOUNDARIES
             and isinstance(row["unknown_reason"], str) and row["unknown_reason"] in UNKNOWN_REASONS
             and evidence_consistent(row))
+
+
+BLOCKER_EVENT_POLICIES = {
+    "blocker_watch_wake": ({"blocker_closed", "timer_due", "unknown"}, "wake_command_returned"),
+    "blocker_watch_alarm": ({"alarm_stale", "unknown"}, "alarm_batch_acknowledged"),
+    "blocker_watch_links": ({"unknown"}, "links_batch_acknowledged"),
+}
+
+
+def unqualified_blocker_event(row):
+    """Ordinary data facts only; never an accepted PR or parent witness."""
+    if not (isinstance(row, dict) and set(row) == EVIDENCE_KEYS
+            and type(row.get("schema")) is int and row["schema"] == 4
+            and row["measurement"] == "workflow_evidence" and row["caller"] == "ai-blocker-watch"
+            and isinstance(row["workflow"], str) and row["workflow"] in BLOCKER_EVENT_POLICIES
+            and valid_workflow_id(row["workflow_id"])
+            and isinstance(row["utc"], str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["utc"])
+            and row["cohort_id"] is None and row["target_ordinal"] is None
+            and row["source_verified"] == row["clock_quality"] == "unknown"
+            and all(row[name] is None for name in ("source_fingerprint_start", "source_fingerprint_end",
+                     "install_generation_binding", "clock_error_bound_ms", "latency_ms"))
+            and all(valid_timestamp_ms(row[name]) for name in ("eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms"))
+            and isinstance(row["unknown_reason"], str) and row["unknown_reason"] in {"source_unknown", "clock_unknown"}
+            and isinstance(row["event_kind"], str) and isinstance(row["delivery_boundary"], str)):
+        return False
+    kinds, boundary = BLOCKER_EVENT_POLICIES[row["workflow"]]
+    if row["event_kind"] not in kinds or row["delivery_boundary"] not in {boundary, "unknown"}:
+        return False
+    eligible, observed, delivered = (row[name] for name in ("eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms"))
+    if row["event_kind"] == "unknown" and eligible is not None:
+        return False
+    if row["event_kind"] != "unknown" and observed is None:
+        return False
+    if row["event_kind"] == "alarm_stale" and eligible is None:
+        return False
+    if (row["delivery_boundary"] == "unknown") != (delivered is None):
+        return False
+    if delivered is not None and observed is None:
+        return False
+    # Unverified wall clocks do not justify deleting genuine server facts.
+    if observed is not None and ((eligible is not None and eligible > observed)
+                                 or (delivered is not None and delivered < observed)):
+        return row["unknown_reason"] == "clock_unknown"
+    return True
 
 
 def trusted_boundary_executable(path):

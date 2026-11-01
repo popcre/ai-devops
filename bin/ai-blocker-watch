@@ -253,6 +253,81 @@ bw_active_begin(){
     GH_MEASURE_ACTIVE_DISABLED=1
   fi
 }
+bw_fact_now(){
+  BW_FACT_NOW=''
+  [ "$GH_COST_READY" = 1 ] || return 0
+  gh_measure_clock || return 0
+  [[ "$GH_MEASURE_CLOCK" =~ ^[1-9][0-9]{0,12}$ ]] && BW_FACT_NOW="$GH_MEASURE_CLOCK"
+  return 0
+}
+bw_fact_epoch(){
+  # Evidence requires a real, unambiguous UTC date, not the permissive legacy
+  # parser's fallback. Round-trip checks also reject calendar normalization.
+  [[ "${1:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  local epoch roundtrip
+  epoch="$(epoch_of "$1" 2>/dev/null)" || return 1
+  [[ "$epoch" =~ ^[0-9]{1,10}$ ]] && [ "$epoch" -le 9999999999 ] || return 1
+  TZ=UTC printf -v roundtrip '%(%Y-%m-%dT%H:%M:%SZ)T' "$epoch"
+  [ "$roundtrip" = "$1" ] || return 1
+  printf '%s' "$epoch"
+}
+bw_fact_release(){
+  local epoch expected="${3:-}"
+  [ "$GH_COST_READY" = 1 ] || return 0
+  BW_FACT_EVENT="$1"
+  bw_fact_now; BW_FACT_OBSERVED="$BW_FACT_NOW"
+  if epoch="$(bw_fact_epoch "$2")" && { [ -z "$expected" ] || [ "$epoch" = "$expected" ]; }; then
+    BW_FACT_ELIGIBLE=$((epoch * 1000))
+  fi
+  return 0
+}
+bw_fact_observe(){
+  [ -z "${BW_FACT_OBSERVED:-}" ] || return 0
+  bw_fact_now; BW_FACT_OBSERVED="$BW_FACT_NOW"
+}
+bw_fact_ack(){
+  bw_fact_now; BW_FACT_LAST_ACK="$BW_FACT_NOW"
+}
+bw_fact_command_returned(){
+  [[ "${1:-}" =~ ^[0-9]{1,3}$ ]] || return 0
+  bw_fact_now; BW_FACT_DELIVERED="$BW_FACT_NOW"
+}
+bw_fact_alarm_candidate(){
+  local raw_epoch="$1" threshold="$2" eligible
+  bw_fact_observe
+  if [[ "$raw_epoch" =~ ^[0-9]{1,10}$ && "$threshold" =~ ^(0|[1-9][0-9]{0,6})$ ]]; then
+    eligible=$(( (raw_epoch + threshold * 3600) * 1000 ))
+    if [ "$eligible" -ge 0 ] && [ "$eligible" -le 9999999999999 ]; then
+      if [ -z "$BW_FACT_ELIGIBLE" ] || [ "$eligible" -lt "$BW_FACT_ELIGIBLE" ]; then BW_FACT_ELIGIBLE="$eligible"; fi
+      return 0
+    fi
+  fi
+  BW_FACT_ALARM_KNOWN=0
+  return 0
+}
+bw_fact_finish(){
+  local outcome="$1" boundary=unknown eligible="${BW_FACT_ELIGIBLE:-}" event="${BW_FACT_EVENT:-unknown}" delivered=''
+  case "$BW_ACTIVE_KIND" in
+    wake)
+      case "$outcome" in process_succeeded|process_failed)
+        if [ -n "${BW_FACT_DELIVERED:-}" ]; then boundary=wake_command_returned; delivered="$BW_FACT_DELIVERED"; fi ;;
+      esac ;;
+    alarm)
+      event=unknown; eligible=''
+      if [ "$outcome" = completed ] && [ "$BW_FACT_NEW_NOTIFICATIONS" -gt 0 ]; then
+        if [ "$BW_FACT_ALARM_KNOWN" = 1 ] && [ -n "$BW_FACT_ELIGIBLE" ]; then event=alarm_stale; eligible="$BW_FACT_ELIGIBLE"; fi
+        if [ -n "$BW_FACT_LAST_ACK" ]; then boundary=alarm_batch_acknowledged; delivered="$BW_FACT_LAST_ACK"; fi
+      fi ;;
+    links)
+      event=unknown; eligible=''
+      if [ "$outcome" = completed ] && [ -n "$BW_FACT_LAST_ACK" ]; then boundary=links_batch_acknowledged; delivered="$BW_FACT_LAST_ACK"; fi ;;
+  esac
+  if [ "$DRY" = 1 ]; then boundary=unknown; delivered=''; fi
+  # No source/clock authority and no PR or completion control-channel path.
+  gh_measure_blocker_evidence "$BW_WORKFLOW" "$BW_TICK_RECEIPT_ID" "$event" "$eligible" \
+    "${BW_FACT_OBSERVED:-}" "$delivered" "$boundary" || note 'request measurement unavailable: event facts not saved'
+  return 0
+}
 bw_active_finish(){
   local outcome elapsed boundary
   [ "$GH_COST_READY" = 1 ] && [ -n "$BW_TICK_RECEIPT_ID" ] || return 0
@@ -276,11 +351,13 @@ bw_active_finish(){
   gh_measure_workflow_outcome ai-blocker-watch "$BW_WORKFLOW" "$BW_TICK_RECEIPT_ID" "$outcome" "$elapsed" \
     "$boundary" "$BW_ACTIVE_ATTEMPTED" "$BW_ACTIVE_SUCCEEDED" "$BW_ACTIVE_FAILED" "$BW_ACTIVE_SKIPPED" "$BW_ACTIVE_PARENT" ||
     note 'request measurement unavailable: active outcome not saved'
+  bw_fact_finish "$outcome"
   return 0
 }
 bw_active_skipped(){
   local BW_ACTIVE_KIND="$1" BW_WORKFLOW="blocker_watch_$1" BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
   local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=1 BW_ACTIVE_ERROR=0
+  local BW_FACT_EVENT=unknown BW_FACT_ELIGIBLE='' BW_FACT_OBSERVED='' BW_FACT_DELIVERED='' BW_FACT_LAST_ACK='' BW_FACT_NOW='' BW_FACT_ALARM_KNOWN=1 BW_FACT_NEW_NOTIFICATIONS=0
   bw_active_begin; bw_active_finish
 }
 BW_TICK_CONTEXT=''
@@ -719,6 +796,7 @@ $what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unkn
 wake(){
   local BW_ACTIVE_KIND=wake BW_WORKFLOW=blocker_watch_wake BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
   local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0 BW_WAKE_RESULT=skipped
+  local BW_FACT_EVENT=unknown BW_FACT_ELIGIBLE='' BW_FACT_OBSERVED='' BW_FACT_DELIVERED='' BW_FACT_LAST_ACK='' BW_FACT_NOW='' BW_FACT_ALARM_KNOWN=1 BW_FACT_NEW_NOTIFICATIONS=0
   bw_active_begin
   wake_body "$@"
   local status=$?
@@ -727,7 +805,7 @@ wake(){
 }
 wake_body(){ # wake <wait file>
   local f="$1" h s cwd ref r n state title prompt log arg
-  local until_at parked_issue parked_url main_checkout wid
+  local until_at parked_issue parked_url main_checkout wid closed_at
   if jfields "$f" .harness .session .cwd '.blocker // ""' '.until // ""' '.parked_issue // ""' '.parked_url // ""' '.main_checkout // ""'; then
     h="${JF[0]}"; s="${JF[1]}"; cwd="${JF[2]}"; ref="${JF[3]}"
     until_at="${JF[4]}"; parked_issue="${JF[5]}"; parked_url="${JF[6]}"; main_checkout="${JF[7]}"
@@ -746,11 +824,12 @@ wake_body(){ # wake <wait file>
     # Still OPEN in this tick's snapshot → no REST read. A miss (closed, a pull
     # request, a repo outside the scan) always falls through to REST.
     if meta="$(snapshot_open_hit "$ref")"; then :
-    elif ! meta="$(AI_GH_OPERATION=bw.wake_miss gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+    elif ! meta="$(AI_GH_OPERATION=bw.wake_miss gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), (.closed_at | if type=="string" then (if length>0 then . else "unknown" end) else "unknown" end), .title] | @tsv')"; then
       note "could not read $ref"; BW_WAKE_RESULT=refused; FAILED=1; return; fi
-    IFS=$'\t' read -r state ispr title <<<"$meta"
+    IFS=$'\t' read -r state ispr closed_at title <<<"$meta"
     if [ "$state" = closed ]; then
       released=blocker
+      bw_fact_release blocker_closed "$closed_at"
       why="the blocker you registered a wait on, $ref (\"$title\"), is now closed."
       if [ "$ispr" = true ]; then
         merged="$(gh_api "repos/$r/pulls/$n" --jq .merged 2>/dev/null || echo unknown)"
@@ -765,6 +844,7 @@ wake_body(){ # wake <wait file>
     now_e="${EPOCHSECONDS:-$(date -u +%s)}"; due_e="$(epoch_of "$until_at" 2>/dev/null || echo 0)"
     if [ "$due_e" -gt 0 ] && [ "$now_e" -ge "$due_e" ]; then
       released=time; why="the time you asked to be called back at, $until_at, has passed."
+      bw_fact_release timer_due "$until_at" "$due_e"
     fi
   fi
   [ -n "$released" ] || return 0
@@ -879,11 +959,14 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
       gh_measure_active_harness timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}"
     else timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}"; fi
   }) >"$log" 2>&1 </dev/null; then
+    local process_rc=$?
+    bw_fact_command_returned "$process_rc"
     bw_active_count succeeded; BW_WAKE_RESULT=process_succeeded
     jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
     local rc=$?
+    bw_fact_command_returned "$rc"
     # The desktop may still own this Codex thread. Its resume command rejects
     # a second writer before running the prompt; keep the wait for a later tick
     # without spending a wake attempt or reporting a failed continuation.
@@ -974,10 +1057,10 @@ snapshot_index_build(){ # snapshot_index_build <owner/repo>: index the pages ope
   done
   SNAPREPO[$repo]=1
 }
-snapshot_open_hit(){ # snapshot_open_hit <repo#n>: prints "open<TAB>false<TAB>title" when this tick saw it OPEN
+snapshot_open_hit(){ # OPEN has no closed_at; the title remains the last TSV field.
   local r="${1%#*}"
   [ -n "${SNAPREPO[$r]+set}" ] && [ -n "${SNAPIDX[$1]+set}" ] || return 1
-  printf 'open\tfalse\t%s' "${SNAPIDX[$1]#*$'\t'}"
+  printf 'open\tfalse\tunknown\t%s' "${SNAPIDX[$1]#*$'\t'}"
 }
 snapshot_dependents_of(){ # snapshot_dependents_of <repo> <n>: OPEN issues this tick saw blocked by repo#n
   local d; for d in ${SNAPDEP[$1#$2]:-}; do printf '%s\n' "$d"; done
@@ -1053,6 +1136,7 @@ depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue ho
 alarm_scan(){
   local BW_ACTIVE_KIND=alarm BW_WORKFLOW=blocker_watch_alarm BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
   local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0
+  local BW_FACT_EVENT=unknown BW_FACT_ELIGIBLE='' BW_FACT_OBSERVED='' BW_FACT_DELIVERED='' BW_FACT_LAST_ACK='' BW_FACT_NOW='' BW_FACT_ALARM_KNOWN=1 BW_FACT_NEW_NOTIFICATIONS=0
   bw_active_begin
   alarm_scan_body "$@"
   local status=$?
@@ -1081,7 +1165,7 @@ alarm_scan_body(){ # alarm_scan <dry 0|1>
   ALARM_TICK="$HOME_DIR/alarm-tick"
   rm -rf "$ALARM_TICK"
   (umask 077; mkdir -p "$ALARM_TICK/cache"; printf '0' > "$ALARM_TICK/agql")
-  local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
+  local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=() fact_activity=()
   cutoff="$(utc_ago "$(cfgd .alarm_stall_hours 24)" hours)"
   # Pass 1: the shared open-issue snapshot gives every OPEN blocker of an
   # OPEN issue (with assignees for free; owned ones drop out).
@@ -1128,6 +1212,7 @@ alarm_scan_body(){ # alarm_scan <dry 0|1>
     # updatedAt counts this tool's own alarm comment as activity; look past it.
     [[ "$lastact" > "$cutoff" ]] && { bw_active_count skipped; continue; }
     la_ep="$(epoch_of "$lastact" 2>/dev/null || printf 0)"
+    if [ "$GH_COST_READY" = 1 ]; then fact_activity[$key]="$(bw_fact_epoch "$lastact" || true)"; fi
     if [ "$la_ep" -eq 0 ]; then lastact="2000-01-01T00:00:00Z"; fi # unknown activity time reads as the oldest
     stall[$key]=1; salarmed[$key]="$alarmed"; sact[$key]="$lastact"
     sage[$key]="$(( ( ${EPOCHSECONDS:-$(date -u +%s)} - la_ep ) / 3600 ))h"
@@ -1167,10 +1252,12 @@ alarm_scan_body(){ # alarm_scan <dry 0|1>
   for key in $sorted; do
     [ "${salarmed[$key]}" = true ] && { bw_active_count skipped; bw_write_observation "$key" skipped unchanged blocker_watch_alarm; continue; }
     if [ "$dry" = 1 ]; then note "would ask $key for an owner (no owner, no activity for ${sage[$key]})"; continue; fi
+    bw_fact_alarm_candidate "${fact_activity[$key]:-}" "$(cfgd .alarm_stall_hours 24)"
     bw_active_count attempted
     if gh_call issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
 This open issue blocks ${spar[$key]} and has gone ${sage[$key]} with no owner: no assignee, no \`owner:\` line, no open linked pull request, no activity.
 Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand it to a named queue owner. Listed in today's ai-blocker-watch digest. (ai-blocker-watch)" >/dev/null; then
+      bw_fact_ack; BW_FACT_NEW_NOTIFICATIONS=$((BW_FACT_NEW_NOTIFICATIONS + 1))
       note "asked $key for an owner"
       bw_active_count succeeded
       bw_write_observation "$key" written new blocker_watch_alarm
@@ -1208,6 +1295,7 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
         if ! cmp -s "$body" "$HOME_DIR/digest-$day.prev" 2>/dev/null; then
           bw_active_count attempted
           if gh_call issue edit "$dnum" -R "$drepo" --body-file "$body" >/dev/null; then
+            bw_fact_ack
             bw_active_count succeeded
             cp "$body" "$HOME_DIR/digest-$day.prev"; note "updated digest $drepo#$dnum"
           else note "alarm: could not update digest $drepo#$dnum"; bw_active_count failed; afail=1; fi
@@ -1216,6 +1304,7 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
       else
         bw_active_count attempted
         if gh_call issue create -R "$drepo" -t "$title" --body-file "$body" >/dev/null; then
+          bw_fact_ack
           bw_active_count succeeded
           cp "$body" "$HOME_DIR/digest-$day.prev"; touch "$HOME_DIR/digest-$day.done"; note "opened digest in $drepo: $title"
         else note "alarm: could not open today's digest in $drepo"; bw_active_count failed; afail=1; fi
@@ -1316,6 +1405,7 @@ parse_depends_on(){ # parse_depends_on <issue body, CRs removed> -> dep numbers,
 maintain_links(){
   local BW_ACTIVE_KIND=links BW_WORKFLOW=blocker_watch_links BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
   local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0
+  local BW_FACT_EVENT=unknown BW_FACT_ELIGIBLE='' BW_FACT_OBSERVED='' BW_FACT_DELIVERED='' BW_FACT_LAST_ACK='' BW_FACT_NOW='' BW_FACT_ALARM_KNOWN=1 BW_FACT_NEW_NOTIFICATIONS=0
   bw_active_begin
   maintain_links_body "$@"
   local status=$?
@@ -1379,9 +1469,11 @@ maintain_links_body(){ # maintain_links <dry 0|1>
       # every scan and kept the links clock from ever advancing.
       if [ "$id" = pr ]; then bw_active_count skipped; note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
     fi
+    bw_fact_observe
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
     bw_active_count attempted
     if AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
+      bw_fact_ack
       bw_active_count succeeded
       created=$((created+1)); snapshot_index_set "$bref" "$br#$dep"; snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
