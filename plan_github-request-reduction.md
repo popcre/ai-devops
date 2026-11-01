@@ -21,10 +21,12 @@ source `628d2cf` was shown Merged with Checks Not checked. This is mirror
 continuity, not independent check execution or adoption. Full offline CI results
 remain independently tracked.
 
-The final public mirror overview shows exact landing `813baf8b`;
-[existing Trail 372/change 170](https://entire.com/gh/popcre/ai-devops/-/trails/372/changes/170)
-shows Merged at exact PR head `35dfb37c`, Checks Not checked and one commit
-behind in the squash context. GitHub's required safety result is authoritative;
+The final public mirror overview shows exact landing
+`a98131576c3a092fc19ec938d24650ab98469c8a`;
+[existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
+shows Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
+Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
+GitHub's required safety result is authoritative;
 mirror CI parity remains unverified. No capture, hooks or paid/integration
 settings changed.
 

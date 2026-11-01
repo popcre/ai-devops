@@ -674,11 +674,18 @@ preserved. This run made zero API requests, changed no host configuration and
 did not run the optional counter-image case; ordinary-context counter refusal
 and both earlier native cold-counter failures remain unchanged.
 
-The public mirror overview subsequently showed exact landing `813baf8b`.
+An earlier public mirror overview showed exact landing `813baf8b`.
 [Existing Trail 372/change 170](https://entire.com/gh/popcre/ai-devops/-/trails/372/changes/170)
 showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
 behind in the squash context. This is sanitized continuity, not mirror CI
 execution parity; GitHub's required safety result remains authoritative.
+
+The final overview subsequently showed exact landing
+`a98131576c3a092fc19ec938d24650ab98469c8a`.
+[Existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
+showed Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
+Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
+This final mirror continuity likewise does not establish CI execution parity.
 
 The earlier default-namespace metadata-only Windows audits refused qualification:
 4837 and 916 had configuration-ancestor writers outside the finite trusted set;
