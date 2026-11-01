@@ -19,7 +19,15 @@ class AdmissionTests(unittest.TestCase):
         self.state = self.base / "state"
         self.state.mkdir()
         self.fake = self.base / "fake-gh"
-        self.fake.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*"\n')
+        self.fake.write_text('''#!/usr/bin/env bash
+[ -z "${FAKE_CALL_LOG:-}" ] || printf '%s\\n' "$*" >> "$FAKE_CALL_LOG"
+[ -z "${FAKE_DELAY:-}" ] || sleep "$FAKE_DELAY"
+if [ "${FAKE_GRAPHQL:-}" = merged ] && [ "$1 $2" = 'api graphql' ]; then
+  printf '%s\\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeCommit":{"oid":"fixture123"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}}}}}'
+else
+  printf "%s\\n" "$*"
+fi
+''')
         self.fake.chmod(0o700)
         self.env = dict(os.environ, AI_GH_STATE_DIR=self.state.as_posix(),
                         AI_GH_REAL_GH=self.fake.as_posix(), AI_GH_QUOTA_PROBE_SECONDS="off",
@@ -48,11 +56,13 @@ class AdmissionTests(unittest.TestCase):
         else:
             p.kill()
 
-    def start(self, name, **settings):
+    def start(self, name, waiter=None, arguments=None, **settings):
         self.bash = os.environ.get("AI_TEST_BASH") or shutil.which("bash")
         pidfile = self.base / f"pid-{len(self.children)}"
+        command = [(ROOT / "bin" / (waiter or "ai-gh")).as_posix()]
+        command += arguments if arguments is not None else ["api", name]
         p = subprocess.Popen([self.bash, "-c", 'printf "%s\\n" "$$" > "$1"; shift; exec "$BASH" "$@"', "--",
-                              pidfile.as_posix(), (ROOT / "bin/ai-gh").as_posix(), "api", name],
+                              pidfile.as_posix(), *command],
                              env=dict(self.env, **settings), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, text=True)
         p.pidfile = pidfile
@@ -76,8 +86,8 @@ class AdmissionTests(unittest.TestCase):
         (lock / "owner").write_text(f"123 {int(time.time())} fixture\n")
         return lock
 
-    def finish(self, p, expected=0):
-        out, err = p.communicate(timeout=20)
+    def finish(self, p, expected=0, timeout=20):
+        out, err = p.communicate(timeout=timeout)
         self.assertEqual(p.returncode, expected, err)
         return out
 
@@ -100,6 +110,56 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(int(rows[0].split()[2]), int(old.pidfile.read_text()))
         self.assertEqual(len(rows), 13)
         self.assertEqual(self.ticket_count(), 0)
+
+    def test_network_timeout_starts_after_admission(self):
+        lock = self.hold()
+        p = self.start("after-admission", AI_GH_CALL_TIMEOUT_SECONDS="1")
+        self.wait_for(lambda: self.ticket_count() == 1)
+        time.sleep(2)
+        shutil.rmtree(lock)
+        self.assertEqual(self.finish(p), "api after-admission\n")
+
+    def test_network_timeout_preserves_ordinary_and_graphql_exit(self):
+        for kind in ("ordinary", "graphql"):
+            with self.subTest(kind=kind):
+                self.finish(self.start(kind, AI_GH_CALL_TIMEOUT_SECONDS="1", FAKE_DELAY="3"), 124)
+
+    def test_invalid_network_timeout_refuses_before_call(self):
+        for value in ("0", "off", "-1"):
+            with self.subTest(value=value):
+                self.finish(self.start("invalid", AI_GH_CALL_TIMEOUT_SECONDS=value), 2)
+
+    def test_generic_waiter_keeps_ticket_past_old_short_default(self):
+        self.waiter_after_busy_lock("ai-gh-wait", ["--until-regex", "api observed", "--timeout-minutes", "1", "--", "api", "observed"])
+
+    def test_pr_waiter_keeps_ticket_past_old_short_default(self):
+        self.waiter_after_busy_lock("ai-pr-wait", ["1", "--repo", "popcre/ai-devops", "--timeout-minutes", "1", "--api-timeout-seconds", "1"], FAKE_GRAPHQL="merged")
+
+    def waiter_after_busy_lock(self, script, args, **settings):
+        lock = self.hold()
+        # Exercise the real production default, not the shortened test default.
+        settings.update(AI_DEVOPS_TEST_MODE="0", AI_TASK_GATES_MODE="none")
+        p = self.start("waiter", waiter=script, arguments=args, **settings)
+        self.wait_for(lambda: self.ticket_count() == 1)
+        time.sleep(12)  # beyond the previous 10-second admission abandonment
+        shutil.rmtree(lock)
+        self.finish(p, timeout=45)
+
+    def test_generic_waiter_deadline_does_not_start_late_api_call(self):
+        self.hold()
+        calls = self.base / "calls"
+        p = self.start("deadline", waiter="ai-gh-wait", arguments=["--until-regex", "observed", "--timeout-minutes", "1", "--", "api", "observed"],
+                       AI_DEVOPS_TEST_MODE="1", AI_GH_WAIT_TEST_DEADLINE_EPOCH=str(int(time.time()) + 2), FAKE_CALL_LOG=calls.as_posix())
+        self.finish(p, 2)
+        self.assertFalse(calls.exists())
+
+    def test_explicit_zero_admission_override_is_preserved(self):
+        self.hold()
+        calls = self.base / "calls"
+        p = self.start("override", waiter="ai-gh-wait", arguments=["--until-regex", "observed", "--timeout-minutes", "1", "--", "api", "observed"],
+                       AI_GH_NO_WAIT_LOCK_SECONDS="0", FAKE_CALL_LOG=calls.as_posix())
+        self.finish(p, 2)
+        self.assertFalse(calls.exists())
 
     def test_cancelled_waiter_removes_only_its_ticket(self):
         lock = self.hold()

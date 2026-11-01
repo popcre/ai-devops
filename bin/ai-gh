@@ -68,6 +68,11 @@ LOCK="$STATE/lock.d"
 say(){ printf 'ai-gh: %s\n' "$*" >&2; }
 isnum(){ case "$1" in ''|*[!0-9]*) return 1;; esac; }
 for v in SPACING BACKOFF STALE PROBE_TIMEOUT; do isnum "${!v}" || { say "$v must be a whole number"; exit 2; }; done
+if [ -n "${AI_GH_CALL_TIMEOUT_SECONDS:-}" ]; then
+  isnum "$AI_GH_CALL_TIMEOUT_SECONDS" && [ "$AI_GH_CALL_TIMEOUT_SECONDS" -gt 0 ] || {
+    say 'AI_GH_CALL_TIMEOUT_SECONDS must be positive whole seconds'; exit 2;
+  }
+fi
 
 prev=''
 for a in "$@"; do
@@ -699,6 +704,15 @@ trap 'release; exit 130' INT TERM
 # because stderr is a pipe) and copied for the failure record.
 exec 4>&1
 GH_MEASURE_EXECUTED=1
+real_call(){
+  # Waiters budget queue admission separately from the actual network call.
+  # This timer starts only after admission, probes and mutex release.
+  if [ -n "${AI_GH_CALL_TIMEOUT_SECONDS:-}" ]; then
+    timeout "$AI_GH_CALL_TIMEOUT_SECONDS" "$REAL" "$@"
+  else
+    "$REAL" "$@"
+  fi
+}
 GRAPH_TRANSFORMED=0
 if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ]; then
   for a in "$@"; do
@@ -762,14 +776,14 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
   # a later page can otherwise be missed while gh has already exited.
   rc="$({
     exec 3> >("$TEE" "$err" >&2); stderr_pid=$!
-    "$REAL" "$@" 2>&3 | "$TEE" "$GRAPH_FIFO" >&4
+    real_call "$@" 2>&3 | "$TEE" "$GRAPH_FIFO" >&4
     graph_status=("${PIPESTATUS[@]}")
     exec 3>&-
     wait "$stderr_pid" 2>/dev/null || true
     if [ "${graph_status[1]}" -ne 0 ]; then printf '1'; else printf '%s' "${graph_status[0]}"; fi
   } 5>&1)"
 else
-  rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | "$TEE" "$err" >&2; } 5>&1)"
+  rc="$({ { real_call "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | "$TEE" "$err" >&2; } 5>&1)"
 fi
 exec 4>&-
 isnum "${rc:-}" || rc=1
