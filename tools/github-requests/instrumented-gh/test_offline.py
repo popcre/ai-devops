@@ -46,6 +46,11 @@ class OfflineContract(unittest.TestCase):
                 self.assertEqual(selected['upstream_version'], version)
                 self.assertEqual(selected['source_url'].rsplit('/', 1)[-1], selected['upstream_commit'])
         self.assertEqual(version_profile(HERE / 'pins.json', '2.101.0')['profile_kind'], 'historical')
+        t16 = version_profile(HERE / 'pins.json', '2.95.0')
+        self.assertEqual(t16['profile_kind'], 'runtime')
+        self.assertEqual(t16['api_constructor_hooks'], 2)
+        self.assertIs(t16['detached_telemetry'], True)
+        self.assertEqual(t16['upstream_commit'], '70bb306bd25eb407f90eabefd98824aed62cf519')
         for version in ('0.0.0', '../2.101.0', True):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 version_profile(HERE / 'pins.json', version)
