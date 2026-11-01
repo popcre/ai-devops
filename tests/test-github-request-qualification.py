@@ -379,5 +379,44 @@ exit "${1:-0}"
                 if process.poll() is None: process.kill(); process.wait()
 
 
+class SourceBoundaryRegressionTests(unittest.TestCase):
+    def test_python_read_and_write_labels_cannot_persist_arbitrary_text(self):
+        import pr_status_singleflight as single
+        rows = []
+        with mock.patch.object(single, "_target_ordinal", return_value=1), \
+             mock.patch.object(single, "_emit_record", side_effect=rows.append), \
+             mock.patch.dict(os.environ, {"AI_GH_CALLER": "untrusted-label-sentinel"}):
+            single.emit_read_observation("opaque-test-key", "upstream")
+            single.emit_write_observation("opaque-test-key", "written", True)
+            single.emit_read_observation("opaque-test-key", "cache", caller="another-untrusted-label")
+        self.assertEqual([row["caller"] for row in rows], ["unknown"] * 3)
+        self.assertNotIn("untrusted", json.dumps(rows))
+        self.assertEqual(single.observation_caller("ai-pr-wait"), "ai-pr-wait")
+        self.assertEqual(single.observation_caller("ai-merge-group-evidence"), "ai-merge-group-evidence")
+
+    @unittest.skipUnless(os.name == "posix", "Linux observer layout")
+    def test_execution_identity_accepts_aliases_but_rejects_external_hardlinks(self):
+        directory = str(ROOT / "tools/github-requests/instrumented-gh")
+        sys.path.insert(0, directory)
+        try:
+            from managed_read import same_execution_layout
+        finally:
+            sys.path.remove(directory)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"; source.mkdir()
+            transport = source / "ai-gh"; transport.write_text("public fixture source")
+            bash = root / "bash"; bash.write_text("native fixture identity")
+            alias = root / "alias"; alias.symlink_to(source, target_is_directory=True)
+            bash_alias = root / "bash-alias"; bash_alias.symlink_to(bash)
+            self.assertTrue(same_execution_layout(alias / "ai-gh", transport, bash_alias, bash))
+            foreign = root / "foreign"; foreign.mkdir()
+            os.link(transport, foreign / "ai-gh")
+            self.assertFalse(same_execution_layout(foreign / "ai-gh", transport, bash, bash))
+            different = source / "different"; different.write_bytes(transport.read_bytes())
+            self.assertFalse(same_execution_layout(different, transport, bash, bash))
+            self.assertFalse(same_execution_layout(source / "missing", transport, bash, bash))
+
+
 if __name__ == "__main__":
     unittest.main()

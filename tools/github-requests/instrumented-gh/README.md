@@ -1,4 +1,4 @@
-# Linux outgoing-write counter prototype
+# Outgoing-write counter qualification
 
 Owner: [#660](https://github.com/popcre/ai-devops/issues/660), under #658.
 This extends the existing measurement namespace. It does not install, alter
@@ -16,12 +16,14 @@ normal maintenance routes, without changing a host merely for measurement.
 `build.py` accepts those two
 verified archives (`gh.tar.gz`, `go.tar.gz`) from a private directory and builds
 unmodified/instrumented binaries in a new private output directory. It changes
-only the two upstream API client constructors, the CLI finalization point and
+only the profile's declared upstream API client constructors, the CLI finalization point and
 the new internal counter package. Modules retain upstream `go.mod`/`go.sum`.
+The 2.88.1 profile has one constructor and no detached telemetry; 2.97.0,
+2.103.3 and historical 2.101.0 have two constructors and detached telemetry.
 No binary or upstream source archive belongs in this repository.
 Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
 before hashing, and extracted from those same verified immutable bytes.
-Qualification execution likewise uses a verified sealed ELF snapshot held by
+Linux qualification execution likewise uses a verified sealed ELF snapshot held by
 the parent; replacing the original pathname cannot select a different program.
 Every fixture and measurement artifact invocation uses that boundary. Builds
 require an already-created owner-only output directory beneath trusted ancestors;
@@ -61,8 +63,10 @@ these client constructors, not every command, transport, external client or
 host. Completed writes are not proof of server acceptance or quota cost.
 Missing finish, malformed/oversized metadata or interrupted commands yield
 unknown. Late hooks/custom transports and full constructor coverage remain
-qualification work. Windows is unsupported until true inherited HANDLE
-isolation has been proved; compiling a Windows binary is not that proof.
+qualification work. Windows has a separate native fixture and HANDLE-isolation
+path below; source presence and cross-compilation do not establish its native
+proof. Current runtime-version native proof, installed useful-work acceptance
+and global HTTP totals are not claimed by this document or the profile registry.
 
 ## Verification
 
@@ -82,8 +86,9 @@ fixture command against that manifest exercises TTY update success and
 concurrent command failure. Original-build results explicitly skip this
 case and cannot qualify updater behavior or installed release feature parity.
 All proxy destinations are mapped to the local trusted server; no updater or
-telemetry request reaches GitHub. Enabled telemetry still sends one detached
-local request, excluded from the primary process observation. Global HTTP
+telemetry request reaches GitHub. Profiles declaring detached telemetry exercise
+one separate local request, excluded from the primary process observation.
+The 2.88.1 profile instead verifies its declared absence. Global HTTP
 total remains unknown. Source-bound coverage receipts are in
 `tests/verification/github-requests/http-counter-coverage-linux-2026-10-07.json`.
 
@@ -187,9 +192,10 @@ unknown. No production or fleet acceptance follows from local fixtures.
 
 ## Isolated native Windows qualification
 
-This is fixture-only code owned by #660. No Windows execution receipt exists
-until the reviewed fixture runs; compilation and offline tests are separate
-evidence. Neither success qualifies installation, production routing, MSYS
+This is fixture-only code owned by #660. Current runtime-profile native
+execution requires its actual reviewed fixture receipt; historical receipts,
+compilation and offline tests are separate evidence. None alone qualifies
+installation, production routing, MSYS
 result transport, Windows TLS/auth/context coverage or a global HTTP total.
 Native commands and the OS-installed gh remain untouched. The pinned build
 does not supply vendor signing, Windows resources or official release parity.
@@ -275,7 +281,8 @@ inheritance sentinel and grandchildren, separate concurrent channels, capacity,
 paused/closed readers, strict two-record parsing, record sizing, verify/use image
 and ancestor replacement, pagination/hidden retry/redirect server ledgers,
 Unicode/header/stdio/status parity, forced cancellation without replay, actual
-console cancellation, detached telemetry, and numeric receipt shape. Absence
+console cancellation, the profile's detached-telemetry capability or declared
+absence, and numeric receipt shape. Absence
 of a console is a genuine unknown failure, never a successful skip. The
 offline source-binding and numeric-schema cases additionally reject missing,
 mismatched/extra source and receipt fields, text, forged digests and NaN.

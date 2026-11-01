@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Offline P1 summary. No network access; never echo unvalidated input values.
+"""Offline P1 aggregation and explicit live waiter qualification.
 
 Usage: python tools/github-requests/report.py MEASUREMENTS_DIRECTORY
-Output is a scrubbed JSON aggregate, NOT acceptance evidence for busy windows.
+The directory-summary mode makes no network calls and emits a scrubbed aggregate.
+The explicit --qualify-wait mode executes the authorized waiter, which can make
+normal paced GitHub calls; its separate live-parent receipt preserves unknowns.
+Neither mode alone grants programme acceptance or authenticates edited artifacts.
 Owned by #658; later measured transports extend this schema rather than making
 another collector. Raw daily records stay in the private machine state directory.
 """

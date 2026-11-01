@@ -33,6 +33,20 @@ VALUE_FLAGS = {"--json", "--jq", "--repo", "-R", "--limit", "-L",
                "--state", "--base", "--head", "--branch", "--workflow"}
 
 
+def same_execution_layout(transport, expected_transport, bash, expected_bash):
+    """Aliases may identify the same loaded files; external helper layouts may not.
+
+    File identity alone also accepts an ai-gh hardlink in another directory,
+    where its adjacent helpers would escape the retained generation mounts.
+    """
+    try:
+        actual, expected = pathlib.Path(transport), pathlib.Path(expected_transport)
+        return (actual.samefile(expected) and actual.parent.samefile(expected.parent)
+                and pathlib.Path(bash).samefile(expected_bash))
+    except (OSError, ValueError):
+        return False
+
+
 def aggregate_invocations(raw):
     """Aggregate only complete sequential pairs, including admission probes."""
     unknown = {**UNKNOWN, "counted_invocations": None}
@@ -258,8 +272,8 @@ class ManagedReadObservation:
                 source_bootstrap = transport_boundary.get("bootstrap_ns")
                 self.bootstrap_complete = type(source_bootstrap) is int and source_bootstrap >= 0
                 self.source_bootstrap_ns = source_bootstrap if self.bootstrap_complete else None
-                if (os.path.abspath(transport_boundary["transport_path"]) != self.transport_path
-                        or transport_boundary["bash_path"] != self.bash):
+                if not same_execution_layout(self.transport_path, transport_boundary["transport_path"],
+                                             self.bash, transport_boundary["bash_path"]):
                     raise ValueError("retained generation transport mismatch")
                 identity = transport_boundary["identity"]
                 for key, length in (("source_sha", 40), ("source_fingerprint", 64), ("install_generation_binding", 64)):

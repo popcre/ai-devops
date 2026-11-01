@@ -55,6 +55,13 @@ def _emit_record(record_obj):
         pass
 
 
+def observation_caller(value=None):
+    # Never persist arbitrary caller/environment strings as telemetry labels.
+    selected = value if value is not None else os.environ.get("AI_GH_CALLER") or "ai-pr-wait"
+    return selected if isinstance(selected, str) and selected in {
+        "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-merge-group-evidence", "unknown"} else "unknown"
+
+
 def read_clock():
     """Bracket the UTC sample with actual local monotonic readings."""
     try:
@@ -146,7 +153,7 @@ def emit_read_observation(key, source, caller=None, interval=None, raw=None, cac
         "schema": 6,
         "utc": now,
         "measurement": "read_observation",
-        "caller": caller or os.environ.get("AI_GH_CALLER") or "ai-pr-wait",
+        "caller": observation_caller(caller),
         "workflow": "pr_wait",
         "target_ordinal": ordinal,
         "source": source,
@@ -172,7 +179,7 @@ def emit_write_observation(key, action, content_changed, caller=None):
         "schema": 6,
         "utc": now,
         "measurement": "write_observation",
-        "caller": caller or os.environ.get("AI_GH_CALLER") or "ai-pr-wait",
+        "caller": observation_caller(caller),
         "workflow": "pr_wait",
         "target_ordinal": ordinal,
         "action": action,
