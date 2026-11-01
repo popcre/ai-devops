@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 11:08 AM EST — current coordinator reconciliation.
+November 1, 2026, 11:47 AM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -51,6 +51,12 @@ corrected cold gate (+128.40% p95 / +40.89% total); its warm group passed.
 The separate telemetry-fixture defect has a focused native parity repair with
 zero timing pairs; both failed timing attempts remain retained.
 T16's documented trusted-executor access remains unavailable.
+Dispatch/privacy receipt emission is implemented and tested. Active
+BlockerWatch wake/alarm/link terminal emission is a separate current code gap:
+cost/write observations and tick receipts do not qualify those outcomes.
+The current source/clock/event qualification routes also accept PR events only;
+future active BlockerWatch detection needs a finite eligibility/delivery adapter,
+not merely more unqualified receipts. Accepted P5/headroom proof stays accepted.
 
 ## Historical delivery snapshots — superseded by current reconciliation
 

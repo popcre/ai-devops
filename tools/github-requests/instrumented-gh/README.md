@@ -393,8 +393,9 @@ from source presence, completed pair count or missing reported cold failure.
 One authorized receipt-only fixture rebuild reused the exact frozen 2.97 CLI
 images and yielded a retained failed qualification: twenty cold pairs p95
 +128.40061% and total +40.88737%; twenty warm pairs p95 -42.67821% and total
--12.57680%, passing only the warm group. Detached-telemetry parity remains
-unknown. The corrected numeric result is separate from the first missing
+-12.57680%, passing only the warm group. Detached-telemetry parity was unknown
+in that timing attempt. The corrected numeric result is separate from the
+first missing
 receipt, not a reclassification or repeat-until-pass; it does not qualify the
 full supervised route.
 The telemetry unknown was subsequently traced to the fixture's bare-path
@@ -402,6 +403,11 @@ classifier: the pinned vendor appends its Twirp method path. The focused
 six-line fixture repair passed both unchanged CLI images' child parity plus
 the seven environment and nine boundary cases, with zero timing pairs.
 That functional proof does not change either retained performance failure.
+A separate cause-only capture aligned its first pair with Defender OnOpen
+waits; the historical long launch stall was not reproduced and remains
+unattributed. That diagnostic neither clears a cold gate nor transfers 916's
+different kernel-cleanup attribution to the 2.97 host. No security setting or
+vendor capability was changed.
 
 ## Retirement
 

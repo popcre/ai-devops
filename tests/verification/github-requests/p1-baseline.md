@@ -12,6 +12,14 @@ unimplemented emission path. Dispatch receipts describe the command boundary,
 not completion of dispatched remote work. No dispatch or transcript traffic is
 manufactured to fill a sample, and no old observation is reclassified.
 
+A separate current source audit found that active BlockerWatch wake/alarm/link
+terminal emission is not implemented: alarm/links set cost/workflow labels,
+while wake records private state, and only tick/completed reaches the terminal
+collector/reporter. Existing write, event and local observations do not qualify
+these active terminal outcomes. This is a code/qualification gap distinct from
+missing natural dispatch/privacy samples; historical P5 and busy-window proofs
+remain accepted without supplying those missing active-operation receipts.
+
 ## Coordinator natural sample — October 31, 2026 EDT
 
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` under #658/#660.
@@ -1027,8 +1035,9 @@ not NTFS, Go GC or the numeric pipe; the cause of the accumulated kernel table
 remains unknown and no Defender attribution is made. Windows batch tests (38 with two declared platform
 skips), sharing tests (19 with five declared platform skips), 107 native source
 fixtures and seven-pin original-config preflight are candidate proofs, not
-already-installed outcomes. PR #2267 delivery and final installed live proof
-remain pending; natural request reduction, useful-work p95 and broader account
+already-installed outcomes. At this candidate stage PR #2267 delivery and final
+installed live proof were pending; the completed receipts below supersede that
+delivery status. Natural request reduction, useful-work p95 and broader account
 coverage remain separate open measurements.
 
 The independently checked Windows launch-cause digest is
@@ -1269,7 +1278,7 @@ derived manifest
 remain distinct, with the replacement fixture's provenance separately recorded
 rather than substituted into the original counter-source binding. The corrected
 attempt failed and all forty pairs remain
-retained, with no repeat after the corrected protocol. Summary digest
+retained, without another performance-acceptance attempt. Summary digest
 `451f2c6f0b96554a7203c739fe063116747c7c09287140be428e52177d7f0a73`
 and numeric digest
 `d1d1199f049eadff5681497660efd7a3c621290504da681fb4d4f6ec6b94bb65`
@@ -1279,7 +1288,8 @@ Cold p95 was 98.9521 / 226.0072 ms, +128.40061%, and total time
 1.585935000 / 2.234382100 seconds, +40.88737%: failed. Warm p95 was
 252.7339 / 144.8716 ms, -42.67821%, and total time
 2.245693300 / 1.963257000 seconds, -12.57680%: passed. Baseline detached
-telemetry parity remains unknown; warm performance alone does not qualify the
+telemetry parity was unknown in that timing attempt; warm performance alone
+does not qualify the
 profile. The first failure is not replaced or relabeled. These are native
 counter-only timings, not whole-observer overhead or natural work; the 916
 kernel profile does not establish this other host's delay cause. Whole-account
@@ -1316,6 +1326,40 @@ to tested `69186aa9`. This is a qualification-fixture-only source change, with
 no deployed runtime entry/helper change. Actual installed local/916 `642a1da6`
 proofs retain their original generation; the fixture landing is not substituted
 into them or the earlier counters' source bindings.
+
+The latest bounded public-mirror read at 11:11 AM EST showed overview short
+`5824380` and [existing Trail 416/change 187](https://entire.com/gh/popcre/ai-devops/-/trails/416/changes/187)
+Merged at exact tested head `69186aa924a841d02acbfb845fd309de26180dde`,
+with Checks Not checked. This is observed source-display parity only, with no
+independent CI, automatic-memory or utility qualification. No settings,
+capture, hooks or integration changed.
+
+## Separate Windows 2.97 cause-only capture
+
+One authorized traced diagnostic retained twenty cold diagnostic pairs using
+the same frozen CLI images, with no performance-acceptance claim or replacement
+of either failed qualification. Independently checked diagnostic digest
+`74cf3c761a3901d8ff74a9f13b5b457792b48b5f4b176c08b9a24ffe46be288d`
+records zero lost trace events. The first captured pair was 121.21 / 135.75 ms;
+baseline/candidate OnOpen Defender image scans of 66.2038 / 75.95 ms align with
+their process-creation callbacks and wait stacks through WdFilter and
+FltSendMessage. Report interpretation was checked against the
+[Microsoft performance-report reference](https://learn.microsoft.com/en-us/powershell/module/defenderperformance/get-mpperformancereport?view=windowsserver2025-ps).
+
+The historical 280 ms launch stall was not reproduced and remains unattributed.
+These first-pair scans do not explain that earlier stall or the separate 916
+kernel process-security LUID-cleanup evidence. No security exclusion, disabled
+feature, vendor change or operating-system fix follows from the capture; cold
+gates remain failed.
+
+The diagnostic's original privacy-pending field was preserved and resolved by
+a separate independently checked closure digest
+`1bd90ee2ac0e408cfef899edc71637385b2bb96732633292f9de7e71ed8bc0f8`:
+twenty fresh generated files and three decoder directories are owner/system/
+administrator-only, recoverable access backups exist, every byte hash is
+unchanged and the decoder still reads them. The owned recording and children
+are inactive; original vendor/authentication and host permissions are unchanged.
+Raw traces remain private and no new GitHub traffic was generated.
 
 ## Final local normal installation and capacity restoration
 
