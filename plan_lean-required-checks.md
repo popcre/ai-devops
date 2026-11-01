@@ -9,9 +9,9 @@
 |---|---|---|
 | A Standing rule + owner ruling in ai-devops | ✅ done | PR #2174 |
 | B shared-db required checks cut to core; queue-gate collision/lease re-checks removed; "one licensor per change" killed | ✅ done; live ruleset + classic protection = 5 contexts | shared-db #5171 (8dd0e9b2) |
-| C shared-db claim / lease / evidence-pair / guarded-authorization chain retired | 🟡 C1 done: guarded merge no longer re-runs collision or lease checks. C2 (retire claim-first contracts, version lanes, preview leases, guarded authorization) open | shared-db #5183 (835b4491) merged on the 5-check set |
+| C shared-db claim / lease / evidence-pair / guarded-authorization chain retired | 🟡 C1 + C2 done: promotion keys on the merged PR's merge commit on main + preview evidence, admission not enforced; queue gate = identity / version order / preview hold; production gate needs only the two core exact-head checks; guarded-merge, author-lease and Agent work contract workflows deleted; required = 3 core contexts in code, ruleset 26255167 and classic protection. Open: move the preview/production exclusive locks out of `manage-migration-author-lanes.mjs`, then delete the claim/lane code and `refs/db-contracts` | shared-db #5221, #5226, #5234, #5240 (flake fix); work issue #5228 |
 | D Other toolkit repos audited to the same core | ✅ audited; ai-devops producer merged and live-proved | Other popcre/u2giants repos have no required checks. [#2191](https://github.com/popcre/ai-devops/pull/2191) merged as `d1bc598ab860609455fca487135ce3e488016228`. Its independent secret-boundary [required job](https://github.com/popcre/ai-devops/actions/runs/41124163899/job/124298229440) passed in seven seconds on exact source `7cf9afa49dad64ba696ae36ae262854824ec662e`; eight broad-suite jobs were still running when observed, and the PR merged without waiting for them. The previous full truth evaluator remains advisory. |
-| E Live proof: fresh shared-db migration PR merges on core checks only | 🟡 non-migration proof done (#5171 switch, #5183 merged on core set); first migration PR on the core set still to land | |
+| E Live proof: fresh shared-db migration PR merges on core checks only | 🟡 merge proved: comment-only migration #5233 merged 2026-10-31 on the 3 core checks (no guarded authorization). Automatic production promotion not yet observed: the candidate trigger is head-of-line blocked by PR #5104 (4 failed attempts) | shared-db #5233 (ef9a3e1a), issue #5225 |
 
 ## The rule
 
@@ -25,7 +25,7 @@ removed from the required set first and repaired afterwards.
 
 | Repo | Required checks |
 |---|---|
-| shared-db | `SQL migration guards` (migration lint, applied-migration edit refusal, duplicate/ordering of versions, production sidecars), `Destructive SQL outside migrations`, `supabase/tests against an ephemeral database`. Until stage C: `Merge queue gate` + `Migration guarded merge authorization`, because automatic production promotion and the shared-preview ordering hold still read them. |
+| shared-db | `SQL migration guards` (migration lint, applied-migration edit refusal, duplicate/ordering of versions, production sidecars), `Destructive SQL outside migrations`, `supabase/tests against an ephemeral database`. Stage C2 removed `Merge queue gate` and `Migration guarded merge authorization` (2026-10-31); the queue gate still runs, advisory. |
 | ai-devops | `verification-closure`: the existing public-boundary secret scanner on the exact candidate, independently of general tests. Context name and live ruleset remain unchanged. |
 
 The earlier stage-D audit counted required context names without examining
