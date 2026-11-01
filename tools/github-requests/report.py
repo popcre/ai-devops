@@ -115,6 +115,7 @@ def summarize(directory):
     qualified_groups = collections.defaultdict(list)
     qualified_latency = []
     costs_with_ids = []
+    active_receipts = {}
     observed_points = cost_records = cost_window_records = unattributed_window_records = 0
     cost_windows = {}
     verified_principal_records = 0
@@ -285,13 +286,20 @@ def summarize(directory):
                     cost_counts[(row["caller"], row["operation"], row["workflow"])] += row["graphql_points"]
                     continue
                 if row.get("schema") == 3:
-                    if (set(row) != RECEIPT_KEYS or row.get("measurement") != "workflow_outcome"
+                    row = json.loads(line, object_pairs_hook=unique_object)
+                    active = row.get("workflow") in ACTIVE_RECEIPT_BOUNDARIES
+                    if (type(row.get("schema")) is not int
+                            or set(row) != (ACTIVE_RECEIPT_KEYS if active else RECEIPT_KEYS)
+                            or row.get("measurement") != "workflow_outcome"
                             or (row.get("caller"), row.get("workflow"), row.get("outcome")) not in RECEIPT_LABELS
                             or not valid_workflow_id(row.get("workflow_id"))
                             or type(row.get("elapsed_ms")) is not int
                             or not 0 <= row["elapsed_ms"] <= 604800000
                             or row["workflow_id"] in receipts):
                         raise ValueError("invalid workflow receipt")
+                    if active:
+                        validate_active_receipt(row)
+                        active_receipts[row["workflow_id"]] = row
                     receipts[row["workflow_id"]] = (row["caller"], row["workflow"], row["outcome"], row["elapsed_ms"])
                     outcome_counts[(row["caller"], row["workflow"], row["outcome"])] += 1
                     continue
@@ -368,6 +376,21 @@ def summarize(directory):
     } | {("ai-blocker-watch", "blocker_watch_tick", "completed"),
          ("ai-transcript-destination-check", "transcript_privacy", "verified")}
     completed = sum(count for labels, count in outcome_counts.items() if labels in useful_completed_labels)
+    active_groups = {}
+    for identifier, row in active_receipts.items():
+        parent = row["parent_workflow_id"]
+        if parent in receipts and receipts[parent][:2] != ("ai-blocker-watch", "blocker_watch_tick"):
+            raise ValueError("active receipt parent is not a tick")
+        parent_state = "standalone" if parent is None else ("matched" if parent in receipts else "unmatched_unknown")
+        key = (row["workflow"], row["boundary"], row["outcome"], parent_state)
+        group = active_groups.setdefault(key, {"receipts": 0, "attempted_count": 0, "succeeded_count": 0,
+                                              "failed_count": 0, "skipped_count": 0, "successful_active_operations": 0})
+        group["receipts"] += 1
+        for field in ("attempted_count", "succeeded_count", "failed_count", "skipped_count"):
+            group[field] += row[field]
+        # This counts process/write boundaries, never the resumed task's completion.
+        if row["outcome"] in {"completed", "process_succeeded"}:
+            group["successful_active_operations"] += 1
     context_ordinals = {context: i + 1 for i, context in enumerate(sorted({key[0] for key in cost_windows}))}
     # Same-target replay denominators for #658 section 13 item 2. A replay is
     # a later read of a correlated target already seen in this measurement set.
@@ -468,6 +491,9 @@ def summarize(directory):
         "qualified_latency_by_outcome": [{"event_kind": event, "delivery_boundary": boundary, "outcome": outcome,
                                            "count": len(values), "p95_ms": sorted(values)[(95 * len(values) + 99) // 100 - 1]}
                                           for (event, boundary, outcome), values in sorted(qualified_groups.items())],
+        "active_blocker_watch_operations": [dict(workflow=key[0], boundary=key[1], outcome=key[2],
+                                                  parent_state=key[3], **value)
+                                             for key, value in sorted(active_groups.items())],
         "workflow_outcomes": [
             {"caller": caller, "workflow": workflow, "outcome": outcome, "count": count}
             for (caller, workflow, outcome), count in sorted(outcome_counts.items())],
@@ -510,6 +536,31 @@ COST_SHAPES = {frozenset(keys | extra) for keys in (COST_KEYS, COST_KEYS_WITH_ID
                for extra in (set(), {"graphql_remaining", "graphql_reset_at"},
                              {"access_context"}, {"graphql_remaining", "graphql_reset_at", "access_context"})}
 RECEIPT_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id", "outcome", "elapsed_ms"}
+ACTIVE_RECEIPT_BOUNDARIES = {"blocker_watch_alarm": "alarm_scan", "blocker_watch_links": "links_scan",
+                             "blocker_watch_wake": "wake_process_exit"}
+ACTIVE_RECEIPT_KEYS = RECEIPT_KEYS | {"boundary", "attempted_count", "succeeded_count", "failed_count",
+                                      "skipped_count", "parent_workflow_id"}
+
+
+def validate_active_receipt(row):
+    if row["boundary"] != ACTIVE_RECEIPT_BOUNDARIES[row["workflow"]]:
+        raise ValueError("invalid active boundary")
+    for field in ("attempted_count", "succeeded_count", "failed_count", "skipped_count"):
+        if type(row[field]) is not int or not 0 <= row[field] <= 999999999:
+            raise ValueError("invalid active count")
+    if row["succeeded_count"] + row["failed_count"] > row["attempted_count"]:
+        raise ValueError("active counts exceed attempts")
+    parent = row["parent_workflow_id"]
+    if parent is not None and (not valid_workflow_id(parent) or parent == row["workflow_id"]):
+        raise ValueError("invalid active parent")
+    outcome = row["outcome"]
+    if outcome in {"completed", "process_succeeded"} and not (
+            row["attempted_count"] > 0 and row["succeeded_count"] > 0 and row["failed_count"] == 0):
+        raise ValueError("idle or failed active success")
+    if outcome == "partial" and row["succeeded_count"] == 0:
+        raise ValueError("partial receipt without successful work")
+    if outcome in {"skipped", "refused"} and row["succeeded_count"]:
+        raise ValueError("skipped receipt contains successful work")
 COST_LABELS = {
     ("ai-pr-wait", "graphql.pr_status", "pr_wait"),
     ("ai-blocker-watch", "graphql.open_issue_snapshot", "blocker_watch_tick"),
@@ -522,6 +573,12 @@ RECEIPT_LABELS = {
     ("ai-pr-wait", "pr_wait", outcome)
     for outcome in ("merged", "closed", "checks_failed", "ejected", "deadline")
 } | {("ai-blocker-watch", "blocker_watch_tick", "completed")}
+RECEIPT_LABELS |= {
+    ("ai-blocker-watch", workflow, outcome)
+    for workflow in ("blocker_watch_alarm", "blocker_watch_links")
+    for outcome in ("completed", "partial", "failed", "skipped")
+} | {("ai-blocker-watch", "blocker_watch_wake", outcome)
+     for outcome in ("process_succeeded", "process_failed", "refused", "skipped")}
 RECEIPT_LABELS |= {
     ("ai-verify-run", workflow, outcome)
     for workflow, outcomes in (("verify_dispatch", ("dispatched", "duplicate_refused", "failed")),
@@ -548,7 +605,7 @@ WRITE_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", 
 # Keep in lockstep with telemetry.sh gh_measure_read_observation /
 # gh_measure_write_observation; a wider emitter must never crash the report.
 OBSERVATION_WORKFLOWS = {"pr_wait", "blocker_watch_tick", "blocker_watch_alarm",
-                         "blocker_watch_links", "merge_group_evidence"}
+                         "blocker_watch_links", "blocker_watch_wake", "merge_group_evidence"}
 LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline"}
 LOCAL_CLOCK_BASES = {"linux_boottime_centiseconds", "unknown"}
 LOCAL_REASONS = {"source_unknown", "clock_unknown", "clock_negative", "delivery_unknown"}

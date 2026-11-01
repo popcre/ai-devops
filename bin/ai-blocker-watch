@@ -144,6 +144,8 @@ gh_call(){
 # own verified local access context. Unknown contexts retain ordinary reads.
 gh_selected_call(){
   local context key file temporary rc after
+  local AI_GH_WORKFLOW_ID="${BW_TICK_RECEIPT_ID:-}"
+  export AI_GH_WORKFLOW_ID
   if [ "${AI_GH_OPERATION:-}" != bw.wake_miss ] || [ -z "${BW_WAKE_CACHE:-}" ] ||
      ! context="$(gh_selected_context)"; then
     AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return
@@ -226,6 +228,52 @@ APP_TOKEN="$TOOL_ROOT/bin/ai-gh-app-auth"
 unset AI_GH_OPERATION
 BW_WORKFLOW=''
 BW_TICK_RECEIPT_ID=''
+## Active boundary counters are dynamically scoped to one scan/process only.
+# The tick remains a parent, never an additional copy of a child's costs.
+bw_active_count(){
+  [ -n "${BW_ACTIVE_KIND:-}" ] || return 0
+  case "$1" in
+    attempted) BW_ACTIVE_ATTEMPTED=$((BW_ACTIVE_ATTEMPTED + 1)) ;;
+    succeeded) BW_ACTIVE_SUCCEEDED=$((BW_ACTIVE_SUCCEEDED + 1)) ;;
+    failed) BW_ACTIVE_FAILED=$((BW_ACTIVE_FAILED + 1)) ;;
+    skipped) BW_ACTIVE_SKIPPED=$((BW_ACTIVE_SKIPPED + 1)) ;;
+  esac
+  return 0
+}
+bw_active_begin(){
+  [ "$GH_COST_READY" = 1 ] || return 0
+  BW_TICK_RECEIPT_ID="$(gh_measure_workflow_id)" || { note 'request measurement unavailable: active ID not created'; return 0; }
+  gh_measure_clock; BW_ACTIVE_START="$GH_MEASURE_CLOCK"
+}
+bw_active_finish(){
+  local outcome elapsed boundary
+  [ "$GH_COST_READY" = 1 ] && [ -n "$BW_TICK_RECEIPT_ID" ] || return 0
+  if [ "$BW_ACTIVE_KIND" = wake ]; then
+    boundary=wake_process_exit; outcome="$BW_WAKE_RESULT"
+  else
+    boundary="${BW_ACTIVE_KIND}_scan"
+    if [ "$BW_ACTIVE_ERROR" = 1 ]; then
+      if [ "$BW_ACTIVE_SUCCEEDED" -gt 0 ]; then outcome=partial; else outcome=failed; fi
+    elif [ "$BW_ACTIVE_SUCCEEDED" -gt 0 ]; then outcome=completed
+    else outcome=skipped; fi
+  fi
+  if [ "$DRY" = 1 ]; then
+    outcome=skipped; BW_ACTIVE_ATTEMPTED=0; BW_ACTIVE_SUCCEEDED=0; BW_ACTIVE_FAILED=0
+  fi
+  if [ "$outcome" = skipped ] || [ "$outcome" = refused ]; then
+    [ "$BW_ACTIVE_SKIPPED" -gt 0 ] || BW_ACTIVE_SKIPPED=1
+  fi
+  gh_measure_clock; elapsed=$((GH_MEASURE_CLOCK - BW_ACTIVE_START)); [ "$elapsed" -ge 0 ] || elapsed=0
+  gh_measure_workflow_outcome ai-blocker-watch "$BW_WORKFLOW" "$BW_TICK_RECEIPT_ID" "$outcome" "$elapsed" \
+    "$boundary" "$BW_ACTIVE_ATTEMPTED" "$BW_ACTIVE_SUCCEEDED" "$BW_ACTIVE_FAILED" "$BW_ACTIVE_SKIPPED" "$BW_ACTIVE_PARENT" ||
+    note 'request measurement unavailable: active outcome not saved'
+  return 0
+}
+bw_active_skipped(){
+  local BW_ACTIVE_KIND="$1" BW_WORKFLOW="blocker_watch_$1" BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
+  local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=1 BW_ACTIVE_ERROR=0
+  bw_active_begin; bw_active_finish
+}
 BW_TICK_CONTEXT=''
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
@@ -659,7 +707,16 @@ $what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unkn
   fi
 }
 
-wake(){ # wake <wait file>
+wake(){
+  local BW_ACTIVE_KIND=wake BW_WORKFLOW=blocker_watch_wake BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
+  local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0 BW_WAKE_RESULT=skipped
+  bw_active_begin
+  wake_body "$@"
+  local status=$?
+  bw_active_finish
+  return "$status"
+}
+wake_body(){ # wake <wait file>
   local f="$1" h s cwd ref r n state title prompt log arg
   local until_at parked_issue parked_url main_checkout wid
   if jfields "$f" .harness .session .cwd '.blocker // ""' '.until // ""' '.parked_issue // ""' '.parked_url // ""' '.main_checkout // ""'; then
@@ -681,7 +738,7 @@ wake(){ # wake <wait file>
     # request, a repo outside the scan) always falls through to REST.
     if meta="$(snapshot_open_hit "$ref")"; then :
     elif ! meta="$(AI_GH_OPERATION=bw.wake_miss gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
-      note "could not read $ref"; FAILED=1; return; fi
+      note "could not read $ref"; BW_WAKE_RESULT=refused; FAILED=1; return; fi
     IFS=$'\t' read -r state ispr title <<<"$meta"
     if [ "$state" = closed ]; then
       released=blocker
@@ -702,6 +759,7 @@ wake(){ # wake <wait file>
     fi
   fi
   [ -n "$released" ] || return 0
+  BW_WAKE_RESULT=refused
   local home_m="$HOME" zb=""
   command -v cygpath >/dev/null 2>&1 && home_m="$(cygpath -m "$HOME")"
   zb="$(ls -t "$HOME"/.zcode/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1 || true)"
@@ -803,7 +861,10 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
   local tmp="$f.tmp"
   jq --arg at "$(now_iso)" --arg m "$mode" '.state="waking" | .mode=$m | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
   note "$mode $h session $s in $cwd (wait released: $why); log $log"
+  bw_active_count attempted
+  BW_WAKE_RESULT=process_failed
   if (cd "$cwd" && timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}") >"$log" 2>&1 </dev/null; then
+    bw_active_count succeeded; BW_WAKE_RESULT=process_succeeded
     jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
@@ -813,10 +874,12 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
     # without spending a wake attempt or reporting a failed continuation.
     if [ "$h" = codex ] && [ "$mode" = resumed ] &&
        grep -Fq 'already has an active writer (code -32600)' "$log"; then
+      BW_WAKE_RESULT=refused; bw_active_count skipped
       jq --arg at "$(now_iso)" '.state="waiting" | .attempts-=1 | .active_writer_at=$at | del(.last_attempt_at)' "$f" > "$tmp" && mv "$tmp" "$f" || { FAILED=1; return; }
       note "Codex session $s is still active; wait $wid remains queued"
       return
     fi
+    bw_active_count failed
     FAILED=1
     if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
       jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="failed" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
@@ -972,7 +1035,16 @@ depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue ho
   printf '%s' "$((best+1))"
 }
 
-alarm_scan(){ # alarm_scan <dry 0|1>
+alarm_scan(){
+  local BW_ACTIVE_KIND=alarm BW_WORKFLOW=blocker_watch_alarm BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
+  local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0
+  bw_active_begin
+  alarm_scan_body "$@"
+  local status=$?
+  bw_active_finish
+  return "$status"
+}
+alarm_scan_body(){ # alarm_scan <dry 0|1>
   local dry="$1" start repo out cutoff afail=0
   local pr pn kr kn ac ti k key j rc marker pr_open alarmed lastact la_ep
   # The alarm POSTS (request-for-owner comments, the digest issue), so it is
@@ -1005,7 +1077,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
       out="${SNAP[$repo|$pg]}"
       while IFS=$'\t' read -r pr pn kr kn ac ti; do
         [ -n "$kr" ] || continue
-        [ "$ac" -gt 0 ] && continue # an assignee is an owner; nothing further to check
+        [ "$ac" -gt 0 ] && { bw_active_count skipped; continue; } # an assignee is an owner
         key="$kr#$kn"
         if [ -z "${seen[$key]+set}" ]; then seen[$key]=1; sttl[$key]="$ti"; fi
         spar[$key]="${spar[$key]:-}$pr#$pn "
@@ -1033,13 +1105,13 @@ alarm_scan(){ # alarm_scan <dry 0|1>
       if ($ours != null and ($i.updatedAt <= $ours) and ($theirs == null or $theirs < $ours)) then ($theirs // $i.createdAt) else $i.updatedAt end)')" || jrc=$?
     mapfile -t ans <<<"$jout"
     [ "${#ans[@]}" -ge 1 ] || exit "$((jrc ? jrc : 1))"; marker="${ans[0]}"
-    [ "$marker" = true ] && continue
+    [ "$marker" = true ] && { bw_active_count skipped; continue; }
     [ "${#ans[@]}" -ge 2 ] || exit "$((jrc ? jrc : 1))"; pr_open="${ans[1]}"
-    [ "$pr_open" = true ] && continue
+    [ "$pr_open" = true ] && { bw_active_count skipped; continue; }
     [ "${#ans[@]}" -ge 4 ] && [ "$jrc" -eq 0 ] || exit "$((jrc ? jrc : 1))"
     alarmed="${ans[2]}"; lastact="${jout#*$'\n'*$'\n'*$'\n'}"
     # updatedAt counts this tool's own alarm comment as activity; look past it.
-    [[ "$lastact" > "$cutoff" ]] && continue
+    [[ "$lastact" > "$cutoff" ]] && { bw_active_count skipped; continue; }
     la_ep="$(epoch_of "$lastact" 2>/dev/null || printf 0)"
     if [ "$la_ep" -eq 0 ]; then lastact="2000-01-01T00:00:00Z"; fi # unknown activity time reads as the oldest
     stall[$key]=1; salarmed[$key]="$alarmed"; sact[$key]="$lastact"
@@ -1078,14 +1150,16 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     fi
   } > "$body"
   for key in $sorted; do
-    [ "${salarmed[$key]}" = true ] && { bw_write_observation "$key" skipped unchanged blocker_watch_alarm; continue; }
+    [ "${salarmed[$key]}" = true ] && { bw_active_count skipped; bw_write_observation "$key" skipped unchanged blocker_watch_alarm; continue; }
     if [ "$dry" = 1 ]; then note "would ask $key for an owner (no owner, no activity for ${sage[$key]})"; continue; fi
+    bw_active_count attempted
     if gh_call issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
 This open issue blocks ${spar[$key]} and has gone ${sage[$key]} with no owner: no assignee, no \`owner:\` line, no open linked pull request, no activity.
 Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand it to a named queue owner. Listed in today's ai-blocker-watch digest. (ai-blocker-watch)" >/dev/null; then
       note "asked $key for an owner"
+      bw_active_count succeeded
       bw_write_observation "$key" written new blocker_watch_alarm
-    else note "alarm: could not comment on $key"; afail=1; fi
+    else note "alarm: could not comment on $key"; bw_active_count failed; afail=1; fi
   done
   if [ "${#stall[@]}" -gt 0 ] || [ -e "$HOME_DIR/digest-$day.done" ]; then
     title="ai-blocker-watch digest $day"
@@ -1117,20 +1191,25 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
       if [ -n "$dnum" ]; then
         touch "$HOME_DIR/digest-$day.done"
         if ! cmp -s "$body" "$HOME_DIR/digest-$day.prev" 2>/dev/null; then
+          bw_active_count attempted
           if gh_call issue edit "$dnum" -R "$drepo" --body-file "$body" >/dev/null; then
+            bw_active_count succeeded
             cp "$body" "$HOME_DIR/digest-$day.prev"; note "updated digest $drepo#$dnum"
-          else note "alarm: could not update digest $drepo#$dnum"; afail=1; fi
+          else note "alarm: could not update digest $drepo#$dnum"; bw_active_count failed; afail=1; fi
+        else bw_active_count skipped
         fi
       else
+        bw_active_count attempted
         if gh_call issue create -R "$drepo" -t "$title" --body-file "$body" >/dev/null; then
+          bw_active_count succeeded
           cp "$body" "$HOME_DIR/digest-$day.prev"; touch "$HOME_DIR/digest-$day.done"; note "opened digest in $drepo: $title"
-        else note "alarm: could not open today's digest in $drepo"; afail=1; fi
+        else note "alarm: could not open today's digest in $drepo"; bw_active_count failed; afail=1; fi
       fi
     fi
   fi
   if [ "$afail" = 0 ]; then
     [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_ALARM"
-  else FAILED=1; fi
+  else BW_ACTIVE_ERROR=1; FAILED=1; fi
   # ISSUE_Q payloads include comment bodies; never leave them on disk past the scan.
   rm -rf "$ALARM_TICK"
 }
@@ -1219,7 +1298,16 @@ parse_depends_on(){ # parse_depends_on <issue body, CRs removed> -> dep numbers,
   } <<<"${val//,/$'\n'}"
 }
 
-maintain_links(){ # maintain_links <dry 0|1>
+maintain_links(){
+  local BW_ACTIVE_KIND=links BW_WORKFLOW=blocker_watch_links BW_ACTIVE_PARENT="${BW_TICK_RECEIPT_ID:-}"
+  local BW_TICK_RECEIPT_ID='' BW_ACTIVE_START='' BW_ACTIVE_ATTEMPTED=0 BW_ACTIVE_SUCCEEDED=0 BW_ACTIVE_FAILED=0 BW_ACTIVE_SKIPPED=0 BW_ACTIVE_ERROR=0
+  bw_active_begin
+  maintain_links_body "$@"
+  local status=$?
+  bw_active_finish
+  return "$status"
+}
+maintain_links_body(){ # maintain_links <dry 0|1>
   local dry="$1" start repo out lfail=0
   # Link creation POSTs to GitHub, so posting is owned by the same single
   # machine as propagation and the alarm — without this gate N scheduled
@@ -1251,10 +1339,10 @@ maintain_links(){ # maintain_links <dry 0|1>
       while IFS=$'\t' read -r -d '' num did blocked && IFS= read -r -d '' body; do
         [ -n "$num" ] || continue
         [ "$did" = null ] || idmap["$repo#$num"]="$did"
-        deps="$(parse_depends_on "$body")" || { malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
+        deps="$(parse_depends_on "$body")" || { bw_active_count skipped; malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
         for dep in $deps; do
-          if [ "$dep" = "$num" ]; then note "links: $repo#$num depends_on names itself; skipped"; malformed=$((malformed+1)); continue; fi
-          case " $blocked " in *" $dep "*) continue ;; esac # link present → nothing to do
+          if [ "$dep" = "$num" ]; then bw_active_count skipped; note "links: $repo#$num depends_on names itself; skipped"; malformed=$((malformed+1)); continue; fi
+          case " $blocked " in *" $dep "*) bw_active_count skipped; continue ;; esac # link present → nothing to do
           [ -z "${eseen[$repo#$num>$dep]+set}" ] || continue
           eseen["$repo#$num>$dep"]=1; edges+=("$repo#$num $dep")
         done
@@ -1271,21 +1359,24 @@ maintain_links(){ # maintain_links <dry 0|1>
     id="${idmap[$br#$dep]:-}"
     if [ -z "$id" ]; then
       id="$(AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
-      if [ -z "$id" ]; then note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
+      if [ -z "$id" ]; then bw_active_count skipped; note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
       # GitHub only links issues to issues; a pull request target is refused
       # every scan and kept the links clock from ever advancing.
-      if [ "$id" = pr ]; then note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
+      if [ "$id" = pr ]; then bw_active_count skipped; note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
+    bw_active_count attempted
     if AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
+      bw_active_count succeeded
       created=$((created+1)); snapshot_index_set "$bref" "$br#$dep"; snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
+      bw_active_count failed
       note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1
     fi
   done
   [ "$malformed" -eq 0 ] || note "links: skipped $malformed malformed db-work-scope fence(s) this scan"
   [ "$unresolvable" -eq 0 ] || note "links: skipped $unresolvable unreadable depends_on target(s) this scan"
-  if [ "$lfail" = 0 ]; then [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_LINKS"; else FAILED=1; fi
+  if [ "$lfail" = 0 ]; then [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_LINKS"; else BW_ACTIVE_ERROR=1; FAILED=1; fi
 }
 
 maybe_links(){
@@ -1353,8 +1444,8 @@ lock_take(){
 cmd_alarm(){
   BW_WORKFLOW=blocker_watch_alarm
   [ "${1:-}" != --dry-run ] || DRY=1
-  alarm_on || die "the unowned-blocker alarm is disabled in the config"
-  lock_take || return 0
+  alarm_on || { bw_active_skipped alarm; die "the unowned-blocker alarm is disabled in the config"; }
+  lock_take || { bw_active_skipped alarm; return 0; }
   alarm_scan "$DRY"
   [ "$FAILED" = 0 ] || { note "alarm finished with failures"; exit 1; }
 }
@@ -1362,8 +1453,8 @@ cmd_alarm(){
 cmd_links(){
   BW_WORKFLOW=blocker_watch_links
   [ "${1:-}" != --dry-run ] || DRY=1
-  links_on || die "blocked-by link maintenance is disabled in the config"
-  lock_take || return 0
+  links_on || { bw_active_skipped links; die "blocked-by link maintenance is disabled in the config"; }
+  lock_take || { bw_active_skipped links; return 0; }
   maintain_links "$DRY"
   [ "$FAILED" = 0 ] || { note "links finished with failures"; exit 1; }
 }
