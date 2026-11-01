@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Closed Oracle metadata-only admission; captures are never read here.
 
-Only a genuine independent prospective native completion containing BOTH scoped
-lines registers this new conditional local purpose. Advisory reviews, hashes,
-booleans and expired source/worker permits cannot register it. This is not a
-qualified source, SourceRef, provider or hosting permission issuer.
+The admission is descriptor-only (#2041, owner rulings 2026-10-29): it binds
+the exact committed Oracle source, the private-tooling opt-in, the stat-only
+custody descriptor and the installed enforcement. No reviewer verdict is
+required or read; an AI review of the action is optional advisory evidence.
+This is not a qualified source, SourceRef, provider or hosting permission issuer.
 """
 import argparse
 from datetime import datetime
@@ -24,6 +25,7 @@ import fcntl
 ROOT=Path(__file__).resolve().parents[1]
 PROFILE='oracle-native-alternate-serialization-v1'
 ACTION='offline-private-capture-transform'
+ADMISSION_SCHEMA=1
 PURPOSE='native-alternate-serialization'
 CENSUS={'original_uploads':26,'native_groups':8,'native_pages':33,
     'completion_sha256':'8ae0e0182324b563b10d5acb2c43a87adf677c3933d35ee8ffa8a3513befc74c',
@@ -95,12 +97,6 @@ def validate_lock_fd(fd):
     info=os.fstat(fd)
     require(stat.S_ISREG(info.st_mode) and info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1,'native receipt lock is unsafe')
 
-def approval_summary(state):
-    return 'APPROVE by '+state['provider']+' (implementer '+state['implementer_engine']+', run '+state['run_id']+', '+state['review_mode']+') for '+ACTION+' at '+state['head']+' report sha256:'+state['report_sha256']
-
-def has_exact_task_override(task,state):
-    return any(isinstance(r,dict) and r.get('kind')=='reviewer-approval' and r.get('action')==ACTION and r.get('observed_class')=='private-tooling' and r.get('reason')==approval_summary(state) for r in task.get('overrides',[]))
-
 def profile():
     raw=(ROOT/'config/review-action-profiles.json').read_bytes();value=decode(raw)['profiles'][PROFILE]
     require(value['repository']=='https://github.com/u2giants/theoracle' and value['action']==ACTION
@@ -159,20 +155,39 @@ def validate_manifest(m,now):
 
 
 def binding(state,m):
-    p,pdigest=profile();old=legacy()
+    p,_=profile();old=legacy();substitution_guard()
+    # Optional advisory review evidence only: binds what the reviewer sees.
+    require(state['normalized_upstream']==p['repository'],'exact Oracle repository required')
+    exported=old._native.validate_snapshot(Path(state['code_only_export']),state['head'])
+    require(exported==state['code_only'] and exported['paths']==p['paths'],'full public decoder/operator closure required')
+    return _bind(Path(state['repository_root']),state['head'],state['source_digest'],m)
+
+
+def substitution_guard():
     if os.environ.get('AI_DEVOPS_TEST_MODE')!='1':
         require(not any(os.environ.get(k) for k in ('AI_TASK_GATES_FILE','AI_TASK_GATES_CONSUMER_FILE',
             'AI_REVIEW_ACTION_PROFILES_FILE','AI_REVIEW_NATIVE_EXPORT_ROOT')),'native policy substitution refused')
-    require(state['normalized_upstream']==p['repository'] and state['provider']=='deepseek'
-        and state['implementer_engine'].lower()!='deepseek' and state['review_mode'] in ('final-check','security-review'),'independent exact Oracle review required')
-    exported=old._native.validate_snapshot(Path(state['code_only_export']),state['head'])
-    require(exported==state['code_only'] and exported['paths']==p['paths'],'full public decoder/operator closure required')
-    require(m['source_head']==state['head'] and m['source_digest']==state['source_digest'],'source moved')
-    repo=Path(state['repository_root'])
+
+
+def admission_binding(repo,m):
+    """Descriptor-only binding of the exact clean committed Oracle source."""
+    substitution_guard();p,_=profile();old=legacy();repo=Path(repo)
+    require(repo.is_absolute() and repo.resolve()==repo,'canonical repository root required')
+    proc=subprocess.run([str(ROOT/'bin/ai-review-lifecycle'),'identity',str(repo)],capture_output=True,timeout=30)
+    require(proc.returncode==0,'source identity unavailable');ident=decode(proc.stdout)
+    require(ident['repository_root']==str(repo) and ident['normalized_upstream']==p['repository'],'exact Oracle repository required')
+    require(ident['working_tree_sha256']==sha(b''),'clean committed Oracle source required')
+    for path in p['paths']:old.git(repo,'cat-file','-e',ident['head']+':'+path)
+    return _bind(repo,ident['head'],ident['source_digest'],m)
+
+
+def _bind(repo,head,src_digest,m):
+    p,pdigest=profile();old=legacy()
+    require(m['source_head']==head and m['source_digest']==src_digest,'source moved')
     explanation=control_metadata.gate_explanation(repo,decode)
     require(explanation['repository']=='u2giants/theoracle' and explanation['declared_class']=='private-tooling'
         and explanation['effective_class']=='private-tooling','truthful Oracle private-tooling task required')
-    local=decode(old.git(repo,'show',state['head']+':.ai-devops/task-gates.json'))
+    local=decode(old.git(repo,'show',head+':.ai-devops/task-gates.json'))
     require('oracle-native-alternate-descriptor-only-admission' in local['gates']['private-tooling']['required'],
             'committed Oracle opt-in required')
     facts=validate_manifest(m,int(time.time()));installed=old.installed_enforcement()
@@ -182,66 +197,23 @@ def binding(state,m):
         for path,digest in public.items():require(sha(old.git(ROOT,'show',installed['source_head']+':'+path))==digest,'installed Oracle guard differs')
     return {'profile':PROFILE,'profile_sha256':pdigest,'action':ACTION,'purpose':PURPOSE,
         'manifest_descriptor_sha256':sha(canonical(m)),'permission_registration_descriptor_sha256':sha(canonical(m['permission_custody'])),
-        'source_head':state['head'],'source_digest':state['source_digest'],'path_set_sha256':p['path_set_sha256'],
+        'source_head':head,'source_digest':src_digest,'path_set_sha256':p['path_set_sha256'],
         'root_action_authority':False,'entrypoint':p['entrypoint'],'installed_enforcement':installed,
         'oracle_enforcement_sha256':public,**facts}
 
 
-def exact_purpose_line(content,b):
-    expected='Purpose registration: '+PROFILE+' descriptor sha256:'+b['permission_registration_descriptor_sha256']
-    lines=[line for line in content.splitlines() if line.lstrip().startswith('Purpose registration:')]
-    return len(lines)==1 and lines[0] in (expected,expected+'.')
-
-
-def completed(state_path,state,b):
-    require(state.get('status')=='completed' and state.get('verdict')=='APPROVE' and state.get('stale') is False
-        and state.get('failure_class') is None,'current completed approval required')
-    require(b['installed_enforcement']['kind']=='VERIFIED_INSTALLED_SOURCE','test fixture cannot issue authority')
-    finished=datetime.fromisoformat(state['finished_at'].replace('Z','+00:00'))
-    require(finished.tzinfo is not None and 0<=time.time()-finished.timestamp()<=300,'native approval start window expired')
-    control_metadata.lifecycle(state_path)
-    old=legacy();proc=subprocess.run([sys.executable,str(ROOT/'bin/ai-review-code-only.py'),'lifecycle-proof',
-        str(state_path),state['session_id'],state['report_path'],'--completed'],capture_output=True)
-    require(proc.returncode==0 and decode(proc.stdout)==state['code_only_completion'],'genuine independent native completion required')
-    report=old._native.private_read(Path(state['report_path'])).decode()
-    require(sha(report.encode())==state['report_sha256'] and old._native.has_exact_action_scope(report,b)
-        and exact_purpose_line(report,b),'dual exact independent scopes required')
-    return {'kind':'native-independent-current-purpose-registration','profile':PROFILE,'purpose':PURPOSE,
-        'descriptor_sha256':b['permission_registration_descriptor_sha256'],'action_descriptor_sha256':b['manifest_descriptor_sha256'],
-        'source_head':state['head'],'source_digest':state['source_digest'],'provider':state['provider'],
-        'implementer_engine':state['implementer_engine'],'native_completion_sha256':sha(canonical(state['code_only_completion'])),
-        'report_sha256':state['report_sha256'],'conditional_unqualified_serialization_only':True,
-        'qualified_source_authority':False,'source_ref_authority':False,'provider_authority':False,'hosted_authority':False}
-
-
-def atomic_receipt(state_path,state,b,m,publish):
-    reg=completed(state_path,state,b)
-    if not publish:return reg
-    require(os.environ.get('AI_DEVOPS_TEST_MODE')!='1','test mode cannot issue actual authority')
-    lock=os.open(str(state_path)+'.oracle.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
-    try:
-        validate_lock_fd(lock)
-        fcntl.flock(lock,fcntl.LOCK_EX);old=legacy();current=decode(control_metadata.read_lifecycle(state_path,old._native.private_read))
-        require(current==state,'lifecycle moved during registration')
-        finished=int(datetime.fromisoformat(state['finished_at'].replace('Z','+00:00')).timestamp())
-        expected={'schema_version':1,'registration':reg,'binding':b,'action_id':m['action_id'],
-                  'issued_at':finished,'expires_at':min(m['expires_at'],finished+300)}
-        key='oracle_alternate_action_admission'
-        if key in current:require(current[key]==expected,'admission collision');return reg
-        # Task gate has already independently recorded the exact approval.
-        identity=sha(('u2giants/theoracle'+'\0'+state['repository_root']).encode())
-        task_dir=Path(os.environ.get('AI_TASK_GATES_DIR',str(Path.home()/'.local/state/ai-devops/task-gates')))
-        task=decode(old._native.private_read(task_dir/(identity+'.json')))
-        require(has_exact_task_override(task,state),'native gate approval was not persisted exactly')
-        current[key]=expected
-        fd,temp=tempfile.mkstemp(dir=Path(state_path).parent,prefix='.oracle-admission-')
-        with os.fdopen(fd,'wb') as out:out.write(canonical(current)+b'\n');out.flush();os.fsync(out.fileno())
-        os.replace(temp,state_path)
-        parent=os.open(Path(state_path).parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-        try:os.fsync(parent)
-        finally:os.close(parent)
-        return reg
-    finally:os.close(lock)
+def admission(repo,m,publish,advisory_report_sha256=None):
+    """Issue the one-use descriptor-only admission; no reviewer verdict is read."""
+    b=admission_binding(repo,m);now=int(time.time())
+    if advisory_report_sha256 is not None:
+        require(isinstance(advisory_report_sha256,str) and re.fullmatch('[a-f0-9]{64}',advisory_report_sha256),'advisory report digest malformed')
+    record={'schema_version':ADMISSION_SCHEMA,'kind':'descriptor-only-admission','profile':PROFILE,'action':ACTION,'purpose':PURPOSE,
+        'action_id':m['action_id'],'repository_root':str(repo),'binding':b,'issued_at':now,'expires_at':min(m['expires_at'],now+300),
+        'reviewer_verdict_required':False,'advisory_review_report_sha256':advisory_report_sha256,
+        'conditional_unqualified_serialization_only':True,'qualified_source_authority':False,'source_ref_authority':False,
+        'provider_authority':False,'hosted_authority':False}
+    if not publish:return record,None
+    return record,control_metadata.publish_admission(record,PROFILE,canonical)
 
 
 def evidence_projection(b):
@@ -255,31 +227,38 @@ def prompt(state):
     b=state['action_profile_binding']
     require(b.get('profile')==PROFILE,'foreign action profile prompt refused')
     return ('Review ONLY Oracle offline native-alternate serialization. Metadata/custody/stat and claimed historical hashes were checked; '
-        'capture bytes were NOT read or hash-verified. Only genuine independent native completion may register this current bounded purpose. '
-        'Applicable owner/license/custodian requirements remain mandatory; withhold approval if they are not established. '
+        'capture bytes were NOT read or hash-verified. This review is advisory only; admission never reads its verdict. '
+        'Report any applicable owner/license/custodian requirement that is not established. '
         'No old permit renewal, model/network/database/SourceRef/adoption/hosting rights. Require exact closure, one-use consumption before reads, '
-        'networkless fixed bounds and explicit schema refusal. If approving include both unique standalone lines:\n'
+        'networkless fixed bounds and explicit schema refusal. Name the descriptor you reviewed:\n'
         'Purpose registration: '+PROFILE+' descriptor sha256:'+b['permission_registration_descriptor_sha256']+'\n'
         'Action scope: '+PROFILE+' descriptor sha256:'+b['manifest_descriptor_sha256'])
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser();parser.add_argument('phase',choices=('capture','evidence','finish','preaction','prompt'))
-    parser.add_argument('state');parser.add_argument('--manifest');parser.add_argument('--profile',default=PROFILE)
-    parser.add_argument('--stage',default='initial-forward');parser.add_argument('--admit',action='store_true');args=parser.parse_args(argv)
+    parser=argparse.ArgumentParser();parser.add_argument('phase',choices=('capture','evidence','finish','prompt','admit'))
+    parser.add_argument('state',nargs='?');parser.add_argument('--manifest');parser.add_argument('--profile',default=PROFILE)
+    parser.add_argument('--stage',default='initial-forward');parser.add_argument('--repo');parser.add_argument('--publish',action='store_true')
+    parser.add_argument('--advisory-report-sha256');args=parser.parse_args(argv)
     try:
         require(args.profile==PROFILE and args.stage=='initial-forward','fixed Oracle stage required')
+        if args.phase=='admit':
+            require(args.state is None and args.repo,'admission takes --repo and descriptor stdin only')
+            m=decode(sys.stdin.buffer.read(1024**2+1));require(type(m) is dict,'descriptor object required')
+            record,path=admission(Path(args.repo),m,args.publish,args.advisory_report_sha256)
+            print(json.dumps({'admission':None if path is None else str(path),'admission_sha256':sha(canonical(record)),
+                'action_id':record['action_id'],'source_head':record['binding']['source_head'],
+                'installed_enforcement':record['binding']['installed_enforcement']['kind'],'reviewer_verdict_required':False},sort_keys=True));return 0
+        require(args.state is not None,'lifecycle state required')
         state=decode(control_metadata.read_lifecycle(args.state,legacy()._native.private_read))
         require(type(state) is dict and (args.phase=='capture' or type(state.get('action_profile_binding')) is dict),'invalid lifecycle action binding')
         if args.phase=='prompt':print(prompt(state));return 0
-        require(state['status']=={'capture':'preflight','evidence':'running','finish':'running','preaction':'completed'}[args.phase],'wrong native phase')
+        require(state['status']=={'capture':'preflight','evidence':'running','finish':'running'}[args.phase],'wrong native phase')
         m=metadata(args.manifest) if args.manifest else decode(sys.stdin.buffer.read(1024**2+1));b=binding(state,m)
         if args.phase!='capture':require(b==state['action_profile_binding'],'action metadata or source moved')
-        if args.phase=='preaction':atomic_receipt(args.state,state,b,m,args.admit)
         if args.phase=='evidence':b=evidence_projection(b)
         print(json.dumps(b,sort_keys=True));return 0
     except (OSError,ValueError,KeyError,TypeError,RecursionError,subprocess.SubprocessError):
         print('oracle-native-alternate: bounded native metadata admission refused',file=sys.stderr);return 1
-
 
 if __name__=='__main__':sys.exit(main())
