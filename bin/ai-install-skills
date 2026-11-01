@@ -93,7 +93,7 @@ usage() {
   cat <<'EOF'
 Usage: ai-install-skills [--dry-run] [--keep-orphans] [--adopt-globals]
 
-  --reviewer-approval REPORT  Exact-source independent installation approval.
+  --reviewer-approval REPORT  Accepted and ignored; no AI review gates installation (#2041).
   --only NAME      Install this exact skill only (repeat for multiple skills).
                    Skips globals, orphan cleanup, identity and launcher work.
 
@@ -155,7 +155,6 @@ if ((${#ONLY_SKILLS[@]})); then
 fi
 
 if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
-  [[ -n "$SCOPED_REVIEWER_APPROVAL" ]] || { echo 'ERROR: --only installation requires --reviewer-approval.' >&2; exit 3; }
   [[ "${AI_INSTALL_LOG:-$BASE_HOME/.cache/ai-devops/install-log.tsv}" == "$BASE_HOME/.cache/ai-devops/install-log.tsv" ]] || { echo 'ERROR: scoped audit destination override refused.' >&2; exit 3; }
   for critical in bin/ai-install-skills bin/ai-task-gates tools/scoped_skills_install.py tools/lib/task-gates.sh config/task-gates.json; do
     [[ -f "$REPO_ROOT/$critical" && ! -L "$REPO_ROOT/$critical" ]] || exit 3
@@ -200,11 +199,11 @@ fi
 if ((${#ONLY_SKILLS[@]})) && ! $DRY_RUN; then
   SCOPED_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-scoped-skills.XXXXXX")"
   trap 'rm -rf -- "$SCOPED_TMP"' EXIT
-  SCOPED_PREPARED="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
+  SCOPED_PREPARED="$(python3 "$REPO_ROOT/tools/scoped_skills_install.py" prepare "$REPO_ROOT" "$CLAUDE_HOME" "$CODEX_HOME" --scratch "$SCOPED_TMP" "${ONLY_SKILLS[@]}")"
   IFS=$'\t' read -r SCOPED_PLAN SCOPED_PLAN_SHA <<< "$SCOPED_PREPARED"
   [[ "$SCOPED_PLAN" == "$SCOPED_TMP/plan.json" && "$SCOPED_PLAN_SHA" =~ ^[a-f0-9]{64}$ ]] || exit 3
-  ( cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" check --before scoped-skills-install --scoped-skills-plan "$SCOPED_PLAN" --reviewer-approval "$SCOPED_REVIEWER_APPROVAL" ) | tee "$(dirname "$SCOPED_PLAN")/gate-summary.txt"
-  python3 "$REPO_ROOT/tools/scoped_skills_install.py" validate "$SCOPED_PLAN" "$REPO_ROOT" "$SCOPED_REVIEWER_APPROVAL" "$SCOPED_PLAN_SHA"
+  ( cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" check --before scoped-skills-install --scoped-skills-plan "$SCOPED_PLAN" ) | tee "$(dirname "$SCOPED_PLAN")/gate-summary.txt"
+  python3 "$REPO_ROOT/tools/scoped_skills_install.py" validate "$SCOPED_PLAN" "$REPO_ROOT" "$SCOPED_PLAN_SHA"
   SCOPED_RUN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$SCOPED_PLAN")"
   REPO_ROOT="$(dirname "$SCOPED_PLAN")/source"
 fi

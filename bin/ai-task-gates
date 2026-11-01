@@ -1380,19 +1380,19 @@ cmd_check(){
   # falls through to the same checks it would have mirrored in `prepare`.
   refuse_raw_archives "$action" "$(check_change_set "$action" "$base")"
   if [ "$action" = scoped-skills-install ]; then
-    [ -n "$scoped_skills_plan" ] && [ -n "$reviewer_approval" ] \
+    [ -n "$scoped_skills_plan" ] \
       && [ -z "$base$acknowledge$small_entry$small_rows$small_quote$target_head$installed_checkout$installed_launcher$application_release_target$application_workflow_target" ] \
       && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
-      || blocked 'ai-task-gates: STOP. Scoped skill installation needs only its exact plan and independent approval.'
+      || blocked 'ai-task-gates: STOP. Scoped skill installation needs only its exact plan.'
     resolve_repo
     [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] || blocked 'ai-task-gates: STOP. Scoped skill installation is ai-devops only.'
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Scoped skill installation requires a declared installation task.'
     [ "$ROOT" = "$TOPLEVEL" ] && [ "$POLICY_FILE" = "$ROOT/config/task-gates.json" ] || blocked 'ai-task-gates: STOP. Scoped installation requires its candidate gate and policy.'
-    python3 "$ROOT/tools/scoped_skills_install.py" validate "$scoped_skills_plan" "$TOPLEVEL" "$reviewer_approval" \
+    python3 "$ROOT/tools/scoped_skills_install.py" validate "$scoped_skills_plan" "$TOPLEVEL" \
       || blocked 'ai-task-gates: STOP. Scoped source, destinations or snapshot no longer match.'
-    decide_local_tests_required deploy "$(merged_gate "$IDENTITY" installation | sed -n 's/^required\t//p' | paste -sd, -)" 1
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
-      || approval_refused deploy $? 'ai-task-gates: STOP. Scoped installation needs exact-source independent APPROVE with bound passing tests.'
+    # No AI-review APPROVE gates installation (owner ruling 2026-10-29 night,
+    # #2041); a supplied --reviewer-approval is ignored.
+    approval_summary="no-reviewer-gate(#2041)"
     printf 'ai-task-gates: scoped skill installation approved: %s\n' "$approval_summary"
     return 0
   fi

@@ -297,11 +297,12 @@ for invalid in missing '../shared-one' 'shared-*'; do
 done
 if run_installer "$fixture" "$claude" "$codex" --only >/dev/null 2>&1; then fail 'accepted missing name'; fi
 if run_installer "$fixture" "$claude" "$codex" --only shared-one --adopt-globals >/dev/null 2>&1; then fail 'accepted globals'; fi
-# Unreviewed fixtures cannot enter the new scoped installation gate.
+# No AI-review approval is required (#2041), but an undeclared fixture task
+# still cannot pass the scoped installation gate.
 if CLAUDE_HOME="$claude" CODEX_HOME="$codex" bash "$fixture/bin/ai-install-skills" --only shared-one > "$TMP_ROOT/scoped.out" 2>&1; then
-  fail 'unreviewed scoped installation succeeded'
+  fail 'undeclared scoped installation succeeded'
 fi
-grep -q 'requires --reviewer-approval' "$TMP_ROOT/scoped.out" || fail 'missing scoped approval refusal'
+grep -q 'requires --reviewer-approval' "$TMP_ROOT/scoped.out" && fail 'scoped install still demands reviewer approval'
 assert_absent "$claude/skills/shared-one"
 assert_absent "$codex/skills/shared-one"
 # Reviewed scoped behavior and adversarial gate cases use committed private
