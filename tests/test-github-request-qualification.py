@@ -404,6 +404,74 @@ exit "${1:-0}"
         with self.assertRaises(ValueError):
             with report.retained_generation_launch(generation): pass
 
+    def test_private_tmpfs_copy_has_no_writable_alias_and_cannot_be_remounted(self):
+        if not sys.platform.startswith("linux") or not shutil.which("bwrap"):
+            self.skipTest("Linux Bubblewrap required")
+        helper = self.root / 'tools/helper.py'
+        original = helper.read_bytes()
+        attributes = self.root / '.gitattributes'
+        original_attributes = attributes.read_bytes()
+        attributes_stat = attributes.stat()
+        probe = r'''
+import ctypes,errno,fcntl,os,pathlib,stat,sys
+root=pathlib.Path(sys.argv[1]);helper=root/'tools/helper.py'
+assert helper.read_bytes()==b'ORIGINAL_HELPER = True\n'
+for name in ('bin','tools','config'):
+    assert os.statvfs(root/name).f_flag & os.ST_RDONLY
+def refused(action):
+    try: action()
+    except OSError as error:
+        assert error.errno in (errno.EROFS,errno.EPERM,errno.EBADF),error.errno
+    else: raise AssertionError('immutable source mutation succeeded')
+refused(lambda:helper.write_bytes(b'changed'))
+refused(lambda:os.chmod(helper,0o777))
+refused(lambda:os.link(helper,root/'tools/alias'))
+refused(lambda:os.symlink('helper.py',root/'tools/symlink'))
+refused(lambda:os.mkdir(root/'tools/added'))
+refused(lambda:os.rename(helper,root/'tools/moved'))
+refused(lambda:os.unlink(helper))
+refused(lambda:(root/'tools/new-helper.py').write_bytes(b'changed'))
+library=ctypes.CDLL(None,use_errno=True)
+assert library.mount(None,os.fsencode(root/'tools'),None,32,None)==-1
+assert ctypes.get_errno()==errno.EPERM
+# A further user/mount namespace cannot recover write authority over the
+# inherited private read-only mount. Kernels may refuse the namespace itself.
+pid=os.fork()
+if pid==0:
+    if library.unshare(0x10020000)!=0:
+        os._exit(0 if ctypes.get_errno() in (errno.EPERM,errno.EINVAL,errno.ENOSYS) else 3)
+    result=library.mount(None,os.fsencode(root/'tools'),None,32,None)
+    os._exit(0 if result==-1 and ctypes.get_errno()==errno.EPERM else 4)
+assert os.waitpid(pid,0)[1]==0
+# A leaked setup writer could bypass a later read-only bind remount. Check
+# actual inherited regular descriptors, not just future pathname opens.
+for name in os.listdir('/proc/self/fd'):
+    descriptor=int(name)
+    if descriptor<=2:continue
+    try:info=os.fstat(descriptor)
+    except OSError:continue
+    if stat.S_ISREG(info.st_mode):refused(lambda:os.write(descriptor,b'X'))
+assert helper.read_bytes()==b'ORIGINAL_HELPER = True\n'
+assert (root/'bin/ai-pr-wait').stat().st_mode & 0o777 == 0o500
+assert helper.stat().st_mode & 0o777 == 0o400
+'''
+        with self.fixture_installation(), report.retained_generation(self.root, self.manifest) as generation:
+            # An ordinary concurrent canonical edit cannot alter captured bytes.
+            helper.write_bytes(b'HOST_ONLY_CHANGE = True\n')
+            try:
+                for _ in range(2):
+                    with report.retained_generation_launch(generation) as launch:
+                        result = subprocess.run([*launch['argv_prefix'], sys.executable, '-I', '-S', '-c', probe, str(self.root)],
+                                                pass_fds=launch['pass_fds'], capture_output=True)
+                        self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(helper.read_bytes(), b'HOST_ONLY_CHANGE = True\n')
+            finally: helper.write_bytes(original)
+        self.assertFalse((self.root/'tools/new-helper.py').exists())
+        self.assertEqual(attributes.read_bytes(), original_attributes)
+        after = attributes.stat()
+        for key in ('st_dev','st_ino','st_mode','st_uid','st_gid','st_size','st_mtime_ns','st_ctime_ns'):
+            self.assertEqual(getattr(after,key),getattr(attributes_stat,key),key)
+
     def test_qualifier_cancellation_reaps_its_owned_child_group(self):
         self.waiter.write_text('#!/usr/bin/env bash\nsleep 60 &\nprintf "READY %s\\n" "$!"\nwait\n')
         for cancellation in (signal.SIGINT, signal.SIGTERM):

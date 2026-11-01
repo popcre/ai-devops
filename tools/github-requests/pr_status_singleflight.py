@@ -19,6 +19,7 @@ import time
 import math
 import re
 import secrets
+from contextvars import ContextVar
 
 if os.name == "nt":
     import msvcrt
@@ -26,6 +27,7 @@ else:
     import fcntl
 
 _HERE = Path(__file__).resolve().parent
+_OPERATION_RECORDS = ContextVar("pr_status_operation_records", default=None)
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
@@ -48,9 +50,18 @@ def _target_ordinal(key):
 
 
 def _emit_record(record_obj):
+    pending = _OPERATION_RECORDS.get()
+    if pending is not None:
+        pending.append(record_obj)
+        return
+    _append_records([record_obj])
+
+
+def _append_records(records):
     try:
         import measure_append
-        measure_append.append_record(_measurement_dir(), json.dumps(record_obj, separators=(",", ":")))
+        measure_append.append_records(_measurement_dir(),
+                                      [json.dumps(row, separators=(",", ":")) for row in records])
     except Exception:
         pass
 
@@ -143,13 +154,15 @@ def read_interval(key, interval, raw, cache_age_ms, cache_policy):
             "ttl_cacheable": cacheable(raw, interval["expected_head"])}
 
 
-def emit_read_observation(key, source, caller=None, interval=None, raw=None, cache_age_ms=None, cache_policy="upstream"):
+def emit_read_observation(key, source, caller=None, interval=None, raw=None, cache_age_ms=None, cache_policy="upstream", _operation_ordinal=None):
     """Count a completed status read: cache saves an upstream read."""
     if interval is not None:
         interval = dict(interval)
         if "finish" not in interval:
             interval["finish"] = read_clock()
-    ordinal = _target_ordinal(key)
+    # Private handoff only: run passes its immediately preceding same-key map
+    # result. This parameter grants no trust to an external ordinal declaration.
+    ordinal = _operation_ordinal if type(_operation_ordinal) is int and 1 <= _operation_ordinal <= 1000000000 else _target_ordinal(key)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     record = {
         "schema": 6,
@@ -188,6 +201,7 @@ def emit_write_observation(key, action, content_changed, caller=None):
         "content_relation": relation,
         "duplicate_unchanged_write": action == "written" and not content_changed,
     })
+    return ordinal
 
 
 def windows_acl(mode, path):
@@ -487,6 +501,20 @@ def main():
 
 def run(command, cache, age_file, source_file, expected_head=None,
         deadline=None, cap_supervisor_timeout=False, defer_source_mark=False, args_key=None, interval=None):
+    records = []
+    token = _OPERATION_RECORDS.set(records)
+    try:
+        return _run(command, cache, age_file, source_file, expected_head, deadline,
+                    cap_supervisor_timeout, defer_source_mark, args_key, interval)
+    finally:
+        _OPERATION_RECORDS.reset(token)
+        if records:
+            _append_records(records)
+
+
+def _run(command, cache, age_file, source_file, expected_head=None,
+         deadline=None, cap_supervisor_timeout=False, defer_source_mark=False, args_key=None, interval=None):
+    operation_ordinal = None
     if cap_supervisor_timeout:
         try:
             index = command.index("--timeout-seconds")
@@ -536,14 +564,14 @@ def run(command, cache, age_file, source_file, expected_head=None,
                 if interval is not None:
                     interval["sharing_scope"] = None
             if args_key:
-                emit_write_observation(args_key, "skipped", False)
+                operation_ordinal = emit_write_observation(args_key, "skipped", False)
         else:
             try:
                 atomic_write(cache, result.stdout)
                 if interval is not None:
                     interval["finish"] = read_clock()
                 if args_key:
-                    emit_write_observation(args_key, "written", True)
+                    operation_ordinal = emit_write_observation(args_key, "written", True)
             except OSError:
                 # A cache write must not erase an otherwise valid fresh outcome.
                 if interval is not None:
@@ -551,7 +579,10 @@ def run(command, cache, age_file, source_file, expected_head=None,
     elif interval is not None:
         interval["sharing_scope"] = None
     if args_key:
-        emit_read_observation(args_key, "upstream", interval=interval, raw=result.stdout)
+        # The write row just validated this exact target key through the map
+        # lock. Reuse it only for this operation's read row; no cross-call cache.
+        emit_read_observation(args_key, "upstream", interval=interval, raw=result.stdout,
+                              _operation_ordinal=operation_ordinal)
     return 0
 
 

@@ -334,6 +334,36 @@ else:
         Refuses {Assert-ConfigMetadata} 'Foreign credential file reader refused without reading bytes'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        # A foreign-writable ancestor does not authorize access to this already
+        # protected private leaf. Retained no-delete pins prevent substitution.
+        $shared=Join-Path $root 'metadata-shared-parent';[GenerationCustody]::PrivateDirectory($shared)
+        $private=Join-Path $shared 'private';[GenerationCustody]::PrivateDirectory($private)
+        [IO.File]::WriteAllText((Join-Path $private 'hosts.yml'),'synthetic, not credentials')
+        $acl=Get-FixtureDacl $shared $true
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles,[Security.AccessControl.AccessControlType]::Allow))
+        Set-FixtureDirectoryDacl $shared $acl;$env:GH_CONFIG_DIR=$private
+        Assert-ConfigMetadata;Assert $true 'Protected private config below foreign DELETE_CHILD ancestor admitted'
+        Refuses {[IO.Directory]::Move($private,($private+'-replaced'))} 'Held private config cannot rename despite ancestor DELETE_CHILD'
+        Refuses {[IO.Directory]::Move($shared,($shared+'-replaced'))} 'Held foreign ancestor cannot rename'
+        Refuses {[IO.Directory]::Delete($private,$true)} 'Held private config cannot delete for junction replacement'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        Add-Type -TypeDefinition @'
+using System;using System.Runtime.InteropServices;using Microsoft.Win32.SafeHandles;
+public static class ConfigDeleteFixture {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern SafeFileHandle CreateFileW(string p,uint a,uint s,IntPtr x,uint d,uint f,IntPtr t);
+ [DllImport("advapi32.dll")]static extern uint GetSecurityInfo(SafeFileHandle h,uint k,uint f,out IntPtr o,out IntPtr g,out IntPtr d,out IntPtr s,out IntPtr sd);
+ [DllImport("advapi32.dll")]static extern uint SetSecurityInfo(SafeFileHandle h,uint k,uint f,IntPtr o,IntPtr g,IntPtr d,IntPtr s);
+ [DllImport("kernel32.dll")]static extern IntPtr LocalFree(IntPtr p);
+ public static SafeFileHandle Open(string p){var h=CreateFileW(p,0x10000,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero);if(h.IsInvalid)throw new System.IO.IOException("Fixture DELETE open failed");return h;}
+ public static void Unprotect(SafeFileHandle h){IntPtr o,g,d,s,sd;if(GetSecurityInfo(h,1,4,out o,out g,out d,out s,out sd)!=0)throw new System.IO.IOException("Fixture DACL unavailable");try{if(SetSecurityInfo(h,1,0x20000004,IntPtr.Zero,IntPtr.Zero,d,IntPtr.Zero)!=0)throw new System.IO.IOException("Fixture unprotect failed");}finally{LocalFree(sd);}}
+}
+'@
+        $preopened=[ConfigDeleteFixture]::Open($private)
+        try{Refuses {Assert-ConfigMetadata} 'Preexisting DELETE handle causes sharing refusal before admission'}finally{$preopened.Dispose();foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()}
+        $control=[GenerationCustody]::DirectoryControl($private);try{[ConfigDeleteFixture]::Unprotect($control)}finally{$control.Dispose()}
+        Refuses {Assert-ConfigMetadata} 'Unprotected config leaf beneath writable parent refused'
+        foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
+        $env:GH_CONFIG_DIR=$config
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
         $acl=Get-FixtureDacl $unsafe $true
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))

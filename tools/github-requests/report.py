@@ -1169,7 +1169,7 @@ def retained_generation_launch(boundary):
             replacements[str(descriptor)] = str(borrowed)
         command = list(boundary["argv_prefix"])
         for index in range(1, len(command)):
-            if command[index - 1] == "--ro-bind-data":
+            if command[index - 1] in ("--file", "--ro-bind-data"):
                 command[index] = replacements[command[index]]
         marker = command.index("--")
         yield {"argv_prefix": command, "mount_prefix": command[:marker + 1],
@@ -1266,7 +1266,14 @@ def retained_generation(root, manifest, manifest_fd=None):
             finally:
                 os.close(raw_fd)
             descriptors.append(fd)
-            command += ["--perms", f"{files.modes[name]:04o}", "--ro-bind-data", str(fd), str(root / name)]
+            # Copy into the fresh private tmpfs, then seal that entire mount
+            # below. Individual bind mounts add hundreds of mount operations;
+            # --file creates no writable host alias or subordinate mount.
+            # The captured top-level attributes file is outside those fresh
+            # tmpfs roots: retain its individual read-only bind instead of
+            # ever copying into the canonical host checkout.
+            operation = "--file" if pathlib.PurePosixPath(name).parts[0] in ("bin", "tools", "config") else "--ro-bind-data"
+            command += ["--perms", f"{files.modes[name]:04o}", operation, str(fd), str(root / name)]
         for directory in ("bin", "tools", "config"):
             command += ["--remount-ro", str(root / directory)]
         identity["source_boundary"] = "linux_sealed_generation"
