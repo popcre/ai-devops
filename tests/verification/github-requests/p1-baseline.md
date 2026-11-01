@@ -95,6 +95,55 @@ acceptance. This live component proof creates no active/business outcome,
 request-counter cohort or detection sample; it does not add 24 completions to a
 denominator or reclassify the older five counted reads.
 
+### T16 authenticated output — reliable completion and delivery unproved
+
+The documented existing edge-dev identity authenticated to T16 and produced
+fresh output on November 1, 2026, at 4:16:35 PM EST. This limited witness does
+not establish reliable command/session completion.
+Proof `3144c2f284662bfef108c4a7a7f96a4ef87062286522efb1cd45cdd9c32a052b`
+preserves the original evidence; no key, trust or configuration was introduced.
+The preceding 4:10:14 PM EST attempt reached the trusted endpoint but its default
+key was refused. Corrected proof
+`6a141babe6b9ba80aa39557f5209116e0d71b823e44ca6c69a3ec7dff93cacaa`
+separates that authentication refusal from the helper's broad deadline label.
+The final 4:31:47 PM EST existing-key check returned fresh nonce/output but still
+had no known SSH exit/EOF within its owned twenty-second limit despite explicit
+no-stdin/no-PTY. Completion proof
+`7bd7b9c0af39f5420f3f1f533d01603867df8ef5b1ef248c825371877a01e959`
+and aggregate
+`88c3ee552c15b4452c10506e9ab90d39033afacbbf65f5a314a57819d86d3078`
+were independently hashed/read. Authentication is now known to work; reliable
+termination, target leftovers, ownership/installed source, manifest and client/
+scheduler inventory remain unknown. No broad kills, install/count attempt,
+credential copy, new trust or configuration/security change was made. Existing
+local T16 session repair must resolve command completion before safe deployment.
+Earlier peer/authentication failures do not describe the final limited witness.
+
+Actual local output identifies vendor `gh` 2.95, requiring its own finite profile.
+Profile #2293 merged as `34170e8985c46be84dfd5d10177a3b03c92fac20` from exact
+`6233d19f93d6ebb928e909d37743890c8ebe368a`, using official source
+`70bb306bd25eb407f90eabefd98824aed62cf519` / archive
+`dcd91a606a211327a0649a5fa753edcf4598a7b543e0ee70520a338844949057`.
+Verified source has two constructors and detached telemetry; its pinned go-gh
+v2.13 configuration precedence matches the existing guard. Paired updateable
+Windows builds/focused Linux checks passed. The first native functional run on
+existing host 916 passed 26 top-level functions and four subcases with zero skips
+or failures, including seven environment/nine boundary cases and ledger,
+metadata-schema, native-child, stream/status and cancellation parity checks.
+All fourteen frozen artifacts remained unchanged and no owned process remained;
+real GitHub demand and timing pairs were zero and the vendor was not replaced.
+Native proof
+`768f87d4e0b6cfe1dcf773984c8cf022998df363e1126f99788ce5e0e39801b4`
+and independently audited build approval
+`a2183e7482b1418f36f786c85ee5be6e1006e1cd8fe3147aff452090d694e802`
+bind actual `6233` factory/V3 fixture/916 execution. Profile equivalence at the
+merge does not retarget that execution or the five older installed toolkits.
+This is functional fixture proof, not T16 ownership, vendor-image hash, custody,
+installation, original-privilege or timing acceptance. No older observation is
+retargeted and no twenty-outcome cohort or whole-account total follows from the
+limited access. Existing local T16 session repair is still required before
+safe full installation and the one necessary representative managed read.
+
 ### Earlier source-scoped adapter snapshots — superseded by final reconciliation
 
 The following implementation-stage descriptions retain their original source;

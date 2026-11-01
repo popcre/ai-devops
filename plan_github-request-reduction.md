@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 3:47 PM EST — current coordinator reconciliation.
+November 1, 2026, 4:40 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -53,7 +53,19 @@ population and a supported OS fix remain unproven. Windows 2.97 also failed its
 corrected cold gate (+128.40% p95 / +40.89% total); its warm group passed.
 The separate telemetry-fixture defect has a focused native parity repair with
 zero timing pairs; both failed timing attempts remain retained.
-T16's documented trusted-executor access remains unavailable.
+T16 accepts the existing documented identity and returns fresh command output;
+this is limited authentication/execution evidence, not reliable operational
+access. The final 4:31:47 PM EST bounded check still lacked SSH exit/EOF at twenty
+seconds even without stdin/PTY. Installed ownership/source and leftover process
+state remain unknown; no T16 install/count was attempted. Existing local T16
+session repair of command completion is required, not a new key or Tailscale
+change. Actual vendor output reports `gh` 2.95; its exact-source profile #2293
+merged as `34170e89`, separately from the five installed `10ae` toolkits. The
+paired updateable build passed 26 native top-level functions and four subcases
+on existing host 916, plus the environment/boundary and parity checks, with no
+real API demand, timing pairs or vendor replacement. This does not prove T16
+installation, custody, vendor-image hash, timing or original privileges. No
+borrowed-version qualification is allowed.
 Dispatch/privacy and finite active BlockerWatch terminal/event emission are now
 implemented and tested; the earlier emission/consumer code gaps are repaired.
 The governed SDK component profile admits only successful standalone alarms
