@@ -26,9 +26,10 @@ it. T16 is online but the correct current destination still timed out from a
 trusted peer; no alternate executor or new trust was introduced.
 
 The real native Windows counter run passed environment and hostile custody
-fixtures but failed its cold-start overhead gate. A receipt-writer schema bug
-hid the numeric distributions; repair that capture without changing thresholds
-or erasing the failure. Ordinary Windows live outgoing-write composition is
+fixtures but failed its cold-start overhead gate twice. The receipt-writer schema
+repair retained all twenty cold and twenty warm pairs without changing either
+CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
+failures remain preserved. Ordinary Windows live outgoing-write composition is
 also a real technical gap: the current managed-read adapter is Linux-only,
 the native counter runner is synthetic-fixture-only, and the Windows waiter
 supervisor qualifies source/events without observing its CLI writes. This

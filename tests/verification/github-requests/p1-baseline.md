@@ -589,9 +589,13 @@ All four retained distributions contain twenty measurements. Cold baseline
 p95 was 32.6482 ms versus candidate 35.6978 ms (ratio 1.0934079061); totals were
 633.593 versus 780.8177 ms (ratio 1.2323647831). Warm p95 was 36.4771 versus
 35.0808 ms (ratio 0.9617211895); totals were 653.1579 versus 646.8241 ms
-(ratio 0.9903028043). The cold outlier remains in the distribution. Fifteen
-other top-level functional tests, seven hostile-environment and nine native
-custody cases passed. This is local synthetic qualification with no real API
+(ratio 0.9903028043). The cold outlier remains in the distribution. The selected
+`^TestWindows` source census contains 27 top-level functions across the CLI and
+channel test files, including one role helper that returns immediately in the
+parent process. Twenty-six reported no failure; the overhead function failed
+cold and passed warm. This is a selected-function census, not 27 independent
+functional scenarios. Seven hostile-environment and nine native custody cases
+passed. This is local synthetic qualification with no real API
 traffic; it neither accepts cold performance nor proves ordinary Windows
 authentication/context or whole-command/account costs. HTTP totals stay null.
 
@@ -603,16 +607,38 @@ reads on 4837 and edge-dev returned OPEN with exit 0 in 14.065 and 12.745 second
 consumer outcomes, not loaded-source counter or savings proof. No vendor CLI
 or persistent execution policy changed.
 
+The local Linux full installer also returned exit 0 at `8ab68085`; its actual
+canonical source, managed launcher and manifest digest
+`7144424e0abff8e22249213a3e95edace0f15bb8607d730cbc1ee766e7cc40e6`
+were checked. A necessary post-install issue read then returned exit 0 with
+verified installed source and complete numeric metadata: two primary completed
+writes, zero external writes and five native invocations including unseparated
+admission/identity/quota probes. Command elapsed time was 4.095459595 seconds;
+the one-command cohort took 4.265265832 seconds including 163.427346 ms bootstrap.
+The observation and summary digests are
+`4a576e2ef70d1fe0edbc3cccd077720d5d6d8a34534e66197a7ab5fa2161a45d`
+and `6848ff36fbedd1b3dc466997f28e0155a87ec2d62ef43d8bed7802174491575e`.
+The corrected ten-input build retained both earlier executable hashes and the
+same `updateable` feature variant. This is one useful outcome, not five useful
+outcomes, a matched before/after cohort, remote detection or whole-account HTTP.
+
 Hetz's root-run installer passed all eighteen required stages at the same
-source and a necessary ordinary merged-PR read returned exit 0. Acceptance was
-reopened when the normal source owner could not read newly installed root-only
-tracked files. Preserve that regression and repair through the owning
-installation procedure; installer exit 0 alone does not prove the normal-user
-capability. Root source qualification additionally remains unknown because the
-protected read boundary drops root's special access and its SSH soft descriptor
-limit is insufficient. No canonical permission change or retained capability
-may be sacrificed solely to force a qualification result. Explicit normal-owner
-qualification must remain distinct from root execution.
+source. Its initial root-only tracked-file regression is preserved. The owning
+installation recovery restored 91 metadata entries without changing content,
+then all eighteen required stages passed again. Separate prior-head metadata
+recovery restored normal-owner readability without changing its content. The
+protected recovery digests are
+`4e26bb69750e6aad92aaf66c1bca1a46b516d8c89249eb21d59ed5fa5c4dd99e`
+and `bc0af196024f15b8d74f88d62836181570eb667ebd170883b211663964d5b5c7`.
+Normal-owner live source custody, ordinary import and sealed waiter help then
+passed; the parent's original descriptor limit was restored. A necessary
+normal-owner installed read returned MERGED and exit 0 in 11.306788892 seconds,
+including 149.701114 ms source bootstrap, with verified raw and loaded source.
+Its sanitized receipt digest is
+`cc10728a9a309cd784bc0f581725d8472cf1589c1a54405c1290608d39284c24`.
+Eligibility preceded observation, so detection latency remains unknown; request
+totals and savings also remain unknown. This normal-owner proof is distinct
+from root execution and does not erase the original installation regression.
 
 The necessary PR #2252 repair subsequently merged as
 `30f235dba3305e1dfec412ae36e95f36756b5c2f`. A real 4837 waiter was observed
