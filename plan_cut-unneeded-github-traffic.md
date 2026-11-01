@@ -12,6 +12,27 @@ Linked handoff (this session):
 
 ## STATUS — read first
 
+October 31, 2026, 10:13 PM EDT — superseding source audit under #658.
+Owner: current #658 coordinator. This reconciliation changes neither the
+acceptance contract nor the preserved historical samples below.
+
+| Outcome | Current verified state | Remaining work |
+|---|---|---|
+| Item-2 cache repair | #1710 merged as `3b9ac286`; do not repeat its source repair | Comparable natural-workload read/write acceptance |
+| Duration and counter source | #1510 merged as `1861259d`; #1511 merged as `2ed3c24b` | Source/clock qualification and actual transport coverage; these source landings do not establish acceptance |
+| S3 managed caller routing | Source and bounded installed P3 proof accepted in [the October 13 record](tests/verification/github-requests/p3-installed-proof-edge-dev-2026-10-13.md) for #931/#933/#936 | Fleet-wide coverage remains separate; dispatch/privacy terminal outcome receipts are absent, rather than their callers being unwrapped |
+| Congestion and native cached waiter | #2219/#2225/#2229 source, full installations and installed proofs accepted in [the October 31 record](tests/verification/github-requests/admission-20261031.md) | Active-copy rollout and comparable workload acceptance; do not redo the completed scoped repair |
+| S4/P8 programme acceptance | Open under #658/#660; original S1/S2 and two busy-window proofs retained | Matched costs, useful-work latency, safety equivalence and host/client coverage |
+
+Fresh session starts with the parent plan's current STATUS and #658, then the
+first unproved outcome. The dated entries and S3/S4 table below are historical;
+their pending #1710/#1510/#1511 source-delivery and P3 proof instructions are
+superseded by this audit. Current source checks passed: the managed GitHub
+transport guard and all 15 request-counter tests. These checks establish
+neither savings nor live programme completion.
+
+### Historical status snapshots
+
 October 21, 2026, 2:12 PM EDT: current Codex session on edge-dev3 owns resumed
 #658/#660 acceptance. Both cleanup closures are reopened. The duration adapter
 is already installed; do not repeat the October 15 handoff's pending install.

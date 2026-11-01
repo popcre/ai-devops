@@ -1,5 +1,28 @@
 # P1 request attribution — working baseline
 
+## Superseding source audit — October 31, 2026, 10:13 PM EDT
+
+Owner: current #658 coordinator, with P1 acceptance retained on #660.
+The frozen samples and their original limits below remain unchanged. Pending
+source-delivery statements are historical: #1710 merged as `3b9ac286`, #1510
+as `1861259d`, and #1511 as `2ed3c24b`. The [October 31 installed cached-waiter
+proof](admission-20261031.md#final-source-installed-proof) establishes the scoped
+Linux/Windows capability repair, not whole-workload savings or cache-hit rates.
+
+Dispatch and privacy callers now use the shared transport; descriptions below
+calling them unwrapped predate the accepted [P3 installed proof](p3-installed-proof-edge-dev-2026-10-13.md).
+Their terminal outcome receipts remain absent: the current collector and
+reporter accept workflow outcomes only for PR waiting and BlockerWatch ticks.
+Current managed-transport guard and request-counter tests pass (15 counter
+tests). This does not qualify missing outcomes or historical observations.
+
+Keep #658/#660 open for matched baseline/candidate costs, source and clock
+qualification, safety-event equivalence, useful-work latency and host/client
+coverage. Schema-4 source/clock evidence remains deliberately unknown; local
+monotonic duration observations do not establish GitHub-event detection latency.
+No source landing, installed command or new status note retrospectively turns
+the samples below into a matched comparison.
+
 ## Resume sample — October 21, 2026, 2:12 PM EDT
 
 Owner: current Codex session on edge-dev3 under #658/#660. This supplements
