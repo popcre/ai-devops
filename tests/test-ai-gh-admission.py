@@ -30,17 +30,32 @@ class AdmissionTests(unittest.TestCase):
     def stop_children(self):
         for p in self.children:
             if p.poll() is None:
-                p.terminate()
+                self.signal(p, "TERM")
             try:
                 p.communicate(timeout=3)
             except subprocess.TimeoutExpired:
-                p.kill()
+                self.signal(p, "KILL")
                 p.communicate()
 
+    def signal(self, p, name):
+        # Native Windows TerminateProcess bypasses Bash traps and its process
+        # ID is not Git Bash's PID. Ask the same Bash runtime to deliver the
+        # signal to the PID recorded by the fixture's exec wrapper.
+        if p.pidfile.exists():
+            subprocess.run([self.bash, "-c", 'kill -"$1" "$2"', "--", name,
+                            p.pidfile.read_text().strip()], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=3)
+        else:
+            p.kill()
+
     def start(self, name, **settings):
-        p = subprocess.Popen([os.environ.get("AI_TEST_BASH") or shutil.which("bash"), (ROOT / "bin/ai-gh").as_posix(), "api", name],
+        self.bash = os.environ.get("AI_TEST_BASH") or shutil.which("bash")
+        pidfile = self.base / f"pid-{len(self.children)}"
+        p = subprocess.Popen([self.bash, "-c", 'printf "%s\\n" "$$" > "$1"; shift; exec "$BASH" "$@"', "--",
+                              pidfile.as_posix(), (ROOT / "bin/ai-gh").as_posix(), "api", name],
                              env=dict(self.env, **settings), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, text=True)
+        p.pidfile = pidfile
         self.children.append(p)
         return p
 
@@ -82,7 +97,7 @@ class AdmissionTests(unittest.TestCase):
         for p in newcomers:
             self.finish(p)
         rows = (self.base / "reservations").read_text().splitlines()
-        self.assertEqual(int(rows[0].split()[2]), old.pid)
+        self.assertEqual(int(rows[0].split()[2]), int(old.pidfile.read_text()))
         self.assertEqual(len(rows), 13)
         self.assertEqual(self.ticket_count(), 0)
 
@@ -92,7 +107,7 @@ class AdmissionTests(unittest.TestCase):
         self.wait_for(lambda: self.ticket_count() == 1)
         following = self.start("following")
         self.wait_for(lambda: self.ticket_count() == 2)
-        old.terminate()
+        self.signal(old, "TERM")
         old.communicate(timeout=3)
         self.wait_for(lambda: self.ticket_count() == 1)
         self.assertTrue((lock / "owner").is_file())
@@ -116,7 +131,7 @@ class AdmissionTests(unittest.TestCase):
         lock = self.hold()
         dead = self.start("killed")
         self.wait_for(lambda: self.ticket_count() == 1)
-        dead.kill()
+        self.signal(dead, "KILL")
         dead.communicate(timeout=3)
         tickets = list((self.state / "admission.d").glob("[0-9]*"))
         self.assertEqual(len(tickets), 1)
