@@ -21,6 +21,13 @@ source `628d2cf` was shown Merged with Checks Not checked. This is mirror
 continuity, not independent check execution or adoption. Full offline CI results
 remain independently tracked.
 
+The final public mirror overview shows exact landing `813baf8b`;
+[existing Trail 372/change 170](https://entire.com/gh/popcre/ai-devops/-/trails/372/changes/170)
+shows Merged at exact PR head `35dfb37c`, Checks Not checked and one commit
+behind in the squash context. GitHub's required safety result is authoritative;
+mirror CI parity remains unverified. No capture, hooks or paid/integration
+settings changed.
+
 Normal full installations on local Linux, Hetz and the three reachable Windows
 hosts now bind `8ab68085`; necessary ordinary reads passed. Hetz's subsequent
 owner-readability regression was repaired without content changes, and all
@@ -36,14 +43,23 @@ fixtures but failed its cold-start overhead gate twice. The receipt-writer schem
 repair retained all twenty cold and twenty warm pairs without changing either
 CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
 failures remain preserved. The finite native Windows read/counter adapter and
-metadata-only actual-context guards are implemented in open, unmerged PR #2253.
-This is candidate implementation, not installed or actual-context acceptance:
+metadata-only actual-context guards merged through PR #2253 as
+`813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on origin/main.
+Final-source installation receipts remain pending; merge is not actual-context acceptance:
 foreign credential readers and unsafe namespaces remain qualification refusals,
 and the native cold counter gate remains failed. The existing Windows waiter
 has separately proved source-bound event delivery within the five-minute ceiling.
 A genuine installed-source Linux waiter began for #2253 while it was OPEN and
-unqueued; its final event receipt remains pending. Keep P1/P7/P8, twenty matched
+unqueued, then observed its merge with exit 0 and a source-qualified conditional
+95.155–97.383-second delivery interval, within the five-minute ceiling. This
+waiter witnessed installed `8ab68085`, not the new final source. Keep P1/P7/P8, twenty matched
 outcomes, before/after comparison and live proof open until demonstrated.
+
+The exact final-source Windows fixture passed 95 native cases on PowerShell
+7.6.8, including valid event parsing and injected cleanup failures followed by
+verified cleanup of later owned handles and trees. It made no API request and
+did not execute the optional counter image. This repairs the native fixture
+and cleanup capability; it does not erase the separate cold-counter failure.
 
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains

@@ -655,3 +655,56 @@ there is no substituted sixty-second acceptance target. Full observation was
 outcome does not satisfy the twenty-outcome floor, establish p95 regression,
 count actual requests or prove savings. The source witness is `8ab68085`, not
 the later merge commit being detected.
+
+## Final source delivery and Linux merge observation
+
+PR #2253 merged as `813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on
+origin/main. This delivers the finite native Windows observation implementation
+and source/event corrections; it does not establish final-source installation,
+ordinary Windows actual-context qualification or programme acceptance.
+
+The protected final native receipt digest is
+`8a773e141069d3354d89c53aa38a9fdb810b29b921aeb2202118c5ef1dc05036`.
+It binds the three fixture/supervisor/event files to exact PR head `35dfb37c`
+and landing `813baf8b`. On 916 under PowerShell Core 7.6.8, 95 native cases
+passed with exit 0, including genuine event type handling and injected first
+capture-disposal and first directory-unseal faults. Later owned cleanup and
+actual fixture-tree deletion were verified. The original CI failure remains
+preserved. This run made zero API requests, changed no host configuration and
+did not run the optional counter-image case; ordinary-context counter refusal
+and both earlier native cold-counter failures remain unchanged.
+
+The public mirror overview subsequently showed exact landing `813baf8b`.
+[Existing Trail 372/change 170](https://entire.com/gh/popcre/ai-devops/-/trails/372/changes/170)
+showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
+behind in the squash context. This is sanitized continuity, not mirror CI
+execution parity; GitHub's required safety result remains authoritative.
+
+The final same-guard metadata-only Windows audits still refuse ordinary
+counter qualification: 4837 and 916 have foreign configuration-ancestor
+writers; edge-dev has foreign credential-file readers. Bounded local-group
+closure did not establish an owner-only or existing-administrator-only
+equivalence. The protected sanitized receipt digests are
+`fc0cef9a8d014ea867e4b3ca54964bb8fa59e47bcec9004fbffbe0d119b5a134`
+(4837), `a4aac61c6f11be6c5a265a1af26c60c546c9a80cb648e8d0e559b68103a9c4ab`
+(916) and `cf2294d2fab1619adec648c5da45f065ca52000bf652ee97e550fa7be81bb9f8`
+(edge-dev). No configuration contents, permission changes, copied credentials,
+alternative authentication context or API request was used for these audits.
+These qualification refusals preserve ordinary working CLI capability; they
+are not zero-request observations. T16 remains a separate external trusted
+execution/access gap despite being online, not evidence of installed coverage.
+
+The existing Linux installed-source waiter began while #2253 was OPEN and
+unqueued. It later reported the actual merge commit and exit 0 under live
+sealed-generation custody. Its receipt digest is
+`d11cdb642057f889f26681b02800c6579446d5e5843d72eae1fc68ef1e2a5eda`.
+The source witness is installed `8ab68085`, manifest
+`7144424e0abff8e22249213a3e95edace0f15bb8607d730cbc1ee766e7cc40e6`;
+raw/loaded fingerprints match the previously verified installed observation.
+The genuine post-start merge interval is 95,155–97,383 ms with 1,114 ms combined
+uncertainty and the explicit GitHub UTC assumption. It passes the configured
+300,000 ms waiter ceiling. Total qualification took 1,239.979463014 seconds,
+including 59.376810 ms source bootstrap; total waiting time is not event delivery
+latency. The original 25-minute deadline was unchanged and no replay was run.
+This is one genuine useful outcome, not twenty matched baseline/candidate
+outcomes, a p95 regression result, an HTTP census or savings evidence.
