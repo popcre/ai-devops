@@ -66,7 +66,9 @@ if [ -n "$installed_checkout" ]; then
   same_path "$source_common" "$installed_common" || {
     warn 'candidate does not share the installed checkout Git common directory'; exit 1;
   }
-  [ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ] || {
+  # --no-optional-locks keeps this read from rewriting the shared common
+  # directory's worktree index as root; the ownership wrapper is primary-only.
+  [ -z "$(git -C "$SOURCE_ROOT" --no-optional-locks status --porcelain)" ] || {
     warn 'candidate checkout has local changes'; exit 1;
   }
 fi
@@ -91,17 +93,17 @@ else
   trap 'exit 143' TERM
 fi
 umask "$install_original_umask"
-if [ -n "$(git status --porcelain)" ]; then
-  warn 'checkout has local changes; preserve and reconcile them before updating'
-  exit 1
-fi
-previous_head="$(git rev-parse HEAD)" || exit 1
 # Public source creation must not inherit a protected logging umask or leave
 # root-created source/Git outputs inaccessible to the installed checkout owner.
 # The wrapper scopes 022 to Git itself; installer/private state keeps its mask.
 public_git() {
   python3 "$SOURCE_ROOT/tools/lib/install-public-git.py" "$REPO_ROOT" "$@"
 }
+if [ -n "$(public_git --no-optional-locks status --porcelain)" ]; then
+  warn 'checkout has local changes; preserve and reconcile them before updating'
+  exit 1
+fi
+previous_head="$(git rev-parse HEAD)" || exit 1
 branch="$(git symbolic-ref --short -q HEAD || true)"
 if [ -n "$branch" ]; then
   [ "$branch" = main ] || { warn 'only main or a detached installed checkout may update'; exit 1; }
@@ -222,7 +224,7 @@ info 'Re-running install.sh'
 source_sha="$target_head"
 proof_file="$(mktemp "$install_lock_dir/rollback.XXXXXXXX")" || exit 1
 rollback_checkout() {
-  [ -z "$(git status --porcelain)" ] || { warn 'checkout has new local edits; automatic source rollback refused'; return 1; }
+  [ -z "$(public_git --no-optional-locks status --porcelain)" ] || { warn 'checkout has new local edits; automatic source rollback refused'; return 1; }
   [ "$(git rev-parse HEAD)" = "$target_head" ] || { warn 'checkout moved during install; automatic source rollback refused'; return 1; }
   [ "$(git symbolic-ref --short -q HEAD || true)" = "$branch" ] || {
     warn 'checkout branch changed during install; automatic source rollback refused'; return 1;
@@ -234,7 +236,7 @@ rollback_checkout() {
   fi
   [ "$(git rev-parse HEAD)" = "$previous_head" ] &&
     [ "$(git symbolic-ref --short -q HEAD || true)" = "$branch" ] &&
-    [ -z "$(git status --porcelain)" ]
+    [ -z "$(public_git --no-optional-locks status --porcelain)" ]
 }
 if ! AI_DEVOPS_INSTALL_LOCK_FD=9 AI_DEVOPS_INSTALL_LOCK_PARENT="$$" \
   AI_DEVOPS_INSTALL_DEFER_FINALIZE=1 AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE="$proof_file" \

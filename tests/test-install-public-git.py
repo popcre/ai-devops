@@ -292,5 +292,23 @@ class PublicGitTests(unittest.TestCase):
                 change.assert_not_called()
 
 
+    def test_status_read_through_wrapper_leaves_index_untouched(self):
+        index = self.repo / ".git/index"
+        before = (helper.metadata(index), index.read_bytes())
+        original = os.umask(0o077)
+        try:
+            self.assertEqual(helper.public_git(self.repo, ["--no-optional-locks", "status", "--porcelain"]), 0)
+        finally: os.umask(original)
+        self.assertEqual((helper.metadata(index), index.read_bytes()), before)
+
+    def test_updater_and_gates_status_checks_never_write_the_index(self):
+        for relative in ("update.sh", "bin/ai-task-gates"):
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            for number, line in enumerate(text.splitlines(), 1):
+                if "status --porcelain" in line or "status --porcelain=v1" in line:
+                    self.assertTrue("public_git" in line or "--no-optional-locks" in line,
+                                    f"{relative}:{number} runs git status without ownership-safe routing")
+
+
 if __name__ == "__main__":
     unittest.main()
