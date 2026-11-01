@@ -59,6 +59,12 @@ foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
 $passed=0
 function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
 function Refuses([scriptblock]$Operation,[string]$Name){$refused=$false;try{& $Operation}catch{$refused=$true};Assert $refused $Name}
+function Get-FixtureDacl([string]$Path,[bool]$Directory){
+    $sddl=(Get-Acl -LiteralPath $Path).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    $acl=if($Directory){[Security.AccessControl.DirectorySecurity]::new()}else{[Security.AccessControl.FileSecurity]::new()}
+    $acl.SetSecurityDescriptorSddlForm($sddl,[Security.AccessControl.AccessControlSections]::Access)
+    return $acl
+}
 $file=Join-Path $root 'sealed.sh'
 $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($file,'sealed bytes')
@@ -100,8 +106,8 @@ $parentHandle=[ParentIsolationProbe]::OpenProcess(0x68,$false,[int]$args[2])
 if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parentHandle)|Out-Null;if($args[3] -eq '1'){exit 16}}
 try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
 try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
-try{$a=Get-Acl -LiteralPath $root;Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
-try{$a=Get-Acl -LiteralPath (Join-Path $root 'sealed.sh');Set-Acl -LiteralPath (Join-Path $root 'sealed.sh') -AclObject $a;exit 17}catch{}
+try{$s=(Get-Acl -LiteralPath $root).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access);$a=[Security.AccessControl.DirectorySecurity]::new();$a.SetSecurityDescriptorSddlForm($s,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
+try{$p=Join-Path $root 'sealed.sh';$s=(Get-Acl -LiteralPath $p).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access);$a=[Security.AccessControl.FileSecurity]::new();$a.SetSecurityDescriptorSddlForm($s,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $p -AclObject $a;exit 17}catch{}
 try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
 if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
 exit 0
@@ -285,7 +291,7 @@ else:
         try{Refuses {[GenerationCustody]::Read($meta)} 'Metadata handle cannot read credential bytes'}finally{$meta.Dispose()}
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
-        $acl=Get-Acl -LiteralPath $hostFile
+        $acl=Get-FixtureDacl $hostFile $false
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Write,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $hostFile -AclObject $acl
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
@@ -297,7 +303,7 @@ else:
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
-        $acl=Get-Acl -LiteralPath $unsafe
+        $acl=Get-FixtureDacl $unsafe $true
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $unsafe -AclObject $acl;$env:GH_CONFIG_DIR=$unsafe
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config namespace refused'
@@ -391,7 +397,7 @@ else:
     $parentHandle=[GenerationCustody]::Hold($unsafeParent,$true,$false)
     try{
         [GenerationCustody]::AssertProtectedParent($parentHandle,$false)
-        $a=Get-Acl -LiteralPath $unsafeParent
+        $a=Get-FixtureDacl $unsafeParent $true
         $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Modify','None','None','Allow'))
         Set-Acl -LiteralPath $unsafeParent -AclObject $a
         $candidate=Join-Path $unsafeParent 'candidate'
