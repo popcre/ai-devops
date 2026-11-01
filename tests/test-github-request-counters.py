@@ -268,6 +268,103 @@ class TargetOrdinal(unittest.TestCase):
         self.assertTrue(all(o.isdigit() for o in out), out)
 
 
+class SameOperationMeasurements(unittest.TestCase):
+    def test_base_exception_always_resets_operation_buffer(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             mock.patch.object(single.subprocess, "run", side_effect=KeyboardInterrupt):
+            root = Path(temporary)
+            with self.assertRaises(KeyboardInterrupt):
+                single.run(["fixture"], None, root / "age", root / "source", args_key="k")
+            self.assertIsNone(single._OPERATION_RECORDS.get())
+
+    def test_nested_operations_commit_separately(self):
+        import io
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); body = ProspectiveReadIntervals.body(self, "a" * 40)
+            result = subprocess.CompletedProcess([], 0, body, b""); batches = []
+            def execute(command, **kwargs):
+                if command == ["outer"]:
+                    single.run(["inner"], root / "inner", root / "inner-age", root / "inner-source", args_key="inner")
+                return result
+            with mock.patch.object(single.subprocess, "run", side_effect=execute), \
+                 mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=io.BytesIO()), stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+                 mock.patch.object(single, "_target_ordinal", side_effect=lambda key: {"inner": 17, "outer": 18}[key]), \
+                 mock.patch.object(single, "_append_records", side_effect=lambda rows: batches.append(list(rows))):
+                self.assertEqual(single.run(["outer"], root / "outer", root / "age", root / "source", args_key="outer"), 0)
+            self.assertEqual([[r["target_ordinal"] for r in rows] for rows in batches], [[17, 17], [18, 18]])
+            self.assertIsNone(single._OPERATION_RECORDS.get())
+
+    def test_concurrent_operations_do_not_share_buffers(self):
+        import io, threading
+        from concurrent.futures import ThreadPoolExecutor
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); body = ProspectiveReadIntervals.body(self, "a" * 40)
+            barrier = threading.Barrier(2); batches = []
+            def execute(*args, **kwargs):
+                barrier.wait(timeout=5)
+                return subprocess.CompletedProcess([], 0, body, b"")
+            def operation(key):
+                return single.run([key], root / key, root / (key+"-age"), root / (key+"-source"), args_key=key)
+            with mock.patch.object(single.subprocess, "run", side_effect=execute), \
+                 mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=io.BytesIO()), stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+                 mock.patch.object(single, "_target_ordinal", side_effect=lambda key: {"first": 17, "second": 18}[key]), \
+                 mock.patch.object(single, "_append_records", side_effect=lambda rows: batches.append(list(rows))), \
+                 ThreadPoolExecutor(max_workers=2) as pool:
+                self.assertEqual(list(pool.map(operation, ("first", "second"))), [0, 0])
+            self.assertEqual(sorted([r["target_ordinal"] for r in rows] for rows in batches), [[17, 17], [18, 18]])
+
+    def test_flush_before_return_and_no_cross_operation_ordinal_reuse(self):
+        import io
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            body = ProspectiveReadIntervals.body(self, "a" * 40)
+            result = subprocess.CompletedProcess(["fixture"], 0, body, b"")
+            batches = []
+            with mock.patch.object(single.subprocess, "run", return_value=result), \
+                 mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=io.BytesIO()),
+                                                                 stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+                 mock.patch.object(single, "_target_ordinal", side_effect=[17, 18]) as ordinal, \
+                 mock.patch.object(single, "_append_records", side_effect=lambda rows: batches.append(list(rows))):
+                for expected in (17, 18):
+                    self.assertEqual(single.run(["fixture"], root / "cache", root / "age", root / "source", args_key="same target"), 0)
+                    self.assertEqual(len(batches), expected - 16)
+                    self.assertEqual([r["measurement"] for r in batches[-1]], ["write_observation", "read_observation"])
+                    self.assertEqual([r["target_ordinal"] for r in batches[-1]], [expected, expected])
+                self.assertEqual(ordinal.call_count, 2)
+                self.assertIsNone(single._OPERATION_RECORDS.get())
+
+    def test_telemetry_failure_cannot_change_original_result(self):
+        import io
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); body = ProspectiveReadIntervals.body(self, "a" * 40)
+            output = io.BytesIO()
+            with mock.patch.object(single.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, body, b"")), \
+                 mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=output), stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+                 mock.patch.object(single, "_target_ordinal", return_value=None), \
+                 mock.patch.object(measure_append, "append_records", side_effect=OSError("fixture fsync")):
+                self.assertEqual(single.run(["fixture"], root / "cache", root / "age", root / "source", args_key="k"), 0)
+                self.assertEqual(output.getvalue(), body)
+                self.assertIsNone(single._OPERATION_RECORDS.get())
+
+    def test_serialization_failure_preserves_successful_primary_output(self):
+        import io
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); body = ProspectiveReadIntervals.body(self, "a" * 40)
+            output = io.BytesIO()
+            with mock.patch.object(single.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, body, b"")), \
+                 mock.patch.object(single, "sys", SimpleNamespace(stdout=SimpleNamespace(buffer=output), stderr=SimpleNamespace(buffer=io.BytesIO()))), \
+                 mock.patch.object(single, "_target_ordinal", return_value=17), \
+                 mock.patch.object(single.json, "dumps", side_effect=TypeError("fixture serialization")):
+                self.assertEqual(single.run(["fixture"], root / "cache", root / "age", root / "source", args_key="k"), 0)
+                self.assertEqual(output.getvalue(), body)
+                self.assertIsNone(single._OPERATION_RECORDS.get())
+
+
 class MeasureAppend(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -284,6 +381,82 @@ class MeasureAppend(unittest.TestCase):
 
     def test_append_rejects_embedded_newline(self):
         self.assertFalse(measure_append.append_record(self.dir, "a\nb"))
+
+    def test_same_operation_batch_preserves_order_and_one_durable_commit(self):
+        with mock.patch.object(measure_append.os, "fsync", wraps=os.fsync) as durable:
+            self.assertTrue(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(durable.call_count, 1)
+        self.assertEqual(next(self.dir.glob("*.jsonl")).read_text(), '{"write":1}\n{"read":1}\n')
+
+    def test_short_write_restores_existing_rows(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        actual_open = open
+        class ShortWriter:
+            def __init__(self, handle): self.handle = handle
+            def __enter__(self): return self
+            def __exit__(self, *args): return self.handle.__exit__(*args)
+            def __getattr__(self, name): return getattr(self.handle, name)
+            def write(self, data): return self.handle.write(data[:3])
+        with mock.patch.object(measure_append, "open", create=True,
+                               side_effect=lambda *a, **k: ShortWriter(actual_open(*a, **k))):
+            self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(next(self.dir.glob("*.jsonl")).read_text(), '{"prior":1}\n')
+        self.assertFalse((self.dir / "write.lock").exists())
+
+    def test_fsync_error_restores_previous_length_and_releases_lock(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        with mock.patch.object(measure_append.os, "fsync", side_effect=[OSError("fixture"), None]):
+            self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(next(self.dir.glob("*.jsonl")).read_text(), '{"prior":1}\n')
+        self.assertFalse((self.dir / "write.lock").exists())
+
+    def test_late_flush_error_rolls_back_already_written_batch(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        actual_open = open
+        class LateFailure:
+            def __init__(self, handle): self.handle, self.failed = handle, False
+            def __enter__(self): return self
+            def __exit__(self, *args): return self.handle.__exit__(*args)
+            def __getattr__(self, name): return getattr(self.handle, name)
+            def flush(self):
+                self.handle.flush()
+                if not self.failed:
+                    self.failed = True
+                    raise OSError("fixture late flush")
+        with mock.patch.object(measure_append, "open", create=True,
+                               side_effect=lambda *a, **k: LateFailure(actual_open(*a, **k))):
+            self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(next(self.dir.glob("*.jsonl")).read_text(), '{"prior":1}\n')
+
+    def test_fsync_and_rollback_failure_still_reports_false(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        with mock.patch.object(measure_append.os, "fsync", side_effect=OSError("fixture unavailable")):
+            self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertFalse((self.dir / "write.lock").exists())
+
+    def test_batch_lock_refusal_does_not_append(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        (self.dir / "write.lock").mkdir(mode=0o700)
+        with mock.patch.object(measure_append.time, "sleep"):
+            self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(next(self.dir.glob("*.jsonl")).read_text(), '{"prior":1}\n')
+
+    def test_batch_cap_checks_both_rows_before_writing(self):
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        target = next(self.dir.glob("*.jsonl")); target.write_bytes(b"x" * 4193270)
+        self.assertFalse(measure_append.append_records(self.dir, ['x' * 1000, 'y' * 1000]))
+        self.assertEqual(target.stat().st_size, 4193270)
+        for rows in ([], ['a', 'b', 'c'], ['a', 'bad\nrow'], ['a', None]):
+            self.assertFalse(measure_append.append_records(self.dir, rows))
+
+    def test_batch_never_follows_a_daily_symlink(self):
+        if os.name == "nt": self.skipTest("native symlink permission tested separately")
+        self.assertTrue(measure_append.append_record(self.dir, '{"prior":1}'))
+        target = next(self.dir.glob("*.jsonl")); target.unlink()
+        outside = self.dir.parent / "outside"; outside.write_text("untouched")
+        target.symlink_to(outside)
+        self.assertFalse(measure_append.append_records(self.dir, ['{"write":1}', '{"read":1}']))
+        self.assertEqual(outside.read_text(), "untouched")
 
 
 class ReportCounters(unittest.TestCase):

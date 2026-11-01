@@ -50,8 +50,22 @@ def write_event_fd(descriptor: int, record: str) -> bool:
 
 def append_record(measurements_dir: Path, record: str) -> bool:
     """Append one newline-terminated record. Returns False on any refusal."""
+    return append_records(measurements_dir, [record])
+
+
+def append_records(measurements_dir: Path, records) -> bool:
+    """Commit at most two same-operation rows with one durable append.
+
+    No data survives this call in memory. A failed append restores the prior
+    length while its existing writer lock is held, so a short write cannot
+    leave a partial JSON row ahead of a later successful observation.
+    """
     try:
-        if not isinstance(record, str) or "\n" in record or not record:
+        if (not isinstance(records, (list, tuple)) or not 1 <= len(records) <= 2
+                or any(not isinstance(row, str) or "\n" in row or not row for row in records)):
+            return False
+        payload = ("\n".join(records) + "\n").encode("utf-8")
+        if len(payload) > 4194304:
             return False
         if measurements_dir.is_symlink():
             return False
@@ -89,10 +103,25 @@ def append_record(measurements_dir: Path, record: str) -> bool:
         try:
             if target.exists() and target.stat().st_size >= 4193280:
                 return False
-            with open(target, "a", encoding="utf-8", newline="\n") as handle:
-                handle.write(record + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            with open(target, "a+b") as handle:
+                handle.seek(0, os.SEEK_END)
+                original = handle.tell()
+                if original + len(payload) > 4194304:
+                    return False
+                try:
+                    if handle.write(payload) != len(payload):
+                        raise OSError("incomplete measurement append")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                except OSError:
+                    try:
+                        handle.seek(original)
+                        handle.truncate()
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    except OSError:
+                        pass
+                    return False
             return True
         except OSError:
             return False
@@ -101,7 +130,7 @@ def append_record(measurements_dir: Path, record: str) -> bool:
                 lock.rmdir()
             except OSError:
                 pass
-    except OSError:
+    except (OSError, UnicodeError):
         return False
 
 
