@@ -655,3 +655,243 @@ there is no substituted sixty-second acceptance target. Full observation was
 outcome does not satisfy the twenty-outcome floor, establish p95 regression,
 count actual requests or prove savings. The source witness is `8ab68085`, not
 the later merge commit being detected.
+
+## Final source delivery and Linux merge observation
+
+PR #2253 merged as `813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on
+origin/main. This delivers the finite native Windows observation implementation
+and source/event corrections; it does not establish final-source installation,
+ordinary Windows actual-context qualification or programme acceptance.
+
+The protected final native receipt digest is
+`8a773e141069d3354d89c53aa38a9fdb810b29b921aeb2202118c5ef1dc05036`.
+It binds the three fixture/supervisor/event files to exact PR head `35dfb37c`
+and landing `813baf8b`. On 916 under PowerShell Core 7.6.8, 95 native cases
+passed with exit 0, including genuine event type handling and injected first
+capture-disposal and first directory-unseal faults. Later owned cleanup and
+actual fixture-tree deletion were verified. The original CI failure remains
+preserved. This run made zero API requests, changed no host configuration and
+did not run the optional counter-image case; ordinary-context counter refusal
+and both earlier native cold-counter failures remain unchanged.
+
+An earlier public mirror overview showed exact landing `813baf8b`.
+[Existing Trail 372/change 170](https://entire.com/gh/popcre/ai-devops/-/trails/372/changes/170)
+showed Merged at exact PR head `35dfb37c` with Checks Not checked and one commit
+behind in the squash context. This is sanitized continuity, not mirror CI
+execution parity; GitHub's required safety result remains authoritative.
+
+The final overview subsequently showed exact landing
+`a98131576c3a092fc19ec938d24650ab98469c8a`.
+[Existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
+showed Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
+Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
+This final mirror continuity likewise does not establish CI execution parity.
+
+The earlier default-namespace metadata-only Windows audits refused qualification:
+4837 and 916 had configuration-ancestor writers outside the finite trusted set;
+edge-dev had file readers outside that set. The protected sanitized receipt digests are
+`fc0cef9a8d014ea867e4b3ca54964bb8fa59e47bcec9004fbffbe0d119b5a134`
+(4837), `a4aac61c6f11be6c5a265a1af26c60c546c9a80cb648e8d0e559b68103a9c4ab`
+(916) and `cf2294d2fab1619adec648c5da45f065ca52000bf652ee97e550fa7be81bb9f8`
+(edge-dev). No configuration contents, permission changes, copied credentials,
+alternative authentication context or API request was used for those audits.
+Subsequent source inspection found that the guard had inspected the default
+configuration rather than the private SSH namespace already selected by `ai-gh`.
+Those default-namespace audits therefore do not establish the actual command's
+credential context. The corrected guard follows the existing selection without
+changing environment or copying credentials: metadata checks pass on edge-dev
+and 4837, while 916's actual context remains refused. The CodexSandboxUsers
+read/execute settings grant is an intentional low-privilege sandbox role, not
+evidence that unidentified human users were granted credentials; no group-trust
+exception or ACL change was made to obtain qualification. These refusals are
+not zero-request observations. T16 remains a separate external trusted
+execution/access gap despite being online, not evidence of installed coverage.
+Its final protected access digest is
+`003e5b8e6dd0f88a85ccfa4d1479cb29984a648153f1a0763826179eba93f9d3`:
+the documented SSH and RDP endpoints each timed out under six-second bounds
+from a trusted peer. The atlas names no alternative SSH port, WinRM route or
+native executor. No broad probe, new trust or authentication-setting change
+was made; a reachable supported executor is still required.
+
+The final local Linux full installation independently verifies exact clean
+`813baf8b`, exit 0, all 21 required stages passed and none failed. Its manifest
+digest is `01ac7b2fc8bb30aa70d67301268a587e4f3cdce5f8ceefd003e6f9d71bac9bc0`;
+the sanitized installation-summary digest is
+`0508c87c8a24a820fcd01dc0eba9c8e2a8ac0702a8d35b75d20e2aed3e27d6fe`.
+A necessary installed-source issue read returned exit 0 and complete, verified
+numeric metadata: two primary writes, zero external writes and five native
+invocations including unseparated admission/identity/quota probes. Command time
+was 4.189972613 seconds and total cohort time 4.367105921 seconds, including
+168.921321 ms counter/bootstrap; 62.982448 ms source bootstrap is a component,
+not an additional amount. Observation and summary digests are
+`72b9d3788c3ee6a7e613fc0c9449d078363119a481946a9f7dcbe41be855790c`
+and `905ef87b9c4c16f998a2142a0d67488b9219688fa8f12a5dcfd1307d4af4b459`.
+This proves one useful final-installed-source outcome, not five useful outcomes,
+matched savings, detection latency, GraphQL points or whole-account HTTP totals.
+
+Final normal full installations on 4837, edge-dev and 916 each returned exit 0,
+with clean canonical source and matching managed launchers at exact `813baf8b`.
+One necessary installed-source issue read per host returned OPEN and exit 0;
+each source receipt was consumed while native custody remained held, with
+verified raw/loaded fingerprint
+`48ef2a3e321f02e430d0efdbef5687aa4ac73e6960ccf3e211c3a35a97347442`.
+The three sanitized delivery receipt digests, respectively, are
+`8aad3c400f620244f819d736b6a489fed206e885323886f909e9c3bb35b658f4`,
+`0fe9d141f470d7f612400bb4c368daeafd3cf1f34e9540fd85ec079806948c68`
+and `f8def5afc355c99debf9dc03461453aa3d658e914dbba77a63b3afcae348739b`.
+Elapsed time before receipt acknowledgement was 17.0356866, 16.2493993 and
+11.2757293 seconds, respectively. Clock qualification remains unknown and
+request counts remain null: the actual-context counter refusal is preserved.
+These are final-installed-source capability outcomes, not counted Windows
+acceptance, detection measurements or a matched savings comparison.
+
+A later necessary PR #2254 waiter provides a genuine post-start event sample
+from installed `813baf8b`, not merely the earlier `8ab68085` source witness.
+It returned the merge and exit 0 under verified sealed source custody, manifest
+`01ac7b2fc8bb30aa70d67301268a587e4f3cdce5f8ceefd003e6f9d71bac9bc0`.
+The independently checked receipt digest is
+`50e24f81a6d2b3db956d491ab209d1cd6e8f9a07c9e9043effbe27b0cc3f051e`.
+Conditional GitHub-UTC delivery was 200,946–203,432 ms with 1,243 ms combined
+uncertainty, passing the configured 300,000 ms ceiling. Total qualification was
+322.206112627 seconds including 61.658457 ms source bootstrap. This preserves
+the distinction between total elapsed time and event delivery. It adds one
+real outcome, not a matched twenty-outcome cohort, p95 regression or savings.
+
+## Linux ownership transition repair and remaining advisory CI
+
+PR #2254 merged the Linux-only owner-transition repair as
+`87790de4264f59007d8e0fdaaedae8de0e63d86d`. Isolated privileged reproduction
+proved the earlier helper could leave a formerly normal-owner file root-owned
+when Git reused the same device/inode. The fixed same-inode and distinct-inode
+cases preserved normal ownership; a file already root-owned stayed root-owned.
+The protected zero-API reproduction packet digest is
+`e967d00a1f7bb85c38a38b9c20dc0e89b146ed8745d9161001c41f70de832162`.
+
+The actual Hetz normal root-run full update to `87790de4` passed all eighteen
+required stages, exit 0, exact clean source and matching manifest. Both changed
+tracked files were captured as normal-owner files before this update and reused
+their device/inode during the real update; both retained their original owner
+and expected new content afterward. The independently frozen before digest is
+`a800eafeab9fb2d430911a7db5699bf844ed796bf037ea88d14f56727e8abb73`;
+the final install/owner-transition/useful-read digest is
+`16a706cb5e51f2dbee6b3b35528365799341b72bd55aad478d35f7caad46c974`.
+No manual change was made to the unrelated seventeen root-readable paths whose
+prior ownership was unknown. This is evidence for the two observed transitions,
+not a claim that every tracked file belongs to the normal owner.
+
+The subsequent necessary normal-owner source-qualified read returned MERGED and
+exit 0 in 8.238795836 seconds, including 145.092491 ms source bootstrap, bound to
+manifest `4695f7d56cfc32751b137a3704041d611315338fc02e89ca0ac8ad911788437c`.
+Ordinary import, Git access, index/reference ownership and restored parent
+descriptor limit passed. Event eligibility preceded observation, so detection
+latency remains null; actual request totals remain null. Windows runtime files
+did not change in this Linux-only repair, so the installed `813baf8b` Windows
+source receipts remain scoped evidence for those exact unchanged blobs.
+
+Full advisory verify run `41278636180` at exact PR head `35dfb37c` completed
+with 24 successful jobs, three skips and three failures: one underlying Windows
+section-three source-cleanup discrepancy and its aggregate/report propagation.
+Linux offline and doc-safety passed. The failed native assertion was
+`Every injected cleanup failure remains visible`, followed by actual denial
+deleting the second owned cleanup-fault fixture file. The protected failed-log
+digest is `ca5394d851a1c1d821c64d4bba381b0c1b46ab27ee8a239a9f4c396e8fb04b9c`.
+The later affected-account repair is recorded below; the 95-case focused native
+result remains separate and does not erase this CI failure. No unchanged
+whole-CI rerun or performance-threshold change is claimed.
+
+The final explicit per-file cleanup repair passed 100 native cases as the actual
+NetworkService runner account in run `41285694553`, exit 0, owned cleanup
+successful and zero API requests. Its protected receipt digest is
+`eb89d6a3a2acacbe51bea5fae5d70596d37ca1e1bc9a623fbde4487f8eedc1bd`.
+The proof head is `57eed81f76da773511352928d17df7940866a332`, source blob
+`9b3b488e6064265302fd3a511f4e95a061c8a6ad` and fixture blob
+`12bd7027529b97708ceed072e7946df13beef6b8`. Retained metadata-only file controls
+bind fresh snapshot files before sealing and explicitly restore them after the
+owned child stops, preserving each cleanup error. Original, vendor and credential
+permissions remain unchanged. The temporary proof workflow was removed before
+PR #2256 head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`; the three
+production/test blobs are identical to the successful proof head. This establishes
+the repaired service-account capability, not a new counter-performance result.
+
+PR #2256 subsequently merged normally as
+`a98131576c3a092fc19ec938d24650ab98469c8a`. The three delivered production/test
+blobs remain identical to the successful NetworkService proof head; no temporary
+workflow remains in the delivery. Required safety passed and the Entire result
+was neutral. Final combined normal full installations and useful reads are in
+progress on the five reachable hosts; no completed final-source receipt or
+counted Windows observation is inferred from the merge. The code also includes
+the Linux-only owner-transition repair; no intermediate repeat rollout is needed.
+
+The final combined `a9813157` Linux receipts subsequently completed. Local full
+installation passed all 21 required stages with no failure, exact clean source
+and owner-private manifest
+`a52d5527de34fd82e866646f47073cbf9b2664288deffd09e2a65ed8abbf7de9`.
+The independently checked sanitized receipt digest is
+`9d34eba4e26db7e353c6afcb001adaa4a6aacb1891392123deb2900114387137`.
+Its necessary issue read returned exit 0, verified source and complete numeric
+metadata: two primary writes, zero external writes and five native invocations
+including unseparated probes. Command time was 4.184242573 seconds; total cohort
+time was 4.341196403 seconds including 149.248337 ms bootstrap. Source bootstrap
+56.108856 ms is a component of that bootstrap, not an additional amount.
+
+Hetz's normal full `a9813157` installation passed all eighteen required stages,
+exit 0, exact clean source and manifest
+`9af44ff5d950ff9f58e691a3e87051fb2f2ac195a83e586d4a36d6fec86e227e`.
+The protected combined receipt digest is
+`9671b2847073493dd1e0868dda80ab08eb77e85552ccd38e990704ef5e625a95`.
+The subsequent normal-owner read returned MERGED and exit 0 with verified source
+in 11.994158959 seconds including 140.314219 ms source bootstrap. Ordinary import,
+Git/index/reference access and parent descriptor-limit restoration passed; no
+manual metadata repair was made. This does not claim every readable source file
+is normal-owner-owned. Eligibility preceded observation, so detection remains
+null; HTTP totals remain null. Neither final Linux receipt establishes matched
+before/after savings, the twenty-outcome floor or qualified p95 regression.
+
+Final normal full Windows installations on edge-dev, 4837 and 916 then completed
+at exact `a9813157`, each with exit 0, clean canonical source and matching managed
+launcher. The independently checked delivery index digest is
+`1746454ced28f8c8c8735500f38ab85750d4c2ce19409f80a85871f72f7f95db`;
+its respective verified-summary digests are
+`7730fcf88f293a26e19d2bab45825030841b70edb40cdef621780b8e902ca62d`,
+`161f0f4ca33f9a72bf41f3353fcd02473609bdb548543c4c6149db2467887470`
+and `929db8a1a8d86430c4fb4dfe2b010940f3aea2ed342d0dc9f3343b31e2a99e40`.
+All three necessary issue reads returned OPEN and exit 0 under verified loaded
+source fingerprint `ba5212412cad7e669927fe83b24133f9fbd2f073ae816b269b49ad4eda00bb01`.
+
+Edge-dev and 4837 used the existing effective private SSH context and finite
+2.97.0 counter image under explicit native custody. Each numeric observation
+was complete: five native invocations, two primary completed writes, zero
+external writes and zero failed write attempts. Full Linux-observed elapsed
+times, including SSH/controller bootstrap, were 14.443682553 and 34.360151487
+seconds, respectively. These counts cover the primary-constructor subset and
+unseparated admission probes; they are one useful outcome per host, not five.
+Whole-account HTTP, GraphQL operations, costs and detection latency remain null.
+The counter is qualification-only: native 2.97.0 overhead is unqualified and
+the preserved 2.88.1 cold failures still stand. The 916 ordinary source-qualified
+read succeeded in 11.319618800 seconds before receipt acknowledgement, while its
+fresh metadata counter guard refused a foreign staging-parent writer before any
+counter API call. Its counts remain null; original authentication, permissions,
+environment and ordinary CLI capability were preserved.
+
+The bounded code delivery, final five-host installation and useful live proof
+are complete. Programme acceptance stays open on #658: no twenty matched
+baseline/candidate outcomes per operation, natural savings or qualified p95
+regression result has been fabricated. Existing accepted busy windows remain
+accepted. #660 remains the instrumentation owner, not a duplicate programme
+acceptance issue. T16's documented trusted-executor access gap, the failed or
+unqualified timing evidence and broader request/client coverage remain explicit.
+
+The existing Linux installed-source waiter began while #2253 was OPEN and
+unqueued. It later reported the actual merge commit and exit 0 under live
+sealed-generation custody. Its receipt digest is
+`d11cdb642057f889f26681b02800c6579446d5e5843d72eae1fc68ef1e2a5eda`.
+The source witness is installed `8ab68085`, manifest
+`7144424e0abff8e22249213a3e95edace0f15bb8607d730cbc1ee766e7cc40e6`;
+raw/loaded fingerprints match the previously verified installed observation.
+The genuine post-start merge interval is 95,155–97,383 ms with 1,114 ms combined
+uncertainty and the explicit GitHub UTC assumption. It passes the configured
+300,000 ms waiter ceiling. Total qualification took 1,239.979463014 seconds,
+including 59.376810 ms source bootstrap; total waiting time is not event delivery
+latency. The original 25-minute deadline was unchanged and no replay was run.
+This is one genuine useful outcome, not twenty matched baseline/candidate
+outcomes, a p95 regression result, an HTTP census or savings evidence.

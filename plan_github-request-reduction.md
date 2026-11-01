@@ -21,6 +21,15 @@ source `628d2cf` was shown Merged with Checks Not checked. This is mirror
 continuity, not independent check execution or adoption. Full offline CI results
 remain independently tracked.
 
+The final public mirror overview shows exact landing
+`a98131576c3a092fc19ec938d24650ab98469c8a`;
+[existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
+shows Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
+Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
+GitHub's required safety result is authoritative;
+mirror CI parity remains unverified. No capture, hooks or paid/integration
+settings changed.
+
 Normal full installations on local Linux, Hetz and the three reachable Windows
 hosts now bind `8ab68085`; necessary ordinary reads passed. Hetz's subsequent
 owner-readability regression was repaired without content changes, and all
@@ -36,14 +45,45 @@ fixtures but failed its cold-start overhead gate twice. The receipt-writer schem
 repair retained all twenty cold and twenty warm pairs without changing either
 CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
 failures remain preserved. The finite native Windows read/counter adapter and
-metadata-only actual-context guards are implemented in open, unmerged PR #2253.
-This is candidate implementation, not installed or actual-context acceptance:
-foreign credential readers and unsafe namespaces remain qualification refusals,
-and the native cold counter gate remains failed. The existing Windows waiter
+metadata-only actual-context guards merged through PR #2253 as
+`813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on origin/main.
+Local Linux full installation and a necessary counted read verify prior delivery
+`813baf8b`; all three reachable Windows hosts also have full source-bound
+installation and source-custodied useful-read receipts. The Linux-only owner
+transition repair then merged through #2254 as `87790de4`; Hetz's normal full
+update and source-qualified owner read at that source passed, including actual
+same-inode owner preservation. The final combined code is now merged through
+normal PR #2256 as `a98131576c3a092fc19ec938d24650ab98469c8a`, including that
+Linux owner repair. Final normal full installations and source-qualified useful
+reads now pass at `a9813157` on both Linux hosts and all three Windows hosts.
+Edge-dev and 4837 each completed one necessary counted read with two primary
+writes and five native invocations; 916 preserved its ordinary source-qualified
+read while its counter namespace guard refused a foreign parent writer. Merge is
+not actual-context acceptance. The earlier Windows counter guard inspected the
+default configuration instead of the private SSH namespace actually selected by
+`ai-gh`; that implementation bug is repaired in merged PR #2256. Metadata-only
+checks now pass on edge-dev and 4837; 916 still refuses its actual context. No
+group trust, credential, permission or environment setting changed. The native
+cold counter gate remains failed. The existing Windows waiter
 has separately proved source-bound event delivery within the five-minute ceiling.
 A genuine installed-source Linux waiter began for #2253 while it was OPEN and
-unqueued; its final event receipt remains pending. Keep P1/P7/P8, twenty matched
+unqueued, then observed its merge with exit 0 and a source-qualified conditional
+95.155–97.383-second delivery interval, within the five-minute ceiling. This
+waiter witnessed installed `8ab68085`, not the new final source. Keep P1/P7/P8, twenty matched
 outcomes, before/after comparison and live proof open until demonstrated.
+
+The earlier focused Windows fixture passed 95 native cases on PowerShell 7.6.8,
+but full CI later exposed a service-account cleanup discrepancy. Explicit retained
+file ACL controls now pass 100 native cases under the actual NetworkService
+runner in run `41285694553`; the temporary proof workflow was retired before
+PR #2256's normal merge with unchanged proven code/test blobs. Required safety
+passed; Entire's result was neutral, not independent CI execution. This zero-API
+proof repairs the demonstrated cleanup capability, without erasing the prior
+CI or separate cold-counter failures. All five reachable hosts have completed
+the final combined installation and useful read. Windows 2.97 counter timing
+remains unqualified, 2.88 cold timing remains failed, T16 remains unreachable
+through documented trusted executors, and matched programme savings remain
+unknown. The completed bounded delivery does not close #658 acceptance.
 
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains
