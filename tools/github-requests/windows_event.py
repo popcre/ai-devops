@@ -159,6 +159,7 @@ def active_harness_exec(arguments):
     if not arguments:
         return 127
     environment = os.environ.copy()
+    bound_bash = environment.get("AI_GH_ACTIVE_BASH")
     unsafe, event = False, None
     kernel = _kernel()
     try:
@@ -189,6 +190,15 @@ def active_harness_exec(arguments):
     # Explicit standard-stream-only inheritance is decisive even if closure
     # verification was uncertain. Such uncertainty never grants qualification.
     try:
+        if bound_bash:
+            # MSYS timeout does not parse native Windows argv quoting. Keep
+            # the original UTF-8 vector as DATA until the final MSYS exec.
+            child = subprocess.Popen([bound_bash, "--noprofile", "--norc", "-c",
+                                      'mapfile -d "" -t argv; exec "${argv[@]}" </dev/null'],
+                                     env=environment, stdin=subprocess.PIPE,
+                                     stdout=None, stderr=None, close_fds=True)
+            child.communicate(b"\0".join(value.encode("utf-8") for value in arguments) + b"\0")
+            return child.returncode
         child = subprocess.Popen(arguments, env=environment, stdin=subprocess.DEVNULL,
                                  stdout=None, stderr=None, close_fds=True)
         return child.wait()

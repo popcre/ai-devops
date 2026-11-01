@@ -787,7 +787,7 @@ try {
         if($ActiveCompletion){
             $eventChannel=[GenerationCustody+EventChannel]::new(256)
             $activeAckChannel=[GenerationCustody+EventChannel]::new(1,$true)
-            $activeEnvironment=@{AI_GH_ACTIVE_EVENT_HANDLE=[string]$eventChannel.WriteHandle;AI_GH_ACTIVE_ACK_HANDLE=[string]$activeAckChannel.ReadHandle;AI_GH_ACTIVE_PYTHON=(Bash-Path $activePython)}
+            $activeEnvironment=@{AI_GH_ACTIVE_EVENT_HANDLE=[string]$eventChannel.WriteHandle;AI_GH_ACTIVE_ACK_HANDLE=[string]$activeAckChannel.ReadHandle;AI_GH_ACTIVE_PYTHON=(Bash-Path $activePython);AI_GH_ACTIVE_BASH=$installedBash}
             foreach($key in $activeEnvironment.Keys){$counterEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$activeEnvironment[$key],'Process')}
         }
         $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]($RestrictedReadProfile -or $ActiveSdkProfile),[bool]($ReadOnlyNoStdin -or $ActiveNoStdin))

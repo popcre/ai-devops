@@ -98,6 +98,17 @@ class ActiveWriterTests(unittest.TestCase):
                 self.assertTrue(launch.call_args.kwargs["close_fds"])
                 self.assertEqual(launch.call_args.kwargs["env"], {"SDK_CONTEXT_SENTINEL": "unchanged"})
 
+    def test_bound_bash_preserves_original_nul_vector_without_native_argv_conversion(self):
+        command = ["C:/Program Files/Git/usr/bin/timeout.exe", "2", "provider", 'quote"backslash\\', "日本語"]
+        child = mock.Mock(); child.returncode = 7
+        with mock.patch.object(windows_event, "_kernel", return_value=mock.Mock()), \
+             mock.patch.dict(os.environ, {"AI_GH_ACTIVE_BASH": "C:/bound/bash.exe"}, clear=True), \
+             mock.patch.object(windows_event.subprocess, "Popen", return_value=child) as launch:
+            self.assertEqual(windows_event.active_harness_exec(command), 7)
+            self.assertEqual(launch.call_args.args[0][0], "C:/bound/bash.exe")
+            self.assertNotIn("AI_GH_ACTIVE_BASH", launch.call_args.kwargs["env"])
+            child.communicate.assert_called_once_with(b"\0".join(x.encode("utf-8") for x in command) + b"\0")
+
 
 @unittest.skipUnless(os.name == "nt", "native Windows reciprocal pipe components")
 class NativeActiveComponents(unittest.TestCase):

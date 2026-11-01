@@ -40,7 +40,7 @@ try{
  foreach($name in @('alarm','links')){Assert-ActiveArguments 'bin/ai-blocker-watch' @($name) $true;Check $true 'Named SDK admission'}
  $refused=$false;try{Assert-ActiveArguments 'bin/ai-blocker-watch' @('tick') $true}catch{$refused=$true};Check $refused 'SDK cannot admit provider ticks'
  $refused=$false;try{Assert-ReadArguments 'bin/ai-blocker-watch' @('alarm')}catch{$refused=$true};Check $refused 'Active work cannot masquerade as read profile'
- $bash=Join-Path $env:ProgramFiles 'Git/bin/bash.exe';$actor=Join-Path $PSScriptRoot 'windows_active_actor.py'
+ $bash=Join-Path $env:ProgramFiles 'Git/bin/bash.exe';$actor=Join-Path $PSScriptRoot 'windows_active_actor.py';$env:AI_GH_ACTIVE_BASH=$bash
  foreach($mode in @('valid','bash-facts','ack-malformed','ack-partial','ack-late','closed','nonpipe','alias','full-event','full-ack','forged-claim','raw-duplicate','raw-overflow','raw-oversize','legacy-pr','provider-exit','provider-uncertain','provider-timeout')){
   $event=$null;$ack=$null;$child=$null
   try{
