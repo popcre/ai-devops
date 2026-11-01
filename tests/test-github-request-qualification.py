@@ -418,5 +418,58 @@ class SourceBoundaryRegressionTests(unittest.TestCase):
             self.assertFalse(same_execution_layout(source / "missing", transport, bash, bash))
 
 
+class DescriptorCustodyTests(unittest.TestCase):
+    def test_scoped_raise_nested_restore_and_actual_child_limit(self):
+        # Dedicated process: never alter the test runner's own descriptor ceiling.
+        code = '''import resource, subprocess, sys
+import report
+old=resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE,(1024,old[1]))
+with report.source_descriptor_lease(4096) as limits:
+ assert limits==(1024,old[1])
+ with report.source_descriptor_lease(4096) as nested: assert nested==limits
+ result=subprocess.check_output(['/usr/bin/prlimit','--nofile='+':'.join(map(str,limits)),'--',sys.executable,'-c','import resource;print(resource.getrlimit(resource.RLIMIT_NOFILE)[0])'],text=True)
+ assert result.strip()=='1024'
+ assert resource.getrlimit(resource.RLIMIT_NOFILE)[0]==4096
+assert resource.getrlimit(resource.RLIMIT_NOFILE)==(1024,old[1])
+'''
+        subprocess.run([sys.executable, "-c", code], env=dict(os.environ, PYTHONPATH=str(ROOT / "tools/github-requests")), check=True)
+
+    def test_lease_refuses_threads_hard_ceiling_and_foreign_changes(self):
+        import resource
+        with mock.patch.object(resource, "getrlimit", return_value=(1024, 2048)), mock.patch.object(resource, "setrlimit") as change:
+            with self.assertRaises(ValueError), report.source_descriptor_lease(2049): pass
+            with mock.patch.object(report.threading, "active_count", return_value=2):
+                with self.assertRaises(ValueError), report.source_descriptor_lease(2048): pass
+            change.assert_not_called()
+        with mock.patch.object(resource, "getrlimit", side_effect=[(1024, 4096), (3072, 4096)]), mock.patch.object(resource, "setrlimit") as change:
+            with self.assertRaises(ValueError), report.source_descriptor_lease(2048): pass
+            change.assert_called_once_with(resource.RLIMIT_NOFILE, (2048, 4096))
+
+    def test_inherited_manifest_is_canonical_readonly_and_offset_independent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); manifest = root / "install-manifest.tsv"
+            manifest.write_bytes(b"canonical bytes"); manifest.chmod(0o600)
+            other = root / "other"; other.write_bytes(manifest.read_bytes()); other.chmod(0o600)
+            for path, flags, expected in [(manifest, os.O_RDONLY, "launcher reached"),
+                                           (other, os.O_RDONLY, "custody differs"),
+                                           (manifest, os.O_RDWR, "not readonly")]:
+                descriptor = os.open(path, flags)
+                os.lseek(descriptor, 4, os.SEEK_SET)
+                try:
+                    with mock.patch.object(report, "protected_directory", side_effect=[os.open(root, os.O_RDONLY | os.O_DIRECTORY), ValueError("launcher reached")]):
+                        with self.assertRaisesRegex(ValueError, expected):
+                            report.canonical_installation(root, manifest, descriptor)
+                    self.assertEqual(os.lseek(descriptor, 0, os.SEEK_CUR), 4)
+                finally: os.close(descriptor)
+            manifest.chmod(0o644)
+            descriptor = os.open(manifest, os.O_RDONLY)
+            try:
+                with mock.patch.object(report, "protected_directory", return_value=os.open(root, os.O_RDONLY | os.O_DIRECTORY)):
+                    with self.assertRaisesRegex(ValueError, "custody differs"):
+                        report.canonical_installation(root, manifest, descriptor)
+            finally: os.close(descriptor)
+
+
 if __name__ == "__main__":
     unittest.main()

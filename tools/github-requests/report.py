@@ -880,7 +880,7 @@ def protected_directory(path):
         raise
 
 
-def canonical_installation(root, manifest):
+def canonical_installation(root, manifest, manifest_fd=None):
     """Only the actual protected installation can certify current source.
 
     The public CLI has no fixture-manifest or generation-override mode. Tests
@@ -891,15 +891,24 @@ def canonical_installation(root, manifest):
     directory = protected_directory("/etc/ai-devops")
     descriptor = None
     try:
-        descriptor = os.open("install-manifest.tsv", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
-                             dir_fd=directory)
+        if manifest_fd is None:
+            descriptor = os.open("install-manifest.tsv", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                                 dir_fd=directory)
+        else:
+            import fcntl
+            if fcntl.fcntl(manifest_fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
+                raise ValueError("manifest descriptor is not readonly")
+            descriptor = os.dup(manifest_fd)
         info = os.fstat(descriptor)
+        canonical = os.stat("install-manifest.tsv", dir_fd=directory, follow_symlinks=False)
         supplied = os.stat(manifest, follow_symlinks=False)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.geteuid())
                 or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 4 * 1024 * 1024
+                or not stat.S_ISREG(canonical.st_mode)
+                or (info.st_dev, info.st_ino) != (canonical.st_dev, canonical.st_ino)
                 or not stat.S_ISREG(supplied.st_mode) or (info.st_dev, info.st_ino) != (supplied.st_dev, supplied.st_ino)):
             raise ValueError("canonical manifest custody differs")
-        data = os.read(descriptor, 4 * 1024 * 1024 + 1)
+        data = os.pread(descriptor, 4 * 1024 * 1024 + 1, 0)
     finally:
         if descriptor is not None:
             os.close(descriptor)
@@ -983,10 +992,11 @@ class VerifiedGitObjects:
             self.process.stdout.close()
 
 
-def installed_source(root, manifest):
+def installed_source(root, manifest, manifest_fd=None):
     """Verify canonical installed identity and immutable raw Git objects."""
     root = pathlib.Path(root).resolve(strict=True)
-    data, launcher = canonical_installation(root, manifest)
+    data, launcher = (canonical_installation(root, manifest) if manifest_fd is None
+                      else canonical_installation(root, manifest, manifest_fd))
     rows = [row.split("\t") for row in data.decode("utf-8").splitlines()]
     sha_rows = [row for row in rows if len(row) == 4 and row[:2] == ["meta", "source_sha"]]
     if len(sha_rows) != 1 or re.fullmatch(r"[0-9a-f]{40}", sha_rows[0][2]) is None:
@@ -1137,6 +1147,8 @@ def retained_generation_launch(boundary):
     import fcntl
     if not retained_generation_valid(boundary):
         raise ValueError("generation custody is not live")
+    if _FD_LEASE is not None and _FD_LEASE[0] != _FD_LEASE[1] and threading.active_count() != 1:
+        raise ValueError("raised descriptor custody requires a single-threaded parent")
     opened, replacements = [], {}
     try:
         for descriptor, _, _ in boundary._descriptors:
@@ -1159,8 +1171,40 @@ def retained_generation_launch(boundary):
             os.close(descriptor)
 
 
+_FD_LEASE = None
+
+
 @contextmanager
-def retained_generation(root, manifest):
+def source_descriptor_lease(required):
+    """Only a single-threaded parent may temporarily raise its soft ceiling."""
+    import resource
+    global _FD_LEASE
+    current = resource.getrlimit(resource.RLIMIT_NOFILE)
+    original = _FD_LEASE[0] if _FD_LEASE is not None else current
+    expected = _FD_LEASE[1] if _FD_LEASE is not None else current
+    if current != expected or (_FD_LEASE is not None and original != expected and threading.active_count() != 1):
+        raise ValueError("descriptor limit changed outside custody")
+    raised = required > current[0]
+    if raised and (threading.active_count() != 1 or required > current[1]):
+        raise ValueError("descriptor ceiling cannot safely be raised")
+    previous = _FD_LEASE
+    active = (max(current[0], required), current[1])
+    if raised:
+        resource.setrlimit(resource.RLIMIT_NOFILE, active)
+    _FD_LEASE = (original, active)
+    try:
+        yield original if active != original else None
+    finally:
+        observed = resource.getrlimit(resource.RLIMIT_NOFILE)
+        _FD_LEASE = previous
+        if observed != active:
+            raise ValueError("descriptor limit changed outside custody")
+        if raised:
+            resource.setrlimit(resource.RLIMIT_NOFILE, current)
+
+
+@contextmanager
+def retained_generation(root, manifest, manifest_fd=None):
     """Retain one immutable loaded-source boundary for waiters or ai-gh reads.
 
     Consumers prepend argv_prefix to their real command and include pass_fds
@@ -1184,10 +1228,13 @@ def retained_generation(root, manifest):
                             "--", "/usr/bin/true"], capture_output=True, timeout=10)
     if probe.returncode:
         raise ValueError("boundary unavailable")
-    identity, files = installed_source(root, manifest)
+    identity, files = (installed_source(root, manifest) if manifest_fd is None
+                       else installed_source(root, manifest, manifest_fd))
     command = [boundary, "--unshare-user", "--die-with-parent", "--bind", "/", "/",
                "--dev-bind", "/dev", "/dev", "--cap-drop", "ALL"]
     descriptors, custody = [], None
+    lease = source_descriptor_lease(2048 + 2 * len(files) + 64)
+    child_limits = lease.__enter__()
     try:
         for directory in ("bin", "tools", "config"):
             command += ["--tmpfs", str(root / directory)]
@@ -1214,8 +1261,14 @@ def retained_generation(root, manifest):
             command += ["--remount-ro", str(root / directory)]
         identity["source_boundary"] = "linux_sealed_generation"
         bash = trusted_boundary_executable(shutil.which("bash") or "")
+        payload_prefix = []
+        if child_limits is not None:
+            limiter = trusted_boundary_executable(shutil.which("prlimit") or "")
+            payload_prefix = [limiter, "--nofile=" + ":".join(map(str, child_limits)), "--"]
         custody = RetainedGenerationMapping(_GENERATION_AUTHORITY,
-                    {"identity": identity, "argv_prefix": tuple([*command, "--"]), "pass_fds": tuple(descriptors),
+                    {"identity": identity, "mount_prefix": tuple([*command, "--"]),
+                     "execution_prefix": tuple(payload_prefix),
+                     "argv_prefix": tuple([*command, "--", *payload_prefix]), "pass_fds": tuple(descriptors),
                      "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash,
                      "bootstrap_ns": time.perf_counter_ns() - bootstrap_started}, descriptors)
         yield custody
@@ -1225,9 +1278,10 @@ def retained_generation(root, manifest):
             _ACTIVE_GENERATIONS.pop(id(custody), None)
         for fd in descriptors:
             os.close(fd)
+        lease.__exit__(None, None, None)
 
 
-def qualify_wait(root, manifest, arguments, receipt_path):
+def qualify_wait(root, manifest, arguments, receipt_path, manifest_fd=None):
     """Explicit live parent; offline JSON and child environment grant no trust.
 
     Qualification failure runs the original command normally and records an
@@ -1239,6 +1293,8 @@ def qualify_wait(root, manifest, arguments, receipt_path):
     root = pathlib.Path(root).resolve(strict=True)
     receipt = {"schema": 1, "measurement": "live_parent_wait_qualification",
                "receipt_origin": "live_parent", "source_verified": "unknown",
+               "execution_profile": ("root" if os.geteuid() == 0 else "installed_owner"
+                                     if os.geteuid() == root.stat().st_uid else "other_user"),
                "workload_kind": "fixture" if os.environ.get("AI_DEVOPS_TEST_MODE") == "1" else "caller_command",
                "source_boundary": "unknown", "unknown_reason": "boundary_unavailable",
                "source_sha": None, "source_fingerprint": None, "install_generation_binding": None,
@@ -1250,7 +1306,8 @@ def qualify_wait(root, manifest, arguments, receipt_path):
     environment.pop("AI_GH_QUALIFICATION_EVENT_FD", None)
     try:
         receipt["unknown_reason"] = "manifest_untrusted"
-        generation_context = retained_generation(root, manifest)
+        generation_context = (retained_generation(root, manifest) if manifest_fd is None
+                              else retained_generation(root, manifest, manifest_fd))
         generation = generation_context.__enter__()
         launch_context = retained_generation_launch(generation)
         launch = launch_context.__enter__()
@@ -1392,6 +1449,7 @@ if __name__ == "__main__":
             parser = argparse.ArgumentParser(description="Run an explicitly qualified live PR waiter")
             parser.add_argument("--source-root", required=True)
             parser.add_argument("--manifest", default="/etc/ai-devops/install-manifest.tsv")
+            parser.add_argument("--manifest-fd", type=int)
             parser.add_argument("--receipt", required=True)
             parser.add_argument("arguments", nargs=argparse.REMAINDER)
             options = parser.parse_args(sys.argv[2:])
@@ -1400,7 +1458,7 @@ if __name__ == "__main__":
                 arguments = arguments[1:]
             if not arguments:
                 parser.error("waiter arguments are required")
-            sys.exit(qualify_wait(options.source_root, options.manifest, arguments, options.receipt))
+            sys.exit(qualify_wait(options.source_root, options.manifest, arguments, options.receipt, options.manifest_fd))
         if len(sys.argv) == 3 and sys.argv[1] == "--cohort":
             print(json.dumps(read_cohort(sys.argv[2]), separators=(",", ":")))
             sys.exit(0)
