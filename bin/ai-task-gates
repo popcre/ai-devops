@@ -373,7 +373,7 @@ change_set(){
     path="${status_line:3}"
     [ -n "$path" ] || continue
     printf '%s\n' "$path"
-  done < <(git status --porcelain=v1 -z --untracked-files=all --no-renames 2>/dev/null)
+  done < <(git --no-optional-locks status --porcelain=v1 -z --untracked-files=all --no-renames 2>/dev/null)
   # A modified submodule appears above as its own path; also surface a
   # submodule whose recorded commit moved without a worktree status entry.
   git diff --no-renames --name-only --ignore-submodules=none HEAD 2>/dev/null || true
@@ -1429,8 +1429,8 @@ cmd_check(){
     [ -z "$target_head" ] || [ "$target_head" = "$same_head" ] || blocked 'ai-task-gates: STOP. Same-source target differs from the installed commit.'
     [ "$same_head" = "$start_head" ] && [ "$same_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Same-source install does not match the recorded source HEAD.'
     git -C "$same_root" merge-base --is-ancestor "$same_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Same-source target is not in the fetched origin/main release history.'
-    [ -z "$(git -C "$same_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout has local changes.'
-    [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout has local changes.'
+    [ -z "$(git -C "$same_root" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout has local changes.'
+    [ -z "$(git -C "$TOPLEVEL" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout has local changes.'
     [ -f "$same_root/bin/ai-task-gates" ] || blocked 'ai-task-gates: STOP. Installed gate source is missing.'
     if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
       expected_launcher="$HOME/.local/bin/ai-task-gates"
@@ -1695,7 +1695,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
              *) false ;;
            esac \
         && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
-        && infra_status="$(git -C "$TOPLEVEL" status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
+        && infra_status="$(git -C "$TOPLEVEL" --no-optional-locks status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
         && [ -z "$infra_status" ] \
         && [ -n "$infra_head" ] && [ "$infra_head" = "$infra_main" ] \
         && [ -z "$small_entry$target_head$installed_checkout$installed_launcher" ] \
@@ -1741,14 +1741,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     # no reviewer verdict and no further owner text (#2041).
     if [ "$action" = deploy ] && [ "$protected" != true ] && [ "$declared" = installation ] \
        && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
-      [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
+      [ -z "$(git -C "$TOPLEVEL" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
         || blocked 'ai-task-gates: STOP. Candidate checkout has local changes; install only an exact committed target.'
       [ -z "$target_head" ] || [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] \
         || blocked 'ai-task-gates: STOP. The named target differs from the candidate HEAD.'
       if [ -n "$installed_checkout" ]; then
         local inst_root
         inst_root="$(cd "$installed_checkout" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout path is unavailable.'
-        [ -z "$(git -C "$inst_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
+        [ -z "$(git -C "$inst_root" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] \
           || blocked 'ai-task-gates: STOP. Installed checkout has local changes.'
         [ "$(git -C "$inst_root" rev-parse HEAD 2>/dev/null)" = "$(state_field start_head)" ] \
           || blocked 'ai-task-gates: STOP. Installed checkout moved since the installation task was declared.'
@@ -1964,7 +1964,7 @@ linux_review_authority(){
   review_root="$(cd "$review_root" && pwd -P)" || return 1
   case "$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" in "$review_root"/.ai/reviews/*) ;; *) return 1 ;; esac
   [ "$review_root" != "$candidate" ] && [ "$(git -C "$review_root" rev-parse HEAD)" = "$target" ] || return 1
-  [ -z "$(git -C "$review_root" status --porcelain=v1 --untracked-files=all)" ] || return 1
+  [ -z "$(git -C "$review_root" --no-optional-locks status --porcelain=v1 --untracked-files=all)" ] || return 1
   common="$(cd "$(git -C "$checkout" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || return 1
   [ "$common" = "$(cd "$(git -C "$review_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || return 1
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$review_root")" = "$source_digest" ] || return 1
@@ -2075,7 +2075,7 @@ cmd_install_verify(){
     https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
     *) blocked 'ai-task-gates: STOP. Unsupported installed origin.' ;;
   esac; fi
-  [ -z "$(git -C "$installed" status --porcelain=v1 --untracked-files=all)" ] && [ -z "$(git -C "$candidate_root" status --porcelain=v1 --untracked-files=all)" ] || blocked 'ai-task-gates: STOP. Installation source checkout is dirty.'
+  [ -z "$(git -C "$installed" --no-optional-locks status --porcelain=v1 --untracked-files=all)" ] && [ -z "$(git -C "$candidate_root" --no-optional-locks status --porcelain=v1 --untracked-files=all)" ] || blocked 'ai-task-gates: STOP. Installation source checkout is dirty.'
   installed_head="$(git -C "$installed" rev-parse HEAD)"
   receipt="$(linux_manifest_receipt "$installed" "$launcher" "$manifest")" || receipt=''
   auth_dir="$STATE_DIR/install-authorizations"; issued="$auth_dir/$target.json"; pending="$issued.consuming"; ordinary="$issued.ordinary"
@@ -2352,7 +2352,7 @@ cmd_authorize_install(){
   fi
   git -C "$TOPLEVEL" merge-base --is-ancestor "$start_head" "$target_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Pre-update HEAD is not ancestor of candidate.'
   git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate is not in fetched origin/main history.'
-  [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
+  [ -z "$(git -C "$TOPLEVEL" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
   # The reviewed release is the change set from the recorded pre-update HEAD;
   # a raw transcript archive inside it is refused here, before any
@@ -2404,7 +2404,7 @@ cmd_authorize_install(){
       blocked 'ai-task-gates: STOP. Installed checkout moved since task declaration outside the reviewed release range.'
     printf 'ai-task-gates: installed checkout advanced from %s to %s within the reviewed release range.\n' "$start_head" "$installed_head" >&2
   fi
-  [ -z "$(git -C "$installed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout is dirty.'
+  [ -z "$(git -C "$installed_root" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout is dirty.'
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then canonical_launcher="$HOME/.local/bin/ai-task-gates"; else canonical_launcher="/usr/local/bin/ai-task-gates"; fi
   if command -v cygpath >/dev/null 2>&1; then
     local normalized_launcher normalized_canonical
@@ -2488,7 +2488,7 @@ cmd_authorize_install(){
   reviewed_common="$(cd "$(git -C "$reviewed_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && pwd -P)" || blocked 'ai-task-gates: STOP. Reviewed Git ownership unavailable.'
   [ "$reviewed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Review and installation do not share Git ownership.'
   [ "$(git -C "$reviewed_root" rev-parse HEAD 2>/dev/null)" = "$target_head" ] || blocked 'ai-task-gates: STOP. Reviewed checkout moved from exact target.'
-  [ -z "$(git -C "$reviewed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Reviewed checkout is dirty.'
+  [ -z "$(git -C "$reviewed_root" --no-optional-locks status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Reviewed checkout is dirty.'
   # Read the reviewed commit only from the wrapper-written header (before the
   # first "## Result" line); a runner door may repeat its own header table
   # below it, and reviewer text never names the target.
