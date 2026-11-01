@@ -14,6 +14,10 @@ import subprocess
 import sys
 
 
+STORAGE_OVERRIDES = {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+                     "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+
+
 def metadata(path):
     try:
         info = path.lstat()
@@ -90,9 +94,22 @@ def pinned_open(base, path):
 
 def public_git(root, arguments):
     root = pathlib.Path(root).resolve(strict=True)
+    if STORAGE_OVERRIDES.intersection(os.environ):
+        raise ValueError("updater Git storage overrides are not permitted")
+    # Only storage routing is excluded. Existing authentication, credential
+    # configuration and SSH identity selection retain their ordinary behavior.
+    identity_environment = {name: value for name, value in os.environ.items() if name not in STORAGE_OVERRIDES}
+    top = pathlib.Path(subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"], env=identity_environment, text=True).strip())
+    primary = root / ".git"
+    if not top.samefile(root) or primary.is_symlink() or not primary.is_dir():
+        raise ValueError("updater requires the exact primary source checkout")
     owner = root.stat()
     common = pathlib.Path(subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip())
+        ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        env=identity_environment, text=True).strip())
+    if not common.samefile(primary):
+        raise ValueError("updater Git common directory differs from the primary checkout")
     before = {}
     if os.geteuid() == 0 and owner.st_uid != 0:
         before = {path: metadata(path) for path in (tracked(root) | primary_metadata(common))}

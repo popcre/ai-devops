@@ -163,6 +163,45 @@ class PublicGitTests(unittest.TestCase):
         (self.repo / "alias").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(OSError): helper.pinned_open(self.repo, self.repo / "alias/file")
 
+    def test_redirected_private_storage_is_refused_without_any_mutation(self):
+        private = self.parent / "private-store"; private.mkdir()
+        marker = private / "private-index"; marker.write_bytes(b"private fixture only")
+        subprocess.run(["git", "-C", str(private), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(private), "add", "private-index"], check=True)
+        subprocess.run(["git", "-C", str(private), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "private fixture"], check=True)
+        index = private / ".git/index"
+        snapshot = (helper.metadata(marker), marker.read_bytes(), index.read_bytes(), self.git("rev-parse", "HEAD"))
+        for variable in helper.STORAGE_OVERRIDES:
+            destination = private if variable == "GIT_WORK_TREE" else index if variable == "GIT_INDEX_FILE" else private / ".git/objects" if "OBJECT" in variable else private / ".git"
+            with mock.patch.dict(os.environ, {variable: str(destination)}), mock.patch.object(helper.subprocess, "run") as run:
+                with self.assertRaisesRegex(ValueError, "storage overrides"):
+                    helper.public_git(self.repo, ["checkout", "--detach", self.after])
+                run.assert_not_called()
+            self.assertEqual((helper.metadata(marker), marker.read_bytes(), index.read_bytes(), self.git("rev-parse", "HEAD")), snapshot)
+
+    def test_foreign_symlinked_primary_git_store_is_refused(self):
+        private = self.parent / "foreign-context"; private.mkdir()
+        subprocess.run(["git", "-C", str(private), "init", "-q"], check=True)
+        (self.repo / ".git").rename(self.repo / "saved-primary")
+        (self.repo / ".git").symlink_to(private / ".git", target_is_directory=True)
+        with mock.patch.object(helper, "subprocess") as commands:
+            commands.check_output.side_effect = subprocess.check_output
+            with self.assertRaisesRegex(ValueError, "exact primary"):
+                helper.public_git(self.repo, ["checkout", "--detach", self.after])
+            commands.run.assert_not_called()
+
+    def test_authentication_configuration_survives_identity_reads(self):
+        real_output = subprocess.check_output
+        environments = []
+        def capture(*args, **kwargs):
+            if "env" in kwargs: environments.append(kwargs["env"])
+            return real_output(*args, **kwargs)
+        with mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh fixture-identity"}), mock.patch.object(helper.subprocess, "check_output", side_effect=capture):
+            self.assertEqual(helper.public_git(self.repo, ["rev-parse", "HEAD"]), 0)
+        self.assertGreaterEqual(len(environments), 2)
+        self.assertTrue(all(env["GIT_SSH_COMMAND"] == "ssh fixture-identity" for env in environments))
+
     def test_foreign_replacement_is_not_modified(self):
         path = self.repo / "old"
         with mock.patch.object(helper, "subprocess") as commands:
