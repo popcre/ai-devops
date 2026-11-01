@@ -9,6 +9,32 @@ are complete; broader fleet and comparable-workload acceptance is not.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 Three parallel audits reconciled source, fleet and measurement evidence.
 
+November 1, 2026 EDT continuation: measurement PR #2249 merged as
+`e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
+`8ab68085c4fee1ad00fe9b26e991c3b595c69168`, both verified on origin/main.
+The timing receipt includes SSH/source setup from before SSH launch. The
+temporary Entire advisory failure later read back NEUTRAL; GitHub's required
+doc-safety and verification closure passed. The first bounded mirror lookup
+found no corresponding Trail; that mirror remains unverified, not a delivery
+or adoption claim. Full offline CI results remain independently tracked.
+
+Normal installation and actual live proof continue under this coordinator.
+Hetz required private-memory seed recovery with the existing protected SSH
+identity; no facts or required stage were skipped. Its older `u2giants` origin
+is a GitHub-confirmed redirect to `popcre`, not a different repository; preserve
+it. T16 is online but the correct current destination still timed out from a
+trusted peer; no alternate executor or new trust was introduced.
+
+The real native Windows counter run passed environment and hostile custody
+fixtures but failed its cold-start overhead gate. A receipt-writer schema bug
+hid the numeric distributions; repair that capture without changing thresholds
+or erasing the failure. Ordinary Windows live outgoing-write composition is
+also a real technical gap: the current managed-read adapter is Linux-only,
+the native counter runner is synthetic-fixture-only, and the Windows waiter
+supervisor qualifies source/events without observing its CLI writes. This
+needs explicit finite native composition and actual-context proof, not merely
+more observation time. Keep P1/P7/P8 and live proof open until demonstrated.
+
 - Superseded source instructions: #1710 merged as `3b9ac286`, #1510 as
   `1861259d`, and #1511 as `2ed3c24b`; accepted P3 routing proof remains
   accepted. The companion plan and baseline now distinguish these completed
