@@ -345,6 +345,11 @@ removed; their three delivery remotes had already auto-deleted. No foreign
 workspace, source or handoff was changed. The current chat workspace and earlier
 trial/fault/native recovery references are intentionally preserved under#2022,
 because unfinished work remains; they are not disposable orphaned work.
+The retained current workspace is Codex workspace503c, closing branch
+`codex/entire-trial-wrap-20261101`, attached to the coordinator UUID above.
+Its handoff publication is [PR2275](https://github.com/popcre/ai-devops/pull/2275).
+Do not remove a workspace still attached to this chat; successors start fresh
+from current main rather than writing into the retained closing workspace.
 
 Housekeeping is report-only. Its repository-wide candidate inventory includes
 foreign/unknown work and is not deletion authority. The closeout issue note
