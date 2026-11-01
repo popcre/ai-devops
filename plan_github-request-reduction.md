@@ -61,7 +61,8 @@ arbitrary provider work. Default original-context/provider operations decline
 qualification before running once unchanged; native completion integration and
 final installed proof remain unfinished. The separate `e6ed1ac8` durable-only
 event-fact producer passed 185 BlockerWatch and 31 receipt/fact cases on Linux;
-corrected bounded native proof remains in progress. These facts do not yet have
+its corrected bounded native run passed all 31 cases in 186.212 seconds, with
+owned-process/fixture absence verified. These facts do not yet have
 a governed eligibility-to-delivery consumer, even for SDK alarm/links. That is
 an implementation gap, separate from genuine future activity and privileged
 source-authority constraints. Accepted P5/headroom proof stays accepted.

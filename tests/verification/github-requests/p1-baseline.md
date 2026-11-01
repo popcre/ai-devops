@@ -28,8 +28,14 @@ outside reduced-rights qualification. Explicit SDK-only alarm/links is component
 scope, not arbitrary privileged-provider acceptance. Native integration and final
 installed proof are still required. Candidate `e6ed1ac8` adds durable-only
 unqualified event facts (185 BlockerWatch and 31 receipt/fact cases passed on
-Linux); its first native controller exceeded its aggregate deadline without
-preserving streams, so corrected bounded proof is not yet a code verdict.
+Linux). Its first native controller exceeded its aggregate deadline without
+preserving streams; the corrected bounded protocol then passed all 31 native
+cases in 186.212 seconds, with zero owned processes/fixtures remaining. Receipt
+`e5414303ba9872c1bcdd30509b22a7a7b0bb8ee096ec103c74d822de84eeb79e`
+retains actual `e6ed` source; separate executed-closure equivalence to PR #2285
+head `7f926` is bound by
+`7e6e997c7a2031d74243142d848727c0f590555a372d05f14a87e281cd61deb7`.
+The original 180-second timeout remains historical protocol failure evidence.
 No governed BW eligibility-to-delivery consumer exists yet. Genuine future facts
 alone cannot close that implementation gap; PR event qualification remains
 strictly PR-only. Historical P5 and busy-window proofs remain accepted.
