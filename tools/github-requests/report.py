@@ -581,7 +581,7 @@ def valid_read_interval(row):
             or row["cache_age_ms"] is not None and not valid_latency(row["cache_age_ms"])
             or row["cache_policy"] not in ("upstream", "in_flight", "ttl")
             or row["source"] == "upstream" and (row["cache_policy"] != "upstream" or row["cache_age_ms"] is not None)
-            or row["source"] == "cache" and (row["cache_policy"] == "upstream" or row["cache_age_ms"] is None)):
+            or row["source"] == "cache" and row["cache_policy"] == "upstream"):
         return False
     if elapsed is not None and (type(elapsed) is not list or len(elapsed) != 2
             or not all(type(value) is int and 0 <= value <= 604800000 for value in elapsed)
@@ -615,6 +615,7 @@ def summarize_read_intervals(rows, receipts):
             known.pop(generation, None)
         if (not continuous or row["clock_state"] != "local_unqualified" or generation is None
                 or not row["head_known"] or row["head_matches"] is not True or row["force_refresh"]
+                or row["source"] == "cache" and row["cache_age_ms"] is None
                 or row["workflow_correlation"] != "workflow"):
             continue
         prior = known.get(row["generation_ordinal"])
@@ -1163,7 +1164,9 @@ def retained_generation_launch(boundary):
         for index in range(1, len(command)):
             if command[index - 1] == "--ro-bind-data":
                 command[index] = replacements[command[index]]
-        yield {"argv_prefix": command, "pass_fds": tuple(opened)}
+        marker = command.index("--")
+        yield {"argv_prefix": command, "mount_prefix": command[:marker + 1],
+               "execution_prefix": command[marker + 1:], "pass_fds": tuple(opened)}
         if not retained_generation_valid(boundary):
             raise ValueError("generation custody changed during execution")
     finally:
@@ -1185,7 +1188,7 @@ def source_descriptor_lease(required):
     if current != expected or (_FD_LEASE is not None and original != expected and threading.active_count() != 1):
         raise ValueError("descriptor limit changed outside custody")
     raised = required > current[0]
-    if raised and (threading.active_count() != 1 or required > current[1]):
+    if raised and (threading.active_count() != 1 or (current[1] != resource.RLIM_INFINITY and required > current[1])):
         raise ValueError("descriptor ceiling cannot safely be raised")
     previous = _FD_LEASE
     active = (max(current[0], required), current[1])
@@ -1263,8 +1266,10 @@ def retained_generation(root, manifest, manifest_fd=None):
         bash = trusted_boundary_executable(shutil.which("bash") or "")
         payload_prefix = []
         if child_limits is not None:
+            import resource
             limiter = trusted_boundary_executable(shutil.which("prlimit") or "")
-            payload_prefix = [limiter, "--nofile=" + ":".join(map(str, child_limits)), "--"]
+            rendered_limits = ["unlimited" if value == resource.RLIM_INFINITY else str(value) for value in child_limits]
+            payload_prefix = [limiter, "--nofile=" + ":".join(rendered_limits), "--"]
         custody = RetainedGenerationMapping(_GENERATION_AUTHORITY,
                     {"identity": identity, "mount_prefix": tuple([*command, "--"]),
                      "execution_prefix": tuple(payload_prefix),
@@ -1293,7 +1298,8 @@ def qualify_wait(root, manifest, arguments, receipt_path, manifest_fd=None):
     root = pathlib.Path(root).resolve(strict=True)
     receipt = {"schema": 1, "measurement": "live_parent_wait_qualification",
                "receipt_origin": "live_parent", "source_verified": "unknown",
-               "execution_profile": ("root" if os.geteuid() == 0 else "installed_owner"
+               "execution_profile": ("unsupported" if not hasattr(os, "geteuid") else
+                                     "root" if os.geteuid() == 0 else "installed_owner"
                                      if os.geteuid() == root.stat().st_uid else "other_user"),
                "workload_kind": "fixture" if os.environ.get("AI_DEVOPS_TEST_MODE") == "1" else "caller_command",
                "source_boundary": "unknown", "unknown_reason": "boundary_unavailable",

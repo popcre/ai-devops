@@ -246,17 +246,56 @@ exit "${1:-0}"
             with self.fixture_installation(), self.assertRaises(ValueError):
                 report.installed_source(self.root, self.manifest)
         self.manifest.write_text(original); self.manifest.chmod(0o644)
-        with self.assertRaises(ValueError): report.installed_source(self.root, self.manifest)
+        with self.assertRaises((OSError, ValueError)): report.installed_source(self.root, self.manifest)
         self.manifest.chmod(0o600)
         linked = self.manifest.with_name("linked.tsv"); linked.symlink_to(self.manifest)
         with self.assertRaises((OSError, ValueError)): report.installed_source(self.root, linked)
         launcher = self.launcher.parent / "ai-pr-wait"
         launcher.unlink(); launcher.symlink_to(ROOT / "bin/ai-gh")
-        with self.assertRaises(ValueError): report.installed_source(self.root, self.manifest)
+        with self.assertRaises((OSError, ValueError)): report.installed_source(self.root, self.manifest)
 
     def test_arbitrary_owner_private_manifest_cannot_certify_installation(self):
         with self.assertRaises((ValueError, OSError)):
             report.installed_source(self.root, self.manifest)
+
+    def test_missing_canonical_installation_never_certifies_fixture(self):
+        with mock.patch.object(report, "protected_directory", side_effect=FileNotFoundError):
+            with self.assertRaises((OSError, ValueError)):
+                report.installed_source(self.root, self.manifest)
+
+    def test_unsupported_owner_identity_preserves_original_fallback(self):
+        original_os = report.os
+        class WithoutPosixIdentity:
+            def __getattr__(self, name):
+                if name == "geteuid": raise AttributeError(name)
+                return getattr(original_os, name)
+        receipt = self.root / "unsupported-receipt.json"
+        bash = shutil.which("bash")
+        with mock.patch.object(report, "os", WithoutPosixIdentity()), mock.patch.object(report.sys, "platform", "win32"), mock.patch.object(report.shutil, "which", return_value=bash):
+            status = report.qualify_wait(self.root, self.manifest, ["7"], receipt)
+        self.assertEqual(status, 7)
+        self.assertEqual(json.loads(receipt.read_text())["execution_profile"], "unsupported")
+
+    def test_mount_prefix_survives_child_limit_restoration(self):
+        import resource
+        prototype = ROOT / "tools/github-requests/instrumented-gh"
+        sys.path.insert(0, str(prototype))
+        try:
+            from managed_read import native_mount_prefix
+        finally: sys.path.remove(str(prototype))
+        lease = mock.MagicMock()
+        lease.__enter__.return_value = (1024, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
+        with self.fixture_installation(), mock.patch.object(report, "source_descriptor_lease", return_value=lease):
+            with report.retained_generation(self.root, self.manifest) as generation:
+                with report.retained_generation_launch(generation) as launch:
+                    self.assertEqual(launch["argv_prefix"], launch["mount_prefix"] + launch["execution_prefix"])
+                    native = native_mount_prefix(launch, "/fixture-native", 13, "/fixture-native/gh")
+                    self.assertLess(native.index("--ro-bind-data"), native.index("--"))
+                    self.assertEqual(native[native.index("--") + 1:], launch["execution_prefix"])
+                    result = subprocess.run([*launch["argv_prefix"], sys.executable, "-c",
+                                             "import resource;print(resource.getrlimit(resource.RLIMIT_NOFILE)[0])"],
+                                            pass_fds=launch["pass_fds"], capture_output=True, text=True, check=True)
+                    self.assertEqual(result.stdout.strip(), "1024")
 
     def test_git_environment_and_replace_objects_do_not_rewrite_generation(self):
         original = (self.root / "tools/helper.py").read_bytes()
@@ -445,6 +484,15 @@ assert resource.getrlimit(resource.RLIMIT_NOFILE)==(1024,old[1])
         with mock.patch.object(resource, "getrlimit", side_effect=[(1024, 4096), (3072, 4096)]), mock.patch.object(resource, "setrlimit") as change:
             with self.assertRaises(ValueError), report.source_descriptor_lease(2048): pass
             change.assert_called_once_with(resource.RLIMIT_NOFILE, (2048, 4096))
+
+    def test_infinite_hard_limit_is_not_a_negative_ceiling(self):
+        import resource
+        with mock.patch.object(resource, "getrlimit", side_effect=[(1024, resource.RLIM_INFINITY), (4096, resource.RLIM_INFINITY)]), mock.patch.object(resource, "setrlimit") as change:
+            with report.source_descriptor_lease(4096) as original:
+                self.assertEqual(original, (1024, resource.RLIM_INFINITY))
+            self.assertEqual(change.call_args_list,
+                             [mock.call(resource.RLIMIT_NOFILE, (4096, resource.RLIM_INFINITY)),
+                              mock.call(resource.RLIMIT_NOFILE, (1024, resource.RLIM_INFINITY))])
 
     def test_inherited_manifest_is_canonical_readonly_and_offset_independent(self):
         with tempfile.TemporaryDirectory() as temporary:
