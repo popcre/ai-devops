@@ -45,16 +45,18 @@ CLI image or thresholds; cold p95 rose 9.34% and total time rose 23.24%. Both
 failures remain preserved. The finite native Windows read/counter adapter and
 metadata-only actual-context guards merged through PR #2253 as
 `813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on origin/main.
-Local Linux full installation and a necessary counted read now verify final
-`813baf8b`; all three reachable Windows hosts also have full final-source
+Local Linux full installation and a necessary counted read verify prior delivery
+`813baf8b`; all three reachable Windows hosts also have full source-bound
 installation and source-custodied useful-read receipts. The Linux-only owner
 transition repair then merged through #2254 as `87790de4`; Hetz's normal full
 update and source-qualified owner read at that source passed, including actual
-same-inode owner preservation. Local Linux's `87790de4` rollout remains pending.
-Windows runtime blobs are unchanged. Merge is
+same-inode owner preservation. The final combined code is now merged through
+normal PR #2256 as `a98131576c3a092fc19ec938d24650ab98469c8a`, including that
+Linux owner repair. Final normal full installations on both Linux hosts and
+all three Windows hosts are active; their final receipts remain pending. Merge is
 not actual-context acceptance. The earlier Windows counter guard inspected the
 default configuration instead of the private SSH namespace actually selected by
-`ai-gh`; that implementation bug is repaired in queued PR #2256. Metadata-only
+`ai-gh`; that implementation bug is repaired in merged PR #2256. Metadata-only
 checks now pass on edge-dev and 4837; 916 still refuses its actual context. No
 group trust, credential, permission or environment setting changed. The native
 cold counter gate remains failed. The existing Windows waiter
@@ -69,7 +71,8 @@ The earlier focused Windows fixture passed 95 native cases on PowerShell 7.6.8,
 but full CI later exposed a service-account cleanup discrepancy. Explicit retained
 file ACL controls now pass 100 native cases under the actual NetworkService
 runner in run `41285694553`; the temporary proof workflow was retired before
-PR #2256's queued merge with unchanged proven code/test blobs. This zero-API
+PR #2256's normal merge with unchanged proven code/test blobs. Required safety
+passed; Entire's result was neutral, not independent CI execution. This zero-API
 proof repairs the demonstrated cleanup capability, without erasing the prior
 CI or separate cold-counter failures. Final combined installation and counted
 Windows read receipts remain pending.

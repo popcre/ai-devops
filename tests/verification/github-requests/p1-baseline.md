@@ -802,9 +802,18 @@ The proof head is `57eed81f76da773511352928d17df7940866a332`, source blob
 bind fresh snapshot files before sealing and explicitly restore them after the
 owned child stops, preserving each cleanup error. Original, vendor and credential
 permissions remain unchanged. The temporary proof workflow was removed before
-queued PR #2256 head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`; the three
+PR #2256 head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`; the three
 production/test blobs are identical to the successful proof head. This establishes
 the repaired service-account capability, not a new counter-performance result.
+
+PR #2256 subsequently merged normally as
+`a98131576c3a092fc19ec938d24650ab98469c8a`. The three delivered production/test
+blobs remain identical to the successful NetworkService proof head; no temporary
+workflow remains in the delivery. Required safety passed and the Entire result
+was neutral. Final combined normal full installations and useful reads are in
+progress on the five reachable hosts; no completed final-source receipt or
+counted Windows observation is inferred from the merge. The code also includes
+the Linux-only owner-transition repair; no intermediate repeat rollout is needed.
 
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
