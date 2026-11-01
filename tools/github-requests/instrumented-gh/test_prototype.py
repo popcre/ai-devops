@@ -334,20 +334,24 @@ class PrototypeTests(unittest.TestCase):
             if write_fd >= 0:
                 os.close(write_fd)
 
-    def parity(self, args, expected, retry=False, diagnostic=False, require_metadata=False):
+    def parity(self, args, expected, retry=False, diagnostic=False, require_metadata=False, require_success=False):
         self.reset(retry)
         baseline, _ = self.execute("baseline", args, instrument=False)
-        self.assertEqual(self.server.received, expected)
+        baseline_requests = self.server.received
+        if expected is not None:
+            self.assertEqual(baseline_requests, expected)
         self.reset(retry)
         patched, metadata = self.diagnostic(args) if diagnostic else self.execute("instrumented", args)
-        self.assertEqual(self.server.received, expected)
+        self.assertEqual(self.server.received, baseline_requests)
         self.assertEqual((patched.returncode, patched.stdout, patched.stderr),
                          (baseline.returncode, baseline.stdout, baseline.stderr))
+        if require_success:
+            self.assertEqual(patched.returncode, 0, 'finite managed positive outcome failed')
         if require_metadata:
             self.assertIsNotNone(metadata, 'managed command ran without the counter channel')
         if metadata is None:
             return
-        self.assertEqual(metadata["observed_completed_writes"], expected)
+        self.assertEqual(metadata["observed_completed_writes"], baseline_requests)
         self.assertTrue(metadata["complete"])
         self.assertIsNone(metadata["http_requests"])
 
@@ -374,7 +378,9 @@ class PrototypeTests(unittest.TestCase):
     def test_builtin_api_host_coverage(self):
         for args, expected in self.managed_fixture_cases():
             with self.subTest(command=args[:2]):
-                self.parity(args, expected, diagnostic=True, require_metadata=True)
+                # Some vendor releases satisfy a selector-only JSON read
+                # locally. The trusted ledger, not the verb, defines demand.
+                self.parity(args, None, diagnostic=True, require_metadata=True, require_success=True)
 
     def test_managed_coverage_refuses_missing_counter_finish(self):
         from unittest.mock import patch
@@ -620,6 +626,14 @@ class PrototypeTests(unittest.TestCase):
             self.assertIsNone(metadata)
             self.assertEqual((result.returncode, result.stdout, result.stderr),
                              (baseline.returncode, baseline.stdout, baseline.stderr))
+            if MANIFEST['pins'].get('detached_telemetry') is False:
+                self.reset()
+                result, metadata = self.diagnostic(['api', 'private'])
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(self.server.received, 1)
+                self.assertEqual(self.server.telemetry_received, 0)
+                self.assertTrue(metadata['complete'])
+                self.assertEqual(metadata['observed_completed_writes'], 1)
 
     def test_explicit_caller_self_path_is_preserved(self):
         self.env['GH_PATH'] = '/fixture-caller-explicit'
