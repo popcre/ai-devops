@@ -409,6 +409,25 @@ unattributed. That diagnostic neither clears a cold gate nor transfers 916's
 different kernel-cleanup attribution to the 2.97 host. No security setting or
 vendor capability was changed.
 
+## Active-operation scope
+
+Finite source-isolated read profiles preserve environment, cwd, authentication,
+streams and original descriptor limits; they do not assert identical OS
+privileges or arbitrary privileged-provider compatibility. Existing immutable
+read receipts and constructor counts retain that narrower scope.
+
+The separate common BlockerWatch completion adapter in PR #2283 is not a counter
+performance qualification. Its default original-context/provider path declines
+qualification before executing the original command once outside the namespace.
+The explicit `sdk_only_no_provider` alarm/links profile records actual privilege
+restrictions and measures `parent_acknowledged_active_begin_to_end`, including
+control transport. Full caller-through-cleanup elapsed/setup costs remain
+separate, and external caller startup/final storage are not silently excluded
+from a whole-observer verdict: that verdict stays unknown. Native integration
+and installed proof remain required. Durable producer event facts grant neither
+source nor clock authority; a governed BW eligibility-to-delivery consumer is
+still missing. No completion envelope is event-detection latency.
+
 ## Retirement
 
 #660 owns the minimal pinned patch until upstream supplies an equivalent

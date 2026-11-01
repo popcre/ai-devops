@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 11:47 AM EST — current coordinator reconciliation.
+November 1, 2026, 1:39 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -52,11 +52,25 @@ The separate telemetry-fixture defect has a focused native parity repair with
 zero timing pairs; both failed timing attempts remain retained.
 T16's documented trusted-executor access remains unavailable.
 Dispatch/privacy receipt emission is implemented and tested. Active
-BlockerWatch wake/alarm/link terminal emission is a separate current code gap:
-cost/write observations and tick receipts do not qualify those outcomes.
-The current source/clock/event qualification routes also accept PR events only;
-future active BlockerWatch detection needs a finite eligibility/delivery adapter,
-not merely more unqualified receipts. Accepted P5/headroom proof stays accepted.
+BlockerWatch terminal receipts merged through #2281 (`e178`); the stricter
+legacy/active fixture repair then passed on the original CI environment and
+merged through #2282 (`aaca50a8`). The common active-completion adapter is queued
+in #2283 at `d5d3d0fa`, with 49 qualification tests passing. Its explicit SDK-only
+alarm/links profile measures an acknowledged parent envelope, not detection or
+arbitrary provider work. Default original-context/provider operations decline
+qualification before running once unchanged; native completion integration and
+final installed proof remain unfinished. The separate `e6ed1ac8` durable-only
+event-fact producer passed 185 BlockerWatch and 31 receipt/fact cases on Linux;
+corrected bounded native proof remains in progress. These facts do not yet have
+a governed eligibility-to-delivery consumer, even for SDK alarm/links. That is
+an implementation gap, separate from genuine future activity and privileged
+source-authority constraints. Accepted P5/headroom proof stays accepted.
+
+The five finite read observations preserve environment, working directory,
+authentication, streams and original descriptor limits within their declared
+source-isolated profiles. They do not prove identical OS privileges or arbitrary
+privileged-provider acceptance; the immutable context clarification and coverage
+aggregate V4 preserve their ten-write/twenty-five-invocation counts.
 
 ## Historical delivery snapshots — superseded by current reconciliation
 

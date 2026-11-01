@@ -12,13 +12,38 @@ unimplemented emission path. Dispatch receipts describe the command boundary,
 not completion of dispatched remote work. No dispatch or transcript traffic is
 manufactured to fill a sample, and no old observation is reclassified.
 
-A separate current source audit found that active BlockerWatch wake/alarm/link
-terminal emission is not implemented: alarm/links set cost/workflow labels,
-while wake records private state, and only tick/completed reaches the terminal
-collector/reporter. Existing write, event and local observations do not qualify
-these active terminal outcomes. This is a code/qualification gap distinct from
-missing natural dispatch/privacy samples; historical P5 and busy-window proofs
-remain accepted without supplying those missing active-operation receipts.
+Active BlockerWatch terminal emission now exists in merged #2281 (`e178`):
+distinct child IDs, parent-tick linkage, finite boundaries and attempted,
+succeeded, failed and skipped counts. Idle, dry-run, partial and refused work
+does not become successful active work or change the useful-work denominator.
+Its actual native proof passed sixteen cases; earlier fixture-selection failures
+remain retained. The legacy/active CI-fixture repair #2282 (`aaca50a8`) passed
+on the same physical CI environment without relaxing the validator.
+
+Common parent-completion adapter #2283 is queued at `d5d3d0fa`, with 49
+qualification cases passing. It distinguishes the acknowledged active envelope
+from full caller-through-cleanup costs; neither alone supplies a whole-observer
+budget verdict. Default original-context and provider-capable work executes once
+outside reduced-rights qualification. Explicit SDK-only alarm/links is component
+scope, not arbitrary privileged-provider acceptance. Native integration and final
+installed proof are still required. Candidate `e6ed1ac8` adds durable-only
+unqualified event facts (185 BlockerWatch and 31 receipt/fact cases passed on
+Linux); its first native controller exceeded its aggregate deadline without
+preserving streams, so corrected bounded proof is not yet a code verdict.
+No governed BW eligibility-to-delivery consumer exists yet. Genuine future facts
+alone cannot close that implementation gap; PR event qualification remains
+strictly PR-only. Historical P5 and busy-window proofs remain accepted.
+
+Coverage aggregate V4 has digest
+`fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.
+It preserves all seven V3 input bindings and adds the immutable context-scope
+clarification (`a37434319f4a0466d6cba479f12d97af0e7be96553f89750d92913390d2b3ce0`).
+Five disjoint useful reads still mean ten covered constructor writes and
+twenty-five native invocations including probes, not a matched cohort. Preserved
+environment/cwd/authentication/streams/descriptor limits do not imply identical
+OS privileges. These finite source-isolated read counts remain valid; arbitrary
+privileged active qualification, whole-account totals and matched natural
+savings remain unknown. V3 and its original receipts were not rewritten.
 
 ## Coordinator natural sample — October 31, 2026 EDT
 
