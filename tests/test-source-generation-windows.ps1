@@ -1,6 +1,7 @@
 # Focused native custody tests; writes only a newly-created private directory.
 param([string]$Supervisor=(Join-Path $PSScriptRoot '..\tools\github-requests\source_generation_windows.ps1'),
-      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'))
+      [string]$EventHelper=(Join-Path $PSScriptRoot '..\tools\github-requests\windows_event.py'),
+      [string]$CounterManifest,[string]$ExpectedCounterManifestSha256)
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
 $text=[IO.File]::ReadAllText($Supervisor)
@@ -9,7 +10,14 @@ if (-not $source) { throw 'Supervisor native custody class missing' }
 Add-Type -TypeDefinition $source
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Supervisor PowerShell syntax invalid'}
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-ReadArguments'},$true)
+. ([scriptblock]::Create($guard.Extent.Text))
+foreach($name in @('Hash-Bytes','Read-LockedBytes','Local-OnlyProbe','Capture-Counter','Bash-Path')){
+    $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+    . ([scriptblock]::Create($guard.Extent.Text))
+}
+$guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CounterContext'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
@@ -94,6 +102,7 @@ exit 0
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
     Assert $true 'Finite public read arguments accepted'
     Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'
+    Refuses {Assert-ReadArguments 'bin/ai-gh' @('--version')} 'Local version fixture does not authorize managed admission'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','other/private')} 'Other repository denied by explicit read profile'
     Refuses {Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--reviewer-approval','unbound-file')} 'Unbound helper argument denied by read profile'
     $wireProbe=Join-Path $root 'wire_probe.py'
@@ -133,6 +142,9 @@ elif mode=='full':
   if not m._write_once(h,b'x'*4096):break
  else:raise SystemExit(21)
  if time.monotonic()-start>1:raise SystemExit(22)
+elif mode=='counter':
+ for value in (b'{"schema":1,"started":true}\n',b'{"schema":1,"finished":true}\n'):
+  if not m._write_once(h,value):raise SystemExit(35)
 elif mode=='duplicate':
  if not m._write_once(h,b'{}') or not m._write_once(h,b'{}'):raise SystemExit(24)
 elif mode=='malformed':
@@ -145,8 +157,8 @@ else:
     $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
     $python=(Get-Command python.exe -ErrorAction Stop).Source
     function Posix([string]$p){return '/'+$p.Substring(0,1)+'/'+$p.Substring(3).Replace('\','/')}
-    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog')){
-        $channel=[GenerationCustody+EventChannel]::new();$job=[GenerationCustody]::Job()
+    foreach($mode in @('basic','full','duplicate','malformed','invalid','closed','watchdog','counter')){
+        $channel=if($mode -eq 'counter'){[GenerationCustody+EventChannel]::new(128)}else{[GenerationCustody+EventChannel]::new()};$job=[GenerationCustody]::Job()
         $saved=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
         try{
             [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',[string]$channel.WriteHandle,'Process')
@@ -155,8 +167,68 @@ else:
             $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true)
             try{Assert ($process.WaitForExit(5000)) 'Native event write is bounded';Assert ($process.ExitCode -eq 0) ('Git Bash/native Python event pipe '+$mode+' exit='+$process.ExitCode)}finally{$process.Dispose()}
             if($mode -eq 'basic'){Assert ($channel.EventText() -eq '{"native_chain":"ok"}') 'Raw handle survives actual Bash/native Python chain'}
+            elseif($mode -eq 'counter'){Assert ($channel.CounterText() -ceq "{`"schema`":1,`"started`":true}`n{`"schema`":1,`"finished`":true}`n") 'Separate numeric pipe retains sequential complete messages'}
             elseif($mode -eq 'duplicate' -or $mode -eq 'malformed'){Assert ($null -eq $channel.EventText() -and $channel.Status -eq 'invalid') 'Duplicate or malformed event stays unknown'}
         }finally{[Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$saved,'Process');$job.Dispose();$channel.Dispose()}
+    }
+    foreach($key in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_PAGER','AI_GH_HTTP_COUNTER_HANDLE','AI_GH_HTTP_COUNTER_FD','MSYS2_ARG_CONV_EXCL')){
+        $saved=[Environment]::GetEnvironmentVariable($key,'Process')
+        try{[Environment]::SetEnvironmentVariable($key,'unsupported-test-context','Process');Refuses {Assert-CounterContext} ('Ambient counter context refused: '+$key);Assert ([Environment]::GetEnvironmentVariable($key,'Process') -ceq 'unsupported-test-context') 'Counter guard preserves original environment'}finally{[Environment]::SetEnvironmentVariable($key,$saved,'Process')}
+    }
+    if($CounterManifest){
+        # Optional owned native integration: direct local --version only. Never
+        # enter ai-gh admission here: even --version can refresh its quota.
+        $script:locks=[Collections.Generic.List[IDisposable]]::new()
+        $script:installedBash=$bash
+        $capsule=Join-Path $root 'counter-capsule'
+        [GenerationCustody]::PrivateDirectory($capsule)
+        $capsuleHold=[GenerationCustody]::Hold($capsule,$true,$false)
+        $capsuleControl=[GenerationCustody]::DirectoryControl($capsule)
+        $channel=[GenerationCustody+EventChannel]::new(128);$job=[GenerationCustody]::Job();$imageHold=$null
+        $savedHandle=$env:AI_GH_HTTP_COUNTER_HANDLE;$savedHost=$env:AI_GH_HTTP_COUNTER_HOST
+        try{
+            Refuses {Capture-Counter $CounterManifest ('0'*64)} 'Wrong approved manifest refused before image execution'
+            $captured=Capture-Counter $CounterManifest $ExpectedCounterManifestSha256
+            # Metadata attacks use a fresh private copy, never the approved
+            # frozen source/image. Every case must fail before any execution.
+            $negative=Join-Path $root 'counter-negative';[GenerationCustody]::PrivateDirectory($negative)
+            $negativeSource=Join-Path $negative 'source';[void][IO.Directory]::CreateDirectory($negativeSource)
+            $originalStage=Split-Path $CounterManifest -Parent
+            foreach($sourceFile in (Get-ChildItem -LiteralPath (Join-Path $originalStage 'source') -File)){
+                [IO.File]::WriteAllBytes((Join-Path $negativeSource $sourceFile.Name),[IO.File]::ReadAllBytes($sourceFile.FullName))
+            }
+            [IO.File]::WriteAllBytes((Join-Path $negative 'gh-instrumented.exe'),$captured.bytes)
+            foreach($attackCase in @('target','installed','version','compiled-binding','extra-helper')){
+                $metadata=[IO.File]::ReadAllText($CounterManifest)|ConvertFrom-Json
+                switch($attackCase){
+                    target {$metadata.target='linux-amd64'}
+                    installed {$metadata.installed=$true}
+                    version {$metadata.pins.upstream_version='2.101.0'}
+                    compiled-binding {$metadata.compiled_counter_source_binding.files.'channel_windows.go'='0'*64}
+                    extra-helper {[IO.File]::WriteAllText((Join-Path $negativeSource 'unexpected.go'),'not approved')}
+                }
+                $negativeManifest=Join-Path $negative 'build.json'
+                [IO.File]::WriteAllText($negativeManifest,($metadata|ConvertTo-Json -Depth 20 -Compress),[Text.UTF8Encoding]::new($false))
+                $savedLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
+                try{Refuses {Capture-Counter $negativeManifest (Hash-Bytes ([IO.File]::ReadAllBytes($negativeManifest)))} ('Counter metadata/helper attack refused: '+$attackCase)}finally{foreach($lock in $script:locks){$lock.Dispose()};$script:locks=$savedLocks}
+            }
+            Remove-Item -LiteralPath $negative -Recurse -Force
+            $image=Join-Path $capsule 'counter.exe';[IO.File]::WriteAllBytes($image,$captured.bytes)
+            $imageHold=[GenerationCustody]::Hold($image,$false,$true)
+            [GenerationCustody]::DirectoryAccess($capsuleControl,$false)
+            [GenerationCustody]::AssertClosure($capsule,@('counter.exe'))
+            Refuses {[IO.File]::WriteAllBytes($image,[byte[]]@(0))} 'Held copied counter image mutation refused'
+            $env:AI_GH_HTTP_COUNTER_HANDLE=[string]$channel.WriteHandle;$env:AI_GH_HTTP_COUNTER_HOST='api.github.com'
+            $command=(@('-c','exec "$1" --version','owned-counter-fixture',(Bash-Path $image))|ForEach-Object{[GenerationCustody]::Quote($_)}) -join ' '
+            $process=[GenerationCustody]::Start($job,$bash,$command,$root,$true,$true)
+            try{Assert ($process.WaitForExit(5000)) 'Native instrumented local version is bounded';Assert ($process.ExitCode -eq 0) 'Native local version preserves original success'}finally{$process.Dispose()}
+            $wire=$channel.CounterText();$rows=@($wire -split "`n"|Where-Object{$_}|ForEach-Object{$_|ConvertFrom-Json})
+            Assert ($rows.Count -eq 2 -and $rows[0].started -eq $true -and $rows[1].finished -eq $true) 'Actual Bash to native counter handle retains complete invocation'
+            Assert ($rows[1].observed_completed_writes -eq 0 -and $rows[1].failed_write_attempts -eq 0 -and $rows[1].observed_external_writes -eq 0 -and $rows[1].incomplete -eq $false -and $null -eq $rows[1].http_requests) 'Direct local native version emits complete zero writes without global HTTP claim'
+        }finally{
+            $env:AI_GH_HTTP_COUNTER_HANDLE=$savedHandle;$env:AI_GH_HTTP_COUNTER_HOST=$savedHost;$job.Dispose();$channel.Dispose()
+            try{[GenerationCustody]::DirectoryAccess($capsuleControl,$true)}finally{$capsuleControl.Dispose();if($imageHold){$imageHold.Dispose()};$capsuleHold.Dispose();foreach($lock in $script:locks){$lock.Dispose()};Remove-Item -LiteralPath $capsule -Recurse -Force}
+        }
     }
     $fixture=@{schema=4;utc='2026-10-31T00:00:00Z';measurement='workflow_evidence';caller='ai-pr-wait';workflow='pr_wait';workflow_id=('a'*32);cohort_id=$null;target_ordinal=$null;source_verified='unknown';source_fingerprint_start=$null;source_fingerprint_end=$null;install_generation_binding=$null;event_kind='pr_merged';eligible_utc_ms=1750000000000L;observed_utc_ms=1750000001000L;delivered_utc_ms=1750000001000L;delivery_boundary='terminal_report';clock_quality='unknown';clock_error_bound_ms=$null;latency_ms=$null;unknown_reason='source_unknown'}
     $json=$fixture|ConvertTo-Json -Compress

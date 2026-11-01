@@ -11,7 +11,9 @@ param(
     [string]$BashExe,
     [switch]$RestrictedReadProfile,
     [switch]$ObserverEvents,
-    [switch]$ReadOnlyNoStdin
+    [switch]$ReadOnlyNoStdin,
+    [string]$CounterManifest,
+    [string]$ExpectedCounterManifestSha256
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
@@ -224,10 +226,12 @@ public static class GenerationCustody {
   }}if(count!=paths.Length)throw new IOException("Incomplete private generation");
  }
  public sealed class EventChannel:IDisposable {
-  readonly SafeFileHandle reader,writer;readonly System.Collections.Generic.List<byte[]> messages=new System.Collections.Generic.List<byte[]>();int total;bool invalid;
+  readonly SafeFileHandle reader,writer;readonly System.Collections.Generic.List<byte[]> messages=new System.Collections.Generic.List<byte[]>();readonly int limit;int total;bool invalid;
   public long WriteHandle {get{return writer.DangerousGetHandle().ToInt64();}}
   public string Status {get{return invalid?"invalid":messages.Count==1?"received":"unavailable";}}
-  public EventChannel(){
+  public EventChannel():this(1){}
+  public EventChannel(int messageLimit){
+   if(messageLimit!=1&&messageLimit!=128)throw new ArgumentException("Finite channel limit required");limit=messageLimit;
    string user=WindowsIdentity.GetCurrent().User.Value;IntPtr descriptor;uint size;
    if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("O:"+user+"D:P(A;;GA;;;"+user+")(A;;GA;;;SY)S:(ML;;NW;;;ME)",1,out descriptor,out size))throw new IOException("Private event descriptor unavailable");
    try{SecurityAttributes a=new SecurityAttributes();a.Length=(uint)Marshal.SizeOf(typeof(SecurityAttributes));a.Descriptor=descriptor;
@@ -237,13 +241,14 @@ public static class GenerationCustody {
     if(writer.IsInvalid||!SetNamedPipeHandleState(writer,ref mode,IntPtr.Zero,IntPtr.Zero)||!SetHandleInformation(writer.DangerousGetHandle(),1,1))throw new IOException("Nonblocking event writer unavailable");
    }catch{if(writer!=null)writer.Dispose();if(reader!=null)reader.Dispose();throw;}finally{LocalFree(descriptor);}
   }
-  public void Drain(){if(invalid)return;for(int i=0;i<16;i++){
+  public void Drain(){if(invalid)return;for(int i=0;i<129;i++){
    byte[] data=new byte[4096];uint read;bool ok=ReadFile(reader,data,4096,out read,IntPtr.Zero);int error=Marshal.GetLastWin32Error();
    if(!ok&&(error==232||error==109||error==536))return;
-   if(!ok||read==0){invalid=true;return;}total+=(int)read;if(total>65536||messages.Count!=0){invalid=true;return;}
+   if(!ok||read==0){invalid=true;return;}total+=(int)read;if(total>65536||messages.Count>=limit){invalid=true;return;}
    byte[] message=new byte[read];Array.Copy(data,message,read);messages.Add(message);
   }invalid=true;}
   public string EventText(){Drain();if(invalid||messages.Count!=1)return null;try{return new UTF8Encoding(false,true).GetString(messages[0]);}catch(DecoderFallbackException){invalid=true;return null;}}
+  public string CounterText(){Drain();if(invalid||messages.Count==0)return null;try{var b=new StringBuilder();foreach(byte[] m in messages)b.Append(new UTF8Encoding(false,true).GetString(m));return b.ToString();}catch(DecoderFallbackException){invalid=true;return null;}}
   public void Dispose(){writer.Dispose();reader.Dispose();}
  }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites) {return Hold(path,directory,denyWrites,false);}
@@ -265,6 +270,8 @@ $captureLocks = [Collections.Generic.List[IDisposable]]::new()
 $snapshot = $null
 $child = $null
 $eventChannel = $null
+$counterChannel = $null
+$counterBinding = $null
 $receipt = [GenerationCustody]::Pipe($ReceiptHandle,[IO.FileAccess]::Write)
 $ack = [GenerationCustody]::Pipe($ReceiptAckHandle,[IO.FileAccess]::Read)
 $exitCode = 125
@@ -296,6 +303,84 @@ function Bash-Path([string]$Path) {
     $p = [IO.Path]::GetFullPath($Path)
     if ($p.StartsWith('\\')) { throw 'Network source refused' }
     return '/'+$p.Substring(0,1)+'/'+$p.Substring(3).Replace('\','/')
+}
+function Read-LockedBytes([string]$Path) {
+    $handle=[GenerationCustody]::Hold($Path,$false,$true)
+    $script:locks.Add($handle)
+    return ,([GenerationCustody]::Read($handle))
+}
+function Assert-CounterContext {
+    foreach($key in @([Environment]::GetEnvironmentVariables().Keys)) {
+        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','PAGER','GH_PAGER','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
+    }
+    if($env:GH_HOST -and $env:GH_HOST -cne 'github.com'){throw 'Counter supports original github.com context only'}
+    if([Console]::IsInputRedirected -eq $false -or [Console]::IsOutputRedirected -eq $false){throw 'Counter requires explicit nonTTY read capsule'}
+}
+function Local-OnlyProbe([string]$Executable,[string[]]$Values) {
+    $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$Executable;$info.UseShellExecute=$false
+    $info.Arguments=($Values|ForEach-Object{[GenerationCustody]::Quote($_)}) -join ' '
+    $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.RedirectStandardInput=$true
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$info
+    try{
+        if(-not $process.Start()){throw 'Local version probe unavailable'}
+        $process.StandardInput.Close();$output=$process.StandardOutput.ReadToEndAsync();$errors=$process.StandardError.ReadToEndAsync()
+        if(-not $process.WaitForExit(5000)){ $process.Kill();$process.WaitForExit();throw 'Local version probe exceeded finite deadline' }
+        if($process.ExitCode -ne 0 -or -not $output.Wait(1000) -or -not $errors.Wait(1000) -or $output.Result.Length -gt 4096){throw 'Local version probe unavailable'}
+        return $output.Result.TrimEnd([char[]]"`r`n")
+    }finally{$process.Dispose()}
+}
+function Capture-Counter([string]$ManifestPath,[string]$ExpectedHash) {
+    if($ExpectedHash -cnotmatch '^[a-f0-9]{64}$'){throw 'Exact approved counter manifest digest required'}
+    $stage=[IO.Directory]::GetParent([IO.Path]::GetFullPath($ManifestPath))
+    if([IO.Path]::GetFileName($ManifestPath) -cne 'build.json'){throw 'Fixed counter build manifest required'}
+    $ancestors=@();$cursor=$stage
+    while($null -ne $cursor){$ancestors+=$cursor;$cursor=$cursor.Parent}
+    foreach($ancestor in ($ancestors|Sort-Object {$_.FullName.Length})){
+        $held=[GenerationCustody]::Hold($ancestor.FullName,$true,$false)
+        try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $ancestor.Parent));$script:locks.Add($held)}catch{$held.Dispose();throw}
+    }
+    $manifestBytes=Read-LockedBytes $ManifestPath
+    if((Hash-Bytes $manifestBytes) -cne $ExpectedHash){throw 'Counter build manifest digest mismatch'}
+    $m=[Text.Encoding]::UTF8.GetString($manifestBytes)|ConvertFrom-Json
+    if($m.target -cne 'windows-amd64' -or $m.installed -isnot [bool] -or $m.installed -ne $false -or $m.counter_source_binding.schema -ne 1 -or $m.compiled_counter_source_binding.schema -ne 1){throw 'Unsupported counter qualification build'}
+    $names=@('httpcounter.go','httpcounter_test.go','channel.go','channel_linux.go','channel_windows.go','channel_unsupported.go','channel_windows_test.go','windows_cli_fixture_test.go','native_fixture.ps1','pins.json')
+    $expected=($names|Sort-Object)-join ','
+    foreach($binding in @($m.counter_source_binding,$m.compiled_counter_source_binding)){
+        if((@($binding.files.PSObject.Properties.Name|Sort-Object)-join ',') -cne $expected){throw 'Counter ten-input closure mismatch'}
+    }
+    $sourceDir=Join-Path $stage.FullName 'source'
+    $script:locks.Add([GenerationCustody]::Hold($sourceDir,$true,$false))
+    if((@(Get-ChildItem -LiteralPath $sourceDir -Force|ForEach-Object Name|Sort-Object)-join ',') -cne $expected){throw 'Counter auxiliary source closure mismatch'}
+    $pins=$null;$bindingText=[Text.StringBuilder]::new()
+    foreach($name in ($names|Sort-Object)){
+        $bytes=Read-LockedBytes (Join-Path $sourceDir $name);$hash=Hash-Bytes $bytes
+        if($hash -cne $m.counter_source_binding.files.$name -or $hash -cne $m.compiled_counter_source_binding.files.$name){throw 'Counter source/compiled binding mismatch'}
+        [void]$bindingText.Append($name).Append([char]0).Append($hash).Append("`n")
+        if($name -ceq 'pins.json'){$pins=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json}
+    }
+    $version=[string]$m.pins.upstream_version
+    if($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$'){throw 'Unknown counter runtime version'}
+    $profile=$pins.profiles.PSObject.Properties[$version]
+    if($null -eq $profile -or $profile.Value.profile_kind -cne 'runtime'){throw 'Counter runtime profile required'}
+    foreach($key in @('upstream_commit','source_sha256','api_constructor_hooks','detached_telemetry','profile_kind')){
+        if($m.pins.$key -cne $profile.Value.$key){throw 'Counter runtime profile binding mismatch'}
+    }
+    if($m.pins.toolchain_sha256 -cne $pins.toolchain_sha256){throw 'Counter toolchain binding mismatch'}
+    $image=Read-LockedBytes (Join-Path $stage.FullName 'gh-instrumented.exe')
+    $imageHash=Hash-Bytes $image
+    if($imageHash -cne $m.artifacts.instrumented.sha256 -or $image.Length -lt 128 -or $image[0] -ne 77 -or $image[1] -ne 90){throw 'Counter image digest/PE mismatch'}
+    $pe=[BitConverter]::ToInt32($image,60)
+    if($pe -lt 64 -or $pe -gt ($image.Length-6) -or [BitConverter]::ToUInt32($image,$pe) -ne 17744 -or [BitConverter]::ToUInt16($image,$pe+4) -ne 34404){throw 'Counter image must be PE amd64'}
+    # Resolve the same Bash PATH used by ordinary ai-gh, then hold the actual
+    # vendor image during its local version check. No request or credential read.
+    $ordinary=Local-OnlyProbe $script:installedBash @('-c','p=$(type -P gh); test -n "$p" && cygpath -w "$p"')
+    if(-not [IO.Path]::IsPathRooted($ordinary)){throw 'Ordinary native gh image unavailable'}
+    $cursor=[IO.Directory]::GetParent($ordinary)
+    while($null -ne $cursor){$script:locks.Add([GenerationCustody]::Hold($cursor.FullName,$true,$false));$cursor=$cursor.Parent}
+    $official=Read-LockedBytes $ordinary
+    $actualVersion=Local-OnlyProbe $ordinary @('--version')
+    if($actualVersion -cnotmatch ('^gh version '+[regex]::Escape($version)+'(?: |\r?\n|$)')){throw 'Counter version differs from actual ordinary gh'}
+    return @{bytes=$image;binding=@{schema=1;manifest_sha256=$ExpectedHash;image_sha256=$imageHash;counter_source_fingerprint=(Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($bindingText.ToString())));runtime_version=$version;ordinary_image_sha256=(Hash-Bytes $official);closure_entry='extra/counter.exe';scope='primary_constructor_subset';http_requests=$null;graphql_operations=$null;qualification_only=$true}}
 }
 function Assert-ReadArguments([string]$Entry,[object[]]$Values) {
     if ($Entry -eq 'bin/ai-pr-wait') {
@@ -342,6 +427,12 @@ function Test-ObserverEvent([string]$Text) {
     return $true
 }
 try {
+    $countRequests=([bool]$CounterManifest -or [bool]$ExpectedCounterManifestSha256)
+    $observeTransport=$ObserverEvents -or $countRequests
+    if($countRequests){
+        if(-not $CounterManifest -or -not $ExpectedCounterManifestSha256 -or -not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -cne 'bin/ai-gh' -or $ObserverEvents){throw 'Counter requires explicit restricted finite ai-gh read with no stdin'}
+        Assert-CounterContext
+    }
     if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
     foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {
         if (($key -in @('BASH_ENV','ENV','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient source prevents generation qualification' }
@@ -411,6 +502,18 @@ try {
     $ids = @($paths | ForEach-Object { $blobs[$_] })
     # Raw blobs avoid Git archive's Windows EOL/export transformations.
     [GenerationCustody]::Materialize($git,$root,$snapshot,[string[]]$paths,[string[]]$ids)
+    $closurePaths=@($paths)
+    if($countRequests){
+        $capturedCounter=Capture-Counter $CounterManifest $ExpectedCounterManifestSha256
+        $counterBinding=$capturedCounter.binding
+        $extra=Join-Path $snapshot 'extra'
+        [void][IO.Directory]::CreateDirectory($extra)
+        [IO.File]::WriteAllBytes((Join-Path $extra 'counter.exe'),$capturedCounter.bytes)
+        $counterHold=[GenerationCustody]::Hold((Join-Path $extra 'counter.exe'),$false,$true)
+        $locks.Add($counterHold)
+        if((Hash-Bytes ([GenerationCustody]::Read($counterHold))) -cne $counterBinding.image_sha256){throw 'Private counter image copy mismatch'}
+        $closurePaths+='extra/counter.exe'
+    }
     # Freeze only the private generation. Canonical files stay writable.
     $ancestors = @()
     $ancestor = [IO.Directory]::GetParent($snapshot)
@@ -420,7 +523,7 @@ try {
     $snapshotDirectories = @((Get-Item -LiteralPath $snapshot)) + @(Get-ChildItem -LiteralPath $snapshot -Directory -Recurse -Force)
     foreach ($directory in $snapshotDirectories) { $directoryControls.Add([GenerationCustody]::DirectoryControl($directory.FullName)) }
     foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$false) }
-    [GenerationCustody]::AssertClosure($snapshot,[string[]]$paths)
+    [GenerationCustody]::AssertClosure($snapshot,[string[]]$closurePaths)
     $manifest = [Text.StringBuilder]::new()
     foreach ($relative in $paths) {
         if ($relative -notmatch '^(bin|tools|config)/[A-Za-z0-9_./ -]+$' -or $relative -match '(^|/)\.\.(/|$)') { throw 'Unexpected generation path' }
@@ -447,27 +550,38 @@ try {
     $job = [GenerationCustody]::Job()
     $locks.Add($job)
     $fingerprint = Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
-    $observerRun = if ($ObserverEvents) {[Guid]::NewGuid().ToString('N')}else{$null}
+    $observerRun = if ($observeTransport) {[Guid]::NewGuid().ToString('N')}else{$null}
     $controlByte = New-Object byte[] 1
-    $controlRead = if ($ObserverEvents) {$ack.ReadAsync($controlByte,0,1)}else{$null}
-    if($ObserverEvents -and $controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before child launch')}
+    $controlRead = if ($observeTransport) {$ack.ReadAsync($controlByte,0,1)}else{$null}
+    if($observeTransport -and $controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before child launch')}
     $savedEventHandle=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
+    $counterEnvironment=@{}
     try {
+        if($countRequests){
+            $counterChannel=[GenerationCustody+EventChannel]::new(128)
+            $childCounter=@{AI_GH_REAL_GH=(Bash-Path (Join-Path $snapshot 'extra/counter.exe'));GH_PATH=(Join-Path $snapshot 'extra/counter.exe');AI_GH_HTTP_COUNTER_HANDLE=[string]$counterChannel.WriteHandle;AI_GH_HTTP_COUNTER_HOST='api.github.com'}
+            foreach($key in $childCounter.Keys){$counterEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$childCounter[$key],'Process')}
+        }
         if ($ObserverEvents) {
             try {$eventChannel=[GenerationCustody+EventChannel]::new()}catch{$eventChannel=$null}
             $wireHandle=if($null -ne $eventChannel){[string]$eventChannel.WriteHandle}else{$null}
             [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$wireHandle,'Process')
         }
         $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]$RestrictedReadProfile,[bool]$ReadOnlyNoStdin)
-    } finally { [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$savedEventHandle,'Process') }
-    if ($ObserverEvents) {
+    } finally {
+        [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$savedEventHandle,'Process')
+        foreach($key in $counterEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$counterEnvironment[$key],'Process')}
+    }
+    if ($observeTransport) {
         $started=@{schema=1;frame='started';observer_run_id=$observerRun;observer_arguments_sha256=(Hash-Bytes $argumentBytes);source_sha=$sourceSha;source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';execution_profile='restricted_read';stdin_profile='read_only_no_stdin';start_boundary='process_resumed'}
         $startedBytes=[Text.Encoding]::UTF8.GetBytes((($started|ConvertTo-Json -Compress)+"`n"));$receipt.Write($startedBytes,0,$startedBytes.Length);$receipt.Flush()
         while (-not $child.WaitForExit(20)) {
             if($controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before terminal delivery')}
             if($null -ne $eventChannel){$eventChannel.Drain()}
+            if($null -ne $counterChannel){$counterChannel.Drain()}
         }
         if($null -ne $eventChannel){$eventChannel.Drain()}
+        if($null -ne $counterChannel){$counterChannel.Drain()}
     } else { $child.WaitForExit() }
     $exitCode = $child.ExitCode
     $verified = $RestrictedReadProfile -or -not $privilegedOriginal
@@ -475,7 +589,7 @@ try {
     $detail = if ($verified) {'none'} else {'privileged_original_context'}
     $profile = if ($RestrictedReadProfile) {'restricted_read'} else {'original'}
     $record = [ordered]@{schema=1;source_sha=$sourceSha;source_fingerprint=$fingerprint;loaded_source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';install_generation_binding=(Hash-Bytes $launcherBytes);source_boundary='windows_locked_generation';child_exit=$exitCode;source_verified=$(if($verified){'verified'}else{'unknown'});unknown_reason=$reason;boundary_detail=$detail;execution_profile=$profile;clock_quality='unknown';clock_error_bound_ms=$null}
-    if ($ObserverEvents) {
+    if ($observeTransport) {
         $eventText=if($null -ne $eventChannel){$eventChannel.EventText()}else{$null}
         $record['observer_run_id']=$observerRun
         $record['observer_arguments_sha256']=Hash-Bytes $argumentBytes
@@ -483,11 +597,12 @@ try {
         $record['start_boundary']='process_resumed'
         $record['observer_event_json']=if(Test-ObserverEvent $eventText){$eventText}else{$null}
         $record['observer_event_status']=if($record['observer_event_json']){'received'}elseif($null -eq $eventChannel -or $eventChannel.Status -eq 'unavailable'){'unavailable'}else{'invalid'}
+        if($countRequests){$record['counter_binding']=$counterBinding;$record['counter_raw']=$counterChannel.CounterText()}
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes((($record | ConvertTo-Json -Compress)+"`n"))
     $receipt.Write($bytes,0,$bytes.Length);$receipt.Flush()
     # Receipt is consumed before custody ends, never certified by a later file.
-    if (-not $ObserverEvents) {$controlRead=$ack.ReadAsync($controlByte,0,1)}
+    if (-not $observeTransport) {$controlRead=$ack.ReadAsync($controlByte,0,1)}
     if ($controlRead.Wait(30000) -and $controlRead.Result -eq 0) { throw [OperationCanceledException]::new('Observer control closed') }
     if (-not $controlRead.IsCompleted -or $controlRead.Result -ne 1 -or $controlByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
 } catch [OperationCanceledException] {
@@ -496,6 +611,7 @@ try {
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $child) { if (-not $child.HasExited) { $child.Kill();$child.WaitForExit() };$child.Dispose() }
     if ($null -ne $eventChannel) { $eventChannel.Dispose() }
+    if ($null -ne $counterChannel) { $counterChannel.Dispose() }
     foreach ($capture in $captureLocks) { $capture.Dispose() }
     foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$true) }
     foreach ($control in $directoryControls) { $control.Dispose() }

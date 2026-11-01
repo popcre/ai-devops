@@ -56,13 +56,50 @@ def valid_start(row, argument_hash):
             and row["stdin_profile"] == "read_only_no_stdin")
 
 
-def valid_receipt(row, started):
+def valid_counter_binding(row, expected_hash):
+    keys = {"schema", "manifest_sha256", "image_sha256", "counter_source_fingerprint", "runtime_version",
+            "ordinary_image_sha256", "closure_entry", "scope", "http_requests", "graphql_operations", "qualification_only"}
+    return (isinstance(row, dict) and set(row) == keys and type(row["schema"]) is int and row["schema"] == 1
+            and digest(expected_hash) and row["manifest_sha256"] == expected_hash
+            and all(digest(row[key]) for key in ("image_sha256", "counter_source_fingerprint", "ordinary_image_sha256"))
+            and isinstance(row["runtime_version"], str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", row["runtime_version"]) is not None
+            and row["closure_entry"] == "extra/counter.exe" and row["scope"] == "primary_constructor_subset"
+            and row["http_requests"] is None and row["graphql_operations"] is None and row["qualification_only"] is True)
+
+
+def counter_aggregate(raw):
+    """One existing numeric-only validator; never transmit raw child pipe data."""
+    location = str(HERE / "instrumented-gh")
+    if location not in sys.path:
+        sys.path.insert(0, location)
+    from managed_read import aggregate_invocations
+    return aggregate_invocations(raw.encode("utf-8") if isinstance(raw, str) else b"")
+
+
+def valid_counter_measurement(row):
+    unknown = counter_aggregate(None)
+    if not isinstance(row, dict) or set(row) != set(unknown) or type(row["complete"]) is not bool:
+        return False
+    if row == unknown:
+        return True
+    return (row["measurement"] == unknown["measurement"] and row["http_requests"] is None
+            and row["complete"] is True and type(row["counted_invocations"]) is int and 1 <= row["counted_invocations"] <= 64
+            and row["failed_write_attempts"] == 0
+            and all(type(row[key]) is int and 0 <= row[key] <= 64000000000 for key in
+                    ("observed_completed_writes", "failed_write_attempts", "observed_external_writes")))
+
+
+def valid_receipt(row, started, expected_counter_hash=None):
     if not isinstance(row, dict) or not isinstance(started, dict):
         return False
     required = {"schema", "source_sha", "source_fingerprint", "loaded_source_fingerprint", "source_scope",
                 "install_generation_binding", "source_boundary", "child_exit", "source_verified", "unknown_reason",
                 "boundary_detail", "execution_profile", "clock_quality", "clock_error_bound_ms", "observer_run_id",
                 "observer_arguments_sha256", "stdin_profile", "observer_event_json", "observer_event_status", "start_boundary"}
+    if expected_counter_hash is not None:
+        required |= {"counter_binding", "counter_measurement"}
+        if not valid_counter_binding(row.get("counter_binding"), expected_counter_hash) or not valid_counter_measurement(row.get("counter_measurement")):
+            return False
     return (set(row) == required and type(row["schema"]) is int and row["schema"] == 1
             and all(row[key] == started[key] for key in ("source_sha", "source_fingerprint", "source_scope",
                     "observer_run_id", "observer_arguments_sha256", "execution_profile", "stdin_profile", "start_boundary"))
@@ -165,7 +202,7 @@ def _write_private(path, value):
         os.close(parent)
 
 
-def observe(command, arguments, receipt_path, timeout_seconds):
+def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_hash=None):
     """Linux parent; only live frames can produce this observer receipt."""
     if not sys.platform.startswith("linux"):
         raise ValueError("Linux parent clock required")
@@ -215,7 +252,7 @@ def observe(command, arguments, receipt_path, timeout_seconds):
                     received = get_report().qualification_clock()  # BEFORE ACK, while source custody remains held.
                     receipt_elapsed_ns = time.perf_counter_ns() - observation_started_ns
                     source = row["record"]
-                    if got_receipt or not valid_receipt(source, started):
+                    if got_receipt or not valid_receipt(source, started, expected_counter_hash):
                         raise ValueError("observer source receipt unavailable")
                     event = None
                     event_invalid = False
@@ -236,6 +273,9 @@ def observe(command, arguments, receipt_path, timeout_seconds):
                               "started_frame_elapsed_ns": started_frame_elapsed_ns,
                               "receipt_elapsed_ns": receipt_elapsed_ns,
                               "stdin_profile": "read_only_no_stdin", "transport": "ssh_included"}
+                    if expected_counter_hash is not None:
+                        result["measurement"] = "linux_observed_windows_managed_read_counter"
+                        result["counter_measurement"] = source["counter_measurement"]
                     try:
                         _write_private(receipt_path, result)
                     except (OSError, ValueError):
@@ -280,16 +320,23 @@ def _peek(stream):
                                                    ctypes.byref(available), None) else 0
 
 
-def windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle):
+def windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle, counter_manifest=None, expected_counter_hash=None):
     """Documented process-only script execution; never changes persistent/GPO policy."""
     powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-    return [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(HERE / "source_generation_windows.ps1"),
+    command = [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(HERE / "source_generation_windows.ps1"),
             "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(argument_file),
             "-ReceiptHandle", str(receipt_handle), "-ReceiptAckHandle", str(ack_handle),
             "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
+    if counter_manifest is not None:
+        if not digest(expected_counter_hash):
+            raise ValueError("exact approved counter manifest digest required")
+        command[command.index("bin/ai-pr-wait")] = "bin/ai-gh"
+        command.remove("-ObserverEvents")
+        command += ["-CounterManifest", counter_manifest, "-ExpectedCounterManifestSha256", expected_counter_hash]
+    return command
 
 
-def windows_controller(source_root, argument_bytes, timeout_seconds):
+def windows_controller(source_root, argument_bytes, timeout_seconds, counter_manifest=None, expected_counter_hash=None):
     """Windows native controller: stream bytes; hold receipt custody until Linux ACK."""
     import msvcrt
     arguments = loads(argument_bytes)
@@ -322,7 +369,7 @@ def windows_controller(source_root, argument_bytes, timeout_seconds):
     with tempfile.TemporaryDirectory(prefix="ai-gh-observer-") as temporary:
         argument_file = Path(temporary) / "arguments.json"
         argument_file.write_bytes(argument_bytes)
-        command = windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle)
+        command = windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle, counter_manifest, expected_counter_hash)
         try:
             child = subprocess.Popen(command, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -358,6 +405,10 @@ def windows_controller(source_root, argument_bytes, timeout_seconds):
                             # Child has exited. Drain its complete output BEFORE
                             # forwarding the final receipt on this ordered stream.
                             output_frames()
+                            if counter_manifest is not None:
+                                if not valid_counter_binding(record.get("counter_binding"), expected_counter_hash):
+                                    raise ValueError("native counter binding unavailable")
+                                record["counter_measurement"] = counter_aggregate(record.pop("counter_raw", None))
                             source = record
                             got_receipt = True
                             sys.stdout.buffer.write(frame("receipt", record=record))
@@ -404,14 +455,20 @@ def main():
     parser.add_argument("--read-only-no-stdin", action="store_true", required=True)
     parser.add_argument("--timeout-seconds", type=int, default=3600)
     parser.add_argument("--arguments-base64")
+    parser.add_argument("--counter-manifest")
+    parser.add_argument("--expected-counter-manifest-sha256")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     if not 1 <= options.timeout_seconds <= 7200:
         parser.error("finite observer deadline required")
+    if bool(options.counter_manifest) != bool(options.expected_counter_manifest_sha256) or (options.counter_manifest and
+            (not digest(options.expected_counter_manifest_sha256) or not re.fullmatch(r"[A-Za-z]:[/\\][A-Za-z0-9_./\\ -]+", options.counter_manifest))):
+        parser.error("fixed native manifest path and exact approved SHA256 required")
     if options.windows_controller:
         if os.name != "nt" or options.arguments_base64 is None:
             parser.error("native Windows controller required")
-        return windows_controller(options.source_root, base64.b64decode(options.arguments_base64, validate=True), options.timeout_seconds)
+        return windows_controller(options.source_root, base64.b64decode(options.arguments_base64, validate=True), options.timeout_seconds,
+                                  options.counter_manifest, options.expected_counter_manifest_sha256)
     if not options.host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", options.host) or not options.receipt:
         parser.error("known SSH host and new private receipt destination required")
     if not re.fullmatch(r"[A-Za-z]:[/\\][A-Za-z0-9_./\\ -]+", options.source_root):
@@ -419,13 +476,16 @@ def main():
     arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
     payload = base64.b64encode(json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")).decode("ascii")
     remote_path = options.source_root.rstrip("/\\") + "/tools/github-requests/remote_wait.py"
-    remote = subprocess.list2cmdline(["python.exe", "-I", remote_path, "--windows-controller", "--source-root", options.source_root,
-                                     "--read-only-no-stdin", "--timeout-seconds", str(options.timeout_seconds), "--arguments-base64", payload])
+    remote_arguments = ["python.exe", "-I", remote_path, "--windows-controller", "--source-root", options.source_root,
+                        "--read-only-no-stdin", "--timeout-seconds", str(options.timeout_seconds), "--arguments-base64", payload]
+    if options.counter_manifest:
+        remote_arguments += ["--counter-manifest", options.counter_manifest, "--expected-counter-manifest-sha256", options.expected_counter_manifest_sha256]
+    remote = subprocess.list2cmdline(remote_arguments)
     if any(os.environ.get(key) for key in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME")):
         parser.error("ambient source injection prevents observer qualification")
     ssh = get_report().trusted_boundary_executable("/usr/bin/ssh")
     command = [ssh, "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=12", options.host, remote]
-    return observe(command, arguments, options.receipt, options.timeout_seconds)
+    return observe(command, arguments, options.receipt, options.timeout_seconds, options.expected_counter_manifest_sha256)
 
 
 if __name__ == "__main__":
