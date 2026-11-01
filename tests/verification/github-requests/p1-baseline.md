@@ -58,8 +58,8 @@ Linux parent's acknowledged BEGIN and facts-receive clocks with genuine eligible
 GitHub UTC; Windows wall-clock fields cannot be subtracted from Linux clocks.
 That remote boundary is parent receipt of the alarm batch acknowledgement over
 SSH, including transport, not an exact native SDK acknowledgement interval.
-Native integration and proof remain unfinished; whole-observer budget remains
-unknown for both routes.
+Native combined delivery and installed proof remain unfinished; the component
+proof below does not close the unknown whole-observer budget for either route.
 
 The native completion/facts component subsequently passed eight native Python
 tests with at least fifty actual assertions in 7.604 seconds at `acb359c1`.
