@@ -1,5 +1,98 @@
 # Entire reversible trial execution report — #2022
 
+## November 1 XPS and Linux recovery
+
+Coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d` verified this continuation
+on November1,2026. It supersedes the older XPS-access and Linux-installation
+blockers below, not the failed hosted merge gate or original ownership blocker.
+
+### Existing XPS runner
+
+An already trusted edge-dev connection supplied exact-host known-host entries.
+The existing authorized SSH key then connected to `edge-runn-xps` with strict
+host-key checking and a task-only private known-host file. No first-use trust,
+key replacement, shared SSH edit or weaker verification was needed. Preflight
+showed zero workers/trial agents and the original GitHub service running/automatic.
+Published-checksum-verified portable components stayed in an owned private
+directory; no full toolkit or runner service was installed.
+
+[Mirror build9](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/9)
+passed on actual `edge-runn-xps`, agent `entire-2022-xps`, agent4.9.0, at exact
+GitHub source `5c83f0596685d8be3a63c3991521da21a0c2737f`. The unchanged Windows
+phrase check exited0 in15.883seconds. Its one-job agent disconnected; the one-hour
+token was revoked, concealed vault record marked revoked and private configuration
+archived. Final readback: zero trial agents, original GitHub service running/automatic.
+T2 now has focused execution on **all three requested Windows runners and Linux**.
+This is not whole-suite parity or a natural timing pair.
+
+### Linux installation and original command capability
+
+Another rollout had advanced Linux to merged a9813157. Independent checks matched
+clean source, completion/manifest/stage hashes,188 manifest rows and21 required
+PASS stages. Doctor and the actual precommit private-memory **coverage** gate
+exited0. The earlier full audit's exit1 was broader than that installation gate;
+it cannot stand as a current refusal. No private facts, limits or private clone
+were edited to obtain a pass.
+
+Actual installed command invocation exposed a separate root-lookup defect:
+globals looked under `/usr/local/tools`, and health chose the wrong repository.
+[PR2260](https://github.com/popcre/ai-devops/pull/2260), source
+`648c72833e10887e16cfefaa7448e58a886a57e3`, merged normally as
+`39aaa8b59d4d52609c357aaff9f20f4305330727`. Both commands now resolve chained
+relative/absolute links before finding source; health keeps explicit overrides.
+Linux focused suites passed (globals13 cases, health30 assertions), plus syntax
+and diff checks. Fixtures reject broken synthetic indexes rather than falsely
+reporting clean.
+
+The pinned updater advanced only to that merged release. Its first installer
+attempt stopped before stages because sudo lacked a terminal; another updater
+correctly refused the existing transaction. Documented private-PTY authentication
+and direct installer resume of **the same transaction** then completed, exit0.
+No receipt, lock or gate was removed/overridden. At7:31AM EST, exact completion,
+source, manifest and stage hashes matched39aaa8b5, every required stage passed,
+and actual installed commands from an unrelated directory gave four globals
+CLEAN, coverage health0 and doctor0. Entire capture hooks remained absent/off.
+Linux recovery is proved; native app adoption is separate.
+The accepted39aaa8b5 object was independently recovered from a pinned offline
+bundle into a clean clone; strict full fsck passed without Entire access.
+
+Windows/Git Bash testing caught a fixture-only link-creation ordering error.
+[PR2263](https://github.com/popcre/ai-devops/pull/2263) conditionally creates the
+target first, preserving production code. Corrected Windows suites passed
+(globals; health27/0); both symlink-only fixtures explicitly skipped because
+Git Bash did not create real links. Linux's link assertions all ran/passed.
+The original failed attempt remains in private custody. Fresh Windows readbacks
+on edge-dev, al8960ofc/4837 and916 show clean merged a9813157, four matching
+globals each and no active installer; prior full installation receipts remain.
+
+### Unresolved platform and acceptance boundaries
+
+Native settings still require the named Buildkite pipeline, up-to-date branches,
+no behind merges and Checks on main/main. No strict-cancellation control is
+exposed. The official CLI reads mergeability from the hosted service and submits
+merges there; the destination evaluator is outside this owned toolkit/public CLI.
+The preserved head-build7/base-build6-canceled case still reported mergeable:true.
+**No server fix or new passing cancellation proof is claimed.** No client-only
+guard was substituted, setting weakened, unsafe merge attempted or vendor support
+restarted. Coordinator owns this external platform blocker on#2022.
+
+The current control inventory exposes **zero native apps**, only browser control;
+native computer APIs are disabled. All16 actual fresh-client cells remain
+unchecked. Files, versions, headless children and mirrors are not substitutes;
+Linux MiMo/ZCode platform qualification is also still unverified.
+
+Existing [Trail387/change175](https://entire.com/gh/popcre/ai-devops/-/trails/387/changes/175)
+showed exact648c728 **Merged**, **Checks Not checked**. GitHub's landing remains
+authoritative; no duplicate Trail or full-CI display pass was manufactured.
+Whole-process parity, concurrent merge safety, cross-host native-client recovery,
+timing0/5, issued-access/retention uncertainties and the outgoing ownership-check
+timeout remain open. No predecessor identity or foreign claim was released.
+Full replacement remains unqualified. Private custody retains November1-prefixed
+receipts and the seven-file XPS proof manifest; credentials stay concealed.
+No private upload/capture, paid Agents, purchases, billing/support restart,
+protected-main bypass or permanent cutover. Discovery November2,2026,5:00PM EST;
+stop November12,2026,5:58AM EST, unchanged.
+
 ## October 31 Alien execution follow-up
 
 A final capacity read found Alien idle again. The second bounded startup attempt

@@ -195,6 +195,7 @@ same change. Never add a value, address, or project identifier.
   `ai provider api keys openai deepseek chatgpt qwen`
 - GitHub: `GitHub App - pop-ai-watchers`, `GitHub PAT - u2giants repo push
   access`, `GitHub PAT ai-devops RUNNER pool read token`
+- Revoked public trial recovery: `REVOKED - Buildkite agent token - Entire #2022 XPS one-job 2026-11-01`
 - Hosting: `Railway API`, `Coolify API Token - Hetz production VPS`,
   `cloudflare token`, `cloudflare-tunnel-tokens`
 - Transcript mirror: `Dropbox OAuth token - rclone on hetz (transcript mirror)`

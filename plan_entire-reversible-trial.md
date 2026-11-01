@@ -31,6 +31,24 @@ The original R1–R8 work remains, with updates below.
 
 ### Trial sequence, dependencies and completion gates
 
+November1 continuation: [XPS build9](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/9)
+passed at exact5c83f059 on actualedge-runn-xps using independently trusted existing
+access and strict host verification. Its one-job token was revoked and original
+GitHub service preserved. Focused T2 execution now covers all three requested
+Windows runners plus Linux. Linux protected installation and actual linked-command
+recovery are proved at merged39aaa8b5 (PR2260): source/completion/manifest/stage
+hashes match, globals four CLEAN, coverage health0, doctor0. No private facts or
+limits changed. Windows fixture correction PR2263 has focused Linux/real-Windows
+proof; symlink-only Windows skips are explicit. See the
+[complete recovery receipt](tests/verification/entire-trial/report.md#november-1-xps-and-linux-recovery).
+Older XPS-access and Linux-installation blockers below are superseded only to
+this extent. **Canceled-destination service enforcement remains unfixed**; no
+supported strict setting is exposed, no client-side substitute or bypass used.
+Native controls expose zero apps, so all16 cells remain0/16. Full parity,
+concurrent merges, cross-host client recovery, timing0/5, issued-access/retention
+and the outgoing ownership-check timeout remain owned by this coordinator on#2022.
+No foreign claim/identity released; original constraints and deadlines unchanged.
+
 Latest October31 T2 result: a second bounded attempt used Alien's next idle
 window and [build8](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/8)
 passed at exact5c83f059 on actualedge-alien. Its one-job agent disconnected,
@@ -237,10 +255,10 @@ blocked disposition. Planning is already merged.
 | R0 Scope and original clock | partial | Prior public companion: source `71174bec16900ba945e3a85b04c589933d63b72f`, landing `74fb9f9bed94e7112efaa980ca62e5d047bb23f5`; fleet scope below is planned, not installed. |
 | R1 Inventory and supported capability map | observed baseline; authentication/live use partial | Four authenticated host reads, OS/client/root/source hashes and recoverable originals retained owner-only; missing command/app locations and unverified desktop/login behavior disclosed in the [R1 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531669322). No client/platform equivalence inferred. |
 | R2 Shared client workflow and safe access | source repair merged; actual adoption incomplete | PR2195 landed d7f4c10. PR2230 landed7a80853: default Linux MiMo/ZCode refresh and exact Windows machine-tail preservation repaired, focused Linux/Windows proof. Accepted installed adoption remains separate. |
-| R3 CI contract and Entire feasibility | actual jobs and isolated merge/publication proved; replacement unqualified | All12 workflows/182 registrations inventoried. Envy/Alien Windows and Linux agents ran focused checks; native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-base gate gap, XPS trust, whole-suite parity and protected-main transition remain unmet. |
+| R3 CI contract and Entire feasibility | all requested runners focused-proved; replacement unqualified | All12 workflows/182 registrations inventoried. Envy/Alien/XPS Windows and Linux ran focused checks; native Trail1 merged9742612 and exact GitHub/offline export passed. Canceled-destination service gap, whole-suite parity and protected-main transition remain unmet. |
 | R4 Offline cross-platform verification | focused suites passed; broader adversarial gates open | Focused Linux and three-host Windows fixtures passed; corrected990c8b95 ordinary Linux/all12 Windows PR sections and d7f4c10 queue passed. Remaining §10/T3 cases and native execution are not passed by fixtures. |
-| R5 Protected installation on four machines | three Windows installer completions; full acceptance incomplete | edge-dev/4837/916 native installers reachedDone at merged9c912187, gate/child0, clean matching launcher/global postflights. Linux read-only memory health still exits1, not bypassed. Native original-client/cross-host acceptance remains unproved; task-record restoration limitation is disclosed in the follow-up report. |
-| R6 All 16 live client-machine journeys | 0 of16 accepted | Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; native-control/missing-client limits are explicit. |
+| R5 Protected installation on four machines | Windows receipts retained; Linux installation/commands recovered; app acceptance incomplete | Prior Windows native completions at9c912187 remain; fresh Windows a9813157 reads are clean with four matching globals. Linux39aaa8b5 installer resume completed0, exact receipts agree, installed globals/coverage health/doctor pass. Original-client/cross-host acceptance stays open; earlier task-record restoration limitation retained. |
+| R6 All 16 live client-machine journeys | 0 of16 accepted; native control unavailable | Current control surface exposes zero native apps. Actual fresh-session behavior, automatic instructions, source/check/Trail readback, capture-off and recovery remain unproved; no file/CLI/child/browser substitutions. Linux MiMo/ZCode platform qualification is separate and unverified. |
 | R7 Live CI workflow and continuity | focused native chain and isolated publication passed; broad acceptance open | T3/T4 report binds pass/fail/repair and actual merge to exact source. No protected-main replacement or full parity; GitHub controls unchanged. |
 | R8 Acceptance, bounded stop and disposition | open | §13: every matrix cell and CI gate has evidence; original stop retained, missing capability stays visibly incomplete. |
 

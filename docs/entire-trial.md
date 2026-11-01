@@ -1,5 +1,30 @@
 # Entire trial operating record — #2022
 
+## November 1 XPS and Linux recovery
+
+[XPS build9](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/9)
+passed the unchanged Windows phrase suite at exact5c83f059 on actualedge-runn-xps.
+Existing independently trusted access was reused with strict verification. Its
+one-job agent exited, short-lived token was revoked, configuration archived and
+original GitHub service remained running/automatic. Focused T2 execution now
+covers Envy, Alien, XPS and Linux; full CI parity and timing remain unproved.
+
+Linux recovery is proved at merged39aaa8b5 ([PR2260](https://github.com/popcre/ai-devops/pull/2260)):
+supported installation/resume completed0; exact source/completion/manifest/stage
+hashes agree; actual installed globals gives four CLEAN, coverage health0 and
+doctor0. No private facts or health limits changed. This corrects the prior full
+audit-versus-installation-gate distinction and repairs real linked-command root
+lookup. Windows fixture compatibility and all failed attempts are disclosed in
+the [source-bound report](../tests/verification/entire-trial/report.md#november-1-xps-and-linux-recovery).
+
+Entire's canceled-destination service gate is **not fixed**: no supported strict
+setting is exposed, and no client-only substitute or unsafe merge was used.
+All16 actual-client cells stay0/16 because native controls are unavailable here;
+instruction files, CLI tests and browsers do not satisfy them. Coordinator owns
+these blockers, remaining parity/recovery/timing and the unchanged outgoing
+ownership-check timeout on#2022. No paid/capture/private/billing/support expansion,
+protected-main cutover or deadline change.
+
 ## October 31 Alien runner execution
 
 The second bounded Alien attempt passed its collision guard during a fresh idle
