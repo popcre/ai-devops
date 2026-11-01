@@ -183,6 +183,34 @@ gh_measure_workflow_id(){
   printf '%s' "$id"
 }
 
+gh_measure_active_channel(){
+  local phase="$1" record="$2" helper="${BASH_SOURCE[0]%/*}/report.py" python="${AI_GH_ACTIVE_PYTHON:-}"
+  { [[ "${AI_GH_ACTIVE_EVENT_FD:-}" =~ ^[0-9]{1,5}$ && "${AI_GH_ACTIVE_ACK_FD:-}" =~ ^[0-9]{1,5}$ ]] ||
+    [[ "${AI_GH_ACTIVE_EVENT_HANDLE:-}" =~ ^[0-9]{1,20}$ && "${AI_GH_ACTIVE_ACK_HANDLE:-}" =~ ^[0-9]{1,20}$ ]]; } || return 2
+  [ -n "$python" ] && [ -f "$helper" ] || return 2
+  printf '%s' "$record" | "$python" -I -S -c \
+    'import os,runpy,sys; p=sys.argv.pop(1); sys.path.insert(0,os.path.dirname(p)); runpy.run_path(p,run_name="__main__")' \
+    "$helper" --active-channel "$phase" 2>/dev/null
+}
+
+gh_measure_active_begin(){
+  local workflow="$1" id="$2" parent="$3" boundary="$4" record
+  [ "${GH_MEASURE_ACTIVE_DISABLED:-0}" != 1 ] || return 2
+  [ -z "$parent" ] && parent=null || parent="\"$parent\""
+  record=$(printf '{"schema":1,"measurement":"active_completion_boundary","phase":"begin","caller":"ai-blocker-watch","workflow":"%s","workflow_id":"%s","parent_workflow_id":%s,"boundary":"%s"}' "$workflow" "$id" "$parent" "$boundary")
+  gh_measure_active_channel begin "$record"
+}
+
+gh_measure_active_harness(){
+  local helper="${BASH_SOURCE[0]%/*}/report.py" executable
+  executable="$(command -v "$1")" || { "$@"; return "$?"; }
+  shift
+  case "${OSTYPE:-}" in msys*|cygwin*|win32*) executable="$(cygpath -w "$executable")" || return 127 ;; esac
+  printf '%s\0' "$executable" "$@" | "${AI_GH_ACTIVE_PYTHON}" -I -S -c \
+    'import os,runpy,sys; p=sys.argv.pop(1); sys.path.insert(0,os.path.dirname(p)); runpy.run_path(p,run_name="__main__")' \
+    "$helper" --active-harness
+}
+
 gh_measure_workflow_outcome(){
   local caller="${1:-}" workflow="${2:-}" id="${3:-}" outcome="${4:-}" elapsed="${5:-}" utc record
   local boundary="${6:-}" attempted="${7:-}" succeeded="${8:-}" failed="${9:-}" skipped="${10:-}" parent="${11:-}" extended=0 number
@@ -225,6 +253,10 @@ gh_measure_workflow_outcome(){
   if [ "$extended" = 1 ]; then
     [ -z "$parent" ] && parent=null || parent="\"$parent\""
     record="${record%\}},\"boundary\":\"$boundary\",\"attempted_count\":$attempted,\"succeeded_count\":$succeeded,\"failed_count\":$failed,\"skipped_count\":$skipped,\"parent_workflow_id\":$parent}"
+  fi
+  if [ "$caller" = ai-blocker-watch ] &&
+    { [ "${BW_ACTIVE_OBSERVER_READY:-0}" = 1 ] || [ "$workflow" = blocker_watch_tick ]; }; then
+    gh_measure_active_channel end "$record" || :
   fi
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
