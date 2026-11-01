@@ -10,6 +10,15 @@ Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desk
 
 ## STATUS — read before doing work
 
+November 1 closeout: [portable continuation](HANDOFF.d/2026-11-01T1301Z-edge-dev3-codex-optimizer-desktop-continuation.md).
+Start by verifying a supported native desktop control surface, not by repeating
+sign-in repair or CLI warm-ups. This chat's native computer APIs are explicitly
+disabled; current inventory exposes browsers only, and plugin discovery found
+no applicable enablement route. A generic new chat or the documented Computer
+Use setup is not proof of availability on Ubuntu/Windows. No successor has
+accepted execution. #2220 remains blocked, with the named coordinator retaining
+accountability but releasing shared-file editing reservations at closeout.
+
 November 1 update: subscription sign-in was repaired and a fresh native model
 request succeeded. The fixed five-loop/four-fact learning schedule and one
 native CLI pair per mechanism completed; see the
@@ -45,17 +54,18 @@ installation was performed by this review/closeout session; rows remain open.
 | Step | State | Evidence / next gate |
 |---|---|---|
 | 1 Inventory and classify all four desktops | 🟨 partial | Current package/process inventory published; embedded desktop engines/native control remain unverified |
-| 2 Qualify privacy, hooks and recovery | 🟨 partial/blocked | Pinned offline tests and isolated native start receipt; working model access, full adversarial/recovery and capability proof remain open |
+| 2 Qualify privacy, hooks and recovery | 🟨 partial/blocked | Native model access repaired; bounded CLI loop/fact smoke and test recovery recorded; desktop/adversarial/full-capability proof open |
 | 3 Build managed installation and diagnostics | ⬜ open | Cross-platform fixture tests |
 | 4 Prove applicable Ubuntu desktops | ⬜ open | Actual desktop session receipts |
 | 5 Resolve Windows applicability | ⬜ open | Actual MiMo/ZCode supported-or-inapplicable evidence |
-| 6 Measure benefit and decide rollout | ⬜ open | Paired cost and quality report |
+| 6 Measure benefit and decide rollout | 🟨 smoke only | CLI learning/helper/recovery costs recorded; skill mismatch and missed check prevent acceptance; ten pairs per actual desktop still open |
 | 7 Land, install, restore and close | ⬜ open | Exact landing plus per-target live proof |
 
 Execution resumes at the remaining native access/privacy gates in steps 1–2,
 not by replaying the published planning work. The earlier closeout paragraphs
-describe their own historical session. No managed installation, smoke pair or
-desktop acceptance has been delivered. Re-read downstream steps at each boundary.
+describe their own historical session. The bounded CLI smoke is delivered;
+managed installation and desktop acceptance are not. Re-read downstream steps
+at each boundary.
 
 ## 1. Ultimate goal
 
@@ -73,7 +83,7 @@ Primary Ubuntu candidate is edge-dev3, the planning host. Windows development ca
 
 ## 3. Trigger and authorization
 
-Albert asked: “make a plan to implement it for all the harnesses we use that it is applicable to: claude desktop for ubuntu, codex desktop for ubuntu, mimo desktop for windows, zcode desktop for windows.” This authorizes this plan and its publication, not immediate desktop installation. A subsequent execution session uses the plan as its complete brief.
+Albert originally asked: “make a plan to implement it for all the harnesses we use that it is applicable to: claude desktop for ubuntu, codex desktop for ubuntu, mimo desktop for windows, zcode desktop for windows.” That was planning authorization. His November 1 follow-up authorized fixing sign-in, continuing isolated trials and completing actual desktop proof/cost measurements while preserving existing capabilities. That execution authority remains bounded by native support, privacy and measured acceptance; it does not authorize an unsupported adapter or capability reduction.
 
 The preceding assessment found recurring token-waste subjects in the private topic-cut store: repeated verification, unchanged queue updates and oversized tool output. Those are qualitative signals, not measured TokenEconomizer savings. No private segment text is included here. Existing [compression evidence](docs/compression-and-process-fixes.md#measured-evidence) distinguishes large raw reductions from approximately 2% net savings measured by an earlier coding proxy after cache effects.
 
@@ -85,7 +95,7 @@ NOT in this plan: building a new optimizer; adding MiMo/ZCode adapters from scra
 
 ## 5. Current source and delivery state
 
-Repository baseline inspected: [7e591363634be65a6b99d7e60443afc6f1091716](https://github.com/popcre/ai-devops/commit/7e591363634be65a6b99d7e60443afc6f1091716). Planning worktree was clean and matched fetched origin/main before edits. This plan and its handoff are the only new workstream artifacts; no TokenEconomizer code, runtime setting, model call or install has been introduced.
+Historical planning baseline: [7e591363634be65a6b99d7e60443afc6f1091716](https://github.com/popcre/ai-devops/commit/7e591363634be65a6b99d7e60443afc6f1091716). Planning introduced documentation only. November 1 execution subsequently repaired native authentication and ran session-local synthetic CLI hooks/model calls with isolated configuration/state. [PR #2262](https://github.com/popcre/ai-devops/pull/2262) published those receipts and costs; its landing [8dcf2c7b5c9d26d468487e379afd580374091b68](https://github.com/popcre/ai-devops/commit/8dcf2c7b5c9d26d468487e379afd580374091b68) was verified on main. No global optimizer or managed desktop installation was performed. Do not redo the planning or bounded learning schedule as if no trials occurred.
 
 Concrete existing evidence:
 
