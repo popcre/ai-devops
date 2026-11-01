@@ -565,7 +565,7 @@ temporary-directory source-boundary claims are superseded, while their ordinary
 authenticated read outcomes remain historical capability evidence. Actual offline
 SSH help preserved output and exit 0 with verified source but unknown event;
 cancellation returned 130 without a false receipt. Ten Linux framing/clock and
-three native-writer dispatch tests pass. No live API event was created by these
+three writer-dispatch unit tests pass. No live API event was created by these
 fixtures. Final installation and a genuinely later PR event remain separate.
 
 PR #1709 was closed after proving all three changes already present upstream.
