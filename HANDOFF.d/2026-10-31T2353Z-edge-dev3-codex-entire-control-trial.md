@@ -171,8 +171,9 @@ runners cannot simply be registered to another controller.
 
 ### Disposable failure experiment
 
-[DraftPR2196](https://github.com/popcre/ai-devops/pull/2196) is NEVER MERGE,
-with no auto-merge request. Failed source
+[PR2196](https://github.com/popcre/ai-devops/pull/2196) was closed unmerged
+during wrap-up, with repaired head4e244108 preserved and no auto-merge request.
+Do not reopen it merely to finish optional Entire Gates. Failed source
 [9257823b](https://github.com/popcre/ai-devops/commit/9257823ba78fe284092f6aed878535d19a6d0f6a)
 had one intentionally missing managed-policy phrase. GitHub
 [run41117200862](https://github.com/popcre/ai-devops/actions/runs/41117200862)
@@ -182,7 +183,8 @@ showed5of27failed at that exact head. Repair source
 [4e244108](https://github.com/popcre/ai-devops/commit/4e2441081c270288a50fbb058b9229ad0b57a784)
 restored the phrase and was seen as current/pending rather than old acceptance.
 Later all actual repair CI jobs passed; optional Entire Gates must not create
-a wait. Reconcile current PR state once, retain evidence and close unmerged.
+a wait. Closure was read back from GitHub; the experiment branch is retained
+for evidence. No merge or installation occurred from this branch.
 No last-green→newer-failure→repair acceptance chain has been fully qualified.
 No faulty experimental source was installed or merged.
 
@@ -234,7 +236,9 @@ Key owning sources, all portable:
 
 1. Claim #2022 as the new coordinator and reconcile this handoff, the entire
    amended plan and current source/install/rules/runner evidence. Recover
-   private baselines using §8. Gate: fresh manifest and owner, no stale state
+   private baselines using §8. Also resolve the failed outgoing ownership check
+   recorded in the wrap-up reconciliation; never treat unreadable claims as
+   zero or release a foreign reservation. Gate: fresh manifest and owner, no stale state
    presented as live; all downstream T/R assumptions checked.
 2. Execute planT1/T2: preserve/recover partial host transactions before writes,
    qualify Buildkite/current account access and supported self-hosted Windows
@@ -344,6 +348,65 @@ installation is running. The coordinator mistakenly requested a hold after4837
 had already also advanced; preserve both partial states. It made no scheduler
 bypass, memory edit, native-client proof or CI-provider connection. Its public
 delivery is integrated in the parent's evidence/issue, not a separate PR.
+
+## Wrap-up reconciliation
+
+The controlling amendment, operating record, report and this handoff were
+published by [PR2213](https://github.com/popcre/ai-devops/pull/2213), verified
+on main at [7e591363](https://github.com/popcre/ai-devops/commit/7e591363634be65a6b99d7e60443afc6f1091716).
+Its exact-head documentation safety passed all534 tracked Markdown files;
+whitespace checks passed. The owner decision and fresh-session transfer are
+recorded on [#2022](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550904872).
+The final closeout adds the repository-router supersession pointer so a session
+following the old advisory-only instructions reaches the controlling amendment.
+No new implementation, account, integration, database write or policy bypass.
+
+Credential sweep: nothing new to store; no plaintext credential appeared.
+The existing sudo credential stayed in1Password and protected transport.
+No private memory was edited. Both sub-agents are completed, not working.
+
+Required ownership check is **unverified**, not passed. This session did no
+shared-database work and held no known shared-db claim, but wrap-up requires
+the native check because sub-agents were used. The installed
+ai-shared-db-closeout-check was run twice for actual session UUID
+01a18e41-40fb-76f2-90a6-cad01b186b8e. Both returned exit2, okfalse,
+“GitHub request timed out.” Empty arrays in those failure receipts do not
+prove zero reservations. Receipts are owner-only in cutover-20261031 as
+shared-db-closeout-check.json and shared-db-closeout-check-retry.json.
+An existing SSH route to the alternate Linux host denied public-key/password
+authentication before any remote checker ran. No permissions, tool limits or
+checks were bypassed, and no foreign claim was touched. The coordinator owns
+resolution of the timed-out native reads; closeout must not be called fully
+verified until a supported fresh check succeeds. This is a newly observed
+closing-tool blocker, not a reason to resume unrelated implementation or ask
+Albert to perform technical steps. Record any later resolution on #2022.
+
+Workspace decisions: preserve the clean original fleet working copy, repaired
+negative experiment, detached Linux install candidate and prose-delivery working
+copy as explicit recovery state while the application outcome remains unfinished.
+Preserve the instruction helper's six uncommitted files:
+[Claude global](https://github.com/popcre/ai-devops/blob/main/templates/system/CLAUDE-global.md),
+[Codex global](https://github.com/popcre/ai-devops/blob/main/templates/system/AGENTS-global-codex.md),
+[MiMo global](https://github.com/popcre/ai-devops/blob/main/templates/system/AGENTS-global-mimo.md),
+[ZCode global](https://github.com/popcre/ai-devops/blob/main/templates/system/AGENTS-global-zcode.md),
+[adoption test](https://github.com/popcre/ai-devops/blob/main/tests/test-ai-adopt-globals.sh)
+and [phrase test](https://github.com/popcre/ai-devops/blob/main/tests/test-client-globals-required-phrases.sh).
+Its complete binary patch
+is now owner-only in the cutover-20261031 custody group, named
+client-instructions-uncommitted.patch. No unreviewed bytes were reset/deleted.
+The final issue receipt identifies the closeout PR; new execution starts from
+current upstream rather than reusing these copies. Remote candidates/installed
+host states remain subject to fresh reconciliation before writes.
+
+Housekeeping was run in report-only mode. Its GitHub availability probe returned
+UNKNOWN, so it could not qualify merged candidates. It reported no successor-
+review handoffs; unattributed/unprovable records and unknown branch/worktree
+states remain for their owners. No global cleanup was attempted and no count
+was treated as evidence that a file could be removed. The report is retained
+privately with the cutover evidence. This does not claim a machine-wide cleanup.
+
+No new application work was discovered or started during wrap-up. All previously
+unfinished trial, repair and live-proof work remains in §§3–9 and T1–T7/R1–R8.
 
 ## Final whole-plan self-audit
 

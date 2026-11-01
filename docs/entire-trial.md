@@ -1,5 +1,34 @@
 # Entire trial operating record — #2022
 
+## October 31 T1/T2 continuation
+
+Coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d` started from main
+`7cf494770ab062dd1d4b501862d72a0f4b68404c`; authenticated Entire overview
+displayed matching `7cf4947`. Buildkite login succeeded. The Entire plugin was
+installed with **Only selected repositories: ai-devops**, leaving shared-db
+unchecked. Buildkite readback confirms the Entire provider connection.
+A dedicated `entire-2022-windows` self-hosted queue has zero connected agents,
+zero jobs and zero pipelines. Existing hosted queues were not used or altered.
+No GitHub App repository installation, capture or paid activation was performed.
+
+Buildkite CLI3.67.0 was checksum-verified and extracted only into private trial
+custody. Its supported device login requested organization-scoped management
+permissions. Browser safety requires action-time confirmation for that new
+access; the attempt was denied without issuing credentials. No agent token
+was generated. The coordinator owns resolution; do not bypass this boundary.
+The earlier toolkit-deployment gate refusal was preserved; the correctly
+declared external-infrastructure check subsequently passed. No toolkit
+deployment or host installation followed either check.
+
+Two existing runner hosts returned their GitHub services; XPS SSH failed host
+verification. No host key was accepted or replaced. All four development
+checkouts now report d307c8a6; this is newer than the outgoing partial-install
+baseline, but no complete transaction receipt or native-client proof was
+established here. Preserve those intervening changes. The outgoing native
+ownership checker remains unverified; no predecessor identity was substituted.
+See the [report](../tests/verification/entire-trial/report.md#october-31-t1t2-continuation).
+Discovery November2,2026,5:00PM EST and stop November12,2026,5:58AM EST remain.
+
 ## October 31 authority update — replacement-controller trial
 
 Albert authorized: “let's test Entire controlling testing and merging, with

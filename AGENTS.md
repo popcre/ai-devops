@@ -166,6 +166,10 @@ Selective EGM-inspired fresh-reader checks for complex plans or handoffs: read
 [`plan_selective-fresh-reader.md`](plan_selective-fresh-reader.md) STATUS first;
 opt-in pilot only, no new review gate or full EGM rollout.
 
+TokenEconomizer for Ubuntu Claude/Codex desktops and Windows MiMo/ZCode desktops:
+read [plan_tokeneconomizer-desktops.md](plan_tokeneconomizer-desktops.md) STATUS
+first. Qualify actual desktop support; do not infer it from CLI compatibility.
+
 Shared-db migration gate trimming (plan, not active): read
 [`plan_shared-db-gate-trim.md`](plan_shared-db-gate-trim.md) STATUS first;
 [popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
@@ -174,6 +178,13 @@ No gate or workflow changes until the owner approves.
 Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
 [#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
+
+For Albert's October 31 authorization to test Entire controlling testing and
+merging while GitHub retains official code, read the plan's **October 31
+controlling amendment** first, then T1–T7 and R1–R8. The older advisory-only
+public-companion workflow below is not a veto on that bounded trial. Preserve
+its privacy, no-billing and original-deadline constraints; no permanent
+protected-main cutover or bypass follows from trial authorization.
 
 Fleet/CI expansion: read that plan's current STATUS and R1–R8 before claiming
 rollout. Codex, Claude, MiMo and ZCode across all four requested machines each

@@ -8,6 +8,10 @@ description: Reduce Codex token use by loading only relevant repo docs, compress
 Use this before or during large Codex sessions where repeated context is eating
 tokens. The goal is to preserve the contract while shrinking the prompt.
 
+For TokenEconomizer desktop integration, read
+[`plan_tokeneconomizer-desktops.md`](../../../plan_tokeneconomizer-desktops.md)
+STATUS first. Do not re-plan or infer desktop compatibility from a CLI result.
+
 ## Minimal Loading Order
 
 1. Read `AGENTS.md` first.
