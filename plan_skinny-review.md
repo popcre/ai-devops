@@ -16,10 +16,10 @@
 | D Instructions, globals and skills rewritten | #2072 | ✅ done (2026-10-30) | PR #2085 (9170814b), ruling #2104 (5bf5ec01); 5-host proof https://github.com/popcre/ai-devops/issues/2072#issuecomment-6513481440 |
 | E Installer stages, scheduled jobs, freeze window removed | #2073 | ✅ done (2026-10-30) | PR #2091 (5fc8a414), #2117 (ea60d99b); 5-host proof https://github.com/popcre/ai-devops/issues/2073#issuecomment-6515744637 |
 | F Delete old reviewer code and data | #2074 | ✅ done | #2112 d55ba665, #2113 e9239b09, #2131 dd691629, #2139 1f4fb596, shared-db#5118 92133262, #5121 562ad02b; proof issues/2074#issuecomment-6520525203 |
-| G Advisory review in other repos + automatic production promotion in shared-db | #2075 | 🟡 merged; real-migration promotion + hold proofs wait for the next shared-db migration PR | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6514359329 |
+| G Advisory review in other repos + automatic production promotion in shared-db | #2075 | ✅ done (2026-10-31) | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6551124566 |
 | H Fixer hygiene and delivery speed | #2171 | ✅ delivered and live-proved | [Owning acceptance and cleanup](https://github.com/popcre/ai-devops/issues/2171); final implementation [#2204](https://github.com/popcre/ai-devops/pull/2204) landed `23bf2a8aa9177edaf84f47e04b1b760334cd7b56`; [shared-db integration and live receipt](https://github.com/popcre/shared-db/issues/5175#issuecomment-6534013046). |
 
-**A fresh session starts at stage A,** then B. Re-read each later stage before starting it, because earlier stages can change it.
+**All stages are done.** What remains is the #2041 closeout: see https://github.com/popcre/ai-devops/issues/2041 and the inventory resolution column in `docs/reviewer-enforcement-inventory-2026-10-29.md`.
 
 ### Fixer follow-up — #2171
 
