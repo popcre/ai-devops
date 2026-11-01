@@ -143,7 +143,7 @@ class ObserverTests(unittest.TestCase):
                 "assert a=={'protocol':1,'kind':'ack','observer_run_id':'" + "a" * 32 + "'};"
                 "sys.stdout.buffer.write(" + repr(remote.frame("exit", code=3)) + ");sys.stdout.buffer.flush();sys.exit(3)")
         out, err = Capture(), Capture()
-        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), mock.patch.object(self.report, "qualification_clock", side_effect=clocks()):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), mock.patch.object(self.report, "qualification_clock", side_effect=clocks()), mock.patch.object(remote.time, "perf_counter_ns", side_effect=[100, 400, 1100]):
             target = Path(temporary) / "receipt.json"
             result = remote.observe([sys.executable, "-I", "-c", code], arguments, target, 5)
             saved = json.loads(target.read_text())
@@ -152,6 +152,9 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(err.buffer.getvalue(), b"original error\n")
         self.assertEqual(saved["event_qualification"]["latency_upper_ms"], 4003)
         self.assertEqual(saved["transport"], "ssh_included")
+        self.assertEqual(saved["observation_timing_basis"], "linux_parent_perf_counter_ns_before_ssh_popen")
+        self.assertEqual(saved["started_frame_elapsed_ns"], 300)
+        self.assertEqual(saved["receipt_elapsed_ns"], 1000)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux observer process required")
     def test_malicious_event_data_never_changes_original_exit(self):
