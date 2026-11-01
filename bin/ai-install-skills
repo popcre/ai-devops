@@ -64,7 +64,7 @@ SHORT_HOST="${SHORT_HOST:-$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' 
 # profile (%USERPROFILE% = C:\Users\<you>). Installing under $HOME there puts
 # skills on a network share the apps never look at, and silently skips Codex.
 # So when USERPROFILE is set (Windows only; unset on Linux/macOS), base the
-# install on it instead of $HOME. Explicit CLAUDE_HOME/CODEX_HOME still win.
+# install on it instead of $HOME. Explicit client-home variables still win.
 BASE_HOME="$HOME"
 if [[ -n "${USERPROFILE:-}" ]]; then
   if command -v cygpath >/dev/null 2>&1; then
@@ -78,6 +78,8 @@ if [[ -n "${USERPROFILE:-}" ]]; then
 fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
+ZCODE_HOME="${ZCODE_HOME:-$BASE_HOME/.zcode}"
+MIMO_HOME="${MIMO_HOME:-$BASE_HOME/.config/mimocode}"
 DRY_RUN=false
 SHOW_LOG=false
 KEEP_ORPHANS=false
@@ -898,6 +900,22 @@ if [[ -d "$CODEX_HOME" ]]; then
                  "$CODEX_HOME/AGENTS.md" "Codex global instructions"
 else
   echo "No $CODEX_HOME directory — skipping Codex global instructions."
+fi
+
+# ZCode and MiMo read generated editions of the canonical global instructions.
+# Refresh only homes the clients already created; do not create client homes.
+if [[ -d "$ZCODE_HOME" ]]; then
+  install_global "$REPO_ROOT/templates/system/AGENTS-global-zcode.md" \
+                 "$ZCODE_HOME/AGENTS.md" "ZCode global instructions"
+else
+  echo "No $ZCODE_HOME directory — skipping ZCode global instructions."
+fi
+
+if [[ -d "$MIMO_HOME" ]]; then
+  install_global "$REPO_ROOT/templates/system/AGENTS-global-mimo.md" \
+                 "$MIMO_HOME/AGENTS.md" "MiMo global instructions"
+else
+  echo "No $MIMO_HOME directory — skipping MiMo global instructions."
 fi
 
 echo

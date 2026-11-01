@@ -28,6 +28,8 @@ make_fixture() {
   cp "$REPO_ROOT/config/retired-skills.txt" "$fixture/config/retired-skills.txt"
   printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
   printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
+  printf '%s\n' '# test ZCode global' > "$fixture/templates/system/AGENTS-global-zcode.md"
+  printf '%s\n' '# test MiMo global' > "$fixture/templates/system/AGENTS-global-mimo.md"
   # Default: no repository-scoped skills. Individual tests opt in.
   printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {}' '}' > "$fixture/config/skill-scope.json"
   printf '%s\n' '{' '  "schema_version": 1,' '  "protected_skills": ["handoff-writer"]' '}' > "$fixture/config/skill-trigger-policy.json"
@@ -43,9 +45,25 @@ make_demo_clone() {
 
 run_installer() {
   local fixture="$1" claude_home="$2" codex_home="$3"
+  local fixture_root
+  fixture_root="$(dirname "$fixture")"
   shift 3
   mkdir -p "$codex_home"
-  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
+  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 USERPROFILE="$HOME" \
+    CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
+    ZCODE_HOME="$fixture_root/zcode" MIMO_HOME="$fixture_root/mimo" \
+    bash "$fixture/bin/ai-install-skills" "$@"
+}
+
+# Exercise default client-root discovery with a synthetic Windows profile.
+# USERPROFILE deliberately differs from HOME, as it does on affected Git Bash
+# installs; every default root and installer log remains inside this fixture.
+run_installer_defaults() {
+  local fixture="$1" profile_home="$2" home_override="$3"
+  shift 3
+  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$home_override" USERPROFILE="$profile_home" \
+    CLAUDE_HOME= CODEX_HOME= ZCODE_HOME= MIMO_HOME= \
+    AI_INSTALL_LOG="$profile_home/.cache/ai-devops/install-log.tsv" \
     bash "$fixture/bin/ai-install-skills" "$@"
 }
 
@@ -274,6 +292,87 @@ grep -Fq 'NOT overwriting' "$TMP_ROOT/og1.out" || fail "edited global not report
 run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/og2.out" 2>&1
 grep -Fq 'Claude global instructions already up to date (machine section kept).' "$TMP_ROOT/og2.out" \
   || fail "refreshed global with machine section not seen as current"
+
+echo "globals: default ZCode/MiMo roots seed and safely refresh generated templates"
+fixture="$TMP_ROOT/client-globals/repo"; profile="$TMP_ROOT/client-globals/profile"
+make_fixture "$fixture"
+mkdir -p "$profile/.codex" "$profile/.zcode" "$profile/.config/mimocode"
+git -C "$fixture" init -q
+git -C "$fixture" -c user.name=T -c user.email=t@example.com add -A
+git -C "$fixture" -c user.name=T -c user.email=t@example.com commit -qm globals-v1
+run_installer_defaults "$fixture" "$profile" "$TMP_ROOT/client-globals/redirected-home" \
+  >"$TMP_ROOT/client-globals-seed.out" 2>&1
+assert_file "$profile/.claude/CLAUDE.md"
+assert_file "$profile/.codex/AGENTS.md"
+assert_file "$profile/.zcode/AGENTS.md"
+assert_file "$profile/.config/mimocode/AGENTS.md"
+grep -Fq '# test ZCode global' "$profile/.zcode/AGENTS.md" || fail 'ZCode global not seeded at default root'
+grep -Fq '# test MiMo global' "$profile/.config/mimocode/AGENTS.md" || fail 'MiMo global not seeded at default root'
+
+# The installed machine section is CRLF data owned by the host. Its bytes must
+# survive an older-template refresh and a dry-run preview unchanged.
+printf '## Machine facts — testbox\r\nlocal fact\r\n' > "$TMP_ROOT/client-globals/machine-tail"
+for client_global in "$profile/.zcode/AGENTS.md" "$profile/.config/mimocode/AGENTS.md"; do
+  printf '\r\n---\r\n\r\n' >> "$client_global"
+  cat "$TMP_ROOT/client-globals/machine-tail" >> "$client_global"
+done
+printf '%s\n' '# test ZCode global v2' > "$fixture/templates/system/AGENTS-global-zcode.md"
+printf '%s\n' '# test MiMo global v2' > "$fixture/templates/system/AGENTS-global-mimo.md"
+git -C "$fixture" -c user.name=T -c user.email=t@example.com add -A
+git -C "$fixture" -c user.name=T -c user.email=t@example.com commit -qm globals-v2
+cp "$profile/.zcode/AGENTS.md" "$TMP_ROOT/client-globals/zcode-before-dry-run"
+cp "$profile/.config/mimocode/AGENTS.md" "$TMP_ROOT/client-globals/mimo-before-dry-run"
+run_installer_defaults "$fixture" "$profile" "$TMP_ROOT/client-globals/redirected-home" --dry-run \
+  >"$TMP_ROOT/client-globals-dry.out" 2>&1
+cmp -s "$TMP_ROOT/client-globals/zcode-before-dry-run" "$profile/.zcode/AGENTS.md" || fail 'dry-run changed ZCode global'
+cmp -s "$TMP_ROOT/client-globals/mimo-before-dry-run" "$profile/.config/mimocode/AGENTS.md" || fail 'dry-run changed MiMo global'
+assert_absent "$profile/.zcode/globals-backup"
+assert_absent "$profile/.config/mimocode/globals-backup"
+run_installer_defaults "$fixture" "$profile" "$TMP_ROOT/client-globals/redirected-home" \
+  >"$TMP_ROOT/client-globals-refresh.out" 2>&1
+for client_global in "$profile/.zcode/AGENTS.md" "$profile/.config/mimocode/AGENTS.md"; do
+  tail -c "$(wc -c < "$TMP_ROOT/client-globals/machine-tail")" "$client_global" \
+    > "$TMP_ROOT/client-globals/actual-tail"
+  if ! cmp -s "$TMP_ROOT/client-globals/machine-tail" "$TMP_ROOT/client-globals/actual-tail"; then
+    echo "expected machine-tail bytes: $(od -An -tx1 "$TMP_ROOT/client-globals/machine-tail")" >&2
+    echo "actual final bytes: $(od -An -tx1 "$TMP_ROOT/client-globals/actual-tail")" >&2
+    fail "machine-tail bytes changed in $client_global"
+  fi
+done
+grep -Fq '# test ZCode global v2' "$profile/.zcode/AGENTS.md" || fail 'ZCode managed body not refreshed'
+grep -Fq '# test MiMo global v2' "$profile/.config/mimocode/AGENTS.md" || fail 'MiMo managed body not refreshed'
+
+# Changes outside a recognized machine section are not template-managed.
+sed -i 's/test ZCode global v2/local ZCode edit/' "$profile/.zcode/AGENTS.md"
+sed -i 's/test MiMo global v2/local MiMo edit/' "$profile/.config/mimocode/AGENTS.md"
+printf '%s\n' '# test ZCode global v3' > "$fixture/templates/system/AGENTS-global-zcode.md"
+printf '%s\n' '# test MiMo global v3' > "$fixture/templates/system/AGENTS-global-mimo.md"
+git -C "$fixture" -c user.name=T -c user.email=t@example.com add -A
+git -C "$fixture" -c user.name=T -c user.email=t@example.com commit -qm globals-v3
+run_installer_defaults "$fixture" "$profile" "$TMP_ROOT/client-globals/redirected-home" \
+  >"$TMP_ROOT/client-globals-local-edit.out" 2>&1
+grep -Fq 'local ZCode edit' "$profile/.zcode/AGENTS.md" || fail 'unknown ZCode edit was overwritten'
+grep -Fq 'local MiMo edit' "$profile/.config/mimocode/AGENTS.md" || fail 'unknown MiMo edit was overwritten'
+grep -Fq 'NOT overwriting' "$TMP_ROOT/client-globals-local-edit.out" || fail 'unknown edits were not reported'
+
+echo "globals: absent ZCode/MiMo homes stay absent; explicit roots with spaces work"
+fixture="$TMP_ROOT/absent-clients/repo"; profile="$TMP_ROOT/absent-clients/profile"
+make_fixture "$fixture"
+mkdir -p "$profile/.codex"
+run_installer_defaults "$fixture" "$profile" "$TMP_ROOT/absent-clients/redirected-home" >/dev/null 2>&1
+assert_absent "$profile/.zcode"
+assert_absent "$profile/.config/mimocode"
+
+fixture="$TMP_ROOT/space-roots/repo"; profile="$TMP_ROOT/space-roots/profile"
+zcode="$TMP_ROOT/space-roots/ZCode Home"; mimo="$TMP_ROOT/space-roots/MiMo Home"
+make_fixture "$fixture"
+mkdir -p "$profile/.codex" "$zcode" "$mimo"
+AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$TMP_ROOT/space-roots/redirected-home" USERPROFILE="$profile" \
+  CLAUDE_HOME= CODEX_HOME= ZCODE_HOME="$zcode" MIMO_HOME="$mimo" \
+  AI_INSTALL_LOG="$profile/.cache/ai-devops/install-log.tsv" \
+  bash "$fixture/bin/ai-install-skills" >"$TMP_ROOT/space-roots.out" 2>&1
+grep -Fq '# test ZCode global' "$zcode/AGENTS.md" || fail 'explicit ZCode root with spaces failed'
+grep -Fq '# test MiMo global' "$mimo/AGENTS.md" || fail 'explicit MiMo root with spaces failed'
 
 echo "scoped install preserves all unrelated state"
 fixture="$TMP_ROOT/scoped/repo"; claude="$TMP_ROOT/scoped/claude"; codex="$TMP_ROOT/scoped/codex"
