@@ -70,7 +70,9 @@ exit 0
         $job=[GenerationCustody]::Job()
         $executable=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        $arguments='-NoProfile -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
+        # Only this owned test child uses a process-scoped script policy. The
+        # restricted token and sealed source/ACL attack checks stay unchanged.
+        $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
         $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
         try {$process.WaitForExit();Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)} finally {$process.Dispose();$job.Dispose()}
         $job=[GenerationCustody]::Job()
@@ -79,7 +81,12 @@ exit 0
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
         Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
-    } finally {[GenerationCustody]::DirectoryAccess($control,$true);$control.Dispose();$attackHold.Dispose()}
+    } finally {
+        # A restoration failure must remain visible without retaining source
+        # handles that make the outer cleanup fail with a different error.
+        try {[GenerationCustody]::DirectoryAccess($control,$true)}
+        finally {try {$control.Dispose()} finally {$attackHold.Dispose()}}
+    }
     [IO.File]::WriteAllText($injected,'parent restoration works')
     Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
     [IO.File]::Delete($injected)
