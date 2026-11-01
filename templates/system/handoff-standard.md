@@ -1,5 +1,9 @@
 # HANDOFF standard — how EVERY session must write a handoff
 
+For the selective fresh-reader pilot, read
+[`plan_selective-fresh-reader.md`](../../plan_selective-fresh-reader.md) STATUS
+first. It is opt-in and does not replace the self-audit below.
+
 This is a hard standard, not a suggestion. Albert starts new sessions with clean
 context windows and relies on the handoff as the ONLY memory carried forward.
 Skimpy handoffs force him to stay in long sessions babysitting — the exact thing

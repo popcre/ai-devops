@@ -162,6 +162,10 @@ pipeline. The recovery procedure lives in
 
 ## Specialized task router
 
+Selective EGM-inspired fresh-reader checks for complex plans or handoffs: read
+[`plan_selective-fresh-reader.md`](plan_selective-fresh-reader.md) STATUS first;
+opt-in pilot only, no new review gate or full EGM rollout.
+
 TokenEconomizer for Ubuntu Claude/Codex desktops and Windows MiMo/ZCode desktops:
 read [plan_tokeneconomizer-desktops.md](plan_tokeneconomizer-desktops.md) STATUS
 first. Qualify actual desktop support; do not infer it from CLI compatibility.

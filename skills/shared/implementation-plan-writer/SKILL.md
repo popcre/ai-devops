@@ -5,6 +5,10 @@ description: Write or audit an implementation plan that a brand-new AI session c
 
 # implementation-plan-writer
 
+For the selective fresh-reader pilot, read
+[`plan_selective-fresh-reader.md`](../../../plan_selective-fresh-reader.md) STATUS
+first. It is opt-in and does not replace the self-audit below.
+
 ## The failure this skill exists to kill
 
 Plans get written by the session that did the thinking — and that session

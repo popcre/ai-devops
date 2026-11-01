@@ -1,5 +1,9 @@
 # Current context contract
 
+Selective fresh-reader checks for complex plans/handoffs: read
+[`plan_selective-fresh-reader.md`](../plan_selective-fresh-reader.md) STATUS first;
+this is an open pilot plan, not an installed or mandatory review workflow.
+
 This is the compact, current specification for Claude/Codex context in
 `ai-devops`. The completed historical work and decisions remain in the STATUS
 table of [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
