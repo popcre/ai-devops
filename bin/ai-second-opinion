@@ -463,8 +463,22 @@ def main(argv):
                 subprocess.run(["git", "-C", tmp, "-c", "user.name=p", "-c", "user.email=p@l",
                                 "commit", "-qm", "p"], check=True)
                 STATE = os.path.join(tmp, "state")
-                sdir, meta = start(p, "doctor", tmp, False)
-                ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
+                # The provider or OpenCode sometimes answers a single call with a
+                # transient "Unexpected server error" (about one call in five for
+                # GLM on 2026-10-31), which failed whole installs. Retry a failed
+                # probe with a fresh session; a real fault fails all attempts.
+                ans = ""
+                for attempt in range(3):
+                    try:
+                        sdir, meta = start(p, f"doctor{attempt}", tmp, False)
+                        ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
+                    except SystemExit:
+                        ans = ""
+                    if "READY" in ans.upper():
+                        break
+                    if attempt < 2:
+                        print(f"live: attempt {attempt + 1} failed; retrying", file=sys.stderr)
+                        time.sleep(3)
                 print(f"live: {ans.strip()[:80]}")
                 ok &= "READY" in ans.upper()
         print("doctor: OK" if ok else "doctor: FAILED")
