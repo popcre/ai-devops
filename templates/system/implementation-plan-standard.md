@@ -104,6 +104,10 @@ What could break, the rollback, what's still uncertain and how to decide it.
 
 ## Mandatory self-audit gate (BEFORE showing the plan)
 
+For an eligible complex plan, the optional [fresh-reader procedure](../../docs/fresh-reader-check.md)
+may follow this self-audit. Record skip, unsupported or incomplete honestly;
+none makes the mandatory self-audit fail or introduces approval.
+
 Grade the draft against the checklist; loop until every item passes. Then answer,
 citing sections:
 
