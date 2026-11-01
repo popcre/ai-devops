@@ -305,6 +305,8 @@ def valid_active_arguments(arguments, sdk_coordinator=False):
 def _clear_active_intervals(result, reason):
     result["active_completion_qualified"] = False
     for record in result["active_completion_records"]:
+        if reason == "dry_run":
+            record["active_success"] = False
         record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
                 duration_upper_ms=None, unknown_reason=reason)
         if isinstance(record.get("event_qualification"), dict):

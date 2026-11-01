@@ -428,6 +428,7 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         self.assertFalse(dry["active_completion_qualified"])
         self.assertEqual(dry["detection_unknown_reason"], "dry_run")
         for row in dry["active_completion_records"]:
+            self.assertFalse(row["active_success"])
             self.assertIsNone(row["completion_qualification"]["duration_upper_ms"])
             self.assertIsNone(row["event_qualification"]["latency_upper_ms"])
 
