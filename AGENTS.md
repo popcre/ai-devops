@@ -171,6 +171,13 @@ Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
 [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
 [#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
 
+For Albert's October 31 authorization to test Entire controlling testing and
+merging while GitHub retains official code, read the plan's **October 31
+controlling amendment** first, then T1–T7 and R1–R8. The older advisory-only
+public-companion workflow below is not a veto on that bounded trial. Preserve
+its privacy, no-billing and original-deadline constraints; no permanent
+protected-main cutover or bypass follows from trial authorization.
+
 Fleet/CI expansion: read that plan's current STATUS and R1–R8 before claiming
 rollout. Codex, Claude, MiMo and ZCode across all four requested machines each
 need live proof; repository instructions/mirror success prove neither fleet
