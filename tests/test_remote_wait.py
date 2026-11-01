@@ -316,13 +316,14 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     remote.windows_supervisor_command("C:/repo", args, 50, 51, active_completion=True, sdk_coordinator=True)
 
-    def run_transport(self, sdk=False, duplicate=False, cleanup=True, mismatch=False, drop=False, clock_unknown=False):
+    def run_transport(self, sdk=False, duplicate=False, cleanup=True, mismatch=False, drop=False, clock_unknown=False,
+                      original_status=3, storage_failure=False):
         arguments = ["alarm"] if sdk else ["tick"]
         arg_hash = hashlib.sha256(json.dumps(arguments, separators=(",", ":")).encode()).hexdigest()
         started = start(arg_hash)
         started.update(execution_profile="active_sdk_coordinator" if sdk else "original_active", stdin_profile="active_no_stdin")
         source = receipt(started, event())
-        source.update(observer_event_json=None, observer_event_status="unavailable", active_channel_status="valid")
+        source.update(child_exit=original_status, observer_event_json=None, observer_event_status="unavailable", active_channel_status="valid")
         if not sdk:
             source.update(source_verified="unknown", unknown_reason="boundary_unavailable", boundary_detail="active_original_context_unqualified")
         identity, parent = "1" * 32, None if sdk else "2" * 32
@@ -340,12 +341,12 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         frames += remote.frame("receipt", record=source)
         payload = b"original\x00\xff\n"
         confirmation = {"schema": 1, "frame": "cleanup", "observer_run_id": started["observer_run_id"], "owned_cleanup_verified": cleanup}
-        terminal = remote.frame("cleanup", record=confirmation) + remote.frame("exit", code=7 if mismatch else 3)
+        terminal = remote.frame("cleanup", record=confirmation) + remote.frame("exit", code=99 if mismatch else original_status)
         code = ("import sys,json,os;sys.stdout.buffer.write(" + repr(remote.frame("started", record=started) + active(begin))
                 + ");sys.stdout.buffer.flush();a=json.loads(sys.stdin.buffer.readline());assert a['kind']=='active_ack' and a['workflow_id']=='" + identity
                 + "';sys.stdout.buffer.write(" + repr(remote.frame("stdout", data=base64.b64encode(payload).decode()) + frames)
                 + ");sys.stdout.buffer.flush();assert json.loads(sys.stdin.buffer.readline())['kind']=='ack';assert not os.path.exists(sys.argv[1]);sys.stdout.buffer.write("
-                + repr(b"" if drop else terminal) + ");sys.stdout.buffer.flush();sys.exit(3)")
+                + repr(b"" if drop else terminal) + ");sys.stdout.buffer.flush();sys.exit("+str(original_status)+")")
         out, err = Capture(), Capture()
         samples = [dict(wall_ms=1000+i*10, monotonic_ms=1000+i*10, error_bound_ms=1,
                         basis="linux_adjtimex_maxerror") for i in range(16)]
@@ -356,12 +357,20 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
                                    active_completion=True, sdk_coordinator=sdk)
-                status = 3
+                status = original_status
+            elif storage_failure:
+                with mock.patch.object(remote, "_write_active_private", side_effect=OSError("owned storage fixture failure")):
+                    status = remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
+                                            active_completion=True, sdk_coordinator=sdk)
+                self.assertEqual(status, original_status)
+                self.assertFalse(target.exists())
+                self.assertIn(b"original command status preserved", err.buffer.getvalue())
+                return None
             else:
                 status = remote.observe([sys.executable, "-I", "-c", code, str(target)], arguments, target, 5,
                                         active_completion=True, sdk_coordinator=sdk)
             saved = json.loads(target.read_text())
-        self.assertEqual(status, 3)
+        self.assertEqual(status, original_status)
         self.assertEqual(out.buffer.getvalue(), payload)
         self.assertEqual(saved["measurement"], "linux_observed_windows_active_completion")
         self.assertEqual(saved["qualification_profile"], "sdk_only_no_provider" if sdk else "original_context")
@@ -404,6 +413,27 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
                     remote._write_active_private(path, {"active_completion_qualified": True})
             self.assertFalse(path.exists())
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_actual_primary_zero_and_nonzero_survive_cleanup_and_storage_failures(self):
+        for status in (0, 7):
+            result = self.run_transport(sdk=True, cleanup=False, original_status=status)
+            self.assertFalse(result["active_completion_qualified"])
+            self.assertFalse(result["native_cleanup_verified"])
+            self.assertIsNone(self.run_transport(sdk=True, original_status=status, storage_failure=True))
+
+    def test_late_failure_clears_previously_qualified_event_as_well_as_completion(self):
+        result = {"active_completion_qualified": True, "active_source_protocol_verified": True,
+                  "active_completion_records": [{"completion_qualification": {
+                      "clock_quality": "parent_monotonic_host_bookends", "duration_lower_ms": 1, "duration_upper_ms": 3},
+                      "event_qualification": {"clock_quality": "host_bound_github_utc_assumed", "latency_lower_ms": 1,
+                                              "latency_upper_ms": 1001, "clock_error_bound_ms": 1000}}]}
+        remote._finish_active_result(result, time.perf_counter_ns(), False)
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertFalse(result["active_source_protocol_verified"])
+        row = result["active_completion_records"][0]
+        self.assertIsNone(row["completion_qualification"]["duration_upper_ms"])
+        self.assertIsNone(row["event_qualification"]["latency_upper_ms"])
+        self.assertEqual(row["event_qualification"]["unknown_reason"], "transport_unverified")
 
     def test_active_admission_refuses_before_process_creation(self):
         with mock.patch.object(remote.subprocess, "Popen") as launch:

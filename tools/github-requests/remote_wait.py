@@ -272,6 +272,9 @@ def _finish_active_result(result, observation_started_ns, verified):
         for record in result["active_completion_records"]:
             record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
                     duration_upper_ms=None, unknown_reason="transport_unverified")
+            if isinstance(record.get("event_qualification"), dict):
+                record["event_qualification"].update(clock_quality="unknown", latency_lower_ms=None,
+                        latency_upper_ms=None, clock_error_bound_ms=None, unknown_reason="transport_unverified")
     return result
 
 
@@ -430,8 +433,13 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
         if pending or not got_exit or original_exit is None or code != original_exit:
             raise ValueError("observer transport ended without original exit")
         if active_completion and active_result is not None:
+            active_result["native_cleanup_reported"] = got_cleanup
+            active_result["native_cleanup_verified"] = cleanup_verified
             _finish_active_result(active_result, observation_started_ns, got_cleanup and cleanup_verified)
-            _write_active_private(receipt_path, active_result)
+            try:
+                _write_active_private(receipt_path, active_result)
+            except (OSError, ValueError):
+                print("active observation: receipt storage unavailable; original command status preserved", file=sys.stderr)
         return original_exit
     except BaseException:
         if active_completion and active_result is not None:
@@ -561,6 +569,7 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
         deadline = time.monotonic() + timeout_seconds
         source = None
         active_control_failed = False
+        native_cleanup = None
         def output_frames():
             for name, stream in (("stdout", child.stdout), ("stderr", child.stderr)):
                 while _peek(stream):
@@ -586,9 +595,9 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                         else:
                             sys.stdout.buffer.write(frame("active", record={"data": record["data"], "queued": record["queued"]}))
                     elif active_completion and record.get("frame") == "cleanup":
-                        if not got_receipt:
+                        if not got_receipt or native_cleanup is not None:
                             raise ValueError("cleanup before source custody receipt")
-                        sys.stdout.buffer.write(frame("cleanup", record=record))
+                        native_cleanup = record  # Finalize only after the actual supervisor exit.
                     else:
                         if got_receipt:
                             raise ValueError("duplicate native receipt")
@@ -634,9 +643,20 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                 if active_completion and pending:
                     raise ValueError("partial terminal active source frame")
                 output_frames()
-                sys.stdout.buffer.write(frame("exit", code=child.returncode))
+                status = child.returncode
+                if active_completion:
+                    if source is not None and status == 125:
+                        # 125 is this supervisor's observer-cleanup status.
+                        # Preserve the genuinely recorded original operation,
+                        # while independently refusing any qualification.
+                        native_cleanup = {"schema": 1, "frame": "cleanup", "observer_run_id": source["observer_run_id"],
+                                          "owned_cleanup_verified": False}
+                        status = source["child_exit"]
+                    if native_cleanup is not None:
+                        sys.stdout.buffer.write(frame("cleanup", record=native_cleanup))
+                sys.stdout.buffer.write(frame("exit", code=status))
                 sys.stdout.buffer.flush()
-                return child.returncode
+                return status
             time.sleep(0.005)
         sys.stdout.buffer.write(frame("exit", code=130))
         sys.stdout.buffer.flush()
