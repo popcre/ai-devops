@@ -1,10 +1,10 @@
 ---
-issue: none
+issue: 2220
 status: OPEN
 owner: codex/tokeneconomizer-desktop-plan
 ---
 
-Issue registration is pending the shared GitHub throttle; this is implementation work, not an untracked exemption. Replace with the owning issue before publication when access succeeds.
+Owning issue: [#2220](https://github.com/popcre/ai-devops/issues/2220). Implementation remains unstarted.
 
 ## 0. Business decisions only the owner can make
 
@@ -20,7 +20,7 @@ Produce a self-contained implementation plan for TokenEconomizer, with genuine d
 
 ## 3. Current state
 
-Planning only. All seven implementation steps remain open. No plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. Plan and router links were committed and pushed in [d39a60ad](https://github.com/popcre/ai-devops/commit/d39a60ad). Document safety passed with 536 tracked Markdown files. Issue/PR creation is blocked by the shared GitHub throttle lock (exit 75); the planning session owns retry and registration. Publication is not implementation acceptance.
+Planning only. All seven implementation steps remain open. No plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. Plan and router links were committed and pushed in [d39a60ad](https://github.com/popcre/ai-devops/commit/d39a60ad). Document safety passed with 536 tracked Markdown files. Issue registration subsequently succeeded as #2220 through the repaired candidate; the earlier access blockage is superseded. The planning session retains PR delivery ownership. Publication is not implementation acceptance.
 
 ## 4. Failed approaches
 

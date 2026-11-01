@@ -1,6 +1,7 @@
 # TokenEconomizer — desktop applicability, qualification and measured rollout
 
 Owner: the implementing Codex session on the owning GitHub issue. Date: October 31, 2026 (EDT).
+Owning issue: [#2220](https://github.com/popcre/ai-devops/issues/2220).
 Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desktops.md).
 
 ## STATUS — read before doing work
