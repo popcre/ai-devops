@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One native-approved action, consumed before ANY capture-content open.
+"""One descriptor-admitted action, consumed before ANY capture-content open.
 
 No admission retry/renewal, arbitrary operator, network or broad host mount.
 Actual runtime confinement requires supported Linux namespaces; refusal stops.
@@ -24,15 +24,20 @@ spec=importlib.util.spec_from_file_location('oracle_output',Path(__file__).with_
 output_checks=importlib.util.module_from_spec(spec);spec.loader.exec_module(output_checks)
 
 
-def consume(state_path,state,m,b):
-    profile.completed(state_path,state,b)
-    receipt=state.get('oracle_alternate_v2_action_admission')
-    profile.require(type(receipt) is dict and receipt.get('binding')==b and receipt.get('action_id')==m['action_id']
-        and type(receipt.get('expires_at')) is int and int(time.time())+180<=receipt['expires_at']<=m['expires_at']
-        and receipt.get('registration')==profile.completed(state_path,state,b),
-        'actual current-purpose and action gate receipt required')
+def read_admission(admission_path):
+    old=profile.legacy()
+    return profile.control_metadata.read_admission(admission_path,profile.PROFILE,old._native.private_read,profile.decode)
+
+
+def consume(admission_path,record,m,b):
+    # Descriptor-only admission (#2041): no reviewer verdict is read or needed.
+    profile.require(type(record) is dict and record.get('kind')=='descriptor-only-admission' and record.get('profile')==profile.PROFILE
+        and record.get('binding')==b and record.get('action_id')==m['action_id'] and record.get('schema_version')==profile.ADMISSION_SCHEMA
+        and type(record.get('expires_at')) is int and int(time.time())+180<=record['expires_at']<=m['expires_at'],
+        'actual current descriptor-only admission required')
+    profile.require(b['installed_enforcement']['kind']=='VERIFIED_INSTALLED_SOURCE','test fixture cannot issue authority')
     profile.require(os.environ.get('AI_DEVOPS_TEST_MODE')!='1','test fixture cannot consume actual authority')
-    spent=Path(state_path).parent/('oracle-alternate-v2-'+m['action_id']+'.spent')
+    spent=Path(admission_path).parent/('oracle-alternate-v2-'+m['action_id']+'.spent')
     fd=os.open(spent,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'wb') as out:
         out.write(profile.canonical({'action_id':m['action_id'],'binding_sha256':profile.sha(profile.canonical(b)),
@@ -94,16 +99,16 @@ def limits():
     resource.setrlimit(resource.RLIMIT_NOFILE,(128,128))
 
 
-def run(state_path,m):
-    old=profile.legacy();state=profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))
-    b=profile.binding(state,m);profile.require(b==state.get('action_profile_binding'),'fixed prospective action binding required')
+def run(admission_path,m):
+    old=profile.legacy();state=read_admission(admission_path)
+    b=profile.admission_binding(Path(state['repository_root']),m);profile.require(b==state.get('binding'),'fixed prospective action binding required')
     # There is deliberately no ordinary/advisory/boolean authority path.
     spec=importlib.util.spec_from_file_location('oracle_public_runtime',Path(__file__).with_name('oracle_native_alternate_v2_runtime.py'))
     runtime_recipe=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime_recipe)
     recipe=runtime_recipe.verify_recipe(m['runtime']['root'])
     profile.require(recipe['closure_sha256']==m['runtime']['closure_sha256'] and recipe['bytes']==m['runtime']['bytes'],
                     'reviewed public-only runtime recipe differs')
-    consume(state_path,state,m,b)
+    consume(admission_path,state,m,b)
     profile.validate_manifest(m,int(time.time()))
     runtime=m['runtime'];total=public_runtime(runtime['root'],runtime['closure_sha256'],runtime['bytes'])
     profile.require(total==runtime['bytes'],'runtime size differs')
@@ -115,7 +120,7 @@ def run(state_path,m):
     source_bytes=[]
     for path in (operator,decoder,chain):
         data=path.read_bytes()
-        profile.require(data==old.git(repo,'show',state['head']+':'+str(path.relative_to(repo))), 'fixed source changed')
+        profile.require(data==old.git(repo,'show',b['source_head']+':'+str(path.relative_to(repo))), 'fixed source changed')
         source_bytes.append(data)
     output=Path(m['output_parent']['path'])/m['output_leaf'];output.mkdir(mode=0o700)
     output.chmod(0o700);output_fd=output_checks.open_directory(output);output_initial=os.fstat(output_fd)
@@ -134,7 +139,7 @@ def run(state_path,m):
         revalidate_input_paths(inputs,fds)
         control={'schema_version':2,'profile':profile.PROFILE,'purpose':profile.PURPOSE,'limits':profile.LIMITS,'census':profile.CENSUS,
             'inputs':[{k:v for k,v in item.items() if k!='path'} for item in inputs],
-            'capture_count':len(m['captures']),'expires_at':min(m['expires_at'],state['oracle_alternate_v2_action_admission']['expires_at']),'runtime_bytes':total}
+            'capture_count':len(m['captures']),'expires_at':min(m['expires_at'],state['expires_at']),'runtime_bytes':total}
         started=time.monotonic();wall=time.time()
         # A sealed anonymous metadata fd avoids a blocking stdin write. Bound
         # stdout while reading it, rather than after unbounded communicate().
@@ -150,8 +155,8 @@ def run(state_path,m):
             result=bytearray();selector=selectors.DefaultSelector();selector.register(proc.stdout,selectors.EVENT_READ)
             try:
                 while selector.get_map():
-                    profile.require(time.monotonic()-started<180 and time.time()<state['oracle_alternate_v2_action_admission']['expires_at'],'action deadline expired')
-                    profile.require(profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))==state,'purpose registration revoked during execution')
+                    profile.require(time.monotonic()-started<180 and time.time()<state['expires_at'],'action deadline expired')
+                    profile.require(read_admission(admission_path)==state,'purpose registration revoked during execution')
                     for key,_ in selector.select(.1):
                         chunk=os.read(key.fileobj.fileno(),2049-len(result))
                         if not chunk:selector.unregister(key.fileobj)
@@ -171,16 +176,16 @@ def run(state_path,m):
         returned_fd=output_checks.open_directory(output)
         try:profile.require((os.fstat(returned_fd).st_dev,os.fstat(returned_fd).st_ino)==(output_initial.st_dev,output_initial.st_ino),'output path replaced before release')
         finally:os.close(returned_fd)
-        profile.require(profile.decode(profile.control_metadata.read_lifecycle(state_path,old._native.private_read))==state and time.time()<m['expires_at'],'registration changed before release')
+        profile.require(read_admission(admission_path)==state and time.time()<m['expires_at'],'registration changed before release')
         return receipt
     finally:
         for fd in fds+source_fds+[output_fd]:os.close(fd)
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--state',required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--admission',required=True);args=parser.parse_args()
     try:
-        m=profile.decode(sys.stdin.buffer.read(1024**2+1));print(json.dumps(run(args.state,m),sort_keys=True));return 0
+        m=profile.decode(sys.stdin.buffer.read(1024**2+1));print(json.dumps(run(args.admission,m),sort_keys=True));return 0
     except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
         print('oracle-native-alternate: isolated action stopped; no retry or qualification',file=sys.stderr);return 1
 
