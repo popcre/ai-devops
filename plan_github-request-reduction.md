@@ -15,11 +15,13 @@ The final code repair merged through #2291 as
 governed completion/event consumers, native transport, registered Windows CI and
 literal dry-run parity. The registration repair's actual `e04` CI passed its classifier and all twelve
 Windows sections, with the new fixture executed and 73 native assertions;
-earlier registration failure remains retained. Four remote normal full installs
+earlier registration failure remains retained. All five normal full installs
 now verify exact `10ae0b93`: all three Windows hosts report twelve completed
 phases with numeric required-stage counts unknown; Hetz passed all 21 required
-stages with zero failures after supported normal-owner/bus recovery. Local final
-installation remains pending; its last completed source is `642a1da6`.
+stages with zero failures after supported normal-owner/bus recovery. Local passed
+all 21 required and twelve optional stages and its installed command returned
+zero. The local maintenance window's full-capacity restoration and timer
+retirement are still pending; publication remains held for that separate proof.
 
 The earlier five necessary source-custodied reads total
 ten covered constructor writes and twenty-five native invocations including

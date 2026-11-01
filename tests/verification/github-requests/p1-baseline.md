@@ -6,8 +6,8 @@ Final code #2291 merged as `10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`.
 Dispatch/privacy and finite active BlockerWatch terminal/event producers,
 governed parent completion/event consumers, native transport and literal dry-run
 parity are implemented. The original emission/consumer implementation gaps are
-repaired. Four remote normal full installs now verify this generation; the local
-final installation remains pending. Earlier read receipts below retain their
+repaired. All five normal full installs now verify this generation; local
+maintenance-capacity restoration remains separately pending. Earlier read receipts below retain their
 actual source and are not silently retargeted; no new SDK/counter workload was
 created by the remote installations.
 
@@ -32,7 +32,7 @@ notifications. Its actual `2963` PowerShell bytes independently match final
 not twenty useful outcomes or current full-budget acceptance. All older cold,
 request-reduction and protocol failures remain preserved below.
 
-### Final remote normal installations at `10ae0b93`
+### Final normal installations at `10ae0b93`
 
 The three Windows normal full installers exited zero, canonical source/managed
 launcher are exact `10ae` and clean, and all retained full-install log hashes
@@ -55,6 +55,17 @@ and all five bound artifact hashes were independently verified: actual head,
 manifest, clean source and launcher bind final `10ae`. Existing history was
 preserved; an older baseline field inside the completion record is not asserted
 as the current installed head. No new measurement or SDK workload was generated.
+
+Local normal full installation also completed at exact clean `10ae`, with all
+21 required and twelve optional stages passed, exit zero/no timeout, matching
+manifest/completion and actual installed-command exit zero. Receipt
+`78c27319770be1ad29513a2fa1da5ed47a939acd10aeaae7637f6a5d69779439`
+and its copied manifest/completion/full-log hashes were independently verified;
+actual task-gate bytes match final Git source. Its older baseline completion
+field is not asserted as current. No new counter/timing cohort was generated.
+Local maintenance-capacity restoration/timer retirement are still pending and
+require their own proof before publication; installation exit zero is not that
+proof.
 
 ### One actual installed SDK dry-run — component scope only
 
