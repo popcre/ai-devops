@@ -1325,13 +1325,22 @@ Write-Step "Retiring reviewer scheduled jobs and the freeze window"
 if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Test mode: not touching this computer's scheduled tasks (reviewer jobs)."
 } else {
-    foreach ($retired in @('ai-devops\reviewer-start-watch', 'ai-devops\ai-reviewer-logs-sync')) {
-        & schtasks.exe /Query /TN $retired *> $null
-        if ($LASTEXITCODE -eq 0) {
-            & schtasks.exe /Delete /F /TN $retired *> $null
-            if ($LASTEXITCODE -eq 0) { Write-Note "Unscheduled the retired $retired job." }
-            else { Write-Warning "Could not unschedule the retired $retired job." }
+    # schtasks writes "cannot find the file" to stderr when a job is already
+    # gone; under this script's Stop preference Windows PowerShell 5.1 turns
+    # that native stderr into a terminating error, so query with Continue.
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        foreach ($retired in @('ai-devops\reviewer-start-watch', 'ai-devops\ai-reviewer-logs-sync')) {
+            & schtasks.exe /Query /TN $retired *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & schtasks.exe /Delete /F /TN $retired *> $null
+                if ($LASTEXITCODE -eq 0) { Write-Note "Unscheduled the retired $retired job." }
+                else { Write-Warning "Could not unschedule the retired $retired job." }
+            }
         }
+    } finally {
+        $ErrorActionPreference = $priorPreference
     }
     $global:LASTEXITCODE = 0
 }
