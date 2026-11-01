@@ -20,7 +20,7 @@ sys.path.insert(0, str(HERE))
 from source_binding import source_binding, validate_source_binding, version_profile
 from numeric_receipt import validate_receipt
 from managed_read import aggregate_invocations, managed_read_label
-from managed_read import _packet_send, _packet_receive, _WORKER_BOOTSTRAP
+from managed_read import _packet_send, _packet_receive, _WORKER_BOOTSTRAP, _CohortProcess
 from build import patch as patch_counter_source
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
@@ -341,6 +341,17 @@ class OfflineContract(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux inherited cohort capability')
 class CohortContract(unittest.TestCase):
+    def test_worker_interrupt_uses_only_retained_pidfd_and_refuses_closed_identity(self):
+        cohort = _CohortProcess.__new__(_CohortProcess)
+        cohort.worker_pidfd = 17
+        with patch('managed_read.signal.pidfd_send_signal') as send, patch('managed_read.os.kill') as numeric:
+            cohort.interrupt(signal.SIGINT)
+            send.assert_called_once_with(17, signal.SIGINT)
+            numeric.assert_not_called()
+        cohort.worker_pidfd = None
+        with self.assertRaises(ProcessLookupError):
+            cohort.interrupt(signal.SIGTERM)
+
     def test_packet_rejects_duplicate_nonfinite_oversized_and_closes_received_handles(self):
         for raw in (b'{"sequence":1,"sequence":2}', b'{"number":NaN}', b'x' * 4097, b'[]'):
             with self.subTest(raw_length=len(raw)):

@@ -228,6 +228,7 @@ class _CohortProcess:
         self.process = None
         self.ordinal = 0
         self.cleanup_complete = False
+        self.worker_pidfd = None
         try:
             with observation._generation_provider.retained_generation_launch(observation.transport_boundary) as launch, contextlib.ExitStack() as held:
                 prefix = list(launch["mount_prefix"][:-1]) + ["--tmpfs", observation._native_mount]
@@ -255,10 +256,14 @@ class _CohortProcess:
                 for descriptor in received:
                     os.close(descriptor)
                 if (set(value) != {"ready", "pid"} or type(value["ready"]) is not int or value["ready"] != 1
-                        or type(value["pid"]) is not int or value["pid"] <= 1 or received
-                        or os.getpgid(value["pid"]) != self.process.pid):
+                        or type(value["pid"]) is not int or value["pid"] <= 1 or received):
                     raise ValueError("cohort bootstrap failed")
-                self.worker_pid = value["pid"]
+                # Capture a kernel process identity before checking its owned
+                # session/group. Numeric ready-frame PIDs cannot authorize a
+                # late signal after the worker has been reaped/reused.
+                self.worker_pidfd = os.pidfd_open(value["pid"])
+                if os.getpgid(value["pid"]) != self.process.pid:
+                    raise ValueError("cohort worker left owned group")
                 self.channel.settimeout(None)
         except BaseException:
             peer.close()
@@ -302,10 +307,14 @@ class _CohortProcess:
                     self.process.wait()
             self.cleanup_complete = self.process.returncode == 0
         self.channel.close()
+        if self.worker_pidfd is not None:
+            os.close(self.worker_pidfd)
+            self.worker_pidfd = None
 
     def interrupt(self, signum):
-        # The trusted ready frame binds this live worker to our unreaped group.
-        os.kill(self.worker_pid, signum)
+        if self.worker_pidfd is None:
+            raise ProcessLookupError("cohort worker is closed")
+        signal.pidfd_send_signal(self.worker_pidfd, signum)
 
 
 def native_mount_prefix(launch, mount, descriptor, executable):
