@@ -73,6 +73,11 @@ unit or job was stopped. Combined local proof
 binds installation, capacity and retirement without rewriting the earlier
 installation receipt. These bindings were independently hashed/read. This
 operational recovery is not a new counter/timing cohort or programme acceptance.
+Independent final audit
+`ff1fb73cb0167a0188cb601dffe41d90fd327ff2fe109d01379fe93666ebded1`
+binds all five normal full installations, the single SDK dry-run and restored
+capacity at final `10ae`, explicitly without additional workloads, retargeted
+older counts or detection/programme acceptance.
 
 ### One actual installed SDK dry-run — component scope only
 
