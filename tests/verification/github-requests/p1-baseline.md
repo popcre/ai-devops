@@ -744,6 +744,48 @@ uncertainty, passing the configured 300,000 ms ceiling. Total qualification was
 the distinction between total elapsed time and event delivery. It adds one
 real outcome, not a matched twenty-outcome cohort, p95 regression or savings.
 
+## Linux ownership transition repair and remaining advisory CI
+
+PR #2254 merged the Linux-only owner-transition repair as
+`87790de4264f59007d8e0fdaaedae8de0e63d86d`. Isolated privileged reproduction
+proved the earlier helper could leave a formerly normal-owner file root-owned
+when Git reused the same device/inode. The fixed same-inode and distinct-inode
+cases preserved normal ownership; a file already root-owned stayed root-owned.
+The protected zero-API reproduction packet digest is
+`e967d00a1f7bb85c38a38b9c20dc0e89b146ed8745d9161001c41f70de832162`.
+
+The actual Hetz normal root-run full update to `87790de4` passed all eighteen
+required stages, exit 0, exact clean source and matching manifest. Both changed
+tracked files were captured as normal-owner files before this update and reused
+their device/inode during the real update; both retained their original owner
+and expected new content afterward. The independently frozen before digest is
+`a800eafeab9fb2d430911a7db5699bf844ed796bf037ea88d14f56727e8abb73`;
+the final install/owner-transition/useful-read digest is
+`16a706cb5e51f2dbee6b3b35528365799341b72bd55aad478d35f7caad46c974`.
+No manual change was made to the unrelated seventeen root-readable paths whose
+prior ownership was unknown. This is evidence for the two observed transitions,
+not a claim that every tracked file belongs to the normal owner.
+
+The subsequent necessary normal-owner source-qualified read returned MERGED and
+exit 0 in 8.238795836 seconds, including 145.092491 ms source bootstrap, bound to
+manifest `4695f7d56cfc32751b137a3704041d611315338fc02e89ca0ac8ad911788437c`.
+Ordinary import, Git access, index/reference ownership and restored parent
+descriptor limit passed. Event eligibility preceded observation, so detection
+latency remains null; actual request totals remain null. Windows runtime files
+did not change in this Linux-only repair, so the installed `813baf8b` Windows
+source receipts remain scoped evidence for those exact unchanged blobs.
+
+Full advisory verify run `41278636180` at exact PR head `35dfb37c` completed
+with 24 successful jobs, three skips and three failures: one underlying Windows
+section-three source-cleanup discrepancy and its aggregate/report propagation.
+Linux offline and doc-safety passed. The failed native assertion was
+`Every injected cleanup failure remains visible`, followed by actual denial
+deleting the second owned cleanup-fault fixture file. The protected failed-log
+digest is `ca5394d851a1c1d821c64d4bba381b0c1b46ab27ee8a239a9f4c396e8fb04b9c`.
+The source/fleet owners are repairing this demonstrated discrepancy; the 95-case
+focused native result remains separate and does not erase the CI failure.
+No unchanged whole-CI rerun or performance-threshold change is claimed.
+
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
 sealed-generation custody. Its receipt digest is

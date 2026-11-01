@@ -47,8 +47,11 @@ metadata-only actual-context guards merged through PR #2253 as
 `813baf8b4fd8d3cc6e8671f7abc9d3a4caa5e2c2`, verified on origin/main.
 Local Linux full installation and a necessary counted read now verify final
 `813baf8b`; all three reachable Windows hosts also have full final-source
-installation and source-custodied useful-read receipts. Hetz's final-source
-receipt remains pending. Merge is
+installation and source-custodied useful-read receipts. The Linux-only owner
+transition repair then merged through #2254 as `87790de4`; Hetz's normal full
+update and source-qualified owner read at that source passed, including actual
+same-inode owner preservation. Local Linux's `87790de4` rollout remains pending.
+Windows runtime blobs are unchanged. Merge is
 not actual-context acceptance:
 foreign credential readers and unsafe namespaces remain qualification refusals,
 and the native cold counter gate remains failed. The existing Windows waiter
