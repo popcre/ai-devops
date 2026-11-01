@@ -207,6 +207,11 @@ stub_gh 'edge-fixture-win'; guard_run >/dev/null 2>&1; rrc=$?
 check 'a CR in the runner name still refuses' '[ "$rrc" -eq 3 ]'
 fixture_runner 'edge-fixture-win'
 
+# A legitimate registration name is data even when it looks like an option.
+fixture_runner '-i'; stub_gh '-i'; out="$(guard_run --check-collision)"; rc=$?
+check 'a leading-dash busy runner name is matched literally' '[ "$rc" -eq 3 ]'
+fixture_runner 'edge-fixture-win'
+
 # No runner installed here at all: proceed. A developer laptop must not be
 # blocked by a guard aimed at hosts that run CI.
 PATH="$GHBIN:$PATH" AI_TEST_RUNNER_DIRS="$WORK/no-such-runner*" \

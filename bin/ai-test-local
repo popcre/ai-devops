@@ -219,7 +219,7 @@ refuse_if_local_runner_busy() {
     }
     while IFS=$'\t' read -r registered_repo n; do
       [ "$registered_repo" = "$repository" ] || continue
-      printf '%s\n' "$busy_remote" | grep -qxF "$n" && busy="$busy $n"
+      printf '%s\n' "$busy_remote" | grep -qxF -- "$n" && busy="$busy $n"
     done <<< "$bindings"
   done < <(printf '%s\n' "$bindings" | cut -f1 | LC_ALL=C sort -u)
 
