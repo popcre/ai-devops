@@ -8,6 +8,11 @@ import tempfile
 import shutil
 import sys
 import unittest
+import socket
+import array
+import subprocess
+import signal
+import time
 from unittest.mock import patch
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -15,6 +20,7 @@ sys.path.insert(0, str(HERE))
 from source_binding import source_binding, validate_source_binding, version_profile
 from numeric_receipt import validate_receipt
 from managed_read import aggregate_invocations, managed_read_label
+from managed_read import _packet_send, _packet_receive, _WORKER_BOOTSTRAP
 from build import patch as patch_counter_source
 spec = importlib.util.spec_from_file_location("counter_runner", HERE / "run.py")
 runner = importlib.util.module_from_spec(spec)
@@ -331,6 +337,176 @@ class OfflineContract(unittest.TestCase):
                 self.assertEqual(runner.validate(channel(**{key: value})), runner.UNKNOWN)
         self.assertEqual(runner.validate(channel(error="fake-secret-sentinel")), runner.UNKNOWN)
         self.assertEqual(runner.validate(channel(http_requests=4)), runner.UNKNOWN)
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'Linux inherited cohort capability')
+class CohortContract(unittest.TestCase):
+    def test_packet_rejects_duplicate_nonfinite_oversized_and_closes_received_handles(self):
+        for raw in (b'{"sequence":1,"sequence":2}', b'{"number":NaN}', b'x' * 4097, b'[]'):
+            with self.subTest(raw_length=len(raw)):
+                left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+                descriptor = os.open(os.devnull, os.O_RDONLY)
+                try:
+                    before = len(os.listdir('/proc/self/fd'))
+                    left.sendmsg([raw], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [descriptor]))])
+                    with self.assertRaises(ValueError):
+                        _packet_receive(right)
+                    self.assertEqual(len(os.listdir('/proc/self/fd')), before)
+                finally:
+                    os.close(descriptor); left.close(); right.close()
+
+    def test_truncated_ancillary_closes_every_received_descriptor(self):
+        left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        descriptor = os.open(os.devnull, os.O_RDONLY)
+        try:
+            before = len(os.listdir('/proc/self/fd'))
+            left.sendmsg([b'{}'], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [descriptor] * 40))])
+            with self.assertRaises(ValueError):
+                _packet_receive(right)
+            self.assertEqual(len(os.listdir('/proc/self/fd')), before)
+        finally:
+            os.close(descriptor); left.close(); right.close()
+
+    def worker(self, directory, body, environment=None):
+        transport = pathlib.Path(directory) / 'ai-gh'
+        transport.write_text(body)
+        left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        process = subprocess.Popen([sys.executable, '-I', '-S', '-c', _WORKER_BOOTSTRAP,
+             str(HERE / 'managed_read.py'), '--private-cohort-worker',
+             str(right.fileno()), '/usr/bin/bash', str(transport), '/usr/bin/true', '/usr/bin/true', '12030'],
+             pass_fds=(right.fileno(),), start_new_session=True, stdin=subprocess.DEVNULL,
+             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+        right.close(); left.settimeout(4)
+        self.addCleanup(left.close)
+        def stop():
+            if process.returncode is None:
+                try: os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                process.wait(timeout=4)
+        self.addCleanup(stop)
+        ready, descriptors = _packet_receive(left)
+        self.assertEqual(ready, {'ready': 1, 'pid': process.pid})
+        self.assertEqual(descriptors, [])
+        return left, process
+
+    def request(self, **changes):
+        return dict(sequence=1, kind='instrumented', arguments=['issue', 'view', '658', '--repo', 'popcre/ai-devops', '--json', 'number'],
+                    workflow_id='a' * 32, timeout_seconds=2, **changes)
+
+    def test_worker_preserves_streams_exit_and_excludes_controller_from_exec(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            # This child executes a fresh image and checks actual inherited
+            # descriptors; the controller socket must never cross exec.
+            code = 'import os,stat;assert not any(stat.S_ISSOCK(os.fstat(n).st_mode) for n in range(3,128) if os.path.exists("/proc/self/fd/"+str(n)));print("exact stdout");os.write(2,b"exact stderr\\n");raise SystemExit(7)'
+            import shlex
+            channel, process = self.worker(directory, 'exec ' + shlex.quote(sys.executable) + ' -c ' + shlex.quote(code))
+            descriptor = os.open(os.devnull, os.O_RDONLY)
+            read, write = os.pipe()
+            try:
+                _packet_send(channel, self.request(), (descriptor, out.fileno(), err.fileno(), write))
+                os.close(write); write = -1
+                self.assertEqual(_packet_receive(channel), ({'sequence': 1, 'status': 7, 'stopped': False}, []))
+                out.seek(0); err.seek(0)
+                self.assertEqual(out.read(), b'exact stdout\n')
+                self.assertEqual(err.read(), b'exact stderr\n')
+                self.assertEqual(os.read(read, 1), b'')
+            finally:
+                os.close(descriptor); os.close(read)
+                if write >= 0: os.close(write)
+
+    def test_malformed_command_refuses_without_execution_or_descriptor_leak(self):
+        variants = [({'sequence': True}, 4), ({'timeout_seconds': True}, 4), ({'sequence': 2}, 4),
+                    ({'arguments': ['api', 'repos/private']}, 4), ({}, 3), ({}, 5)]
+        for changes, count in variants:
+            with self.subTest(changes=changes, count=count), tempfile.TemporaryDirectory() as directory:
+                marker = pathlib.Path(directory) / 'executed'
+                channel, process = self.worker(directory, 'touch ' + str(marker))
+                descriptor = os.open(os.devnull, os.O_RDWR)
+                try:
+                    value = self.request(); value.update(changes)
+                    _packet_send(channel, value, [descriptor] * count)
+                    process.wait(timeout=4)
+                    self.assertFalse(marker.exists())
+                    self.assertNotEqual(process.returncode, 0)
+                finally: os.close(descriptor)
+
+    def test_timeout_stops_the_owned_group_without_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = pathlib.Path(directory) / 'executed'
+            pidfile = pathlib.Path(directory) / 'grandchild'
+            channel, process = self.worker(directory, 'echo once >> ' + str(marker) + '; sleep 10 & echo $! > ' + str(pidfile) + '; wait')
+            descriptor = os.open(os.devnull, os.O_RDWR)
+            try:
+                value = self.request(); value['timeout_seconds'] = 1
+                _packet_send(channel, value, [descriptor] * 4)
+                self.assertEqual(_packet_receive(channel), ({'sequence': 1, 'status': 124, 'stopped': True}, []))
+                process.wait(timeout=4)
+                self.assertEqual(process.returncode, 0)
+                self.assertEqual(marker.read_text().splitlines(), ['once'])
+                self.assertFalse(pathlib.Path('/proc', pidfile.read_text().strip()).exists())
+            finally: os.close(descriptor)
+
+    def test_normal_close_and_cancellation_reap_actual_adopted_grandchild(self):
+        for cancel in (False, True):
+            with self.subTest(cancel=cancel), tempfile.TemporaryDirectory() as directory:
+                pidfile = pathlib.Path(directory) / 'grandchild'
+                body = 'sleep 30 & echo $! > ' + str(pidfile) + ('; wait' if cancel else '; exit 0')
+                channel, process = self.worker(directory, body)
+                descriptor = os.open(os.devnull, os.O_RDWR)
+                try:
+                    _packet_send(channel, self.request(), [descriptor] * 4)
+                    if cancel:
+                        for _ in range(200):
+                            if pidfile.exists() and pidfile.read_text().strip(): break
+                            time.sleep(0.005)
+                        self.assertTrue(pidfile.exists())
+                        os.kill(process.pid, signal.SIGINT)
+                    expected = {'sequence': 1, 'status': 130 if cancel else 0, 'stopped': cancel}
+                    self.assertEqual(_packet_receive(channel), (expected, []))
+                    if not cancel: _packet_send(channel, {'close': 1})
+                    process.wait(timeout=4)
+                    self.assertEqual(process.returncode, 0)
+                    self.assertFalse(pathlib.Path('/proc', pidfile.read_text().strip()).exists())
+                finally: os.close(descriptor)
+
+    def test_forty_command_limit_does_not_execute_a_forty_first(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = pathlib.Path(directory) / 'executed'
+            channel, process = self.worker(directory, 'echo once >> ' + str(marker))
+            descriptor = os.open(os.devnull, os.O_RDWR)
+            try:
+                for ordinal in range(1, 41):
+                    value = self.request(); value['sequence'] = ordinal
+                    _packet_send(channel, value, [descriptor] * 4)
+                    self.assertEqual(_packet_receive(channel), ({'sequence': ordinal, 'status': 0, 'stopped': False}, []))
+                process.wait(timeout=4)
+                self.assertEqual(marker.read_text().splitlines(), ['once'] * 40)
+                with self.assertRaises((OSError, ValueError)):
+                    _packet_send(channel, self.request(), [descriptor] * 4)
+                    _packet_receive(channel)
+            finally: os.close(descriptor)
+
+    def test_isolated_worker_ignores_hostile_user_site_without_changing_child_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            site = home / '.local/lib' / ('python%d.%d' % sys.version_info[:2]) / 'site-packages'
+            site.mkdir(parents=True)
+            marker = home / 'startup-executed'
+            injection = 'import pathlib;pathlib.Path(%r).write_text("injected")' % str(marker)
+            (site / 'sitecustomize.py').write_text(injection)
+            (site / 'usercustomize.py').write_text(injection)
+            (site / 'injection.pth').write_text(injection + '\n')
+            environment = dict(os.environ, HOME=directory, ORIGINAL_TEST_VALUE='kept exactly')
+            output = home / 'original-env'
+            channel, process = self.worker(directory, 'printf "%s" "$ORIGINAL_TEST_VALUE" > ' + str(output), environment)
+            descriptor = os.open(os.devnull, os.O_RDWR)
+            try:
+                _packet_send(channel, self.request(), [descriptor] * 4)
+                self.assertEqual(_packet_receive(channel), ({'sequence': 1, 'status': 0, 'stopped': False}, []))
+                _packet_send(channel, {'close': 1}); process.wait(timeout=4)
+                self.assertFalse(marker.exists())
+                self.assertEqual(output.read_text(), 'kept exactly')
+            finally: os.close(descriptor)
 
 
 if __name__ == "__main__":
