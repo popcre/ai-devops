@@ -32,6 +32,8 @@ $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($ordinary,'canonical bytes')
 $directory=[GenerationCustody]::Hold($root,$true,$false)
 $held=[GenerationCustody]::Hold($file,$false,$true)
+$primaryFailure=$null
+$cleanupFailure=$null
 try {
     Refuses { [IO.File]::WriteAllText($file,'altered') } 'Held source must reject writes'
     Refuses { [IO.File]::Move($file,(Join-Path $root 'renamed.sh')) } 'Held source must reject rename'
@@ -81,11 +83,18 @@ exit 0
         # Only this owned test child uses a process-scoped script policy. The
         # restricted token and sealed source/ACL attack checks stay unchanged.
         $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[GenerationCustody]::Quote($attack)+' '+[GenerationCustody]::Quote($root)+' '+$sid+' '+$PID+' '+[int]$beforePrivileges
-        $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
-        try {$process.WaitForExit();Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)} finally {$process.Dispose();$job.Dispose()}
+        $process=$null
+        try {
+            $process=[GenerationCustody]::Start($job,$executable,$arguments,$root,$true)
+            Assert ($process.WaitForExit(30000)) 'Restricted attack child must terminate within its deadline'
+            Assert ($process.ExitCode -eq 0) ('Restricted child helper/ACL attacks denied; exit='+$process.ExitCode)
+        } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
         $job=[GenerationCustody]::Job()
-        $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
-        try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'} finally {$process.Dispose();$job.Dispose()}
+        $process=$null
+        try {
+            $process=[GenerationCustody]::Start($job,$executable,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root,$true)
+            $job.Dispose();Assert ($process.WaitForExit(10000)) 'Restricted cancellation returns to parent cleanup'
+        } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
         Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
@@ -316,11 +325,18 @@ else:
     }finally{$parentHandle.Dispose()}
     $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $job=[GenerationCustody]::Job()
-    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
-    try {$process.WaitForExit();Assert ($process.ExitCode -eq 17) 'Original child exit preserved'} finally {$process.Dispose();$job.Dispose()}
+    $process=$null
+    try {
+        $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "exit 17"',$root)
+        Assert ($process.WaitForExit(30000)) 'Ordinary child must terminate within its deadline'
+        Assert ($process.ExitCode -eq 17) 'Original child exit preserved'
+    } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
     $job=[GenerationCustody]::Job()
-    $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root)
-    try {$job.Dispose();Assert ($process.WaitForExit(10000)) 'Cancellation closes child job'} finally {$process.Dispose();$job.Dispose()}
+    $process=$null
+    try {
+        $process=[GenerationCustody]::Start($job,$powershell,'-NoProfile -Command "Start-Sleep -Seconds 30"',$root)
+        $job.Dispose();Assert ($process.WaitForExit(10000)) 'Cancellation closes child job'
+    } finally {try {$job.Dispose()} finally {if($null -ne $process){$process.Dispose()}}}
     $junction=Join-Path $root 'junction'
     New-Item -ItemType Junction -Path $junction -Target $root | Out-Null
     try { Refuses {$h=[GenerationCustody]::Hold($junction,$true,$false);$h.Dispose()} 'Reparse directory refuses' } finally {[IO.Directory]::Delete($junction)}
@@ -329,5 +345,19 @@ else:
     if ($LASTEXITCODE -ne 0) { throw 'Hardlink fixture unavailable' }
     Refuses { $h=[GenerationCustody]::Hold($link,$false,$true);$h.Dispose() } 'Hardlinked source refuses'
     Remove-Item -LiteralPath $link
-} finally { $held.Dispose();$directory.Dispose();Remove-Item -LiteralPath $root -Recurse -Force }
+} catch { $primaryFailure=$_ }
+finally {
+    try {
+        try {$held.Dispose()} finally {$directory.Dispose()}
+        Remove-Item -LiteralPath $root -Recurse -Force
+    } catch { $cleanupFailure=$_ }
+}
+if($null -ne $primaryFailure){
+    if($null -ne $cleanupFailure){
+        throw [AggregateException]::new('Native source fixture and cleanup both failed',
+            [Exception[]]@($primaryFailure.Exception,$cleanupFailure.Exception))
+    }
+    throw $primaryFailure
+}
+if($null -ne $cleanupFailure){throw $cleanupFailure}
 Write-Output "PASS $passed native Windows source custody cases"
