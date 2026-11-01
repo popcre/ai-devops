@@ -245,8 +245,7 @@ function names; never invent those names from this public skill.
 
 Before every data write:
 
-1. Resolve the expected ref with `ai-private-config value supabase_shared_prod_ref`,
-   then prove the connected production target matches it and the project name is `popdam`.
+1. Choose the approved target — production (`ai-private-config value supabase_shared_prod_ref`) or the shared-db preview branch (`ai-private-config value supabase_shared_preview_ref`, branch `shared-db-schema-rehearsal`). Owner ruling, Albert Hazan, 2026-11-01 (verbatim: "change the rule and see if that fixes the problem"): licensed landings may target either, so licensed loads can be rehearsed and restored on preview. Set `DISNEY_TARGET_REF` to the chosen ref (default: production). Prove the connected target before every write: production by project name `popdam`; preview by branch proof against the production project plus a SQL probe of the exact ref.
 2. Read the relevant live function signatures. Do not bypass guarded begin/load/finalize functions with direct table writes.
 3. Get the Supabase access token from 1Password vault `vibe_coding`, item `Supabase CLI Personal Access Token`, field `SUPABASE_ACCESS_TOKEN`. Never print or persist it.
 4. Set `DISNEY_SOURCE_COMMIT` to the full 40-character commit SHA holding the private source output.
