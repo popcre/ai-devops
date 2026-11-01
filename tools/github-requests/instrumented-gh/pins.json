@@ -3,6 +3,14 @@
   "prototype_platform": "linux-amd64",
   "default_profile": "2.103.3",
   "profiles": {
+    "2.103.0": {
+      "upstream_commit": "7948e8056e45ac3c729b829e0eafe2d0797a95c6",
+      "source_url": "https://codeload.github.com/cli/cli/tar.gz/7948e8056e45ac3c729b829e0eafe2d0797a95c6",
+      "source_sha256": "5a1bb92aac825129136c8b6efd989965fe78895217015e08df39b31b8d5370ec",
+      "profile_kind": "runtime",
+      "api_constructor_hooks": 2,
+      "detached_telemetry": true
+    },
     "2.97.0": {
       "upstream_commit": "55dbb4dc6b7edb10b48e3d7fc5bccd32318d1b55",
       "source_url": "https://codeload.github.com/cli/cli/tar.gz/55dbb4dc6b7edb10b48e3d7fc5bccd32318d1b55",
