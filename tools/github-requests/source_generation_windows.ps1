@@ -366,20 +366,35 @@ function Read-LockedBytes([string]$Path) {
 }
 function Assert-CounterContext {
     foreach($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
+        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL','MSYS2_ENV_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
     }
     foreach($key in @('GH_PAGER','PAGER')){if([Environment]::GetEnvironmentVariable($key,'Process') -and [Environment]::GetEnvironmentVariable($key,'Process') -cne 'cat'){throw 'Only literal cat pager is qualified for nonTTY read'}}
     if($env:GH_HOST -and $env:GH_HOST -cne 'github.com'){throw 'Counter supports original github.com context only'}
     if([Console]::IsInputRedirected -eq $false -or [Console]::IsOutputRedirected -eq $false){throw 'Counter requires explicit nonTTY read capsule'}
 }
 function Config-Directory {
+    # ai-gh selects this ALREADY EXISTING private SSH store before native gh.
+    # Inspect that same route; never set GH_CONFIG_DIR or create credentials.
+    if($env:GH_CONFIG_DIR){return $env:GH_CONFIG_DIR}
+    if($env:SSH_CONNECTION){
+        Assert-BashStartupEnvironment
+        if(-not $script:installedBash){throw 'Managed Git Bash identity required before config probe'}
+        # Only Git Bash builtins: no PATH-selected cygpath/helper or API call.
+        $probe='if builtin test -f "$HOME/.ai-devops/gh-ssh/hosts.yml"; then case "$HOME" in /*|[A-Za-z]:[\\/]*) ;; *) exit 3;; esac; builtin cd -- "$HOME/.ai-devops/gh-ssh" && builtin pwd -W; fi'
+        $private=Local-OnlyProbe $script:installedBash @('--noprofile','--norc','-c',$probe)
+        if($private){return $private}
+    }
     # cli2.97.0 internal/config/config.go delegates to go-gh/v2@v2.13.0
     # pkg/config/config.go:250. Windows UserHomeDir is USERPROFILE, not HOME.
-    if($env:GH_CONFIG_DIR){return $env:GH_CONFIG_DIR}
     if($env:XDG_CONFIG_HOME){return [IO.Path]::Combine($env:XDG_CONFIG_HOME,'gh')}
     if($env:APPDATA){return [IO.Path]::Combine($env:APPDATA,'GitHub CLI')}
     if($env:USERPROFILE){return [IO.Path]::Combine($env:USERPROFILE,'.config','gh')}
     throw 'Original gh configuration location unavailable'
+}
+function Assert-BashStartupEnvironment {
+    foreach($key in @([Environment]::GetEnvironmentVariables().Keys)){
+        if(($key -in @('BASH_ENV','ENV','SHELLOPTS','BASHOPTS','PS4','PROMPT_COMMAND','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')){throw 'Ambient source prevents generation qualification'}
+    }
 }
 function Assert-ConfigMetadata {
     $path=Config-Directory
@@ -552,12 +567,9 @@ try {
     if($countRequests){
         if(-not $CounterManifest -or -not $ExpectedCounterManifestSha256 -or -not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -cne 'bin/ai-gh' -or $ObserverEvents){throw 'Counter requires explicit restricted finite ai-gh read with no stdin'}
         Assert-CounterContext
-        Assert-ConfigMetadata
     }
     if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
-    foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if (($key -in @('BASH_ENV','ENV','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient source prevents generation qualification' }
-    }
+    Assert-BashStartupEnvironment
     # Pin and recheck existing ancestors BEFORE the source snapshot is created.
     $parents=@();$parent=$stagingParent
     while($null -ne $parent){$parents+=$parent;$parent=$parent.Parent}
@@ -605,6 +617,7 @@ try {
     $expectedInterpreter = [GenerationCustody]::Hold($installedBash,$false,$true)
     if (-not [GenerationCustody]::Same($interpreter,$expectedInterpreter)) { throw 'Managed interpreter mismatch' }
     $locks.Add($interpreter);$locks.Add($expectedInterpreter)
+    if($countRequests){Assert-ConfigMetadata}
     $snapshot = Join-Path $stagingParent.FullName ('ai-gh-generation-'+$PID+'-'+[Guid]::NewGuid().ToString('N'))
     [GenerationCustody]::PrivateDirectory($snapshot)
     # This fresh protected object's identity is held throughout materialization,
