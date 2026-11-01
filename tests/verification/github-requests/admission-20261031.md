@@ -32,8 +32,8 @@ per-token quotas or remove any primary/secondary rate protection.
   This reduces unrelated pages when repositories have many PRs; no measured
   account-wide savings percentage is claimed.
 - Run `bash tests/test-ai-gh.sh`: existing suite completed **280 passed,
-  0 failed**, including subprocess admission tests. Final exact-source rerun
-  is required after changes made during qualification.
+  0 failed**, including subprocess admission tests. Final exact-source Ubuntu
+  rerun also completed **280 passed, 0 failed** on candidate `f4d1794d`.
 - Run `python3 tests/test_review_fixer_state.py`: **55 tests passed**,
   including encoded base-filter and unchanged full-scope tests.
 - Run `python3 tests/test-ai-gh-admission.py`: **6 tests passed**, covering
@@ -54,7 +54,21 @@ unordered copies. A previous source read was invalidated by editing the Bash
 script while that process was waiting; its syntax failure is excluded from
 qualification. Freeze source before invoking a long-lived Bash process.
 
-Still required on #658: native Windows tests, exact merged candidate install,
+A timed useful write through the frozen candidate posted the
+[#658 ownership receipt](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551308879)
+in **108.05 seconds**, including shared admission wait. This is a real
+successful foreground operation, not proof the congestion is resolved or a
+matched before/after improvement.
+
+The parent verified immutable candidate `f4d1794d` on Windows host al8960ofc
+(4837 route), using Git Bash `bin/bash.exe` and native Python 3.14 in an owned
+temporary source archive. All **6 admission tests passed** in 44.439 seconds,
+and all **55 fixer lifecycle tests passed**. The admission wrapper supplied its
+actual Git Bash executable and signalled recorded MSYS PIDs. No installed
+runtime or shared machine setting changed. The existing Windows ai-gh suite
+is still pending; do not claim that outcome from the smaller fixture suites.
+
+Still required on #658: full focused Windows ai-gh suite, exact merged candidate install,
 all active runner/toolkit copies refreshed by their supported route, and a
 timed foreground request amid natural mixed-credential traffic. Measure useful
 work latency and probe counts before/after; never infer savings from narrower
