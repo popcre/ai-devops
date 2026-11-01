@@ -3,6 +3,10 @@
 Decision record for the ScaleDown transcript audit (2026-10-14) and the A–F
 process fixes. Read this before adding another token-saving tool.
 
+TokenEconomizer desktop qualification and measured rollout:
+[read the implementation plan STATUS first](../plan_tokeneconomizer-desktops.md).
+This is a plan, not evidence of installation or savings.
+
 ## Measured evidence
 
 ScaleDown processed **950** AI transcripts sampled from the private local
