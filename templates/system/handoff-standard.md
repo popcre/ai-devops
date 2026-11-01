@@ -315,6 +315,10 @@ later session doesn't contradict them).
 
 ## Mandatory self-audit gate (do this BEFORE showing the handoff)
 
+For an eligible complex handoff, the optional [fresh-reader procedure](../../docs/fresh-reader-check.md)
+may follow this self-audit. Record skip, unsupported or incomplete honestly;
+none makes the mandatory self-audit fail or introduces approval.
+
 After drafting, grade your OWN handoff against these questions. **Write an
 answer to every question and cite the handoff section(s) that prove the answer.**
 Do not merely acknowledge that the questions were asked. If an answer exposes

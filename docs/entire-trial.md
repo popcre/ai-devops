@@ -1,5 +1,42 @@
 # Entire trial operating record — #2022
 
+## October 31 Alien runner execution
+
+The second bounded Alien attempt passed its collision guard during a fresh idle
+window. [Build8](https://buildkite.com/u2giants/entire-2022-existing-windows-runner/builds/8)
+passed the existing phrase suite at exact5c83f059 on actualedge-alien, agent4.9.0.
+Its one-job agent disconnected, token was revoked and config archived; original
+GitHub service remained running/automatic. T2 now has Envy/Alien Windows plus
+Linux execution; XPS trust remains unqualified. The [receipt](../tests/verification/entire-trial/report.md#october-31-alien-execution-follow-up)
+supersedes the earlier nonexecution limit without erasing the first refusal.
+All16 live-client cells, whole-suite parity, timing, canceled-base safety gap and
+the original ownership blocker remain open. Original constraints/deadlines stand.
+
+## October 31 protected installation and bounded recovery follow-up
+
+Three Windows native installers completed at merged9c912187, with clean source,
+matching launcher source/hash receipts and four global/template matches per host.
+No native-client journey is accepted:0/16 remains. Linux read-only memory health
+still fails; no facts, private clone or health limit were changed to force passage.
+The [follow-up report](../tests/verification/entire-trial/report.md#october-31-installation-and-recovery-follow-up)
+records corrected916 invocation and task-state restoration evidence/limitations.
+
+Original runner token revocation was tested by real denied registration.
+Envy/Linux owned configurations are archived recoverably. A fresh Alien idle
+window disappeared before startup; the collision guard refused, owned build7 was
+canceled unexecuted, the second one-hour token revoked and config archived.
+Original GitHub worker/services were preserved; this is not Alien execution proof.
+XPS still lacks independently verified SSH trust. No new timing pair or whole-suite
+acceptance follows. The canceled-base merge gap remains and no protected-main
+replacement is qualified. Outgoing ownership timeout remains with the coordinator.
+
+PR2237 landed0a710176; its existing Trail350/change158 showed exact794014f source
+merged and Checks Not checked. Repair PR2230's Trail340/change153 showed exact
+5e7071c source merged, but only two prepare/review-fixer checks were displayed.
+Those subsets do not replace authoritative GitHub validation or establish parity.
+All detailed receipts remain on#2022 and in approved private custody.
+Discovery November2,2026,5:00PM EST; stop November12,2026,5:58AM EST, unchanged.
+
 ## October 31 authorized runner and native merge execution
 
 At9:52PM EDT, coordinator `01a19481-9ceb-7592-934e-9e5a4dac240d` recorded

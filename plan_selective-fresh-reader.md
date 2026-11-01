@@ -1,7 +1,7 @@
 # Plan — selective fresh-reader checks for complex plans and handoffs
 
-Owner: Codex chat `01a19476-0eae-7092-ad1a-43b4120a92b2` for publication;
-the successor implementing session takes ownership before §9.1.
+Execution owner: Codex chat `01a194ee-7e16-70b3-9ebd-307fdd653f15` on #2222.
+The earlier publication owner released its editing scope before this execution.
 Owning issue: [#2222](https://github.com/popcre/ai-devops/issues/2222).
 Keep implementation and `- [ ] live proof` on that same issue.
 Sibling: [TokenEconomizer #2220](https://github.com/popcre/ai-devops/issues/2220),
@@ -15,6 +15,16 @@ Handoff: [session continuation](HANDOFF.d/2026-11-01T0016Z-edge-dev3-codex-selec
 
 ## STATUS — read first; do not re-derive or re-plan
 
+October 31 execution owner: Codex chat `01a194ee-7e16-70b3-9ebd-307fdd653f15`,
+reconciled on #2222/#2227. The [protocol](docs/fresh-reader-check.md),
+[native receipts](tests/verification/fresh-reader/qualification.md) and
+[three-artifact pilot](tests/verification/fresh-reader/pilot.md) now exist.
+The isolated Ubuntu Codex CLI trial found material clarity fixes in only one
+of three documents. Routine adoption is **rejected** under the frozen two-of-three
+rule; no causal saving, desktop/Windows support or broad installation is claimed.
+Keep the procedure experimental for explicit requests only. Other native routes
+and active-optimizer exclusion remain unverified; no accepted shared mode exists.
+
 October 31 closeout: Muse's corrected static source/plan review approved narrow
 qualification pilots, not a running implementation. Read the
 [decision record](docs/muse-egm-tokeneconomizer-review-2026-10-31.md) and
@@ -24,15 +34,16 @@ instructions are in handoff §6; implementation rows below remain open.
 
 | Step | State as of October 31, 2026 | Evidence / acceptance still owed |
 |---|---|---|
-| 1 Define the bounded reader protocol and fixtures | ⬜ open | Protocol and fixture checks in §9.1 |
-| 2 Add opt-in routes to existing writing workflows | ⬜ open | Exact-head link/safety checks and trigger examples in §9.2 |
-| 3 Run isolated synthetic live trials | ⬜ open | Isolation receipts and findings in §9.3 |
-| 4 Measure value on public real work | ⬜ open | Paired results and decision in §9.4 |
-| 5 Land, install accepted scope, and close acceptance | ⬜ open | Ubuntu/Windows proof and disposition in §9.5 |
+| 1 Define the bounded reader protocol and fixtures | ✅ implemented | Protocol, four public fixtures and separately held answer key |
+| 2 Add opt-in routes to existing writing workflows | ✅ experimental only | Paired pointers preserve mandatory self-audits; routine invocation stays off |
+| 3 Run isolated synthetic live trials | 🟨 scoped proof | Ubuntu Codex CLI receipts; no Claude/Windows/desktop or active-optimizer claim |
+| 4 Measure value on public real work | ✅ negative pilot | One of three documents improved; threshold failed; routine adoption rejected |
+| 5 Land, install accepted scope, and close acceptance | 🟨 source delivery | No accepted rollout/install; retain native route gaps on #2222 and parent disposition |
 
-Fresh session starts at §9.1. This document delivers planning only: no reader
-workflow has been implemented, installed, or measured. Keep `- [ ] live proof`
-on the same owning issue until all applicable live acceptance is recorded.
+Fresh sessions start with the execution receipts above rather than replaying
+§9.1. The original planning/closeout notes below are historical. Keep
+`- [ ] live proof` on the same issue for any route still proposed for adoption;
+negative pilot evidence does not prove an untested platform works.
 
 ## 1. Ultimate goal
 
