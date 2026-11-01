@@ -96,6 +96,12 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 previous_head="$(git rev-parse HEAD)" || exit 1
+# Public source creation must not inherit a protected logging umask or leave
+# root-created source/Git outputs inaccessible to the installed checkout owner.
+# The wrapper scopes 022 to Git itself; installer/private state keeps its mask.
+public_git() {
+  python3 "$SOURCE_ROOT/tools/lib/install-public-git.py" "$REPO_ROOT" "$@"
+}
 branch="$(git symbolic-ref --short -q HEAD || true)"
 if [ -n "$branch" ]; then
   [ "$branch" = main ] || { warn 'only main or a detached installed checkout may update'; exit 1; }
@@ -129,7 +135,7 @@ fi
 # Fetching objects does not alter the installed checkout. The target code runs
 # from an isolated candidate; only its successful preflight permits advancement.
 info 'Fetching origin main'
-git fetch --atomic --no-tags origin \
+public_git fetch --atomic --no-tags origin \
   refs/heads/main:refs/remotes/origin/main || exit 1
 fetched_main="$(git rev-parse refs/remotes/origin/main)" || exit 1
 [ "$fetched_main" = "$(git rev-parse FETCH_HEAD)" ] || {
@@ -167,7 +173,7 @@ cleanup() {
   [ -z "${install_lock_fallback:-}" ] || rmdir -- "$install_lock_fallback" 2>/dev/null || true
 }
 trap cleanup EXIT
-git -c core.hooksPath="$hooks_dir" worktree add --detach "$candidate" "$target_head" >/dev/null || exit 1
+public_git -c core.hooksPath="$hooks_dir" worktree add --detach "$candidate" "$target_head" >/dev/null || exit 1
 candidate_added=1
 # Task declarations are scoped to one worktree. The disposable exact-target
 # candidate must declare its own installation task before its gate preflight;
@@ -206,9 +212,9 @@ if [ -e "$HOME/.config/ai-devops/glm-formal/activation.json" ] || [ -L "$HOME/.c
 fi
 info "Advancing installed checkout to $target_head"
 if [ -n "$branch" ]; then
-  git -c core.hooksPath="$hooks_dir" merge --ff-only "$target_head" || exit 1
+  public_git -c core.hooksPath="$hooks_dir" merge --ff-only "$target_head" || exit 1
 else
-  git -c core.hooksPath="$hooks_dir" checkout --detach "$target_head" || exit 1
+  public_git -c core.hooksPath="$hooks_dir" checkout --detach "$target_head" || exit 1
 fi
 [ "$(git rev-parse HEAD)" = "$target_head" ] || { warn 'checkout moved to an unexpected commit'; exit 1; }
 
@@ -222,9 +228,9 @@ rollback_checkout() {
     warn 'checkout branch changed during install; automatic source rollback refused'; return 1;
   }
   if [ -n "$branch" ]; then
-    git -c core.hooksPath="$hooks_dir" reset --hard "$previous_head" >/dev/null || return 1
+    public_git -c core.hooksPath="$hooks_dir" reset --hard "$previous_head" >/dev/null || return 1
   else
-    git -c core.hooksPath="$hooks_dir" checkout --detach "$previous_head" >/dev/null || return 1
+    public_git -c core.hooksPath="$hooks_dir" checkout --detach "$previous_head" >/dev/null || return 1
   fi
   [ "$(git rev-parse HEAD)" = "$previous_head" ] &&
     [ "$(git symbolic-ref --short -q HEAD || true)" = "$branch" ] &&

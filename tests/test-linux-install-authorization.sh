@@ -57,10 +57,11 @@ GATE
 chmod +x "$TMP/src/bin/ai-task-gates"
 cp "$ROOT/install.sh" "$ROOT/update.sh" "$TMP/src/"
 mkdir -p "$TMP/src/tools/lib" && cp "$ROOT/tools/lib/path-identity.sh" "$TMP/src/tools/lib/"
+cp "$ROOT/tools/lib/install-public-git.py" "$TMP/src/tools/lib/"
 git -C "$TMP/src" init -q -b main
 git -C "$TMP/src" config user.name Fixture
 git -C "$TMP/src" config user.email fixture@example.invalid
-git -C "$TMP/src" add install.sh update.sh bin/ai-task-gates tools/lib/path-identity.sh
+git -C "$TMP/src" add install.sh update.sh bin/ai-task-gates tools/lib/path-identity.sh tools/lib/install-public-git.py
 git -C "$TMP/src" commit -qm baseline
 git init -q --bare "$TMP/remote.git"
 git -C "$TMP/src" remote add origin "$TMP/remote.git"
@@ -409,4 +410,5 @@ rm "$marker"
 ln -s "$TMP/foreign-marker" "$marker"
 if restore_failed_install; then fail 'symlinked stage marker was removed'; fi
 [ -L "$marker" ] || fail 'symlinked stage marker changed'
+python3 "$ROOT/tests/test-install-public-git.py"
 echo 'PASS: Linux installer authorization, checkout pin, lock, and update order'
