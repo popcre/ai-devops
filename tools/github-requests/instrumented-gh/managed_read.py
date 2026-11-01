@@ -100,6 +100,39 @@ def managed_read_label(arguments):
     return ".".join(family)
 
 
+def _owner_private_group(group_id, owner_uid):
+    """NSS effective members include explicit members AND primary groups."""
+    try:
+        import grp
+        import pwd
+        group = grp.getgrgid(group_id)
+        members = {pwd.getpwnam(name).pw_uid for name in group.gr_mem}
+        members.update(entry.pw_uid for entry in pwd.getpwall() if entry.pw_gid == group_id)
+        return members == {owner_uid}
+    except (ImportError, KeyError, OSError, TypeError, AttributeError):
+        return False
+
+
+def _private_config_files(directory, owner_uid):
+    # Metadata only: O_PATH never reads authentication/configuration contents.
+    for name in ("config.yml", "hosts.yml"):
+        descriptor = None
+        try:
+            descriptor = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+                return False
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+    return True
+
+
 def _protected_config(environment):
     # Inspect metadata only. Authentication stays in the unchanged gh process.
     home = environment.get("HOME")
@@ -116,14 +149,19 @@ def _protected_config(environment):
         descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         for component in path.parts[1:]:
             info = os.fstat(descriptor)
+            sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+            private_group_write = (not info.st_mode & 0o020
+                                   or _owner_private_group(info.st_gid, info.st_uid))
             if (info.st_uid not in (0, os.getuid())
-                    or (info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX))):
+                    or (not sticky_root and (info.st_mode & 0o002 or not private_group_write))):
                 return False
             child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         info = os.fstat(descriptor)
-        return info.st_uid == os.getuid() and not info.st_mode & 0o077
+        group_private = not info.st_mode & 0o070 or _owner_private_group(info.st_gid, info.st_uid)
+        return (info.st_uid == os.getuid() and not info.st_mode & 0o002 and group_private
+                and _private_config_files(descriptor, info.st_uid))
     except FileNotFoundError:
         # Token-authenticated existing environments need not create a config.
         return any(bool(environment.get(name)) for name in ("GH_TOKEN", "GITHUB_TOKEN"))
@@ -188,7 +226,8 @@ class ManagedReadObservation:
         if (os.name != "posix" or not hasattr(os, "uname") or os.uname().sysname != "Linux"
                 or threading.current_thread() is not threading.main_thread()
                 or self.environment.get("GH_HOST", "github.com") != "github.com"
-                or any(self.environment.get(name) for name in ("GH_PATH", "GH_DEBUG", "GH_PAGER", "PAGER", "GH_FORCE_TTY"))
+                or any(self.environment.get(name) for name in ("GH_PATH", "GH_DEBUG", "GH_FORCE_TTY"))
+                or any(self.environment.get(name, "") not in ("", "cat") for name in ("GH_PAGER", "PAGER"))
                 or "AI_GH_REAL_GH" in self.environment
                 or any(name.startswith("AI_GH_HTTP_COUNTER_") for name in self.environment)
                 or any(value and (name in {"BASH_ENV", "ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",

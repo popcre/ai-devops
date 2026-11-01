@@ -461,6 +461,59 @@ class PrototypeTests(unittest.TestCase):
             with self.observation(environment, historical_profile=True) as observation:
                 self.assertTrue(observation.summary()['historical_profile'])
 
+    def test_managed_observation_preserves_literal_cat_pagers(self):
+        environment = self.raw_env()
+        environment.update(GH_HOST='github.com', GH_PAGER='cat', PAGER='cat')
+        with self.observation(environment) as observation:
+            self.assertEqual(observation.environment['GH_PAGER'], 'cat')
+            self.assertEqual(observation.environment['PAGER'], 'cat')
+        for pager in ('/bin/cat', 'cat; executor', 'less', '!executor'):
+            with self.subTest(pager=pager), self.assertRaises(ValueError):
+                self.observation({**environment, 'GH_PAGER': pager})
+
+    def test_config_metadata_private_group_and_foreign_access(self):
+        from unittest.mock import patch
+        from managed_read import _protected_config
+        with tempfile.TemporaryDirectory() as directory:
+            config = pathlib.Path(directory) / 'config'
+            config.mkdir()
+            config.chmod(0o771)
+            environment = {'HOME': directory, 'GH_CONFIG_DIR': str(config)}
+            for name in ('hosts.yml', 'config.yml'):
+                (config / name).write_text('synthetic fixture only')
+                (config / name).chmod(0o600)
+            with patch('managed_read._owner_private_group', return_value=True):
+                self.assertTrue(_protected_config(environment))
+                (config / 'hosts.yml').chmod(0o640)
+                self.assertFalse(_protected_config(environment))
+                (config / 'hosts.yml').chmod(0o600)
+                linked = pathlib.Path(directory) / 'linked'
+                os.link(config / 'hosts.yml', linked)
+                self.assertFalse(_protected_config(environment))
+                linked.unlink()
+                (config / 'hosts.yml').unlink()
+                (config / 'hosts.yml').symlink_to(config / 'config.yml')
+                self.assertFalse(_protected_config(environment))
+                (config / 'hosts.yml').unlink()
+            with patch('managed_read._owner_private_group', return_value=False):
+                self.assertFalse(_protected_config(environment))
+
+    def test_private_group_nss_includes_primary_group_users(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from managed_read import _owner_private_group
+        import grp
+        import pwd
+        owner = os.getuid()
+        with patch.object(grp, 'getgrgid', return_value=SimpleNamespace(gr_mem=['owner'])), \
+                patch.object(pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=owner)), \
+                patch.object(pwd, 'getpwall', return_value=[SimpleNamespace(pw_uid=owner, pw_gid=123)]):
+            self.assertTrue(_owner_private_group(123, owner))
+            with patch.object(pwd, 'getpwall', return_value=[SimpleNamespace(pw_uid=owner + 1, pw_gid=123)]):
+                self.assertFalse(_owner_private_group(123, owner))
+            with patch.object(pwd, 'getpwnam', side_effect=KeyError('unknown member')):
+                self.assertFalse(_owner_private_group(123, owner))
+
     def test_managed_observation_cancellation_is_unknown_without_replay(self):
         arguments = ['issue', 'view', '1', '--repo', 'popcre/ai-devops', '--json', 'number']
         with self.proxy(), tempfile.TemporaryFile() as output:

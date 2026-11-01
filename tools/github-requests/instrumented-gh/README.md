@@ -143,6 +143,13 @@ An ambient `AI_GH_REAL_GH` also declines qualification. A local version read
 of the original protected vendor ELF must match the bound source release;
 historical profiles require explicit `historical_profile=True` and cannot
 establish current runtime acceptance. No system CLI is changed.
+Literal `cat` pager settings remain unchanged in this noninteractive JSON
+profile. Configuration-directory group access is accepted only when NSS
+explicit members plus primary-group users resolve exclusively to its owner;
+foreign/world-write access is refused. Existing fixed configuration files are
+inspected through anchored no-follow metadata handles only, never read: each
+must be a singly linked owner file with mode 0600. Symlinks, hard links and
+public file permissions decline qualification without changing configuration.
 
 The controller holds `report.retained_generation(root, install_manifest)` and
 passes its live mapping as `transport_boundary`.
