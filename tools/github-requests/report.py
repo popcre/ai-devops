@@ -788,6 +788,13 @@ def qualify_event(event, start, end, source_verified):
             or observed < start["wall_ms"] - bound or delivered > end["wall_ms"] + bound):
         result["unknown_reason"] = "event_invalid"
         return result
+    # An event already eligible when observation began proves useful source
+    # execution, but its age is not detection latency. Include the host start
+    # uncertainty: a second-resolution eligibility interval overlapping that
+    # start is likewise insufficient to prove the eligibility was observed.
+    if eligible < start["wall_ms"] + start["error_bound_ms"] + 1:
+        result["unknown_reason"] = "eligibility_not_observed"
+        return result
     # Parent receives the event only after the known waiter reported terminal
     # output. Its clock read bounds when that delivery was actually observed.
     error = bound + 1000

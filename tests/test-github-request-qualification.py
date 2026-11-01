@@ -42,8 +42,18 @@ class EventTests(unittest.TestCase):
 
     def clocks(self):
         now = time.time_ns() // 1_000_000
-        return ({"wall_ms": now - 100, "monotonic_ms": 1000, "error_bound_ms": 10},
-                {"wall_ms": now + 100, "monotonic_ms": 1200, "error_bound_ms": 20})
+        return ({"wall_ms": now - 2000, "monotonic_ms": 1000, "error_bound_ms": 10},
+                {"wall_ms": now + 100, "monotonic_ms": 3100, "error_bound_ms": 20})
+
+    def test_preexisting_or_start_overlapping_eligibility_is_not_detection(self):
+        start, end = self.clocks()
+        row = event()
+        for eligible in (start["wall_ms"] - 2000, start["wall_ms"] + 5):
+            row["eligible_utc_ms"] = eligible
+            result = report.qualify_event(row, start, end, True)
+            self.assertEqual(result["unknown_reason"], "eligibility_not_observed")
+            self.assertIsNone(result["latency_lower_ms"])
+            self.assertIsNone(result["latency_upper_ms"])
 
     def test_live_interval_includes_host_and_server_timestamp_uncertainty(self):
         start, end = self.clocks()
