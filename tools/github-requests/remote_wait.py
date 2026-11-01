@@ -295,6 +295,23 @@ def _write_active_private(path, value):
         try: os.unlink(temporary, dir_fd=parent)
         except FileNotFoundError: pass
         os.close(parent)
+def valid_active_arguments(arguments, sdk_coordinator=False):
+    return (type(arguments) is list and len(arguments) in (1, 2)
+            and arguments[0] in ("tick", "alarm", "links")
+            and (len(arguments) == 1 or arguments[1] == "--dry-run")
+            and (not sdk_coordinator or arguments[0] != "tick"))
+
+
+def _clear_active_intervals(result, reason):
+    result["active_completion_qualified"] = False
+    for record in result["active_completion_records"]:
+        record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
+                duration_upper_ms=None, unknown_reason=reason)
+        if isinstance(record.get("event_qualification"), dict):
+            record["event_qualification"].update(clock_quality="unknown", latency_lower_ms=None,
+                    latency_upper_ms=None, clock_error_bound_ms=None, unknown_reason=reason)
+
+
 def _finish_active_result(result, observation_started_ns, verified):
     result.update(transport_cleanup_status="verified" if verified else "unverified",
                   observer_transport_elapsed_ns=time.perf_counter_ns() - observation_started_ns,
@@ -306,14 +323,8 @@ def _finish_active_result(result, observation_started_ns, verified):
                                        "receipt_storage_and_fsync", "post_return_cleanup"],
                   whole_observer_budget_qualification="unknown")
     if not verified:
-        result["active_completion_qualified"] = False
+        _clear_active_intervals(result, "transport_unverified")
         result["active_source_protocol_verified"] = False
-        for record in result["active_completion_records"]:
-            record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
-                    duration_upper_ms=None, unknown_reason="transport_unverified")
-            if isinstance(record.get("event_qualification"), dict):
-                record["event_qualification"].update(clock_quality="unknown", latency_lower_ms=None,
-                        latency_upper_ms=None, clock_error_bound_ms=None, unknown_reason="transport_unverified")
     return result
 
 
@@ -322,9 +333,9 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     """Linux parent; only live frames can produce this observer receipt."""
     if not sys.platform.startswith("linux"):
         raise ValueError("Linux parent clock required")
-    if active_completion and (arguments not in (["tick"], ["alarm"], ["links"]) or
-                              (sdk_coordinator and arguments == ["tick"])):
+    if active_completion and not valid_active_arguments(arguments, sdk_coordinator):
         raise ValueError("finite active coordinator operation required")
+    dry_run = active_completion and len(arguments) == 2
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     bounded_arguments(argument_bytes)
     argument_hash = hashlib.sha256(argument_bytes).hexdigest()
@@ -349,7 +360,7 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
         def acknowledge(identity):
             return _send_active_control(child.stdin, frame("active_ack", workflow_id=identity))
         transcript = get_report().ActiveCompletionTranscript(arguments[0], acknowledge,
-                       qualification_profile="original_context")
+                       qualification_profile="original_context", dry_run=dry_run)
     try:
         while time.monotonic() < deadline:
             if not selector.select(min(0.2, max(0, deadline - time.monotonic()))):
@@ -431,17 +442,21 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                             record["event_qualification"] = qualify_remote_alarm_facts(
                                 record.get("event_record"), beginnings.get(outcome["workflow_id"]),
                                 record.get("event_parent_clock"), qualified,
-                                sdk_coordinator and arguments == ["alarm"] and source["child_exit"] == 0
+                                sdk_coordinator and arguments[0] == "alarm" and not dry_run and source["child_exit"] == 0
                                 and outcome["parent_workflow_id"] is None and outcome["outcome"] == "completed")
                         interval_verified = bool(qualified and records and all(
                             item["completion_qualification"]["unknown_reason"] == "none" for item in records))
                         result.update(measurement="linux_observed_windows_active_completion", active_completion_records=records,
                                       active_source_protocol_verified=qualified,
                                       active_completion_qualified=interval_verified, stdin_profile="active_no_stdin",
+                                      dry_run=dry_run,
                                       qualification_profile="sdk_only_no_provider" if sdk_coordinator else "original_context",
                                       original_privilege_equivalence=False,
                                       native_execution_profile=source["execution_profile"],
                                       detection_latency_ms=None, detection_unknown_reason="eligibility_and_delivery_not_witnessed")
+                        if dry_run:
+                            _clear_active_intervals(result, "dry_run")
+                            result["detection_unknown_reason"] = "dry_run"
                         result.pop("event_qualification", None)
                         if not _send_active_control(child.stdin, frame("ack", observer_run_id=source["observer_run_id"])):
                             transcript.invalid = True
@@ -552,7 +567,7 @@ def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_
             "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
     if active_completion:
         arguments = bounded_arguments(argument_bytes)
-        if counter_manifest is not None or arguments not in (["tick"], ["alarm"], ["links"]) or (sdk_coordinator and arguments == ["tick"]):
+        if counter_manifest is not None or not valid_active_arguments(arguments, sdk_coordinator):
             raise ValueError("finite original active operation required")
         command[command.index("bin/ai-pr-wait")] = "bin/ai-blocker-watch"
         for flag in ("-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"):
@@ -771,8 +786,7 @@ def main():
     arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     bounded_arguments(argument_bytes)  # before SSH or native supervisor creation.
-    if options.active_completion and (arguments not in (["tick"], ["alarm"], ["links"]) or
-                                      (options.sdk_coordinator_profile and arguments == ["tick"])):
+    if options.active_completion and not valid_active_arguments(arguments, options.sdk_coordinator_profile):
         parser.error("finite active operation required; SDK profile excludes providers/ticks")
     payload = base64.b64encode(argument_bytes).decode("ascii")
     remote_path = options.source_root.rstrip("/\\") + "/tools/github-requests/remote_wait.py"

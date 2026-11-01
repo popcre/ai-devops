@@ -331,13 +331,19 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
             for flag in ("-RestrictedReadProfile", "-ReadOnlyNoStdin", "-ActiveSdkProfile"):
                 self.assertNotIn(flag, ordinary)
             self.assertIn("-ActiveSdkProfile", sdk)
-            for args in (b'["tick"]', b'["arbitrary"]', b'["alarm","extra"]'):
+            for operation in ("alarm", "links"):
+                command = remote.windows_supervisor_command("C:/repo", json.dumps([operation, "--dry-run"]).encode(),
+                                                           50, 51, active_completion=True, sdk_coordinator=True)
+                self.assertIn("-ActiveSdkProfile", command)
+            for args in (b'["tick"]', b'["tick","--dry-run"]', b'["arbitrary"]', b'["alarm","extra"]'):
                 with self.assertRaises(ValueError):
                     remote.windows_supervisor_command("C:/repo", args, 50, 51, active_completion=True, sdk_coordinator=True)
 
     def run_transport(self, sdk=False, duplicate=False, cleanup=True, mismatch=False, drop=False, clock_unknown=False,
-                      original_status=3, storage_failure=False):
+                      original_status=3, storage_failure=False, dry_run=False, facts=False):
         arguments = ["alarm"] if sdk else ["tick"]
+        if dry_run:
+            arguments.append("--dry-run")
         arg_hash = hashlib.sha256(json.dumps(arguments, separators=(",", ":")).encode()).hexdigest()
         started = start(arg_hash)
         started.update(execution_profile="active_sdk_coordinator" if sdk else "original_active", stdin_profile="active_no_stdin")
@@ -353,6 +359,12 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
                "outcome": "completed", "elapsed_ms": 2, "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
         def active(row): return remote.frame("active", record={"data": json.dumps(row), "queued": False})
         frames = active(end) + (active(end) if duplicate else b"")
+        if facts:
+            row = event()
+            row.update(caller="ai-blocker-watch", workflow="blocker_watch_alarm", workflow_id=identity,
+                       event_kind="alarm_stale", eligible_utc_ms=1015, observed_utc_ms=2000,
+                       delivered_utc_ms=3000, delivery_boundary="alarm_batch_acknowledged")
+            frames += active({"schema": 1, "measurement": "active_event_facts", "phase": "facts", "event": row})
         if not sdk:
             tick = {key: end[key] for key in self.report.RECEIPT_KEYS}
             tick.update(workflow="blocker_watch_tick", workflow_id=parent)
@@ -406,6 +418,26 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         self.assertFalse(result["active_completion_qualified"])
         self.assertTrue(result["active_completion_records"])
         self.assertEqual(result["active_completion_records"][0]["completion_qualification"]["unknown_reason"], "source_unknown")
+
+    def test_dry_run_intent_defeats_forged_completed_delivery(self):
+        ordinary = self.run_transport(sdk=True, original_status=0, facts=True)
+        self.assertFalse(ordinary["dry_run"])
+        self.assertIsNotNone(ordinary["active_completion_records"][0]["event_qualification"]["latency_upper_ms"])
+        dry = self.run_transport(sdk=True, original_status=0, facts=True, dry_run=True)
+        self.assertTrue(dry["dry_run"])
+        self.assertFalse(dry["active_completion_qualified"])
+        self.assertEqual(dry["detection_unknown_reason"], "dry_run")
+        for row in dry["active_completion_records"]:
+            self.assertIsNone(row["completion_qualification"]["duration_upper_ms"])
+            self.assertIsNone(row["event_qualification"]["latency_upper_ms"])
+
+    def test_finite_dry_run_admission_keeps_sdk_ticks_excluded(self):
+        for operation in ("tick", "alarm", "links"):
+            for arguments in ([operation], [operation, "--dry-run"]):
+                self.assertTrue(remote.valid_active_arguments(arguments))
+                self.assertEqual(remote.valid_active_arguments(arguments, True), operation != "tick")
+        for arguments in ([], ["alarm", "--other"], ["alarm", "--dry-run", "extra"], ["ALARM"], ["--dry-run", "alarm"]):
+            self.assertFalse(remote.valid_active_arguments(arguments))
 
     def test_sdk_data_requires_final_source_and_global_transcript(self):
         self.assertTrue(self.run_transport(sdk=True)["active_completion_qualified"])
