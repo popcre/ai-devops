@@ -160,21 +160,42 @@ public file permissions decline qualification without changing configuration.
 The controller holds `report.retained_generation(root, install_manifest)` and
 passes its live mapping as `transport_boundary`.
 The boundary is an opaque active capsule produced by canonical `import report`,
-not a serializable dictionary. Each actual launch borrows independent sealed
-source/image descriptors so repeated `ro-bind-data` mounts cannot consume the
-next launch's bytes. Closed or forged capsules decline qualification.
-The observer retains sealed
-paired native images once per cohort. It launches the original `ai-gh` through
-that readonly generation boundary, with its chosen image mounted readonly in
-a namespace-only private tmpfs. `AI_GH_REAL_GH` selects that image only inside
-the owned child. Existing shared pacing, credentials, quotas, probes and backoff
-remain in force; no alternate real GitHub throttle state is created.
+not a serializable dictionary. Closed or forged capsules decline qualification.
+The bounded Linux cohort implementation borrows independent sealed source/image
+descriptors once, mounts the readonly source and both verified native images in
+one owned Bubblewrap namespace, and closes the borrowed descriptions after
+bootstrap. Its frozen source is the capsule's exact generation; no later mutable
+controller import replaces it. The original `ai-gh` executes inside that boundary
+with the selected readonly image in a namespace-only private tmpfs.
+`AI_GH_REAL_GH` selects that image only inside the owned child. Existing shared
+pacing, credentials, quotas, probes and backoff remain in force; no alternate
+real GitHub throttle state is created.
+
+This is Linux-only, private cohort custody, not a global service, persistent
+daemon or production route. A literal `python -I -S` bootstrap loads only the
+sealed worker and excludes user-site/source-injection startup. The frozen original
+environment and working directory are preserved for the actual command. An
+inherited noninheritable `AF_UNIX/SOCK_SEQPACKET` capability carries bounded
+unique-key JSON, strict monotonically increasing command ordinals and exactly
+four transferred descriptors: caller stdin/stdout/stderr and the numeric writer.
+Packets, ancillary truncation, unexpected handles, unsupported arguments and
+nonfinite values are refused without command replay. No socket name or listener
+is published on the host.
 
 `run(arguments, opaque_workflow_id, ...)` streams caller-owned standard
 descriptors unchanged and returns `(original_status, observation)`. Up to forty
 commands are allowed; each has a supervised timeout of 1–300 seconds (120 by
-default). Signals reach the owned group; timeout/cancellation never replays a
-command and yields unknown metadata. A complete observation sums strictly
+default). A cohort has a fixed 12,030-second maximum lifetime (40 times the
+300-second command budget plus 30 seconds of bootstrap/cleanup allowance), not
+a renewable background lifetime. Twenty cold pairs and twenty warm pairs
+therefore require separate forty-command cohorts. Worker-only subreaper custody
+reaps actual direct/adopted descendants on close, timeout or cancellation;
+unrelated parent/host processes are not adopted. The ready worker is bound by a
+retained pidfd before signals are forwarded, avoiding numeric-PID reuse; cleanup
+signals only owned pidfd-bound or still-unreaped descendants. Signals reach the
+owned workload; timeout/cancellation never replays a command and yields unknown
+metadata. The inherited controller socket is never passed to ordinary children.
+A complete observation sums strictly
 sequential numeric start/finish pairs once, including observed admission
 identity/quota probes. Empty, truncated, interleaved, oversized or incomplete
 pairs remain unknown. The uninstrumented image produces unknown, never zero.
@@ -184,9 +205,14 @@ counter-off/on pairs measure instrumentation overhead only.
 Source identity is attached only to an actual complete wrapped observation
 while the retained generation is held. An ordinary transport hash bookend
 alone leaves loaded source unknown. The summary includes the source boundary's
-bootstrap time, image verification and whole cohort elapsed time; missing source
-bootstrap timing is explicit. Performance qualification must include all setup
-over the same outcomes. The finite counter-only timing result does not establish
+bootstrap time, image verification and whole cohort elapsed time after teardown;
+missing source bootstrap timing is explicit. Performance qualification must
+include source/image verification, worker/namespace/socket startup, all command
+work, numeric validation and final worker/descendant teardown over the same
+outcomes. No setup, cleanup, shared pacing or external CI latency is hidden to
+obtain a timing pass. The bounded cohort implementation remains qualification
+machinery until actual complete measured receipts establish its result; earlier
+per-command namespace/hash failures stay preserved. The finite counter-only timing result does not establish
 the supervised route's overhead. Counts remain completed writes in the covered
 primary API constructors; subprocess traffic and whole-account HTTP totals stay
 unknown. No production or fleet acceptance follows from local fixtures.
