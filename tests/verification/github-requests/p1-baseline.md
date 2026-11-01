@@ -557,6 +557,17 @@ evidence. New prospective read receipts retain arrivals, publication times,
 head/cache generation, reuse policy and clock limitations. Historical records
 are never upgraded by inference. Raw artifacts remain protected locally.
 
+Native Windows source/event qualification passed 52 cases, including unsafe
+staging-parent refusal before creation and replacement-before-seal refusal.
+Existing shared temporary permissions were unsuitable; a verified standard
+protected parent was used without changing existing permissions. Earlier
+temporary-directory source-boundary claims are superseded, while their ordinary
+authenticated read outcomes remain historical capability evidence. Actual offline
+SSH help preserved output and exit 0 with verified source but unknown event;
+cancellation returned 130 without a false receipt. Ten Linux framing/clock and
+three native-writer dispatch tests pass. No live API event was created by these
+fixtures. Final installation and a genuinely later PR event remain separate.
+
 PR #1709 was closed after proving all three changes already present upstream.
 PR #1567 was closed without deleting its branch after exact recovery of its
 unique historical document: 19,432 bytes, SHA-256
