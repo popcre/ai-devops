@@ -362,7 +362,10 @@ gh_measure_blocker_evidence(){
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
   record=$(printf '{"schema":4,"utc":"%s","measurement":"workflow_evidence","caller":"ai-blocker-watch","workflow":"%s","workflow_id":"%s","cohort_id":null,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"%s","eligible_utc_ms":%s,"observed_utc_ms":%s,"delivered_utc_ms":%s,"delivery_boundary":"%s","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"%s"}' \
     "$utc" "$workflow" "$id" "$event" "${eligible:-null}" "${observed:-null}" "${delivered:-null}" "$boundary" "$reason")
-  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record" || return $?
+  # Only this live observer transport can join facts; saved rows grant no authority.
+  gh_measure_active_channel facts "{\"schema\":1,\"measurement\":\"active_event_facts\",\"phase\":\"facts\",\"event\":$record}" || :
+  return 0
 }
 
 # Observe quota fields carried by an upstream GraphQL response. Optional

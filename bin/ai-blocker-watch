@@ -323,7 +323,7 @@ bw_fact_finish(){
       if [ "$outcome" = completed ] && [ -n "$BW_FACT_LAST_ACK" ]; then boundary=links_batch_acknowledged; delivered="$BW_FACT_LAST_ACK"; fi ;;
   esac
   if [ "$DRY" = 1 ]; then boundary=unknown; delivered=''; fi
-  # No source/clock authority and no PR or completion control-channel path.
+  # Facts remain unqualified data; an optional live parent may consume them after END.
   gh_measure_blocker_evidence "$BW_WORKFLOW" "$BW_TICK_RECEIPT_ID" "$event" "$eligible" \
     "${BW_FACT_OBSERVED:-}" "$delivered" "$boundary" || note 'request measurement unavailable: event facts not saved'
   return 0
