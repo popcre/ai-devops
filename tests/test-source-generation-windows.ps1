@@ -8,6 +8,23 @@ $text=[IO.File]::ReadAllText($Supervisor)
 $source=[regex]::Match($text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
 if (-not $source) { throw 'Supervisor native custody class missing' }
 Add-Type -TypeDefinition $source
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class FixtureDacl {
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern uint SetSecurityInfo(SafeFileHandle handle,uint kind,uint flags,IntPtr owner,IntPtr group,IntPtr dacl,IntPtr sacl);
+ public static void Apply(SafeFileHandle handle,byte[] descriptor){
+  if(handle==null||handle.IsInvalid||handle.IsClosed||descriptor==null||descriptor.Length==0||descriptor.Length>65536)throw new IOException("Invalid owned fixture DACL");
+  GCHandle pinned=GCHandle.Alloc(descriptor,GCHandleType.Pinned);
+  try{bool present,defaulted;IntPtr dacl;if(!GetSecurityDescriptorDacl(pinned.AddrOfPinnedObject(),out present,out dacl,out defaulted)||!present||dacl==IntPtr.Zero)throw new IOException("Owned fixture DACL required");
+   uint error=SetSecurityInfo(handle,1,0x80000004,IntPtr.Zero,IntPtr.Zero,dacl,IntPtr.Zero);if(error!=0)throw new IOException("Owned fixture DACL update failed; Win32="+error);
+  }finally{pinned.Free();}
+ }
+}
+'@
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Supervisor PowerShell syntax invalid'}
@@ -65,6 +82,17 @@ function Get-FixtureDacl([string]$Path,[bool]$Directory){
     $acl.SetSecurityDescriptorSddlForm($sddl,[Security.AccessControl.AccessControlSections]::Access)
     return $acl
 }
+function Set-FixtureDirectoryDacl([string]$Path,[Security.AccessControl.DirectorySecurity]$Acl){
+    # Only the two fresh PrivateDirectory negative fixtures call this helper.
+    # Retain no-follow control and identity pins; never request owner/group/SACL.
+    $pin=[GenerationCustody]::Hold($Path,$true,$false)
+    $control=$null
+    try{
+        $control=[GenerationCustody]::DirectoryControl($Path)
+        Assert ([GenerationCustody]::Same($pin,$control)) 'Owned DACL control binds its pinned directory'
+        [FixtureDacl]::Apply($control,$Acl.GetSecurityDescriptorBinaryForm())
+    }finally{if($null -ne $control){$control.Dispose()};$pin.Dispose()}
+}
 $file=Join-Path $root 'sealed.sh'
 $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($file,'sealed bytes')
@@ -101,13 +129,17 @@ try {
 $ErrorActionPreference='Stop'
 $root=$args[0]
 if([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $args[1]){exit 10}
-Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);}'
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);[DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr attributes,uint disposition,uint flags,IntPtr template);}'
 $parentHandle=[ParentIsolationProbe]::OpenProcess(0x68,$false,[int]$args[2])
 if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parentHandle)|Out-Null;if($args[3] -eq '1'){exit 16}}
 try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
 try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
-try{$s=(Get-Acl -LiteralPath $root).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access);$a=[Security.AccessControl.DirectorySecurity]::new();$a.SetSecurityDescriptorSddlForm($s,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
-try{$p=Join-Path $root 'sealed.sh';$s=(Get-Acl -LiteralPath $p).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access);$a=[Security.AccessControl.FileSecurity]::new();$a.SetSecurityDescriptorSddlForm($s,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $p -AclObject $a;exit 17}catch{}
+$dac=[ParentIsolationProbe]::CreateFileW($root,0x40000,7,[IntPtr]::Zero,3,0x02200000,[IntPtr]::Zero)
+if($dac -ne [IntPtr]::new(-1)){[ParentIsolationProbe]::CloseHandle($dac)|Out-Null;exit 13}
+if([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 5){exit 18}
+$dac=[ParentIsolationProbe]::CreateFileW((Join-Path $root 'sealed.sh'),0x40000,7,[IntPtr]::Zero,3,0x02200000,[IntPtr]::Zero)
+if($dac -ne [IntPtr]::new(-1)){[ParentIsolationProbe]::CloseHandle($dac)|Out-Null;exit 17}
+if([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 5){exit 19}
 try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
 if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
 exit 0
@@ -305,7 +337,7 @@ else:
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
         $acl=Get-FixtureDacl $unsafe $true
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
-        Set-Acl -LiteralPath $unsafe -AclObject $acl;$env:GH_CONFIG_DIR=$unsafe
+        Set-FixtureDirectoryDacl $unsafe $acl;$env:GH_CONFIG_DIR=$unsafe
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config namespace refused'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $env:GH_CONFIG_DIR=$config
@@ -399,7 +431,7 @@ else:
         [GenerationCustody]::AssertProtectedParent($parentHandle,$false)
         $a=Get-FixtureDacl $unsafeParent $true
         $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Modify','None','None','Allow'))
-        Set-Acl -LiteralPath $unsafeParent -AclObject $a
+        Set-FixtureDirectoryDacl $unsafeParent $a
         $candidate=Join-Path $unsafeParent 'candidate'
         Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false);[GenerationCustody]::PrivateDirectory($candidate)} 'Unsafe parent refused BEFORE snapshot creation'
         Assert (-not [IO.Directory]::Exists($candidate)) 'Unsafe namespace never materialized'
