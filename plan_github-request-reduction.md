@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-November 1, 2026, 1:39 PM EST — current coordinator reconciliation.
+November 1, 2026, 3:03 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
 The [original coordinator comment](https://github.com/popcre/ai-devops/issues/658#issuecomment-6551943692)
@@ -10,23 +10,20 @@ completed the scoped #2219/#2225/#2229 repair and both-system live proof;
 its explicitly unchecked broader fleet/comparable-workload acceptance remains
 on #658. The work below extends that acceptance, without reopening the repair.
 
-PR #2267 delivered the measurement repairs as `9225b8c4`; #2272 delivered the
-matching Hetz profile and fixture-only CI recovery as `c403f6ca`. The
-cross-repository collision guard and literal runner-name follow-up landed
-through #2276/#2277 as `18ae4d2e`/`642a1da6`, with seventy focused checks passing
-on Linux and native Windows. Local and 916 normal full updates reached `642a1da6`;
-local passed all 21 required and 12 optional stages, and 916's installed guard
-returned exit 0. Edge-dev/4837 retain their verified full `9225` delivery, Hetz
-its full `c403` delivery. Five necessary source-custodied reads across those five
-hosts total ten covered constructor writes and twenty-five native invocations,
-including probes; these are disjoint outcomes, not matched natural cohorts.
-All ten local CI registrations and original labels were restored before the
-final read, the recovery timer retired, and no jobs or runner services stopped.
-Original vendor versions, authentication, permissions and shared admission
-were preserved; no active CI or another chat's source ownership was bypassed.
-The telemetry qualification-fixture repair #2278 landed as `58243800` without
-changing a deployed runtime entry/helper; installed `642a1da6` receipts retain
-their actual generation.
+The final code repair merged through #2291 as
+`10ae0b9367282b1d39e4b0d0bcdbdc69af7d46c3`, including durable active receipts,
+governed completion/event consumers, native transport, registered Windows CI and
+literal dry-run parity. The registration repair's actual `e04` CI passed its classifier and all twelve
+Windows sections, with the new fixture executed and 73 native assertions;
+earlier registration failure remains retained. Normal full installation and
+source-custodied live proof at `10ae0b93` remain pending and are not yet claimed.
+
+The last completed installations remain local/916 `642a1da6`, edge-dev/4837
+`9225b8c4` and Hetz `c403f6ca`. Their five necessary source-custodied reads total
+ten covered constructor writes and twenty-five native invocations including
+probes: disjoint outcomes, not matched natural cohorts. All original local CI
+capacity was restored before the local read; no jobs or services were stopped.
+These immutable receipts and coverage aggregate V4 keep their actual generations.
 
 The [completed repair comparison](tests/verification/github-requests/p1-baseline.md#same-operation-durable-telemetry-repair-comparison)
 shows 23.89%/25.56% lower local replay processing time with both records still
@@ -51,41 +48,17 @@ corrected cold gate (+128.40% p95 / +40.89% total); its warm group passed.
 The separate telemetry-fixture defect has a focused native parity repair with
 zero timing pairs; both failed timing attempts remain retained.
 T16's documented trusted-executor access remains unavailable.
-Dispatch/privacy receipt emission is implemented and tested. Active
-BlockerWatch terminal receipts merged through #2281 (`e178`); the stricter
-legacy/active fixture repair then passed on the original CI environment and
-merged through #2282 (`aaca50a8`). The common active-completion adapter merged
-through #2283 as `49dec38d`, with code bytes equal to tested `d5d3d0fa` and 49
-qualification tests passing. Its explicit SDK-only
-alarm/links profile measures an acknowledged parent envelope, not detection or
-arbitrary provider work. Default original-context/provider operations decline
-qualification before running once unchanged; native completion integration and
-final installed proof remain unfinished. The separate `e6ed1ac8` durable-only
-event-fact producer passed 185 BlockerWatch and 31 receipt/fact cases on Linux;
-its corrected bounded native run passed all 31 cases in 186.212 seconds, with
-owned-process/fixture absence verified; it merged through #2285 as `4bee93ba`.
-Its separate governed consumer merged through #2286 as `221cb504`, with all four
-code/test blobs equal to tested `f2a90c12` and 60 qualification, 31 caller/fact, 185 BlockerWatch
-and 38 counter cases passing. It admits only successful standalone explicit
-SDK alarms, conservatively bounds batch acknowledgement and leaves links,
-wakes, original-context/provider work and whole-observer budgets unknown.
-Native completion/facts candidate `acb359c1` passed eight native tests with at
-least fifty actual assertions and zero owned processes remaining; this is
-component proof, with original privileged source and full observer budget
-unknown. Native integration merged through #2289 as `6932559d`, with nine
-code/test blobs equal to reviewed `e406`. Its CI run failed the new suite's
-missing registration manifest; Windows execution and the aggregate report then
-skipped. The changed-head registration/default-native-Python fixture repair
-merged through #2290 as `fba13b43`; actual CI then passed the classifier and all
-twelve Windows sections, including the new fixture's 73 native assertions.
-Final installed delivery remains pending.
-The final parity audit also found the native entry omitted literal `--dry-run`;
-its finite successor and common caller-intent guard are being composed, without
-new authority or live actions, in joint #2291 at `20c2f01b`. Read-only integrated
-review found no concrete defect; landing, changed-head CI and installed proofs
-remain required.
-This does not retarget or negate the earlier native component proof. Accepted
-P5/headroom proof stays accepted.
+Dispatch/privacy and finite active BlockerWatch terminal/event emission are now
+implemented and tested; the earlier emission/consumer code gaps are repaired.
+The governed SDK component profile admits only successful standalone alarms
+for conservative detection bounds. Local Linux uses local parent bookends;
+native Windows uses Linux parent receipt over SSH, never cross-host wall-clock
+subtraction. Dry-run work cannot qualify either interval or active success,
+regardless of producer data. No simulation is live acceptance. Default original-
+context/provider work runs once without a qualification claim; wake/link/tick
+detection, privileged-provider authority and whole-observer budgets remain
+unknown. Accepted P5/headroom proof is unchanged. Genuine future activity and
+twenty matched natural outcomes remain necessary; no traffic is manufactured.
 
 The five finite read observations preserve environment, working directory,
 authentication, streams and original descriptor limits within their declared

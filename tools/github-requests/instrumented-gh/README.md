@@ -432,7 +432,7 @@ standalone SDK alarms can receive conservative batch-ack detection; links,
 wakes, ticks and original/provider context remain unknown. Native integration
 landed through #2289; #2290 repaired suite registration and actual changed-head
 CI passed all twelve Windows sections with the new fixture executed. Final
-dry-run successor/installed proof remain required. No completion envelope is
+installed proof at final dry-run successor #2291 (`10ae0b93`) remains required. No completion envelope is
 event-detection latency.
 
 The native remote counterpart must use Linux parent BEGIN/facts-receive clocks
@@ -440,7 +440,7 @@ and genuine eligible GitHub UTC, never subtract Windows wall clocks. Its named
 boundary is parent-received alarm batch acknowledgement over SSH and includes
 transport; it does not claim an exact native SDK-ack interval or full-budget pass.
 
-The finite dry-run parity successor is not yet landed. Its actual caller-argument
+The finite dry-run parity successor merged through #2291. Its actual caller-argument
 flag, rather than producer frames, excludes simulated work from both qualified
 completion/event intervals and active-success classification. Raw diagnostics
 and original execution remain available; simulation cannot establish acceptance.
