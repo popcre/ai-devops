@@ -29,7 +29,18 @@ twenty cold pairs p95 +4.66224%/total +0.74847%, twenty warm pairs p95
 ledgers and successful cleanup. Earlier failed/development variants remain
 preserved. Windows focused proofs passed, while native cold-performance cause
 analysis remains active; no Defender attribution or unverified installed result
-is claimed. Delivery/install proof for this repair remains pending PR #2267.
+is claimed. PR #2267 merged normally as `9225b8c430f3abc315698e2d847f61d460647d81`.
+All three Windows hosts completed normal full installation and counted useful
+reads at that exact source, including the repaired 916 route with unchanged
+2.88.1 vendor/authentication context. Each read observed two primary writes,
+five native invocations and no external/failed writes. Linux CI's fixture-only
+trusted-executable repair then merged through #2272 as
+`c403f6ca528bffd9a430efc8bc9939bcfc390c36`, with the production guard unchanged
+and the actual affected shard passing. Hetz's full c403 update passed eighteen
+required stages; its new matching 2.103.0 profile and current counted read are
+being reconciled. Local installation remains held by actual active CI workers,
+not bypassed or asserted complete. Final current-source Linux live proof is
+still pending; Windows installed source remains 9225, not c403.
 
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as
@@ -43,7 +54,7 @@ source `628d2cf` was shown Merged with Checks Not checked. This is mirror
 continuity, not independent check execution or adoption. Full offline CI results
 remain independently tracked.
 
-The final public mirror overview shows exact landing
+The earlier #2256 public mirror overview showed exact landing
 `a98131576c3a092fc19ec938d24650ab98469c8a`;
 [existing Trail 374/change 172](https://entire.com/gh/popcre/ai-devops/-/trails/374/changes/172)
 shows Merged at exact PR head `8cc385950db5dcd075b859d536ee5c28f6f5cf10`,
@@ -51,6 +62,14 @@ Checks Not checked and Up to date Not checked, observed at 2:52 AM EST.
 GitHub's required safety result is authoritative;
 mirror CI parity remains unverified. No capture, hooks or paid/integration
 settings changed.
+
+For the later #2267 delivery, the observed overview shows short `9225` and
+[existing Trail 394/change 179](https://entire.com/gh/popcre/ai-devops/-/trails/394/changes/179)
+shows Merged at exact PR head `c542181fe74899ddc799c9ad45bb0a507bfebf12`,
+one failed check out of 28 and six commits behind, with GitHub links. Required
+GitHub doc-safety and verification closure passed; the advisory Linux shard
+failure was subsequently repaired by #2272. Entire was neutral and is not
+independent CI parity or a final #2272 mirror claim.
 
 Normal full installations on local Linux, Hetz and the three reachable Windows
 hosts now bind `8ab68085`; necessary ordinary reads passed. Hetz's subsequent

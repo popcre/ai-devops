@@ -1039,3 +1039,71 @@ contains user-reported process/token churn, not a confirmed fix or evidence
 that Codex caused this host's accumulated state. Patched vendors, disabled
 features, changed foreground/security settings and a reboot are not asserted
 as a supported repair by this record.
+
+## Repaired measurement delivery and actual Windows counting
+
+PR #2267 merged normally as `9225b8c430f3abc315698e2d847f61d460647d81`.
+Required GitHub doc-safety and verification closure passed; Entire was neutral.
+The observed public overview showed short `9225`, while
+[existing Trail 394/change 179](https://entire.com/gh/popcre/ai-devops/-/trails/394/changes/179)
+showed Merged at exact head `c542181fe74899ddc799c9ad45bb0a507bfebf12`, one of
+28 checks failed and six commits behind. This preserves the advisory failure
+rather than presenting mirror status as independent CI parity.
+
+All three Windows hosts completed normal full installation at exact `9225` with
+exit 0, clean canonical source and matching managed launchers. One necessary
+counted issue read per host then returned exit 0 under active source custody,
+with matching loaded fingerprint
+`a9b1497b1b77ff1c10ef5db9a568c038930f0e86fd034ef5e8bcdaadbd9e09cd`.
+Each receipt was complete: five native invocations, two primary completed
+writes, zero external writes and zero failed write attempts. The original
+authentication, permissions and vendor CLI were preserved, including 916's
+unchanged 2.88.1 version; its previously refused observation route is now
+actually counted, not merely a fixture/preflight claim.
+
+The independently checked index digest is
+`4f784f5f302a6c32630c57a0bf8741e607330037389571da0aae00ddeadc1c48`.
+Verified-summary digests for edge-dev, 4837 and 916 are respectively
+`1c7b2293889ed4a198659317a1d1b40d366e3b7bd5cdaa883ea3e463664594a0`,
+`0da88fb8d6c9c121917d83f9313668c6ceed47ef5e85d644db100b1966ce18f6`
+and `b779047c94d2838a089e442f9dd09db4cd53fd86a28533057dc23d1ab73abe50`.
+Whole observer times before acknowledgement, including SSH/bootstrap, were
+19.210870665, 34.636154932 and 17.655045724 seconds. These are three useful
+outcomes, not fifteen; requests cover the finite constructors and unseparated
+probes only. Whole-account HTTP, GraphQL/cost, Windows clock/detection and
+natural savings remain unknown. Windows 2.88.1 cold failure and 2.97.0
+unqualified performance remain preserved.
+
+The necessary #2267 Linux waiter also completed a genuine post-start merge
+observation with exit 0 and verified actual source
+`39aaa8b59d4d52609c357aaff9f20f4305330727`, rather than assumed `a981`.
+Receipt digest `d8e17c093247175ef01d6aab59bec31ac93958760f717363c815766ca161a8e0`
+binds its conditional delivery interval of 225,813–228,043 ms, within the
+configured 300,000 ms ceiling. Total qualification was 1,206.079460167 seconds,
+including 61.460346 ms source bootstrap. This is the fourth distinct single
+genuine event observation, not a matched twenty-outcome cohort or a new
+instrumentation-performance timing run.
+
+The full #2267 advisory run `41308418097` exposed one Linux shard-two fixture
+defect: a positive fixture selected an untrusted ancestor through PATH's
+`/usr/local/bin/git` and hit the unchanged production executable guard. PR #2272
+repaired the fixture and added the hostile-PATH negative case; it merged as
+`c403f6ca528bffd9a430efc8bc9939bcfc390c36`. Exact repaired head
+`33ce42b080de73d7e260bb0b2f4296e390fa4607`, run `41310463472`, job
+`124860024518` passed the actual same Git 2.55 route with 32 qualification tests
+and companion checks. The protected proof digest is
+`fbdb78ca39e05d72bf79e1dd4ef3a0f1e5550c592061c5d2a9c128a6f82d6d85`.
+No production trust guard changed and no unchanged failing-CI rerun is claimed.
+
+Hetz's actual vendor 2.103.0 is preserved through an explicit matching profile:
+upstream commit `7948e8056e45ac3c729b829e0eafe2d0797a95c6`, source archive
+`5a1bb92aac825129136c8b6efd989965fe78895217015e08df39b31b8d5370ec`.
+The original new updateable build manifest digest is
+`f4c930072fe87aea4626f17c10861a2a09b59ca00a63189b94f00f4ef2e6c749`;
+baseline/instrumented image digests are
+`3b56f16a90ef57c8b3bb3fcf5585b070facf84f61a00c45d600206a3c2b435fb`
+and `66b89b94f7527894882898feba33c10efd28e639338fd453d719010e5f119ccc`.
+Its 29 functional and 29 offline tests establish finite profile compatibility,
+not the separately measured 2.103.3 overhead result or a vendor upgrade. Final
+current-source Linux installed/count receipts remain pending; no source changes
+from another active chat or actual CI collision were overwritten/bypassed.
