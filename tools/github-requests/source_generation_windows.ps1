@@ -5,7 +5,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$SourceRoot,
     [Parameter(Mandatory=$true)][ValidateSet('bin/ai-pr-wait','bin/ai-gh')][string]$EntryPoint,
-    [Parameter(Mandatory=$true)][string]$ArgumentsFile,
+    [Parameter(Mandatory=$true,ParameterSetName='File')][string]$ArgumentsFile,
+    [Parameter(Mandatory=$true,ParameterSetName='Inline')][string]$ArgumentsBase64,
     [Parameter(Mandatory=$true)][long]$ReceiptHandle,
     [Parameter(Mandatory=$true)][long]$ReceiptAckHandle,
     [string]$BashExe,
@@ -209,8 +210,11 @@ public static class GenerationCustody {
   try{bool present,defaulted;IntPtr dacl;if(!GetSecurityDescriptorDacl(descriptor,out present,out dacl,out defaulted)||!present||SetSecurityInfo(h,1,0x80000004,IntPtr.Zero,IntPtr.Zero,dacl,IntPtr.Zero)!=0)throw new IOException("Snapshot directory sealing unavailable");}finally{LocalFree(descriptor);}
  }
  public static byte[] Read(SafeFileHandle handle){
+  return Read(handle,67108864);
+ }
+ public static byte[] Read(SafeFileHandle handle,int maximum){
   using(FileStream stream=new FileStream(new SafeFileHandle(handle.DangerousGetHandle(),false),FileAccess.Read)){
-   if(stream.Length>67108864)throw new IOException("Source capture too large");byte[] bytes=new byte[(int)stream.Length];int offset=0,n;while(offset<bytes.Length){n=stream.Read(bytes,offset,bytes.Length-offset);if(n==0)throw new IOException("Source capture incomplete");offset+=n;}return bytes;
+   if(stream.Length>maximum)throw new IOException("Source capture too large");byte[] bytes=new byte[(int)stream.Length];int offset=0,n;while(offset<bytes.Length){n=stream.Read(bytes,offset,bytes.Length-offset);if(n==0)throw new IOException("Source capture incomplete");offset+=n;}return bytes;
   }
  }
  public static void AssertClosure(string root,string[] paths){
@@ -376,7 +380,12 @@ function Capture-Counter([string]$ManifestPath,[string]$ExpectedHash) {
     $ordinary=Local-OnlyProbe $script:installedBash @('-c','p=$(type -P gh); test -n "$p" && cygpath -w "$p"')
     if(-not [IO.Path]::IsPathRooted($ordinary)){throw 'Ordinary native gh image unavailable'}
     $cursor=[IO.Directory]::GetParent($ordinary)
-    while($null -ne $cursor){$script:locks.Add([GenerationCustody]::Hold($cursor.FullName,$true,$false));$cursor=$cursor.Parent}
+    $officialParents=@()
+    while($null -ne $cursor){$officialParents+=$cursor;$cursor=$cursor.Parent}
+    foreach($ancestor in ($officialParents|Sort-Object {$_.FullName.Length})){
+        $held=[GenerationCustody]::Hold($ancestor.FullName,$true,$false)
+        try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $ancestor.Parent));$script:locks.Add($held)}catch{$held.Dispose();throw}
+    }
     $official=Read-LockedBytes $ordinary
     $actualVersion=Local-OnlyProbe $ordinary @('--version')
     if($actualVersion -cnotmatch ('^gh version '+[regex]::Escape($version)+'(?: |\r?\n|$)')){throw 'Counter version differs from actual ordinary gh'}
@@ -427,6 +436,27 @@ function Test-ObserverEvent([string]$Text) {
     return $true
 }
 try {
+    if($PSCmdlet.ParameterSetName -ceq 'Inline'){
+        if($ArgumentsBase64.Length -gt 10924){throw 'Bounded argument JSON required'}
+        $argumentBytes=[Convert]::FromBase64String($ArgumentsBase64)
+    }else{
+        $argumentPath=[IO.Path]::GetFullPath($ArgumentsFile)
+        $parents=@();$cursor=[IO.Directory]::GetParent($argumentPath)
+        while($null -ne $cursor){$parents+=$cursor;$cursor=$cursor.Parent}
+        foreach($parent in ($parents|Sort-Object {$_.FullName.Length})){
+            $held=[GenerationCustody]::Hold($parent.FullName,$true,$false)
+            try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $parent.Parent));$locks.Add($held)}catch{$held.Dispose();throw}
+        }
+        $argumentHold=[GenerationCustody]::Hold($argumentPath,$false,$true);$locks.Add($argumentHold)
+        $argumentBytes=[GenerationCustody]::Read($argumentHold,8192)
+    }
+    if($argumentBytes.Length -gt 8192){throw 'Bounded argument JSON required'}
+    $argumentText = [Text.UTF8Encoding]::new($false,$true).GetString($argumentBytes)
+    if (-not $argumentText.TrimStart().StartsWith('[')) { throw 'String argument array required' }
+    $arguments = $argumentText | ConvertFrom-Json
+    if ($null -eq $arguments) { $arguments = @() }
+    foreach ($argument in $arguments) { if ($argument -isnot [string] -or $argument.Contains([char]0)) { throw 'String argument array required' } }
+    if ($RestrictedReadProfile) { Assert-ReadArguments $EntryPoint @($arguments) }
     $countRequests=([bool]$CounterManifest -or [bool]$ExpectedCounterManifestSha256)
     $observeTransport=$ObserverEvents -or $countRequests
     if($countRequests){
@@ -533,13 +563,6 @@ try {
         if ((Git-BlobHash $sourceBytes) -ne $blobs[$relative]) { throw ('Snapshot differs from installed Git generation: '+$relative) }
         [void]$manifest.Append($relative).Append([char]0).Append((Hash-Bytes $sourceBytes)).Append("`n")
     }
-    $argumentBytes = [IO.File]::ReadAllBytes($ArgumentsFile)
-    $argumentText = [Text.Encoding]::UTF8.GetString($argumentBytes)
-    if (-not $argumentText.TrimStart().StartsWith('[')) { throw 'String argument array required' }
-    $arguments = $argumentText | ConvertFrom-Json
-    if ($null -eq $arguments) { $arguments = @() }
-    foreach ($argument in $arguments) { if ($argument -isnot [string] -or $argument.Contains([char]0)) { throw 'String argument array required' } }
-    if ($RestrictedReadProfile) { Assert-ReadArguments $EntryPoint @($arguments) }
     $privilegedOriginal = [GenerationCustody]::PrivilegedContext()
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $BashExe

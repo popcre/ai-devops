@@ -20,7 +20,6 @@ import selectors
 import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -207,6 +206,7 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     if not sys.platform.startswith("linux"):
         raise ValueError("Linux parent clock required")
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    bounded_arguments(argument_bytes)
     argument_hash = hashlib.sha256(argument_bytes).hexdigest()
     observation_started_ns = time.perf_counter_ns()  # BEFORE SSH Popen, never command-runtime-only.
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None,
@@ -320,11 +320,22 @@ def _peek(stream):
                                                    ctypes.byref(available), None) else 0
 
 
-def windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle, counter_manifest=None, expected_counter_hash=None):
+def bounded_arguments(argument_bytes):
+    if not isinstance(argument_bytes, bytes) or len(argument_bytes) > 8192:
+        raise ValueError("bounded original argument JSON required")
+    arguments = loads(argument_bytes.decode("utf-8", errors="strict"))
+    if not isinstance(arguments, list) or any(not isinstance(value, str) or "\x00" in value for value in arguments):
+        raise ValueError("read argument array required")
+    return arguments
+
+
+def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest=None, expected_counter_hash=None):
     """Documented process-only script execution; never changes persistent/GPO policy."""
     powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    bounded_arguments(argument_bytes)
+    argument_payload = base64.b64encode(argument_bytes).decode("ascii")
     command = [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(HERE / "source_generation_windows.ps1"),
-            "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(argument_file),
+            "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsBase64", argument_payload,
             "-ReceiptHandle", str(receipt_handle), "-ReceiptAckHandle", str(ack_handle),
             "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
     if counter_manifest is not None:
@@ -339,9 +350,7 @@ def windows_supervisor_command(source_root, argument_file, receipt_handle, ack_h
 def windows_controller(source_root, argument_bytes, timeout_seconds, counter_manifest=None, expected_counter_hash=None):
     """Windows native controller: stream bytes; hold receipt custody until Linux ACK."""
     import msvcrt
-    arguments = loads(argument_bytes)
-    if not isinstance(arguments, list) or any(not isinstance(value, str) for value in arguments):
-        raise ValueError("read argument array required")
+    arguments = bounded_arguments(argument_bytes)
     receipt_read, receipt_write = os.pipe()
     ack_read, ack_write = os.pipe()
     receipt_handle, ack_handle = msvcrt.get_osfhandle(receipt_write), msvcrt.get_osfhandle(ack_read)
@@ -366,84 +375,81 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
     threading.Thread(target=control_reader, daemon=True).start()
     child = None
     reader = None
-    with tempfile.TemporaryDirectory(prefix="ai-gh-observer-") as temporary:
-        argument_file = Path(temporary) / "arguments.json"
-        argument_file.write_bytes(argument_bytes)
-        command = windows_supervisor_command(source_root, argument_file, receipt_handle, ack_handle, counter_manifest, expected_counter_hash)
-        try:
-            child = subprocess.Popen(command, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            os.close(receipt_write)
-            os.close(ack_read)
-            reader = os.fdopen(receipt_read, "rb", buffering=0)
-            pending = bytearray()
-            got_receipt = False
-            deadline = time.monotonic() + timeout_seconds
-            source = None
-            def output_frames():
-                for name, stream in (("stdout", child.stdout), ("stderr", child.stderr)):
-                    while _peek(stream):
-                        data = os.read(stream.fileno(), min(8192, _peek(stream)))
-                        sys.stdout.buffer.write(frame(name, data=base64.b64encode(data).decode("ascii")))
-                        sys.stdout.buffer.flush()
-            while time.monotonic() < deadline:
-                output_frames()
-                available = _peek(reader)
-                if available:
-                    pending.extend(os.read(reader.fileno(), min(available, 8192)))
-                    if len(pending) > MAX_FRAME:
-                        raise ValueError("native receipt overflow")
-                    while b"\n" in pending:
-                        line, _, rest = pending.partition(b"\n")
-                        pending = bytearray(rest)
-                        record = loads(line)
-                        if record.get("frame") == "started":
-                            sys.stdout.buffer.write(frame("started", record=record))
-                        else:
-                            if got_receipt:
-                                raise ValueError("duplicate native receipt")
-                            # Child has exited. Drain its complete output BEFORE
-                            # forwarding the final receipt on this ordered stream.
-                            output_frames()
-                            if counter_manifest is not None:
-                                if not valid_counter_binding(record.get("counter_binding"), expected_counter_hash):
-                                    raise ValueError("native counter binding unavailable")
-                                record["counter_measurement"] = counter_aggregate(record.pop("counter_raw", None))
-                            source = record
-                            got_receipt = True
-                            sys.stdout.buffer.write(frame("receipt", record=record))
-                        sys.stdout.buffer.flush()
-                if not controls.empty():
-                    control = controls.get_nowait()
-                    expected = {"protocol": 1, "kind": "ack", "observer_run_id": source["observer_run_id"]} if source else None
-                    if not control or len(control) > 1024 or loads(control) != expected:
-                        break
-                    os.write(ack_write, b"\x01")
-                if child.poll() is not None:
-                    output_frames()
-                    sys.stdout.buffer.write(frame("exit", code=child.returncode))
+    command = windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest, expected_counter_hash)
+    try:
+        child = subprocess.Popen(command, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        os.close(receipt_write)
+        os.close(ack_read)
+        reader = os.fdopen(receipt_read, "rb", buffering=0)
+        pending = bytearray()
+        got_receipt = False
+        deadline = time.monotonic() + timeout_seconds
+        source = None
+        def output_frames():
+            for name, stream in (("stdout", child.stdout), ("stderr", child.stderr)):
+                while _peek(stream):
+                    data = os.read(stream.fileno(), min(8192, _peek(stream)))
+                    sys.stdout.buffer.write(frame(name, data=base64.b64encode(data).decode("ascii")))
                     sys.stdout.buffer.flush()
-                    return child.returncode
-                time.sleep(0.005)
-            sys.stdout.buffer.write(frame("exit", code=130))
-            sys.stdout.buffer.flush()
-            return 130
-        finally:
+        while time.monotonic() < deadline:
+            output_frames()
+            available = _peek(reader)
+            if available:
+                pending.extend(os.read(reader.fileno(), min(available, 8192)))
+                if len(pending) > MAX_FRAME:
+                    raise ValueError("native receipt overflow")
+                while b"\n" in pending:
+                    line, _, rest = pending.partition(b"\n")
+                    pending = bytearray(rest)
+                    record = loads(line)
+                    if record.get("frame") == "started":
+                        sys.stdout.buffer.write(frame("started", record=record))
+                    else:
+                        if got_receipt:
+                            raise ValueError("duplicate native receipt")
+                        # Child has exited. Drain its complete output BEFORE
+                        # forwarding the final receipt on this ordered stream.
+                        output_frames()
+                        if counter_manifest is not None:
+                            if not valid_counter_binding(record.get("counter_binding"), expected_counter_hash):
+                                raise ValueError("native counter binding unavailable")
+                            record["counter_measurement"] = counter_aggregate(record.pop("counter_raw", None))
+                        source = record
+                        got_receipt = True
+                        sys.stdout.buffer.write(frame("receipt", record=record))
+                    sys.stdout.buffer.flush()
+            if not controls.empty():
+                control = controls.get_nowait()
+                expected = {"protocol": 1, "kind": "ack", "observer_run_id": source["observer_run_id"]} if source else None
+                if not control or len(control) > 1024 or loads(control) != expected:
+                    break
+                os.write(ack_write, b"\x01")
+            if child.poll() is not None:
+                output_frames()
+                sys.stdout.buffer.write(frame("exit", code=child.returncode))
+                sys.stdout.buffer.flush()
+                return child.returncode
+            time.sleep(0.005)
+        sys.stdout.buffer.write(frame("exit", code=130))
+        sys.stdout.buffer.flush()
+        return 130
+    finally:
+        try:
+            os.close(ack_write)  # native supervisor observes EOF and cleans up.
+        except OSError:
+            pass
+        if child is not None and child.poll() is None:
             try:
-                os.close(ack_write)  # native supervisor observes EOF and cleans up.
-            except OSError:
-                pass
-            if child is not None and child.poll() is None:
-                try:
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
-            if reader is not None:
-                reader.close()
-            if child is not None:
-                child.stdout.close()
-                child.stderr.close()
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
+        if reader is not None:
+            reader.close()
+        if child is not None:
+            child.stdout.close()
+            child.stderr.close()
 
 
 def main():
@@ -474,7 +480,9 @@ def main():
     if not re.fullmatch(r"[A-Za-z]:[/\\][A-Za-z0-9_./\\ -]+", options.source_root):
         parser.error("ordinary native Windows source path required")
     arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
-    payload = base64.b64encode(json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")).decode("ascii")
+    argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    bounded_arguments(argument_bytes)  # before SSH or native supervisor creation.
+    payload = base64.b64encode(argument_bytes).decode("ascii")
     remote_path = options.source_root.rstrip("/\\") + "/tools/github-requests/remote_wait.py"
     remote_arguments = ["python.exe", "-I", remote_path, "--windows-controller", "--source-root", options.source_root,
                         "--read-only-no-stdin", "--timeout-seconds", str(options.timeout_seconds), "--arguments-base64", payload]

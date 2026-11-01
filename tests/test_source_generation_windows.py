@@ -1,6 +1,7 @@
 """Native Windows supervisor integration; no network requests or machine changes."""
 import hashlib
 import json
+import base64
 import os
 from pathlib import Path
 import subprocess
@@ -19,8 +20,7 @@ class WindowsGeneration(unittest.TestCase):
         root = Path(os.environ.get("GENERATION_INSTALLED_ROOT", "C:/repos/ai-devops"))
         for arguments, expected_exit, restricted in [(["--help"], 0, False), (["not-a-pr"], 3, False), (["--help"], 0, True)]:
             with self.subTest(arguments=arguments), tempfile.TemporaryDirectory(prefix="ai-generation-parent-") as temporary:
-                args = Path(temporary) / "args.json"
-                args.write_text(json.dumps(arguments), encoding="utf-8")
+                argument_payload = base64.b64encode(json.dumps(arguments).encode("utf-8")).decode("ascii")
                 read_fd, write_fd = os.pipe()
                 ack_read, ack_write = os.pipe()
                 write_handle = msvcrt.get_osfhandle(write_fd)
@@ -34,8 +34,8 @@ class WindowsGeneration(unittest.TestCase):
                 environment["AI_GH_SOURCE_SHA"] = "0" * 40
                 snapshot_parents = [Path(os.environ["LOCALAPPDATA"]) / "Temp", Path(os.environ["ProgramFiles"])]
                 before = {path for parent in snapshot_parents for path in parent.glob("ai-gh-generation-*")}
-                command = ["powershell.exe", "-NoProfile", "-File", str(supervisor), "-SourceRoot", str(root),
-                     "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsFile", str(args),
+                command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(supervisor), "-SourceRoot", str(root),
+                     "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsBase64", argument_payload,
                      "-ReceiptHandle", str(write_handle), "-ReceiptAckHandle", str(ack_handle)]
                 if restricted:
                     command.append("-RestrictedReadProfile")

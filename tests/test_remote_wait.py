@@ -79,11 +79,13 @@ class ObserverTests(unittest.TestCase):
 
     def test_native_supervisor_uses_only_process_scoped_script_policy(self):
         with mock.patch.dict(os.environ, {"SystemRoot": "C:/Windows"}):
-            command = remote.windows_supervisor_command("C:/repos/ai-devops", "owned-arguments.json", 123, 456)
+            command = remote.windows_supervisor_command("C:/repos/ai-devops", b'["--help"]', 123, 456)
         self.assertEqual(command[1:5], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
         self.assertTrue(command[0].replace("\\", "/").endswith("System32/WindowsPowerShell/v1.0/powershell.exe"))
         self.assertNotIn("Set-ExecutionPolicy", command)
         self.assertIn("-ReadOnlyNoStdin", command)
+        self.assertNotIn("-ArgumentsFile", command)
+        self.assertEqual(base64.b64decode(command[command.index("-ArgumentsBase64")+1]), b'["--help"]')
 
     def test_linux_receive_bound_includes_transport_not_windows_wall(self):
         row = event()
@@ -196,6 +198,19 @@ class ObserverTests(unittest.TestCase):
 
 
 class CounterCapsuleTests(unittest.TestCase):
+    def test_exact_inline_argument_bytes_and_bounds_precede_process_creation(self):
+        raw=b' [ "--help" ] '
+        with mock.patch.dict(os.environ,{"SystemRoot":"C:/Windows"}):
+            command=remote.windows_supervisor_command('C:/repos/ai-devops',raw,123,456)
+            self.assertEqual(base64.b64decode(command[command.index('-ArgumentsBase64')+1]),raw)
+            for bad in (b'x'*8193,b'["\\u0000"]',b'[1]',b'{}',b'["\xff"]'):
+                with self.subTest(bad=bad[:20]),self.assertRaises((ValueError,UnicodeError)):
+                    remote.windows_supervisor_command('C:/repos/ai-devops',bad,123,456)
+        with mock.patch.object(remote.subprocess,'Popen') as popen:
+            with self.assertRaises(ValueError):
+                remote.observe(['never-launched'],['x'*8193],'unused.json',1)
+            popen.assert_not_called()
+
     def binding(self):
         return dict(schema=1, manifest_sha256="a"*64, image_sha256="b"*64,
                     counter_source_fingerprint="c"*64, runtime_version="2.97.0",
@@ -245,7 +260,7 @@ class CounterCapsuleTests(unittest.TestCase):
 
     def test_counter_controller_keeps_original_profile_and_process_policy(self):
         with mock.patch.dict(os.environ,{"SystemRoot":"C:/Windows"}):
-            command=remote.windows_supervisor_command("C:/repos/ai-devops","args.json",123,456,
+            command=remote.windows_supervisor_command("C:/repos/ai-devops",b'["issue","view","658","--repo","popcre/ai-devops","--json","state,title"]',123,456,
                        "C:/Program Files/owned/build.json","a"*64)
         self.assertIn("-RestrictedReadProfile",command)
         self.assertIn("-ReadOnlyNoStdin",command)
