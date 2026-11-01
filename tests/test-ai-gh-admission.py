@@ -21,6 +21,7 @@ class AdmissionTests(unittest.TestCase):
         self.fake = self.base / "fake-gh"
         self.fake.write_text('''#!/usr/bin/env bash
 [ -z "${FAKE_CALL_LOG:-}" ] || printf '%s\\n' "$*" >> "$FAKE_CALL_LOG"
+if [ "${FAKE_ERROR_PAYLOAD:-}" = 1 ]; then printf 'fixture stdout\\n'; printf 'fixture stderr\\n' >&2; exit 7; fi
 if [ "${FAKE_IGNORE_TERM:-}" = 1 ]; then trap '' TERM; while :; do sleep 1; done; fi
 [ -z "${FAKE_EXIT:-}" ] || exit "$FAKE_EXIT"
 [ -z "${FAKE_DELAY:-}" ] || sleep "$FAKE_DELAY"
@@ -142,6 +143,15 @@ fi
         for kind in ("ordinary", "graphql"):
             with self.subTest(kind=kind):
                 self.finish(self.start(kind, AI_GH_CALL_TIMEOUT_SECONDS="5", FAKE_EXIT="137"), 137)
+
+    def test_timed_backend_output_and_error_exit_are_preserved(self):
+        for kind in ("ordinary", "graphql"):
+            with self.subTest(kind=kind):
+                p = self.start(kind, AI_GH_CALL_TIMEOUT_SECONDS="5", FAKE_ERROR_PAYLOAD="1")
+                out, err = p.communicate(timeout=20)
+                self.assertEqual(p.returncode, 7)
+                self.assertEqual(out, "fixture stdout\n")
+                self.assertEqual(err, "fixture stderr\n")
 
     def test_generic_waiter_keeps_ticket_past_old_short_default(self):
         self.waiter_after_busy_lock("ai-gh-wait", ["--until-regex", "api observed", "--timeout-minutes", "1", "--", "api", "observed"])
