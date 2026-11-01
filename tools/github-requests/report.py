@@ -1592,7 +1592,7 @@ def qualify_wait(root, manifest, arguments, receipt_path, manifest_fd=None):
 ACTIVE_BEGIN_KEYS = {"schema", "measurement", "phase", "caller", "workflow", "workflow_id",
                      "parent_workflow_id", "boundary"}
 ACTIVE_CHANNEL_ENV = ("AI_GH_ACTIVE_EVENT_FD", "AI_GH_ACTIVE_ACK_FD", "AI_GH_ACTIVE_PYTHON",
-                      "AI_GH_ACTIVE_EVENT_HANDLE", "AI_GH_ACTIVE_ACK_HANDLE")
+                      "AI_GH_ACTIVE_EVENT_HANDLE", "AI_GH_ACTIVE_ACK_HANDLE", "AI_GH_ACTIVE_BASH")
 ACTIVE_ACK_SECONDS = 0.250
 ACTIVE_MAX_FRAMES = 256
 

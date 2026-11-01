@@ -866,6 +866,8 @@ exit 7
 ''')
         try:
             status, receipt, _, _ = self.run_active(profile="original_context", AI_GH_ACTIVE_EVENT_FD=str(reserved),
+                AI_GH_ACTIVE_ACK_FD=str(reserved), AI_GH_ACTIVE_EVENT_HANDLE="12345", AI_GH_ACTIVE_ACK_HANDLE="12346",
+                AI_GH_ACTIVE_PYTHON=sys.executable, AI_GH_ACTIVE_BASH="reserved-observer-bash",
                 ACTIVE_TEST_LEGIT=str(legit), ACTIVE_TEST_RESERVED=str(reserved), ACTIVE_TEST_RESULT=str(output))
             observed = json.loads(output.read_text())
             self.assertEqual(status, 7)
