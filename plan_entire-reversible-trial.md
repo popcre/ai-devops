@@ -30,6 +30,22 @@ acceptance has passed. The original R1–R8 work remains, with updates below.
 
 ### Trial sequence, dependencies and completion gates
 
+October 31 continuation, 8:36 PM EDT: coordinator Codex chat
+`01a19481-9ceb-7592-934e-9e5a4dac240d` claimed
+[#2022](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6551194895)
+from current main `7cf494770ab062dd1d4b501862d72a0f4b68404c` on a fresh
+`codex/entire-trial-control-20261031` branch. T1 and T2 are **partial**;
+[current receipts](tests/verification/entire-trial/report.md#october-31-t1t2-continuation)
+supersede historical access/install assumptions, not acceptance gates.
+Buildkite is connected only to public ai-devops; a dedicated self-hosted queue
+exists with zero agents/jobs/pipelines. No runner installation or test occurred.
+The supported CLI device route requests new management access; browser safety
+requires action-time confirmation before that grant. No such credential was
+issued. The coordinator owns this blocked access step, XPS SSH host verification,
+and the preserved outgoing ownership-check timeout. Never impersonate the old
+chat UUID. T3–T7/R2–R8, all16 journeys, timing and recovery remain unmet.
+The original discovery and stop are unchanged; no trial clock restarted.
+
 **T1 Reconcile and freeze.** The new coordinator claims #2022, reads this whole
 plan and the handoff, refreshes current main in its own worktree and declares
 the honest task class. Reconcile the partially completed installations before

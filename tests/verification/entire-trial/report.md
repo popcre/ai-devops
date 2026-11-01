@@ -1,5 +1,79 @@
 # Entire reversible trial execution report — #2022
 
+## October 31 T1/T2 continuation
+
+Observed by Codex chat `01a19481-9ceb-7592-934e-9e5a4dac240d` on edge-dev3,
+October31,2026,8:36PM EDT. Claim:
+[#2022 receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6551194895).
+Source/base `7cf494770ab062dd1d4b501862d72a0f4b68404c`; whole linked plan read.
+Closing PR2215 is merged. Windows scheduler repair PR2216 is also merged;
+its source presence is not a completed installation/live repair receipt.
+
+Private custody `entire-2022-control-20261031` retains the continuation manifest,
+runner/development-host reads and hashed 12-workflow/suite-source inventory.
+The inventory contains182 suite registrations. A single completed GitHub runner
+inventory reports all three requested Windows runners online: EDGE-ALIEN busy,
+EDGE-RUNN-ENVY idle and edge-runn-xps idle. Scheduling is only this observation;
+XPS being online in GitHub does not resolve its SSH identity failure.
+All25 predecessor baseline-manifest files were present with matching SHA256.
+That proves local evidence integrity, not the whole T7 recovery outcome.
+
+T1 drift: installed Linux source and all three Windows development checkouts
+now report `d307c8a611b922ebaab84ba0c06a1917849647f7`. Linux was clean.
+No complete install receipt, Windows managed-launcher reconciliation or private
+memory-health acceptance was obtained. Do not replay old partial transactions
+or describe October30 state as current. No host was written by this continuation.
+
+T2 actual results:
+
+- Authenticated Entire overview displayed current main7cf4947. Buildkite login
+  via GitHub succeeded; the account displays29 evaluation days remaining.
+  No payment information, paid activation or billing investigation occurred.
+- The Entire plugin's selected-repositories payload contained ai-devops only,
+  with shared-db unchecked. Buildkite's repository-provider page confirms the
+  connection. No GitHub repository App installation was submitted.
+- Dedicated self-hosted queue `entire-2022-windows` was created and read back
+  with0 agents,0 jobs and0 pipelines. No hosted compute was selected or run.
+  Existing GitHub runner services were not modified.
+- SSH readbacks for edge-alien and edge-runn-envy found GitHub runner services,
+  no Buildkite service. XPS SSH returned `Host key verification failed.`
+  No host trust was changed. Coordinator owns supported identity reconciliation.
+- Official Buildkite CLI3.67.0 archive matched its published checksum; isolated
+  binary returned version3.67.0. Supported device login requested only
+  `read_user read_organizations read_clusters write_clusters read_pipelines
+  write_pipelines read_builds write_builds` for the trial organization.
+  This creates new management access: browser safety requires action-time
+  confirmation. Authorization was denied; CLI returned `access_denied`.
+  No CLI or agent credential was issued; coordinator owns this blocked step.
+- A mistaken toolkit `deploy` check refused missing installed paths. The
+  correctly declared external `infrastructure` action passed before isolated
+  CLI extraction. Neither result authorizes bypassing toolkit installation.
+
+Source references:
+[self-hosted checkout](https://buildkite.com/docs/pipelines/source-control/entire#check-out-repositories-on-self-hosted-agents),
+[Windows agent](https://buildkite.com/docs/agent/self-hosted/install/windows),
+[device authorization](https://buildkite.com/docs/platform/cli/reference/auth).
+Self-hosted checkout credentials remain disabled. Windows requires the Entire
+Git helper0.11.5 or newer preinstalled; actual support is still unqualified.
+Buildkite reports pipeline-level checks; a canceled rebuild may preserve an
+earlier passing attempt. T3 must test that behavior rather than assuming
+cancellation invalidates acceptance.
+
+No timing pairs collected. Any later protocol must freeze exact candidate/base,
+commands, scope and request→schedule→tests→merge→official-publication timestamps
+before collecting at least five matched pairs; this discovery is no speed test.
+T3–T7 and R2–R8 remain open, all16 actual-client cells unpassed. No Entire native
+test/merge, official-code trial publication or GitHub-only recovery is claimed.
+
+Preserved independent blocker: outgoing chat
+`01a18e41-40fb-76f2-90a6-cad01b186b8e` ownership checker timed out twice.
+No successful native receipt exists; empty failure arrays prove no release.
+This continuation did not impersonate that identity or release any claim.
+Coordinator owns supported follow-up. Discovery November2,2026,5:00PM EST;
+stop November12,2026,5:58AM EST unchanged. Downstream T3–T7/R2–R8 and final
+acceptance were reread; access, host identity and native-app-control constraints
+remain explicit unmet prerequisites, not substituted passes.
+
 ## October 31 replacement target and execution boundary
 
 The owner now authorizes testing Entire controlling testing and merging, with
