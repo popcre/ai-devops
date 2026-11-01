@@ -67,6 +67,42 @@ ai-blocker-watch list | cancel <wait-id> | reap [--dry-run] | alarm [--dry-run]
 
 `wait` and `has-wait` are inert: use `ai-pr-wait` or leave the issue as the card.
 
+## GitHub measurement qualification (#660 under #658)
+
+These are explicit, bounded observation/analysis tools, not normal routing.
+Owner: the #658 coordinator; consolidate interfaces into the existing reporter
+after qualification rather than creating a second telemetry service. Keep raw
+artifacts in protected local state; publish only scrubbed aggregates.
+
+```text
+python3 tools/github-requests/report.py MEASUREMENTS_DIRECTORY
+python3 tools/github-requests/report.py --qualify-wait --source-root INSTALLED_CHECKOUT --manifest /etc/ai-devops/install-manifest.tsv --receipt PRIVATE_NEW_RECEIPT -- PR --repo popcre/ai-devops --timeout-minutes N
+python3 tools/github-requests/replay.py --repository CHECKOUT --measurements PRIVATE_FROZEN_INPUT --output PRIVATE_NEW_DIRECTORY
+python3 tools/github-requests/compare.py PRIVATE_BASELINE_JSON PRIVATE_CANDIDATE_JSON
+```
+
+The ordinary reporter is offline. `--qualify-wait` explicitly launches one live
+waiter, preserving its output and exit status. On Linux its live parent retains
+the clean installed Git generation, sealed loaded bytes and bounded kernel
+clock. An unavailable source boundary preserves the original waiter with an
+unknown receipt; it never upgrades ordinary/historical events. Remote timestamp
+qualification explicitly assumes GitHub's published UTC reference and includes
+timestamp resolution. Bootstrap and total observation time remain in receipts.
+Cancellation reaps only the owned child group. Use this for necessary real PR
+work; never manufacture activity to reach sample thresholds.
+
+Replay is Linux-only offline analysis of the frozen historical helper pair,
+using a local upstream stub and virtual clock. It does not make HTTP requests
+or recreate missing historical arrivals, heads or live detection times. The
+comparison validates paired operation/outcome cases, minimum twenty outcomes
+per operation and conservative latency bounds. It cannot authenticate edited
+JSON or grant programme acceptance; unknown costs stay null.
+
+The finite version-matched counter build and live managed-read API are documented
+in [the existing counter guide](../tools/github-requests/instrumented-gh/README.md).
+The full observer route failed local timing overhead and must remain explicit
+qualification machinery; passing direct counter timing is a separate result.
+
 ## shared-db scripts (in a `popcre/shared-db` checkout, run with `node`)
 
 These have no `--help`; an unknown flag prints the supported list. The lane
