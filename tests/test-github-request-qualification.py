@@ -251,7 +251,7 @@ exit "${1:-0}"
         (self.root / "tools/UNTRACKED").write_text("private local helper")
         with report.retained_generation(self.root, self.manifest) as generation:
             result = subprocess.run([*generation["argv_prefix"], generation["bash_path"], "-c",
-                                     'test ! -e "$1/tools/UNTRACKED" && ! touch "$1/tools/ADDED"', "bash", str(self.root)],
+                                     ': >/dev/null && test ! -e "$1/tools/UNTRACKED" && ! touch "$1/tools/ADDED"', "bash", str(self.root)],
                                     pass_fds=generation["pass_fds"], capture_output=True)
             self.assertEqual(result.returncode, 0)
         self.assertFalse((self.root / "tools/ADDED").exists())

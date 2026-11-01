@@ -854,12 +854,13 @@ def retained_generation(root, manifest):
     if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
         raise ValueError("boundary unavailable")
     boundary = trusted_boundary_executable(shutil.which("bwrap") or "")
-    probe = subprocess.run([boundary, "--unshare-user", "--bind", "/", "/", "--cap-drop", "ALL",
+    probe = subprocess.run([boundary, "--unshare-user", "--bind", "/", "/", "--dev-bind", "/dev", "/dev", "--cap-drop", "ALL",
                             "--", "/usr/bin/true"], capture_output=True, timeout=10)
     if probe.returncode:
         raise ValueError("boundary unavailable")
     identity, files = installed_source(root, manifest)
-    command = [boundary, "--unshare-user", "--die-with-parent", "--bind", "/", "/", "--cap-drop", "ALL"]
+    command = [boundary, "--unshare-user", "--die-with-parent", "--bind", "/", "/",
+               "--dev-bind", "/dev", "/dev", "--cap-drop", "ALL"]
     descriptors = []
     try:
         for directory in ("bin", "tools", "config"):
