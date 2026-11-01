@@ -64,6 +64,23 @@ class ProspectiveReadIntervals(unittest.TestCase):
         self.assertNotIn("private/repo", json.dumps(row))
         self.assertNotIn("a" * 40, json.dumps(row))
 
+    def test_unrepresentable_cache_age_stays_unknown_without_losing_receipt(self):
+        key, head = "private-context private/repo 77", "a" * 40
+        for age in (None, -1, True, 604800001, float("inf"), "private-age"):
+            rows = []
+            interval = single.begin_read(key, head, 1000000000, False)
+            single.bind_read_scope(interval, self.state)
+            with mock.patch.object(single, "_emit_record", side_effect=rows.append):
+                single.emit_read_observation(key, "cache", interval=interval,
+                                             raw=self.body(head), cache_age_ms=age, cache_policy="ttl")
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0]["cache_age_ms"])
+            self.assertTrue(report_module.valid_read_interval(rows[0]))
+            self.assertTrue(rows[0]["cache_hit"])
+        interval = single.begin_read(key, head, 10, False)
+        self.assertEqual(single.read_interval(key, interval, self.body(head), 604800000, "ttl")["cache_age_ms"],
+                         604800000)
+
     def test_generation_changes_with_head_or_context_and_mutations_are_not_eligible(self):
         first = self.record()
         same = self.record(start=1050, finish=1200, correlation="d" * 32)
