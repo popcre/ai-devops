@@ -27,6 +27,9 @@ class OwnedCleanup(unittest.TestCase):
         # and owned resources with in-memory fault fixtures. No ACLs or files.
         template = r'''
 $ErrorActionPreference='Stop'
+class GenerationCustody {
+ static [void] FileAccess([object]$resource,[bool]$writable){$resource.Unseal()}
+}
 $text=[IO.File]::ReadAllText('__SOURCE__');$tokens=$null;$parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Production parser error'}
@@ -46,6 +49,11 @@ $job=Fake-Resource 'job' $false;$child=Fake-Resource 'child' $false
 $eventChannel=Fake-Resource 'event' $false;$counterChannel=Fake-Resource 'counter' $false
 $captureLocks=@((Fake-Resource 'capture-first' __FAULT__),(Fake-Resource 'capture-last' $false))
 $directoryControls=@();$locks=@((Fake-Resource 'lock-first' $false),(Fake-Resource 'lock-last' $false))
+$fileControls=@((Fake-Resource 'file-first' $false),(Fake-Resource 'file-last' $false))
+foreach($file in $fileControls){
+ $file|Add-Member NoteProperty failUnseal (__FAULT__ -and $file.name -eq 'file-first')
+ $file|Add-Member ScriptMethod Unseal {$global:closed.Add('unseal-'+$this.name);if($this.failUnseal){throw ('unseal-failure-'+$this.name)}}
+}
 $receipt=Fake-Resource 'receipt' $false;$ack=Fake-Resource 'ack' $false
 $snapshot=$null;$bootstrap=$null;$exitCode=__EXIT__;$primaryFailure=$null;$cancelled=$false
 $catches=($main.CatchClauses|ForEach-Object{$_.Extent.Text}) -join "`n"
@@ -67,11 +75,68 @@ try{& ([scriptblock]::Create($execution))}finally{
                     self.assertEqual(len(rows), 1, result.stderr.decode(errors="replace"))
                     row = json.loads(rows[0].split("=", 1)[1])
                     self.assertEqual(row["closed"], ["job", "child", "event", "counter", "capture-first", "capture-last",
+                                                      "unseal-file-first", "unseal-file-last", "file-first", "file-last",
                                                       "lock-last", "lock-first", "receipt", "ack"])
                     if primary:
                         self.assertIn(b"primary-work-failure", result.stderr)
                     if fault:
                         self.assertIn(b"dispose-failure-capture-first", result.stderr)
+                        self.assertIn(b"unseal-failure-file-first", result.stderr)
+
+
+@unittest.skipUnless(cleanup_interpreters(), "native PowerShell runtime required")
+class EffectiveConfiguration(unittest.TestCase):
+    def test_existing_ssh_namespace_and_sdk_fallback_without_loader_execution(self):
+        source = str(Path(__file__).parents[1] / "tools/github-requests/source_generation_windows.ps1").replace("'", "''")
+        cases = [
+            dict(env=dict(GH_CONFIG_DIR="C:/explicit-context", SSH_CONNECTION="owned"), probe="C:/wrong", suffix="/explicit-context", calls=0),
+            dict(env=dict(SSH_CONNECTION="owned", USERPROFILE="C:/profile", HOME="C:/parent-home"), probe="C:/actual-bash-home/.ai-devops/gh-ssh", suffix="/actual-bash-home/.ai-devops/gh-ssh", calls=1),
+            dict(env=dict(XDG_CONFIG_HOME="C:/xdg", USERPROFILE="C:/profile"), probe="C:/private", suffix="/xdg/gh", calls=0),
+            dict(env=dict(SSH_CONNECTION="owned", APPDATA="C:/roaming", USERPROFILE="C:/profile"), probe="", suffix="/roaming/GitHub CLI", calls=1),
+            dict(env=dict(SSH_CONNECTION="owned", USERPROFILE="C:/profile"), probe="", suffix="/profile/.config/gh", calls=1),
+            dict(env=dict(APPDATA="C:/roaming", USERPROFILE="C:/profile"), probe="C:/private", suffix="/roaming/GitHub CLI", calls=0),
+            dict(env=dict(SSH_CONNECTION="owned"), probe="C:/private", error=True, bound=False, calls=0),
+        ]
+        for key in ("BASH_ENV", "ENV", "BASH_FUNC_hostile%%", "SHELLOPTS", "PS4", "PYTHONPATH"):
+            cases.append(dict(env={"SSH_CONNECTION": "owned", key: "hostile-loader"}, probe="C:/private", error=True, calls=0))
+        payload = base64.b64encode(json.dumps(cases).encode()).decode()
+        script = r'''
+$ErrorActionPreference='Stop'
+$text=[IO.File]::ReadAllText('__SOURCE__');$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Production syntax invalid'}
+foreach($name in @('Config-Directory','Assert-BashStartupEnvironment')){
+ $f=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true)
+ . ([scriptblock]::Create($f.Extent.Text))
+}
+function Local-OnlyProbe([string]$exe,[string[]]$values){
+ $script:calls++;if($exe -cne 'identity-bound-bash'){throw 'Unbound interpreter'}
+ if($values.Count -ne 4 -or $values[0] -cne '--noprofile' -or $values[1] -cne '--norc' -or $values[2] -cne '-c' -or $values[3] -notmatch 'builtin pwd -W'){throw 'Unexpected helper invocation'}
+ return $script:probe
+}
+$cases=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CASES__'))|ConvertFrom-Json
+$keys=@('GH_CONFIG_DIR','SSH_CONNECTION','XDG_CONFIG_HOME','APPDATA','USERPROFILE','HOME','BASH_ENV','ENV','SHELLOPTS','BASHOPTS','PS4','PROMPT_COMMAND','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP','BASH_FUNC_hostile%%')
+$rows=@()
+foreach($case in $cases){
+ foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+ foreach($property in $case.env.PSObject.Properties){[Environment]::SetEnvironmentVariable($property.Name,[string]$property.Value,'Process')}
+ $script:installedBash=if($case.bound -ceq $false){$null}else{'identity-bound-bash'};$script:calls=0;$script:probe=$case.probe;$failure=$false;$value=$null
+ try{$value=Config-Directory}catch{$failure=$true}
+ $rows+=@{calls=$script:calls;failed=$failure;value=$value}
+}
+@{rows=$rows}|ConvertTo-Json -Depth 5 -Compress
+'''.replace("__SOURCE__", source).replace("__CASES__", payload)
+        for interpreter in cleanup_interpreters():
+            with self.subTest(interpreter=interpreter.name):
+                encoded = base64.b64encode(script.encode("utf-16le")).decode()
+                result = subprocess.run([str(interpreter), "-NoProfile", "-EncodedCommand", encoded], capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                rows = json.loads(result.stdout)["rows"]
+                for case, row in zip(cases, rows, strict=True):
+                    self.assertEqual(row["calls"], case["calls"])
+                    self.assertEqual(row["failed"], case.get("error", False))
+                    if not row["failed"]:
+                        self.assertTrue(row["value"].replace("\\", "/").endswith(case["suffix"]))
 
 
 @unittest.skipUnless(sys.platform == "win32" and os.environ.get("RUN_MANAGED_WINDOWS_SOURCE_INTEGRATION") == "1",

@@ -192,6 +192,13 @@ public static class GenerationCustody {
   SafeFileHandle h=CreateFileW(path,0x80040000,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);Info i;
   if(h.IsInvalid||!GetFileInformationByHandle(h,out i)||(i.Attributes&0x400)!=0||(i.Attributes&0x10)==0){h.Dispose();throw new IOException("Private directory control unavailable");}return h;
  }
+ public static SafeFileHandle FileControl(string path){
+  // No FILE_READ_DATA and no inheritable security attribute: only this parent
+  // retains authority to restore its fresh file after the child has stopped.
+  SafeFileHandle h=CreateFileW(path,0x60080,3,IntPtr.Zero,3,0x00200000,IntPtr.Zero);Info i;
+  if(h.IsInvalid||!GetFileInformationByHandle(h,out i)||(i.Attributes&0x410)!=0||i.Links!=1||!SetHandleInformation(h.DangerousGetHandle(),1,0)){h.Dispose();throw new IOException("Private file security control unavailable");}
+  return h;
+ }
  public static void AssertProtectedParent(SafeFileHandle handle,bool volumeRoot){
   AssertProtectedMetadata(handle,volumeRoot,false);
  }
@@ -206,19 +213,26 @@ public static class GenerationCustody {
   }finally{LocalFree(descriptor);}
  }
  public static void DirectoryAccess(SafeFileHandle h,bool writable){
+  PrivateObjectAccess(h,true,writable);
+ }
+ public static void FileAccess(SafeFileHandle h,bool writable){
+  PrivateObjectAccess(h,false,writable);
+ }
+ static void PrivateObjectAccess(SafeFileHandle h,bool directory,bool writable){
   string sid=WindowsIdentity.GetCurrent().User.Value;
   // OWNER RIGHTS suppresses the owner's implicit WRITE_DAC. The parent alone
   // retains previously granted control handles for restoring its fresh objects.
-  string acl=writable?"D:P(A;OICI;FA;;;"+sid+")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)":
-   "D:P(D;OICI;0x000d0156;;;"+sid+")(A;OICI;0x001200a9;;;"+sid+")(A;OICI;FA;;;SY)(A;OICI;RC;;;OW)";
+  string inherit=directory?"OICI":"";
+  string acl=writable?"D:P(A;"+inherit+";FA;;;"+sid+")(A;"+inherit+";FA;;;SY)(A;"+inherit+";FA;;;BA)":
+   "D:P(D;"+inherit+";0x000d0156;;;"+sid+")(A;"+inherit+";0x001200a9;;;"+sid+")(A;"+inherit+";FA;;;SY)(A;"+inherit+";RC;;;OW)";
   IntPtr descriptor;uint size;if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("O:"+sid+acl,1,out descriptor,out size))throw new IOException("Snapshot seal descriptor unavailable");
-  try{bool present,defaulted;IntPtr dacl;if(!GetSecurityDescriptorDacl(descriptor,out present,out dacl,out defaulted)||!present||SetSecurityInfo(h,1,0x80000004,IntPtr.Zero,IntPtr.Zero,dacl,IntPtr.Zero)!=0)throw new IOException("Snapshot directory sealing unavailable");}finally{LocalFree(descriptor);}
+  try{bool present,defaulted;IntPtr dacl;if(!GetSecurityDescriptorDacl(descriptor,out present,out dacl,out defaulted)||!present)throw new IOException("Snapshot security descriptor unavailable");uint error=SetSecurityInfo(h,1,0x80000004,IntPtr.Zero,IntPtr.Zero,dacl,IntPtr.Zero);if(error!=0)throw new IOException("Snapshot security update unavailable; Win32="+error);}finally{LocalFree(descriptor);}
  }
  public static byte[] Read(SafeFileHandle handle){
   return Read(handle,67108864);
  }
  public static byte[] Read(SafeFileHandle handle,int maximum){
-  using(FileStream stream=new FileStream(new SafeFileHandle(handle.DangerousGetHandle(),false),FileAccess.Read)){
+  using(FileStream stream=new FileStream(new SafeFileHandle(handle.DangerousGetHandle(),false),System.IO.FileAccess.Read)){
    if(stream.Length>maximum)throw new IOException("Source capture too large");byte[] bytes=new byte[(int)stream.Length];int offset=0,n;while(offset<bytes.Length){n=stream.Read(bytes,offset,bytes.Length-offset);if(n==0)throw new IOException("Source capture incomplete");offset+=n;}return bytes;
   }
  }
@@ -274,13 +288,14 @@ public static class GenerationCustody {
   return h;
  }
  public static bool Same(SafeFileHandle a,SafeFileHandle b){Info x,y;return GetFileInformationByHandle(a,out x)&&GetFileInformationByHandle(b,out y)&&x.Volume==y.Volume&&x.IndexHigh==y.IndexHigh&&x.IndexLow==y.IndexLow;}
- public static FileStream Pipe(long raw,FileAccess access){IntPtr p=new IntPtr(raw);if(GetFileType(p)!=3||!SetHandleInformation(p,1,0))throw new IOException("Parent pipe handle unavailable");return new FileStream(new SafeFileHandle(p,false),access,4096,false);}
+ public static FileStream Pipe(long raw,System.IO.FileAccess access){IntPtr p=new IntPtr(raw);if(GetFileType(p)!=3||!SetHandleInformation(p,1,0))throw new IOException("Parent pipe handle unavailable");return new FileStream(new SafeFileHandle(p,false),access,4096,false);}
  public static string Quote(string s){if(s.Length>0&&s.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0)return s;StringBuilder b=new StringBuilder("\"");int n=0;foreach(char c in s){if(c=='\\'){n++;continue;}if(c=='"'){b.Append('\\',2*n+1);b.Append(c);n=0;continue;}b.Append('\\',n);n=0;b.Append(c);}b.Append('\\',2*n);b.Append('"');return b.ToString();}
 }
 '@
 }catch{Remove-Item -LiteralPath $bootstrap.FullName -Recurse -Force;throw}finally{$env:TEMP=$savedTemp;$env:TMP=$savedTmp}
 $locks = [Collections.Generic.List[IDisposable]]::new()
 $directoryControls = [Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+$fileControls = [Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
 $captureLocks = [Collections.Generic.List[IDisposable]]::new()
 $snapshot = $null
 $child = $null
@@ -305,6 +320,8 @@ function Close-OwnedGeneration([Collections.IDictionary]$Owned) {
     Invoke-OwnedCleanupStep $errors 'counter_channel' $Owned.CounterChannel {param($r)$r.Dispose()}
     foreach($capture in $Owned.CaptureLocks){Invoke-OwnedCleanupStep $errors 'capture_handle' $capture {param($r)$r.Dispose()}}
     foreach($control in $Owned.DirectoryControls){Invoke-OwnedCleanupStep $errors 'directory_unseal' $control {param($r)[GenerationCustody]::DirectoryAccess($r,$true)}}
+    foreach($control in $Owned.FileControls){Invoke-OwnedCleanupStep $errors 'file_unseal' $control {param($r)[GenerationCustody]::FileAccess($r,$true)}}
+    foreach($control in $Owned.FileControls){Invoke-OwnedCleanupStep $errors 'file_control' $control {param($r)$r.Dispose()}}
     foreach($control in $Owned.DirectoryControls){Invoke-OwnedCleanupStep $errors 'directory_control' $control {param($r)$r.Dispose()}}
     for($index=$Owned.Locks.Count-1;$index -ge 0;$index--){Invoke-OwnedCleanupStep $errors 'custody_handle' $Owned.Locks[$index] {param($r)$r.Dispose()}}
     Invoke-OwnedCleanupStep $errors 'receipt' $Owned.Receipt {param($r)$r.Dispose()}
@@ -349,20 +366,35 @@ function Read-LockedBytes([string]$Path) {
 }
 function Assert-CounterContext {
     foreach($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
+        if(($key -in @('AI_GH_REAL_GH','GH_PATH','GH_DEBUG','GH_HTTP_UNIX_SOCKET','GH_FORCE_TTY','MSYS_NO_PATHCONV','MSYS2_ARG_CONV_EXCL','MSYS2_ENV_CONV_EXCL') -or $key -like 'AI_GH_HTTP_COUNTER_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient counter routing or injection prevents measurement; ordinary command remains available' }
     }
     foreach($key in @('GH_PAGER','PAGER')){if([Environment]::GetEnvironmentVariable($key,'Process') -and [Environment]::GetEnvironmentVariable($key,'Process') -cne 'cat'){throw 'Only literal cat pager is qualified for nonTTY read'}}
     if($env:GH_HOST -and $env:GH_HOST -cne 'github.com'){throw 'Counter supports original github.com context only'}
     if([Console]::IsInputRedirected -eq $false -or [Console]::IsOutputRedirected -eq $false){throw 'Counter requires explicit nonTTY read capsule'}
 }
 function Config-Directory {
+    # ai-gh selects this ALREADY EXISTING private SSH store before native gh.
+    # Inspect that same route; never set GH_CONFIG_DIR or create credentials.
+    if($env:GH_CONFIG_DIR){return $env:GH_CONFIG_DIR}
+    if($env:SSH_CONNECTION){
+        Assert-BashStartupEnvironment
+        if(-not $script:installedBash){throw 'Managed Git Bash identity required before config probe'}
+        # Only Git Bash builtins: no PATH-selected cygpath/helper or API call.
+        $probe='if builtin test -f "$HOME/.ai-devops/gh-ssh/hosts.yml"; then case "$HOME" in /*|[A-Za-z]:[\\/]*) ;; *) exit 3;; esac; builtin cd -- "$HOME/.ai-devops/gh-ssh" && builtin pwd -W; fi'
+        $private=Local-OnlyProbe $script:installedBash @('--noprofile','--norc','-c',$probe)
+        if($private){return $private}
+    }
     # cli2.97.0 internal/config/config.go delegates to go-gh/v2@v2.13.0
     # pkg/config/config.go:250. Windows UserHomeDir is USERPROFILE, not HOME.
-    if($env:GH_CONFIG_DIR){return $env:GH_CONFIG_DIR}
     if($env:XDG_CONFIG_HOME){return [IO.Path]::Combine($env:XDG_CONFIG_HOME,'gh')}
     if($env:APPDATA){return [IO.Path]::Combine($env:APPDATA,'GitHub CLI')}
     if($env:USERPROFILE){return [IO.Path]::Combine($env:USERPROFILE,'.config','gh')}
     throw 'Original gh configuration location unavailable'
+}
+function Assert-BashStartupEnvironment {
+    foreach($key in @([Environment]::GetEnvironmentVariables().Keys)){
+        if(($key -in @('BASH_ENV','ENV','SHELLOPTS','BASHOPTS','PS4','PROMPT_COMMAND','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')){throw 'Ambient source prevents generation qualification'}
+    }
 }
 function Assert-ConfigMetadata {
     $path=Config-Directory
@@ -535,12 +567,9 @@ try {
     if($countRequests){
         if(-not $CounterManifest -or -not $ExpectedCounterManifestSha256 -or -not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -cne 'bin/ai-gh' -or $ObserverEvents){throw 'Counter requires explicit restricted finite ai-gh read with no stdin'}
         Assert-CounterContext
-        Assert-ConfigMetadata
     }
     if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
-    foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if (($key -in @('BASH_ENV','ENV','PYTHONPATH','PYTHONHOME','PYTHONSTARTUP') -or $key -like 'BASH_FUNC_*') -and [Environment]::GetEnvironmentVariable($key,'Process')) { throw 'Ambient source prevents generation qualification' }
-    }
+    Assert-BashStartupEnvironment
     # Pin and recheck existing ancestors BEFORE the source snapshot is created.
     $parents=@();$parent=$stagingParent
     while($null -ne $parent){$parents+=$parent;$parent=$parent.Parent}
@@ -588,6 +617,7 @@ try {
     $expectedInterpreter = [GenerationCustody]::Hold($installedBash,$false,$true)
     if (-not [GenerationCustody]::Same($interpreter,$expectedInterpreter)) { throw 'Managed interpreter mismatch' }
     $locks.Add($interpreter);$locks.Add($expectedInterpreter)
+    if($countRequests){Assert-ConfigMetadata}
     $snapshot = Join-Path $stagingParent.FullName ('ai-gh-generation-'+$PID+'-'+[Guid]::NewGuid().ToString('N'))
     [GenerationCustody]::PrivateDirectory($snapshot)
     # This fresh protected object's identity is held throughout materialization,
@@ -626,13 +656,23 @@ try {
     foreach ($directory in ($directories | Sort-Object { $_.FullName.Length })) { $locks.Add([GenerationCustody]::Hold($directory.FullName,$true,$false)) }
     $snapshotDirectories = @((Get-Item -LiteralPath $snapshot)) + @(Get-ChildItem -LiteralPath $snapshot -Directory -Recurse -Force)
     foreach ($directory in $snapshotDirectories) { $directoryControls.Add([GenerationCustody]::DirectoryControl($directory.FullName)) }
+    # Retain exact fresh file data/security identities BEFORE any inheritable
+    # directory denial can reach them. Never open original/vendor/config ACLs.
+    foreach($relative in $closurePaths){
+        $path=Join-Path $snapshot $relative
+        $fileHold=[GenerationCustody]::Hold($path,$false,$true)
+        $locks.Add($fileHold)
+        if($countRequests -and $relative -ceq 'extra/counter.exe' -and -not [GenerationCustody]::Same($counterHold,$fileHold)){throw 'Pinned counter image identity mismatch'}
+        $fileControl=[GenerationCustody]::FileControl($path)
+        try{if(-not [GenerationCustody]::Same($fileHold,$fileControl)){throw 'Fresh file security identity mismatch'};$fileControls.Add($fileControl)}catch{$fileControl.Dispose();throw}
+    }
     foreach ($control in $directoryControls) { [GenerationCustody]::DirectoryAccess($control,$false) }
+    foreach ($control in $fileControls) { [GenerationCustody]::FileAccess($control,$false) }
     [GenerationCustody]::AssertClosure($snapshot,[string[]]$closurePaths)
     $manifest = [Text.StringBuilder]::new()
     foreach ($relative in $paths) {
         if ($relative -notmatch '^(bin|tools|config)/[A-Za-z0-9_./ -]+$' -or $relative -match '(^|/)\.\.(/|$)') { throw 'Unexpected generation path' }
         $path = Join-Path $snapshot $relative
-        $locks.Add([GenerationCustody]::Hold($path,$false,$true))
         $sourceBytes = [IO.File]::ReadAllBytes($path)
         if ((Git-BlobHash $sourceBytes) -ne $blobs[$relative]) { throw ('Snapshot differs from installed Git generation: '+$relative) }
         [void]$manifest.Append($relative).Append([char]0).Append((Hash-Bytes $sourceBytes)).Append("`n")
@@ -709,7 +749,7 @@ try {
 } catch {
     $primaryFailure=$_
 } finally {
-    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
+    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;FileControls=$fileControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
     foreach($failure in $cleanupErrors){
         Write-Error ('Owned generation cleanup failed at '+$failure.phase) -ErrorAction Continue
         Write-Error -ErrorRecord $failure.error -ErrorAction Continue

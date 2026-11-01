@@ -8,6 +8,23 @@ $text=[IO.File]::ReadAllText($Supervisor)
 $source=[regex]::Match($text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
 if (-not $source) { throw 'Supervisor native custody class missing' }
 Add-Type -TypeDefinition $source
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class FixtureDacl {
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern uint SetSecurityInfo(SafeFileHandle handle,uint kind,uint flags,IntPtr owner,IntPtr group,IntPtr dacl,IntPtr sacl);
+ public static void Apply(SafeFileHandle handle,byte[] descriptor){
+  if(handle==null||handle.IsInvalid||handle.IsClosed||descriptor==null||descriptor.Length==0||descriptor.Length>65536)throw new IOException("Invalid owned fixture DACL");
+  GCHandle pinned=GCHandle.Alloc(descriptor,GCHandleType.Pinned);
+  try{bool present,defaulted;IntPtr dacl;if(!GetSecurityDescriptorDacl(pinned.AddrOfPinnedObject(),out present,out dacl,out defaulted)||!present||dacl==IntPtr.Zero)throw new IOException("Owned fixture DACL required");
+   uint error=SetSecurityInfo(handle,1,0x80000004,IntPtr.Zero,IntPtr.Zero,dacl,IntPtr.Zero);if(error!=0)throw new IOException("Owned fixture DACL update failed; Win32="+error);
+  }finally{pinned.Free();}
+ }
+}
+'@
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Supervisor PowerShell syntax invalid'}
@@ -21,11 +38,61 @@ $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.Function
 . ([scriptblock]::Create($guard.Extent.Text))
 $guard=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ObserverEvent'},$true)
 . ([scriptblock]::Create($guard.Extent.Text))
-$root=Join-Path ([IO.Path]::GetTempPath()) ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+$root=$null
+$fixtureParentPins=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+# Synthetic config fixtures need the same trusted ancestry their guard tests.
+# Runner TEMP/profile ancestry can legitimately be foreign-writable for a
+# service account. Verify and pin existing standard parents; never repair them.
+# The final local-volume candidate uses only existing create-new-folder rights.
+$candidates=@([Environment]::GetFolderPath('UserProfile'),(Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),'C:\')
+foreach($candidate in $candidates){
+    if(-not $candidate){continue}
+    $pins=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+    try{
+        $parent=[IO.DirectoryInfo]::new($candidate)
+        if(-not $parent.Exists){throw 'Existing fixture parent required'}
+        if($parent.Parent -eq $null -and [IO.DriveInfo]::new($parent.FullName).DriveType -ne [IO.DriveType]::Fixed){throw 'Local fixed volume required'}
+        $ancestors=@();$cursor=$parent
+        while($null -ne $cursor){$ancestors+=$cursor;$cursor=$cursor.Parent}
+        foreach($ancestor in ($ancestors|Sort-Object {$_.FullName.Length})){
+            $pin=[GenerationCustody]::Metadata($ancestor.FullName,$true)
+            if($null -eq $pin){throw 'Fixture ancestor unavailable'}
+            try{[GenerationCustody]::AssertProtectedParent($pin,($null -eq $ancestor.Parent));$pins.Add($pin)}
+            catch{$pin.Dispose();throw}
+        }
+    }catch{foreach($pin in $pins){$pin.Dispose()};continue}
+    $root=Join-Path $parent.FullName ('ai-gh-generation-test-'+[Guid]::NewGuid().ToString('N'))
+    try{[GenerationCustody]::PrivateDirectory($root)}
+    catch{foreach($pin in $pins){$pin.Dispose()};throw}
+    $fixtureParentPins=$pins
+    break
+}
+if(-not $root){throw 'No verified existing fixture parent; no permissions changed'}
+foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
+    $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+    if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
+    . ([scriptblock]::Create($cleanupAst.Extent.Text))
+}
 $passed=0
 function Assert([bool]$Condition,[string]$Name){if(-not $Condition){throw $Name};$script:passed++}
 function Refuses([scriptblock]$Operation,[string]$Name){$refused=$false;try{& $Operation}catch{$refused=$true};Assert $refused $Name}
-[GenerationCustody]::PrivateDirectory($root)
+function Get-FixtureDacl([string]$Path,[bool]$Directory){
+    $sddl=(Get-Acl -LiteralPath $Path).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    $acl=if($Directory){[Security.AccessControl.DirectorySecurity]::new()}else{[Security.AccessControl.FileSecurity]::new()}
+    $acl.SetSecurityDescriptorSddlForm($sddl,[Security.AccessControl.AccessControlSections]::Access)
+    return $acl
+}
+function Set-FixtureDirectoryDacl([string]$Path,[Security.AccessControl.DirectorySecurity]$Acl){
+    # Only the two fresh PrivateDirectory negative fixtures call this helper.
+    # Retain no-follow control and identity pins; never request owner/group/SACL.
+    $pin=[GenerationCustody]::Hold($Path,$true,$false)
+    $control=$null
+    try{
+        $control=[GenerationCustody]::DirectoryControl($Path)
+        Assert ([GenerationCustody]::Same($pin,$control)) 'Owned DACL control binds its pinned directory'
+        [FixtureDacl]::Apply($control,$Acl.GetSecurityDescriptorBinaryForm())
+    }finally{if($null -ne $control){$control.Dispose()};$pin.Dispose()}
+}
 $file=Join-Path $root 'sealed.sh'
 $ordinary=Join-Path $root 'canonical.sh'
 [IO.File]::WriteAllText($file,'sealed bytes')
@@ -34,6 +101,8 @@ $directory=[GenerationCustody]::Hold($root,$true,$false)
 $held=[GenerationCustody]::Hold($file,$false,$true)
 $primaryFailure=$null
 $cleanupFailure=$null
+$fileControls=[Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+$control=$null
 try {
     Refuses { [IO.File]::WriteAllText($file,'altered') } 'Held source must reject writes'
     Refuses { [IO.File]::Move($file,(Join-Path $root 'renamed.sh')) } 'Held source must reject rename'
@@ -60,19 +129,30 @@ try {
 $ErrorActionPreference='Stop'
 $root=$args[0]
 if([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $args[1]){exit 10}
-Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);}'
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ParentIsolationProbe{[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint access,bool inherit,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr handle);[DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr attributes,uint disposition,uint flags,IntPtr template);}'
 $parentHandle=[ParentIsolationProbe]::OpenProcess(0x68,$false,[int]$args[2])
 if($parentHandle -ne [IntPtr]::Zero){[ParentIsolationProbe]::CloseHandle($parentHandle)|Out-Null;if($args[3] -eq '1'){exit 16}}
 try{[IO.File]::WriteAllText((Join-Path $root 'unexpected_module.py'),'attack');exit 11}catch{}
 try{[IO.Directory]::CreateDirectory((Join-Path $root 'newmodule'))|Out-Null;exit 12}catch{}
-try{$a=Get-Acl -LiteralPath $root;Set-Acl -LiteralPath $root -AclObject $a;exit 13}catch{}
+$dac=[ParentIsolationProbe]::CreateFileW($root,0x40000,7,[IntPtr]::Zero,3,0x02200000,[IntPtr]::Zero)
+if($dac -ne [IntPtr]::new(-1)){[ParentIsolationProbe]::CloseHandle($dac)|Out-Null;exit 13}
+if([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 5){exit 18}
+$dac=[ParentIsolationProbe]::CreateFileW((Join-Path $root 'sealed.sh'),0x40000,7,[IntPtr]::Zero,3,0x02200000,[IntPtr]::Zero)
+if($dac -ne [IntPtr]::new(-1)){[ParentIsolationProbe]::CloseHandle($dac)|Out-Null;exit 17}
+if([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 5){exit 19}
 try{[IO.File]::WriteAllText((Join-Path $root 'sealed.sh'),'attack');exit 14}catch{}
 if([IO.File]::ReadAllText((Join-Path $root 'sealed.sh')) -ne 'sealed bytes'){exit 15}
 exit 0
 '@)
-    $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+    $attackHold=$null
     $control=[GenerationCustody]::DirectoryControl($root)
+    $sealedFailure=$null
     try {
+        foreach($path in @($file,$ordinary,$attack)){$fileControls.Add([GenerationCustody]::FileControl($path))}
+        Assert ([GenerationCustody]::Same($held,$fileControls[0])) 'File cleanup control binds the held source identity'
+        $attackHold=[GenerationCustody]::Hold($attack,$false,$true)
+        Assert ([GenerationCustody]::Same($attackHold,$fileControls[2])) 'Attack helper control binds its held identity'
+        foreach($fileControl in $fileControls){[GenerationCustody]::FileAccess($fileControl,$false)}
         [GenerationCustody]::DirectoryAccess($control,$false)
         $beforePrivileges=[GenerationCustody]::PrivilegedContext()
         $beforePrivilegeState=[GenerationCustody]::PrivilegeState()
@@ -98,25 +178,31 @@ exit 0
         Assert ([GenerationCustody]::PrivilegedContext() -eq $beforePrivileges) 'Parent privileges remain unchanged'
         Assert ([GenerationCustody]::PrivilegeState() -eq $beforePrivilegeState) 'Parent privilege attributes remain unchanged'
         Assert (([IO.File]::ReadAllText($file)) -eq 'sealed bytes') 'Sealed directory remains readable'
-    } finally {
-        # A restoration failure must remain visible without retaining source
-        # handles that make the outer cleanup fail with a different error.
-        try {[GenerationCustody]::DirectoryAccess($control,$true)}
-        finally {try {$control.Dispose()} finally {$attackHold.Dispose()}}
+    } catch {$sealedFailure=$_}
+    finally {
+        $sealedCleanup=Close-OwnedGeneration @{DirectoryControls=@($control);FileControls=$fileControls;
+            Locks=@($attackHold);CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
+            Receipt=$null;Ack=$null;Snapshot=$null;Bootstrap=$null}
+    }
+    if($sealedFailure -or $sealedCleanup.Count){
+        $exceptions=@();if($sealedFailure){$exceptions+=$sealedFailure.Exception}
+        $exceptions+=@($sealedCleanup|ForEach-Object{$_.error.Exception})
+        throw [AggregateException]::new('Restricted fixture or explicit file restoration failed',[Exception[]]$exceptions)
     }
     [IO.File]::WriteAllText($injected,'parent restoration works')
     Assert ([IO.File]::Exists($injected)) 'Retained parent control restores cleanup access'
     [IO.File]::Delete($injected)
-    foreach($name in @('Invoke-OwnedCleanupStep','Close-OwnedGeneration')){
-        $cleanupAst=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
-        if($null -eq $cleanupAst){throw 'Owned cleanup function missing'}
-        . ([scriptblock]::Create($cleanupAst.Extent.Text))
-    }
     $faultRoot=Join-Path $root 'cleanup-fault'
     $firstDirectory=Join-Path $faultRoot 'first';$secondDirectory=Join-Path $faultRoot 'second'
     [GenerationCustody]::PrivateDirectory($faultRoot)
     [GenerationCustody]::PrivateDirectory($firstDirectory);[GenerationCustody]::PrivateDirectory($secondDirectory)
-    [IO.File]::WriteAllText((Join-Path $secondDirectory 'owned-file'),'owned cleanup fixture')
+    $ownedFile=Join-Path $secondDirectory 'owned-file'
+    [IO.File]::WriteAllText($ownedFile,'owned cleanup fixture')
+    $invalidFile=Join-Path $firstDirectory 'owned-file'
+    [IO.File]::WriteAllText($invalidFile,'owned cleanup fixture')
+    $invalidFileControl=[GenerationCustody]::FileControl($invalidFile);$invalidFileControl.Dispose()
+    $laterFileControl=[GenerationCustody]::FileControl($ownedFile)
+    [GenerationCustody]::FileAccess($laterFileControl,$false)
     $invalidControl=[GenerationCustody]::DirectoryControl($firstDirectory);$invalidControl.Dispose()
     $laterControl=[GenerationCustody]::DirectoryControl($secondDirectory)
     [GenerationCustody]::DirectoryAccess($laterControl,$false)
@@ -127,12 +213,17 @@ exit 0
     $cleanupBootstrap=Join-Path $root 'cleanup-bootstrap'
     [GenerationCustody]::PrivateDirectory($cleanupBootstrap)
     $cleanupFailures=Close-OwnedGeneration @{Job=$recording;Child=$null;EventChannel=$recording;CounterChannel=$recording;
-        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);Locks=@($recording);
+        CaptureLocks=@($throwing,$recording);DirectoryControls=@($invalidControl,$laterControl);
+        FileControls=@($invalidFileControl,$laterFileControl);Locks=@($recording);
         Receipt=$recording;Ack=$recording;Snapshot=$faultRoot;Bootstrap=$cleanupBootstrap}
-    Assert ($cleanupFailures.Count -eq 2) 'Every injected cleanup failure remains visible'
+    if($cleanupFailures.Count -ne 3){
+        foreach($failure in $cleanupFailures){[Console]::Error.WriteLine(('OWNED_CLEANUP_PHASE '+$failure.phase+' '+$failure.error.Exception.GetType().Name+' '+$failure.error.Exception.HResult))}
+    }
+    Assert ($cleanupFailures.Count -eq 3) 'Every injected cleanup failure remains visible'
     Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'directory_unseal'}).Count -eq 1) 'First failed native unseal is retained'
     Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'capture_handle'}).Count -eq 1) 'First failed capture disposal is retained'
-    Assert ($laterControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
+    Assert (@($cleanupFailures|Where-Object {$_.phase -eq 'file_unseal'}).Count -eq 1) 'First failed file unseal is retained'
+    Assert ($laterControl.IsClosed -and $laterFileControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
     Assert (-not (Test-Path -LiteralPath $faultRoot) -and -not (Test-Path -LiteralPath $cleanupBootstrap)) 'Later native unseal permits actual owned directory cleanup'
     Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
@@ -212,7 +303,7 @@ else:
         try{[Environment]::SetEnvironmentVariable($key,'unsupported-test-context','Process');Refuses {Assert-CounterContext} ('Ambient counter context refused: '+$key);Assert ([Environment]::GetEnvironmentVariable($key,'Process') -ceq 'unsupported-test-context') 'Counter guard preserves original environment'}finally{[Environment]::SetEnvironmentVariable($key,$saved,'Process')}
     }
     $savedConfigEnvironment=@{}
-    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    foreach($key in @('GH_CONFIG_DIR','XDG_CONFIG_HOME','APPDATA','USERPROFILE','GH_TOKEN','GITHUB_TOKEN','SSH_CONNECTION')){$savedConfigEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
     $savedConfigLocks=$script:locks;$script:locks=[Collections.Generic.List[IDisposable]]::new()
     try{
         foreach($key in $savedConfigEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
@@ -231,28 +322,27 @@ else:
         $meta=[GenerationCustody]::Metadata((Join-Path $config 'hosts.yml'),$false)
         try{Refuses {[GenerationCustody]::Read($meta)} 'Metadata handle cannot read credential bytes'}finally{$meta.Dispose()}
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)
-        $acl=Get-Acl -LiteralPath $hostFile
+        $hostFile=Join-Path $config 'hosts.yml';$originalAcl=(Get-Acl -LiteralPath $hostFile).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+        $acl=Get-FixtureDacl $hostFile $false
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Write,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $hostFile -AclObject $acl
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config file refused'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),[Security.AccessControl.FileSystemRights]::ReadData,[Security.AccessControl.AccessControlType]::Allow))
         Set-Acl -LiteralPath $hostFile -AclObject $acl
         Refuses {Assert-ConfigMetadata} 'Foreign credential file reader refused without reading bytes'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
-        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl);Set-Acl -LiteralPath $hostFile -AclObject $acl
+        $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($originalAcl,[Security.AccessControl.AccessControlSections]::Access);Set-Acl -LiteralPath $hostFile -AclObject $acl
         $unsafe=Join-Path $root 'metadata-unsafe';[GenerationCustody]::PrivateDirectory($unsafe)
-        $acl=Get-Acl -LiteralPath $unsafe
+        $acl=Get-FixtureDacl $unsafe $true
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.AccessControlType]::Allow))
-        Set-Acl -LiteralPath $unsafe -AclObject $acl;$env:GH_CONFIG_DIR=$unsafe
+        Set-FixtureDirectoryDacl $unsafe $acl;$env:GH_CONFIG_DIR=$unsafe
         Refuses {Assert-ConfigMetadata} 'Foreign-writable config namespace refused'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear()
         $env:GH_CONFIG_DIR=$config
         $alias=Join-Path $config 'config.yml'
-        & fsutil hardlink create $alias (Join-Path $config 'hosts.yml')|Out-Null
-        if($LASTEXITCODE -ne 0){throw 'Config alias fixture unavailable'}
+        New-Item -ItemType HardLink -Path $alias -Value (Join-Path $config 'hosts.yml') -ErrorAction Stop|Out-Null
         Refuses {Assert-ConfigMetadata} 'Config file alias refused without reading'
         foreach($lock in $script:locks){$lock.Dispose()};$script:locks.Clear();Remove-Item -LiteralPath $alias
         $junction=Join-Path $root 'metadata-junction';New-Item -ItemType Junction -Path $junction -Target $config|Out-Null;$env:GH_CONFIG_DIR=$junction
@@ -339,9 +429,9 @@ else:
     $parentHandle=[GenerationCustody]::Hold($unsafeParent,$true,$false)
     try{
         [GenerationCustody]::AssertProtectedParent($parentHandle,$false)
-        $a=Get-Acl -LiteralPath $unsafeParent
+        $a=Get-FixtureDacl $unsafeParent $true
         $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Modify','None','None','Allow'))
-        Set-Acl -LiteralPath $unsafeParent -AclObject $a
+        Set-FixtureDirectoryDacl $unsafeParent $a
         $candidate=Join-Path $unsafeParent 'candidate'
         Refuses {[GenerationCustody]::AssertProtectedParent($parentHandle,$false);[GenerationCustody]::PrivateDirectory($candidate)} 'Unsafe parent refused BEFORE snapshot creation'
         Assert (-not [IO.Directory]::Exists($candidate)) 'Unsafe namespace never materialized'
@@ -372,15 +462,18 @@ else:
     New-Item -ItemType Junction -Path $junction -Target $root | Out-Null
     try { Refuses {$h=[GenerationCustody]::Hold($junction,$true,$false);$h.Dispose()} 'Reparse directory refuses' } finally {[IO.Directory]::Delete($junction)}
     $link=Join-Path $root 'hardlink.sh'
-    & fsutil hardlink create $link $file | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Hardlink fixture unavailable' }
+    New-Item -ItemType HardLink -Path $link -Value $file -ErrorAction Stop | Out-Null
     Refuses { $h=[GenerationCustody]::Hold($link,$false,$true);$h.Dispose() } 'Hardlinked source refuses'
     Remove-Item -LiteralPath $link
 } catch { $primaryFailure=$_ }
 finally {
     try {
-        try {$held.Dispose()} finally {$directory.Dispose()}
-        Remove-Item -LiteralPath $root -Recurse -Force
+        $remainingFiles=@($fileControls|Where-Object{-not $_.IsClosed})
+        $remainingDirectories=@();if($control -and -not $control.IsClosed){$remainingDirectories=@($control)}
+        $outerCleanup=Close-OwnedGeneration @{DirectoryControls=$remainingDirectories;FileControls=$remainingFiles;
+            Locks=(@($fixtureParentPins.ToArray())+@($directory,$held));CaptureLocks=@();Job=$null;Child=$null;EventChannel=$null;CounterChannel=$null;
+            Receipt=$null;Ack=$null;Snapshot=$root;Bootstrap=$null}
+        if($outerCleanup.Count){throw [AggregateException]::new('Owned fixture cleanup failed',[Exception[]]@($outerCleanup|ForEach-Object{$_.error.Exception}))}
     } catch { $cleanupFailure=$_ }
 }
 if($null -ne $primaryFailure){
