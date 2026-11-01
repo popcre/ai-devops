@@ -134,6 +134,10 @@ cd /worksp/ai-devops
    (non-dry-run) path.
 6. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
+   global refresh also covers existing ZCode and MiMo homes without creating
+   absent client homes. It refreshes recognized older template bodies, preserves
+   machine sections byte-for-byte (including Windows CRLF), and leaves unknown
+   local edits untouched unless explicit adoption was requested. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects
    the Z.ai Coding Plan key from 1Password, proves a real GLM-5.3 OpenCode
    agent call, and installs the protected Muse review profile into its isolated
