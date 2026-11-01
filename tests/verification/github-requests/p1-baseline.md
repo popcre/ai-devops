@@ -1007,11 +1007,35 @@ output/status. No pacing or external CI delay was added to obtain the pass.
 The earlier `4afc` cold failure and default-feature development result are
 retained, not upgraded to matching-runtime evidence. The new local result
 establishes only this finite complete Linux observer qualification. Windows
-native cold performance remains failed; its current trace investigation points
-to native launch/path-opening work, not a proven Go GC or pipe defect, and no
-Defender attribution is made. Windows batch tests (38 with two declared platform
+native cold performance remains failed. A later symbolized trace isolates the
+observed launch spike to Windows kernel process-security LUID-index cleanup,
+not NTFS, Go GC or the numeric pipe; the cause of the accumulated kernel table
+remains unknown and no Defender attribution is made. Windows batch tests (38 with two declared platform
 skips), sharing tests (19 with five declared platform skips), 107 native source
 fixtures and seven-pin original-config preflight are candidate proofs, not
 already-installed outcomes. PR #2267 delivery and final installed live proof
 remain pending; natural request reduction, useful-work p95 and broader account
 coverage remain separate open measurements.
+
+The independently checked Windows launch-cause digest is
+`849a4fdf45c55c3bcae0714b7e9bbcb19f21a36f41f9beb7962ec125eac0d9ff`.
+Candidate parent launch took 131.8351 ms versus baseline 3.3516 ms; child wait
+was 32.9182 versus 32.8564 ms. Of 132 parent CPU samples during the delayed
+launch, 129 were in the symbolized process-security path through
+`SepCleanupMarkedForDeletionEntries` and `RtlEnumerateEntryHashTable`, spanning
+about 128 ms. No trace events were lost and the owned recording stopped.
+This diagnoses the sampled delay, not a kernel repair or counter timing pass.
+
+The actual host is Windows 11 26H2 build 26300.9711. Microsoft's
+[installed-update notice](https://support.microsoft.com/en-au/servicing/os/windows-11/2026/10/kb5127648-windows-11-24h2-25h2-26h2-security-update),
+[newer preview notice](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/10/kb5127936-windows-11-25h2-26h2-update)
+and [current release health](https://learn.microsoft.com/en-us/windows/release-health/status-windows-11-26h2)
+do not identify a targeted fix for this LUID-index cleanup slowdown. The newer
+preview's token-related RDP fix concerns a different symptom. OpenAI's
+[Windows guidance](https://learn.chatgpt.com/docs/windows/windows-sandbox) and
+[changelog](https://learn.chatgpt.com/docs/changelog) likewise do not establish
+a targeted fix. The [existing Codex discussion](https://github.com/openai/codex/discussions/29949)
+contains user-reported process/token churn, not a confirmed fix or evidence
+that Codex caused this host's accumulated state. Patched vendors, disabled
+features, changed foreground/security settings and a reboot are not asserted
+as a supported repair by this record.
