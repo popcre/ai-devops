@@ -10,6 +10,15 @@ Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desk
 
 ## STATUS — read before doing work
 
+October 31 closeout: Muse's corrected static source/plan review approved narrow
+qualification pilots only. Read the
+[decision record](docs/muse-egm-tokeneconomizer-review-2026-10-31.md) and
+[small-trials handoff](HANDOFF.d/2026-11-01T0208Z-edge-dev3-codex-small-trials-handoff.md)
+before step 1. Reconcile current #2220 execution ownership first. Handoff §6
+specifies the tiny isolated loopguard/environment-facts smoke after applicability
+and privacy checks, before the larger managed-installation matrix. No trial or
+installation was performed by this review/closeout session; rows remain open.
+
 | Step | State | Evidence / next gate |
 |---|---|---|
 | 1 Inventory and classify all four desktops | ⬜ open | Publish versioned applicability report |
