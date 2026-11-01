@@ -1519,8 +1519,485 @@ def qualify_wait(root, manifest, arguments, receipt_path, manifest_fd=None):
                 launch_context.__exit__(None, None, None)
             generation_context.__exit__(None, None, None)
 
+ACTIVE_BEGIN_KEYS = {"schema", "measurement", "phase", "caller", "workflow", "workflow_id",
+                     "parent_workflow_id", "boundary"}
+ACTIVE_CHANNEL_ENV = ("AI_GH_ACTIVE_EVENT_FD", "AI_GH_ACTIVE_ACK_FD", "AI_GH_ACTIVE_PYTHON",
+                      "AI_GH_ACTIVE_EVENT_HANDLE", "AI_GH_ACTIVE_ACK_HANDLE")
+ACTIVE_ACK_SECONDS = 0.250
+ACTIVE_MAX_FRAMES = 256
+
+
+def active_begin_valid(row):
+    return (isinstance(row, dict) and set(row) == ACTIVE_BEGIN_KEYS
+            and type(row["schema"]) is int and row["schema"] == 1
+            and row["measurement"] == "active_completion_boundary" and row["phase"] == "begin"
+            and row["caller"] == "ai-blocker-watch" and isinstance(row["workflow"], str)
+            and row["workflow"] in ACTIVE_RECEIPT_BOUNDARIES
+            and row["boundary"] == ACTIVE_RECEIPT_BOUNDARIES[row["workflow"]]
+            and valid_workflow_id(row["workflow_id"])
+            and (row["parent_workflow_id"] is None or (valid_workflow_id(row["parent_workflow_id"])
+                 and row["parent_workflow_id"] != row["workflow_id"])))
+
+
+def active_outcome_valid(row, parent=False):
+    if (not isinstance(row, dict) or type(row.get("schema")) is not int or row["schema"] != 3
+            or row.get("measurement") != "workflow_outcome" or row.get("caller") != "ai-blocker-watch"
+            or not isinstance(row.get("workflow"), str) or not isinstance(row.get("outcome"), str)
+            or not valid_workflow_id(row.get("workflow_id"))
+            or not isinstance(row.get("utc"), str)
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["utc"]) is None
+            or type(row.get("elapsed_ms")) is not int or not 0 <= row["elapsed_ms"] <= 604800000):
+        return False
+    if parent and set(row) == RECEIPT_KEYS:
+        return row["workflow"] == "blocker_watch_tick" and row["outcome"] == "completed"
+    if (set(row) != ACTIVE_RECEIPT_KEYS or row.get("workflow") not in ACTIVE_RECEIPT_BOUNDARIES
+            or (row["caller"], row["workflow"], row.get("outcome")) not in RECEIPT_LABELS):
+        return False
+    try:
+        validate_active_receipt(row)
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _active_pipe(value):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9]{1,5}", value) is None:
+        raise ValueError("invalid active channel")
+    fd = int(value)
+    if not 3 <= fd <= 65535 or not stat.S_ISFIFO(os.fstat(fd).st_mode):
+        raise ValueError("invalid active channel")
+    return fd
+
+
+def active_channel_helper(phase, data):
+    """Unqualified source-side data transport; no source/clock claims accepted."""
+    if not isinstance(data, bytes) or len(data) > 4096:
+        return False
+    try:
+        import select
+        location = str(pathlib.Path(__file__).resolve().parent)
+        if location not in sys.path:
+            sys.path.insert(0, location)
+        from measure_append import write_event_fd
+        row = json.loads(data, object_pairs_hook=unique_object)
+        if phase == "begin":
+            if not active_begin_valid(row):
+                return False
+        elif phase != "end" or not active_outcome_valid(row, parent=True):
+            return False
+        if os.name == "nt":
+            import windows_event
+            return windows_event.active_completion_io(phase, row, ACTIVE_ACK_SECONDS)
+        if not sys.platform.startswith("linux"):
+            return False
+        event_fd = _active_pipe(os.environ.get("AI_GH_ACTIVE_EVENT_FD"))
+        ack_fd = _active_pipe(os.environ.get("AI_GH_ACTIVE_ACK_FD"))
+        if event_fd == ack_fd:
+            return False
+        started = time.monotonic()
+        if not write_event_fd(event_fd, json.dumps(row, separators=(",", ":"))):
+            return False
+        if phase == "end":
+            return True
+        remaining = ACTIVE_ACK_SECONDS - (time.monotonic() - started)
+        if remaining <= 0 or not select.select([ack_fd], [], [], remaining)[0]:
+            return False
+        raw = os.read(ack_fd, 4097)
+        if time.monotonic() - started > ACTIVE_ACK_SECONDS or len(raw) > 4096 or not raw.endswith(b"\n"):
+            return False
+        ack = json.loads(raw, object_pairs_hook=unique_object)
+        return (isinstance(ack, dict) and set(ack) == {"schema", "phase", "workflow_id"}
+                and type(ack["schema"]) is int and ack["schema"] == 1 and ack["phase"] == "ack"
+                and ack["workflow_id"] == row["workflow_id"])
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return False
+
+
+def active_harness_exec(arguments):
+    """Replace this trusted helper once; observer channels cannot cross exec."""
+    if not arguments:
+        return 127
+    if os.name == "nt":
+        import windows_event
+        return windows_event.active_harness_exec(arguments)
+    environment = os.environ.copy()
+    event = environment.get("AI_GH_ACTIVE_EVENT_FD")
+    unsafe = False
+    # ACK first: the event channel is still available for negative-only invalidation.
+    for key in ("AI_GH_ACTIVE_ACK_FD", "AI_GH_ACTIVE_EVENT_FD", "AI_GH_QUALIFICATION_EVENT_FD"):
+        value = environment.get(key)
+        if value is None:
+            continue
+        try:
+            fd = _active_pipe(value)
+            os.close(fd)
+            try:
+                os.fstat(fd)
+                unsafe = True
+            except OSError as error:
+                import errno
+                unsafe |= error.errno != errno.EBADF
+        except (OSError, ValueError, TypeError):
+            unsafe = True
+        if unsafe and event is not None:
+            try:
+                location = str(pathlib.Path(__file__).resolve().parent)
+                if location not in sys.path:
+                    sys.path.insert(0, location)
+                from measure_append import write_event_fd
+                write_event_fd(int(event), "{}")  # Invalidates the entire capture, never qualifies data.
+            except (OSError, ValueError, TypeError):
+                pass
+    for key in (*ACTIVE_CHANNEL_ENV, "AI_GH_QUALIFICATION_EVENT_FD", "AI_GH_QUALIFICATION_EVENT_HANDLE"):
+        environment.pop(key, None)
+    try:
+        os.execvpe(arguments[0], arguments, environment)
+    except OSError:
+        return 127
+
+
+def active_completion_interval(start, end, source_verified):
+    result = {"boundary": "parent_acknowledged_active_begin_to_end", "clock_quality": "unknown",
+              "duration_lower_ms": None, "duration_upper_ms": None, "unknown_reason": "source_unknown",
+              "includes_control_transport": True, "detection_latency_ms": None,
+              "detection_unknown_reason": "eligibility_and_delivery_not_witnessed"}
+    if not source_verified:
+        return result
+    result["unknown_reason"] = "clock_unknown"
+    if start is None or end is None:
+        return result
+    elapsed = end["monotonic_ms"] - start["monotonic_ms"]
+    wall = end["wall_ms"] - start["wall_ms"]
+    bound = start["error_bound_ms"] + end["error_bound_ms"] + 2
+    if elapsed < 0 or wall < 0 or abs(elapsed - wall) > bound:
+        result["unknown_reason"] = "clock_jump"
+        return result
+    result.update(clock_quality="parent_monotonic_host_bookends", duration_lower_ms=max(0, elapsed - bound),
+                  duration_upper_ms=elapsed + bound, unknown_reason="none")
+    return result
+
+
+class ActiveCompletionTranscript:
+    """Shared finite DATA parser. Its result never grants source authority."""
+    def __init__(self, operation, acknowledge):
+        self.operation, self.acknowledge = operation, acknowledge
+        self.pending, self.completed, self.parents, self.seen = {}, [], {}, set()
+        self.invalid, self.frames = False, 0
+
+    def receive(self, row, clock, queued=False):
+        self.frames += 1
+        if self.frames > ACTIVE_MAX_FRAMES:
+            self.invalid = True
+            return
+        if active_begin_valid(row):
+            if queued:
+                self.invalid = True
+                return
+            identity = row["workflow_id"]
+            if (identity in self.seen or self.pending or (self.operation != "tick" and
+                    (row["workflow"] != "blocker_watch_" + self.operation or row["parent_workflow_id"] is not None))
+                    or (self.operation == "tick" and row["parent_workflow_id"] is None)):
+                self.invalid = True
+                return
+            self.seen.add(identity)
+            self.pending[identity] = (row, clock, bool(self.acknowledge(identity)))
+            return
+        if not active_outcome_valid(row, parent=True):
+            self.invalid = True
+            return
+        if row["workflow"] == "blocker_watch_tick":
+            identity = row["workflow_id"]
+            if self.operation != "tick" or identity in self.parents or self.pending:
+                self.invalid = True
+            else:
+                self.parents[identity] = row
+            return
+        identity = row["workflow_id"]
+        beginning = self.pending.pop(identity, None)
+        if beginning is None:
+            self.invalid = True
+            return
+        first, start, acknowledged = beginning
+        if any(row[key] != first[key] for key in ("workflow", "workflow_id", "parent_workflow_id", "boundary")):
+            self.invalid = True
+            return
+        self.completed.append((row, start, clock, acknowledged))
+
+    def protocol_result(self, status):
+        valid = (not self.invalid and not self.pending and bool(self.completed)
+                 and all(acknowledged for *_, acknowledged in self.completed))
+        if self.operation == "tick":
+            valid &= (status == 0 and len(self.parents) == 1 and all(
+                row["parent_workflow_id"] in self.parents for row, *_ in self.completed))
+        return bool(valid), list(self.completed), dict(self.parents)
+
+    def result(self, status, source_verified=False):
+        # The source flag belongs to the calling live supervisor, never frames.
+        protocol_ok, completed, parents = self.protocol_result(status)
+        source_ok = protocol_ok and source_verified is True
+        records = []
+        for row, start, end, acknowledged in completed:
+            records.append({"outcome_record": row,
+                "completion_qualification": active_completion_interval(start, end, source_ok and acknowledged),
+                "active_success": row["outcome"] in {"completed", "process_succeeded"},
+                "parent_state": "matched" if row["parent_workflow_id"] in parents else
+                                "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"})
+        return bool(source_ok), records
+
+
+class ActiveCompletionObserver(ActiveCompletionTranscript):
+    """Linux owner: JSON cannot substitute for its active opaque custody."""
+    def __init__(self, generation, operation, acknowledge):
+        super().__init__(operation, acknowledge)
+        self.generation = generation
+
+    def receive(self, row, clock, queued=False):
+        if not retained_generation_valid(self.generation):
+            self.invalid = True
+            return
+        super().receive(row, clock, queued)
+
+    def result(self, status):
+        return super().result(status, retained_generation_valid(self.generation))
+
+
+def active_privilege_state():
+    """Read-only OS metadata, never a probe of sudo or privilege acquisition."""
+    names = {"Uid", "Gid", "Groups", "CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb",
+             "NoNewPrivs", "Seccomp", "Seccomp_filters"}
+    if not sys.platform.startswith("linux"):
+        raise ValueError("native privilege observation unavailable")
+    with open("/proc/self/status", encoding="ascii") as stream:
+        result = {key: value.strip() for key, value in (line.split(":", 1) for line in stream) if key in names}
+    if set(result) != names:
+        raise ValueError("incomplete privilege observation")
+    result["user_namespace_inode"] = os.stat("/proc/self/ns/user").st_ino
+    return result
+
+
+def active_sdk_profile(before, inside):
+    """Opt-in SDK component only: never equivalent arbitrary-provider authority."""
+    if set(before) != set(inside):
+        return False
+    if any(before[key] != inside[key] for key in ("Uid", "Gid", "Seccomp", "Seccomp_filters")):
+        return False
+    try:
+        return all(int(state[key], 16) == 0 for state in (before, inside) for key in ("CapPrm", "CapEff", "CapAmb"))
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def _save_active_parent_receipt(receipt_path, receipt):
+    try:
+        destination = pathlib.Path(receipt_path)
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w") as stream:
+            json.dump(receipt, stream, separators=(",", ":")); stream.write("\n")
+    except Exception:
+        print("active qualification: receipt unavailable; original command status preserved", file=sys.stderr)
+
+
+def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="original_context"):
+    """Execute one original finite operation. No fallback after Popen starts."""
+    started = time.perf_counter_ns()
+    arguments = list(arguments)
+    if (not arguments or arguments[0] not in {"alarm", "links", "tick"}
+            or arguments[1:] not in ([], ["--dry-run"])):
+        raise ValueError("unsupported BlockerWatch operation")
+    root = pathlib.Path(root).resolve()
+    environment = os.environ.copy()
+    for key in (*ACTIVE_CHANNEL_ENV, "AI_GH_QUALIFICATION_EVENT_FD", "AI_GH_QUALIFICATION_EVENT_HANDLE"):
+        environment.pop(key, None)
+    receipt = {"schema": 1, "measurement": "live_parent_blocker_watch_qualification",
+               "operation_kind": arguments[0], "dry_run": arguments[1:] == ["--dry-run"],
+               "workload_kind": "fixture" if os.environ.get("AI_DEVOPS_TEST_MODE") == "1" else "caller_command",
+               "source_verified": "unknown", "source_boundary": "unknown", "source_sha": None,
+               "source_fingerprint": None, "install_generation_binding": None,
+               "unknown_reason": "boundary_unavailable", "clock_start": None, "clock_end": None,
+               "child_exit": None, "active_outcomes": [], "detection_latency_ms": None,
+               "detection_unknown_reason": "eligibility_and_delivery_not_witnessed",
+               "source_bootstrap_ns": None, "qualification_elapsed_ns": None,
+               "begin_ack_deadline_ms": 250, "http_requests": None, "programme_acceptance": "unknown",
+               "qualification_profile": profile, "original_privilege_equivalence": False,
+               "provider_acceptance": False, "privilege_context": None}
+    descriptors, generation_context, launch_context, generation = [], None, None, None
+    selector, child, observer = None, None, None
+    operation_started = None
+    buffer = bytearray()
+    previous_term = None
+    class ActiveCancelled(BaseException):
+        def __init__(self, signum): self.signum = signum
+    def cancelled(signum, frame): raise ActiveCancelled(signum)
+    if threading.current_thread() is threading.main_thread():
+        previous_term = signal.signal(signal.SIGTERM, cancelled)
+    try:
+        try:
+            receipt["unknown_reason"] = "original_privilege_context_not_preserved"
+            if profile != "sdk_only_no_provider" or arguments[0] == "tick":
+                raise ValueError("arbitrary provider context is not admitted")
+            if os.environ.get("AI_GH_REAL_GH") or os.environ.get("GH_PATH"):
+                raise ValueError("custom runtime capability is not admitted")
+            trusted_boundary_executable(shutil.which("gh") or "")
+            generation_context = retained_generation(root, manifest)
+            generation = generation_context.__enter__()
+            python = trusted_boundary_executable(pathlib.Path(sys.executable))
+            before = active_privilege_state()
+            with retained_generation_launch(generation) as probe:
+                script = ('import runpy,sys; p=sys.argv.pop(1); '
+                          'sys.path.insert(0,__import__("os").path.dirname(p)); runpy.run_path(p,run_name="__main__")')
+                observed = subprocess.run(list(probe["argv_prefix"]) + [python, "-I", "-S", "-c", script,
+                    str(root / "tools/github-requests/report.py"), "--active-privilege-probe"],
+                    pass_fds=probe["pass_fds"], capture_output=True, timeout=10, check=True)
+            inside = json.loads(observed.stdout, object_pairs_hook=unique_object)
+            receipt["privilege_context"] = {"before": before, "inside": inside,
+                "difference_fields": sorted(key for key in before if before[key] != inside.get(key))}
+            if not active_sdk_profile(before, inside):
+                raise ValueError("SDK component privilege context unavailable")
+            launch_context = retained_generation_launch(generation)
+            launch = launch_context.__enter__()
+            event_read, event_write = os.pipe()
+            ack_read, ack_write = os.pipe()
+            descriptors += [event_read, event_write, ack_read, ack_write]
+            environment.update(AI_GH_ACTIVE_EVENT_FD=str(event_write), AI_GH_ACTIVE_ACK_FD=str(ack_read),
+                               AI_GH_ACTIVE_PYTHON=str(python))
+            command = list(launch["argv_prefix"]) + [generation["bash_path"], str(root / "bin/ai-blocker-watch"), *arguments]
+            from measure_append import write_event_fd
+            observer = ActiveCompletionObserver(generation, arguments[0], lambda identity: write_event_fd(
+                ack_write, json.dumps({"schema": 1, "phase": "ack", "workflow_id": identity}, separators=(",", ":"))))
+            inherited = launch["pass_fds"] + (event_write, ack_read)
+            receipt.update(generation["identity"], source_bootstrap_ns=generation["bootstrap_ns"])
+        except Exception:
+            for fd in descriptors:
+                os.close(fd)
+            descriptors = []
+            if launch_context is not None:
+                launch_context.__exit__(None, None, None); launch_context = None
+            if generation_context is not None:
+                generation_context.__exit__(None, None, None); generation_context = None
+            for key in ACTIVE_CHANNEL_ENV:
+                environment.pop(key, None)
+            observer = None
+            inherited = ()
+            command = [shutil.which("bash") or "/bin/bash", str(root / "bin/ai-blocker-watch"), *arguments]
+        receipt["clock_start"] = qualification_clock()
+        receipt["observer_setup_elapsed_ns"] = time.perf_counter_ns() - started
+        operation_started = time.perf_counter_ns()
+        child = subprocess.Popen(command, env=environment, pass_fds=inherited, start_new_session=True)
+        if observer is not None:
+            for fd in (event_write, ack_read):
+                os.close(fd); descriptors.remove(fd)
+            os.set_blocking(event_read, False)
+            selector = selectors.DefaultSelector(); selector.register(event_read, selectors.EVENT_READ)
+            eof = False
+            while child.poll() is None or not eof:
+                events = selector.select(timeout=0.05)
+                if not events and child.poll() is not None:
+                    break
+                for key, _ in events:
+                    chunk = os.read(key.fd, 4097)
+                    if not chunk:
+                        eof = True; selector.unregister(key.fd); continue
+                    buffer.extend(chunk)
+                    if len(buffer) > 8192:
+                        observer.invalid = True; buffer.clear()
+                    while b"\n" in buffer:
+                        line, _, remaining = buffer.partition(b"\n"); buffer[:] = remaining
+                        try:
+                            if len(line) > 4096:
+                                raise ValueError("oversized active frame")
+                            row = json.loads(line, object_pairs_hook=unique_object)
+                            observer.receive(row, qualification_clock(), queued=bool(buffer) and active_begin_valid(row))
+                        except Exception:
+                            observer.invalid = True
+            if buffer:
+                observer.invalid = True
+        status = child.wait()
+        receipt["operation_supervision_elapsed_ns"] = time.perf_counter_ns() - operation_started
+        receipt.update(child_exit=status, clock_end=qualification_clock())
+        if observer is not None:
+            verified, records = observer.result(status)
+            receipt.update(source_verified="verified" if verified else "unknown", active_outcomes=records,
+                           unknown_reason="none" if verified else "active_observation_untrusted")
+        return status if status >= 0 else 128 - status
+    except (KeyboardInterrupt, ActiveCancelled) as interruption:
+        signum = interruption.signum if isinstance(interruption, ActiveCancelled) else signal.SIGINT
+        if child is not None and child.poll() is None:
+            try: os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError: pass
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try: os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                child.wait()
+        receipt.update(source_verified="unknown", unknown_reason="cancelled", child_exit=128 + signum,
+                       active_outcomes=[])
+        return 128 + signum
+    except Exception:
+        # Observation failure after launch never retries, kills or reclassifies
+        # the original operation. Optional channels are bounded/nonblocking.
+        if child is None:
+            raise
+        status = child.wait()
+        receipt.update(source_verified="unknown", unknown_reason="observation_failed", child_exit=status,
+                       active_outcomes=[])
+        return status if status >= 0 else 128 - status
+    finally:
+        cleanup_started = time.perf_counter_ns()
+        cleanup_ok = True
+        if selector is not None:
+            try: selector.close()
+            except Exception: cleanup_ok = False
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
+        for fd in descriptors:
+            try: os.close(fd)
+            except OSError: cleanup_ok = False
+        for context in (launch_context, generation_context):
+            if context is not None:
+                try: context.__exit__(None, None, None)
+                except Exception: cleanup_ok = False
+        receipt.update(cleanup_elapsed_ns=time.perf_counter_ns() - cleanup_started,
+                       qualification_elapsed_ns=time.perf_counter_ns() - started,
+                       qualification_elapsed_scope="caller_function_entry_through_source_and_channel_cleanup",
+                       caller_process_bootstrap_elapsed_ns=None, receipt_storage_elapsed_ns=None,
+                       whole_observer_budget_qualification="unknown",
+                       observer_cleanup_complete=cleanup_ok,
+                       narrow_completion_envelope_excludes="source_capture_begin_helper_startup_post_end_storage_and_cleanup")
+        if not cleanup_ok:
+            receipt.update(source_verified="unknown", unknown_reason="custody_cleanup_failed", active_outcomes=[])
+        _save_active_parent_receipt(receipt_path, receipt)
+
+
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 2 and sys.argv[1] == "--active-privilege-probe":
+            print(json.dumps(active_privilege_state(), separators=(",", ":")))
+            sys.exit(0)
+        if len(sys.argv) == 2 and sys.argv[1] == "--active-harness":
+            # BW's original provider stdin is /dev/null. NUL framing avoids
+            # an extra native/MSYS argv conversion; never store these values.
+            data = sys.stdin.buffer.read()
+            if not data.endswith(b"\0"):
+                sys.exit(127)
+            arguments = [os.fsdecode(value) for value in data[:-1].split(b"\0")]
+            null = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(null, 0)
+            if null != 0: os.close(null)
+            sys.exit(active_harness_exec(arguments))
+        if len(sys.argv) == 3 and sys.argv[1] == "--active-channel":
+            sys.exit(0 if active_channel_helper(sys.argv[2], sys.stdin.buffer.read(4097)) else 1)
+        if len(sys.argv) > 1 and sys.argv[1] == "--qualify-blocker-watch":
+            import argparse
+            parser = argparse.ArgumentParser(description="Observe one source-custodied BlockerWatch operation")
+            parser.add_argument("--source-root", required=True)
+            parser.add_argument("--manifest", default="/etc/ai-devops/install-manifest.tsv")
+            parser.add_argument("--receipt", required=True)
+            parser.add_argument("--profile", choices=("original_context", "sdk_only_no_provider"), default="original_context")
+            parser.add_argument("arguments", nargs=argparse.REMAINDER)
+            options = parser.parse_args(sys.argv[2:])
+            arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
+            sys.exit(qualify_blocker_watch(options.source_root, options.manifest, arguments, options.receipt, options.profile))
         if len(sys.argv) > 1 and sys.argv[1] == "--qualify-wait":
             import argparse
             parser = argparse.ArgumentParser(description="Run an explicitly qualified live PR waiter")
