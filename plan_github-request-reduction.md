@@ -22,8 +22,14 @@ reads remain unchanged under the replay assumptions, so observed read reduction
 is still 0%, failing the 50% replay target. Original arrivals, response heads and
 overlap were not recorded; natural savings and global irreducibility remain
 unknown. This is candidate code/local replay proof, not a merged installation or
-programme acceptance. Windows and full Linux observer qualification are being
-completed separately; no unverified outcome is counted as installed.
+programme acceptance. The repaired complete Linux observer now passed one
+unchanged strict qualification using the correctly matched updateable build:
+twenty cold pairs p95 +4.66224%/total +0.74847%, twenty warm pairs p95
++1.14350%/total -0.62509%, including bootstrap and teardown, matched request
+ledgers and successful cleanup. Earlier failed/development variants remain
+preserved. Windows focused proofs passed, while native cold-performance cause
+analysis remains active; no Defender attribution or unverified installed result
+is claimed. Delivery/install proof for this repair remains pending PR #2267.
 
 November 1, 2026 EDT continuation: measurement PR #2249 merged as
 `e47fa6e175a43fad798d73e6a1ada6d5a19a5430`; timing follow-up #2250 merged as

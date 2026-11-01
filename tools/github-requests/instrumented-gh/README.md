@@ -77,6 +77,7 @@ python3 tools/github-requests/instrumented-gh/build.py --archives /PRIVATE/archi
 python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --managed-commands
+python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json --full-observer
 ```
 
 Create the private output directory first. The ordinary development build
@@ -208,6 +209,8 @@ retained pidfd before signals are forwarded, avoiding numeric-PID reuse; cleanup
 signals only owned pidfd-bound or still-unreaped descendants. Signals reach the
 owned workload; timeout/cancellation never replays a command and yields unknown
 metadata. The inherited controller socket is never passed to ordinary children.
+`cohort_cleanup_complete` is explicit; unsuccessful cleanup cannot qualify a
+timing cohort. Source/image descriptors are also excluded from the ordinary child.
 A complete observation sums strictly
 sequential numeric start/finish pairs once, including observed admission
 identity/quota probes. Empty, truncated, interleaved, oversized or incomplete
@@ -230,6 +233,20 @@ the supervised route's overhead. Counts remain completed writes in the covered
 primary API constructors; subprocess traffic and whole-account HTTP totals stay
 unknown. No production or fleet acceptance follows from local fixtures.
 
+The exact-source `--full-observer` qualification compares the ordinary
+outside-capsule baseline against the complete observer using two independent
+twenty-pair cold/warm groups. The approved matching `updateable` CLI build and
+source `53107ea9` passed once: cold bootstrap-amortized p95 +4.66224% and total
++0.74847%; warm p95 +1.14350% and total -0.62509%. All bootstrap, matched warm
+setup, command work and teardown were charged; both groups cleaned up and their
+actual fixture request ledgers matched (84/84 cold, 60/60 warm). The protected
+receipt digest is
+`7257394fc50b4fd8c92e4c75518e8251a1da1c6c3780d94088df5a91ef80e615`.
+The earlier strict cold failure and non-updateable development variant remain
+preserved; neither was retroactively relabeled. This qualifies that finite
+Linux fixture workload only, not installed useful-work, natural savings,
+Windows cold performance or whole-account traffic.
+
 ## Explicit native Windows managed reads
 
 The existing Linux SSH controller `../remote_wait.py` can compose its restricted
@@ -249,8 +266,9 @@ does not read credential bytes, create substitute authentication, change ACLs,
 or relax a refusal to obtain a measurement. Ordinary vendor routing remains
 available. A passing source/controller fixture is not a useful counted read,
 and a complete numeric receipt is not whole-program HTTP or GraphQL accounting.
-The measured native cold overhead and full observer-route overhead failures
-remain failures; this mode stays explicit qualification machinery.
+The measured Windows native cold overhead remains failed; earlier full Linux
+observer failures remain preserved separately from the later repaired finite
+Linux qualification. This Windows mode stays explicit qualification machinery.
 
 ## Isolated native Windows qualification
 

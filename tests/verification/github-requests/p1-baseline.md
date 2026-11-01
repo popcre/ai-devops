@@ -981,3 +981,37 @@ does not replace the separate updateable-image runtime-parity binding or prove
 installed acceptance. The later private-tmpfs copy optimization is a concrete
 candidate setup repair with adversarial source/mode/alias tests, not a positive
 performance result until its unchanged strict qualification actually completes.
+
+The later repaired observer completed its one approved actual-feature
+qualification at source `53107ea9534e05ca951bc22b517277308b3dc5fe`, measurement
+helper digest `cf437f86554cf7b77b44d2acbbe0e92eaa5d4805c914479bac056e9bd6f75ebf`.
+The protected receipt digest is
+`7257394fc50b4fd8c92e4c75518e8251a1da1c6c3780d94088df5a91ef80e615`.
+It binds approved build manifest
+`2f0464b78ce8a614412eb3297cbeef328cedd3a40313c2b54437a3123abc5f5a`,
+`updateable` feature tags and baseline/instrumented images
+`ac3d854a7b293ccd4874339d50b4bdafa941b2ebd6968ef4b99db552dfa0495b`
+and `7a0de23bbb9b0edd5a66a03bb80e5e1f37869c299936abdb6e0985f5252d0c03`.
+
+Twenty cold pairs passed: total ratio 1.0074846744 and p95 ratio 1.0466224155.
+Twenty warm pairs passed: total ratio 0.9937490669 and p95 ratio 1.0114350436.
+These are forty paired fixture outcomes across two independent groups, not a
+changed denominator or a natural twenty-per-operation sample. The ordinary
+baseline ran outside the observer capsule; each instrumented cohort ran twenty
+commands. All source/image/bootstrap, matched warmup, command processing and
+teardown were included. Cold/warm bootstrap was 333.221634/276.840736 ms; final
+cohort times were 20.688972892/24.708721293 seconds. Both cleanup flags were true.
+Actual fixture request ledgers matched 84/84 cold and 60/60 warm, with equivalent
+output/status. No pacing or external CI delay was added to obtain the pass.
+
+The earlier `4afc` cold failure and default-feature development result are
+retained, not upgraded to matching-runtime evidence. The new local result
+establishes only this finite complete Linux observer qualification. Windows
+native cold performance remains failed; its current trace investigation points
+to native launch/path-opening work, not a proven Go GC or pipe defect, and no
+Defender attribution is made. Windows batch tests (38 with two declared platform
+skips), sharing tests (19 with five declared platform skips), 107 native source
+fixtures and seven-pin original-config preflight are candidate proofs, not
+already-installed outcomes. PR #2267 delivery and final installed live proof
+remain pending; natural request reduction, useful-work p95 and broader account
+coverage remain separate open measurements.
