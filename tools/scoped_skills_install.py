@@ -2,7 +2,7 @@
 """Read-only source validation, private snapshot and separate scoped-skill receipt.
 
 Owned by ai-install-skills. This is not a release authority: the Bash installer
-always invokes the candidate task gate and its lifecycle approval validator.
+always invokes the candidate task gate; no AI-review approval is required (#2041).
 """
 import hashlib
 import json
@@ -173,11 +173,10 @@ def entries(root, names, client_homes):
     return result
 
 
-def prepare(root, report, claude, codex, names, scratch=None):
+def prepare(root, claude, codex, names, scratch=None):
     if sys.platform != "linux":
         fail("scoped host route is qualified on Linux; use the existing full installation route elsewhere")
     root = safe(Path(root))
-    report = safe(Path(report))
     head, critical = origin(root)
     client_homes = homes(claude, codex)
     receipt_dir = io_paths(client_homes)
@@ -212,20 +211,19 @@ def prepare(root, report, claude, codex, names, scratch=None):
         initial_files = {entry['destination']: tree(Path(entry['destination'])) for entry in selected}
         plan = dict(initial_files=initial_files, schema_version=1, source_root=str(root), head=head, critical=critical,
                     names=names, homes=client_homes, entries=selected,
-                    report=str(report), report_sha256=sha(report.read_bytes()),
                     snapshot=str(snapshot), run_id=scratch.name)
         path = scratch / 'plan.json'
         serialized = json.dumps(plan, sort_keys=True).encode()
         path.write_bytes(serialized)
         digest = sha(serialized)
-        validate(path, root, report, digest)
+        validate(path, root, digest)
         print(str(path) + '\t' + digest)
     except BaseException:
         shutil.rmtree(scratch)
         raise
 
 
-def validate(path, root, report, expected_digest=None):
+def validate(path, root, expected_digest=None):
     path = safe(Path(path))
     serialized = path.read_bytes()
     if expected_digest is not None and (len(expected_digest) != 64 or sha(serialized) != expected_digest):
@@ -233,12 +231,10 @@ def validate(path, root, report, expected_digest=None):
     plan = json.loads(serialized)
     if plan.get('schema_version') != 1:
         fail('unsupported snapshot plan')
-    root, report = safe(Path(root)), safe(Path(report))
+    root = safe(Path(root))
     head, critical = origin(root)
     if plan['source_root'] != str(root) or plan['head'] != head or plan['critical'] != critical:
         fail('source changed')
-    if plan['report'] != str(report) or plan['report_sha256'] != sha(report.read_bytes()):
-        fail('review report changed')
     client_homes = homes(plan['homes']['claude'], plan['homes']['codex'])
     receipt_dir = io_paths(client_homes)
     receipt = safe(receipt_dir / (plan["run_id"] + ".json"))
@@ -273,7 +269,7 @@ def finish(path, expected_digest):
         fail("prepared plan changed")
     plan = json.loads(serialized)
     # Revalidate source and snapshot, then prove the actual copied bytes.
-    validate(path, plan['source_root'], plan['report'], expected_digest)
+    validate(path, plan['source_root'], expected_digest)
     for entry in plan['entries']:
         actual = tree(Path(entry['destination']))
         for rel, digest in entry['files'].items():
@@ -289,7 +285,7 @@ def finish(path, expected_digest):
         entry['backup'] = str(backup) if backup.exists() else None
         entry['backup_files'] = backup_files
     try:
-        gate = subprocess.run([str(Path(plan['source_root']) / 'bin/ai-task-gates'), 'check', '--before', 'scoped-skills-install', '--scoped-skills-plan', str(path), '--reviewer-approval', plan['report']], cwd=plan['source_root'], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        gate = subprocess.run([str(Path(plan['source_root']) / 'bin/ai-task-gates'), 'check', '--before', 'scoped-skills-install', '--scoped-skills-plan', str(path)], cwd=plan['source_root'], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError as error:
         # The selected files may already be copied. Preserve the exact final
         # admission refusal so its owner can repair it without guessing.
@@ -321,10 +317,10 @@ if __name__ == '__main__':
     try:
         operation, *args = sys.argv[1:]
         if operation == 'prepare':
-            if args[4:5] == ['--scratch']:
-                prepare(*args[:4], args[6:], scratch=args[5])
+            if args[3:4] == ['--scratch']:
+                prepare(*args[:3], args[5:], scratch=args[4])
             else:
-                prepare(*args[:4], args[4:])
+                prepare(*args[:3], args[3:])
         elif operation == 'paths':
             io_paths(homes(*args))
         elif operation == 'validate':

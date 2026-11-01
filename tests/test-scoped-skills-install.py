@@ -87,26 +87,20 @@ class ScopedInstall(unittest.TestCase):
         return run
 
     def plan(self):
-        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one')
+        run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one')
         prepared_path, self.plan_sha = run.stdout.strip().split("\t")
         path = Path(prepared_path)
         self.plans.append(path)
         return path
 
-    def approve(self, extra='.'):
-        command = 'source "$1"; export LIB_REVIEWER_APPROVAL_BIN="$2/bin"; mint_reviewer_approval "$3" "$2" final-check "" "$4"'
-        run = self.run_cmd('bash', '-c', command, 'fixture', str(ROOT / 'tests/lib-reviewer-approval.sh'), str(self.root), str(self.case), extra)
-        self.report = Path(run.stdout.strip())
-
     def install(self, ok=True, *extra):
-        return self.run_cmd('bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', '--reviewer-approval', str(self.report), *extra, ok=ok)
+        return self.run_cmd('bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', *extra, ok=ok)
 
     def declare(self, name='installation'):
         self.run_cmd(str(self.root / 'bin/ai-task-gates'), 'start', '--class', name)
 
     def test_reviewed_install_receipt_modes_backup_and_unrelated(self):
         self.declare()
-        self.approve()
         unrelated = self.home / '.claude/skills/two/SKILL.md'
         unrelated.parent.mkdir(parents=True)
         unrelated.write_text('untouched\n')
@@ -125,31 +119,29 @@ class ScopedInstall(unittest.TestCase):
         self.assertEqual(receipt['head'], self.head)
         self.assertEqual(receipt['names'], ['one'])
         self.assertRegex(receipt['prepared_plan_sha256'], r'^[0-9a-f]{64}$')
-        self.assertIn('APPROVE by grok', receipt['approval_summary'])
+        self.assertEqual(receipt['approval_summary'], 'ai-task-gates: scoped skill installation approved: no-reviewer-gate(#2041)')
         self.assertEqual(unrelated.read_text(), 'untouched\n')
         self.assertFalse((self.home / '.claude/CLAUDE.md').exists())
         self.assertFalse((self.home / '.codex/AGENTS.md').exists())
         self.assertEqual(self.git('status', '--porcelain'), '')
 
-    def test_missing_approval_cannot_be_disabled(self):
+    def test_install_needs_no_reviewer_approval(self):
+        # Owner ruling 2026-10-29 (night), #2041: no AI-review APPROVE gates installation.
         self.declare()
-        self.env['AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE'] = '1'
+        self.assertIn('no-reviewer-gate(#2041)', self.install().stdout)
+        self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_text(), 'one\n')
+
+    def test_supplied_reviewer_approval_is_ignored(self):
+        self.declare()
+        self.install(True, '--reviewer-approval', str(self.case / 'absent-report.md'))
+        self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_text(), 'one\n')
+
+    def test_undeclared_task_refused(self):
         self.install(False)
         self.assertFalse((self.home / '.claude/skills').exists())
 
     def test_wrong_class(self):
         self.declare('code')
-        self.approve()
-        self.install(False)
-
-    def test_missing_test_evidence(self):
-        self.declare()
-        self.approve('.tests=null')
-        self.assertIn('local-tests', self.install(False).stdout)
-
-    def test_wrong_head_approval(self):
-        self.declare()
-        self.approve('.head="0000000000000000000000000000000000000000"')
         self.install(False)
 
     def test_snapshot_tamper(self):
@@ -157,7 +149,7 @@ class ScopedInstall(unittest.TestCase):
         plan = json.loads(path.read_text())
         (Path(plan['snapshot']) / 'skills/shared/one/SKILL.md').write_text('substitution')
         with self.assertRaises(ValueError):
-            scoped.validate(path, self.root, self.report)
+            scoped.validate(path, self.root)
 
     def test_selection_tamper(self):
         path = self.plan()
@@ -165,13 +157,13 @@ class ScopedInstall(unittest.TestCase):
         plan['names'] = ['two']
         path.write_text(json.dumps(plan))
         with self.assertRaises(ValueError):
-            scoped.validate(path, self.root, self.report)
+            scoped.validate(path, self.root)
 
     def test_source_tamper(self):
         path = self.plan()
         (self.root / 'dirty.txt').write_text('dirty')
         with self.assertRaises(ValueError):
-            scoped.validate(path, self.root, self.report)
+            scoped.validate(path, self.root)
 
     def test_destination_tamper(self):
         path = self.plan()
@@ -179,23 +171,23 @@ class ScopedInstall(unittest.TestCase):
         plan['homes']['claude'] = str(self.case / 'other')
         path.write_text(json.dumps(plan))
         with self.assertRaises(ValueError):
-            scoped.validate(path, self.root, self.report)
+            scoped.validate(path, self.root)
 
     def test_source_symlink(self):
         (self.root / 'skills/shared/one/link').symlink_to(self.report)
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
 
     def test_destination_symlink(self):
         dest = self.home / '.claude/skills'
         dest.parent.mkdir()
         dest.symlink_to(self.case)
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
 
     def test_marker_traversal(self):
         dest = self.home / '.claude/skills/one'
         dest.mkdir(parents=True)
         (dest / '.ai-devops-managed').write_text('0' * 64 + '  ../escape\n')
-        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
+        self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
 
     def test_incompatible_full_flags(self):
         self.install(False, '--adopt-globals')
@@ -220,40 +212,27 @@ class ScopedInstall(unittest.TestCase):
     def test_missing_merged_release_ref(self):
         self.git('update-ref', '-d', 'refs/remotes/origin/main')
         try:
-            self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
+            self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
         finally:
             self.git('update-ref', 'refs/remotes/origin/main', self.head)
 
     def test_foreign_origin(self):
         self.git('remote', 'set-url', 'origin', 'https://github.com/example/ai-devops')
         try:
-            self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.report), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
+            self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'prepare', str(self.root), str(self.home / '.claude'), str(self.home / '.codex'), 'one', ok=False)
         finally:
             self.git('remote', 'set-url', 'origin', 'https://github.com/popcre/ai-devops')
-
-    def test_wrong_review_mode(self):
-        self.declare()
-        self.approve('.review_mode="plan-review"')
-        self.install(False)
-
-    def test_report_substitution(self):
-        self.declare()
-        self.approve()
-        self.report.write_text('substituted report')
-        self.install(False)
 
     def test_full_receipt_and_launchers_are_unchanged(self):
         targets = [Path('/etc/ai-devops/install-manifest.tsv'), Path('/usr/local/bin/ai-task-gates')]
         before = {str(path): (path.read_bytes(), str(path.resolve())) for path in targets if path.is_file()}
         self.declare()
-        self.approve()
         self.install()
         after = {str(path): (path.read_bytes(), str(path.resolve())) for path in targets if path.is_file()}
         self.assertEqual(after, before)
 
     def test_repeated_names_deduplicate(self):
         self.declare()
-        self.approve()
         self.install(True, '--only', 'one')
         receipts = list((self.home / '.local/state/ai-devops/scoped-skills').glob('*.json'))
         receipt = json.loads(receipts[0].read_text())
@@ -328,7 +307,6 @@ class ScopedInstall(unittest.TestCase):
         os.link(victim, dest / 'SKILL.md')
         (dest / '.ai-devops-managed').write_text(scoped.sha(b'old\n') + '  SKILL.md\n')
         self.declare()
-        self.approve()
         self.install(False)
         self.assertEqual(victim.read_text(), 'old\n')
         self.assertFalse((dest / 'run.sh').exists())
@@ -363,17 +341,15 @@ class ScopedInstall(unittest.TestCase):
 
     def test_forged_inherited_descriptor_refused(self):
         self.declare()
-        self.approve()
         self.env['AI_INSTALL_SKILLS_LOCK_FD'] = '999'
         self.assertIn('descriptor does not match', self.install(False).stdout)
         self.assertFalse((self.home / '.claude/skills').exists())
 
-    def stage_finish(self, invalid_review=False):
+    def stage_finish(self, wrong_class=False):
         dest = self.home / '.claude/skills/one'
         dest.mkdir(parents=True)
         (dest / 'SKILL.md').write_text('preserve local edit\n')
         self.declare()
-        self.approve('.tests=null' if invalid_review else '.')
         path = self.plan()
         plan = json.loads(path.read_text())
         for entry in plan['entries']:
@@ -384,11 +360,12 @@ class ScopedInstall(unittest.TestCase):
                 shutil.copytree(target, backup)
             shutil.copytree(Path(plan['snapshot']) / entry['source'], target, dirs_exist_ok=True)
         (path.parent / 'gate-summary.txt').write_text('FAKE SCRATCH APPROVAL')
+        if wrong_class:
+            self.declare('code')
         return path, plan
 
     def test_expected_plan_digest_cannot_be_supplied_by_environment(self):
         self.declare()
-        self.approve()
         self.env['SCOPED_PLAN_SHA'] = 'forged'
         self.install()
         self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_bytes(), (self.root / 'skills/shared/one/SKILL.md').read_bytes())
@@ -398,7 +375,7 @@ class ScopedInstall(unittest.TestCase):
         plan['initial_files'] = {}
         path.write_text(json.dumps(plan, sort_keys=True))
         with self.assertRaisesRegex(ValueError, 'prepared plan changed'):
-            scoped.validate(path, self.root, self.report, self.plan_sha)
+            scoped.validate(path, self.root, self.plan_sha)
         run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
         self.assertIn('prepared plan changed', run.stdout)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
@@ -408,13 +385,13 @@ class ScopedInstall(unittest.TestCase):
         self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha)
         receipt = json.loads((self.home / '.local/state/ai-devops/scoped-skills' / (plan['run_id'] + '.json')).read_text())
         self.assertEqual(receipt['prepared_plan_sha256'], self.plan_sha)
-        self.assertIn('APPROVE by grok', receipt['approval_summary'])
+        self.assertEqual(receipt['approval_summary'], 'ai-task-gates: scoped skill installation approved: no-reviewer-gate(#2041)')
         self.assertNotIn('FAKE', receipt['approval_summary'])
 
     def test_failed_final_revalidation_preserves_backup_without_receipt(self):
-        path, plan = self.stage_finish(invalid_review=True)
+        path, plan = self.stage_finish(wrong_class=True)
         run = self.run_cmd('python3', str(self.root / 'tools/scoped_skills_install.py'), 'finish', str(path), self.plan_sha, ok=False)
-        self.assertIn('local-tests', run.stdout)
+        self.assertIn('declared installation task', run.stdout)
         self.assertFalse((self.home / '.local/state/ai-devops/scoped-skills').exists())
         backup = self.home / '.claude/skills-backup' / ('one.' + plan['run_id'])
         self.assertEqual((backup / 'SKILL.md').read_text(), 'preserve local edit\n')
@@ -439,19 +416,18 @@ class ScopedInstall(unittest.TestCase):
 
     def test_inherited_descriptor_for_other_file_refused(self):
         self.declare()
-        self.approve()
         lock = self.home / '.cache/ai-devops/skills-install.lock'
         lock.parent.mkdir(parents=True)
         lock.write_text('')
         other = self.case / 'other-lock'
         with other.open('a') as descriptor:
             self.env['AI_INSTALL_SKILLS_LOCK_FD'] = str(descriptor.fileno())
-            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', '--reviewer-approval', str(self.report)], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one'], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.assertNotEqual(run.returncode, 0)
             self.assertIn('descriptor does not match', run.stdout)
         self.assertFalse((self.home / '.claude/skills').exists())
 
-    def test_inherited_real_lock_cannot_waive_approval(self):
+    def test_inherited_real_lock_is_reused(self):
         import fcntl
         self.declare()
         lock = self.home / '.cache/ai-devops/skills-install.lock'
@@ -459,10 +435,9 @@ class ScopedInstall(unittest.TestCase):
         with lock.open('a') as descriptor:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.env['AI_INSTALL_SKILLS_LOCK_FD'] = str(descriptor.fileno())
-            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one', '--reviewer-approval', str(self.report)], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            self.assertNotEqual(run.returncode, 0)
-            self.assertIn('APPROVE', run.stdout)
-        self.assertFalse((self.home / '.claude/skills').exists())
+            run = subprocess.run(['bash', str(self.root / 'bin/ai-install-skills'), '--only', 'one'], cwd=self.root, env=self.env, pass_fds=(descriptor.fileno(),), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertEqual((self.home / '.claude/skills/one/SKILL.md').read_text(), 'one\n')
 
     def test_backup_directory_substitution_cannot_issue_receipt(self):
         path, plan = self.stage_finish()
@@ -476,7 +451,6 @@ class ScopedInstall(unittest.TestCase):
 
     def test_scoped_audit_trim_uses_private_stage(self):
         self.declare()
-        self.approve()
         self.env['AI_INSTALL_LOG_MAX_LINES'] = '1'
         self.install()
         self.install()
@@ -492,7 +466,6 @@ class ScopedInstall(unittest.TestCase):
         try:
             self.assertEqual(self.git('status', '--porcelain'), '')
             self.declare()
-            self.approve()
             self.install()
             installed = self.home / '.claude/skills/one/run.sh'
             self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
@@ -536,7 +509,6 @@ class ScopedInstall(unittest.TestCase):
 
     def test_alternate_gate_policy(self):
         self.declare()
-        self.approve()
         policy = self.case / 'policy.json'
         shutil.copyfile(self.root / 'config/task-gates.json', policy)
         self.env['AI_TASK_GATES_FILE'] = str(policy)
