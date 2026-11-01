@@ -35,6 +35,11 @@ def event():
 
 
 class EventTests(unittest.TestCase):
+    def test_unsupported_native_event_pipe_is_explicitly_unknown(self):
+        with mock.patch.object(measure_append.sys, "platform", "win32"):
+            self.assertFalse(measure_append.write_event_fd(3, "{}"))
+            self.assertIsNone(report.qualification_clock())
+
     def clocks(self):
         now = time.time_ns() // 1_000_000
         return ({"wall_ms": now - 100, "monotonic_ms": 1000, "error_bound_ms": 10},
@@ -71,6 +76,7 @@ class EventTests(unittest.TestCase):
             row = event(); row[name] = value
             self.assertFalse(report.unqualified_event(row))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux kernel clock API")
     def test_clock_query_is_readonly_and_unsynchronized_clock_is_unknown(self):
         class Library:
             def adjtimex(self, pointer):
@@ -165,6 +171,7 @@ class EventTests(unittest.TestCase):
             os.close(write_fd)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux sealed source; native Windows has its own custody suite")
 class ParentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

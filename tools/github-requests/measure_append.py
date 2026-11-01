@@ -25,6 +25,8 @@ def write_event_fd(descriptor: int, record: str) -> bool:
     Linux pipe makes O_NONBLOCK local to this write. Regular files, stdio,
     oversized records and unavailable readers are refused without side effects.
     """
+    if not sys.platform.startswith("linux"):
+        return False
     opened = None
     try:
         if (type(descriptor) is not int or not 3 <= descriptor <= 65535
