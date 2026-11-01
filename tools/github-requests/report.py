@@ -14,6 +14,13 @@ import pathlib
 import re
 import stat
 import sys
+import ctypes
+import math
+import selectors
+import shutil
+import subprocess
+import time
+from contextlib import contextmanager
 from pr_status_singleflight import unix_private
 
 
@@ -346,7 +353,12 @@ def summarize(directory):
             raise ValueError("local observation has no outcome receipt")
         if receipt[:2] != (row["caller"], row["workflow"]) or receipt[2] != row["outcome"]:
             raise ValueError("local observation and outcome disagree")
-    completed = sum(count for (_, _, outcome), count in outcome_counts.items() if outcome != "deadline")
+    # A dispatch/cancel command does not prove remote verification finished.
+    useful_completed_labels = {
+        ("ai-pr-wait", "pr_wait", outcome) for outcome in ("merged", "closed", "checks_failed", "ejected")
+    } | {("ai-blocker-watch", "blocker_watch_tick", "completed"),
+         ("ai-transcript-destination-check", "transcript_privacy", "verified")}
+    completed = sum(count for labels, count in outcome_counts.items() if labels in useful_completed_labels)
     context_ordinals = {context: i + 1 for i, context in enumerate(sorted({key[0] for key in cost_windows}))}
     # Same-target replay denominators for #658 section 13 item 2. A replay is
     # a later read of a correlated target already seen in this measurement set.
@@ -466,7 +478,7 @@ def summarize(directory):
                           "HTTP pagination and GraphQL queries without a cost observation", "unknown access context and cross-host quota correlation",
                           "GraphQL cost without a matching workflow receipt cannot be assigned to a completed outcome",
                           "idle BlockerWatch ticks are not comparable to active workflow outcomes",
-                          "dispatch and privacy outcomes are not yet instrumented",
+                          "dispatch/cancel receipts measure commands, not remote verification completion",
                           "probe requests", "transformed GraphQL output hides HTTP-200 errors",
                           "telemetry warnings or interrupted processes may omit records",
                           "target-correlation adapter is local-only and not independently reviewed for acceptance"],
@@ -500,6 +512,14 @@ RECEIPT_LABELS = {
     ("ai-pr-wait", "pr_wait", outcome)
     for outcome in ("merged", "closed", "checks_failed", "ejected", "deadline")
 } | {("ai-blocker-watch", "blocker_watch_tick", "completed")}
+RECEIPT_LABELS |= {
+    ("ai-verify-run", workflow, outcome)
+    for workflow, outcomes in (("verify_dispatch", ("dispatched", "duplicate_refused", "failed")),
+                              ("verify_status", ("completed", "failed")),
+                              ("verify_cancel", ("cancel_requested", "refused", "failed")))
+    for outcome in outcomes
+} | {("ai-transcript-destination-check", "transcript_privacy", outcome)
+     for outcome in ("verified", "refused", "failed", "skipped")}
 EVIDENCE_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id", "cohort_id", "target_ordinal",
                  "source_verified", "source_fingerprint_start", "source_fingerprint_end", "install_generation_binding",
                  "event_kind", "eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms", "delivery_boundary",
@@ -603,8 +623,406 @@ def valid_principal(value):
     return isinstance(value, str) and (value == "unknown" or
                                        re.fullmatch(r"local-sha256:[0-9a-f]{64}", value) is not None)
 
+
+def qualification_clock():
+    """Read the Linux kernel's current UTC error bound; never change its clock.
+
+    Unsupported ABIs and unsynchronized clocks remain unknown. The wall and
+    monotonic readings bracket adjtimex, including the sampling interval in
+    the returned bound. No environment or cohort file supplies a bound.
+    """
+    if not sys.platform.startswith("linux") or ctypes.sizeof(ctypes.c_long) != 8:
+        return None
+    class Timeval(ctypes.Structure):
+        _fields_ = [("sec", ctypes.c_long), ("usec", ctypes.c_long)]
+    class Timex(ctypes.Structure):
+        _fields_ = [("modes", ctypes.c_uint), ("offset", ctypes.c_long), ("freq", ctypes.c_long),
+                    ("maxerror", ctypes.c_long), ("esterror", ctypes.c_long), ("status", ctypes.c_int),
+                    ("constant", ctypes.c_long), ("precision", ctypes.c_long), ("tolerance", ctypes.c_long),
+                    ("time", Timeval), ("tick", ctypes.c_long), ("ppsfreq", ctypes.c_long),
+                    ("jitter", ctypes.c_long), ("shift", ctypes.c_int), ("stabil", ctypes.c_long),
+                    ("jitcnt", ctypes.c_long), ("calcnt", ctypes.c_long), ("errcnt", ctypes.c_long),
+                    ("stbcnt", ctypes.c_long), ("tai", ctypes.c_int), ("reserved", ctypes.c_int * 11)]
+    try:
+        before = time.monotonic_ns()
+        value = Timex()  # modes=0 is a read, never a synchronization request.
+        library = ctypes.CDLL(None, use_errno=True)
+        library.adjtimex.argtypes = [ctypes.POINTER(Timex)]
+        library.adjtimex.restype = ctypes.c_int
+        status = library.adjtimex(ctypes.byref(value))
+        wall = time.time_ns()
+        after = time.monotonic_ns()
+        # TIME_OK only: leap transitions, TIME_ERROR, UNSYNC and CLOCKERR do
+        # not qualify an interval. maxerror is microseconds, not milliseconds.
+        if (status != 0 or value.status & (0x0040 | 0x1000)
+                or not 0 <= value.maxerror <= 59_000_000 or after < before):
+            return None
+        bound = math.ceil(value.maxerror / 1000 + (after - before) / 1_000_000)
+        return {"wall_ms": wall // 1_000_000, "monotonic_ms": after // 1_000_000,
+                "error_bound_ms": bound, "basis": "linux_adjtimex_maxerror"}
+    except (OSError, ValueError, AttributeError, OverflowError):
+        return None
+
+
+def qualify_event(event, start, end, source_verified):
+    """Qualify a live parent observation, keeping uncertainty as an interval.
+
+    GitHub's eligible event is only second-resolution. Its 1000ms uncertainty
+    is included rather than pretending it is a millisecond clock reading.
+    Kernel UTC synchronization is a host bound, not a GitHub clock audit;
+    the resulting interval is explicitly conditional on GitHub event UTC.
+    """
+    result = {"clock_quality": "unknown", "unknown_reason": "clock_unknown",
+              "latency_lower_ms": None, "latency_upper_ms": None,
+              "clock_error_bound_ms": None, "event_kind": "unknown"}
+    if not source_verified:
+        result["unknown_reason"] = "source_unknown"
+        return result
+    if not unqualified_event(event):
+        result["unknown_reason"] = "event_unknown"
+        return result
+    result["event_kind"] = event["event_kind"]
+    if (event["event_kind"] == "unknown" or event["eligible_utc_ms"] is None
+            or event["delivery_boundary"] != "terminal_report"):
+        result["unknown_reason"] = "event_unknown"
+        return result
+    if start is None or end is None:
+        return result
+    elapsed_wall = end["wall_ms"] - start["wall_ms"]
+    elapsed_mono = end["monotonic_ms"] - start["monotonic_ms"]
+    bound = start["error_bound_ms"] + end["error_bound_ms"] + 2
+    if elapsed_wall < 0 or elapsed_mono < 0 or abs(elapsed_wall - elapsed_mono) > bound:
+        result["unknown_reason"] = "clock_jump"
+        return result
+    eligible, observed, delivered = (event[name] for name in
+                                    ("eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms"))
+    if (observed is None or delivered is None or not eligible <= observed <= delivered
+            or observed < start["wall_ms"] - bound or delivered > end["wall_ms"] + bound):
+        result["unknown_reason"] = "event_invalid"
+        return result
+    # Parent receives the event only after the known waiter reported terminal
+    # output. Its clock read bounds when that delivery was actually observed.
+    error = bound + 1000
+    elapsed = delivered - eligible
+    if elapsed > 604_800_000 or error > 60_000:
+        result["unknown_reason"] = "clock_unknown"
+        return result
+    result.update(clock_quality="host_bound_github_utc_assumed", unknown_reason="none",
+                  latency_lower_ms=max(0, elapsed - error), latency_upper_ms=elapsed + error,
+                  clock_error_bound_ms=error)
+    return result
+
+
+def unqualified_event(row):
+    """The child supplies only the existing scrubbed, unqualified schema."""
+    return (isinstance(row, dict) and set(row) == EVIDENCE_KEYS
+            and type(row.get("schema")) is int and row["schema"] == 4
+            and row["measurement"] == "workflow_evidence"
+            and row["caller"] == "ai-pr-wait" and row["workflow"] == "pr_wait"
+            and isinstance(row["utc"], str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["utc"]) is not None
+            and valid_workflow_id(row["workflow_id"]) and valid_nullable_id(row["cohort_id"])
+            and valid_target_ordinal(row["target_ordinal"])
+            and row["source_verified"] == "unknown" and row["clock_quality"] == "unknown"
+            and row["source_fingerprint_start"] is None and row["source_fingerprint_end"] is None
+            and row["install_generation_binding"] is None and row["clock_error_bound_ms"] is None
+            and row["latency_ms"] is None and isinstance(row["event_kind"], str) and row["event_kind"] in EVENT_KINDS
+            and all(valid_timestamp_ms(row[name]) for name in
+                    ("eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms"))
+            and isinstance(row["delivery_boundary"], str) and row["delivery_boundary"] in DELIVERY_BOUNDARIES
+            and isinstance(row["unknown_reason"], str) and row["unknown_reason"] in UNKNOWN_REASONS
+            and evidence_consistent(row))
+
+
+def trusted_boundary_executable(path):
+    """Same root-owned native Bubblewrap boundary used by the supervisor."""
+    path = pathlib.Path(path).resolve(strict=True)
+    for parent in path.parents:
+        info = parent.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError("boundary executable ancestor is untrusted")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022
+                or not info.st_mode & 0o111 or os.read(descriptor, 4) != b"\x7fELF"):
+            raise ValueError("boundary executable is untrusted")
+    finally:
+        os.close(descriptor)
+    return str(path)
+
+
+def sealed_source(data):
+    import fcntl
+    descriptor = os.memfd_create("github-qualified-source", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+    try:
+        remaining = memoryview(data)
+        while remaining:
+            count = os.write(descriptor, remaining)
+            if count <= 0:
+                raise OSError("source snapshot write stopped")
+            remaining = remaining[count:]
+        os.fchmod(descriptor, 0o500)
+        seals = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+        fcntl.fcntl(descriptor, fcntl.F_ADD_SEALS, seals)
+        if fcntl.fcntl(descriptor, fcntl.F_GET_SEALS) & seals != seals:
+            raise OSError("source snapshot seals differ")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def installed_source(root, manifest):
+    """Bind exact Git blobs to the real installed waiter manifest entry.
+
+    The manifest is read through its verified descriptor. Source comes from
+    immutable Git blobs, not from path bytes that could change after hashing.
+    No config values or local paths enter the public receipt.
+    """
+    root = pathlib.Path(root).resolve(strict=True)
+    manifest = pathlib.Path(manifest)
+    descriptor = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.geteuid())
+                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 4 * 1024 * 1024):
+            raise ValueError("manifest custody is untrusted")
+        data = os.read(descriptor, 4 * 1024 * 1024 + 1)
+    finally:
+        os.close(descriptor)
+    rows = [row.split("\t") for row in data.decode("utf-8").splitlines()]
+    sha_rows = [row for row in rows if len(row) == 4 and row[:2] == ["meta", "source_sha"]]
+    if len(sha_rows) != 1 or re.fullmatch(r"[0-9a-f]{40}", sha_rows[0][2]) is None:
+        raise ValueError("manifest source is untrusted")
+    sha = sha_rows[0][2]
+    entries = [row for row in rows if len(row) == 4 and row[0] == "symlink"
+               and pathlib.Path(row[1]).name == "ai-pr-wait"]
+    if len(entries) != 1 or not pathlib.Path(entries[0][2]).samefile(root / "bin/ai-pr-wait"):
+        raise ValueError("installed waiter differs")
+    if not pathlib.Path(entries[0][1]).samefile(root / "bin/ai-pr-wait"):
+        raise ValueError("installed launcher differs")
+    git = trusted_boundary_executable(shutil.which("git") or "")
+    listing = subprocess.run([git, "-C", str(root), "ls-tree", "-rz", sha, "--", "bin", "tools", "config"],
+                             capture_output=True, check=True, timeout=20).stdout
+    files, fingerprint, total_bytes = {}, hashlib.sha256(), 0
+    for entry in listing.split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        mode, kind, blob = metadata.split()
+        path = raw_path.decode("utf-8")
+        if (kind != b"blob" or mode not in (b"100644", b"100755")
+                or pathlib.PurePosixPath(path).is_absolute() or ".." in pathlib.PurePosixPath(path).parts):
+            raise ValueError("generation contains an unsupported source entry")
+        content = subprocess.run([git, "-C", str(root), "cat-file", "blob", blob.decode("ascii")],
+                                 capture_output=True, check=True, timeout=10).stdout
+        total_bytes += len(content)
+        if len(content) > 4 * 1024 * 1024 or total_bytes > 64 * 1024 * 1024 or len(files) >= 4096:
+            raise ValueError("source file exceeds bound")
+        if hashlib.sha1(b"blob " + str(len(content)).encode("ascii") + b"\0" + content).hexdigest() != blob.decode("ascii"):
+            raise ValueError("Git source blob identity differs")
+        files[path] = content
+    if not files or len(files) > 4096 or "bin/ai-pr-wait" not in files:
+        raise ValueError("source generation is incomplete")
+    if hashlib.sha256(files["bin/ai-pr-wait"]).hexdigest() != entries[0][3]:
+        raise ValueError("manifest waiter hash differs")
+    for path, content in sorted(files.items()):
+        fingerprint.update(path.encode("utf-8") + b"\0" + hashlib.sha256(content).hexdigest().encode("ascii") + b"\n")
+    return {"source_sha": sha, "source_fingerprint": fingerprint.hexdigest(),
+            "install_generation_binding": hashlib.sha256(data).hexdigest()}, files
+
+
+@contextmanager
+def retained_generation(root, manifest):
+    """Retain one immutable loaded-source boundary for waiters or ai-gh reads.
+
+    Consumers prepend argv_prefix to their real command and include pass_fds
+    in that subprocess only. Identity alone is preparation, never execution
+    proof; only an actual observed child result can qualify loaded source.
+    """
+    root = pathlib.Path(root).resolve(strict=True)
+    # Preserve ambient behavior on the ordinary path. An explicit qualifier
+    # cannot attribute code injected by shell/Python startup or native-loader
+    # overrides to the tracked toolkit generation, so it declines qualification.
+    injection_keys = {"BASH_ENV", "ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+                      "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH"}
+    if any(value and (name in injection_keys or name.startswith("BASH_FUNC_"))
+           for name, value in os.environ.items()):
+        raise ValueError("ambient source injection is unqualified")
+    if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
+        raise ValueError("boundary unavailable")
+    boundary = trusted_boundary_executable(shutil.which("bwrap") or "")
+    probe = subprocess.run([boundary, "--unshare-user", "--bind", "/", "/", "--cap-drop", "ALL",
+                            "--", "/usr/bin/true"], capture_output=True, timeout=10)
+    if probe.returncode:
+        raise ValueError("boundary unavailable")
+    identity, files = installed_source(root, manifest)
+    command = [boundary, "--unshare-user", "--die-with-parent", "--bind", "/", "/", "--cap-drop", "ALL"]
+    descriptors = []
+    try:
+        for directory in ("bin", "tools", "config"):
+            command += ["--tmpfs", str(root / directory)]
+        directories = sorted({str(pathlib.PurePosixPath(name).parent) for name in files},
+                             key=lambda value: (value.count("/"), value))
+        made = {"bin", "tools", "config"}
+        for directory in directories:
+            parts = pathlib.PurePosixPath(directory).parts
+            for depth in range(1, len(parts) + 1):
+                parent = "/".join(parts[:depth])
+                if parent not in made:
+                    command += ["--dir", str(root / parent)]
+                    made.add(parent)
+        for name, content in files.items():
+            fd = sealed_source(content)
+            descriptors.append(fd)
+            command += ["--perms", "0500", "--ro-bind-data", str(fd), str(root / name)]
+        for directory in ("bin", "tools", "config"):
+            command += ["--remount-ro", str(root / directory)]
+        identity["source_boundary"] = "linux_sealed_generation"
+        bash = trusted_boundary_executable(shutil.which("bash") or "")
+        yield {"identity": identity, "argv_prefix": [*command, "--"], "pass_fds": tuple(descriptors),
+               "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash}
+    finally:
+        for fd in descriptors:
+            os.close(fd)
+
+
+def qualify_wait(root, manifest, arguments, receipt_path):
+    """Explicit live parent; offline JSON and child environment grant no trust.
+
+    Qualification failure runs the original command normally and records an
+    unknown receipt. No automatic fallback runs after a child has started.
+    Network, cwd, authentication, stdio and command status remain inherited.
+    Only the pinned public source directories are replaced inside the child.
+    """
+    root = pathlib.Path(root).resolve(strict=True)
+    receipt = {"schema": 1, "measurement": "live_parent_wait_qualification",
+               "receipt_origin": "live_parent", "source_verified": "unknown",
+               "workload_kind": "fixture" if os.environ.get("AI_DEVOPS_TEST_MODE") == "1" else "caller_command",
+               "source_boundary": "unknown", "unknown_reason": "boundary_unavailable",
+               "source_sha": None, "source_fingerprint": None, "install_generation_binding": None,
+               "child_exit": None, "clock_start": None, "clock_end": None, "event": None,
+               "event_qualification": None}
+    descriptors, command, generation_context = [], None, None
+    read_fd = write_fd = None
+    environment = os.environ.copy()
+    environment.pop("AI_GH_QUALIFICATION_EVENT_FD", None)
+    try:
+        receipt["unknown_reason"] = "manifest_untrusted"
+        generation_context = retained_generation(root, manifest)
+        generation = generation_context.__enter__()
+        command = generation["argv_prefix"]
+        read_fd, write_fd = os.pipe()
+        descriptors += [read_fd, write_fd]
+        environment["AI_GH_QUALIFICATION_EVENT_FD"] = str(write_fd)
+        command += [generation["bash_path"],
+                    str(root / "bin/ai-pr-wait"), *arguments]
+        receipt.update(generation["identity"], source_verified="verified",
+                       unknown_reason="none")
+    except (OSError, ValueError, subprocess.SubprocessError, UnicodeError):
+        command = [shutil.which("bash") or "/bin/bash", str(root / "bin/ai-pr-wait"), *arguments]
+        environment.pop("AI_GH_QUALIFICATION_EVENT_FD", None)
+        for fd in descriptors:
+            os.close(fd)
+        descriptors = []
+        read_fd = write_fd = None
+        if generation_context is not None:
+            generation_context.__exit__(None, None, None)
+            generation_context = None
+    start = qualification_clock()
+    events, event_bytes = [], bytearray()
+    try:
+        inherited = tuple(descriptors) + (generation["pass_fds"] if generation_context is not None else ())
+        child = subprocess.Popen(command, env=environment, pass_fds=inherited)
+        if write_fd is not None:
+            os.close(write_fd)
+            descriptors.remove(write_fd)
+        if read_fd is not None:
+            os.set_blocking(read_fd, False)
+            selector = selectors.DefaultSelector()
+            selector.register(read_fd, selectors.EVENT_READ)
+            while child.poll() is None:
+                for key, _ in selector.select(timeout=0.1):
+                    chunk = os.read(key.fd, 65537)
+                    if not chunk:
+                        selector.unregister(key.fd)
+                        continue
+                    # Keep draining an oversized pipe so optional evidence
+                    # cannot deadlock the original command. Retain only one
+                    # overflow byte, which makes the event unqualified.
+                    if len(event_bytes) <= 65536:
+                        event_bytes.extend(chunk[:65537 - len(event_bytes)])
+                # No report-controlled wait deadline replaces the waiter's own.
+            while True:
+                try:
+                    chunk = os.read(read_fd, 65537)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                if len(event_bytes) <= 65536:
+                    event_bytes.extend(chunk[:65537 - len(event_bytes)])
+            selector.close()
+        status = child.wait()
+        end = qualification_clock()
+        if len(event_bytes) <= 65536:
+            try:
+                events = [json.loads(line, object_pairs_hook=unique_object)
+                          for line in event_bytes.splitlines() if line]
+            except (ValueError, UnicodeError):
+                events = []
+        event = events[0] if len(events) == 1 else None
+        if (not unqualified_event(event)
+                or {"pr_merged": 0, "pr_closed": 1, "check_completed": 1}.get(event["event_kind"], status) != status):
+            event = None
+        if event is None and receipt["source_verified"] == "verified":
+            # No bound waiter observation proves that execution crossed the
+            # prepared boundary. Retain identity as preparation, not proof.
+            receipt["source_verified"] = "unknown"
+            receipt["unknown_reason"] = "child_observation_missing"
+        receipt.update(child_exit=status, clock_start=start, clock_end=end, event=event,
+                       event_qualification=qualify_event(event, start, end, receipt["source_verified"] == "verified"))
+        # The qualification parent consumes and assembles evidence under live
+        # sealed-FD custody. This saved artifact is a historical receipt, never
+        # an offline input that upgrades ordinary report/schema-4 evidence.
+        try:
+            destination = pathlib.Path(receipt_path)
+            if not destination.parent.is_dir() or destination.exists() or destination.is_symlink():
+                raise ValueError("qualification receipt destination is unavailable")
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as stream:
+                json.dump(receipt, stream, separators=(",", ":"))
+                stream.write("\n")
+        except (OSError, ValueError):
+            print("request qualification: receipt unavailable; original command status preserved", file=sys.stderr)
+        return status if status >= 0 else 128 - status
+    finally:
+        for fd in descriptors:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if generation_context is not None:
+            generation_context.__exit__(None, None, None)
+
 if __name__ == "__main__":
     try:
+        if len(sys.argv) > 1 and sys.argv[1] == "--qualify-wait":
+            import argparse
+            parser = argparse.ArgumentParser(description="Run an explicitly qualified live PR waiter")
+            parser.add_argument("--source-root", required=True)
+            parser.add_argument("--manifest", default="/etc/ai-devops/install-manifest.tsv")
+            parser.add_argument("--receipt", required=True)
+            parser.add_argument("arguments", nargs=argparse.REMAINDER)
+            options = parser.parse_args(sys.argv[2:])
+            arguments = options.arguments
+            if arguments[:1] == ["--"]:
+                arguments = arguments[1:]
+            if not arguments:
+                parser.error("waiter arguments are required")
+            sys.exit(qualify_wait(options.source_root, options.manifest, arguments, options.receipt))
         if len(sys.argv) == 3 and sys.argv[1] == "--cohort":
             print(json.dumps(read_cohort(sys.argv[2]), separators=(",", ":")))
             sys.exit(0)
