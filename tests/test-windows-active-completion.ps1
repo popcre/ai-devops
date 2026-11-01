@@ -45,7 +45,11 @@ try{
  }finally{$controlWriter.Dispose();$controlReader.Dispose()}
  foreach($name in @('tick','alarm','links')){Assert-ActiveArguments 'bin/ai-blocker-watch' @($name) $false;Check $true 'Original finite active admission'}
  foreach($name in @('alarm','links')){Assert-ActiveArguments 'bin/ai-blocker-watch' @($name) $true;Check $true 'Named SDK admission'}
+ foreach($name in @('tick','alarm','links')){Assert-ActiveArguments 'bin/ai-blocker-watch' @($name,'--dry-run') $false;Check $true 'Original finite dry-run admission'}
+ foreach($name in @('alarm','links')){Assert-ActiveArguments 'bin/ai-blocker-watch' @($name,'--dry-run') $true;Check $true 'Named SDK dry-run admission'}
  $refused=$false;try{Assert-ActiveArguments 'bin/ai-blocker-watch' @('tick') $true}catch{$refused=$true};Check $refused 'SDK cannot admit provider ticks'
+ $refused=$false;try{Assert-ActiveArguments 'bin/ai-blocker-watch' @('tick','--dry-run') $true}catch{$refused=$true};Check $refused 'SDK cannot admit dry-run provider ticks'
+ $refused=$false;try{Assert-ActiveArguments 'bin/ai-blocker-watch' @('alarm','--other') $false}catch{$refused=$true};Check $refused 'Unknown active flags refused'
  $refused=$false;try{Assert-ReadArguments 'bin/ai-blocker-watch' @('alarm')}catch{$refused=$true};Check $refused 'Active work cannot masquerade as read profile'
  $bash=Join-Path $env:ProgramFiles 'Git/bin/bash.exe';$actor=Join-Path $PSScriptRoot 'windows_active_actor.py';$env:AI_GH_ACTIVE_BASH=$bash
  foreach($mode in @('valid','bash-facts','ack-malformed','ack-partial','ack-late','closed','nonpipe','alias','full-event','full-ack','forged-claim','raw-duplicate','raw-overflow','raw-oversize','legacy-pr','provider-exit','provider-uncertain','provider-timeout')){

@@ -1800,9 +1800,10 @@ def qualify_blocker_event(event, start, end, source_verified, successful_alarm=F
 
 class ActiveCompletionTranscript:
     """Shared finite DATA parser. Its result never grants source authority."""
-    def __init__(self, operation, acknowledge, qualification_profile="original_context"):
+    def __init__(self, operation, acknowledge, qualification_profile="original_context", dry_run=False):
         self.operation, self.acknowledge = operation, acknowledge
         self.qualification_profile = qualification_profile
+        self.dry_run = dry_run
         self.pending, self.completed, self.parents, self.seen = {}, [], {}, set()
         self.facts = {}
         self.invalid, self.frames = False, 0
@@ -1874,23 +1875,30 @@ class ActiveCompletionTranscript:
         records = []
         for row, start, end, acknowledged in completed:
             event, facts_clock = self.facts.get(row["workflow_id"], (None, None))
-            records.append({"outcome_record": row,
+            record = {"outcome_record": row,
                 "completion_qualification": active_completion_interval(start, end, source_ok and acknowledged),
                 "event_record": event, "event_parent_clock": facts_clock,
                 "event_qualification": qualify_blocker_event(event, start, facts_clock, source_ok,
-                    self.qualification_profile == "sdk_only_no_provider" and status == 0
+                    self.dry_run is False and self.qualification_profile == "sdk_only_no_provider" and status == 0
                     and self.operation == "alarm" and row["parent_workflow_id"] is None
                     and row["outcome"] == "completed"),
                 "active_success": row["outcome"] in {"completed", "process_succeeded"},
                 "parent_state": "matched" if row["parent_workflow_id"] in parents else
-                                "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"})
+                                "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"}
+            if self.dry_run is not False:
+                record["active_success"] = False
+                record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
+                    duration_upper_ms=None, unknown_reason="dry_run_not_active_work")
+                record["event_qualification"].update(clock_quality="unknown", latency_lower_ms=None,
+                    latency_upper_ms=None, clock_error_bound_ms=None, unknown_reason="dry_run_not_active_work")
+            records.append(record)
         return bool(source_ok), records
 
 
 class ActiveCompletionObserver(ActiveCompletionTranscript):
     """Linux owner: JSON cannot substitute for its active opaque custody."""
-    def __init__(self, generation, operation, acknowledge, qualification_profile="original_context"):
-        super().__init__(operation, acknowledge, qualification_profile)
+    def __init__(self, generation, operation, acknowledge, qualification_profile="original_context", dry_run=False):
+        super().__init__(operation, acknowledge, qualification_profile, dry_run)
         self.generation = generation
 
     def receive(self, row, clock, queued=False):
@@ -2096,7 +2104,7 @@ def qualify_blocker_watch(root, manifest, arguments, receipt_path, profile="orig
             from measure_append import write_event_fd
             observer = ActiveCompletionObserver(generation, arguments[0], lambda identity: write_event_fd(
                 ack_write, json.dumps({"schema": 1, "phase": "ack", "workflow_id": identity}, separators=(",", ":"))),
-                qualification_profile=profile)
+                qualification_profile=profile, dry_run=arguments[1:] == ["--dry-run"])
             inherited = launch["pass_fds"] + (event_write, ack_read)
             receipt.update(generation["identity"], source_bootstrap_ns=generation["bootstrap_ns"])
         except Exception:

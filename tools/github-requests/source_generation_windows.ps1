@@ -586,7 +586,7 @@ function Send-ActiveFrames($Channel,$Output) {
     }
 }
 function Assert-ActiveArguments([string]$Entry,[string[]]$Values,[bool]$Sdk) {
-    if($Entry -cne 'bin/ai-blocker-watch' -or @($Values).Count -ne 1 -or $Values[0] -cnotin @('tick','alarm','links')){throw 'Finite active operation required'}
+    if($Entry -cne 'bin/ai-blocker-watch' -or @($Values).Count -notin @(1,2) -or $Values[0] -cnotin @('tick','alarm','links') -or (@($Values).Count -eq 2 -and $Values[1] -cne '--dry-run')){throw 'Finite active operation required'}
     if($Sdk -and $Values[0] -cnotin @('alarm','links')){throw 'SDK coordinator profile cannot run ticks or providers'}
 }
 function Receive-ActiveControl($Lines,$Channel) {

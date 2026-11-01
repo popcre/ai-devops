@@ -715,12 +715,13 @@ exit "${ACTIVE_TEST_STATUS:-0}"
         value = time.monotonic_ns() // 1_000_000
         return {"monotonic_ms": value, "wall_ms": value + 100000, "error_bound_ms": 1}
 
-    def run_active(self, operation="alarm", profile="sdk_only_no_provider", **environment):
+    def run_active(self, operation="alarm", profile="sdk_only_no_provider", dry_run=False, **environment):
         receipt = Path(self.fixture.temp.name) / f"active-{time.monotonic_ns()}.json"
         stdout, stderr = tempfile.TemporaryFile(), tempfile.TemporaryFile()
         original = subprocess.Popen
         def capture(*args, **kwargs):
-            if len(args[0]) >= 2 and str(args[0][-2]).endswith("/bin/ai-blocker-watch"):
+            suffix_index = -3 if dry_run else -2
+            if len(args[0]) >= -suffix_index and str(args[0][suffix_index]).endswith("/bin/ai-blocker-watch"):
                 kwargs.update(stdout=stdout, stderr=stderr)
             return original(*args, **kwargs)
         with self.fixture.fixture_installation(), mock.patch.dict(os.environ, {
@@ -728,7 +729,8 @@ exit "${ACTIVE_TEST_STATUS:-0}"
                 "ACTIVE_TEST_INVOCATIONS": str(self.invocations), "GH_CONFIG_DIR": str(self.credentials), **environment}), \
                 mock.patch.object(report, "qualification_clock", side_effect=self.clock), \
                 mock.patch.object(report.subprocess, "Popen", side_effect=capture):
-            status = report.qualify_blocker_watch(self.root, self.manifest, [operation], receipt, profile)
+            arguments = [operation] + (["--dry-run"] if dry_run else [])
+            status = report.qualify_blocker_watch(self.root, self.manifest, arguments, receipt, profile)
         stdout.seek(0); stderr.seek(0)
         output, diagnostic = stdout.read(), stderr.read()
         stdout.close(); stderr.close()
@@ -746,6 +748,20 @@ exit "${ACTIVE_TEST_STATUS:-0}"
         self.assertGreater(q["duration_upper_ms"], 10)
         self.assertIsNone(q["detection_latency_ms"])
         self.assertEqual(receipt["programme_acceptance"], "unknown")
+
+    def test_actual_factory_dry_run_intent_excludes_forged_completed_fixture(self):
+        status, receipt, output, diagnostic = self.run_active(dry_run=True)
+        self.assertEqual(status, 0)
+        self.assertTrue(receipt["dry_run"])
+        self.assertEqual(receipt["source_verified"], "verified", receipt.get("unknown_reason"))  # Fixture only.
+        self.assertEqual(self.invocations.read_text(), "x")
+        self.assertEqual(output, b"original active stdout\n")
+        for record in receipt["active_outcomes"]:
+            self.assertFalse(record["active_success"])
+            self.assertEqual(record["completion_qualification"]["unknown_reason"], "dry_run_not_active_work")
+            self.assertIsNone(record["completion_qualification"]["duration_upper_ms"])
+            self.assertEqual(record["event_qualification"]["unknown_reason"], "dry_run_not_active_work")
+            self.assertIsNone(record["event_qualification"]["latency_upper_ms"])
 
     def test_multiple_child_boundaries_have_own_envelopes_and_parent(self):
         _, receipt, _, _ = self.run_active("tick")
@@ -1005,12 +1021,12 @@ class ActiveEventConsumerTests(unittest.TestCase):
     def clock(self, value):
         return {"wall_ms": value, "monotonic_ms": value, "error_bound_ms": 1}
 
-    def transcript(self, operation="alarm", outcome="completed", ack=True):
+    def transcript(self, operation="alarm", outcome="completed", ack=True, dry_run=False):
         row = receipt_fixture("ai-blocker-watch", "blocker_watch_" + operation, outcome, "a" * 32)
         begin = {key: row[key] for key in ("caller", "workflow", "workflow_id", "parent_workflow_id", "boundary")}
         begin.update(schema=1, measurement="active_completion_boundary", phase="begin")
         transcript = report.ActiveCompletionTranscript(operation, lambda _: ack,
-                                                       qualification_profile="sdk_only_no_provider")
+                                                       qualification_profile="sdk_only_no_provider", dry_run=dry_run)
         transcript.receive(begin, self.clock(1000)); transcript.receive(row, self.clock(4000))
         return transcript, row
 
@@ -1087,6 +1103,24 @@ class ActiveEventConsumerTests(unittest.TestCase):
         transcript.qualification_profile = "original_context"
         transcript.receive(self.facts(), self.clock(4100))
         self.assertEqual(transcript.result(0, source_verified=True)[1][0]["event_qualification"]["unknown_reason"], "event_unknown")
+
+    def test_caller_dry_run_intent_blocks_forged_completed_alarm_facts(self):
+        for dry_run in (True, "false", 0, None):
+            with self.subTest(dry_run=dry_run):
+                transcript, _ = self.transcript(dry_run=dry_run)  # Trusted caller policy, not frames.
+                transcript.receive(self.facts(), self.clock(4100))
+                verified, records = transcript.result(0, source_verified=True)  # Protocol fixture only.
+                self.assertTrue(verified)
+                qualification = records[0]["event_qualification"]
+                self.assertEqual(qualification["unknown_reason"], "dry_run_not_active_work")
+                self.assertIsNone(qualification["latency_lower_ms"])
+                self.assertIsNone(qualification["latency_upper_ms"])
+                self.assertFalse(records[0]["active_success"])
+                completion = records[0]["completion_qualification"]
+                self.assertEqual(completion["unknown_reason"], "dry_run_not_active_work")
+                self.assertIsNone(completion["duration_lower_ms"])
+                self.assertIsNone(completion["duration_upper_ms"])
+                self.assertEqual(records[0]["event_parent_clock"], self.clock(4100))
 
     def test_actual_telemetry_append_precedes_forward_and_failure_preserves_status(self):
         script = '''source "$1"
