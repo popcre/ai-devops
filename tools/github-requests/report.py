@@ -1875,7 +1875,7 @@ class ActiveCompletionTranscript:
         records = []
         for row, start, end, acknowledged in completed:
             event, facts_clock = self.facts.get(row["workflow_id"], (None, None))
-            records.append({"outcome_record": row,
+            record = {"outcome_record": row,
                 "completion_qualification": active_completion_interval(start, end, source_ok and acknowledged),
                 "event_record": event, "event_parent_clock": facts_clock,
                 "event_qualification": qualify_blocker_event(event, start, facts_clock, source_ok,
@@ -1884,7 +1884,14 @@ class ActiveCompletionTranscript:
                     and row["outcome"] == "completed"),
                 "active_success": row["outcome"] in {"completed", "process_succeeded"},
                 "parent_state": "matched" if row["parent_workflow_id"] in parents else
-                                "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"})
+                                "standalone" if row["parent_workflow_id"] is None else "unmatched_unknown"}
+            if self.dry_run is not False:
+                record["active_success"] = False
+                record["completion_qualification"].update(clock_quality="unknown", duration_lower_ms=None,
+                    duration_upper_ms=None, unknown_reason="dry_run_not_active_work")
+                record["event_qualification"].update(clock_quality="unknown", latency_lower_ms=None,
+                    latency_upper_ms=None, clock_error_bound_ms=None, unknown_reason="dry_run_not_active_work")
+            records.append(record)
         return bool(source_ok), records
 
 

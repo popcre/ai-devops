@@ -1097,9 +1097,15 @@ class ActiveEventConsumerTests(unittest.TestCase):
                 verified, records = transcript.result(0, source_verified=True)  # Protocol fixture only.
                 self.assertTrue(verified)
                 qualification = records[0]["event_qualification"]
-                self.assertEqual(qualification["unknown_reason"], "event_unknown")
+                self.assertEqual(qualification["unknown_reason"], "dry_run_not_active_work")
                 self.assertIsNone(qualification["latency_lower_ms"])
                 self.assertIsNone(qualification["latency_upper_ms"])
+                self.assertFalse(records[0]["active_success"])
+                completion = records[0]["completion_qualification"]
+                self.assertEqual(completion["unknown_reason"], "dry_run_not_active_work")
+                self.assertIsNone(completion["duration_lower_ms"])
+                self.assertIsNone(completion["duration_upper_ms"])
+                self.assertEqual(records[0]["event_parent_clock"], self.clock(4100))
 
     def test_actual_telemetry_append_precedes_forward_and_failure_preserves_status(self):
         script = '''source "$1"
