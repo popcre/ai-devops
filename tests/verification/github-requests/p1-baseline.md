@@ -693,6 +693,12 @@ alternative authentication context or API request was used for these audits.
 These qualification refusals preserve ordinary working CLI capability; they
 are not zero-request observations. T16 remains a separate external trusted
 execution/access gap despite being online, not evidence of installed coverage.
+Its final protected access digest is
+`003e5b8e6dd0f88a85ccfa4d1479cb29984a648153f1a0763826179eba93f9d3`:
+the documented SSH and RDP endpoints each timed out under six-second bounds
+from a trusted peer. The atlas names no alternative SSH port, WinRM route or
+native executor. No broad probe, new trust or authentication-setting change
+was made; a reachable supported executor is still required.
 
 The existing Linux installed-source waiter began while #2253 was OPEN and
 unqueued. It later reported the actual merge commit and exit 0 under live
