@@ -20,7 +20,11 @@ import selectors
 import shutil
 import subprocess
 import time
+import signal
+import threading
 from contextlib import contextmanager
+from collections.abc import Mapping
+from types import MappingProxyType
 from pr_status_singleflight import unix_private
 
 
@@ -836,6 +840,64 @@ class SourceFiles(dict):
     def __init__(self):
         super().__init__()
         self.modes = {}
+        self.loaded = {}
+
+
+class VerifiedGitObjects:
+    """One finite local cat-file stream, with bounded frames and object hashes."""
+    def __init__(self, command, environment):
+        self.process = subprocess.Popen([*command, "cat-file", "--batch"], env=environment,
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.selector = selectors.DefaultSelector()
+        self.selector.register(self.process.stdout, selectors.EVENT_READ)
+        self.buffer = bytearray()
+        self.total = 0
+    def _fill(self, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not self.selector.select(timeout=remaining):
+            raise ValueError("Git object read deadline exceeded")
+        chunk = os.read(self.process.stdout.fileno(), 65536)
+        if not chunk:
+            raise ValueError("Git object stream ended")
+        self.buffer.extend(chunk)
+    def read(self, kind, oid):
+        if kind not in ("commit", "tree", "blob") or re.fullmatch(r"[0-9a-f]{40}", oid) is None:
+            raise ValueError("invalid Git object request")
+        deadline = time.monotonic() + 10
+        self.process.stdin.write(oid.encode("ascii") + b"\n")
+        self.process.stdin.flush()
+        while b"\n" not in self.buffer:
+            if len(self.buffer) > 128:
+                raise ValueError("Git object header exceeds bound")
+            self._fill(deadline)
+        end = self.buffer.index(b"\n")
+        header = bytes(self.buffer[:end]).split(b" ")
+        del self.buffer[:end + 1]
+        if (len(header) != 3 or header[:2] != [oid.encode("ascii"), kind.encode("ascii")]
+                or re.fullmatch(b"[0-9]{1,8}", header[2]) is None):
+            raise ValueError("Git object header differs")
+        length = int(header[2]); self.total += length
+        if length > 4 * 1024 * 1024 or self.total > 64 * 1024 * 1024:
+            raise ValueError("Git source exceeds bound")
+        while len(self.buffer) < length + 1:
+            self._fill(deadline)
+        value = bytes(self.buffer[:length])
+        if self.buffer[length] != 10:
+            raise ValueError("Git object framing differs")
+        del self.buffer[:length + 1]
+        if hashlib.sha1(kind.encode("ascii") + b" " + str(length).encode("ascii") + b"\0" + value).hexdigest() != oid:
+            raise ValueError("Git object identity differs")
+        return value
+    def close(self):
+        try:
+            self.process.stdin.close()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill(); self.process.wait()
+        finally:
+            self.selector.close()
+            self.process.stdout.close()
 
 
 def installed_source(root, manifest):
@@ -856,25 +918,64 @@ def installed_source(root, manifest):
     git = trusted_boundary_executable(shutil.which("git") or "")
     git_environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
     git_environment["GIT_NO_REPLACE_OBJECTS"] = "1"
-    def git_read(*arguments):
-        return subprocess.run([git, "--no-replace-objects", "-C", str(root), *arguments],
+    git_environment.update(GIT_NO_LAZY_FETCH="1", GIT_ATTR_NOSYSTEM="1")
+    git_command = [git, "--no-replace-objects", "-c", "core.attributesFile=/dev/null", "-C", str(root)]
+    def git_read(*arguments, input_data=None):
+        return subprocess.run([*git_command, *arguments], input=input_data,
                               env=git_environment, capture_output=True, check=True, timeout=20).stdout
     if git_read("rev-parse", "--verify", "HEAD^{commit}").strip().decode("ascii") != sha:
         raise ValueError("installed HEAD differs from completed manifest")
     # Read-only source inspection is isolated from the command's GIT_* values;
     # the actual command below inherits every ordinary runtime setting intact.
     git_read("diff", "--quiet", "--ignore-submodules=all", sha, "--")
-    def object_bytes(kind, oid):
-        value = git_read("cat-file", kind, oid)
-        if hashlib.sha1(kind.encode("ascii") + b" " + str(len(value)).encode("ascii") + b"\0" + value).hexdigest() != oid:
-            raise ValueError("Git object identity differs")
-        return value
-    commit = object_bytes("commit", sha)
+    attributes_path = pathlib.Path(git_read("rev-parse", "--git-path", "info/attributes").decode("utf-8").strip())
+    if not attributes_path.is_absolute():
+        attributes_path = root / attributes_path
+    if attributes_path.exists() and any(line.strip() and not line.lstrip().startswith(b"#")
+                                        for line in attributes_path.read_bytes().splitlines()):
+        raise ValueError("local source attributes are unqualified")
+    reader = VerifiedGitObjects(git_command, git_environment)
+    try:
+        files = generation_files(reader, sha)
+    finally:
+        reader.close()
+    if hashlib.sha256(files["bin/ai-pr-wait"]).hexdigest() != entries[0][3]:
+        raise ValueError("manifest waiter hash differs")
+    raw_attributes = git_read("check-attr", f"--source={sha}", "-z", "--stdin", "eol", "filter", "working-tree-encoding",
+                              input_data=b"\0".join(path.encode("utf-8") for path in sorted(files)) + b"\0").split(b"\0")
+    if raw_attributes[-1:] != [b""] or (len(raw_attributes) - 1) % 3:
+        raise ValueError("source attributes framing differs")
+    attributes = {}
+    for offset in range(0, len(raw_attributes) - 1, 3):
+        path, name, value = (item.decode("utf-8") for item in raw_attributes[offset:offset + 3])
+        if path not in files or name not in ("eol", "filter", "working-tree-encoding") or (path, name) in attributes:
+            raise ValueError("source attributes differ")
+        attributes[path, name] = value
+    fingerprint, loaded_fingerprint = hashlib.sha256(), hashlib.sha256()
+    for path, content in sorted(files.items()):
+        if (attributes.get((path, "filter")) not in ("unspecified", "unset")
+                or attributes.get((path, "working-tree-encoding")) not in ("unspecified", "unset")
+                or attributes.get((path, "eol")) not in ("unspecified", "lf", "crlf")):
+            raise ValueError("custom source materialization is unqualified")
+        materialized = content
+        if attributes[path, "eol"] == "crlf" and b"\0" not in content:
+            materialized = content.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        files.loaded[path] = materialized
+        fingerprint.update(path.encode("utf-8") + b"\0" + hashlib.sha256(content).hexdigest().encode("ascii") + b"\n")
+        loaded_fingerprint.update(path.encode("utf-8") + b"\0" + hashlib.sha256(materialized).hexdigest().encode("ascii") + b"\n")
+    return {"source_sha": sha, "source_fingerprint": fingerprint.hexdigest(),
+            "loaded_source_fingerprint": loaded_fingerprint.hexdigest(), "materialization": "committed_git_eol_only",
+            "install_generation_binding": hashlib.sha256(data).hexdigest()}, files
+
+
+def generation_files(reader, sha):
+    """Verify the complete selected commit/tree/blob closure via one batch."""
+    commit = reader.read("commit", sha)
     first_line = commit.split(b"\n", 1)[0]
     if re.fullmatch(b"tree [0-9a-f]{40}", first_line) is None:
         raise ValueError("commit source tree differs")
     def tree_entries(oid):
-        raw, offset, names = object_bytes("tree", oid), 0, set()
+        raw, offset, names = reader.read("tree", oid), 0, set()
         while offset < len(raw):
             space = raw.index(b" ", offset)
             zero = raw.index(b"\0", space + 1)
@@ -888,17 +989,17 @@ def installed_source(root, manifest):
     def source_entries(oid, prefix=""):
         for mode, name, child in tree_entries(oid):
             path = f"{prefix}/{name}" if prefix else name
-            if not prefix and name not in ("bin", "tools", "config"):
+            if not prefix and name not in ("bin", "tools", "config", ".gitattributes"):
                 continue
             if mode == b"40000":
                 yield from source_entries(child, path)
-            elif mode in (b"100644", b"100755") and prefix:
+            elif mode in (b"100644", b"100755") and (prefix or name == ".gitattributes"):
                 yield path, child, mode
             else:
                 raise ValueError("unsupported source tree entry")
-    files, fingerprint, total_bytes = SourceFiles(), hashlib.sha256(), 0
+    files, total_bytes = SourceFiles(), 0
     for path, blob, mode in source_entries(first_line[5:].decode("ascii")):
-        content = object_bytes("blob", blob)
+        content = reader.read("blob", blob)
         total_bytes += len(content)
         if len(content) > 4 * 1024 * 1024 or total_bytes > 64 * 1024 * 1024 or len(files) >= 4096:
             raise ValueError("source file exceeds bound")
@@ -906,12 +1007,72 @@ def installed_source(root, manifest):
         files.modes[path] = 0o500 if mode == b"100755" else 0o400
     if not files or len(files) > 4096 or "bin/ai-pr-wait" not in files:
         raise ValueError("source generation is incomplete")
-    if hashlib.sha256(files["bin/ai-pr-wait"]).hexdigest() != entries[0][3]:
-        raise ValueError("manifest waiter hash differs")
-    for path, content in sorted(files.items()):
-        fingerprint.update(path.encode("utf-8") + b"\0" + hashlib.sha256(content).hexdigest().encode("ascii") + b"\n")
-    return {"source_sha": sha, "source_fingerprint": fingerprint.hexdigest(),
-            "install_generation_binding": hashlib.sha256(data).hexdigest()}, files
+    return files
+
+
+_GENERATION_AUTHORITY = object()
+_ACTIVE_GENERATIONS = {}
+
+
+class RetainedGenerationMapping(Mapping):
+    """Opaque live custody, deliberately not constructible from serialized data."""
+    def __init__(self, authority, values, descriptors):
+        if authority is not _GENERATION_AUTHORITY:
+            raise ValueError("generation custody requires its live factory")
+        self._values = MappingProxyType(dict(values, identity=MappingProxyType(dict(values["identity"]))))
+        self._descriptors = tuple((fd, os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in descriptors)
+        self._authority = authority
+        self._active = True
+        _ACTIVE_GENERATIONS[id(self)] = self
+    def __getitem__(self, key): return self._values[key]
+    def __iter__(self): return iter(self._values)
+    def __len__(self): return len(self._values)
+
+
+def retained_generation_valid(value):
+    """Only a live factory result with still-held immutable source can attest."""
+    if (type(value) is not RetainedGenerationMapping or not value._active
+            or value._authority is not _GENERATION_AUTHORITY or _ACTIVE_GENERATIONS.get(id(value)) is not value):
+        return False
+    import fcntl
+    required = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+    try:
+        for descriptor, device, inode in value._descriptors:
+            info = os.fstat(descriptor)
+            if ((info.st_dev, info.st_ino) != (device, inode) or not stat.S_ISREG(info.st_mode)
+                    or fcntl.fcntl(descriptor, fcntl.F_GET_SEALS) & required != required):
+                return False
+    except OSError:
+        return False
+    return True
+
+
+@contextmanager
+def retained_generation_launch(boundary):
+    """Give each invocation independent offsets; concurrent reads stay parallel."""
+    import fcntl
+    if not retained_generation_valid(boundary):
+        raise ValueError("generation custody is not live")
+    opened, replacements = [], {}
+    try:
+        for descriptor, _, _ in boundary._descriptors:
+            raw = os.open(f"/proc/self/fd/{descriptor}", os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                borrowed = fcntl.fcntl(raw, fcntl.F_DUPFD_CLOEXEC, 2048)
+            finally:
+                os.close(raw)
+            opened.append(borrowed)
+            replacements[str(descriptor)] = str(borrowed)
+        command = list(boundary["argv_prefix"])
+        for index in range(1, len(command)):
+            if command[index - 1] == "--ro-bind-data":
+                command[index] = replacements[command[index]]
+        yield {"argv_prefix": command, "pass_fds": tuple(opened)}
+        if not retained_generation_valid(boundary):
+            raise ValueError("generation custody changed during execution")
+    finally:
+        for descriptor in opened:
+            os.close(descriptor)
 
 
 @contextmanager
@@ -942,7 +1103,7 @@ def retained_generation(root, manifest):
     identity, files = installed_source(root, manifest)
     command = [boundary, "--unshare-user", "--die-with-parent", "--bind", "/", "/",
                "--dev-bind", "/dev", "/dev", "--cap-drop", "ALL"]
-    descriptors = []
+    descriptors, custody = [], None
     try:
         for directory in ("bin", "tools", "config"):
             command += ["--tmpfs", str(root / directory)]
@@ -956,18 +1117,28 @@ def retained_generation(root, manifest):
                 if parent not in made:
                     command += ["--dir", str(root / parent)]
                     made.add(parent)
-        for name, content in files.items():
-            fd = sealed_source(content)
+        for name, content in files.loaded.items():
+            import fcntl
+            raw_fd = sealed_source(content)
+            try:
+                fd = fcntl.fcntl(raw_fd, fcntl.F_DUPFD_CLOEXEC, 2048)
+            finally:
+                os.close(raw_fd)
             descriptors.append(fd)
             command += ["--perms", f"{files.modes[name]:04o}", "--ro-bind-data", str(fd), str(root / name)]
         for directory in ("bin", "tools", "config"):
             command += ["--remount-ro", str(root / directory)]
         identity["source_boundary"] = "linux_sealed_generation"
         bash = trusted_boundary_executable(shutil.which("bash") or "")
-        yield {"identity": identity, "argv_prefix": [*command, "--"], "pass_fds": tuple(descriptors),
-               "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash,
-               "bootstrap_ns": time.perf_counter_ns() - bootstrap_started}
+        custody = RetainedGenerationMapping(_GENERATION_AUTHORITY,
+                    {"identity": identity, "argv_prefix": tuple([*command, "--"]), "pass_fds": tuple(descriptors),
+                     "root": str(root), "transport_path": str(root / "bin/ai-gh"), "bash_path": bash,
+                     "bootstrap_ns": time.perf_counter_ns() - bootstrap_started}, descriptors)
+        yield custody
     finally:
+        if custody is not None:
+            custody._active = False
+            _ACTIVE_GENERATIONS.pop(id(custody), None)
         for fd in descriptors:
             os.close(fd)
 
@@ -989,7 +1160,7 @@ def qualify_wait(root, manifest, arguments, receipt_path):
                "source_sha": None, "source_fingerprint": None, "install_generation_binding": None,
                "child_exit": None, "clock_start": None, "clock_end": None, "event": None,
                "event_qualification": None, "source_bootstrap_ns": None, "qualification_elapsed_ns": None}
-    descriptors, command, generation_context = [], None, None
+    descriptors, command, generation_context, launch_context = [], None, None, None
     read_fd = write_fd = None
     environment = os.environ.copy()
     environment.pop("AI_GH_QUALIFICATION_EVENT_FD", None)
@@ -997,7 +1168,9 @@ def qualify_wait(root, manifest, arguments, receipt_path):
         receipt["unknown_reason"] = "manifest_untrusted"
         generation_context = retained_generation(root, manifest)
         generation = generation_context.__enter__()
-        command = generation["argv_prefix"]
+        launch_context = retained_generation_launch(generation)
+        launch = launch_context.__enter__()
+        command = list(launch["argv_prefix"])
         read_fd, write_fd = os.pipe()
         descriptors += [read_fd, write_fd]
         environment["AI_GH_QUALIFICATION_EVENT_FD"] = str(write_fd)
@@ -1013,13 +1186,27 @@ def qualify_wait(root, manifest, arguments, receipt_path):
         descriptors = []
         read_fd = write_fd = None
         if generation_context is not None:
+            if launch_context is not None:
+                launch_context.__exit__(None, None, None)
+                launch_context = None
             generation_context.__exit__(None, None, None)
             generation_context = None
     start = qualification_clock()
     events, event_bytes = [], bytearray()
+    child, selector = None, None
+    previous_term = None
+    class QualificationCancelled(BaseException):
+        def __init__(self, signum): self.signum = signum
+    def cancelled(signum, frame):
+        raise QualificationCancelled(signum)
+    if threading.current_thread() is threading.main_thread():
+        previous_term = signal.signal(signal.SIGTERM, cancelled)
     try:
-        inherited = tuple(descriptors) + (generation["pass_fds"] if generation_context is not None else ())
-        child = subprocess.Popen(command, env=environment, pass_fds=inherited)
+        inherited = tuple(descriptors) + (launch["pass_fds"] if generation_context is not None else ())
+        # Own only this command's group. The normal waiter already supervises
+        # native calls; this outer group also covers cancellation during setup
+        # or before that inner supervisor has started.
+        child = subprocess.Popen(command, env=environment, pass_fds=inherited, start_new_session=True)
         if write_fd is not None:
             os.close(write_fd)
             descriptors.remove(write_fd)
@@ -1061,7 +1248,7 @@ def qualify_wait(root, manifest, arguments, receipt_path):
         if (not unqualified_event(event)
                 or {"pr_merged": 0, "pr_closed": 1, "check_completed": 1}.get(event["event_kind"], status) != status):
             event = None
-        if event is None and receipt["source_verified"] == "verified":
+        if (event is None or (generation_context is not None and not retained_generation_valid(generation))) and receipt["source_verified"] == "verified":
             # No bound waiter observation proves that execution crossed the
             # prepared boundary. Retain identity as preparation, not proof.
             receipt["source_verified"] = "unknown"
@@ -1083,13 +1270,35 @@ def qualify_wait(root, manifest, arguments, receipt_path):
         except (OSError, ValueError):
             print("request qualification: receipt unavailable; original command status preserved", file=sys.stderr)
         return status if status >= 0 else 128 - status
+    except (KeyboardInterrupt, QualificationCancelled) as interruption:
+        signum = interruption.signum if isinstance(interruption, QualificationCancelled) else signal.SIGINT
+        if child is not None:
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()
+        return 128 + signum
     finally:
+        if selector is not None:
+            selector.close()
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
         for fd in descriptors:
             try:
                 os.close(fd)
             except OSError:
                 pass
         if generation_context is not None:
+            if launch_context is not None:
+                launch_context.__exit__(None, None, None)
             generation_context.__exit__(None, None, None)
 
 if __name__ == "__main__":

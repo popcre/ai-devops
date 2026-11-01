@@ -10,12 +10,15 @@ import subprocess
 import sys
 import tempfile
 import time
+import signal
+import selectors
 import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/github-requests"))
 import report
+import measure_append
 
 
 def event():
@@ -129,6 +132,38 @@ class EventTests(unittest.TestCase):
         self.assertIn("review-fixer", report.CALLERS)
         self.assertNotIn("review-fixer:private-target", report.CALLERS)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux inherited-pipe boundary")
+    def test_optional_event_pipe_full_or_closed_is_nonblocking_and_preserves_flags(self):
+        import fcntl
+        read_fd, write_fd = os.pipe()
+        try:
+            original = fcntl.fcntl(write_fd, fcntl.F_GETFL)
+            os.set_blocking(write_fd, False)
+            while True:
+                try: os.write(write_fd, b"x" * 4096)
+                except BlockingIOError: break
+            os.set_blocking(write_fd, True)
+            start = time.monotonic()
+            self.assertFalse(measure_append.write_event_fd(write_fd, "{}"))
+            self.assertLess(time.monotonic() - start, 0.5)
+            self.assertEqual(fcntl.fcntl(write_fd, fcntl.F_GETFL), original)
+            with tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run(["bash", "-c", 'source "$1"; gh_measure_workflow_evidence ai-pr-wait pr_wait aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; printf OK',
+                                         "bash", str(ROOT / "tools/github-requests/telemetry.sh")],
+                                        env=dict(os.environ, AI_GH_STATE_DIR=directory,
+                                                 AI_GH_QUALIFICATION_EVENT_FD=str(write_fd)),
+                                        pass_fds=(write_fd,), capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "OK")
+            os.close(read_fd); read_fd = None
+            self.assertFalse(measure_append.write_event_fd(write_fd, "{}"))
+            self.assertEqual(fcntl.fcntl(write_fd, fcntl.F_GETFL), original)
+            self.assertFalse(measure_append.write_event_fd(1, "{}"))
+            self.assertFalse(measure_append.write_event_fd(write_fd, "x" * 4096))
+        finally:
+            if read_fd is not None: os.close(read_fd)
+            os.close(write_fd)
+
 
 class ParentTests(unittest.TestCase):
     def setUp(self):
@@ -153,8 +188,10 @@ exit "${1:-0}"
 """.replace("EVENT_PLACEHOLDER", repr(event())))
         self.waiter.chmod(0o755)
         (self.root / "tools/helper.py").write_text("ORIGINAL_HELPER = True\n")
+        (self.root / ".gitattributes").write_text("*.cmd text eol=crlf\n")
+        (self.root / "bin/windows-fixture.cmd").write_bytes(b"@echo off\r\nexit /b 0\r\n")
         self.git("init", "-q")
-        self.git("add", "bin", "tools", "config")
+        self.git("add", "bin", "tools", "config", ".gitattributes")
         self.git("-c", "user.name=Albert Hazan", "-c", "user.email=u2giants@users.noreply.github.com",
                  "commit", "-qm", "qualification fixture")
         self.sha = self.git("rev-parse", "HEAD").strip()
@@ -193,6 +230,7 @@ exit "${1:-0}"
         with self.fixture_installation():
             identity, files = report.installed_source(self.root, self.manifest)
         self.assertEqual(identity["source_sha"], self.sha)
+        self.assertNotEqual(identity["source_fingerprint"], identity["loaded_source_fingerprint"])
         self.assertIn("bin/ai-pr-wait", files)
         original = self.manifest.read_text()
         for bad in (original + f"meta\tsource_sha\t{self.sha}\t-\n",
@@ -284,11 +322,54 @@ exit "${1:-0}"
             os.close(descriptor)
         (self.root / "tools/UNTRACKED").write_text("private local helper")
         with self.fixture_installation(), report.retained_generation(self.root, self.manifest) as generation:
-            result = subprocess.run([*generation["argv_prefix"], generation["bash_path"], "-c",
-                                     ': >/dev/null && test ! -e "$1/tools/UNTRACKED" && ! touch "$1/tools/ADDED"', "bash", str(self.root)],
-                                    pass_fds=generation["pass_fds"], capture_output=True)
-            self.assertEqual(result.returncode, 0)
+            with report.retained_generation_launch(generation) as launch:
+                result = subprocess.run([*launch["argv_prefix"], generation["bash_path"], "-c",
+                                         ': >/dev/null && git -C "$1" diff --quiet HEAD -- && [ -z "$(git -C "$1" status --porcelain --untracked-files=no)" ] && test ! -e "$1/tools/UNTRACKED" && ! touch "$1/tools/ADDED"', "bash", str(self.root)],
+                                        pass_fds=launch["pass_fds"], capture_output=True)
+                self.assertEqual(result.returncode, 0)
         self.assertFalse((self.root / "tools/ADDED").exists())
+
+    def test_live_factory_custody_rejects_forgery_and_closed_context_and_reuses_bytes(self):
+        if not sys.platform.startswith("linux") or not shutil.which("bwrap"):
+            self.skipTest("Linux Bubblewrap required")
+        with self.fixture_installation(), report.retained_generation(self.root, self.manifest) as generation:
+            self.assertTrue(report.retained_generation_valid(generation))
+            self.assertFalse(report.retained_generation_valid(dict(generation)))
+            with self.assertRaises(ValueError):
+                report.RetainedGenerationMapping(None, dict(generation), ())
+            with self.assertRaises(TypeError): generation["identity"]["source_sha"] = "0" * 40
+            for _ in range(2):
+                with report.retained_generation_launch(generation) as launch:
+                    result = subprocess.run([*launch["argv_prefix"], generation["bash_path"],
+                                             str(self.waiter), "0"], pass_fds=launch["pass_fds"], capture_output=True)
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, b"ORIGINAL terminal output\n")
+        self.assertFalse(report.retained_generation_valid(generation))
+        with self.assertRaises(ValueError):
+            with report.retained_generation_launch(generation): pass
+
+    def test_qualifier_cancellation_reaps_its_owned_child_group(self):
+        self.waiter.write_text('#!/usr/bin/env bash\nsleep 60 &\nprintf "READY %s\\n" "$!"\nwait\n')
+        for cancellation in (signal.SIGINT, signal.SIGTERM):
+            process = subprocess.Popen([sys.executable, str(ROOT / "tools/github-requests/report.py"),
+                                        "--qualify-wait", "--source-root", str(self.root),
+                                        "--manifest", str(self.manifest), "--receipt", str(self.root / "unused.json"),
+                                        "--", "0"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            selector = selectors.DefaultSelector(); selector.register(process.stdout, selectors.EVENT_READ)
+            try:
+                self.assertTrue(selector.select(timeout=3))
+                line = process.stdout.readline().strip()
+                self.assertTrue(line.startswith("READY "), line)
+                descendant = int(line.split()[1])
+                process.send_signal(cancellation)
+                process.communicate(timeout=7)
+                self.assertEqual(process.returncode, 128 + cancellation)
+                status_file = Path(f"/proc/{descendant}/stat")
+                if status_file.exists():
+                    self.assertEqual(status_file.read_text().split()[2], "Z")
+            finally:
+                selector.close()
+                if process.poll() is None: process.kill(); process.wait()
 
 
 if __name__ == "__main__":

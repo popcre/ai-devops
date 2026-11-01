@@ -15,6 +15,35 @@ import os
 from pathlib import Path
 import stat
 import time
+import sys
+
+
+def write_event_fd(descriptor: int, record: str) -> bool:
+    """One atomic, nonblocking write through an independent pipe description.
+
+    dup() would share status flags with the caller; reopening its already-held
+    Linux pipe makes O_NONBLOCK local to this write. Regular files, stdio,
+    oversized records and unavailable readers are refused without side effects.
+    """
+    opened = None
+    try:
+        if (type(descriptor) is not int or not 3 <= descriptor <= 65535
+                or not isinstance(record, str) or not record or "\n" in record):
+            return False
+        data = (record + "\n").encode("utf-8")
+        original = os.fstat(descriptor)
+        if not stat.S_ISFIFO(original.st_mode) or len(data) > min(4096, os.fpathconf(descriptor, "PC_PIPE_BUF")):
+            return False
+        opened = os.open(f"/proc/self/fd/{descriptor}", os.O_WRONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        info = os.fstat(opened)
+        if not stat.S_ISFIFO(info.st_mode) or (info.st_dev, info.st_ino) != (original.st_dev, original.st_ino):
+            return False
+        return os.write(opened, data) == len(data)
+    except (OSError, ValueError, UnicodeError):
+        return False
+    finally:
+        if opened is not None:
+            os.close(opened)
 
 
 def append_record(measurements_dir: Path, record: str) -> bool:
@@ -72,3 +101,14 @@ def append_record(measurements_dir: Path, record: str) -> bool:
                 pass
     except OSError:
         return False
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--event-fd" and sys.argv[2].isdigit():
+        data = sys.stdin.buffer.read(4097)
+        try:
+            success = len(data) <= 4096 and write_event_fd(int(sys.argv[2]), data.decode("utf-8"))
+        except UnicodeError:
+            success = False
+        sys.exit(0 if success else 1)
+    sys.exit(2)

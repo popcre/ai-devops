@@ -257,7 +257,11 @@ gh_measure_workflow_evidence(){
   # A caller-supplied descriptor never grants source or clock authority.
   if [[ "${AI_GH_QUALIFICATION_EVENT_FD:-}" =~ ^[0-9]{1,5}$ ]] &&
     [ "$AI_GH_QUALIFICATION_EVENT_FD" -ge 3 ] && [ -p "/proc/self/fd/$AI_GH_QUALIFICATION_EVENT_FD" ]; then
-    { printf '%s\n' "$record" >&"$AI_GH_QUALIFICATION_EVENT_FD"; } 2>/dev/null || :
+    local event_python="${PYTHON_RUNNER:-}" event_helper="${BASH_SOURCE[0]%/*}/measure_append.py"
+    [ -n "$event_python" ] || event_python="$(command -v python3 || command -v python || true)"
+    if [ -n "$event_python" ] && [ -f "$event_helper" ]; then
+      printf '%s' "$record" | "$event_python" "$event_helper" --event-fd "$AI_GH_QUALIFICATION_EVENT_FD" 2>/dev/null || :
+    fi
   fi
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
