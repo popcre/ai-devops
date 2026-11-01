@@ -44,15 +44,15 @@ def digest(value, size=64):
     return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{%d}" % size, value) is not None
 
 
-def valid_start(row, argument_hash):
+def valid_start(row, argument_hash, active_completion=False, sdk_coordinator=False):
     return (isinstance(row, dict) and set(row) == START_KEYS and type(row["schema"]) is int
             and row["schema"] == 1 and row["frame"] == "started"
             and digest(row["observer_run_id"], 32) and digest(row["source_sha"], 40)
             and digest(row["source_fingerprint"]) and row["observer_arguments_sha256"] == argument_hash
             and row["source_scope"] == "git_raw_bin_tools_config_v1"
-            and row["execution_profile"] == "restricted_read"
+            and row["execution_profile"] == ("active_sdk_coordinator" if sdk_coordinator else "original_active" if active_completion else "restricted_read")
             and row["start_boundary"] == "process_resumed"
-            and row["stdin_profile"] == "read_only_no_stdin")
+            and row["stdin_profile"] == ("active_no_stdin" if active_completion else "read_only_no_stdin"))
 
 
 def valid_counter_binding(row, expected_hash):
@@ -88,7 +88,7 @@ def valid_counter_measurement(row):
                     ("observed_completed_writes", "failed_write_attempts", "observed_external_writes")))
 
 
-def valid_receipt(row, started, expected_counter_hash=None):
+def valid_receipt(row, started, expected_counter_hash=None, active_completion=False):
     if not isinstance(row, dict) or not isinstance(started, dict):
         return False
     required = {"schema", "source_sha", "source_fingerprint", "loaded_source_fingerprint", "source_scope",
@@ -99,6 +99,12 @@ def valid_receipt(row, started, expected_counter_hash=None):
         required |= {"counter_binding", "counter_measurement"}
         if not valid_counter_binding(row.get("counter_binding"), expected_counter_hash) or not valid_counter_measurement(row.get("counter_measurement")):
             return False
+    if active_completion:
+        required.add("active_channel_status")
+        if row.get("active_channel_status") not in {"valid", "invalid"}:
+            return False
+        if started.get("execution_profile") == "original_active" and row.get("source_verified") != "unknown":
+            return False
     return (set(row) == required and type(row["schema"]) is int and row["schema"] == 1
             and all(row[key] == started[key] for key in ("source_sha", "source_fingerprint", "source_scope",
                     "observer_run_id", "observer_arguments_sha256", "execution_profile", "stdin_profile", "start_boundary"))
@@ -108,7 +114,7 @@ def valid_receipt(row, started, expected_counter_hash=None):
             and type(row["child_exit"]) is int and -2147483648 <= row["child_exit"] <= 4294967295
             and row["source_verified"] in {"verified", "unknown"}
             and row["unknown_reason"] in {"none", "boundary_unavailable"}
-            and row["boundary_detail"] in {"none", "privileged_original_context"}
+            and row["boundary_detail"] in {"none", "privileged_original_context", "active_original_context_unqualified"}
             and (row["source_verified"] != "verified" or (row["unknown_reason"] == "none" and row["boundary_detail"] == "none"))
             and row["clock_quality"] == "unknown" and row["clock_error_bound_ms"] is None
             and row["observer_event_status"] in {"received", "unavailable", "invalid"}
@@ -170,7 +176,7 @@ def parse_frame(line):
     if not isinstance(row, dict) or type(row.get("protocol")) is not int or row["protocol"] != 1:
         raise ValueError("invalid observer protocol")
     kind = row.get("kind")
-    expected = {"stdout": "data", "stderr": "data", "started": "record", "receipt": "record", "exit": "code"}
+    expected = {"stdout": "data", "stderr": "data", "started": "record", "receipt": "record", "exit": "code", "active": "record"}
     if kind not in expected or set(row) != {"protocol", "kind", expected[kind]}:
         raise ValueError("invalid observer frame shape")
     if kind in {"stdout", "stderr"}:
@@ -201,10 +207,14 @@ def _write_private(path, value):
         os.close(parent)
 
 
-def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_hash=None):
+def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_hash=None,
+            active_completion=False, sdk_coordinator=False):
     """Linux parent; only live frames can produce this observer receipt."""
     if not sys.platform.startswith("linux"):
         raise ValueError("Linux parent clock required")
+    if active_completion and (arguments not in (["tick"], ["alarm"], ["links"]) or
+                              (sdk_coordinator and arguments == ["tick"])):
+        raise ValueError("finite active coordinator operation required")
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     bounded_arguments(argument_bytes)
     argument_hash = hashlib.sha256(argument_bytes).hexdigest()
@@ -220,6 +230,13 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
     got_receipt = False
     got_exit = False
     original_exit = None
+    transcript = None
+    if active_completion:
+        def acknowledge(identity):
+            child.stdin.write(frame("active_ack", workflow_id=identity))
+            child.stdin.flush()
+            return True
+        transcript = get_report().ActiveCompletionTranscript(arguments[0], acknowledge)
     try:
         while time.monotonic() < deadline:
             if not selector.select(min(0.2, max(0, deadline - time.monotonic()))):
@@ -243,16 +260,29 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                     output.write(row["decoded"])
                     output.flush()
                 elif row["kind"] == "started":
-                    if started is not None or got_receipt or not valid_start(row["record"], argument_hash):
+                    if started is not None or got_receipt or not valid_start(row["record"], argument_hash, active_completion, sdk_coordinator):
                         raise ValueError("observer start unavailable")
                     start_clock = get_report().qualification_clock()
                     started_frame_elapsed_ns = time.perf_counter_ns() - observation_started_ns
                     started = row["record"]
+                elif row["kind"] == "active":
+                    if not active_completion or started is None or got_receipt:
+                        raise ValueError("unexpected active completion frame")
+                    value = row["record"]
+                    if (not isinstance(value, dict) or set(value) != {"data", "queued"}
+                            or not isinstance(value["data"], str) or type(value["queued"]) is not bool
+                            or len(value["data"].encode("utf-8")) > 4096):
+                        transcript.invalid = True
+                    else:
+                        try:
+                            transcript.receive(loads(value["data"]), get_report().qualification_clock(), queued=value["queued"])
+                        except (ValueError, TypeError, KeyError):
+                            transcript.invalid = True
                 elif row["kind"] == "receipt":
                     received = get_report().qualification_clock()  # BEFORE ACK, while source custody remains held.
                     receipt_elapsed_ns = time.perf_counter_ns() - observation_started_ns
                     source = row["record"]
-                    if got_receipt or not valid_receipt(source, started, expected_counter_hash):
+                    if got_receipt or not valid_receipt(source, started, expected_counter_hash, active_completion):
                         raise ValueError("observer source receipt unavailable")
                     event = None
                     event_invalid = False
@@ -276,6 +306,16 @@ def observe(command, arguments, receipt_path, timeout_seconds, expected_counter_
                     if expected_counter_hash is not None:
                         result["measurement"] = "linux_observed_windows_managed_read_counter"
                         result["counter_measurement"] = source["counter_measurement"]
+                    if active_completion:
+                        if source["active_channel_status"] != "valid":
+                            transcript.invalid = True
+                        qualified, records = transcript.result(source["child_exit"], source_verified=source["source_verified"] == "verified")
+                        result.update(measurement="linux_observed_windows_active_completion", active_completion_records=records,
+                                      active_completion_qualified=qualified, stdin_profile="active_no_stdin",
+                                      qualification_profile="sdk_only_no_provider" if sdk_coordinator else "original_context",
+                                      original_privilege_equivalence=False,
+                                      native_execution_profile=source["execution_profile"],
+                                      detection_latency_ms=None, detection_unknown_reason="eligibility_and_delivery_not_witnessed")
                     try:
                         _write_private(receipt_path, result)
                     except (OSError, ValueError):
@@ -329,7 +369,8 @@ def bounded_arguments(argument_bytes):
     return arguments
 
 
-def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest=None, expected_counter_hash=None):
+def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest=None, expected_counter_hash=None,
+                               active_completion=False, sdk_coordinator=False):
     """Documented process-only script execution; never changes persistent/GPO policy."""
     powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
     bounded_arguments(argument_bytes)
@@ -338,6 +379,16 @@ def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_
             "-SourceRoot", source_root, "-EntryPoint", "bin/ai-pr-wait", "-ArgumentsBase64", argument_payload,
             "-ReceiptHandle", str(receipt_handle), "-ReceiptAckHandle", str(ack_handle),
             "-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"]
+    if active_completion:
+        arguments = bounded_arguments(argument_bytes)
+        if counter_manifest is not None or arguments not in (["tick"], ["alarm"], ["links"]) or (sdk_coordinator and arguments == ["tick"]):
+            raise ValueError("finite original active operation required")
+        command[command.index("bin/ai-pr-wait")] = "bin/ai-blocker-watch"
+        for flag in ("-RestrictedReadProfile", "-ObserverEvents", "-ReadOnlyNoStdin"):
+            command.remove(flag)
+        command += ["-ActiveCompletion", "-ActiveNoStdin"]
+        if sdk_coordinator:
+            command += ["-ActiveSdkProfile"]
     if counter_manifest is not None:
         if not digest(expected_counter_hash):
             raise ValueError("exact approved counter manifest digest required")
@@ -347,35 +398,54 @@ def windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_
     return command
 
 
-def windows_controller(source_root, argument_bytes, timeout_seconds, counter_manifest=None, expected_counter_hash=None):
+def windows_controller(source_root, argument_bytes, timeout_seconds, counter_manifest=None, expected_counter_hash=None,
+                       active_completion=False, sdk_coordinator=False):
     """Windows native controller: stream bytes; hold receipt custody until Linux ACK."""
     import msvcrt
     arguments = bounded_arguments(argument_bytes)
     receipt_read, receipt_write = os.pipe()
     ack_read, ack_write = os.pipe()
+    if active_completion:
+        try:
+            os.set_blocking(ack_write, False)  # This parent owns this pipe, never a caller descriptor.
+        except (OSError, NotImplementedError):
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.SetNamedPipeHandleState.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p, ctypes.c_void_p]
+            mode = ctypes.c_ulong(1)
+            if not kernel.SetNamedPipeHandleState(msvcrt.get_osfhandle(ack_write), ctypes.byref(mode), None, None):
+                raise ValueError("owned nonblocking active control unavailable")
     receipt_handle, ack_handle = msvcrt.get_osfhandle(receipt_write), msvcrt.get_osfhandle(ack_read)
     os.set_handle_inheritable(receipt_handle, True)
     os.set_handle_inheritable(ack_handle, True)
     startup = subprocess.STARTUPINFO()
     startup.lpAttributeList = {"handle_list": [receipt_handle, ack_handle]}
-    controls = queue.Queue()
+    controls = queue.Queue(maxsize=258)
     def control_reader():
         # Raw descriptor IO avoids a daemon holding CPython's buffered-stdin
         # lock during cancellation/interpreter shutdown.
         data = bytearray()
         try:
-            while len(data) <= 1024 and b"\n" not in data:
-                chunk = os.read(sys.stdin.fileno(), 1025 - len(data))
+            messages = 0
+            while messages < (257 if active_completion else 1):
+                chunk = os.read(sys.stdin.fileno(), 4097 - len(data) if active_completion else 1025 - len(data))
                 if not chunk:
-                    break
+                    controls.put_nowait(b""); return
                 data.extend(chunk)
-            controls.put(bytes(data))
-        except OSError:
-            controls.put(b"")
+                while b"\n" in data:
+                    line, _, rest = data.partition(b"\n"); data = bytearray(rest)
+                    controls.put_nowait(bytes(line) + b"\n"); messages += 1
+                    if not active_completion:
+                        return
+                if len(data) > (4096 if active_completion else 1024):
+                    controls.put_nowait(b""); return
+        except (OSError, queue.Full):
+            try: controls.put_nowait(b"")
+            except queue.Full: pass
     threading.Thread(target=control_reader, daemon=True).start()
     child = None
     reader = None
-    command = windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest, expected_counter_hash)
+    command = windows_supervisor_command(source_root, argument_bytes, receipt_handle, ack_handle, counter_manifest, expected_counter_hash,
+                                         active_completion, sdk_coordinator)
     try:
         child = subprocess.Popen(command, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -386,6 +456,7 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
         got_receipt = False
         deadline = time.monotonic() + timeout_seconds
         source = None
+        active_control_failed = False
         def output_frames():
             for name, stream in (("stdout", child.stdout), ("stderr", child.stderr)):
                 while _peek(stream):
@@ -405,6 +476,11 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                     record = loads(line)
                     if record.get("frame") == "started":
                         sys.stdout.buffer.write(frame("started", record=record))
+                    elif active_completion and record.get("frame") == "active":
+                        if set(record) != {"schema", "frame", "data", "queued"} or record["schema"] != 1:
+                            active_control_failed = True
+                        else:
+                            sys.stdout.buffer.write(frame("active", record={"data": record["data"], "queued": record["queued"]}))
                     else:
                         if got_receipt:
                             raise ValueError("duplicate native receipt")
@@ -416,11 +492,30 @@ def windows_controller(source_root, argument_bytes, timeout_seconds, counter_man
                                 raise ValueError("native counter binding unavailable")
                             record["counter_measurement"] = counter_aggregate(record.pop("counter_raw", None))
                         source = record
+                        if active_completion and active_control_failed:
+                            source["active_channel_status"] = "invalid"
                         got_receipt = True
                         sys.stdout.buffer.write(frame("receipt", record=record))
                     sys.stdout.buffer.flush()
             if not controls.empty():
                 control = controls.get_nowait()
+                if active_completion and control:
+                    try:
+                        value = loads(control)
+                        if (isinstance(value, dict) and set(value) == {"protocol", "kind", "workflow_id"}
+                                and type(value["protocol"]) is int and value["protocol"] == 1
+                                and value["kind"] == "active_ack" and digest(value["workflow_id"], 32)):
+                            outgoing = {"schema": 1, "phase": "ack", "workflow_id": value["workflow_id"]}
+                        elif source and value == {"protocol": 1, "kind": "ack", "observer_run_id": source["observer_run_id"]}:
+                            outgoing = {"schema": 1, "phase": "custody_ack", "observer_run_id": source["observer_run_id"]}
+                        else:
+                            raise ValueError("invalid parent control")
+                        data = json.dumps(outgoing, separators=(",", ":")).encode("ascii") + b"\n"
+                        if os.write(ack_write, data) != len(data):
+                            active_control_failed = True
+                    except (ValueError, TypeError, OSError):
+                        active_control_failed = True
+                    continue
                 expected = {"protocol": 1, "kind": "ack", "observer_run_id": source["observer_run_id"]} if source else None
                 if not control or len(control) > 1024 or loads(control) != expected:
                     break
@@ -458,13 +553,21 @@ def main():
     parser.add_argument("--host")
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--receipt")
-    parser.add_argument("--read-only-no-stdin", action="store_true", required=True)
+    parser.add_argument("--read-only-no-stdin", action="store_true")
+    parser.add_argument("--active-completion", action="store_true")
+    parser.add_argument("--active-no-stdin", action="store_true")
+    parser.add_argument("--sdk-coordinator-profile", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=3600)
     parser.add_argument("--arguments-base64")
     parser.add_argument("--counter-manifest")
     parser.add_argument("--expected-counter-manifest-sha256")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     options = parser.parse_args()
+    if options.active_completion:
+        if not options.active_no_stdin or options.read_only_no_stdin or options.counter_manifest:
+            parser.error("explicit active/no-stdin profile required; no counter/read relabeling")
+    elif not options.read_only_no_stdin or options.active_no_stdin or options.sdk_coordinator_profile:
+        parser.error("explicit existing read-only/no-stdin profile required")
     if not 1 <= options.timeout_seconds <= 7200:
         parser.error("finite observer deadline required")
     if bool(options.counter_manifest) != bool(options.expected_counter_manifest_sha256) or (options.counter_manifest and
@@ -474,7 +577,8 @@ def main():
         if os.name != "nt" or options.arguments_base64 is None:
             parser.error("native Windows controller required")
         return windows_controller(options.source_root, base64.b64decode(options.arguments_base64, validate=True), options.timeout_seconds,
-                                  options.counter_manifest, options.expected_counter_manifest_sha256)
+                                  options.counter_manifest, options.expected_counter_manifest_sha256,
+                                  options.active_completion, options.sdk_coordinator_profile)
     if not options.host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", options.host) or not options.receipt:
         parser.error("known SSH host and new private receipt destination required")
     if not re.fullmatch(r"[A-Za-z]:[/\\][A-Za-z0-9_./\\ -]+", options.source_root):
@@ -482,10 +586,16 @@ def main():
     arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
     argument_bytes = json.dumps(arguments, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     bounded_arguments(argument_bytes)  # before SSH or native supervisor creation.
+    if options.active_completion and (arguments not in (["tick"], ["alarm"], ["links"]) or
+                                      (options.sdk_coordinator_profile and arguments == ["tick"])):
+        parser.error("finite active operation required; SDK profile excludes providers/ticks")
     payload = base64.b64encode(argument_bytes).decode("ascii")
     remote_path = options.source_root.rstrip("/\\") + "/tools/github-requests/remote_wait.py"
     remote_arguments = ["python.exe", "-I", remote_path, "--windows-controller", "--source-root", options.source_root,
-                        "--read-only-no-stdin", "--timeout-seconds", str(options.timeout_seconds), "--arguments-base64", payload]
+                        "--timeout-seconds", str(options.timeout_seconds), "--arguments-base64", payload]
+    remote_arguments += ["--active-completion", "--active-no-stdin"] if options.active_completion else ["--read-only-no-stdin"]
+    if options.sdk_coordinator_profile:
+        remote_arguments += ["--sdk-coordinator-profile"]
     if options.counter_manifest:
         remote_arguments += ["--counter-manifest", options.counter_manifest, "--expected-counter-manifest-sha256", options.expected_counter_manifest_sha256]
     remote = subprocess.list2cmdline(remote_arguments)
@@ -493,7 +603,8 @@ def main():
         parser.error("ambient source injection prevents observer qualification")
     ssh = get_report().trusted_boundary_executable("/usr/bin/ssh")
     command = [ssh, "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=12", options.host, remote]
-    return observe(command, arguments, options.receipt, options.timeout_seconds, options.expected_counter_manifest_sha256)
+    return observe(command, arguments, options.receipt, options.timeout_seconds, options.expected_counter_manifest_sha256,
+                   options.active_completion, options.sdk_coordinator_profile)
 
 
 if __name__ == "__main__":

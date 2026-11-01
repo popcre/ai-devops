@@ -4,7 +4,7 @@
 # equivalence. Fixed issue/PR reads preserve the caller's working directory.
 param(
     [Parameter(Mandatory=$true)][string]$SourceRoot,
-    [Parameter(Mandatory=$true)][ValidateSet('bin/ai-pr-wait','bin/ai-gh')][string]$EntryPoint,
+    [Parameter(Mandatory=$true)][ValidateSet('bin/ai-pr-wait','bin/ai-gh','bin/ai-blocker-watch')][string]$EntryPoint,
     [Parameter(Mandatory=$true,ParameterSetName='File')][string]$ArgumentsFile,
     [Parameter(Mandatory=$true,ParameterSetName='Inline')][string]$ArgumentsBase64,
     [Parameter(Mandatory=$true)][long]$ReceiptHandle,
@@ -13,6 +13,9 @@ param(
     [switch]$RestrictedReadProfile,
     [switch]$ObserverEvents,
     [switch]$ReadOnlyNoStdin,
+    [switch]$ActiveCompletion,
+    [switch]$ActiveNoStdin,
+    [switch]$ActiveSdkProfile,
     [string]$CounterManifest,
     [string]$ExpectedCounterManifestSha256
 )
@@ -82,6 +85,7 @@ public static class GenerationCustody {
  static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle h,out Info info);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr h,uint mask,uint flags);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool WriteFile(SafeFileHandle h,byte[] data,uint size,out uint written,IntPtr overlapped);
  [DllImport("kernel32.dll")] static extern uint GetFileType(IntPtr h);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string s,uint revision,out IntPtr descriptor,out uint size);
  [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public uint Length; public IntPtr Descriptor; public bool Inherit; }
@@ -256,28 +260,45 @@ public static class GenerationCustody {
  public sealed class EventChannel:IDisposable {
   readonly SafeFileHandle reader,writer;readonly System.Collections.Generic.List<byte[]> messages=new System.Collections.Generic.List<byte[]>();readonly int limit;int total;bool invalid;
   public long WriteHandle {get{return writer.DangerousGetHandle().ToInt64();}}
+  public long ReadHandle {get{return reader.DangerousGetHandle().ToInt64();}}
+  public bool Invalid {get{return invalid;}}
+  int consumed;
   public string Status {get{return invalid?"invalid":messages.Count==1?"received":"unavailable";}}
   public EventChannel():this(1){}
-  public EventChannel(int messageLimit){
-   if(messageLimit!=1&&messageLimit!=128)throw new ArgumentException("Finite channel limit required");limit=messageLimit;
+  public EventChannel(int messageLimit):this(messageLimit,false){}
+  public EventChannel(int messageLimit,bool reverse){
+   if(messageLimit!=1&&messageLimit!=128&&messageLimit!=256)throw new ArgumentException("Finite channel limit required");limit=messageLimit;
    string user=WindowsIdentity.GetCurrent().User.Value;IntPtr descriptor;uint size;
    if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("O:"+user+"D:P(A;;GA;;;"+user+")(A;;GA;;;SY)S:(ML;;NW;;;ME)",1,out descriptor,out size))throw new IOException("Private event descriptor unavailable");
    try{SecurityAttributes a=new SecurityAttributes();a.Length=(uint)Marshal.SizeOf(typeof(SecurityAttributes));a.Descriptor=descriptor;
     string name=@"\\.\pipe\ai-gh-event-"+Guid.NewGuid().ToString("N");reader=CreateNamedPipeW(name,0x80001,15,1,4096,65536,0,ref a);
     if(reader.IsInvalid)throw new IOException("Private event pipe unavailable");ConnectNamedPipe(reader,IntPtr.Zero);
     writer=CreateFileW(name,0x40000000,0,IntPtr.Zero,3,0,IntPtr.Zero);uint mode=1;
-    if(writer.IsInvalid||!SetNamedPipeHandleState(writer,ref mode,IntPtr.Zero,IntPtr.Zero)||!SetHandleInformation(writer.DangerousGetHandle(),1,1))throw new IOException("Nonblocking event writer unavailable");
+    if(writer.IsInvalid||!SetNamedPipeHandleState(writer,ref mode,IntPtr.Zero,IntPtr.Zero)||!SetHandleInformation(writer.DangerousGetHandle(),1,reverse?0u:1u)||!SetHandleInformation(reader.DangerousGetHandle(),1,reverse?1u:0u))throw new IOException("Nonblocking event endpoints unavailable");
    }catch{if(writer!=null)writer.Dispose();if(reader!=null)reader.Dispose();throw;}finally{LocalFree(descriptor);}
   }
-  public void Drain(){if(invalid)return;for(int i=0;i<129;i++){
+  public void Drain(){if(invalid)return;for(int i=0;i<=limit;i++){
    byte[] data=new byte[4096];uint read;bool ok=ReadFile(reader,data,4096,out read,IntPtr.Zero);int error=Marshal.GetLastWin32Error();
    if(!ok&&(error==232||error==109||error==536))return;
-   if(!ok||read==0){invalid=true;return;}total+=(int)read;if(total>65536||messages.Count>=limit){invalid=true;return;}
+   if(!ok||read==0){invalid=true;return;}total+=(int)read;if(total>(limit==256?1048576:65536)||messages.Count>=limit){invalid=true;return;}
    byte[] message=new byte[read];Array.Copy(data,message,read);messages.Add(message);
   }invalid=true;}
+  public string[] TakeMessages(){Drain();var result=new System.Collections.Generic.List<string>();if(invalid)return result.ToArray();try{while(consumed<messages.Count)result.Add(new UTF8Encoding(false,true).GetString(messages[consumed++]));}catch(DecoderFallbackException){invalid=true;result.Clear();}return result.ToArray();}
+  public bool Send(byte[] bytes){uint n;if(bytes==null||bytes.Length==0||bytes.Length>4096)return false;return WriteFile(writer,bytes,(uint)bytes.Length,out n,IntPtr.Zero)&&n==bytes.Length;}
   public string EventText(){Drain();if(invalid||messages.Count!=1)return null;try{return new UTF8Encoding(false,true).GetString(messages[0]);}catch(DecoderFallbackException){invalid=true;return null;}}
   public string CounterText(){Drain();if(invalid||messages.Count==0)return null;try{var b=new StringBuilder();foreach(byte[] m in messages)b.Append(new UTF8Encoding(false,true).GetString(m));return b.ToString();}catch(DecoderFallbackException){invalid=true;return null;}}
   public void Dispose(){writer.Dispose();reader.Dispose();}
+ }
+ public sealed class ParentLines {
+  readonly Stream stream;readonly byte[] buffer=new byte[4096];System.Threading.Tasks.Task<int> pending;string text="";int frames;
+  public bool Closed {get;private set;} public bool Invalid {get;private set;}
+  public ParentLines(Stream input){stream=input;pending=stream.ReadAsync(buffer,0,buffer.Length);}
+  public string[] Poll(){var lines=new System.Collections.Generic.List<string>();if(Closed||Invalid)return lines.ToArray();
+   for(int count=0;count<4&&pending.IsCompleted;count++){int n;try{n=pending.Result;}catch{Closed=true;break;}if(n==0){Closed=true;break;}
+    for(int i=0;i<n;i++)if(buffer[i]>127){Invalid=true;return lines.ToArray();}text+=Encoding.ASCII.GetString(buffer,0,n);
+    int end;while((end=text.IndexOf('\n'))>=0){if(end>4096||++frames>257){Invalid=true;return lines.ToArray();}lines.Add(text.Substring(0,end));text=text.Substring(end+1);}
+    if(text.Length>4096){Invalid=true;return lines.ToArray();}pending=stream.ReadAsync(buffer,0,buffer.Length);
+   }return lines.ToArray();}
  }
  public static SafeFileHandle Hold(string path,bool directory,bool denyWrites) {return Hold(path,directory,denyWrites,false);}
  public static SafeFileHandle Metadata(string path,bool directory){
@@ -326,6 +347,7 @@ function Close-OwnedGeneration([Collections.IDictionary]$Owned) {
     Invoke-OwnedCleanupStep $errors 'child_dispose' $Owned.Child {param($r)$r.Dispose()}
     Invoke-OwnedCleanupStep $errors 'event_channel' $Owned.EventChannel {param($r)$r.Dispose()}
     Invoke-OwnedCleanupStep $errors 'counter_channel' $Owned.CounterChannel {param($r)$r.Dispose()}
+    Invoke-OwnedCleanupStep $errors 'active_ack_channel' $Owned.ActiveAckChannel {param($r)$r.Dispose()}
     foreach($capture in $Owned.CaptureLocks){Invoke-OwnedCleanupStep $errors 'capture_handle' $capture {param($r)$r.Dispose()}}
     foreach($control in $Owned.DirectoryControls){Invoke-OwnedCleanupStep $errors 'directory_unseal' $control {param($r)[GenerationCustody]::DirectoryAccess($r,$true)}}
     foreach($control in $Owned.FileControls){Invoke-OwnedCleanupStep $errors 'file_unseal' $control {param($r)[GenerationCustody]::FileAccess($r,$true)}}
@@ -555,6 +577,29 @@ function Test-ObserverEvent([string]$Text) {
     if ($e.delivery_boundary -eq 'terminal_report' -and ($null -eq $e.observed_utc_ms -or $null -eq $e.delivered_utc_ms -or $e.delivered_utc_ms -lt $e.observed_utc_ms)) { return $false }
     return $true
 }
+function Send-ActiveFrames($Channel,$Output) {
+    $messages=@($Channel.TakeMessages())
+    foreach($message in $messages){
+        $wire=@{schema=1;frame='active';data=$message;queued=($messages.Count -gt 1)}
+        $bytes=[Text.Encoding]::UTF8.GetBytes((($wire|ConvertTo-Json -Compress)+"`n"))
+        $Output.Write($bytes,0,$bytes.Length);$Output.Flush()
+    }
+}
+function Assert-ActiveArguments([string]$Entry,[string[]]$Values,[bool]$Sdk) {
+    if($Entry -cne 'bin/ai-blocker-watch' -or @($Values).Count -ne 1 -or $Values[0] -cnotin @('tick','alarm','links')){throw 'Finite active operation required'}
+    if($Sdk -and $Values[0] -cnotin @('alarm','links')){throw 'SDK coordinator profile cannot run ticks or providers'}
+}
+function Receive-ActiveControl($Lines,$Channel) {
+    foreach($line in $Lines.Poll()){
+        try{$item=$line|ConvertFrom-Json}catch{$script:activeChannelInvalid=$true;continue}
+        if((@($item.PSObject.Properties.Name|Sort-Object)-join ',') -ceq 'phase,schema,workflow_id' -and
+            ($item.schema -is [int] -or $item.schema -is [long]) -and $item.schema -eq 1 -and
+            $item.phase -ceq 'ack' -and $item.workflow_id -cmatch '^[a-f0-9]{32}$'){
+            if(-not $Channel.Send([Text.Encoding]::UTF8.GetBytes((($item|ConvertTo-Json -Compress)+"`n")))){$script:activeChannelInvalid=$true}
+        }else{$script:activeChannelInvalid=$true}
+    }
+    if($Lines.Invalid){$script:activeChannelInvalid=$true}
+}
 try {
     $receipt = [GenerationCustody]::Pipe($ReceiptHandle,[IO.FileAccess]::Write)
     $ack = [GenerationCustody]::Pipe($ReceiptAckHandle,[IO.FileAccess]::Read)
@@ -578,15 +623,21 @@ try {
     $arguments = $argumentText | ConvertFrom-Json
     if ($null -eq $arguments) { $arguments = @() }
     foreach ($argument in $arguments) { if ($argument -isnot [string] -or $argument.Contains([char]0)) { throw 'String argument array required' } }
+    if($ActiveCompletion){
+        if(-not $ActiveNoStdin -or $ReadOnlyNoStdin -or $RestrictedReadProfile -or $ObserverEvents -or
+            $CounterManifest -or $ExpectedCounterManifestSha256){throw 'Explicit finite active-completion profile required'}
+        Assert-ActiveArguments $EntryPoint @($arguments) ([bool]$ActiveSdkProfile)
+    }elseif($ActiveNoStdin -or $ActiveSdkProfile -or $EntryPoint -ceq 'bin/ai-blocker-watch'){throw 'Active profile requires explicit active-completion mode'}
     if ($RestrictedReadProfile) { Assert-ReadArguments $EntryPoint @($arguments) }
     $countRequests=([bool]$CounterManifest -or [bool]$ExpectedCounterManifestSha256)
-    $observeTransport=$ObserverEvents -or $countRequests
+    $observeTransport=$ObserverEvents -or $countRequests -or $ActiveCompletion
     if($countRequests){
         if(-not $CounterManifest -or -not $ExpectedCounterManifestSha256 -or -not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -cne 'bin/ai-gh' -or $ObserverEvents){throw 'Counter requires explicit restricted finite ai-gh read with no stdin'}
         Assert-CounterContext
     }
     if ($ObserverEvents -and (-not $RestrictedReadProfile -or -not $ReadOnlyNoStdin -or $EntryPoint -ne 'bin/ai-pr-wait')) { throw 'Observer requires explicit restricted PR read and no-stdin profile' }
     Assert-BashStartupEnvironment
+    if($ActiveSdkProfile){Assert-CounterContext}
     # Pin and recheck existing ancestors BEFORE the source snapshot is created.
     $parents=@();$parent=$stagingParent
     while($null -ne $parent){$parents+=$parent;$parent=$parent.Parent}
@@ -634,7 +685,17 @@ try {
     $expectedInterpreter = [GenerationCustody]::Hold($installedBash,$false,$true)
     if (-not [GenerationCustody]::Same($interpreter,$expectedInterpreter)) { throw 'Managed interpreter mismatch' }
     $locks.Add($interpreter);$locks.Add($expectedInterpreter)
-    if($countRequests){Assert-ConfigMetadata}
+    if($countRequests -or $ActiveSdkProfile){Assert-ConfigMetadata}
+    if($ActiveCompletion){
+        $activePython=(Get-Command python.exe -ErrorAction Stop).Source
+        $pythonParents=@();$parent=[IO.Directory]::GetParent($activePython)
+        while($null -ne $parent){$pythonParents+=$parent;$parent=$parent.Parent}
+        foreach($parent in ($pythonParents|Sort-Object {$_.FullName.Length})){
+            $held=[GenerationCustody]::Hold($parent.FullName,$true,$false)
+            try{[GenerationCustody]::AssertProtectedParent($held,($null -eq $parent.Parent));$locks.Add($held)}catch{$held.Dispose();throw}
+        }
+        $locks.Add([GenerationCustody]::Hold($activePython,$false,$true))
+    }
     $snapshot = Join-Path $stagingParent.FullName ('ai-gh-generation-'+$PID+'-'+[Guid]::NewGuid().ToString('N'))
     [GenerationCustody]::PrivateDirectory($snapshot)
     # This fresh protected object's identity is held throughout materialization,
@@ -706,7 +767,9 @@ try {
     $fingerprint = Hash-Bytes ([Text.Encoding]::UTF8.GetBytes($manifest.ToString()))
     $observerRun = if ($observeTransport) {[Guid]::NewGuid().ToString('N')}else{$null}
     $controlByte = New-Object byte[] 1
-    $controlRead = if ($observeTransport) {$ack.ReadAsync($controlByte,0,1)}else{$null}
+    $activeLines=if($ActiveCompletion){[GenerationCustody+ParentLines]::new($ack)}else{$null}
+    $script:activeChannelInvalid=$false
+    $controlRead = if ($observeTransport -and -not $ActiveCompletion) {$ack.ReadAsync($controlByte,0,1)}else{$null}
     if($observeTransport -and $controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before child launch')}
     $savedEventHandle=[Environment]::GetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE','Process')
     $counterEnvironment=@{}
@@ -721,44 +784,71 @@ try {
             $wireHandle=if($null -ne $eventChannel){[string]$eventChannel.WriteHandle}else{$null}
             [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$wireHandle,'Process')
         }
-        $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]$RestrictedReadProfile,[bool]$ReadOnlyNoStdin)
+        if($ActiveCompletion){
+            $eventChannel=[GenerationCustody+EventChannel]::new(256)
+            $activeAckChannel=[GenerationCustody+EventChannel]::new(1,$true)
+            $activeEnvironment=@{AI_GH_ACTIVE_EVENT_HANDLE=[string]$eventChannel.WriteHandle;AI_GH_ACTIVE_ACK_HANDLE=[string]$activeAckChannel.ReadHandle;AI_GH_ACTIVE_PYTHON=(Bash-Path $activePython)}
+            foreach($key in $activeEnvironment.Keys){$counterEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$activeEnvironment[$key],'Process')}
+        }
+        $child = [GenerationCustody]::Start($job,$start.FileName,$start.Arguments,$start.WorkingDirectory,[bool]($RestrictedReadProfile -or $ActiveSdkProfile),[bool]($ReadOnlyNoStdin -or $ActiveNoStdin))
     } finally {
         [Environment]::SetEnvironmentVariable('AI_GH_QUALIFICATION_EVENT_HANDLE',$savedEventHandle,'Process')
         foreach($key in $counterEnvironment.Keys){[Environment]::SetEnvironmentVariable($key,$counterEnvironment[$key],'Process')}
     }
     if ($observeTransport) {
-        $started=@{schema=1;frame='started';observer_run_id=$observerRun;observer_arguments_sha256=(Hash-Bytes $argumentBytes);source_sha=$sourceSha;source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';execution_profile='restricted_read';stdin_profile='read_only_no_stdin';start_boundary='process_resumed'}
+        $wireProfile=if($ActiveSdkProfile){'active_sdk_coordinator'}elseif($ActiveCompletion){'original_active'}else{'restricted_read'}
+        $wireStdin=if($ActiveCompletion){'active_no_stdin'}else{'read_only_no_stdin'}
+        $started=@{schema=1;frame='started';observer_run_id=$observerRun;observer_arguments_sha256=(Hash-Bytes $argumentBytes);source_sha=$sourceSha;source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';execution_profile=$wireProfile;stdin_profile=$wireStdin;start_boundary='process_resumed'}
         $startedBytes=[Text.Encoding]::UTF8.GetBytes((($started|ConvertTo-Json -Compress)+"`n"));$receipt.Write($startedBytes,0,$startedBytes.Length);$receipt.Flush()
         while (-not $child.WaitForExit(20)) {
-            if($controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before terminal delivery')}
-            if($null -ne $eventChannel){$eventChannel.Drain()}
+            if($ActiveCompletion){
+                Receive-ActiveControl $activeLines $activeAckChannel
+                if($activeLines.Closed){throw [OperationCanceledException]::new('Active observer control closed')}
+                Send-ActiveFrames $eventChannel $receipt
+            }else{
+                if($controlRead.IsCompleted){throw [OperationCanceledException]::new('Observer control closed before terminal delivery')}
+                if($null -ne $eventChannel){$eventChannel.Drain()}
+            }
             if($null -ne $counterChannel){$counterChannel.Drain()}
         }
-        if($null -ne $eventChannel){$eventChannel.Drain()}
+        if($ActiveCompletion){Send-ActiveFrames $eventChannel $receipt}else{if($null -ne $eventChannel){$eventChannel.Drain()}}
         if($null -ne $counterChannel){$counterChannel.Drain()}
     } else { $child.WaitForExit() }
     $exitCode = $child.ExitCode
-    $verified = $RestrictedReadProfile -or -not $privilegedOriginal
+    $verified = $RestrictedReadProfile -or $ActiveSdkProfile -or (-not $ActiveCompletion -and -not $privilegedOriginal)
     $reason = if ($verified) {'none'} else {'boundary_unavailable'}
-    $detail = if ($verified) {'none'} else {'privileged_original_context'}
-    $profile = if ($RestrictedReadProfile) {'restricted_read'} else {'original'}
+    $detail = if ($verified) {'none'}elseif($ActiveCompletion){'active_original_context_unqualified'}else{'privileged_original_context'}
+    $profile = if($ActiveSdkProfile){'active_sdk_coordinator'}elseif($ActiveCompletion){'original_active'}elseif ($RestrictedReadProfile) {'restricted_read'} else {'original'}
     $record = [ordered]@{schema=1;source_sha=$sourceSha;source_fingerprint=$fingerprint;loaded_source_fingerprint=$fingerprint;source_scope='git_raw_bin_tools_config_v1';install_generation_binding=(Hash-Bytes $launcherBytes);source_boundary='windows_locked_generation';child_exit=$exitCode;source_verified=$(if($verified){'verified'}else{'unknown'});unknown_reason=$reason;boundary_detail=$detail;execution_profile=$profile;clock_quality='unknown';clock_error_bound_ms=$null}
     if ($observeTransport) {
-        $eventText=if($null -ne $eventChannel){$eventChannel.EventText()}else{$null}
+        $eventText=if($null -ne $eventChannel -and -not $ActiveCompletion){$eventChannel.EventText()}else{$null}
         $record['observer_run_id']=$observerRun
         $record['observer_arguments_sha256']=Hash-Bytes $argumentBytes
-        $record['stdin_profile']='read_only_no_stdin'
+        $record['stdin_profile']=if($ActiveCompletion){'active_no_stdin'}else{'read_only_no_stdin'}
         $record['start_boundary']='process_resumed'
         $record['observer_event_json']=if(Test-ObserverEvent $eventText){$eventText}else{$null}
-        $record['observer_event_status']=if($record['observer_event_json']){'received'}elseif($null -eq $eventChannel -or $eventChannel.Status -eq 'unavailable'){'unavailable'}else{'invalid'}
+        $record['observer_event_status']=if($ActiveCompletion){'unavailable'}elseif($record['observer_event_json']){'received'}elseif($null -eq $eventChannel -or $eventChannel.Status -eq 'unavailable'){'unavailable'}else{'invalid'}
         if($countRequests){$record['counter_binding']=$counterBinding;$record['counter_raw']=$counterChannel.CounterText()}
+        if($ActiveCompletion){$record['active_channel_status']=if($script:activeChannelInvalid -or $eventChannel.Invalid -or $activeAckChannel.Invalid){'invalid'}else{'valid'}}
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes((($record | ConvertTo-Json -Compress)+"`n"))
     $receipt.Write($bytes,0,$bytes.Length);$receipt.Flush()
     # Receipt is consumed before custody ends, never certified by a later file.
-    if (-not $observeTransport) {$controlRead=$ack.ReadAsync($controlByte,0,1)}
-    if ($controlRead.Wait(30000) -and $controlRead.Result -eq 0) { throw [OperationCanceledException]::new('Observer control closed') }
-    if (-not $controlRead.IsCompleted -or $controlRead.Result -ne 1 -or $controlByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
+    if($ActiveCompletion){
+        $confirmed=$false;$until=[Diagnostics.Stopwatch]::StartNew()
+        while(-not $confirmed -and $until.ElapsedMilliseconds -lt 30000){
+            foreach($line in $activeLines.Poll()){
+                try{$item=$line|ConvertFrom-Json}catch{continue}
+                if((@($item.PSObject.Properties.Name|Sort-Object)-join ',') -ceq 'observer_run_id,phase,schema' -and $item.schema -eq 1 -and $item.phase -ceq 'custody_ack' -and $item.observer_run_id -ceq $observerRun){$confirmed=$true}
+            }
+            if($activeLines.Closed){break};if(-not $confirmed){[Threading.Thread]::Sleep(5)}
+        }
+        if(-not $confirmed){throw 'Parent did not acknowledge active source custody receipt'}
+    }else{
+        if (-not $observeTransport) {$controlRead=$ack.ReadAsync($controlByte,0,1)}
+        if ($controlRead.Wait(30000) -and $controlRead.Result -eq 0) { throw [OperationCanceledException]::new('Observer control closed') }
+        if (-not $controlRead.IsCompleted -or $controlRead.Result -ne 1 -or $controlByte[0] -ne 1) { throw 'Parent did not acknowledge source custody receipt' }
+    }
 } catch [OperationCanceledException] {
     $exitCode=130
     $cancelled=$true
@@ -766,7 +856,7 @@ try {
 } catch {
     $primaryFailure=$_
 } finally {
-    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;FileControls=$fileControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
+    $cleanupErrors=Close-OwnedGeneration @{Job=$job;Child=$child;EventChannel=$eventChannel;CounterChannel=$counterChannel;ActiveAckChannel=$activeAckChannel;CaptureLocks=$captureLocks;DirectoryControls=$directoryControls;FileControls=$fileControls;Locks=$locks;Receipt=$receipt;Ack=$ack;Snapshot=$snapshot;Bootstrap=$(if($bootstrap){$bootstrap.FullName}else{$null})}
     foreach($failure in $cleanupErrors){
         Write-Error ('Owned generation cleanup failed at '+$failure.phase) -ErrorAction Continue
         Write-Error -ErrorRecord $failure.error -ErrorAction Continue

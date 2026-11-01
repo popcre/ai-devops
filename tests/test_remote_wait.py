@@ -296,5 +296,84 @@ class CounterCapsuleTests(unittest.TestCase):
         self.assertGreaterEqual(saved['receipt_elapsed_ns'],saved['started_frame_elapsed_ns'])
 
 
+class ActiveCompletionRemoteTests(unittest.TestCase):
+    def setUp(self):
+        self.report = canonical_report()
+        patch = mock.patch.object(remote, "get_report", return_value=self.report)
+        patch.start(); self.addCleanup(patch.stop)
+
+    def test_profiles_are_named_and_do_not_relabel_active_work(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": "C:/Windows"}):
+            ordinary = remote.windows_supervisor_command("C:/repo", b'["tick"]', 50, 51, active_completion=True)
+            sdk = remote.windows_supervisor_command("C:/repo", b'["alarm"]', 50, 51, active_completion=True, sdk_coordinator=True)
+            self.assertIn("-ActiveCompletion", ordinary)
+            self.assertIn("-ActiveNoStdin", ordinary)
+            for flag in ("-RestrictedReadProfile", "-ReadOnlyNoStdin", "-ActiveSdkProfile"):
+                self.assertNotIn(flag, ordinary)
+            self.assertIn("-ActiveSdkProfile", sdk)
+            for args in (b'["tick"]', b'["arbitrary"]', b'["alarm","extra"]'):
+                with self.assertRaises(ValueError):
+                    remote.windows_supervisor_command("C:/repo", args, 50, 51, active_completion=True, sdk_coordinator=True)
+
+    def run_transport(self, sdk=False, duplicate=False):
+        arguments = ["alarm"] if sdk else ["tick"]
+        arg_hash = hashlib.sha256(json.dumps(arguments, separators=(",", ":")).encode()).hexdigest()
+        started = start(arg_hash)
+        started.update(execution_profile="active_sdk_coordinator" if sdk else "original_active", stdin_profile="active_no_stdin")
+        source = receipt(started, event())
+        source.update(observer_event_json=None, observer_event_status="unavailable", active_channel_status="valid")
+        if not sdk:
+            source.update(source_verified="unknown", unknown_reason="boundary_unavailable", boundary_detail="active_original_context_unqualified")
+        identity, parent = "1" * 32, None if sdk else "2" * 32
+        begin = {"schema": 1, "measurement": "active_completion_boundary", "phase": "begin", "caller": "ai-blocker-watch",
+                 "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": parent, "boundary": "alarm_scan"}
+        end = {"schema": 3, "utc": "2026-11-01T00:00:00Z", "measurement": "workflow_outcome", "caller": "ai-blocker-watch",
+               "workflow": "blocker_watch_alarm", "workflow_id": identity, "parent_workflow_id": parent, "boundary": "alarm_scan",
+               "outcome": "completed", "elapsed_ms": 2, "attempted_count": 1, "succeeded_count": 1, "failed_count": 0, "skipped_count": 0}
+        def active(row): return remote.frame("active", record={"data": json.dumps(row), "queued": False})
+        frames = active(end) + (active(end) if duplicate else b"")
+        if not sdk:
+            tick = {key: end[key] for key in self.report.RECEIPT_KEYS}
+            tick.update(workflow="blocker_watch_tick", workflow_id=parent)
+            frames += active(tick)
+        frames += remote.frame("receipt", record=source)
+        payload = b"original\x00\xff\n"
+        code = ("import sys,json;sys.stdout.buffer.write(" + repr(remote.frame("started", record=started) + active(begin))
+                + ");sys.stdout.buffer.flush();a=json.loads(sys.stdin.buffer.readline());assert a['kind']=='active_ack' and a['workflow_id']=='" + identity
+                + "';sys.stdout.buffer.write(" + repr(remote.frame("stdout", data=base64.b64encode(payload).decode()) + frames)
+                + ");sys.stdout.buffer.flush();assert json.loads(sys.stdin.buffer.readline())['kind']=='ack';sys.stdout.buffer.write("
+                + repr(remote.frame("exit", code=3)) + ");sys.stdout.buffer.flush();sys.exit(3)")
+        out, err = Capture(), Capture()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
+            target = Path(directory) / "active.json"
+            status = remote.observe([sys.executable, "-I", "-c", code], arguments, target, 5,
+                                    active_completion=True, sdk_coordinator=sdk)
+            saved = json.loads(target.read_text())
+        self.assertEqual(status, 3)
+        self.assertEqual(out.buffer.getvalue(), payload)
+        self.assertEqual(saved["measurement"], "linux_observed_windows_active_completion")
+        self.assertEqual(saved["qualification_profile"], "sdk_only_no_provider" if sdk else "original_context")
+        self.assertFalse(saved["original_privilege_equivalence"])
+        self.assertIsNone(saved["detection_latency_ms"])
+        self.assertGreaterEqual(saved["receipt_elapsed_ns"], saved["started_frame_elapsed_ns"])
+        return saved
+
+    def test_original_tick_never_upgrades_even_after_valid_ack(self):
+        result = self.run_transport()
+        self.assertFalse(result["active_completion_qualified"])
+        self.assertTrue(result["active_completion_records"])
+        self.assertEqual(result["active_completion_records"][0]["completion_qualification"]["unknown_reason"], "source_unknown")
+
+    def test_sdk_data_requires_final_source_and_global_transcript(self):
+        self.assertTrue(self.run_transport(sdk=True)["active_completion_qualified"])
+        self.assertFalse(self.run_transport(sdk=True, duplicate=True)["active_completion_qualified"])
+
+    def test_active_admission_refuses_before_process_creation(self):
+        with mock.patch.object(remote.subprocess, "Popen") as launch:
+            with self.assertRaises(ValueError):
+                remote.observe(["unused"], ["tick"], "/unused", 1, active_completion=True, sdk_coordinator=True)
+            launch.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
