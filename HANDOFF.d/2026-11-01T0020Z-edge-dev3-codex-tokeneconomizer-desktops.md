@@ -20,7 +20,7 @@ Produce a self-contained implementation plan for TokenEconomizer, with genuine d
 
 ## 3. Current state
 
-Planning delivery is complete: [PR #2221](https://github.com/popcre/ai-devops/pull/2221) merged as [0b2cae6f259d1fe92546aaafedb70d7f27ec01b6](https://github.com/popcre/ai-devops/commit/0b2cae6f259d1fe92546aaafedb70d7f27ec01b6), with document safety passing for 536 tracked Markdown files. All seven implementation steps remain open on #2220. No TokenEconomizer plugin, capture, config or provider change has been installed. Baseline and upstream candidate are pinned in plan §§5–6. The implementation successor must claim #2220 and begin at plan step 1; this file remains OPEN for that work. Publication is not implementation acceptance.
+Planning delivery is complete: [PR #2221](https://github.com/popcre/ai-devops/pull/2221) merged as [0b2cae6f259d1fe92546aaafedb70d7f27ec01b6](https://github.com/popcre/ai-devops/commit/0b2cae6f259d1fe92546aaafedb70d7f27ec01b6), with document safety passing for 536 tracked Markdown files. All seven implementation steps remain open on #2220 in the reconciled plan STATUS. This planning session installed no TokenEconomizer plugin, capture, config or provider change. Baseline and upstream candidate are pinned in plan §§5–6. The implementation successor must follow current #2220 ownership and the current plan STATUS, including its later coordination links; this file remains OPEN for that work. Publication is not implementation acceptance.
 
 ## 4. Failed approaches
 
