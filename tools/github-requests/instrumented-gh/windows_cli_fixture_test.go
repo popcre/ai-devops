@@ -259,9 +259,10 @@ func TestWindowsNumericReceiptSchema(t *testing.T) {
 }
 
 type cliResult struct {
-	out, err, metadata []byte
-	status             int
-	elapsed            time.Duration
+	out, err, metadata                             []byte
+	status                                         int
+	elapsed                                        time.Duration
+	setup, launch, wait, drain, userCPU, systemCPU time.Duration
 }
 
 func pairedCommand(t *testing.T, instrumented bool, endpoint string, args ...string) cliResult {
@@ -313,6 +314,7 @@ func pairedCommand(t *testing.T, instrumented bool, endpoint string, args ...str
 		cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: []syscall.Handle{syscall.Handle(write.Fd())}}
 		go func() { raw, _ = io.ReadAll(io.LimitReader(read, 4097)); close(drained) }()
 	}
+	setupFinished := time.Now()
 	if cmd.Start() != nil {
 		if write != nil {
 			write.Close()
@@ -321,10 +323,12 @@ func pairedCommand(t *testing.T, instrumented bool, endpoint string, args ...str
 		}
 		t.Fatal("paired command start failed")
 	}
+	launched := time.Now()
 	if write != nil {
 		write.Close()
 	}
 	err := cmd.Wait()
+	waitFinished := time.Now()
 	result := cliResult{out: out.Bytes(), err: stderr.Bytes()}
 	if err != nil {
 		result.status = cmd.ProcessState.ExitCode()
@@ -338,11 +342,22 @@ func pairedCommand(t *testing.T, instrumented bool, endpoint string, args ...str
 			t.Fatal("metadata leaked to descendant")
 		}
 		result.metadata = raw
+		// Do not retain one reader per measured command until the group's
+		// testing cleanup. Include its release in the complete measured route.
+		if err := read.Close(); err != nil {
+			t.Fatal("metadata reader close failed")
+		}
 		if !strictMetadata(raw) {
 			t.Fatal("metadata incomplete or malformed")
 		}
 	}
 	result.elapsed = time.Since(started)
+	result.setup = setupFinished.Sub(started)
+	result.launch = launched.Sub(setupFinished)
+	result.wait = waitFinished.Sub(launched)
+	result.drain = time.Since(waitFinished)
+	result.userCPU = cmd.ProcessState.UserTime()
+	result.systemCPU = cmd.ProcessState.SystemTime()
 	return result
 }
 
@@ -715,6 +730,9 @@ func TestWindowsPairedOverhead(t *testing.T) {
 					b = pairedCommand(t, false, server.URL)
 				}
 				requireParity(t, b, c)
+				// Numeric phase diagnostics retain every pair, including stalls;
+				// the unchanged gate still uses the complete elapsed durations.
+				t.Logf("pair=%d baseline_ns=%d candidate_ns=%d baseline_setup_ns=%d candidate_setup_ns=%d baseline_launch_ns=%d candidate_launch_ns=%d baseline_wait_ns=%d candidate_wait_ns=%d baseline_drain_ns=%d candidate_drain_ns=%d baseline_user_cpu_ns=%d candidate_user_cpu_ns=%d baseline_system_cpu_ns=%d candidate_system_cpu_ns=%d", i, b.elapsed.Nanoseconds(), c.elapsed.Nanoseconds(), b.setup.Nanoseconds(), c.setup.Nanoseconds(), b.launch.Nanoseconds(), c.launch.Nanoseconds(), b.wait.Nanoseconds(), c.wait.Nanoseconds(), b.drain.Nanoseconds(), c.drain.Nanoseconds(), b.userCPU.Nanoseconds(), c.userCPU.Nanoseconds(), b.systemCPU.Nanoseconds(), c.systemCPU.Nanoseconds())
 				baseline = append(baseline, b.elapsed.Nanoseconds())
 				candidate = append(candidate, c.elapsed.Nanoseconds())
 				baseTotal += b.elapsed.Nanoseconds()
