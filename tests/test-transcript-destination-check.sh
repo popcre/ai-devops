@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+export AI_GH_STATE_DIR="$TMP/gh-state"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -60,5 +61,18 @@ fi
 
 [[ "$(head -1 "$ROOT/skills/claude/claude-transcript-backup/SKILL.md")" == '---' ]] ||
   fail "Claude transcript skill frontmatter is not on line 1"
+
+python3 - "$AI_GH_STATE_DIR/measurements" <<'PY' || fail 'privacy receipts lost failure/refusal/skipped boundaries'
+import json, pathlib, re, sys
+rows = [json.loads(line) for p in pathlib.Path(sys.argv[1]).glob('????-??-??.jsonl') for line in p.read_text().splitlines()]
+receipts = [r for r in rows if r.get('measurement') == 'workflow_outcome' and r.get('caller') == 'ai-transcript-destination-check']
+assert {r['outcome'] for r in receipts} == {'verified','refused','failed','skipped'}
+assert sum(r['outcome'] == 'verified' for r in receipts) == 1  # Only the fresh successful API proof.
+assert len({r['workflow_id'] for r in receipts}) == len(receipts)
+for r in receipts:
+    assert re.fullmatch('[0-9a-f]{32}', r['workflow_id'])
+    assert r['workflow'] == 'transcript_privacy'
+    assert set(r) == {'schema','utc','measurement','caller','workflow','workflow_id','outcome','elapsed_ms'}
+PY
 
 echo "PASS: transcript guard accepts only the canonical private destination"
