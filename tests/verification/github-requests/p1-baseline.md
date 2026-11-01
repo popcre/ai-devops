@@ -91,6 +91,11 @@ receives the dry-run arguments and excludes a forged completed fixture; two
 focused actual-intent cases passed. This defends caller intent; producer data still cannot grant
 source authority. Native predicate-only proof and combined landing remain
 unfinished; no real active action or timing acceptance run was generated.
+The joint successor is open in #2291 at `20c2f01b`, based on the merged suite-
+registration repair `fba13b43`. Independent read-only review found no concrete
+defect in its predicates, actual-argument dry-run flag, interval clearing or
+cleanup downgrade. This is advice, not an acceptance gate or a substitute for
+the actual changed-head CI and installed proofs still pending.
 
 Coverage aggregate V4 has digest
 `fdbf22fce344caf9a94bb45be293b67a46f8a920bcd3008e7e8297b078197907`.

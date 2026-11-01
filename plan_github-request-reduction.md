@@ -79,7 +79,9 @@ skipped. A changed-head registration/default-native-Python fixture repair is
 underway; its actual CI execution and final installed delivery remain pending.
 The final parity audit also found the native entry omitted literal `--dry-run`;
 its finite successor and common caller-intent guard are being composed, without
-new authority or live actions.
+new authority or live actions, in joint #2291 at `20c2f01b`. Read-only integrated
+review found no concrete defect; landing, changed-head CI and installed proofs
+remain required.
 This does not retarget or negate the earlier native component proof. Accepted
 P5/headroom proof stays accepted.
 
