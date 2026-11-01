@@ -70,7 +70,7 @@ reap_script(){ printf '%s/scripts/reap-merged-worktrees.mjs' "$1"; }
 
 # --- run ----------------------------------------------------------------------
 cmd_run(){
-  local checkout script rc log="$HOME_DIR/reap.log"
+  local checkout script rc out log="$HOME_DIR/reap.log"
   checkout="$(find_checkout)" || { note "no shared-db checkout found (set AI_SHARED_DB_CHECKOUT if this machine has one); nothing to reap"; return 0; }
   checkout="$(cd "$checkout" && pwd)" || die "shared-db checkout is not a directory: $checkout"
   script="$(reap_script "$checkout")"
@@ -85,9 +85,19 @@ cmd_run(){
     # run from inside the shared-db checkout (issue #2242: cron/Task Scheduler
     # start in $HOME, and git answers "not a git repository").
     if [ "$mode" = apply ]; then
-      (cd "$checkout" && node "$script" --apply); rc=$?
+      out="$(cd "$checkout" && node "$script" --apply 2>&1)"; rc=$?
     else
-      (cd "$checkout" && node "$script"); rc=$?
+      out="$(cd "$checkout" && node "$script" 2>&1)"; rc=$?
+    fi
+    printf '%s\n' "$out"
+    # A Node crash also exits 1 — the reaper's own code for its safe refusal —
+    # so without this check a crash is logged as "refused for safety" and the
+    # task history shows a successful sweep (issue #2242's failure log ended
+    # exactly that way). Node prints "Node.js v" at the foot of an uncaught
+    # error stack; a clean refusal prints its reason and no such line.
+    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q '^Node\.js v'; then
+      note "run end: node crashed (exit $rc) — not a safety refusal"
+      exit 2
     fi
     # rc 0: swept (or dry run). rc 1: the reaper's SAFE refusal — an orchestrator
     # is active and open claims were unreadable, so it removed nothing. That is

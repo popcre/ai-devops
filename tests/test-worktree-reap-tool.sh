@@ -50,6 +50,19 @@ run >/dev/null 2>&1; rc_refuse=$?
 if [ "$rc_refuse" -eq 0 ]; then ok "the reaper's SAFE refusal (exit 1) is a successful sweep (exit 0)"; else bad "safe refusal leaked non-zero ($rc_refuse) and would alarm the task history nightly"; fi
 grep -q "refused for safety" "$WORK/home/.ai-devops/worktree-reap/reap.log" && ok "the refusal is logged with its reason" || bad "refusal not logged"
 
+# Issue #2242's log: the Node crash also exits 1 and was logged as "run end:
+# reaper refused for safety", so the task history showed a successful sweep
+# while the reaper had crashed having removed nothing.
+cat > "$CHECKOUT/scripts/reap-merged-worktrees.mjs" <<'EOF'
+console.error('Error: Command failed: git worktree list --porcelain');
+console.error('    at sh (file:///worksp/shared-db/scripts/reap-merged-worktrees.mjs:144:10)');
+console.error('Node.js v20.20.2');
+process.exit(1);
+EOF
+run >/dev/null 2>&1; rc_crash=$?
+if [ "$rc_crash" -ne 0 ]; then ok "a Node crash (exit 1 with a stack trace) surfaces non-zero, never as a safe sweep"; else bad "a Node crash was swallowed into the 'safe refusal' success path"; fi
+grep -q "node crashed" "$WORK/home/.ai-devops/worktree-reap/reap.log" && ok "the crash is logged as breakage, not as a safety refusal" || bad "crash not logged as breakage"
+
 stub_reaper 0
 run >/dev/null 2>&1; rc_ok=$?
 [ "$rc_ok" -eq 0 ] && ok "clean sweep exits 0" || bad "clean sweep exited $rc_ok"
