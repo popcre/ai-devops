@@ -7,8 +7,9 @@ three rows.
 
 ## Scope
 
-Read only this fixture. Create or replace `result.txt` in the task workspace.
-Do not access network services or files outside the task workspace.
+Read this plan and the supplied `sample.csv`. Create or replace `result.txt` in
+the task workspace. Do not access network services or files outside the task
+workspace.
 
 ## Prerequisites
 
