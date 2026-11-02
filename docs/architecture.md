@@ -72,6 +72,12 @@ path runs on Ubuntu and Windows Git Bash/Python 3 and never modifies claims.
 Each GitHub request allows up to ten minutes for shared queue admission and
 execution; timeout still returns a structured failure and never a pass.
 
+Superseded 2026-11-02 (PR #2309): "missing or ambiguous attribution fails
+closed" now applies only to a session whose identity the claim text carries —
+that session still fails, named in the structured error. A claim implicating no
+session identity no longer fails unrelated sessions' closeout. Lease-owner
+authority and eight-hex prefix blocking are unchanged.
+
 ## The staged workflow
 
 Seven stages, mapped to models via `/etc/ai-devops/models.env`:
