@@ -147,7 +147,7 @@ def parse_claim_owner(body, session):
         # examples; missing/ambiguous attribution is never evidence of absence.
         prose = re.sub(r"```[^\n]*\n[\s\S]*?```", "", body)
         signatures = OWNER_SIGNATURE.findall(prose)
-        if len(signatures) != 1:
+        if len(signatures) != 1 or len(re.findall(r"^Posted by\b", prose, re.MULTILINE)) != 1:
             raise CheckError("lease-free claim owner signature is missing or ambiguous")
         identity = signatures[0]
         if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE):

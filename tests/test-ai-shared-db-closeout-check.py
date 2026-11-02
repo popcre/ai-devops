@@ -273,6 +273,7 @@ exit 127
     def test_lease_free_unreadable_or_ambiguous_owner_fails_closed(self):
         signature = f"Posted by Codex chat {SESSION} on edge-dev"
         for body in ("no owner", signature + "\n" + signature,
+                     signature + "\nPosted by Claude chat unknown on hetz",
                      f"```text\n{signature}\n```", "Posted by Claude chat unknown on hetz",
                      "```db-author-lease\nowner: missing closing fence\n" + signature):
             with self.subTest(body=body):
