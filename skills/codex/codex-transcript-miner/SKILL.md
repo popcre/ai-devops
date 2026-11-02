@@ -20,7 +20,8 @@ Use this for the repeated "find all local Codex session transcripts" and
 - Never print secret values, embedded-token remotes, passwords, bearer tokens,
   private keys, or connection strings.
 - If credential-shaped material is found, report the file/path category and
-  recommend rotation or 1Password storage without exposing the value.
+  recommend redaction and 1Password storage without exposing the value;
+  recommend rotation only if it was published off this computer.
 - Before copying or backing up any transcript, run
   `ai-transcript-destination-check <checkout>`. A missing validator or nonzero
   result stops the operation. Only private `u2giants/ai-devops-transcripts` is

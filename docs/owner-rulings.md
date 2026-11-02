@@ -114,6 +114,20 @@ transcript on hetz (one Supabase sb_secret value; 7 occurrences redacted,
 zero remaining); rotation plan `plan_credential_rotation_20261027.md` in
 u2giants/popdam3 was cancelled by this ruling (issue #551).
 
+## 2026-11-02 — on-machine exposure is never a rotation
+
+Verbatim, from Albert's chat: "if a credentials was exposed only on this
+computer, redact it from wherever it appeared and leave it."
+
+Current rule: restates and hardens the 2026-10-27 ruling, which the global
+rules and `secrets-to-1password` never carried, so a session rotated the shared
+production database password on 2026-11-01 after printing a fragment of it only
+in its local session. Test first: did the value reach anywhere off this
+computer, such as GitHub, CI logs, or an outside service? If not, redact and
+leave it. The AI provider processing the session and the private backups of its
+transcript do not count as publication; redact the backups too. Published
+values still rotate.
+
 ## 2026-10-29 — reviewer system rebuilt simply, four reviewers
 
 Verbatim, from Albert's chat: "rebuild it simply, but with 4 reviewers, not

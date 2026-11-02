@@ -116,8 +116,10 @@ deadline at runtime.
   from a UTC log line, and never quote a time later than now.
 - **Secrets** live in 1Password `vibe_coding`, never in chat, arguments,
   output, logs, or commits; serialize 1Password access and load
-  `secrets-to-1password`. A leak is
-  compromised; the AI rotates them itself (skill).
+  `secrets-to-1password`. A value exposed
+  only on this computer is never rotated: redact it wherever it appeared and
+  leave it. A value published off this computer is compromised; the AI rotates
+  it itself (skill).
 - **Destructive actions:** make each recoverable first (details).
 - **Production:** read-only by default; no human approval is ever requested.
   No review approval gates it (owner ruling 2026-10-29) (details). Shared-db
