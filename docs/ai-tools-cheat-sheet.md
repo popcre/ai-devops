@@ -25,9 +25,16 @@ ai-task-gates explain [--json] [--base REF]
 ai-task-gates status | end
 ```
 
-ACTION: `review code-only-review pr-wait ship deploy database infrastructure
+ACTION: `review code-only-review pr-wait ship deploy database database-read infrastructure
 production shared-db-promotion application-workflow`. Classes are listed in the
 global rules.
+
+Use `database-read` for bounded read-only verification, with fresh target identity
+proof and a server-enforced READ ONLY transaction that is rolled back. It admits
+no SQL writes, schema changes, refreshes, locks, promotion or application writes.
+The gate records admission; it does not execute SQL or enforce the connection.
+Keep credentials and private rows out of public output. Use `database` for mutations;
+all existing mutation prohibitions remain in force. Never reclassify a write as a read.
 
 ## ai-muse (`bin/ai-muse`; needs `AI_MUSE_CALLER=claude` or `codex`)
 

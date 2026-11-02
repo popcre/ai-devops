@@ -1274,6 +1274,26 @@ fi
 rm -rf "$TMP/ansible-real"
 
 printf 'private code review keeps evidence and mutation boundaries\n'
+newrepo "$TMP/database-read" 'popcre/designflow-backend'
+( cd "$TMP/database-read" && "$GATES" start --class private-evidence ) >/dev/null
+check 'read-only database verification is admitted for private evidence' \
+  "rc 0 '$TMP/database-read' check --before database-read"
+check 'the same private evidence task still refuses database mutation' \
+  "rc 3 '$TMP/database-read' check --before database"
+( cd "$TMP/database-read" && "$GATES" start --class deployment ) >/dev/null
+check 'deployment verification may read without releasing database writes' \
+  "rc 0 '$TMP/database-read' check --before database-read && rc 3 '$TMP/database-read' check --before database"
+mkdir -p "$TMP/database-read/.ai-devops"
+printf '%s\n' '{"schema_version":1,"gates":{"deployment":{"forbidden_actions":["database-read"]}}}' > "$TMP/database-read/.ai-devops/task-gates.json"
+check 'consumer policy can still forbid database reads' \
+  "rc 3 '$TMP/database-read' check --before database-read"
+rm "$TMP/database-read/.ai-devops/task-gates.json"
+( cd "$TMP/database-read" && "$GATES" start --class production ) >/dev/null
+check 'production read-only verification needs no mutation authorization' \
+  "rc 0 '$TMP/database-read' check --before database-read"
+check 'read admission does not authorize a production change' \
+  "rc 3 '$TMP/database-read' check --before production"
+rm -rf "$TMP/database-read"
 newrepo "$TMP/private" 'u2giants/licensor-source-data'
 mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
 printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
