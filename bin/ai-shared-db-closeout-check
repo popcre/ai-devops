@@ -141,6 +141,7 @@ def owner_session(owner, actual_session):
 def parse_claim_owner(body, session):
     if not isinstance(body, str):
         raise CheckError("claim body is malformed")
+    body = body.replace("\r\n", "\n")
     fences = re.findall(r"```db-author-lease\s*\n([\s\S]*?)```", body)
     if not fences and "```db-author-lease" not in body:
         # Lease-free C2 claims retain their posting signature. Ignore fenced

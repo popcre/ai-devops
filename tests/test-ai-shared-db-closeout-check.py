@@ -270,6 +270,15 @@ exit 127
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
 
+    def test_lease_free_windows_line_endings_preserve_owner(self):
+        row = nonclaim_issue(5423, ["db-claim"])
+        row["body"] = ("```db-claim\r\nversion: 20261102135312\r\n```\r\n\r\n"
+                       f"Posted by Codex chat {SESSION} on edge-dev\r\n")
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
+
     def test_lease_free_unreadable_or_ambiguous_owner_fails_closed(self):
         signature = f"Posted by Codex chat {SESSION} on edge-dev"
         for body in ("no owner", signature + "\n" + signature,
