@@ -62,6 +62,7 @@ adjacent addresses or nonstandard network masks. Actual host addresses remain
 protected. Unknown or shadowed Python contexts retain the strict scan.
 
 The shared-db closeout checker captures `ai-gh` output as bytes and strictly decodes stdout and stderr as UTF-8 on the main thread. Invalid UTF-8 becomes a structured fail-closed result; keep this explicit byte-to-text boundary so subprocess reader threads cannot turn decode errors into missing output.
+Lease-free claims may retain repeated posting signatures from body edits when every signature identifies the same session. Distinct or unreadable owners still fail closed; repeated signatures never release a claim owned by the current session.
 
 For lease-free C2 claims, closeout reads exactly one posting signature outside
 fenced examples. Existing author leases remain authoritative. Missing or
