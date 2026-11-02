@@ -191,8 +191,11 @@ and points here.
   production action, run `ai-task-gates check --before <action>`. If the work
   outgrew the class, redeclare and say so. private-evidence is read-only
   analysis.
-- **Secrets:** values move only through pipes or protected files. Rotation
-  is done by the AI with a written plan (exact credential, provider, and
+- **Secrets:** values move only through pipes or protected files. A value
+  exposed only on this computer (its chat transcript, terminal, files, or local
+  logs, plus that transcript's private backups) is redacted wherever it appeared
+  and left in place; never rotate it (owner ruling 2026-11-02). Rotation of a
+  value published off this computer is done by the AI with a written plan (exact credential, provider, and
   consumers) on the tracking issue; no review gates it. Never rotate a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** inspect the exact target; keep a commit, backup, or

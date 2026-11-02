@@ -120,7 +120,7 @@ rulings, verbatim: `docs/owner-rulings.md`.
   from a UTC log line, and never quote a time later than now.
 - **Secrets:** 1Password vault `vibe_coding`, values only through pipes or
   protected files — never chat, arguments, output, logs, or commits. Load
-  `secrets-to-1password`. Treat a leak as compromised; the AI rotates them itself; no rotation happens for a credential under a standing
+  `secrets-to-1password`. A value exposed only on this computer is never rotated: redact it wherever it appeared and leave it. Treat a value published off this computer as compromised; the AI rotates it itself; no rotation happens for a credential under a standing
   owner no-rotation directive.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
