@@ -68,6 +68,8 @@ fenced examples. Existing author leases remain authoritative. Missing or
 ambiguous attribution fails closed; an eight-hex signature conservatively
 blocks any full session UUID sharing that prefix. This read-only compatibility
 path runs on Ubuntu and Windows Git Bash/Python 3 and never modifies claims.
+Each GitHub request allows up to ten minutes for shared queue admission and
+execution; timeout still returns a structured failure and never a pass.
 
 ## The staged workflow
 

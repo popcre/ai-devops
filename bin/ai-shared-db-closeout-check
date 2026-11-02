@@ -88,7 +88,10 @@ def gh_call(args):
         if len(args) >= 1 and args[0] == "api":
             command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
                        "api", "--hostname", "github.com", *args[1:]]
-        result = subprocess.run(command, capture_output=True, check=False, timeout=60,
+        # Admission through the shared ai-gh queue can exceed a minute during
+        # fleet CI. Keep that route intact and bounded, without treating queue
+        # congestion as evidence that this session still owns work.
+        result = subprocess.run(command, capture_output=True, check=False, timeout=600,
                                 env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
         try:
             result.stdout = result.stdout.decode("utf-8", errors="strict")

@@ -2,6 +2,8 @@
 """Offline regression tests for the read-only shared-db closeout check."""
 
 import json
+import contextlib
+import io
 import os
 from pathlib import Path
 import shutil
@@ -9,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "bin/ai-shared-db-closeout-check"
@@ -46,6 +49,23 @@ def stage_message(holder="github-actions:555", kind="preview", owner="none"):
 
 
 class CloseoutCheck(unittest.TestCase):
+    def test_request_timeout_still_returns_structured_failure(self):
+        source = CHECKER.read_text(encoding="utf-8").split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        namespace = {"__name__": "closeout_test"}
+        exec(compile(source, str(CHECKER), "exec"), namespace)
+        output = io.StringIO()
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": SESSION,
+                                    "AI_SHARED_DB_CLOSEOUT_BASH": "bash",
+                                    "AI_SHARED_DB_CLOSEOUT_GH_SCRIPT": "ai-gh"}, clear=True), \
+                patch.object(sys, "argv", [str(CHECKER)]), \
+                patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ai-gh", 600)), \
+                contextlib.redirect_stdout(output):
+            status = namespace["main"]()
+        self.assertEqual(status, 2)
+        summary = json.loads(output.getvalue())
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["error"], "GitHub request timed out")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
