@@ -125,6 +125,12 @@ def resolve_session(explicit):
     return candidates[0]
 
 
+def text_has_session_identity(text, session):
+    if UUID.fullmatch(session):
+        return re.search(rf"(?<![A-Za-z0-9]){re.escape(session)}(?![A-Za-z0-9])", text, re.IGNORECASE) is not None
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(session)}(?![A-Za-z0-9_])", text) is not None
+
+
 def owner_session(owner, actual_session):
     raw_owner = owner.strip()
     if UUID.fullmatch(raw_owner.lower()) or MIMO_SESSION.fullmatch(raw_owner):
@@ -132,12 +138,8 @@ def owner_session(owner, actual_session):
     match = OWNER_CHAT.fullmatch(owner) or OWNER_AT_CHAT.fullmatch(owner) or OWNER_ADOPTION.fullmatch(owner)
     if match:
         return normalize_session(match.group(1))
-    if UUID.fullmatch(actual_session):
-        if re.search(rf"(?<![A-Za-z0-9]){re.escape(actual_session)}(?![A-Za-z0-9])", owner, re.IGNORECASE):
-            raise CheckError("owner label contains this session identity in an unsupported format")
-    elif MIMO_SESSION.fullmatch(actual_session):
-        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(actual_session)}(?![A-Za-z0-9_])", owner):
-            raise CheckError("owner label contains this session identity in an unsupported format")
+    if text_has_session_identity(owner, actual_session):
+        raise CheckError("owner label contains this session identity in an unsupported format")
     return None
 
 
@@ -309,7 +311,18 @@ def main():
         claims, issue_count = open_claim_pages()
         matching_claims = []
         for item in claims:
-            owner = parse_claim_owner(item["body"], session)
+            try:
+                owner = parse_claim_owner(item["body"], session)
+            except CheckError:
+                # A claim whose owner cannot be read (legacy no-lease claims
+                # with an unreadable signature, ambiguous or doubled leases)
+                # must not fail closed for unrelated sessions. It stays
+                # fail-closed for a session whose identity the claim carries;
+                # with no implicated identity there is no owner to block.
+                if text_has_session_identity(item["body"], session):
+                    raise CheckError(
+                        f"claim #{item['number']} carries this session identity without a readable owner")
+                continue
             if owner_session(owner, session) == session:
                 matching_claims.append({"issue": item["number"]})
         stages = []
