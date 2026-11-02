@@ -35,6 +35,7 @@
     "ship",
     "deploy",
     "database",
+    "database-read",
     "infrastructure",
     "production",
     "shared-db-promotion",

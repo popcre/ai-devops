@@ -191,6 +191,16 @@ also refused rather than guessed safe.
 
 ### The review-mode variables are a guardrail, not a boundary
 
+Database verification uses the distinct `database-read` action. Unlike `database`,
+it authorizes only bounded observation in a server-enforced READ ONLY transaction
+followed by rollback, after fresh target proof. Calling a function that mutates,
+refreshing a materialized view, acquiring explicit locks, or changing settings or
+privileges is not observation. Existing mutation, archive, privacy, identity and
+consumer-policy restrictions remain unchanged. Admission is not a SQL executor;
+the caller must verify transaction_read_only before querying and retain private
+results in their approved custody. The action is read-only verification under
+production-owner authorization rules, not a release for production changes.
+
 `bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_REVIEWER_APPROVAL` so
 the reviewer lifecycle, which the provider wrappers call for every mode, can see
 the review mode and the assigned AI reviewer's approval report. They keep an honest caller from being

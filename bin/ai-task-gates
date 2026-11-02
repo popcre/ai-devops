@@ -97,7 +97,7 @@ usage: ai-task-gates <command> [options]
         Legacy coarse CI classification; reads paths on stdin.
   version
 
-ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
+ACTION is one of: review code-only-review pr-wait ship deploy database database-read infrastructure production
   shared-db-promotion application-workflow
 
 shared-db-promotion is the one owner-authorized (Albert, 2026-10-02) launch of
@@ -1806,7 +1806,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   if [ "$application_release_ready" -eq 0 ] \
      && printf '%s\n' "$required" | tr ',' '\n' | grep -qx current-chat-resource-and-action-authorization; then
     case "$action" in
-      review|code-only-review|pr-wait) ;;
+      review|code-only-review|pr-wait|database-read) ;;
       *)
         [ -n "$acknowledge" ] || blocked "$(printf 'ai-task-gates: STOP before "%s". The "%s" class in %s requires the owner'\''s explicit authorization of this exact resource and action, and none was supplied.\nRequired gates for this class: %s\nTo proceed, re-run with --acknowledge "<owner authorization>". No AI reviewer verdict is required (#2041).' \
           "$action" "$effective" "$IDENTITY" "$required")"
