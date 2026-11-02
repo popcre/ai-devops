@@ -153,6 +153,8 @@ grep -qF "record a rotation plan on the tracking issue" "$SECRETS_SKILL" \
   || fail "secrets-to-1password lost the recorded rotation plan"
 ! grep -qF "without Albert's approval" "$SECRETS_SKILL" \
   || fail "secrets-to-1password returned to requiring Albert's approval"
+grep -qF "Exposed only on this computer: redact and leave it" "$SECRETS_SKILL" \
+  || fail "secrets-to-1password lost the on-machine redact-and-leave rule"
 grep -qF "hetzner_vps" "$SECRETS_SKILL" || fail "secrets-to-1password lost the standing no-rotation exception"
 grep -qF "supersedes every reviewer-approval rule" "$DETAILS" \
   || fail "standing-rules-details lost the 2026-10-29 advisory-review ruling"

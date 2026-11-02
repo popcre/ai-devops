@@ -465,21 +465,20 @@ have no approval path.
 
 ```bash
 cd /worksp/ai-devops
-./update.sh --reviewer-approval <exact-head APPROVE report>
+./update.sh
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
-On Linux, `update.sh --expected-head <full-merged-SHA> --reviewer-approval
-<exact-head APPROVE report>` pins a protected update before the installed
-checkout moves. The **first** protected rollout must invoke the merged target
-script from a clean, exact-SHA worktree sharing the installed checkout's Git
+On Linux, `update.sh --installed-checkout PATH --expected-head <full-merged-SHA>`
+pins a protected update before the installed checkout moves. The **first**
+protected rollout must invoke the merged target script from a clean, exact-SHA worktree sharing the installed checkout's Git
 common directory:
 
 ```bash
 cd /worksp/ai-devops-candidate
-./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --reviewer-approval <exact-head APPROVE report>
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA>
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
@@ -502,6 +501,19 @@ Reviewer requalification is a required installer stage before authorization
 is finalized, including on a direct retry. The installer records each stage's
 result in a protected local report; the gate checks and binds that report
 before the one-use authorization can be consumed.
+
+**Retry a half-done install (verified 2026-11-01 on hetz, #2274).** When an
+install fails after the checkout advanced, the authorization stays pending and
+the ordinary transaction file is kept for reuse. Retry through `install.sh`
+directly — its resume phase matches that pending transaction. Never re-run
+`update.sh` first: its preflight always refuses with
+`ai-task-gates: STOP. Ordinary install transaction path already exists.` Run
+the retry as the target owner (not root) with `XDG_RUNTIME_DIR=/run/user/<uid>`
+and `DBUS_SESSION_BUS_ADDRESS` exported. Systemd user-unit stages need the user
+bus; `sudo -u user -H` alone drops those variables, and root can never reach
+another user's bus or the user-scoped private-memory hub. Gate state is
+`$HOME`-scoped — one user per install; a root run forks a parallel transaction
+universe and rewrites `/etc/ai-devops/install-manifest.tsv` owned by root.
 
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name

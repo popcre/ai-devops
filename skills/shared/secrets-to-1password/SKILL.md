@@ -51,12 +51,12 @@ the standard.
 The global rule says values move only through pipes or protected files. This is
 the operational detail behind it — read it before you touch a live credential.
 
-**The failure this prevents.** A secret has leaked the moment it reaches
+**The failure this prevents.** A secret is exposed the moment it reaches
 anywhere a human or a log can read it: a chat transcript, terminal scrollback,
 an error message, a process list. On 2026-08-21 a live 1Password
-service-account token was leaked into a chat transcript *minutes after it was
-created to replace an earlier leak*, forcing a second rotation in one session.
-Both leaks had the identical cause: the value sat in a command-line argument,
+service-account token was exposed in a chat transcript *minutes after it was
+created to replace an earlier one*, and was needlessly rotated a second time.
+Both exposures had the identical cause: the value sat in a command-line argument,
 and a parse error echoed the whole command back.
 
 **Allowed transports**
@@ -97,10 +97,19 @@ printf '%s' "$value" | sha256sum | cut -c1-16
 Use it to answer "is this the same token?", "did the write take?", "which of the
 four service-account tokens is this?" — without the value ever being displayed.
 
-**Containment is not remediation.** Removing a secret from one file does not
+**Exposed only on this computer: redact and leave it (owner rulings 2026-10-27
+and 2026-11-02).** First establish where the value went. If it appeared only in
+this computer's chat transcript, terminal, files, or local logs, redact every
+occurrence, including private backups of that transcript, and stop. Do not
+rotate, open a rotation issue, or treat it as compromised. The AI provider
+processing the session does not count as publication. Everything below applies
+only to a value published off this computer: GitHub, CI logs, or an outside
+service.
+
+**Containment is not remediation for a published value.** Removing a secret from one file does not
 invalidate copies already taken. Before reporting a leak handled, sweep the whole
 machine — `.bak-*` files, shell history, config files and their auto-backups,
-setup scripts, archives — and say plainly that only rotation retires an exposed
+setup scripts, archives — and say plainly that only rotation retires a published
 value. Search by pattern and report PATHS ONLY; never print a matched line:
 
 ```bash
@@ -110,7 +119,7 @@ grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
 Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human
 to approve"): report the compromise, record a rotation plan on the tracking issue naming the exact
 credential, provider, and every consumer, rotate through the provider's authenticated tools, update
-1Password and every consumer, and prove the new value works. For an exposed value, revoke
+1Password and every consumer, and prove the new value works. For a published value, revoke
 it as soon as the replacement is in place; never extend its life beyond the
 swap. Never ask Albert
 to approve it. **Exception:** `1Password Service Account Token - hetzner_vps` is
@@ -133,7 +142,7 @@ must refuse any plan that does, until Albert withdraws that directive.
    `op_run` with an `op://vibe_coding/<item>/<field>` reference so the value never
    enters the transcript.
 4. **Rotate or overwrite a live credential only with a recoverable plan.** Adding a
-   new entry is safe; replacing a live value can break running apps. For a planned (not exposed) rotation keep the old value
+   new entry is safe; replacing a live value can break running apps. For a planned (not published) rotation keep the old value
    recoverable until the new one is proven; update every consumer, and prove the new value works. If the
    value you hold conflicts with what's stored, verify against the provider
    yourself. Rotation follows the reviewed plan above; never ask Albert to approve

@@ -51,6 +51,7 @@ SESSION_TOKEN = r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 OWNER_CHAT = re.compile(rf"^(?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_AT_CHAT = re.compile(rf"^(?:codex|claude)-chat-([0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}})@[A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$", re.IGNORECASE)
+OWNER_SIGNATURE = re.compile(rf"^Posted by (?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}|[0-9a-f]{{8}}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
 def normalize_session(value):
@@ -87,7 +88,10 @@ def gh_call(args):
         if len(args) >= 1 and args[0] == "api":
             command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
                        "api", "--hostname", "github.com", *args[1:]]
-        result = subprocess.run(command, capture_output=True, check=False, timeout=60,
+        # Admission through the shared ai-gh queue can exceed a minute during
+        # fleet CI. Keep that route intact and bounded, without treating queue
+        # congestion as evidence that this session still owns work.
+        result = subprocess.run(command, capture_output=True, check=False, timeout=600,
                                 env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
         try:
             result.stdout = result.stdout.decode("utf-8", errors="strict")
@@ -139,10 +143,27 @@ def owner_session(owner, actual_session):
     return None
 
 
-def parse_claim_owner(body):
+def parse_claim_owner(body, session):
     if not isinstance(body, str):
         raise CheckError("claim body is malformed")
+    body = body.replace("\r\n", "\n")
     fences = re.findall(r"```db-author-lease\s*\n([\s\S]*?)```", body)
+    if not fences and "```db-author-lease" not in body:
+        # Lease-free C2 claims retain their posting signature. Ignore fenced
+        # examples; missing/ambiguous attribution is never evidence of absence.
+        prose = re.sub(r"```[^\n]*\n[\s\S]*?```", "", body)
+        signatures = OWNER_SIGNATURE.findall(prose)
+        # Body edits preserve earlier signatures. Repeated attribution to the
+        # same session is one owner; a different or unreadable signer is not.
+        if (len(set(signatures)) != 1
+                or len(re.findall(r"^Posted by\b", prose, re.MULTILINE)) != len(signatures)):
+            raise CheckError("lease-free claim owner signature is missing or ambiguous")
+        identity = signatures[0]
+        if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE):
+            # A short signature cannot distinguish sessions sharing a prefix;
+            # conservatively block every matching full UUID.
+            return session if UUID.fullmatch(session) and session.startswith(identity.lower()) else identity
+        return identity
     if len(fences) != 1:
         raise CheckError("claim must contain exactly one author lease")
     owners = []
@@ -291,13 +312,16 @@ def main():
         matching_claims = []
         for item in claims:
             try:
-                owner = parse_claim_owner(item["body"])
+                owner = parse_claim_owner(item["body"], session)
             except CheckError:
-                # A claim without a readable lease owner (legacy no-lease claims
-                # included) must not fail closed for unrelated sessions. It stays
-                # fail-closed only for a session whose identity the claim carries.
+                # A claim whose owner cannot be read (legacy no-lease claims
+                # with an unreadable signature, ambiguous or doubled leases)
+                # must not fail closed for unrelated sessions. It stays
+                # fail-closed for a session whose identity the claim carries;
+                # with no implicated identity there is no owner to block.
                 if text_has_session_identity(item["body"], session):
-                    matching_claims.append({"issue": item["number"]})
+                    raise CheckError(
+                        f"claim #{item['number']} carries this session identity without a readable owner")
                 continue
             if owner_session(owner, session) == session:
                 matching_claims.append({"issue": item["number"]})
