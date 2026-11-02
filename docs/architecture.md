@@ -63,6 +63,12 @@ protected. Unknown or shadowed Python contexts retain the strict scan.
 
 The shared-db closeout checker captures `ai-gh` output as bytes and strictly decodes stdout and stderr as UTF-8 on the main thread. Invalid UTF-8 becomes a structured fail-closed result; keep this explicit byte-to-text boundary so subprocess reader threads cannot turn decode errors into missing output.
 
+For lease-free C2 claims, closeout reads exactly one posting signature outside
+fenced examples. Existing author leases remain authoritative. Missing or
+ambiguous attribution fails closed; an eight-hex signature conservatively
+blocks any full session UUID sharing that prefix. This read-only compatibility
+path runs on Ubuntu and Windows Git Bash/Python 3 and never modifies claims.
+
 ## The staged workflow
 
 Seven stages, mapped to models via `/etc/ai-devops/models.env`:
