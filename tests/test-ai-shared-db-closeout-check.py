@@ -35,6 +35,16 @@ def nonclaim_issue(number, labels=None):
             "body": "ordinary open issue"}
 
 
+def legacy_issue(number, prose):
+    # shared-db claims from the pre-lease era (and hand-written ones like #5449)
+    # carry only a db-claim fence. The lane tooling still parses them as legacy
+    # claims that protect their objects; the closeout checker must tolerate them.
+    return {"number": number, "state": "open",
+            "labels": [{"name": "db-claim"}],
+            "body": ("```db-claim\nversion: none\nobjects:\n  - table core.widget\n```\n\n"
+                     f"{prose}")}
+
+
 def stage_message(holder="github-actions:555", kind="preview", owner="none"):
     return (f"db-coordination {kind} request-1 pr=none head={'a' * 40}\n\n"
             "lease_version: 1\n"
@@ -275,6 +285,63 @@ exit 127
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.summary(result)["ok"])
+
+    def test_legacy_claim_without_lease_does_not_block_unrelated_session(self):
+        row = legacy_issue(61, f"Posted by Codex chat {FOREIGN} on edge-dev3")
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = self.summary(result)
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["open_claims_checked"], 1)
+
+    def test_legacy_claim_with_own_session_identity_blocks(self):
+        row = legacy_issue(62, f"owner Codex chat {SESSION} on edge-dev3\n\n"
+                               f"Posted by Codex chat {SESSION} on edge-dev3")
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 62}])
+
+    def test_legacy_claim_identity_is_case_insensitive_for_uuid_sessions(self):
+        row = legacy_issue(63, f"Posted by Codex chat {SESSION.upper()} on edge-dev3")
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 63}])
+
+    def test_legacy_claim_with_own_mimo_identity_blocks(self):
+        env = self.mimo_env()
+        row = legacy_issue(64, f"Posted by MiMo chat {MIMO_SESSION} on edge-dev")
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 64}])
+
+    def test_legacy_claim_with_foreign_mimo_identity_does_not_block(self):
+        env = self.mimo_env()
+        row = legacy_issue(65, f"Posted by MiMo chat {FOREIGN_MIMO} on edge-dev")
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+
+    def test_double_lease_claim_does_not_block_unrelated_session(self):
+        row = issue(66, f"Codex chat {FOREIGN} on edge-dev")
+        row["body"] += f"\n```db-author-lease\nowner: Codex chat {FOREIGN} on edge-dev\n```"
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+
+    def test_double_lease_claim_with_own_session_identity_blocks(self):
+        row = issue(67, f"Codex chat {FOREIGN} on edge-dev")
+        row["body"] += f"\n```db-author-lease\nowner: Codex chat {FOREIGN} on edge-dev\n```"
+        row["body"] += f"\nOld session note: {SESSION}"
+        self.write_data({"open_pages": [[row]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 67}])
 
     def test_zero_claims_uses_search_crosscheck(self):
         self.write_data({"open_pages": [[nonclaim_issue(50)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
