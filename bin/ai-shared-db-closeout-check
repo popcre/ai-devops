@@ -51,6 +51,7 @@ SESSION_TOKEN = r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 OWNER_CHAT = re.compile(rf"^(?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_AT_CHAT = re.compile(rf"^(?:codex|claude)-chat-([0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}})@[A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$", re.IGNORECASE)
+OWNER_SIGNATURE = re.compile(rf"^Posted by (?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}|[0-9a-f]{{8}}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
 def normalize_session(value):
@@ -137,10 +138,24 @@ def owner_session(owner, actual_session):
     return None
 
 
-def parse_claim_owner(body):
+def parse_claim_owner(body, session):
     if not isinstance(body, str):
         raise CheckError("claim body is malformed")
+    body = body.replace("\r\n", "\n")
     fences = re.findall(r"```db-author-lease\s*\n([\s\S]*?)```", body)
+    if not fences and "```db-author-lease" not in body:
+        # Lease-free C2 claims retain their posting signature. Ignore fenced
+        # examples; missing/ambiguous attribution is never evidence of absence.
+        prose = re.sub(r"```[^\n]*\n[\s\S]*?```", "", body)
+        signatures = OWNER_SIGNATURE.findall(prose)
+        if len(signatures) != 1 or len(re.findall(r"^Posted by\b", prose, re.MULTILINE)) != 1:
+            raise CheckError("lease-free claim owner signature is missing or ambiguous")
+        identity = signatures[0]
+        if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE):
+            # A short signature cannot distinguish sessions sharing a prefix;
+            # conservatively block every matching full UUID.
+            return session if UUID.fullmatch(session) and session.startswith(identity.lower()) else identity
+        return identity
     if len(fences) != 1:
         raise CheckError("claim must contain exactly one author lease")
     owners = []
@@ -288,7 +303,7 @@ def main():
         claims, issue_count = open_claim_pages()
         matching_claims = []
         for item in claims:
-            owner = parse_claim_owner(item["body"])
+            owner = parse_claim_owner(item["body"], session)
             if owner_session(owner, session) == session:
                 matching_claims.append({"issue": item["number"]})
         stages = []

@@ -247,6 +247,59 @@ exit 127
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 17}])
 
+    def test_lease_free_claim_signature_ownership(self):
+        for identity, expected in ((SESSION, 1), (SESSION[:8], 1),
+                                   (FOREIGN, 0), (FOREIGN[:8], 0),
+                                   (MIMO_SESSION, 0)):
+            with self.subTest(identity=identity):
+                row = nonclaim_issue(5423, ["db-claim"])
+                row["body"] = ("```db-claim\nversion: 20261102135312\nobjects:\n"
+                               "  - table core.character\n```\n\nClose when merged or abandoned.\n\n"
+                               f"Posted by Claude chat {identity} on hetz")
+                self.write_data({"open_pages": [[row]]})
+                result = self.run_check()
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertEqual(self.summary(result)["blocking_claims"],
+                                 [{"issue": 5423}] if expected else [])
+
+    def test_lease_free_mimo_owner_blocks(self):
+        row = nonclaim_issue(5423, ["db-claim"])
+        row["body"] = f"Posted by MiMo chat {MIMO_SESSION} on edge-dev"
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check(env=self.mimo_env())
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
+
+    def test_lease_free_windows_line_endings_preserve_owner(self):
+        row = nonclaim_issue(5423, ["db-claim"])
+        row["body"] = ("```db-claim\r\nversion: 20261102135312\r\n```\r\n\r\n"
+                       f"Posted by Codex chat {SESSION} on edge-dev\r\n")
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
+
+    def test_lease_free_unreadable_or_ambiguous_owner_fails_closed(self):
+        signature = f"Posted by Codex chat {SESSION} on edge-dev"
+        for body in ("no owner", signature + "\n" + signature,
+                     signature + "\nPosted by Claude chat unknown on hetz",
+                     f"```text\n{signature}\n```", "Posted by Claude chat unknown on hetz",
+                     "```db-author-lease\nowner: missing closing fence\n" + signature):
+            with self.subTest(body=body):
+                row = nonclaim_issue(5423, ["db-claim"])
+                row["body"] = body
+                self.write_data({"open_pages": [[row]]})
+                result = self.run_check()
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(self.summary(result)["ok"])
+
+    def test_existing_lease_remains_authoritative_over_posting_signature(self):
+        row = issue(5423, SESSION, suffix=f"\nPosted by Claude chat {FOREIGN} on hetz")
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
+
     def test_relinquished_handoff_ready_claim_still_blocks_until_owner_changes(self):
         ready = issue(18, f"codex/{SESSION}-4152", "relinquished",
                       suffix="\n\nOwner handoff-ready receipt was recorded.")
