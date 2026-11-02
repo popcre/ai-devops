@@ -56,6 +56,13 @@ the others live where noted.
 | ⚙ `log-reviewer-issue` | Records a reviewer failure with complete automatic evidence and detailed notes already present in the session. Shared by Claude and Codex. | "log the reviewer error" / "record this reviewer issue" |
 | `designflow-e2e-tester` | AI-driven end-to-end/visual testing of the dflow app. | "run the E2E tester" (lives in designflow-frontend/.claude/skills) |
 
+## Supabase & Postgres
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ [`supabase`](../skills/shared/supabase/SKILL.md) | Comprehensive Supabase development skill (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues; supabase-js / SSR integrations; CLI and MCP; schema changes, migrations, RLS). Vendored from supabase/agent-skills. | "help me with Supabase auth" / "debug this RLS policy" / "set up supabase in Next.js" |
+| ⚙ [`supabase-postgres-best-practices`](../skills/shared/supabase-postgres-best-practices/SKILL.md) | Postgres performance and design rules from Supabase across 8 priority categories (indexes, schema, RLS, connections, locking, monitoring). Load before writing SQL or changing a schema. | "optimize this query" / "review my schema for performance" / "add proper indexes" |
+
 ## Meta
 
 | Skill | What it does | Say this |
