@@ -301,7 +301,7 @@ exit 127
 
     def test_lease_free_unreadable_or_ambiguous_owner_fails_closed(self):
         signature = f"Posted by Codex chat {SESSION} on edge-dev"
-        for body in ("no owner", signature + "\n" + signature,
+        for body in ("no owner", signature + f"\nPosted by Codex chat {FOREIGN} on edge-dev",
                      signature + "\nPosted by Claude chat unknown on hetz",
                      f"```text\n{signature}\n```", "Posted by Claude chat unknown on hetz",
                      "```db-author-lease\nowner: missing closing fence\n" + signature):
@@ -312,6 +312,19 @@ exit 127
                 result = self.run_check()
                 self.assertEqual(result.returncode, 2, result.stdout)
                 self.assertFalse(self.summary(result)["ok"])
+
+    def test_repeated_lease_free_signatures_preserve_session_ownership(self):
+        for identity, expected in ((SESSION, 1), (SESSION[:8], 1),
+                                   (FOREIGN, 0), (FOREIGN[:8], 0), (MIMO_SESSION, 0)):
+            with self.subTest(identity=identity):
+                row = nonclaim_issue(5449, ["db-claim"])
+                signature = f"Posted by Codex chat {identity} on edge-dev3"
+                row["body"] = signature + "\n\nUpdated evidence.\n\n" + signature
+                self.write_data({"open_pages": [[row]]})
+                result = self.run_check()
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertEqual(self.summary(result)["blocking_claims"],
+                                 [{"issue": 5449}] if expected else [])
 
     def test_existing_lease_remains_authoritative_over_posting_signature(self):
         row = issue(5423, SESSION, suffix=f"\nPosted by Claude chat {FOREIGN} on hetz")
