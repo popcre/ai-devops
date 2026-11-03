@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+# [ai-devops] Linux stand-in for `cmd`, installed as ~/.local/bin/cmd by
+# setup-secrets.sh (#2324). Tracked project .mcp.json files are shared across
+# machines and launch servers as `cmd /c <USERPROFILE>\.config\ai-devops\
+# mcp-launch.cmd ...`; without this, Claude Code on Linux reports
+# "Executable not found in $PATH: cmd" and the server never starts.
+# Only the `/c` form is understood: the ai-devops launchers map to their .sh
+# twins, and any other program runs as-is. Everything else fails loudly.
+cfg="${AI_DEVOPS_CONFIG:-$HOME/.config/ai-devops}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    /c|/C) shift ;;
+    *) echo "cmd-compat: only 'cmd /c <program> ...' is supported" >&2; exit 2 ;;
+  esac
+  [ "$#" -gt 0 ] || { echo 'cmd-compat: /c needs a program' >&2; exit 2; }
+  prog="$1"; shift
+  base="$(printf '%s' "$prog" | sed 's|.*[\\/]||')"
+  case "$base" in
+    mcp-launch.cmd) exec "$cfg/mcp-launch.sh" "$@" ;;
+    mcp-remote-launch.cmd) exec "$cfg/mcp-remote-launch.sh" "$@" ;;
+    cmd|cmd.exe) continue ;;
+    *.cmd|*.bat) echo "cmd-compat: no Linux equivalent for $base" >&2; exit 127 ;;
+    *) exec "$prog" "$@" ;;
+  esac
+done
+echo 'cmd-compat: nothing to run' >&2; exit 2
