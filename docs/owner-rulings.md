@@ -216,3 +216,13 @@ push after `ai-task-gates check --before deploy` opens on the machine doing the
 work (the owner-authorization route, carrying Albert's quoted authorization,
 applies as for backend). The closed qualified-Linux source-release lane is no
 longer required for these three repositories.
+
+## 2026-11-03 — Oracle keeps the recall-ai meeting recorder
+
+Verbatim, from Albert's chat: "Oracle still needs the meeting recorder" — said
+after being told recall-ai had been retired on 2026-09-24 and was blocked on
+Linux.
+
+Current rule: recall-ai stays retired from the machine-wide catalog, but the
+Oracle project's own tracked `.mcp.json` entry is authorized on every machine.
+The Linux remote launcher allows its `op://` reference (#2324).

@@ -413,6 +413,8 @@ _aidev_flock() {
 }
 case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) ;;
+  # Oracle's tracked .mcp.json keeps recall-ai (owner ruling 2026-11-03).
+  "op://vibe_coding/recall-ai MCP/password") ;;
   *) echo "ai-devops: unmanaged remote MCP reference — not starting \$URL" >&2; exit 1 ;;
 esac
 # Resolve at launch even if the parent process still carries an older token.
