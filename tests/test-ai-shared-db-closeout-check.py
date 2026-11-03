@@ -19,6 +19,9 @@ SESSION = "11111111-2222-4333-8444-555555555555"
 FOREIGN = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 MIMO_SESSION = "ses_ffe5ea423b44affe0LH2gvduI6"
 FOREIGN_MIMO = "ses_aaaaaaaaaaaaaaaaBBBBBBBBBB"
+# The checker's resolve_session() reads exactly these. A live AI session exports
+# its own, which must not leak into the fixture's child environment.
+CHECKER_IDENTITY_VARIABLES = ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "MIMO_SESSION_ID")
 
 
 def issue(number, owner, state="active", expires="2026-10-14T00:00:00Z", suffix=""):
@@ -144,7 +147,8 @@ exit 127
 ''', encoding="utf-8")
         gh.chmod(0o644)
         self.checker.chmod(0o755)
-        self.env = os.environ.copy()
+        self.env = {key: value for key, value in os.environ.items()
+                    if key not in CHECKER_IDENTITY_VARIABLES}
         self.env.update({
             "PATH": f"{bindir}{os.pathsep}{self.env.get('PATH', '')}",
             "FAKE_GH_CALLS": str(self.calls),
