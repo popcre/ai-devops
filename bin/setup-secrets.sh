@@ -431,6 +431,15 @@ exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header 'Authoriz
 EOF
   chmod 755 "$REMOTE_SH"
   ok "Wrote $REMOTE_SH"
+  # Shared project .mcp.json files launch through `cmd /c ...mcp-launch.cmd`;
+  # give Linux a `cmd` that routes to the launchers above (#2324). A real cmd
+  # already on PATH (WSL interop, Git Bash) is left alone.
+  CMD_SHIM="$HOME/.local/bin/cmd"
+  if [ -e "$CMD_SHIM" ] || ! command -v cmd >/dev/null 2>&1; then
+    mkdir -p "$HOME/.local/bin"
+    cp "$REPO_ROOT/bin/cmd-compat" "$CMD_SHIM" && chmod 755 "$CMD_SHIM"
+    ok "Installed cmd compatibility shim -> $CMD_SHIM"
+  fi
 fi
 
 # --------------------------------------------------------------------------
