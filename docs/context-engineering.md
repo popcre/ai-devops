@@ -229,7 +229,8 @@ calls:
 | `chrome-devtools` | `popdam3` | 30-day transcripts: one 7-call shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3 2026-09-16 |
 | `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; never global since 2026-09-24 |
 
-`recall-ai` is retired on every machine (owner ruling 2026-09-24):
+`recall-ai` is retired from the machine catalog (owner ruling 2026-09-24); the
+Oracle project keeps its own entry (owner ruling 2026-11-03).
 `$RetiredMcpServerNames` keeps it managed so every consumer deletes old entries.
 
 `supabase` (shared-db, licensor-source-data, dflow_plm, popdam, popcrm-web = 5
