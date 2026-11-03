@@ -162,8 +162,12 @@ fi
 
     def waiter_after_busy_lock(self, script, args, **settings):
         lock = self.hold()
-        # Exercise the real production default, not the shortened test default.
-        settings.update(AI_DEVOPS_TEST_MODE="0", AI_TASK_GATES_MODE="none")
+        # Exercise the real production lock default (300s) explicitly, while
+        # keeping AI_DEVOPS_TEST_MODE=1 so AI_TASK_GATES_MODE=none applies and
+        # the real ai-task-gates check (23.7s on Windows) stays out of the
+        # fixture's admission budget.
+        settings.update(AI_DEVOPS_TEST_MODE="1", AI_TASK_GATES_MODE="none",
+                        AI_GH_NO_WAIT_LOCK_SECONDS="300")
         p = self.start("waiter", waiter=script, arguments=args, **settings)
         self.wait_for(lambda: self.ticket_count() == 1)
         time.sleep(12)  # beyond the previous 10-second admission abandonment
