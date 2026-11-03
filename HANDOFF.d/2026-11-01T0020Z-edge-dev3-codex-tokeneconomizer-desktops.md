@@ -4,6 +4,9 @@ status: OPEN
 owner: codex/tokeneconomizer-desktop-plan
 ---
 
+> **Closed 2026-11-02 (owner decision): not planned.** Albert decided not to use TokenEconomizer or the Elephant-Goldfish fresh reader. See [#2220](https://github.com/popcre/ai-devops/issues/2220), [#2222](https://github.com/popcre/ai-devops/issues/2222), [#2227](https://github.com/popcre/ai-devops/issues/2227). This file is historical; do not resume it.
+
+
 Owning issue: [#2220](https://github.com/popcre/ai-devops/issues/2220). Implementation remains unstarted.
 
 ## 0. Business decisions only the owner can make

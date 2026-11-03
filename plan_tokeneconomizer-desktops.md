@@ -1,3 +1,5 @@
+> **Closed 2026-11-02 (owner decision): not planned.** Albert decided not to use TokenEconomizer or the Elephant-Goldfish fresh reader. See [#2220](https://github.com/popcre/ai-devops/issues/2220), [#2222](https://github.com/popcre/ai-devops/issues/2222), [#2227](https://github.com/popcre/ai-devops/issues/2227). This file is historical; do not resume it.
+
 # TokenEconomizer — desktop applicability, qualification and measured rollout
 
 Owner: the implementing Codex session on the owning GitHub issue. Date: October 31, 2026 (EDT).
