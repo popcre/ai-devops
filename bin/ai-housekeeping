@@ -254,6 +254,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # AI_HOUSEKEEPING_GH (set it empty or to a stub path). There is no bare-CLI
 # fallback — that would bypass the shared admission path. Every GitHub call
 # is time-bounded so a locked or hung transport cannot freeze the report.
+# The bound must outlast shared-throttle admission: ai-gh queues and spaces
+# every call machine-wide, and callers on a busy machine sat past the old 30s
+# bound, so the probe failed and every ref was reported UNKNOWN.
 GH=""
 if [[ -n "${AI_HOUSEKEEPING_GH+x}" ]]; then
   GH="${AI_HOUSEKEEPING_GH}"
@@ -263,19 +266,28 @@ else
     GH="$ROOT/bin/ai-gh"
   fi
 fi
+BASH_BIN="$(readlink -f "$(command -v bash 2>/dev/null)")"
+GH_CALL_TIMEOUT="${AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS:-300}"
+[[ "$GH_CALL_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || GH_CALL_TIMEOUT=300
 
 gh_call() {
   # Bounded GitHub invocation. Returns non-zero on timeout or failure.
+  # Routed through bash like ai-shared-db-closeout-check: the extensionless
+  # transport is not reliably exec-able directly under Git Bash.
+  local -a cmd=("$GH")
+  [[ -n "$BASH_BIN" ]] && cmd=("$BASH_BIN" "$GH")
   if command -v timeout >/dev/null 2>&1; then
-    timeout 30 "$GH" "$@"
+    timeout "$GH_CALL_TIMEOUT" "${cmd[@]}" "$@"
   else
-    "$GH" "$@"
+    "${cmd[@]}" "$@"
   fi
 }
 
 GH_OK=0
+GH_PROBE_RC=0
 if [[ -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
-  if gh_call auth status >/dev/null 2>&1; then
+  gh_call auth status >/dev/null 2>&1 || GH_PROBE_RC=$?
+  if [[ "$GH_PROBE_RC" -eq 0 ]]; then
     GH_OK=1
   fi
 fi
@@ -583,10 +595,12 @@ ODD_REFS="$(git for-each-ref 'refs/codex/turn-diffs/checkpoints/*' --format='%(r
 REVIEW_CANDIDATES=$((WT_MERGED + BR_MERGED + HO_SUCCESSOR + HO_UNATTRIBUTED + HO_UNPROVABLE))
 
 # --- H. Footer / summary --------------------------------------------------
-if [[ "$GH_OK" -ne 1 ]]; then
-  GH_LINE="UNKNOWN (GitHub unavailable)"
-else
+if [[ "$GH_OK" -eq 1 ]]; then
   GH_LINE="available"
+elif [[ "$GH_PROBE_RC" -eq 124 ]]; then
+  GH_LINE="UNKNOWN (GitHub probe timed out)"
+else
+  GH_LINE="UNKNOWN (GitHub unavailable)"
 fi
 
 emit "Housekeeping summary — $REPO_ROOT"
@@ -598,7 +612,11 @@ emit "Plans (git-shared): $PL_ACTIVE active, $PL_DONE retained record"
 emit "Agent job records (machine-local): ${JOB_LINES[*]}"
 emit "Odd refs (clone-local): $ODD_REFS unowned"
 if [[ "$GH_OK" -ne 1 ]]; then
-  emit_warn "GitHub unavailable — merged-ness is UNKNOWN for every worktree and branch above. Install and authenticate gh, then re-run. Never trust an ancestry fallback."
+  if [[ "$GH_PROBE_RC" -eq 124 ]]; then
+    emit_warn "GitHub probe timed out — merged-ness is UNKNOWN for every worktree and branch above. The shared call throttle is busy on this machine; re-run when it is quieter. Never trust an ancestry fallback."
+  else
+    emit_warn "GitHub unavailable — merged-ness is UNKNOWN for every worktree and branch above. Install and authenticate gh, then re-run. Never trust an ancestry fallback."
+  fi
 fi
 emit "Log: $LOG"
 emit "Nothing was changed."
