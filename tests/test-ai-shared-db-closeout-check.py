@@ -13,6 +13,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from bash_resolution import resolve_bash
+
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "bin/ai-shared-db-closeout-check"
 SESSION = "11111111-2222-4333-8444-555555555555"
@@ -90,7 +92,7 @@ class CloseoutCheck(unittest.TestCase):
         self.data = self.root / "data.json"
         self.checker = bindir / "ai-shared-db-closeout-check"
         self.checker.write_bytes(CHECKER.read_bytes())
-        self.bash = shutil.which("bash")
+        self.bash, self._msys_bin = resolve_bash()
         self.assertIsNotNone(self.bash, "Bash is required to run the checker")
         gh_impl = self.root / "fake-ai-gh.py"
         gh_impl.write_text(r'''#!/usr/bin/env python3
@@ -150,7 +152,7 @@ exit 127
         self.env = {key: value for key, value in os.environ.items()
                     if key not in CHECKER_IDENTITY_VARIABLES}
         self.env.update({
-            "PATH": f"{bindir}{os.pathsep}{self.env.get('PATH', '')}",
+            "PATH": os.pathsep.join([str(bindir)] + ([self._msys_bin] if self._msys_bin else []) + [self.env.get('PATH', '')]),
             "FAKE_GH_CALLS": str(self.calls),
             "FAKE_GH_DATA": str(self.data),
             "FAKE_GH_IMPL": str(gh_impl),
