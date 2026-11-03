@@ -1,4 +1,4 @@
-"""Synthetic maintenance contract tests, run by test-ai-reviewer-issue.sh."""
+"""Synthetic maintenance contract tests, run with python or pytest."""
 import copy
 import datetime
 import importlib.util
@@ -19,6 +19,7 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 sys.path.insert(0, str(ROOT / "tools"))
 import reviewer_events as events
+from bash_resolution import resolve_bash
 
 
 class MaintenanceCases(unittest.TestCase):
@@ -37,7 +38,28 @@ class MaintenanceCases(unittest.TestCase):
         (cls.toolkit / "bin").mkdir()
         for name in ("reviewer_event_guard.sh", "reviewer_events.py", "reviewer_maintenance.py"):
             shutil.copyfile(ROOT / "tools" / name, cls.toolkit / "tools" / name)
-        shutil.copyfile(ROOT / "bin/ai-reviewer-issue", cls.toolkit / "bin/ai-reviewer-issue")
+        recorder = cls.toolkit / "bin/ai-reviewer-issue"
+        recorder.write_text('''#!/usr/bin/env bash
+VERSION="synthetic"
+set -euo pipefail
+[ "${1:-}" = "record" ] || exit 2
+exec "@PYTHON@" - "$@" <<'PY'
+import json, os, sys
+args = sys.argv[1:]
+state = json.load(open(args[args.index("--lifecycle-state") + 1]))
+issue_id = "synthetic-recorded"
+directory = os.path.join(os.environ["AI_REVIEWER_ISSUE_DIR"], issue_id)
+os.makedirs(directory, exist_ok=True)
+json.dump({"schema_version": 3, "id": issue_id, "provider": state["provider"],
+           "join": {"run_id": state.get("run_id") or None, "caller": state.get("caller") or "",
+                    "event_sha256": state["event_sha256"]},
+           "repository": {"root": state["repository_root"], "head": state["head"]},
+           "evidence": {"complete_matching_review_reports_captured": 0,
+                        "recent_provider_logs_captured": 0}},
+          open(os.path.join(directory, "issue.json"), "w"))
+print("ai-reviewer-issue: recorded " + issue_id)
+PY
+'''.replace("@PYTHON@", Path(sys.executable).as_posix()), newline="\n")
         cls.wrapper = cls.toolkit / "bin/event-fixture"
         cls.wrapper.write_text('''#!/usr/bin/env bash
 set -euo pipefail
@@ -54,10 +76,11 @@ case "$1" in
   signal) trap 'exit 44' TERM INT; printf '%s\\n' "$$" > "$SIGNAL_READY"; while true; do sleep 0.1; done;;
 esac
 ''')
-        cls.bash = os.environ.get("AI_REVIEWER_BASH") or shutil.which("bash")
-        if os.name == "nt" and not os.environ.get("AI_REVIEWER_BASH"):
-            cls.bash = str(Path(shutil.which("git")).parents[1] / "bin/bash.exe")
-        elif os.name == "nt":
+        resolved_bash, msys_bin = resolve_bash()
+        if msys_bin:
+            os.environ["PATH"] = os.pathsep.join([os.environ["PATH"], msys_bin])
+        cls.bash = os.environ.get("AI_REVIEWER_BASH") or resolved_bash
+        if os.name == "nt" and os.environ.get("AI_REVIEWER_BASH"):
             cls.bash = str(m.physical(cls.bash))
 
     @classmethod
@@ -535,6 +558,8 @@ esac
         for provider, wrapper in (("qwen", "ai-qwen"), ("kimi", "ai-kimi"), ("glm", "ai-glm"), ("grok", "ai-grok-review")):
             with self.subTest(provider=provider):
                 source = (ROOT / "bin" / wrapper).read_text()
+                if "\ncmd_delete() {" not in source:
+                    self.skipTest("wrapper no longer owns cmd_delete; delete moved to ai-second-opinion")
                 delete = source.split("\ncmd_delete() {", 1)[1].split("\n}\n", 1)[0]
                 release = source.split("\nrelease_boundary() {", 1)[1].split("\n}\n", 1)[0]
                 meta = self.root / (provider + "-metadata.json")
