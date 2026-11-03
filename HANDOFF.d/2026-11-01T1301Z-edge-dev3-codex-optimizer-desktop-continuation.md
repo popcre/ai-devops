@@ -4,6 +4,9 @@ status: BLOCKED
 owner: codex/01a194ee-7e16-70b3-9ebd-307fdd653f15
 ---
 
+> **Closed 2026-11-02 (owner decision): not planned.** Albert decided not to use TokenEconomizer or the Elephant-Goldfish fresh reader. See [#2220](https://github.com/popcre/ai-devops/issues/2220), [#2222](https://github.com/popcre/ai-devops/issues/2222), [#2227](https://github.com/popcre/ai-devops/issues/2227). This file is historical; do not resume it.
+
+
 # Optimizer desktop continuation — November 1, 2026
 
 Recorded November 1, 2026, 8:02 AM EST. This is a closeout continuation,
