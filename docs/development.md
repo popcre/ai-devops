@@ -430,6 +430,14 @@ Raising a timeout until nothing fails, marking a suite allowed-to-fail, or
 deleting a check is symptom suppression, not a fix. A harness that invents
 failures is worse than no harness, and a harness that hides them is worse again.
 
+Worked example (2026-11-03, popcre/ai-devops#2322): `test_pr_waiter_keeps_ticket_past_old_short_default`
+was flaky on Windows CI because its fixture set `AI_DEVOPS_TEST_MODE=0` to get
+the production lock default. That also disabled the `AI_TASK_GATES_MODE=none`
+shortcut (it is honored only when `AI_DEVOPS_TEST_MODE=1`), so the real
+`ai-task-gates check --before pr-wait` — 23.7s on Windows — ran inside an
+8-second `wait_for` budget. The fix was environment, not timing: keep test
+mode on and set `AI_GH_NO_WAIT_LOCK_SECONDS=300` explicitly.
+
 Failing suites are named at the end with their log path and their first `FAIL`
 lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
 a local pre-check, not a replacement for CI: GitHub remains the authority on
@@ -455,6 +463,12 @@ bugs the PR-section path can miss. Patterns that have already cost a day
 - **Restricted `PATH`.** `PATH=/usr/bin:/bin` drops jq on Windows (it lives under
   `C:\Program Files\jq\`). Always add `$(dirname "$(command -v jq)")` when a test
   narrows PATH.
+- **Which `bash`.** The bare `bash` on PATH may be the WindowsApps WSL stub, and
+  `Git\bin\bash.exe` bootstraps `/mingw64/bin:/usr/bin` ahead of the inherited
+  PATH — so a test's PATH-first fake (a stub `cygpath`, say) is silently
+  shadowed by Git's real tool (popcre/ai-devops#2321). Resolve the raw MSYS
+  `Git\usr\bin\bash.exe` instead; `tests/bash_resolution.py` does this and
+  honors `AI_TEST_BASH`.
 - **Linux-only suites.** Suites whose names or product contract say Linux-only
   (`test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`)
   must `exit 0` with a skip reason on non-Linux rather than call a

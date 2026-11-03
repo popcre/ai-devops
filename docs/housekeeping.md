@@ -50,6 +50,12 @@ git-shared item is a commit in a repository several sessions write to.
 | Agent job records | machine-local | Provider job state under `~/.local/state/ai-devops/{glm,kimi,qwen}`. |
 | Odd refs | clone-local | `refs/codex/turn-diffs/checkpoints/*` leftovers. Nobody currently owns them and no remedy is known. |
 
+Merged-ness comes from one GitHub lookup pass (PR list plus a batched issue
+list) through the governed `ai-gh` transport. The probe waits its turn in the
+machine-wide call queue and is bounded at 300 seconds per call
+(`AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS`); when the bound is hit the report says
+so and marks refs UNKNOWN instead of guessing.
+
 ## What the labels mean
 
 **LIVE** — dirty working tree, or a pull request is still open. Do not touch.
