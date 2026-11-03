@@ -1580,7 +1580,16 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   done
   [ "$declared" = reviewer-safety ] && reviewer_release=1
   if [ "$action" = deploy ] && [ "$reviewer_release" -eq 1 ] && [ "$application_release_ready" -eq 0 ]; then
-    blocked 'ai-task-gates: STOP. Reviewer-safety changes cannot use the generic deploy action; use a separate installation task.'
+    case "$IDENTITY" in
+      popcre/designflow-tracking|popcre/designflow-frontend|popcre/designflow-item-master)
+        # Owner ruling 2026-11-03 ("get rid of that rule"): DesignFlow sandbox
+        # releases are not confined to one designated computer. These three
+        # apps generic-deploy like designflow-backend; the closed
+        # qualified-Linux source-release lane is no longer required for them.
+        ;;
+      *)
+        blocked 'ai-task-gates: STOP. Reviewer-safety changes cannot use the generic deploy action; use a separate installation task.' ;;
+    esac
   fi
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"

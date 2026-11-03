@@ -1589,6 +1589,22 @@ check 'application release fixture actually contains a changed reviewer-safety r
   "out '$APP' explain --json | jq -e '.changes | any(.class==\"reviewer-safety\" and .path==\"src/router.ts\")' >/dev/null"
 check 'mixed protected application source keeps the generic deployment refusal' \
   "rc 3 '$APP' check --before deploy --reviewer-approval '$APP_APPROVAL'"
+# Owner ruling 2026-11-03 ("get rid of that rule"): DesignFlow sandbox
+# releases are not confined to one designated computer. A reviewer-safety
+# change in the three named apps generic-deploys like anywhere else.
+APP3="$TMP/application-release-designflow"
+newrepo "$APP3" popcre/designflow-tracking
+APP3_BASE="$(git -C "$APP3" rev-parse HEAD)"
+( cd "$APP3" && "$GATES" start --class deployment --base "$APP3_BASE" >/dev/null 2>&1 )
+mkdir -p "$APP3/.ai-devops" "$APP3/src"
+printf '%s\n' '{"schema_version":1,"paths":[{"glob":"src/router.ts","class":"reviewer-safety"}],"gates":{"deployment":{"required":["owner-authorization"]}}}' \
+  > "$APP3/.ai-devops/task-gates.json"
+printf 'steps: []\n' > "$APP3/cloudbuild.yaml"
+printf 'reviewed application router fixture\n' > "$APP3/src/router.ts"
+git -C "$APP3" add .ai-devops/task-gates.json cloudbuild.yaml src/router.ts
+git -C "$APP3" commit -qm 'designflow reviewer-safety release fixture'
+check 'designflow app reviewer-safety change generic-deploys per owner ruling 2026-11-03' \
+  "rc 0 '$APP3' check --before deploy"
 check 'the exact committed application source target records its independent approval' \
   "out '$APP' check --before deploy --application-release-target .ai-devops/application-release-target.json --reviewer-approval '$APP_APPROVAL' | grep -q 'recorded exact application source-release override'"
 check 'outside shared-db the application source route records its release without a reviewer approval' \
