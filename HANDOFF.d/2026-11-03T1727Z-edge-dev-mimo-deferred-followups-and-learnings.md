@@ -1,5 +1,5 @@
 ---
-issue: none # deferred follow-ups carry their own trackers: popcre/shared-db#5468 (ZCode identity gap) and popcre/ai-devops PR #2321 (test-helper bash fallback)
+issue: none # deferred follow-ups carry their own trackers: popcre/shared-db#5468 (ZCode identity gap); the test-helper bash fallback landed 2026-11-03 as PR #2329
 status: OPEN
 owner: mimo/wrapup-20261103-deferred-followups
 ---
@@ -8,11 +8,11 @@ owner: mimo/wrapup-20261103-deferred-followups
 
 ## 0. ⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE
 
-- **When to pick up the two deferred follow-ups below.** Recommendation: the
-  ZCode identity gap only when a ZCode session next needs certified shared-db
-  closeout; the test-helper bash fallback opportunistically the next time anyone
-  touches those tests. Blocks: nothing. A wrong guess costs only idle risk
-  (§9); nothing is waiting.
+- **When to pick up the deferred follow-up below.** Recommendation (owner
+  delegated the pick to a Muse review, 2026-11-03): the ZCode identity gap
+  only when a ZCode session next needs certified shared-db closeout. Blocks:
+  nothing. A wrong guess costs only idle risk (§9); nothing is waiting.
+  The test-helper bash fallback is **done** — see §6.2.
 
 **Already settled — do NOT re-ask (2026-11-03):**
 
@@ -158,13 +158,22 @@ Landed on `main` and queue-verified (all three via merge queue; do not redo):
    when: a fixture with a `ZCode chat sess_<uuid>` claim is counted by a
    second session's check (not skipped) and a ZCode session's own run
    resolves instead of erroring "session identity is missing".
-2. **Test-helper bash fallback** — opportunistic.
-   `tests/reviewer_maintenance_cases.py`
-   (https://github.com/popcre/ai-devops/blob/main/tests/reviewer_maintenance_cases.py)
-   still falls back to `Git\bin\bash.exe` (the wrong one; see finding 3). Make
-   it use `tests/bash_resolution.py`. You'll know it worked when: the file
-   imports `resolve_bash` and its suites pass on Windows under both a plain
-   PowerShell `python -m pytest` and `bash -lc python -m pytest`.
+2. **Test-helper bash fallback** — **LANDED 2026-11-03** as
+   https://github.com/popcre/ai-devops/pull/2329 (commit 16b60de4). The
+   handoff's premise was broken: `tests/reviewer_maintenance_cases.py` could
+   not run at all, because Stage F (#2131) deleted `bin/ai-reviewer-issue`
+   and `tests/test-ai-reviewer-issue.sh` while missing this `.py` file —
+   `setUpClass` copied the deleted CLI and all 138 tests errored at setup.
+   The PR therefore restores the suite rather than only swapping a fallback:
+   `resolve_bash` from `tests/bash_resolution.py` (plus its MSYS coreutils
+   directory on PATH), a synthetic recorder fixture in the existing
+   `bin/event-fixture` style, and a skip on the glm subtest whose
+   `cmd_delete` moved into the `ai-second-opinion` Python path. Verified on
+   edge-dev under both shapes: 134 passed, 5 skipped. Deferred from that PR
+   (Muse, 2026-11-03): the dead `Maintenance` class + `main()` in
+   `tools/reviewer_maintenance.py` (reachable only through the deleted CLI)
+   wants a separate cleanup; the glm delete contract is covered only by a
+   smoke test in `tests/test_ai_second_opinion.py`.
 
 ## 7. Constraints and gotchas in force
 
