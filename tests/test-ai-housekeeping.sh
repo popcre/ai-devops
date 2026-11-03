@@ -482,5 +482,48 @@ else
 fi
 fi
 
+# ---------------------------------------------------------------------------
+# 17. the transport runs through bash: a launcher exec() cannot run directly
+#     must still probe, so the report is not falsely UNKNOWN (Git Bash)
+# ---------------------------------------------------------------------------
+case17="$TMP/bash-route"
+new_repo "$case17"
+stub17="$TMP/gh17"
+cat > "$stub17" <<'STUB'
+#!/nonexistent/interp
+case "${1:-}" in
+  auth) exit 0 ;;
+esac
+exit 0
+STUB
+chmod +x "$stub17"
+( cd "$case17" && AI_HOUSEKEEPING_GH="$stub17" bash "$TOOL" ) > "$TMP/c17.out" 2>&1
+if grep -q 'GitHub: available' "$TMP/c17.out"; then
+  ok "probe routes the transport through bash (unexec-able launcher still works)"
+else
+  bad "transport not routed through bash | $(grep -m1 'GitHub:' "$TMP/c17.out" || echo NO_GH_LINE)"
+fi
+
+# ---------------------------------------------------------------------------
+# 18. a probe that outruns its bound reports throttle timeout, never the
+#     "install and authenticate gh" misdiagnosis
+# ---------------------------------------------------------------------------
+case18="$TMP/probe-timeout"
+new_repo "$case18"
+stub18="$TMP/gh18"
+cat > "$stub18" <<'STUB'
+#!/usr/bin/env bash
+sleep 5
+exit 0
+STUB
+chmod +x "$stub18"
+( cd "$case18" && AI_HOUSEKEEPING_GH="$stub18" \
+    AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS=1 bash "$TOOL" ) > "$TMP/c18.out" 2>&1
+if grep -q 'timed out' "$TMP/c18.out" && ! grep -qi 'install and authenticate' "$TMP/c18.out"; then
+  ok "probe timeout reports throttle timeout, not an install/authentication hint"
+else
+  bad "probe timeout not reported honestly | $(tr '\n' ';' < "$TMP/c18.out" | cut -c1-300)"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
