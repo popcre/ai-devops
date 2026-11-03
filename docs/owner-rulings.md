@@ -201,3 +201,18 @@ it"
 
 - The Entire Gates check is never a required check, merge gate, or input to
   any wait, merge, or promotion decision.
+
+## 2026-11-03 — DesignFlow sandbox releases are not confined to one computer
+
+Verbatim, from Albert's chat: "get rid of that rule" — said after the rule was
+explained to him as: sending sandbox updates out "may only go out from one
+designated work computer — so the test site can never be changed from just any
+machine. This computer is not on that list; the Linux one is."
+
+Current rule: the DesignFlow source-release confinement is removed for
+designflow-tracking, designflow-frontend and designflow-item-master. Their
+sandboxes deploy like designflow-backend: an ordinary `sandbox-albert` branch
+push after `ai-task-gates check --before deploy` opens on the machine doing the
+work (the owner-authorization route, carrying Albert's quoted authorization,
+applies as for backend). The closed qualified-Linux source-release lane is no
+longer required for these three repositories.

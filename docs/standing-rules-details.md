@@ -158,6 +158,19 @@ private-tooling licensed-row seals are unchanged.
 during a review, reviewer state never leaves its home drive, and reviewer paths
 never grow with names.
 
+## DesignFlow sandbox releases (owner ruling 2026-11-03)
+
+Ruling: "get rid of that rule" — the rule that DesignFlow sandbox updates may
+only be sent from one designated (qualified Linux) computer. Full text in
+[`docs/owner-rulings.md`](owner-rulings.md).
+
+Procedure now: designflow-tracking, designflow-frontend and designflow-item-master
+deploy like designflow-backend — commit on `sandbox-albert`, then
+`ai-task-gates check --before deploy` (owner-authorization via `--acknowledge`
+quoting Albert when the gate asks), then push the branch. The closed
+qualified-Linux source-release lane (`--application-release-target`) is no
+longer required for these three and may be retired.
+
 ## Worktree merge quirk
 
 `gh pr merge` from a linked worktree can print `'main' is already used by
