@@ -276,10 +276,8 @@ done
 output="$(run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo")" \
   || fail "Entire adoption fixture failed: $output"
 for global_file in "$claude/CLAUDE.md" "$codex/AGENTS.md" "$zcode/AGENTS.md" "$mimo/AGENTS.md"; do
-  grep -qF '## Public Entire trial instructions (#2022)' "$global_file" \
-    || fail "$(basename "$(dirname "$global_file")") global lacks the Entire policy"
-  grep -qF 'Keep private capture off' "$global_file" \
-    || fail "$(basename "$(dirname "$global_file")") global lacks the capture-off policy"
+  grep -qF '## Entire trial ended (#2022)' "$global_file" \
+    || fail "$(basename "$(dirname "$global_file")") global lacks the Entire ended notice"
 done
 codex_machine_line="$(grep -an '^## Machine facts' "$codex/AGENTS.md" | cut -d: -f1)"
 sed -n "${codex_machine_line},\$p" "$codex/AGENTS.md" > "$TMP_ROOT/adoption-machine-after"

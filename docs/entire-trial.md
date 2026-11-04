@@ -1,4 +1,12 @@
-# Entire trial operating record — #2022
+# Entire trial operating record — #2022 (ended, not adopted)
+
+## Trial ended — November 4, 2026
+
+Ended by owner decision at 4:25 PM EST: **not adopted**. Entire does not execute
+tests, still merges through a GitHub pull request, approved a merge over a
+canceled destination build, and its PR check failed on popdam3 (#2248). GitHub
+only from here; the GitHub App installation on popcre was removed. This file
+and the plan are historical.
 
 ## November 1 XPS and Linux recovery
 
