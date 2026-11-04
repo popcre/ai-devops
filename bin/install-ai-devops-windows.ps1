@@ -1368,6 +1368,15 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so the worktree reap was not scheduled. Install Git for Windows and rerun this script."
 }
 
+# Daily transcript upload (plan_transcript-store.md step 1); SKIP on a host with no Dropbox.
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks (transcript upload)."
+} else {
+    $uploadPs = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $uploadProbe = Invoke-NativeProbe -Command $uploadPs -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $RepoPath 'bin\ai-transcript-upload.ps1')`"", '-Sync')
+    Write-Note "Transcript upload: $($uploadProbe.Output -join ' ')"
+}
+
 # Watchdog duty pool: local timed tasks for CI alarms (queue-slow, runner-pool,
 # membership drift, merge-queue drift). Claim/lease rotation across
 # watch_hosts; free Actions stay backup only. Never paid Blacksmith.
