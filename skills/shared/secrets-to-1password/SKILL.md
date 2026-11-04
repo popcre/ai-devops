@@ -102,9 +102,10 @@ and 2026-11-02).** First establish where the value went. If it appeared only in
 this computer's chat transcript, terminal, files, or local logs, redact every
 occurrence, including private backups of that transcript, and stop. Do not
 rotate, open a rotation issue, or treat it as compromised. The AI provider
-processing the session does not count as publication. Everything below applies
-only to a value published off this computer: GitHub, CI logs, or an outside
-service.
+processing the session does not count as publication. The containment and rotation
+guidance below applies only to a value published off this computer (GitHub, CI
+logs, or an outside service); the hard rules, naming standard, and reporting
+checks apply to every secret.
 
 **Containment is not remediation for a published value.** Removing a secret from one file does not
 invalidate copies already taken. Before reporting a leak handled, sweep the whole

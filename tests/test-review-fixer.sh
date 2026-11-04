@@ -34,6 +34,7 @@ out=""; dir=""
 while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -C) dir="$2"; shift ;; esac; shift; done
 echo "agent called" >> "$STUB_LOG"
 case "$STUB_DECISION" in
+  FIXED-NOTESTS) echo x > "$dir/safe.py"; printf 'summary\nDECISION: FIXED\n' > "$out"; exit 0 ;;
   FIXED-WORKFLOW) mkdir -p "$dir/.github/workflows"; echo x > "$dir/.github/workflows/a.yml"; d=FIXED ;;
   FIXED|MOVED|MOVED-AFTER-PUSH)
     echo x > "$dir/safe.py"; d=FIXED
@@ -45,7 +46,7 @@ case "$STUB_DECISION" in
   BAD-EXIT) printf 'summary\nDECISION: INVALID\n' > "$out"; exit 9 ;;
   *) d="$STUB_DECISION" ;;
 esac
-printf 'summary\nDECISION: %s\n' "$d" > "$out"
+printf 'summary\nTESTS: bash tests/x.sh PASSED\nDECISION: %s\n' "$d" > "$out"
 CX
 chmod +x "$tmp/bin/"*
 fail=0
@@ -74,6 +75,9 @@ check "PROTECTED never closes the issue" '! grep -q "issue close" "$tmp/log"'
 run FIXED-WORKFLOW; rc=$?
 check "a fix touching a workflow is refused" '[ $rc = 1 ] && grep -q "touched protected files" "$tmp/out"'
 check "a refused fix is labelled fixer-failed" 'grep -q "add-label fixer-failed" "$tmp/log"'
+
+run FIXED-NOTESTS; rc=$?
+check "FIXED without a TESTS line is refused and never publishes" '[ $rc = 1 ] && grep -q "without a TESTS line" "$tmp/out" && ! grep -q "pr create" "$tmp/log"'
 
 run INVALID; rc=$?
 check "INVALID closes as not planned with explicit evidence" 'grep -q "issue close 7 --repo o/r --reason not planned" "$tmp/log" && grep -q "review-fixer-invalid:v1" "$tmp/log" && grep -q "add-label fixer-invalid" "$tmp/log"'
