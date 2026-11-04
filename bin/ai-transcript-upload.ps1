@@ -28,7 +28,7 @@ $StateDir = Join-Path $env:LOCALAPPDATA 'ai-devops'
 $Installed = Join-Path $StateDir 'ai-transcript-upload.ps1'
 $InstalledExporter = Join-Path $StateDir 'zcode_export.py'
 $Exporter = Join-Path $PSScriptRoot 'zcode_export.py'
-if (-not (Test-Path -LiteralPath $Exporter)) { $Exporter = Join-Path $PSScriptRoot '..	ools	ranscript_store\zcode_export.py' }
+if (-not (Test-Path -LiteralPath $Exporter)) { $Exporter = Join-Path $PSScriptRoot '..\tools\transcript_store\zcode_export.py' }
 
 if ($Remove) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
