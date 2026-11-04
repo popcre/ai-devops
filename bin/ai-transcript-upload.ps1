@@ -26,16 +26,22 @@ $ProgressPreference = 'SilentlyContinue'
 $TaskName = 'AiDevOps-TranscriptUpload'
 $StateDir = Join-Path $env:LOCALAPPDATA 'ai-devops'
 $Installed = Join-Path $StateDir 'ai-transcript-upload.ps1'
+$InstalledExporter = Join-Path $StateDir 'zcode_export.py'
+$Exporter = Join-Path $PSScriptRoot 'zcode_export.py'
+if (-not (Test-Path -LiteralPath $Exporter)) { $Exporter = Join-Path $PSScriptRoot '..	ools	ranscript_store\zcode_export.py' }
 
 if ($Remove) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $Installed) { Remove-Item -LiteralPath $Installed -Force }
+  if (Test-Path -LiteralPath $InstalledExporter) { Remove-Item -LiteralPath $InstalledExporter -Force }
   'OK transcript upload task removed (Dropbox copies are left as they are)'; exit 0
 }
 if ($Check) {
   $rc = 0
   if (-not (Test-Path -LiteralPath $Installed)) { "ERROR $Installed not installed"; $rc = 1 }
   elseif ((Get-FileHash -LiteralPath $Installed).Hash -ne (Get-FileHash -LiteralPath $PSCommandPath).Hash) { "ERROR installed copy differs from $PSCommandPath"; $rc = 1 }
+  if (-not (Test-Path -LiteralPath $InstalledExporter)) { "ERROR $InstalledExporter not installed"; $rc = 1 }
+  elseif ((Get-FileHash -LiteralPath $InstalledExporter).Hash -ne (Get-FileHash -LiteralPath $Exporter).Hash) { "ERROR installed copy differs from $Exporter"; $rc = 1 }
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   if (-not $t) { "ERROR scheduled task $TaskName not registered"; $rc = 1 }
   elseif ($t.State -eq 'Disabled') { "ERROR scheduled task $TaskName is disabled"; $rc = 1 }
@@ -47,6 +53,8 @@ if ($Install) {
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   Copy-Item -LiteralPath $PSCommandPath -Destination "$Installed.tmp" -Force
   Move-Item -LiteralPath "$Installed.tmp" -Destination $Installed -Force
+  Copy-Item -LiteralPath $Exporter -Destination "$InstalledExporter.tmp" -Force
+  Move-Item -LiteralPath "$InstalledExporter.tmp" -Destination $InstalledExporter -Force
   $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
   $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Installed`""
   $trigger = New-ScheduledTaskTrigger -Daily -At $At
@@ -82,14 +90,32 @@ foreach ($m in $Map) {
 }
 $Root = Join-Path $DropboxRoot 'ai\chat_transcripts'
 if (-not (Test-Path -LiteralPath $Root)) { Write-Error "ai-transcript-upload: $Root not found (Dropbox missing?)"; exit 1 }
+$scanned = 0; $copied = 0; $hot = 0; $errors = 0
 if ($Map.Count -eq 0) {
-  $Map = @("$env:USERPROFILE\.claude\projects=claude\projects",
+  # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
+  $zdb = Join-Path $env:USERPROFILE '.zcode\cli\db\db.sqlite'
+  $zstage = Join-Path $StateDir 'zcode-export'
+  if (Test-Path -LiteralPath $zdb) {
+    $py = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $zrc = 1
+    if ($py) {
+      $prior = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+      & $py.Source $Exporter $zdb $zstage 2>$null | Out-Null
+      $zrc = $LASTEXITCODE; $ErrorActionPreference = $prior
+    }
+    if ($zrc -ne 0) {
+      $errors++
+      New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+      Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} ZCode export failed (exit {1})" -f [DateTime]::UtcNow.ToString('s'), $zrc)
+    }
+  }
+  $Map = @("$zstage=zcode/sessions",
+           "$env:USERPROFILE\.claude\projects=claude\projects",
            "$env:USERPROFILE\.codex\sessions=codex\sessions",
            "$env:USERPROFILE\.codex\archived_sessions=codex\archived_sessions")
 }
 $D = Join-Path $Root $HostName
 $now = [DateTime]::UtcNow
-$scanned = 0; $copied = 0; $hot = 0; $errors = 0
 
 function LongPath([string]$p) {
   if ($env:OS -ne 'Windows_NT' -or $p.StartsWith('\\?\')) { return $p }

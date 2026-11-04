@@ -100,6 +100,29 @@ check "--check fails after remove" '! bash "$up" --check >/dev/null'
 check "bash script has LF line endings" '! grep -q $'"'"'\r'"'"' "$up"'
 check ".cmd launcher runs its own script" 'grep -q "\"%~dpn0\" %\*" "$here/../bin/ai-transcript-upload.cmd"'
 
+# ZCode: the default map exports the sqlite sessions, then uploads the export.
+if command -v python3 >/dev/null 2>&1; then
+  zh="$work/zhome"; mkdir -p "$zh/.zcode/cli/db"; zd="$work/zdb"; mkdir -p "$zd/ai/chat_transcripts"
+  python3 - "$zh/.zcode/cli/db/db.sqlite" <<'PY'
+import json, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.executescript("CREATE TABLE session (id, directory, parent_id); CREATE TABLE message (id, session_id, time_created, time_updated, data);"
+                "CREATE TABLE part (id, message_id, session_id, time_created, data);")
+c.execute("INSERT INTO session VALUES ('ses_1', '/repos/demo', NULL)")
+c.execute("INSERT INTO message VALUES ('m1', 'ses_1', 1700000000000, 1700000000000, ?)", (json.dumps({"role": "user"}),))
+c.execute("INSERT INTO part VALUES ('p1', 'm1', 'ses_1', 1700000000000, ?)", (json.dumps({"type": "text", "text": "synthetic question long enough to keep"}),))
+c.commit()
+PY
+  HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null
+  check "ZCode sqlite sessions reach the upload folder" '[ -s "$zd/ai/chat_transcripts/hostz/zcode/sessions/ses_1.jsonl" ]'
+  check "ZCode database itself is not uploaded" '[ -z "$(find "$zd" -name "*.sqlite")" ]'
+  printf 'not a database
+' > "$zh/.zcode/cli/db/db.sqlite"
+  check "a failed ZCode export reports an error" '! HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
+else
+  skip "ZCode export checks" "python3 not installed"
+fi
+
 # Windows twin, when PowerShell is available (CI Linux runners may lack it).
 if command -v pwsh >/dev/null 2>&1; then
   wsrc="$work/wsrc"; mkdir -p "$wsrc/a" "$work/lad"; printf 'w\n' > "$wsrc/a/w.jsonl"; old "$wsrc/a/w.jsonl"

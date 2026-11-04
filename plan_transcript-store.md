@@ -84,7 +84,8 @@ The store must have these properties:
 **Transcript sources on each machine:**
 - Claude Code: `~/.claude/projects/**.jsonl`
 - Codex: `~/.codex/sessions/`, `~/.codex/archived_sessions/`
-- Others under each machine's folder, such as ZCode/MiMo sqlite on edge-dev. Those are skipped in v1.
+- ZCode: `~/.zcode/cli/db/db.sqlite`. The uploader exports each session to `zcode/sessions/<id>.jsonl` with `tools/transcript_store/zcode_export.py`; the database itself is not uploaded.
+- Others under each machine's folder, such as MiMo sqlite. Those are skipped.
 
 **Archive:** `~/Dropbox/ai/chat_transcripts/<machine>/` holds raw copies, uncompressed. The total is about 25 GB, going back to April 2026. Copies arrive only when someone runs the `claude-transcript-backup` skill (`skills/claude/claude-transcript-backup/SKILL.md`) by hand. Nothing is automatic today.
 
@@ -116,7 +117,7 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 - Importing the existing review labels.
 
 **NOT in this plan:**
-- ZCode/MiMo sqlite transcripts (edge-dev). Add them as a follow-up issue.
+- MiMo sqlite transcripts. Add them as a follow-up issue.
 - A web UI or dashboard.
 - Postgres, Supabase or shared-db.
 - Re-labelling with any LLM other than ScaleDown.
