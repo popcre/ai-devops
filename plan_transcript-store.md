@@ -686,7 +686,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 | Disk | The working DB is expected under 2 GB; edge-dev3 has about 1 TB free. |
 | Dropbox conflicted copies | Avoided by the single writer and new-name publishing. Any conflicted copy is moved to `conflicts/` and reported, never deleted. |
 | Dropbox quota | Checked before step 6 (§11). |
-| A machine's upload fails silently | `--stats` shows the last session time per machine. The skill tells sessions to report a machine more than 2 days stale. |
+| A machine's upload fails silently | The writer records each machine's state from its `.upload-last.txt` and archive files; `--stats` reports `UPLOAD-BROKEN`, `INGEST-LAG`, `IDLE`, `CURRENT`, `ARCHIVE-ONLY` or `UNKNOWN`. |
 
 **Rollback:** disable the timers. To undo a bad build, point `CURRENT.json` at the previous versioned file. To remove the store entirely, move `Dropbox/ai/transcript-store/` to Dropbox's trash (recoverable for its history window). The raw archive is untouched.
 
