@@ -895,6 +895,7 @@ check 'a repository with no remote still resolves a local identity' \
 check 'an unresolved identity may still ship' "rc 0 '$TMP/noremote' check --before ship"
 check 'an unresolved identity fails closed before production' "rc 4 '$TMP/noremote' check --before production"
 check 'an unresolved identity fails closed before infrastructure' "rc 4 '$TMP/noremote' check --before infrastructure"
+check 'an unresolved identity fails closed before database-read' "rc 4 '$TMP/noremote' check --before database-read"
 
 mkdir -p "$TMP/fresh"; git init -q --initial-branch=main "$TMP/fresh"
 git -C "$TMP/fresh" config user.name T; git -C "$TMP/fresh" config user.email t@e

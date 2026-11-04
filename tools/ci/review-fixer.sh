@@ -88,11 +88,16 @@ Do this:
    You run in a sandbox with no network and no installed toolkit, so suites
    that need either cannot run here; do not run them, and never count their
    setup errors as a failure of your fix. Full CI runs on the PR afterwards.
-   If no test covers the changed files, say so and treat the fix as tested.
+   Never claim tests passed that you did not run.
    Ignore any personal or global instructions about reply format; end exactly
    as step 4 says.
-4. End your final message with exactly one line:
-   DECISION: FIXED   (you changed files and the tests pass)
+4. If you decide FIXED, put this line just above the decision line:
+   TESTS: <exact test command you ran> PASSED
+   or, only when no runnable test covers the changed files:
+   TESTS: NONE <which files are uncovered>
+   A FIXED decision without a TESTS line is rejected.
+   End your final message with exactly one line:
+   DECISION: FIXED   (you changed files and the tests you ran pass)
    DECISION: INVALID (every finding is wrong; explain why above that line)
    DECISION: PROTECTED (every real finding needs a protected path; say which)
    DECISION: FAILED  (you could not fix it; explain why above that line)
@@ -127,6 +132,8 @@ case "$decision" in
   FIXED)
     git -C "$work" add -A
     git -C "$work" diff --cached --quiet && fail "the agent reported FIXED but changed no files"
+    # #2093: FIXED must state what was tested; the PR body carries the line.
+    grep -qE '^TESTS: (.+ PASSED|NONE .+)$' "$last" || fail "the agent reported FIXED without a TESTS line"
     # Enforced outside the agent: a fix may never touch workflows, installers
     # or the task gates (plan section 8.5).
     denied="$(git -C "$work" diff --cached --name-only | grep -E \
