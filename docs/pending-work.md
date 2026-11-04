@@ -40,6 +40,17 @@ acting. Some call only for live proof or closure, rather than implementation.
 - [#2261: shared-db worktree reaper working directory](../plan_issue-2261.md)
 - [#2314: vendored Supabase skills and shared-db rules](../plan_issue-2314.md)
 
+### Programmes, watchers, and this plan set
+
+- [#1288: standing watchdog claim issue, never close](../plan_issue-1288.md)
+- [#1881: ruleset trim closeout, hook gap and re-audit](../plan_issue-1881.md)
+- [#2172: lean required checks, finish shared-db stage C](../plan_issue-2172.md)
+- [#2338: blocker-watch digest, own the blockers and auto-close old digests](../plan_issue-2338.md)
+- [#2350: reachability of these plans, land PR #2349](../plan_issue-2350.md)
+- [#2354: finish retiring the Entire trial from routing docs](../plan_issue-2354.md)
+
+Registration handoff: [2026-11-04T2142Z-al8960ofc-claude-open-issue-plans-batch2.md](../HANDOFF.d/2026-11-04T2142Z-al8960ofc-claude-open-issue-plans-batch2.md).
+
 ## Programme pointers
 
 Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-reversible-trial.md)
