@@ -21,3 +21,9 @@ u2giants/authentik	~/actions-runner-u2giants-authentik	actions-runner-u2giants-a
 u2giants/novnc-desktop	~/actions-runner-u2giants-novnc-desktop	actions-runner-u2giants-novnc-desktop.service
 u2giants/vibeflow	~/actions-runner-u2giants-vibeflow	actions-runner-u2giants-vibeflow.service
 u2giants/popwordpress	~/actions-runner-u2giants-popwordpress	actions-runner-u2giants-popwordpress.service
+popcre/designflow-frontend	~/actions-runner-popcre-designflow-frontend	actions-runner-popcre-designflow-frontend.service
+popcre/designflow-backend	~/actions-runner-popcre-designflow-backend	actions-runner-popcre-designflow-backend.service
+popcre/designflow-tracking	~/actions-runner-popcre-designflow-tracking	actions-runner-popcre-designflow-tracking.service
+popcre/designflow-bff	~/actions-runner-popcre-designflow-bff	actions-runner-popcre-designflow-bff.service
+popcre/designflow-item-master	~/actions-runner-popcre-designflow-item-master	actions-runner-popcre-designflow-item-master.service
+popcre/designflow-data-syncing	~/actions-runner-popcre-designflow-data-syncing	actions-runner-popcre-designflow-data-syncing.service
