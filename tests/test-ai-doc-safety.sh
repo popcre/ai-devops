@@ -46,6 +46,34 @@ fi
 # default target is the invoking repository, not the tool home.
 if ( cd "$LINKS" && bash "$TOOL" ) >/dev/null 2>&1; then failed 'the default tree is the invoking repository'; else note 'the default tree is the invoking repository'; fi
 
+# File-list and --changed modes (u2giants/theoracle#345): a PR's changed
+# files are checked on their own, a planted LAN address is still caught, and
+# untouched files elsewhere in the tree are not read.
+SCOPED="$TMP/scoped"; mkrepo "$SCOPED"
+printf 'HostName 192.168.1.20\n' > "$SCOPED/old-topology.md"
+printf '# Clean\n' > "$SCOPED/clean.md"
+( cd "$SCOPED" && git add -A && git commit -qm base )
+if bash "$TOOL" "$SCOPED" -- clean.md >/dev/null 2>&1; then note 'a clean file passes the file-list mode'; else failed 'a clean file passes the file-list mode'; fi
+if bash "$TOOL" "$SCOPED" -- old-topology.md >/dev/null 2>&1; then failed 'a planted LAN address fails the file-list mode'; else note 'a planted LAN address fails the file-list mode'; fi
+( cd "$SCOPED" && git checkout -qb pr && printf 'More prose\n' >> clean.md && git commit -qam prose )
+if bash "$TOOL" --changed main "$SCOPED" >"$TMP/changed.out" 2>&1; then note '--changed checks only the PR files'; else failed '--changed checks only the PR files'; fi
+grep -q 'checking public boundary on 1 selected file' "$TMP/changed.out" && note 'progress names the selected scope' || failed 'progress names the selected scope'
+mkdir -p "$SCOPED/test"; printf 'host 10.1.2.3\n' > "$SCOPED/test/planted.py"
+( cd "$SCOPED" && git add test/planted.py && git commit -qm planted )
+if bash "$TOOL" --changed main "$SCOPED" >/dev/null 2>&1; then failed '--changed catches a LAN address in a changed test file'; else note '--changed catches a LAN address in a changed test file'; fi
+rc=0; bash "$TOOL" --changed no-such-ref "$SCOPED" >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] && note 'an unknown --changed base exits 2' || failed 'an unknown --changed base exits 2'
+
+# The hard limit fails closed with a clear message instead of hanging.
+if command -v timeout >/dev/null 2>&1; then
+  SLOW="$TMP/slowtool"; mkdir -p "$SLOW/bin" "$SLOW/tools"
+  cp "$TOOL" "$SLOW/bin/ai-doc-safety"
+  printf '#!/usr/bin/env bash\nsleep 30\n' > "$SLOW/bin/ai-public-boundary-check"
+  cp "$ROOT/tools/check-markdown-links.py" "$SLOW/tools/"
+  rc=0; AI_DOC_SAFETY_TIMEOUT=1 bash "$SLOW/bin/ai-doc-safety" "$CLEAN" >"$TMP/slow.out" 2>&1 || rc=$?
+  { [ "$rc" -eq 1 ] && grep -q 'did not finish within 1s' "$TMP/slow.out"; } && note 'a stuck check stops at the hard limit and fails' || failed 'a stuck check stops at the hard limit and fails'
+fi
+
 # Usage and environment errors stay exit 2.
 rc=0; bash "$TOOL" --nonsense >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 2 ] && note 'an unknown option exits 2' || failed 'an unknown option exits 2'

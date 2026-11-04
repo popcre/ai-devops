@@ -86,7 +86,7 @@ pipeline. The recovery procedure lives in
   uses a merge queue. GitHub is the source of truth, and finished work must be
   tested, merged, and verified on `origin/main`.
 - Documentation-only changes (every changed file is prose) merge **around** the
-  merge queue: run `bin/ai-doc-safety` on the exact head worktree first; when it
+  merge queue: run `bin/ai-doc-safety --changed origin/main` on the exact head worktree first; when it
   passes, `gh pr merge --squash --admin`. Any code, test, script, workflow, or
   config change uses the merge queue. Never admin-merge a non-prose change.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show

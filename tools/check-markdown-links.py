@@ -14,9 +14,18 @@ import fnmatch, pathlib, re, subprocess, sys, urllib.parse
 root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 if not root.is_dir():
     raise SystemExit("check-markdown-links: expected a repository directory")
+# Optional "-- path..." limits the check to those tracked Markdown files
+# (a PR's changed files, u2giants/theoracle#345); otherwise all are checked.
+if len(sys.argv) > 2 and sys.argv[2] == "--":
+    scope = [":(literal)" + p for p in sys.argv[3:] if p.lower().endswith(".md")]
+    if not scope:
+        print("PASS: no changed Markdown files to check")
+        raise SystemExit(0)
+else:
+    scope = ["*.md"]
 try:
     tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "*.md"], check=True,
+        ["git", "-C", str(root), "ls-files", "--", *scope], check=True,
         text=True, capture_output=True,
     ).stdout.splitlines()
 except (OSError, subprocess.CalledProcessError, UnicodeError):

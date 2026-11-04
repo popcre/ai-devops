@@ -59,10 +59,13 @@ checks unless `--reviewer-approval` is given.
 ## ai-doc-safety (`bin/ai-doc-safety`)
 
 ```text
-ai-doc-safety [tree]
+ai-doc-safety [--changed BASE] [tree] [-- path...]
 ```
 
 Exit 0 = both doc invariants hold; required before a prose-only admin merge.
+The prose lane runs `ai-doc-safety --changed origin/main` (only the PR's files).
+Each check prints progress and stops at `AI_DOC_SAFETY_TIMEOUT` seconds
+(default 300), exiting 1 instead of hanging.
 
 ## ai-blocker-watch (`bin/ai-blocker-watch`)
 
