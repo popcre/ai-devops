@@ -736,6 +736,10 @@ run_stage required "Retire reviewer jobs and freeze window" retire_reviewer_jobs
 # user crontab and any Windows box that only runs install.sh.
 run_stage optional "Housekeeping schedule" "$REPO_ROOT/bin/ai-housekeeping" schedule
 
+# Optional: daily transcript upload (plan_transcript-store.md step 1). SKIP on a
+# host with no Dropbox; the Windows installer has the same stage.
+run_stage optional "Transcript upload" "$REPO_ROOT/bin/ai-transcript-upload" --sync
+
 publish_install_manifest() {
   local source_sha staged owner group
   source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1

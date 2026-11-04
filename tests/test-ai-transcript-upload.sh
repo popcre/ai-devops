@@ -11,6 +11,10 @@ up="$here/../bin/ai-transcript-upload"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 export HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config" XDG_CACHE_HOME="$work/home/.cache"
 export AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/state"
+# Merged main stand-in: a local folder holding the two files at their repo paths.
+main="$work/main"; mkdir -p "$main/bin" "$main/tools/transcript_store"
+cp "$up" "$main/bin/ai-transcript-upload"; cp "$here/../tools/transcript_store/zcode_export.py" "$main/tools/transcript_store/"
+export AI_TRANSCRIPT_UPLOAD_SOURCE="$main"
 mkdir -p "$HOME" "$work/db/ai/chat_transcripts"
 db="$work/db"; D="$db/ai/chat_transcripts/hostx"
 src="$work/src"; mkdir -p "$src/p/a"
@@ -94,7 +98,32 @@ u="$XDG_CONFIG_HOME/systemd/user"
 check "daily timer written and enabled" 'grep -q "^OnCalendar=\*-\*-\* 06:30:00" "$u/ai-transcript-upload.timer" && grep -q "enable --now ai-transcript-upload.timer" "$work/systemctl.log"'
 check "service runs the installed copy and the hetz pull" 'grep -q "transcript-upload\"$" "$u/ai-transcript-upload.service" && grep -q -- "--pull hetz --map none" "$u/ai-transcript-upload.service"'
 check "--check passes after install" 'bash "$up" --check >/dev/null'
+inst="$XDG_CONFIG_HOME/ai-devops/transcript-upload"
+bash "$up" --install >/dev/null
+check "reinstall keeps the existing pull" 'grep -q -- "--pull hetz --map none" "$u/ai-transcript-upload.service"'
+bash "$up" --sync >/dev/null
+check "--sync on an installed host keeps the pull" 'grep -q -- "--pull hetz --map none" "$u/ai-transcript-upload.service"'
+cp "$inst" "$work/inst.lf"; sed 's/$/\r/' "$work/inst.lf" > "$inst"
+check "line endings alone are not stale" 'bash "$up" --check >/dev/null'
+cp "$work/inst.lf" "$inst"
+
+# Staleness and self-update against merged main.
+printf '# merged change\n' >> "$main/bin/ai-transcript-upload"
+out="$(bash "$inst" --check)"; rc=$?
+check "--check reports a copy stale against main" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "stale"'
+out="$(AI_TRANSCRIPT_UPLOAD_SOURCE="$work/nowhere" bash "$inst" --check)"; rc=$?
+check "--check fails when main cannot be read" '[ "$rc" -ne 0 ] && printf "%s" "$out" | grep -q "unverified"'
+bash "$inst" --dropbox "$db" --host hostx --map "$src/p=claude/projects" >/dev/null
+check "a run updates the installed copy from main" 'cmp -s "$main/bin/ai-transcript-upload" "$inst"'
+check "--check passes once updated" 'bash "$inst" --check >/dev/null'
+cp "$inst" "$work/inst.keep"
+printf 'if then fi (\n' >> "$main/bin/ai-transcript-upload"
+bash "$inst" --dropbox "$db" --host hostx --map "$src/p=claude/projects" >/dev/null; rc=$?
+check "a broken main is refused, the upload still runs and logs it" '[ "$rc" -eq 0 ] && cmp -s "$work/inst.keep" "$inst" && grep -q "self_update=failed" "$D/.upload-last.txt"'
+cp "$work/inst.keep" "$main/bin/ai-transcript-upload"
 bash "$up" --remove >/dev/null
+out="$(HOME="$work/empty" XDG_CONFIG_HOME="$work/empty/.config" bash "$up" --sync)"
+check "--sync skips a host with no Dropbox and no timer" 'printf "%s" "$out" | grep -q "^SKIP" && [ ! -e "$work/empty/.config/systemd" ]'
 check "--check fails after remove" '! bash "$up" --check >/dev/null'
 
 check "bash script has LF line endings" '! grep -q $'"'"'\r'"'"' "$up"'
@@ -115,6 +144,12 @@ c.commit()
 PY
   HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null
   check "ZCode sqlite sessions reach the upload folder" '[ -s "$zd/ai/chat_transcripts/hostz/zcode/sessions/ses_1.jsonl" ]'
+  # Pull mode: hetz ZCode sessions are exported here from a copy of its database.
+  mkdir -p "$work/remote/home/ai/.zcode/cli/db"; cp "$zh/.zcode/cli/db/db.sqlite" "$work/remote/home/ai/.zcode/cli/db/db.sqlite"
+  AI_TRANSCRIPT_PULL_LOCAL_ROOT="$work/remote" bash "$up" --dropbox "$zd" --host hostz --map none --pull hetzz >/dev/null
+  zp="$zd/ai/chat_transcripts/hetzz"
+  check "pull uploads the other host's ZCode sessions" '[ -s "$zp/ai/zcode/sessions/ses_1.jsonl" ] && grep -q "errors=0" "$zp/.upload-last.txt"'
+  check "pull with no ZCode under one account is not an error" '[ ! -e "$zp/root/zcode" ]'
   check "ZCode database itself is not uploaded" '[ -z "$(find "$zd" -name "*.sqlite")" ]'
   # MiMo: same tables, its own database and folder.
   mkdir -p "$zh/.local/share/mimocode"; cp "$zh/.zcode/cli/db/db.sqlite" "$zh/.local/share/mimocode/mimocode.db"
@@ -149,6 +184,18 @@ if command -v pwsh >/dev/null 2>&1; then
   out="$(LOCALAPPDATA="$work/lad" pwsh -NoProfile -File "$here/../bin/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=claude/projects" 2>&1)"
   check "ps1: skips identical and never deletes" 'printf "%s" "$out" | grep -q "copied=0" && [ -e "$W/claude/projects/dest-only.jsonl" ]'
   check "ps1: rejects an unsafe -Map destination" '! LOCALAPPDATA="$work/lad" pwsh -NoProfile -File "$here/../bin/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=../esc" >/dev/null 2>&1 && [ ! -e "$wdb/ai/esc" ]'
+  # Self-update of the installed copy against the main stand-in.
+  wla="$work/wlad"; mkdir -p "$wla/ai-devops"; ps1main="$main/bin/ai-transcript-upload.ps1"
+  { cat "$here/../bin/ai-transcript-upload.ps1"; printf '# merged change
+'; } > "$ps1main"
+  cp "$here/../bin/ai-transcript-upload.ps1" "$wla/ai-devops/ai-transcript-upload.ps1"
+  cp "$here/../tools/transcript_store/zcode_export.py" "$wla/ai-devops/zcode_export.py"
+  LOCALAPPDATA="$wla" pwsh -NoProfile -File "$wla/ai-devops/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=claude/projects" >/dev/null 2>&1
+  check "ps1: a run updates the installed copy from main" 'cmp -s "$ps1main" "$wla/ai-devops/ai-transcript-upload.ps1" && grep -q "errors=0$" "$W/.upload-last.txt"'
+  printf 'function {
+' >> "$ps1main"
+  LOCALAPPDATA="$wla" pwsh -NoProfile -File "$wla/ai-devops/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=claude/projects" >/dev/null 2>&1
+  check "ps1: a broken main is refused and logged" '! grep -q "^function {" "$wla/ai-devops/ai-transcript-upload.ps1" && grep -q "self_update=failed" "$W/.upload-last.txt"'
 else
   skip "ps1 checks" "pwsh not installed"
 fi

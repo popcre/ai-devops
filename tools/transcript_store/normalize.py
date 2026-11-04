@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize one Claude Code or Codex ``.jsonl`` transcript (plan step 2).
+"""Normalize one Claude, Codex, Grok or Kimi ``.jsonl`` transcript (plan step 2).
 
 Issue popcre/ai-devops#2050 (stage B, #2060). Python 3.10+, stdlib only.
 
@@ -11,6 +11,7 @@ Issue popcre/ai-devops#2050 (stage B, #2060). Python 3.10+, stdlib only.
      "bytes_parsed": int,      # stops before a truncated last line
      "bad_lines": int,         # malformed lines skipped (not the tail)
      "truncated_tail": bool,
+     "conversation": bool,     # False: a log or index with no conversation record
      "redactions": int}
 
 Rules: secrets are redacted (``redact_patterns.tsv``) before anything else
@@ -23,12 +24,14 @@ writer with ``lineage_key()``.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 HERE = Path(__file__).resolve().parent
 PATTERNS_FILE = HERE / "redact_patterns.tsv"
@@ -196,6 +199,73 @@ def _codex_turn(obj: dict):
     return None  # tool output and reasoning are never sent to ScaleDown
 
 
+def _grok_turn(obj: dict):
+    """chat_history.jsonl: no timestamps, injected user records carry a reason."""
+    if obj.get("synthetic_reason"):
+        return None
+    strings: list[str] = []
+    _collect_strings(obj.get("content"), strings)
+    tools = [str(c["name"]) for c in obj.get("tool_calls") or [] if isinstance(c, dict) and c.get("name")]
+    return obj["type"], "\n".join(strings), tools
+
+
+def _kimi_turn(obj: dict):
+    """wire.jsonl: user messages plus the assistant's text parts and tool calls."""
+    if obj["type"] == "context.append_message":
+        msg = obj.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "user" or (msg.get("origin") or {}).get("kind") != "user":
+            return None  # injected reminders are not conversation
+        strings: list[str] = []
+        _collect_strings(msg.get("content"), strings)
+        return "user", "\n".join(strings), []
+    ev = obj.get("event")
+    if not isinstance(ev, dict):
+        return None
+    if ev.get("type") == "content.part" and (ev.get("part") or {}).get("type") == "text":
+        return "assistant", str(ev["part"].get("text") or ""), []
+    if ev.get("type") == "tool.call" and ev.get("name"):
+        return "assistant", "", [str(ev["name"])]
+    return None  # thinking, tool output and step markers
+
+
+def _turn(obj: dict):
+    kind = obj.get("type")
+    if kind in ("context.append_message", "context.append_loop_event"):
+        return _kimi_turn(obj)
+    if "message" in obj:
+        return _claude_turn(obj)
+    if kind in ("user", "assistant") and "content" in obj:
+        return _grok_turn(obj)
+    return _codex_turn(obj)
+
+
+def _iso(value) -> str | None:
+    """A record time as ISO text: strings pass through, integers are Unix ms."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        t = dt.datetime.fromtimestamp(value / 1000, dt.timezone.utc)
+        return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
+    return None
+
+
+def _grok_dates(chat_path: Path) -> tuple[str | None, str | None]:
+    """Grok dates its session in the sibling events.jsonl, not the chat."""
+    first = last = None
+    try:
+        with open(chat_path.with_name("events.jsonl"), "rb") as f:
+            for line in f:
+                try:
+                    ts = json.loads(line).get("ts")
+                except (ValueError, UnicodeDecodeError, AttributeError):
+                    continue
+                if isinstance(ts, str):
+                    first, last = first or ts, ts
+    except OSError:
+        pass
+    return first, last
+
+
 def parse_lines(raw: bytes):
     """Yield (obj_or_None, end_offset, is_last) per line of ``raw``."""
     pos = 0
@@ -227,6 +297,7 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
     bytes_parsed = 0
     truncated = False
     occ: dict[str, int] = {}
+    conversation = False
     for obj, end, is_last, no_newline in parse_lines(raw):
         if obj is ...:
             bytes_parsed = end
@@ -243,7 +314,7 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             bytes_parsed = end
             continue
         bytes_parsed = end
-        ts = obj.get("timestamp")
+        ts = _iso(obj.get("timestamp") or obj.get("_audit_timestamp") or obj.get("time"))
         if obj.get("type") == "session_meta" and isinstance(obj.get("payload"), dict):
             p = obj["payload"]
             meta["session_id"] = meta["session_id"] or p.get("id")
@@ -259,11 +330,14 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             meta["cwd"] = obj["cwd"]
         if obj.get("parentSessionId"):
             meta["parent_session_id"] = obj["parentSessionId"]
-        got = _claude_turn(obj) if "message" in obj else _codex_turn(obj)
+        if obj.get("type") == "profile.bind" and not meta["cwd"]:
+            meta["cwd"] = (obj.get("environmentDisclosure") or {}).get("cwd")
+        got = _turn(obj)
         if got is None:
             continue
+        conversation = True
         role, text, tools = got
-        if isinstance(ts, str):
+        if ts:
             meta["first_ts"] = meta["first_ts"] or ts
             meta["last_ts"] = ts
         text, n = redact(text)
@@ -275,11 +349,22 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             continue
         h = turn_hash(role, text)
         occ[h] = occ.get(h, 0) + 1
-        turns.append({"ts": ts if isinstance(ts, str) else None, "role": role,
+        turns.append({"ts": ts, "role": role,
                       "text": text, "tools": list(tools), "turn_hash": h,
                       "occurrence_no": occ[h]})
+    p = Path(path)
+    if p.name == "chat_history.jsonl":  # .../sessions/<encoded cwd>/<session>/
+        meta["session_id"] = meta["session_id"] or p.parent.name
+        meta["cwd"] = meta["cwd"] or unquote(p.parent.parent.name)
+        if conversation and not meta["last_ts"]:
+            meta["first_ts"], meta["last_ts"] = _grok_dates(p)
+    elif p.name == "wire.jsonl" and len(p.parents) > 2:  # <session>/agents/<agent>/
+        agent = p.parent.name
+        meta["session_id"] = meta["session_id"] or p.parents[2].name + ("" if agent == "main" else f"-{agent}")
     if not meta["session_id"]:
-        meta["session_id"] = Path(path).stem
+        meta["session_id"] = p.stem
+    if conversation and not meta["last_ts"]:  # never a dateless conversation
+        meta["first_ts"] = meta["last_ts"] = _iso(int(p.stat().st_mtime * 1000))
     meta["repo"] = derive_repo(meta["cwd"])
     if meta["repo"] == "unknown" and rel_path:
         # Claude project-folder name in the archive path
@@ -288,7 +373,8 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
                 meta["repo"] = derive_repo(part)
                 break
     return {"meta": meta, "turns": turns, "bytes_parsed": bytes_parsed,
-            "bad_lines": bad, "truncated_tail": truncated, "redactions": redactions}
+            "bad_lines": bad, "truncated_tail": truncated, "redactions": redactions,
+            "conversation": conversation}
 
 
 def lineage_key(turns: list[dict]) -> str:

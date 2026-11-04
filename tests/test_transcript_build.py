@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 
@@ -407,6 +408,74 @@ class Reader(Base):
         (self.store / "CURRENT.json").write_text(json.dumps({"file": "../x.db", "sha256": "a", "size": 1}))
         with self.assertRaises(reader.StoreUnavailable):
             reader.fetch_store(self.store, self.root / "cache", sleep=NOSLEEP)
+
+
+class DatelessRows(unittest.TestCase):
+    """Rows written as ok before their format was understood heal on the next run."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.archive = root / "archive"
+        self.conn = build.connect(root / "store.db")
+        self.addCleanup(self.conn.close)
+
+    def add(self, rel, lines):
+        p = self.archive / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+        return p
+
+    def run_store(self):
+        calls = []
+
+        def call(system, user):
+            calls.append(1)
+            return "[]"
+        runner = build.Runner(self.conn, None, "v1", 1)
+        runner.call = call
+        runner.prompt = "p"
+        real = build.segment.label_chunk
+        build.segment.label_chunk = lambda text, send, prompt, aliases, sleep=None: (
+            send("s", "u"), types.SimpleNamespace(sections=[], calls=1, reasked=0))[1]
+        self.addCleanup(setattr, build.segment, "label_chunk", real)
+        build.run_archive(self.conn, self.archive, runner)
+        return len(calls)
+
+    def rows(self):
+        return dict(self.conn.execute("SELECT path, status FROM sessions"))
+
+    def test_log_gets_distinct_status_and_is_not_reread(self):
+        self.add("m/grok/sessions/x/s/events.jsonl", [json.dumps({"type": "phase_changed", "ts": "2026-10-01T00:00:00Z"})])
+        self.run_store()
+        self.assertEqual(set(self.rows().values()), {build.NO_CONVERSATION})
+        runner = build.Runner(self.conn, None, "v1", 1)
+        build.run_archive(self.conn, self.archive, runner)
+        self.assertEqual(runner.stats["sessions_skipped"], 1)
+
+    def test_old_dateless_ok_row_is_reparsed_and_its_chunks_replaced(self):
+        rel = "m/kimi/sessions/w/session_k1/agents/main/wire.jsonl"
+        p = self.add(rel, [
+            json.dumps({"type": "context.append_message", "time": 1790000001000, "message": {
+                "role": "user", "origin": {"kind": "user"}, "content": [{"type": "text", "text": "please look at the failing pipeline"}]}}),
+            json.dumps({"type": "context.append_loop_event", "time": 1790000002000, "event": {
+                "type": "content.part", "part": {"type": "text", "text": "I will read the pipeline file now."}}}),
+        ])
+        st = p.stat()
+        self.conn.execute(
+            "INSERT INTO sessions (path, machine, session_id, lineage_id, lineage_key, mtime, size, bytes_parsed, status)"
+            " VALUES (?, 'm', 'wire', 'wire', 'old', ?, ?, ?, 'ok')", (rel, st.st_mtime, st.st_size, st.st_size))
+        self.conn.execute("INSERT INTO chunks (chunk_id, lineage_id, path, status, turn_keys_json) VALUES ('old', 'wire', ?, 'ok', '[]')", (rel,))
+        self.conn.execute("INSERT INTO seen_turns VALUES ('wire', 'h', 1, 'old')")
+        self.conn.commit()
+        self.run_store()
+        status, last_ts, lineage = self.conn.execute("SELECT status, last_ts, lineage_id FROM sessions WHERE path=?", (rel,)).fetchone()
+        self.assertEqual(status, "ok")
+        self.assertIsNotNone(last_ts)
+        self.assertEqual(lineage, "session_k1")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM chunks WHERE chunk_id='old'").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM seen_turns WHERE chunk_id='old'").fetchone()[0], 0)
 
 
 class MachineStatus(Base):
