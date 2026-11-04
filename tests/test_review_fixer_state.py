@@ -6,6 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -25,7 +26,7 @@ class TransportAttribution(unittest.TestCase):
                 m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, " result\n", "")) as run:
             self.assertEqual(m.gh("api", "repos/o/r"), "result")
             args, options = run.call_args
-            self.assertEqual(args[0], ["bash", str(ROOT / "bin/ai-gh"), "api", "repos/o/r"])
+            self.assertEqual(args[0], [shutil.which("bash") or "bash", str(ROOT / "bin/ai-gh"), "api", "repos/o/r"])
             self.assertEqual(options["env"]["AI_GH_CALLER"], "review-fixer")
             self.assertEqual(options["env"]["GH_HOST"], "github.com")
             self.assertEqual(os.environ["AI_GH_CALLER"], "untrusted-caller")
