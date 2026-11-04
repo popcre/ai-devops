@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Export ZCode sessions from its live sqlite database to one ``.jsonl`` each.
+"""Export ZCode or MiMo sessions from a live sqlite database to one ``.jsonl`` each.
 
-ZCode keeps conversations in ``~/.zcode/cli/db/db.sqlite``, which the transcript
-uploader cannot copy as a set of session files. Each export line uses the Claude
-Code shape ``normalize.parse_file`` already reads. Only text parts and tool names
-are exported; reasoning and tool output are left out. A file is rewritten only
+ZCode keeps conversations in ``~/.zcode/cli/db/db.sqlite`` and MiMo in
+``~/.local/share/mimocode/mimocode.db``, with the same session, message and part
+tables, which the transcript uploader cannot copy as a set of session files. Each
+export line uses the Claude Code shape ``normalize.parse_file`` already reads. Only
+text parts and tool names are exported; reasoning, tool output and text the client
+injected itself (marked synthetic or ignored) are left out. A file is rewritten only
 when its session changed, and its mtime is the session's last activity.
 
     zcode_export.py DB DEST    # prints counts only
@@ -32,6 +34,8 @@ def session_lines(conn, sid: str, cwd, parent) -> list[str]:
     parts: dict[str, list[dict]] = {}
     for mid, raw in conn.execute("SELECT message_id, data FROM part WHERE session_id=? ORDER BY time_created, id", (sid,)):
         obj = json.loads(raw)
+        if obj.get("synthetic") or obj.get("ignored"):
+            continue
         if obj.get("type") == "text" and isinstance(obj.get("text"), str):
             parts.setdefault(mid, []).append({"type": "text", "text": obj["text"]})
         elif obj.get("type") == "tool" and isinstance(obj.get("tool"), str):

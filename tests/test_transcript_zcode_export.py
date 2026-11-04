@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ZCode sqlite export for the transcript store. Synthetic fixtures only."""
+"""ZCode and MiMo sqlite export for the transcript store. Synthetic fixtures only."""
 
 import json
 import os
@@ -69,6 +69,27 @@ class Export(unittest.TestCase):
         raw = (self.dest / "ses_1.jsonl").read_text(encoding="utf-8")
         self.assertNotIn(THOUGHT, raw)
         self.assertNotIn("tool output stays out", raw)
+
+    def test_client_injected_text_stays_out(self):
+        add(self.conn, "m6", "ses_1", T0 + 2000, "user", [
+            {"type": "text", "text": "synthetic file dump", "synthetic": True},
+            {"type": "text", "text": "ignored ui note", "ignored": True},
+            {"type": "text", "text": "real words stay in the export"}])
+        self.conn.commit()
+        zcode_export.export(self.db, self.dest)
+        raw = (self.dest / "ses_1.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("synthetic file dump", raw)
+        self.assertNotIn("ignored ui note", raw)
+        self.assertIn("real words stay in the export", raw)
+
+    def test_windows_and_linux_project_paths_name_the_repo(self):
+        for sid, cwd in (("ses_win", "C:\\Users\\a\\repos\\win-app"), ("ses_lin", "/home/a/repos/lin-app")):
+            self.conn.execute("INSERT INTO session VALUES (?, ?, NULL)", (sid, cwd))
+            add(self.conn, sid + "-m", sid, T0, "user", [{"type": "text", "text": ASK}])
+        self.conn.commit()
+        zcode_export.export(self.db, self.dest)
+        for sid, repo in (("ses_win", "win-app"), ("ses_lin", "lin-app")):
+            self.assertEqual(normalize.parse_file(self.dest / f"{sid}.jsonl")["meta"]["repo"], repo)
 
     def test_mtime_is_last_activity_and_unchanged_session_is_not_rewritten(self):
         zcode_export.export(self.db, self.dest)
