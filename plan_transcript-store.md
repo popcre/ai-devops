@@ -84,7 +84,7 @@ The store must have these properties:
 **Transcript sources on each machine:**
 - Claude Code: `~/.claude/projects/**.jsonl`
 - Codex: `~/.codex/sessions/`, `~/.codex/archived_sessions/`
-- ZCode: `~/.zcode/cli/db/db.sqlite`. The uploader exports each session to `zcode/sessions/<id>.jsonl` with `tools/transcript_store/zcode_export.py`; the database itself is not uploaded.
+- ZCode: `~/.zcode/cli/db/db.sqlite` (also on hetz, through the pull). The uploader exports each session to `zcode/sessions/<id>.jsonl` with `tools/transcript_store/zcode_export.py`; the database itself is not uploaded.
 - Others under each machine's folder, such as MiMo sqlite. Those are skipped.
 
 **Archive:** `~/Dropbox/ai/chat_transcripts/<machine>/` holds raw copies, uncompressed. The total is about 25 GB, going back to April 2026. Copies arrive only when someone runs the `claude-transcript-backup` skill (`skills/claude/claude-transcript-backup/SKILL.md`) by hand. Nothing is automatic today.
@@ -340,6 +340,8 @@ Store them in `tools/transcript_store/redact_patterns.tsv`; `normalize.py` and t
 | 4837, 916 | `ahazan` | `%USERPROFILE%\.claude\projects\`, `%USERPROFILE%\.codex\sessions\`, `%USERPROFILE%\.codex\archived_sessions\` (resolve symlinks the same way) | `<D>\claude\`, `<D>\codex\` |
 
   hetz has Dropbox only if `~/Dropbox` exists for the run user. If it does not, the hetz upload instead runs from edge-dev3 as a pull: `rsync -a` over SSH into `<D>`, using the same hot-file and `.partial` rules.
+- **Staying current:** each daily run replaces the installed copy from merged `main` and restarts once, so no host needs hand copying; a failed update never stops the upload and adds `self_update=failed` to the log line. `--check` / `-Check` fails when the copy differs from `main` or `main` cannot be read. `install.sh` and the Windows installer run `--sync` / `-Sync`, which skips hosts without Dropbox and keeps an existing hetz pull and logged-off task.
+- **hetz ZCode:** the edge-dev3 pull copies each account's ZCode database into its cache, exports it there, and uploads to `hetz/<account>/zcode/sessions/`.
 - **Install:** schedule it daily: a systemd user timer like `bin/ai-install-session-tmp` on Linux, and `Register-ScheduledTask` like `bin/ai-housekeeping` on Windows (task runs as `ahazan`, only when logged on is not required).
 - **Skill:** update `skills/claude/claude-transcript-backup/SKILL.md` to say it is now automatic and the skill is the manual fallback.
 

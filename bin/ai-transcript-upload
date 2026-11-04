@@ -10,7 +10,12 @@
 #
 # usage: ai-transcript-upload [--dropbox DIR] [--host NAME] [--hot-minutes N]
 #                             [--map SRC=DESTREL]... [--pull HOST]
-#        ai-transcript-upload --install [--with-pull HOST] | --check | --remove
+#        ai-transcript-upload --install [--with-pull HOST] | --sync | --check | --remove
+#   The installed copy updates itself from merged main at the start of each run;
+#   a failed update never stops the upload and is logged as self_update=failed.
+#   --check fails when the installed files differ from merged main, or main cannot
+#   be read. --sync is the installers' stage: install on a host with Dropbox or an
+#   existing timer, otherwise SKIP. --install keeps an existing --pull.
 #   --map       replaces the default source map (repeatable; tests use it).
 #   --pull      also pull HOST's transcripts over SSH (rsync) into a local cache
 #               and upload them as chat_transcripts/HOST/ (for hosts without
@@ -18,6 +23,7 @@
 # Environment: AI_TRANSCRIPT_PULL_SSH (default "ssh -i ~/.ssh/916-alien -o
 #   BatchMode=yes"), AI_TRANSCRIPT_PULL_USER (default root),
 #   AI_TRANSCRIPT_PULL_LOCAL_ROOT (tests: rsync from this local dir instead),
+#   AI_TRANSCRIPT_UPLOAD_SOURCE (main's raw URL, or a local dir in tests),
 #   AI_TRANSCRIPT_UPLOAD_SYSTEMCTL, AI_TRANSCRIPT_UPLOAD_STATE_DIR.
 # On Windows (Git Bash) it hands off to ai-transcript-upload.ps1.
 set -u
@@ -34,9 +40,10 @@ case "$(uname -s 2>/dev/null)" in
         --hot-minutes) ps_args+=(-HotMinutes "$2"); shift 2 ;;
         --map) ps_args+=(-Map "$2"); shift 2 ;;
         --install) ps_args+=(-Install); shift ;;
+        --sync) ps_args+=(-Sync); shift ;;
         --check) ps_args+=(-Check); shift ;;
         --remove) ps_args+=(-Remove); shift ;;
-        -h|--help) sed -n '2,24p' "$self"; exit 0 ;;
+        -h|--help) sed -n '2,30p' "$self"; exit 0 ;;
         *) echo "ai-transcript-upload: $1 is not supported on Windows" >&2; exit 2 ;;
       esac
     done
@@ -47,6 +54,7 @@ esac
 safe_name() { case "$1" in ''|*/*|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac; }
 safe_rel() { case "/$1/" in //*|*/../*|*/./*) return 1 ;; esac; case "$1" in *[!A-Za-z0-9._/-]*) return 1 ;; esac; }
 
+orig_args=("$@")
 dropbox="${HOME}/Dropbox"; host="$(hostname 2>/dev/null || uname -n)"; host="${host%%.*}"
 hot_min=15; maps=(); pull=""; mode=run; with_pull=""
 while (($#)); do
@@ -57,10 +65,11 @@ while (($#)); do
     --map) maps+=("$2"); shift 2 ;;
     --pull) pull="$2"; shift 2 ;;
     --install) mode=install; shift ;;
+    --sync) mode=sync; shift ;;
     --with-pull) with_pull="$2"; shift 2 ;;
     --check) mode=check; shift ;;
     --remove) mode=remove; shift ;;
-    -h|--help) sed -n '2,24p' "$self"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$self"; exit 0 ;;
     *) echo "ai-transcript-upload: unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -81,7 +90,52 @@ systemctl_cmd="${AI_TRANSCRIPT_UPLOAD_SYSTEMCTL:-systemctl}"
 unit=ai-transcript-upload
 exporter="$(dirname -- "$self")/zcode_export.py"
 [ -f "$exporter" ] || exporter="$(dirname -- "$self")/../tools/transcript_store/zcode_export.py"
+source_base="${AI_TRANSCRIPT_UPLOAD_SOURCE:-https://raw.githubusercontent.com/popcre/ai-devops/main}"
+self_update=""
 
+fetch_main() { # REPO_PATH OUT
+  case "$source_base" in
+    http*) curl -fsSL --max-time 60 -o "$2" "$source_base/$1" ;;
+    *) cp -- "$source_base/$1" "$2" ;;
+  esac
+}
+# Line endings differ between a Windows checkout and main; content does not.
+same_text() { cmp -s <(tr -d '\r' < "$1") <(tr -d '\r' < "$2"); }
+
+# Fetch both files from main into DIR and refuse anything that does not parse.
+fetch_verified() { # DIR
+  fetch_main bin/ai-transcript-upload "$1/transcript-upload" 2>/dev/null \
+    && fetch_main tools/transcript_store/zcode_export.py "$1/zcode_export.py" 2>/dev/null \
+    && [ -s "$1/transcript-upload" ] && [ -s "$1/zcode_export.py" ] \
+    && bash -n "$1/transcript-upload" 2>/dev/null \
+    && python3 -c 'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), "x", "exec")' "$1/zcode_export.py" 2>/dev/null
+}
+
+update_self() {
+  local d changed=0
+  d="$(mktemp -d)" || return 1
+  if ! fetch_verified "$d"; then rm -rf "$d"; return 1; fi
+  same_text "$d/zcode_export.py" "$cfg_dir/zcode_export.py" || mv -f "$d/zcode_export.py" "$cfg_dir/zcode_export.py" || changed=2
+  if ! same_text "$d/transcript-upload" "$cfg_dir/transcript-upload"; then
+    if chmod +x "$d/transcript-upload" && mv -f "$d/transcript-upload" "$cfg_dir/transcript-upload"; then
+      [ "$changed" = 2 ] || changed=1
+    else
+      changed=2
+    fi
+  fi
+  rm -rf "$d"
+  [ "$changed" = 2 ] && return 1
+  # Restart once so this run already uses the merged code.
+  if [ "$changed" = 1 ]; then AI_TRANSCRIPT_UPLOAD_UPDATED=1 exec bash "$cfg_dir/transcript-upload" ${orig_args[@]+"${orig_args[@]}"}; fi
+  return 0
+}
+
+if [ "$mode" = sync ]; then
+  if [ ! -d "$dropbox/ai/chat_transcripts" ] && [ ! -f "$unit_dir/$unit.timer" ]; then
+    echo "SKIP transcript upload: not a Dropbox transcript host"; exit 0
+  fi
+  mode=install
+fi
 if [ "$mode" = remove ]; then
   "$systemctl_cmd" --user disable --now "$unit.timer" >/dev/null 2>&1 || true
   rm -f "$unit_dir/$unit.timer" "$unit_dir/$unit.service" "$cfg_dir/transcript-upload" "$cfg_dir/zcode_export.py"
@@ -91,15 +145,26 @@ fi
 if [ "$mode" = check ]; then
   rc=0
   [ -x "$cfg_dir/transcript-upload" ] || { echo "ERROR $cfg_dir/transcript-upload not installed"; rc=1; }
-  cmp -s "$self" "$cfg_dir/transcript-upload" || { echo "ERROR installed copy differs from $self"; rc=1; }
-  cmp -s "$exporter" "$cfg_dir/zcode_export.py" || { echo "ERROR installed copy differs from $exporter"; rc=1; }
+  main_dir="$(mktemp -d)"
+  if fetch_verified "$main_dir"; then
+    for f in transcript-upload zcode_export.py; do
+      same_text "$main_dir/$f" "$cfg_dir/$f" || { echo "ERROR installed $f is stale: differs from merged main"; rc=1; }
+    done
+  else
+    echo "ERROR could not read merged main; installed copy freshness unverified"; rc=1
+  fi
+  rm -rf "$main_dir"
   [ -f "$unit_dir/$unit.timer" ] || { echo "ERROR $unit.timer not installed"; rc=1; }
   "$systemctl_cmd" --user is-enabled "$unit.timer" >/dev/null 2>&1 || { echo "ERROR $unit.timer not enabled"; rc=1; }
-  ((rc)) || echo "OK transcript upload timer installed"
+  ((rc)) || echo "OK transcript upload timer installed and matches merged main"
   exit "$rc"
 fi
 if [ "$mode" = install ]; then
   mkdir -p "$cfg_dir" "$unit_dir" || exit 1
+  # A reinstall must not lose this host's pull (edge-dev3 is the only route for hetz).
+  if [ -z "$with_pull" ] && [ -f "$unit_dir/$unit.service" ]; then
+    with_pull="$(sed -n 's/.* --pull \([A-Za-z0-9._-]*\) --map none$/\1/p' "$unit_dir/$unit.service" | head -n 1)"
+  fi
   cp "$self" "$cfg_dir/transcript-upload.tmp.$$" && chmod +x "$cfg_dir/transcript-upload.tmp.$$" \
     && mv -f "$cfg_dir/transcript-upload.tmp.$$" "$cfg_dir/transcript-upload" || exit 1
   cp "$exporter" "$cfg_dir/zcode_export.py.tmp.$$" && mv -f "$cfg_dir/zcode_export.py.tmp.$$" "$cfg_dir/zcode_export.py" || exit 1
@@ -115,6 +180,9 @@ if [ "$mode" = install ]; then
 fi
 
 # ---------- run ----------
+if [ -z "${AI_TRANSCRIPT_UPLOAD_UPDATED:-}" ] && [ "$self" -ef "$cfg_dir/transcript-upload" ]; then
+  update_self || self_update=" self_update=failed"
+fi
 root="$dropbox/ai/chat_transcripts"
 [ -d "$root" ] || { echo "ai-transcript-upload: $root not found (Dropbox missing?)" >&2; exit 1; }
 now="$(date +%s)"; scanned=0; copied=0; hot=0; errors=0
@@ -157,7 +225,7 @@ upload_tree() { # SRCDIR DESTDIR PARTIALDIR
 
 write_log() { # HOSTFOLDER
   local line dir="$root/$1"
-  line="$(TZ=America/New_York date '+%Y-%m-%d %H:%M:%S %Z') host=$1 scanned=$scanned copied=$copied skipped_hot=$hot errors=$errors"
+  line="$(TZ=America/New_York date '+%Y-%m-%d %H:%M:%S %Z') host=$1 scanned=$scanned copied=$copied skipped_hot=$hot errors=$errors$self_update"
   mkdir -p "$state_dir" "$dir" && printf '%s\n' "$line" >> "$state_dir/transcript-upload.log"
   printf '%s\n' "$line" > "$dir/.upload-last.txt.tmp.$$" && mv -f "$dir/.upload-last.txt.tmp.$$" "$dir/.upload-last.txt"
   printf '%s\n' "$line"
@@ -206,6 +274,22 @@ if [ -n "$pull" ]; then
       rsync -a -e "$ssh_cmd" -- "$user@$pull:$rsrc/" "$cache/$rel/" 2>/dev/null || errors=$((errors + 1))
     fi
     upload_tree "$cache/$rel" "$root/$pull/$rel" "$root/$pull/.partial/$rel"
+  done
+  # ZCode keeps sessions in sqlite: copy the database, export it here, upload the export.
+  for m in root=/root ai=/home/ai; do
+    who="${m%%=*}"; rdb="${m#*=}/.zcode/cli/db"; zc="$cache/$who/zcode-db"; rc=0
+    if [ -n "${AI_TRANSCRIPT_PULL_LOCAL_ROOT:-}" ]; then
+      [ -f "$AI_TRANSCRIPT_PULL_LOCAL_ROOT$rdb/db.sqlite" ] || continue
+      mkdir -p "$zc"; rsync -a --include='db.sqlite*' --exclude='*' -- "$AI_TRANSCRIPT_PULL_LOCAL_ROOT$rdb/" "$zc/" || rc=1
+    else
+      # shellcheck disable=SC2086 # ssh_cmd is a command line, as rsync -e reads it.
+      $ssh_cmd "$user@$pull" test -f "$rdb/db.sqlite" 2>/dev/null; probe=$?
+      [ "$probe" = 1 ] && continue
+      [ "$probe" = 0 ] || { errors=$((errors + 1)); continue; }
+      mkdir -p "$zc"; rsync -a --include='db.sqlite*' --exclude='*' -e "$ssh_cmd" -- "$user@$pull:$rdb/" "$zc/" 2>/dev/null || rc=1
+    fi
+    if [ "$rc" != 0 ] || ! python3 "$exporter" "$zc/db.sqlite" "$cache/$who/zcode-export" >/dev/null 2>&1; then errors=$((errors + 1)); fi
+    upload_tree "$cache/$who/zcode-export" "$root/$pull/$who/zcode/sessions" "$root/$pull/.partial/$who/zcode/sessions"
   done
   write_log "$pull"; ((errors)) && status=1
 fi
