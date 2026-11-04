@@ -2,6 +2,46 @@
 
 Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 phase 4). Read the linked plan STATUS first.
 
+## Issue implementation plans
+
+These plans record issue-specific assessments; read each verdict or STATUS before
+acting. Some call only for live proof or closure, rather than implementation.
+
+### Installation and local tooling
+
+- [#1836: installed-checkout protection and remaining live proof](../plan_issue-1836.md)
+- [#1860: ZCode headless failures after auto-update](../plan_issue-1860.md)
+- [#1941: slow Windows GitHub authentication checks](../plan_issue-1941.md)
+- [#1962: closeout of Claude sleep-permission failures](../plan_issue-1962.md)
+- [#2235: installer globals and isolated regression coverage](../plan_issue-2235.md)
+- [#2255: same-inode owner-repair regression coverage](../plan_issue-2255.md)
+- [#2280: updater dirty-checkout guards](../plan_issue-2280.md)
+- [#2284: closeout of the obsolete Windows event finding](../plan_issue-2284.md)
+- [#2326: safe command-shim installation](../plan_issue-2326.md)
+
+### Reviews, verification, and documentation
+
+- [#988: scheduled full-verification failures](../plan_issue-988.md)
+- [#2095: advisory-failure follow-ups in PR waiting](../plan_issue-2095.md)
+- [#2236: stale reviewer freeze and approval wording](../plan_issue-2236.md)
+- [#2307: closeout-checker architecture documentation](../plan_issue-2307.md)
+- [#2332: reviewer maintenance test and deletion coverage](../plan_issue-2332.md)
+- [#2336: changed-file documentation safety checks](../plan_issue-2336.md)
+- [#2340: runner guidance and manual Windows verification timeout](../plan_issue-2340.md)
+- [#2346: heartbeat GitHub call throttling](../plan_issue-2346.md)
+
+### Shared database, transcripts, and trial closeout
+
+- [#1779: idle shared-db reservations and remaining fleet proof](../plan_issue-1779.md)
+- [#1998: live transcript re-audit](../plan_issue-1998.md)
+- [#2017: retire the verified DesignFlow HTS handoff](../plan_issue-2017.md)
+- [#2101–#2103: transcript-store review repairs](../plan_issue-2101-2102-2103.md)
+- [#2248: closeout of the Entire Gates finding](../plan_issue-2248.md)
+- [#2261: shared-db worktree reaper working directory](../plan_issue-2261.md)
+- [#2314: vendored Supabase skills and shared-db rules](../plan_issue-2314.md)
+
+## Programme pointers
+
 Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-reversible-trial.md)
 STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); planning only,
 execution not started. Includes continuous memory, Trails, sessions/search and optional CI.
