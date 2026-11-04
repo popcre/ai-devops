@@ -79,10 +79,12 @@ unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/ai-devops"
 systemctl_cmd="${AI_TRANSCRIPT_UPLOAD_SYSTEMCTL:-systemctl}"
 unit=ai-transcript-upload
+exporter="$(dirname -- "$self")/zcode_export.py"
+[ -f "$exporter" ] || exporter="$(dirname -- "$self")/../tools/transcript_store/zcode_export.py"
 
 if [ "$mode" = remove ]; then
   "$systemctl_cmd" --user disable --now "$unit.timer" >/dev/null 2>&1 || true
-  rm -f "$unit_dir/$unit.timer" "$unit_dir/$unit.service" "$cfg_dir/transcript-upload"
+  rm -f "$unit_dir/$unit.timer" "$unit_dir/$unit.service" "$cfg_dir/transcript-upload" "$cfg_dir/zcode_export.py"
   "$systemctl_cmd" --user daemon-reload >/dev/null 2>&1 || true
   echo "OK transcript upload timer removed (Dropbox copies are left as they are)"; exit 0
 fi
@@ -90,6 +92,7 @@ if [ "$mode" = check ]; then
   rc=0
   [ -x "$cfg_dir/transcript-upload" ] || { echo "ERROR $cfg_dir/transcript-upload not installed"; rc=1; }
   cmp -s "$self" "$cfg_dir/transcript-upload" || { echo "ERROR installed copy differs from $self"; rc=1; }
+  cmp -s "$exporter" "$cfg_dir/zcode_export.py" || { echo "ERROR installed copy differs from $exporter"; rc=1; }
   [ -f "$unit_dir/$unit.timer" ] || { echo "ERROR $unit.timer not installed"; rc=1; }
   "$systemctl_cmd" --user is-enabled "$unit.timer" >/dev/null 2>&1 || { echo "ERROR $unit.timer not enabled"; rc=1; }
   ((rc)) || echo "OK transcript upload timer installed"
@@ -99,6 +102,7 @@ if [ "$mode" = install ]; then
   mkdir -p "$cfg_dir" "$unit_dir" || exit 1
   cp "$self" "$cfg_dir/transcript-upload.tmp.$$" && chmod +x "$cfg_dir/transcript-upload.tmp.$$" \
     && mv -f "$cfg_dir/transcript-upload.tmp.$$" "$cfg_dir/transcript-upload" || exit 1
+  cp "$exporter" "$cfg_dir/zcode_export.py.tmp.$$" && mv -f "$cfg_dir/zcode_export.py.tmp.$$" "$cfg_dir/zcode_export.py" || exit 1
   {
     printf '[Unit]\nDescription=Copy AI session transcripts to Dropbox (ai-devops)\n\n[Service]\nType=oneshot\n'
     printf 'ExecStart=-/usr/bin/env bash "%s/transcript-upload"\n' "$cfg_dir"
@@ -175,6 +179,12 @@ if ((${#maps[@]} == 0)); then
   else
     maps=("$HOME/.claude/projects=claude/projects" "$HOME/.codex/sessions=codex/sessions"
           "$HOME/.codex/archived_sessions=codex/archived_sessions")
+    # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
+    zdb="$HOME/.zcode/cli/db/db.sqlite"
+    if [ -f "$zdb" ]; then
+      python3 "$exporter" "$zdb" "$state_dir/zcode-export" >/dev/null 2>&1 || errors=$((errors + 1))
+    fi
+    maps+=("$state_dir/zcode-export=zcode/sessions")
   fi
 fi
 if ! { ((${#maps[@]} == 1)) && [ "${maps[0]}" = none ]; }; then
