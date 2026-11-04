@@ -173,7 +173,7 @@ cd /worksp/ai-devops
    to reap until one appears. All safety refusals live in shared-db's reaper.
    CI **watchdog** timers (queue-slow, runner-pool, drift) belong to the
    **watchdog duty pool** — see [`watchdog-duty-pool.md`](watchdog-duty-pool.md)
-   for claim/lease rotation and how to add a machine; never paid Blacksmith.
+   for claim/lease rotation and how to add a machine; never paid GitHub-hosted.
    The installer schedules `ai-local-watch tick-all` (Task Scheduler / user
    crontab) only on hosts listed in `config/local-watch.json` `watch_hosts`
    (edge-dev, edge-dev3, hetz). That single entry claims the duty lease and

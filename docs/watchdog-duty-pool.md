@@ -15,7 +15,7 @@ Do not invent another name (not “runner pool”, not “failover cluster”).
 
 ## 1. Why this exists
 
-- Paid runners (Blacksmith) were too expensive for alarm scripts ($1000 / 2
+- Paid runners (GitHub-hosted) were too expensive for alarm scripts ($1000 / 2
   weeks class spend, 2026-10-01). Alarm work is now local timers only.
 - A single pinned host (`run_on_host` / `propagate_on_host`) goes silent when
   that PC sleeps or dies. Albert’s machines do not have perfect uptime.
@@ -45,7 +45,7 @@ normal branch + PR). Nicknames must match what BlockerWatch already uses
 4. If the lease is stale or missing, any pool member may **claim** (prefer
    `watch_hosts` order). The loser logs `skip: leader=…` and does not post.
 5. If **no** local claim is fresh, the free GitHub Action backup may run.
-6. Never recommend paid Blacksmith from these tools.
+6. Never recommend paid GitHub-hosted from these tools.
 
 Exit codes agents must understand:
 
@@ -96,7 +96,7 @@ to click through them.
 
 ## 6. What an agent must never do
 
-- Put this duty on paid Blacksmith or invent a second pool name/config.
+- Put this duty on paid GitHub-hosted or invent a second pool name/config.
 - Post alarms without a fresh claim (double comments / fight Club).
 - Store tokens in the public repo, argv, or logs (1Password vault
   `vibe_coding` only).

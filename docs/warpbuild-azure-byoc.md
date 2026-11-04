@@ -20,8 +20,8 @@ account identifiers in this public repository. Resolve live values with `az` and
 | Canary workflow | `.github/workflows/warpbuild-win2022-canary.yml` — manual `workflow_dispatch` only, non-required |
 | Canary proof | Green 2026-09-30 and 2026-10-05 on eastus only: [run 36731941680 job 109943590499](https://github.com/popcre/ai-devops/actions/runs/36731941680/job/109943590499). Windows NT 10.0.20348, X64, git/pwsh/node/bash present; VM and OS disk deleted after the job |
 | Multi-region canary | use2/cus **blocked** (2026-10-05): WarpBuild gallery image not in those regions (`GalleryImageNotFound`). Jobs queue forever; VM create loops and fails. |
-| Required CI | **Still Blacksmith** (`blacksmith-4vcpu-windows-2025`). Practice-lane PR #1220 **MERGED 2026-10-02** (merge `5970c621`) — non-blocking `windows-offline-warpbuild-proof` beside Blacksmith required. Hard cut-over is still not landed. |
-| Owner rule (2026-10-01) | **Blacksmith stays in the pool until WarpBuild is fully up.** Use Blacksmith for runs that would otherwise get stuck. Do not turn Blacksmith off. Do not stop WarpBuild bring-up. "Fully up" is a technical judgment (AI); only the cost choice is Albert's. |
+| Required CI | **Still GitHub-hosted** (`windows-2025`). Practice-lane PR #1220 **MERGED 2026-10-02** (merge `5970c621`) — non-blocking `windows-offline-warpbuild-proof` beside GitHub-hosted required. Hard cut-over is still not landed. |
+| Owner rule (2026-10-01) | **GitHub-hosted stays in the pool until WarpBuild is fully up.** Use GitHub-hosted for runs that would otherwise get stuck. Do not turn GitHub-hosted off. Do not stop WarpBuild bring-up. "Fully up" is a technical judgment (AI); only the cost choice is Albert's. |
 | Owner rule (2026-10-02) | **No West Europe.** US regions only (eastus / eastus2 / centralus). |
 | Azure quota (2026-10-02, eastus) | `standardDASv4Family` **8/10** vCPU, regional `cores` **8/12**. Fits **two** 4-vCPU VMs. Target 40 / 64 for ten. Quota is per family **and** per region. |
 | Quota raise path | Programmatic support ticket is **blocked** on this subscription (`InvalidSupportPlan`, Free plan). `az quota` / Microsoft.Quota RP are not available. Portal **Usage + quotas → Request increase** is the working path. |
@@ -31,7 +31,7 @@ account identifiers in this public repository. Resolve live values with `az` and
 PR #1220 landed the **practice lane** (`windows-offline-warpbuild-proof`:
 `continue-on-error`, `max-parallel: 2`, fork-guarded, label
 `warp-custom-warpbuild-win2022-canary`). It is outside `verification-closure`.
-Required Windows stayed on Blacksmith.
+Required Windows stayed on GitHub-hosted.
 
 Post-merge full required Windows verify on main (`windows-offline-complete`,
 run `37004196465`) was red on sections 1/2/4/5 — **not a WarpBuild regression**.
@@ -45,10 +45,10 @@ and post the green required job URL on #961.
 An earlier hard cut of required `runs-on` to the WarpBuild label failed broadly
 (`doc-safety`, `linux-offline-shard` 2/4, all `windows-offline-section` 1–8,
 `windows-reviewer-fallback-*`, `verification-closure`). Do **not** re-point
-required Windows until the full suite is proven green on BYOC and Blacksmith
+required Windows until the full suite is proven green on BYOC and GitHub-hosted
 remains a live fallback. Open sibling PR #1193
 (`mimo/runner-pool-github-envy-warpbuild`) is a different routing preference
-and must not silently drop WarpBuild or Blacksmith.
+and must not silently drop WarpBuild or GitHub-hosted.
 
 ## Runbook
 
@@ -124,7 +124,7 @@ workflows can use), `provider_id` = stack id, and:
 ### 3. Run the canary
 
 1. Point the canary workflow (or proof lane) at one of the `warp-custom-*`
-   labels. Required Windows stays on Blacksmith.
+   labels. Required Windows stays on GitHub-hosted.
 2. Dispatch: `bin/ai-gh workflow run warpbuild-win2022-canary.yml` (or the
    Actions UI). It is `workflow_dispatch` only and must stay non-required.
 3. Watch with `bin/ai-gh run view <run> --json status,jobs` (bounded; no
@@ -138,7 +138,7 @@ workflows can use), `provider_id` = stack id, and:
 
 Workflow `runs-on` and `config/ci-runner-routing.json` (`warpbuild_windows`)
 must name the same label. Proof lane stays `continue-on-error`, fork-guarded,
-and outside `verification-closure`. Keep Blacksmith as the required lane until
+and outside `verification-closure`. Keep GitHub-hosted as the required lane until
 a reviewed cut-over.
 
 ## Pitfalls already paid for (do not repeat)
@@ -153,10 +153,10 @@ practice-lane land. Read it before touching stacks, runners, or the proof lane.
 2. Job never appears in org runners → VM is booting or already dead; capture
    `C:\warpbuilds\runner.github.stdout.log` **now**.
 3. Many proof jobs waiting → that is capacity (2 VMs × every open PR), not an
-   outage. Do not "fix" it by moving proof jobs to Blacksmith.
+   outage. Do not "fix" it by moving proof jobs to GitHub-hosted.
 4. A suite fails on `windows-offline-complete` but passed on the PR sections →
    Windows platform trap (section C), not WarpBuild.
-5. Do not turn Blacksmith off to "force" WarpBuild to catch up.
+5. Do not turn GitHub-hosted off to "force" WarpBuild to catch up.
 
 ### A. Standing up a stack / VM
 
@@ -183,7 +183,7 @@ practice-lane land. Read it before touching stacks, runners, or the proof lane.
 | Waited to capture logs | Ephemeral VM dies in ~40–120s after failed pickup | `az vm run-command` **immediately** with a tiny log-tail script |
 | `az vm run-command` preempted / ResourceNotFound | A newer op wins; the VM is already gone | Retry once on the other `wb-*` VM; do not loop |
 | Thought only 2 proof jobs were "stuck" | Every open PR adds 8 proof jobs; 2 VMs serve the whole org queue | Capacity fact, not a bug. Raise quota or accept the wait |
-| Expected Blacksmith to take WarpBuild proof jobs | Proof lane has **no Blacksmith fallback by design** — it *is* the WarpBuild proof | Leave it; required CI already runs on Blacksmith |
+| Expected GitHub-hosted to take WarpBuild proof jobs | Proof lane has **no GitHub-hosted fallback by design** — it *is* the WarpBuild proof | Leave it; required CI already runs on GitHub-hosted |
 | Assumed a green PR section path proves the full suite | `windows-offline-section` is **PR-only**; `windows-offline-complete` is the manual/schedule full suite | Always prove `windows-offline-complete` on main after a change |
 | Left proof jobs queued across many PR commits | PR concurrency `cancel-in-progress` **discards** the queue when a new commit lands | More machines is the real fix; do not weaken required checks |
 
@@ -209,11 +209,11 @@ differences"); the short version:
 | Called `az quota create` / Microsoft.Quota RP | `MissingSubscription` / resource type not found | Same portal path; do not keep retrying the RP |
 | Assumed quota is "Azure-wide" | It is per family per region | Measure `az vm list-usage --location <region>` before promising concurrency |
 | Underestimated proof-lane demand | 8 jobs × every open PR against 2 VMs | Budget concurrency from quota, not from `max-parallel` alone |
-| Compared WarpBuild cost to Blacksmith before invoices | Nothing is measured yet | Wait for real invoices before any cost decision |
+| Compared WarpBuild cost to GitHub-hosted before invoices | Nothing is measured yet | Wait for real invoices before any cost decision |
 
 ### E. Safety / process (repeatedly binding)
 
-- **Do not turn Blacksmith off** (owner, 2026-10-01) until WarpBuild is fully
+- **Do not turn GitHub-hosted off** (owner, 2026-10-01) until WarpBuild is fully
   up **and** Albert makes a fresh cost decision.
 - **Never** put secrets, API keys, signed vendor URLs, subscription GUIDs, or
   account emails in this public repo. Resolve live with `az account show` and
@@ -227,7 +227,7 @@ differences"); the short version:
   `ai-task-gates check` "no changes" output as permission to bypass that.
 - Check **names** (`windows-offline`, `windows-offline-section (N, lane)`, …)
   must stay stable or required gates break. Keep
-  `windows-offline-blacksmith.yml` usable as the manual escape hatch.
+  `windows-offline-hosted.yml` usable as the manual escape hatch.
 - Oracle / Teams-bot subscription stays frozen. Dedicated CI subscription only.
 - No Spot for required-test evidence. Disk floor is 256 GB per vendor docs;
   the live canary used 150 GB and only proved the tooling canary.
@@ -241,7 +241,7 @@ public repositories if its **runner group** has
 Observed failure (2026-09-30): WarpBuild VMs booted, cloud-init succeeded, the
 runner showed "Connected to GitHub" / "Listening for Jobs" with the correct
 label, and the job stayed `queued` for hours. GitHub org **Default** runner
-group had `allows_public_repositories=false`. Blacksmith groups already allowed
+group had `allows_public_repositories=false`. GitHub-hosted groups already allowed
 public. Fix applied live:
 
 - Enabled `allows_public_repositories` on the Default group.
@@ -273,7 +273,7 @@ online, check runner-group public access first.
 - Independent review before any new Azure topology, role, or required-CI
   cut-over. The canary and the Default-group public flag were operational CI
   enablement on an already-approved dedicated subscription, not a new grant.
-- Required workflows stay on Blacksmith until a reviewed cut-over proves the
+- Required workflows stay on GitHub-hosted until a reviewed cut-over proves the
   full Windows suite on BYOC and invoices meet the cost goal. Preserve
   `config/ci-suite-manifest.json` fan-out and reviewer safeguards.
 - No Spot for required-test evidence. Disk floor is 256 GB per vendor docs;

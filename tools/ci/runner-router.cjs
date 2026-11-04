@@ -1,13 +1,12 @@
 'use strict';
 // Gives idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other
 // host labelled ai-devops-windows-qualified) ordinary verify.yml Windows
-// sections as extra capacity. Every other section stays on Blacksmith, the
-// lane that always has capacity (owner ruling 2026-10-01: KEEP Blacksmith in
-// the pool until WarpBuild is fully up; USE Blacksmith for runs that would
-// otherwise get stuck; 2026-10-02: "use blacksmith to run your tests").
+// sections as extra capacity. Every other section stays on GitHub-hosted, the
+// lane that always has capacity (Blacksmith removed from the pool,
+// owner request 2026-11-03.)
 // WarpBuild Azure BYOC is NOT routed here; it is proven only by
 // warpbuild-win2022-canary.yml. run() never throws: any lookup error keeps the
-// all-Blacksmith plan, so routing can only add capacity and never sends work
+// all-GitHub-hosted plan, so routing can only add capacity and never sends work
 // back to the GitHub-hosted queue.
 //
 // Section-only hosts (#1312; owner 2026-10-06: "keep it for lighter jobs." and
@@ -16,13 +15,13 @@
 // sections measured green with headroom, so each idle one takes at
 // most one section (in cfg.section_lane_order) and nothing else: no complete
 // matrix, no reviewer proof. A host carrying both labels counts only as
-// qualified. Busy, offline or unknown means the section stays on Blacksmith.
+// qualified. Busy, offline or unknown means the section stays on GitHub-hosted.
 
 // Linux (owner 2026-10-07, "yes, point the checks at it"): idle self-hosted
 // Linux hosts labelled cfg.linux_label (edge-dev3-linux, one job at a time)
 // take linux-offline-shard sections as extra capacity, one section per idle
 // host in cfg.linux_lane_order. Every other section, and every section when the
-// pool is busy, offline, unknown or the head is foreign, stays on Blacksmith.
+// pool is busy, offline, unknown or the head is foreign, stays on GitHub-hosted.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
@@ -30,18 +29,18 @@ function decide(cfg, { event, idleQualified, idleSection, foreign }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
   // A foreign head never runs on our machines: not the self-hosted pool and
   // not the WarpBuild BYOC VMs in our own Azure subscription. Both stay zero;
-  // every section falls through to Blacksmith.
+  // every section falls through to GitHub-hosted.
   let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
   const matrix = range(cfg.windows_sections).map(section => {
     if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
-    return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
+    return { section, lane: 'github-hosted', runs_on: cfg.hosted_windows };
   });
   // One section per idle section-only host, never more than there are hosts.
   let sectionHosts = foreign || !cfg.section_label ? 0 : Math.max(0, idleSection || 0);
   for (const section of cfg.section_lane_order || []) {
     if (sectionHosts <= 0) break;
     const slot = matrix[section - 1];
-    if (!slot || slot.lane !== 'blacksmith') continue;
+    if (!slot || slot.lane !== 'github-hosted') continue;
     matrix[section - 1] = { section, lane: 'section-self-hosted', runs_on: cfg.section_windows };
     sectionHosts -= 1;
   }
@@ -49,14 +48,14 @@ function decide(cfg, { event, idleQualified, idleSection, foreign }) {
 }
 
 // eligible: section numbers the workflow proved select no cfg.linux_unfit_suites
-// for this pull request. Missing or empty means none (fail closed to Blacksmith).
+// for this pull request. Missing or empty means none (fail closed to GitHub-hosted).
 function parseEligible(text) {
   return String(text || '').split(',').map(x => Number(x.trim())).filter(n => Number.isInteger(n) && n > 0);
 }
 
 function decideLinux(cfg, { idleLinux, foreign, eligible = [] }) {
   const shards = cfg.linux_shards || 4;
-  const matrix = range(shards).map(shard => ({ shard, lane: 'blacksmith', runs_on: cfg.blacksmith_linux }));
+  const matrix = range(shards).map(shard => ({ shard, lane: 'github-hosted', runs_on: cfg.hosted_linux }));
   let hosts = foreign || !cfg.linux_label ? 0 : Math.max(0, idleLinux || 0);
   for (const shard of cfg.linux_lane_order || []) {
     if (hosts <= 0) break;
@@ -115,7 +114,7 @@ async function run({ github, poolGithub, context, core, cfg }) {
   let idleLinux = 0;
   const foreign = isForeignHead(context);
   if (foreign) {
-    core.info('Pull request head is outside this repository; every Windows and Linux section stays on Blacksmith.');
+    core.info('Pull request head is outside this repository; every Windows and Linux section stays on GitHub-hosted.');
     poolGithub = null;
   }
   try {
@@ -127,7 +126,7 @@ async function run({ github, poolGithub, context, core, cfg }) {
       idleLinux = Math.max(0, pool.linux - queued.linux);
     }
   } catch (error) {
-    core.warning(`Self-hosted pool unknown (${error.message}); every Windows and Linux section stays on Blacksmith.`);
+    core.warning(`Self-hosted pool unknown (${error.message}); every Windows and Linux section stays on GitHub-hosted.`);
     idle = 0;
     idleSection = 0;
     idleLinux = 0;
