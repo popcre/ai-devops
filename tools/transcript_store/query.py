@@ -121,12 +121,34 @@ def stats(conn, now: dt.datetime | None = None, stale_days: int = STALE_DAYS) ->
     lines += [f"  {t}: {n}" for t, n in sorted(topics.items(), key=lambda kv: (-kv[1], kv[0]))]
     lines += ["", "by repo:"]
     lines += [f"  {r or '-'}: {n}" for r, n in q("SELECT repo, count(*) FROM segments GROUP BY repo ORDER BY 2 DESC, 1")]
-    lines += ["", f"by machine (last session; STALE = older than {stale_days} days):"]
-    for m, n, last in q("SELECT machine, count(*), max(last_ts) FROM sessions GROUP BY machine ORDER BY machine"):
+    lines += [""] + machine_lines(conn, now, stale_days)
+    return lines
+
+
+def machine_lines(conn, now: dt.datetime, stale_days: int) -> list[str]:
+    """Per-machine state as the writer recorded it, plus its age."""
+    sessions = {m: (n, last) for m, n, last in conn.execute(
+        "SELECT machine, count(*), max(last_ts) FROM sessions GROUP BY machine")}
+    try:
+        status = {r[0]: r[1:] for r in conn.execute("SELECT machine, state, detail, checked FROM machine_status")}
+    except sqlite3.OperationalError:
+        status = {}  # store published before the writer recorded this
+    checked = parse_ts(max((v[2] for v in status.values()), default=None))
+    old = checked is not None and (now - checked) > dt.timedelta(days=stale_days)
+    if checked is None:
+        head = "by machine: state UNKNOWN, writer has not recorded upload status"
+    elif old:
+        head = f"by machine: state UNKNOWN, writer last checked {to_new_york(checked)}, over {stale_days} days ago"
+    else:
+        head = f"by machine (states as of {to_new_york(checked)}):"
+    lines = [head]
+    for m in sorted(set(sessions) | set(status), key=str):
+        n, last = sessions.get(m, (0, None))
         t = parse_ts(last)
         when = to_new_york(t) if t else "unknown"
-        flag = "  STALE" if t is None or (now - t) > dt.timedelta(days=stale_days) else ""
-        lines.append(f"  {m or '-'}: {n} sessions, last {when}{flag}")
+        st = status.get(m)
+        tail = "  UNKNOWN" if old or st is None else f"  {st[0].upper()}: {st[1]}"
+        lines.append(f"  {m or '-'}: {n} sessions, last {when}{tail}")
     return lines
 
 

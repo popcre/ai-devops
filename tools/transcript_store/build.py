@@ -52,6 +52,12 @@ INBOX_KEYS = {"question", "src", "prompt_version", "fields"}
 RETENTION_DAYS = 90
 KEEP_VERSIONS = 3
 CONFLICT = "conflicted copy"
+UPLOAD_LAST = ".upload-last.txt"
+UPLOAD_STALE_DAYS = 2
+ACTIVE_DAYS = 2
+ARCHIVE_ONLY_DAYS = 30
+UPLOAD_LINE_RX = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (EDT|EST) host=\S+ scanned=\d+ copied=\d+ skipped_hot=\d+ errors=(\d+)\s*$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -79,6 +85,9 @@ CREATE TABLE IF NOT EXISTS question_labels (
   question TEXT, src TEXT, prompt_version TEXT, fields_json TEXT, created TEXT);
 CREATE TABLE IF NOT EXISTS inbox_applied (filename TEXT PRIMARY KEY, sha256 TEXT, applied TEXT);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS machine_status (
+  machine TEXT PRIMARY KEY, state TEXT, detail TEXT, upload_at TEXT,
+  upload_errors INTEGER, files INTEGER, files_behind INTEGER, checked TEXT);
 """
 
 
@@ -134,7 +143,7 @@ def scan_archive(archive: Path):
     for root, dirs, files in os.walk(archive):
         dirs[:] = sorted(d for d in dirs if d != ".partial" and CONFLICT not in d)
         for name in sorted(files):
-            if not name.endswith(".jsonl") or CONFLICT in name or name == ".upload-last.txt":
+            if not name.endswith(".jsonl") or CONFLICT in name or name == UPLOAD_LAST:
                 continue
             p = Path(root) / name
             rel = p.relative_to(archive).as_posix()
@@ -371,6 +380,84 @@ def run_archive(conn, archive: Path, runner: Runner, newest_first=True):
         runner.process(abspath, rel, machine)
     meta_set(conn, "last_build", iso_now())
     conn.commit()
+    record_machine_status(conn, archive)
+
+
+# ---------------------------------------------------------------- machine status
+
+def read_upload_report(path: Path) -> tuple[dt.datetime | None, int | None, str | None]:
+    """Parse ``.upload-last.txt`` into (run time, errors, problem)."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
+            text = f.read(1024)
+    except FileNotFoundError:
+        return None, None, "no upload report"
+    except OSError as exc:
+        return None, None, f"upload report unreadable ({exc.__class__.__name__})"
+    m = UPLOAD_LINE_RX.match(text.strip())
+    if not m:
+        return None, None, "upload report unparseable"
+    offset = dt.timedelta(hours=-4 if m.group(2) == "EDT" else -5)
+    at = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=dt.timezone(offset))
+    return at, int(m.group(3)), None
+
+
+def classify_machine(report, files_behind: int, newest_mtime: float | None, last_ts: str | None, now: float) -> tuple[str, str]:
+    """One machine's state. A broken upload outranks lag: lag only covers what arrived."""
+    at, errors, problem = report
+    day = 86400.0
+    if problem == "no upload report" and (newest_mtime is None or now - newest_mtime > ARCHIVE_ONLY_DAYS * day):
+        if files_behind:  # plan step 1: a folder no live host writes to any more
+            return "ingest-lag", f"{files_behind} files not yet in store; no upload report"
+        return "archive-only", f"no upload report, no new files for over {ARCHIVE_ONLY_DAYS} days"
+    if problem:
+        return "upload-broken", problem
+    if errors:
+        return "upload-broken", f"last upload had {errors} errors"
+    if now - at.timestamp() > UPLOAD_STALE_DAYS * day:
+        return "upload-broken", f"last upload over {UPLOAD_STALE_DAYS} days old"
+    if files_behind:
+        return "ingest-lag", f"{files_behind} files not yet in store"
+    last = None
+    if last_ts:
+        try:
+            last = dt.datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+            last = last if last.tzinfo else last.replace(tzinfo=dt.timezone.utc)
+        except ValueError:
+            pass
+    if last is not None and now - last.timestamp() <= ACTIVE_DAYS * day:
+        return "current", "upload healthy, store caught up"
+    return "idle", "upload healthy, nothing new"
+
+
+def record_machine_status(conn, archive: Path, now: float | None = None) -> None:
+    """Record each archive folder's state, so readers need no archive access."""
+    if not archive.is_dir():
+        return  # Dropbox missing: keep the last record, whose age readers report
+    now = now if now is not None else time.time()
+    known = {r[0]: r[1:] for r in conn.execute("SELECT path, mtime, size, status FROM sessions")}
+    tally: dict[str, list] = {}  # machine -> [files, behind, newest mtime]
+    for abspath, rel, machine in scan_archive(archive):
+        st = abspath.stat()
+        t = tally.setdefault(machine, [0, 0, None])
+        t[0] += 1
+        t[2] = max(t[2] or 0, st.st_mtime)
+        row = known.get(rel)
+        if row is None or row[0] != st.st_mtime or row[1] != st.st_size or row[2] == "failed":
+            t[1] += 1
+    for d in archive.iterdir():
+        if d.is_dir() and (d / UPLOAD_LAST).exists():
+            tally.setdefault(d.name, [0, 0, None])
+    last = dict(conn.execute("SELECT machine, max(last_ts) FROM sessions GROUP BY machine"))
+    checked = dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(timespec="seconds")
+    with conn:
+        conn.execute("DELETE FROM machine_status")
+        for machine, (files, behind, newest) in tally.items():
+            report = read_upload_report(archive / machine / UPLOAD_LAST)
+            state, detail = classify_machine(report, behind, newest, last.get(machine), now)
+            conn.execute("INSERT INTO machine_status VALUES (?,?,?,?,?,?,?,?)",
+                         (machine, state, detail, report[0].isoformat() if report[0] else None,
+                          report[1], files, behind, checked))
 
 
 # ---------------------------------------------------------------- relabel
@@ -637,6 +724,8 @@ def stats(conn) -> dict:
         "question_labels": dict(q("SELECT question, count(*) FROM question_labels GROUP BY question")),
         "inbox_applied": q("SELECT count(*) FROM inbox_applied")[0][0],
         "last_build": meta_get(conn, "last_build"),
+        "machine_status": {m: {"state": st, "detail": d, "upload_at": u, "checked": c} for m, st, d, u, c in
+                           q("SELECT machine, state, detail, upload_at, checked FROM machine_status")},
     }
     return out
 
