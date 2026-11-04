@@ -28,6 +28,8 @@ for src in "$REPO_ROOT"/bin/*; do
   name="$(basename "$src")"
   case "$name" in *.*) continue ;; esac
   git -C "$REPO_ROOT" ls-files --error-unmatch "bin/$name" >/dev/null 2>&1 || continue
+  # cmd-compat is the Linux stand-in for cmd.exe itself; Windows never runs it.
+  [ "$name" = cmd-compat ] && continue
   launcher="$src.cmd"
   if [ ! -f "$launcher" ]; then
     echo "FAIL: bin/$name has no bin/$name.cmd launcher" >&2; fail=1; continue

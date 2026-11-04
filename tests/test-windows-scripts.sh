@@ -253,7 +253,9 @@ for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway t
 done
 if ! grep -Fq '$McpServerCatalog["recall-ai"]' bin/setup-machine.ps1 &&
    grep -Fq '$RetiredMcpServerNames = @("recall-ai")' bin/setup-machine.ps1 &&
-   ! grep -Fq 'recall' bin/setup-secrets.sh config/mcp.env.example; then
+   ! grep -Fq 'recall' config/mcp.env.example &&
+   # Owner ruling 2026-11-03: Oracle's tracked .mcp.json keeps one recall-ai reference.
+   [ "$(grep -Fc 'recall' bin/setup-secrets.sh)" -le 2 ] && ! grep -F 'recall' bin/setup-secrets.sh | grep -vqF -e 'recall-ai MCP/password' -e 'keeps recall-ai'; then
   ok "Recall.ai is retired on Windows and Linux and deleted wherever it was written"
 else bad "Recall.ai is still installed somewhere"; fi
 if grep -Fq '"oracle"              = @("trigger", "vercel")' bin/setup-machine.ps1 &&
