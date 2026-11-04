@@ -53,6 +53,8 @@ Registration handoff: [2026-11-04T2142Z-al8960ofc-claude-open-issue-plans-batch2
 
 ## Programme pointers
 
+CI process repair (every recurring CI problem from the transcript review): read the [CI repair plan](../plan_ci-process-repair.md) STATUS first ([#2367](https://github.com/popcre/ai-devops/issues/2367)).
+
 Reversible Entire trial alongside GitHub: read the [trial plan](../plan_entire-reversible-trial.md)
 STATUS first ([#2022](https://github.com/popcre/ai-devops/issues/2022)); planning only,
 execution not started. Includes continuous memory, Trails, sessions/search and optional CI.
