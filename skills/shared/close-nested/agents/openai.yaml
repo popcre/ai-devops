@@ -1,0 +1,4 @@
+interface:
+  display_name: "Close Nested"
+  short_description: "Wrap up a session tree into one coordinator handoff"
+  default_prompt: "Use $close-nested to wrap up this session and every nested subsession, then write one handoff whose prompt starts a fresh coordinator with one subsession per open task."

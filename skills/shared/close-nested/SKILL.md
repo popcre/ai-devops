@@ -1,6 +1,6 @@
 ---
 name: close-nested
-description: "Close a coordinator session AND every nested subsession it started, then write ONE coordinator handoff whose prompt starts a fresh coordinator that re-spawns one nested subsession per still-open task. Use for \"close nested\", \"wrap up this session and all its subsessions\", \"close out the whole tree\", \"wrap up everything including the side sessions\", or \"hand the whole fleet to a new coordinator\". Plain single-session \"wrap up\" stays with `wrap-up`."
+description: "Claude, Codex, ZCode and MiMo. Close a coordinator session AND every nested subsession it started, then write ONE coordinator handoff whose prompt starts a fresh coordinator that re-spawns one nested subsession per still-open task. Use for \"close nested\", \"wrap up this session and all its subsessions\", \"close out the whole tree\", \"wrap up everything including the side sessions\", or \"hand the whole fleet to a new coordinator\". Plain single-session \"wrap up\" stays with `wrap-up`."
 ---
 
 # close-nested
@@ -11,7 +11,23 @@ result is ONE handoff file plus ONE paste-ready prompt. Pasting that prompt into
 an empty session creates a **pure coordinator** that does no task work itself
 and starts one nested subsession per open task.
 
-This skill is a superset of `wrap-up`. Load `wrap-up` and `handoff-writer` now;
+## Works in every client
+
+Tool names below are the Claude desktop ones. In another client use its
+equivalent, and say which you used:
+
+- **List / message / start sessions:** Claude desktop `ccd_session_mgmt`
+  `list_sessions`, `SendMessage`, `ccd_session__start_session`. Codex, ZCode,
+  MiMo, or Claude CLI without desktop tools: the client's own subagent or
+  thread tool; if it has none, children are the background agents and worktrees
+  this session launched (find them with `git worktree list` and the issue/PR
+  trail on GitHub), and the coordinator prompt says "start one new session per
+  task with this brief" instead of naming a tool.
+- **Stop a stuck child:** the client's stop/cancel tool, else leave it and
+  preserve its branch from GitHub.
+
+This skill is a superset of `wrap-up` (Codex: `wrap-up` is shared; its docs
+step uses `codex-docs-update`). Load `wrap-up` and `handoff-writer` now;
 their rules (scope freeze, shared-db gate, secrets, ship & verify, workspace
 close, GitHub-URL-only paths, self-audit) apply unchanged to this session and
 to every child. This file adds only the tree-specific steps.
