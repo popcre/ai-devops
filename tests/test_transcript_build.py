@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Transcript-store writer and read protocol (plan step 4). Synthetic only."""
 
+import datetime as dt
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -15,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "transcript_store"))
 import build  # noqa: E402
 import reader  # noqa: E402
+import query  # noqa: E402
 import segment  # noqa: E402
 
 NOSLEEP = lambda s: None  # noqa: E731
@@ -473,6 +476,105 @@ class DatelessRows(unittest.TestCase):
         self.assertEqual(lineage, "session_k1")
         self.assertEqual(self.conn.execute("SELECT count(*) FROM chunks WHERE chunk_id='old'").fetchone()[0], 0)
         self.assertEqual(self.conn.execute("SELECT count(*) FROM seen_turns WHERE chunk_id='old'").fetchone()[0], 0)
+
+
+class MachineStatus(Base):
+    NOW = 1_800_000_000.0  # 2027-01-15 08:00 UTC, EST
+
+    def report(self, machine, age_days=0.1, errors=0, raw=None):
+        d = self.archive / machine
+        d.mkdir(parents=True, exist_ok=True)
+        t = time.gmtime(self.NOW - age_days * 86400 - 5 * 3600)
+        text = raw if raw is not None else (
+            time.strftime("%Y-%m-%d %H:%M:%S", t) + f" EST host={machine} scanned=1 copied=0 skipped_hot=0 errors={errors}\n")
+        (d / ".upload-last.txt").write_text(text, encoding="utf-8")
+
+    def states(self):
+        build.record_machine_status(self.conn, self.archive, self.NOW)
+        return {m: s for m, s in self.conn.execute("SELECT machine, state FROM machine_status")}
+
+    def ingested(self, machine, ts="2026-10-01T00:00:00Z"):
+        self.session(f"{machine}/a.jsonl", [line("user", "hello there", ts=ts)])
+        self.run_build(FakeSD(), now=self.NOW)
+
+    def test_idle_when_upload_fresh_and_nothing_new(self):
+        self.ingested("m")
+        self.report("m")
+        self.assertEqual(self.states(), {"m": "idle"})
+
+    def test_current_when_recent_session(self):
+        self.ingested("m", ts="2027-01-15T07:00:00Z")
+        self.report("m")
+        self.assertEqual(self.states(), {"m": "current"})
+
+    def test_upload_broken_old_errors_garbage_or_missing_with_recent_files(self):
+        for name, kw in (("old", {"age_days": 3}), ("err", {"errors": 2}), ("bad", {"raw": "nonsense\n"})):
+            self.report(name, **kw)
+        self.session("gone/a.jsonl", [line("user", "hi")], mtime=self.NOW - 86400)
+        got = self.states()
+        self.assertEqual({k: got[k] for k in ("old", "err", "bad", "gone")},
+                         dict.fromkeys(("old", "err", "bad", "gone"), "upload-broken"))
+
+    def test_ingest_lag_new_and_failed_files(self):
+        self.ingested("m")
+        self.report("m")
+        self.session("m/b.jsonl", [line("user", "new file")])
+        self.assertEqual(self.states()["m"], "ingest-lag")
+        self.assertEqual(self.count("SELECT files_behind FROM machine_status WHERE machine='m'"), 1)
+        self.ingested("f")
+        self.report("f")
+        self.conn.execute("UPDATE sessions SET status='failed' WHERE machine='f'")
+        self.assertEqual(self.states()["f"], "ingest-lag")
+
+    def test_broken_outranks_lag(self):
+        self.report("m", age_days=9)
+        self.session("m/a.jsonl", [line("user", "hi")])
+        self.assertEqual(self.states(), {"m": "upload-broken"})
+
+    def test_archive_only_folder_without_report(self):
+        self.ingested("old")
+        self.assertEqual(self.states(), {"old": "archive-only"})
+
+    def test_edt_report_time_parsed(self):
+        p = self.root / "r.txt"
+        p.write_text("2026-07-01 08:00:00 EDT host=m scanned=1 copied=0 skipped_hot=0 errors=0\n", encoding="utf-8")
+        at, errors, problem = build.read_upload_report(p)
+        self.assertEqual((at.timestamp(), errors, problem), (1782907200.0, 0, None))
+
+    def test_build_records_and_missing_archive_keeps_record(self):
+        self.ingested("m")
+        self.assertEqual(self.count("SELECT count(*) FROM machine_status"), 1)
+        build.record_machine_status(self.conn, self.root / "absent", self.NOW)
+        self.assertEqual(self.count("SELECT count(*) FROM machine_status"), 1)
+
+    def render(self, now=None):
+        self.conn.commit()
+        when = dt.datetime.fromtimestamp(now or self.NOW, dt.timezone.utc)
+        return "\n".join(query.stats(self.conn, when))
+
+    def test_reader_prints_recorded_state_without_archive(self):
+        self.ingested("m")
+        self.report("m")
+        self.states()
+        shutil.rmtree(self.archive)
+        out = self.render()
+        self.assertIn("IDLE: upload healthy, nothing new", out)
+        self.assertNotIn("STALE", out)
+
+    def test_reader_unknown_when_writer_stopped(self):
+        self.ingested("m")
+        self.report("m")
+        self.states()
+        out = self.render(self.NOW + 3 * 86400)
+        self.assertIn("state UNKNOWN, writer last checked", out)
+        self.assertNotIn("IDLE", out)
+
+    def test_reader_old_store_without_table(self):
+        self.ingested("m")
+        self.conn.execute("DROP TABLE machine_status")
+        out = self.render()
+        self.assertIn("writer has not recorded", out)
+        self.assertIn("UNKNOWN", out)
 
 
 if __name__ == "__main__":

@@ -179,12 +179,14 @@ if ((${#maps[@]} == 0)); then
   else
     maps=("$HOME/.claude/projects=claude/projects" "$HOME/.codex/sessions=codex/sessions"
           "$HOME/.codex/archived_sessions=codex/archived_sessions")
-    # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
-    zdb="$HOME/.zcode/cli/db/db.sqlite"
-    if [ -f "$zdb" ]; then
-      python3 "$exporter" "$zdb" "$state_dir/zcode-export" >/dev/null 2>&1 || errors=$((errors + 1))
-    fi
-    maps+=("$state_dir/zcode-export=zcode/sessions")
+    # ZCode and MiMo keep sessions in sqlite: export them to session files, then copy those like any other.
+    for z in "$HOME/.zcode/cli/db/db.sqlite=zcode" "$HOME/.local/share/mimocode/mimocode.db=mimo"; do
+      zdb="${z%=*}"; zname="${z##*=}"
+      if [ -f "$zdb" ]; then
+        python3 "$exporter" "$zdb" "$state_dir/$zname-export" >/dev/null 2>&1 || errors=$((errors + 1))
+      fi
+      maps+=("$state_dir/$zname-export=$zname/sessions")
+    done
   fi
 fi
 if ! { ((${#maps[@]} == 1)) && [ "${maps[0]}" = none ]; }; then

@@ -116,6 +116,15 @@ PY
   HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null
   check "ZCode sqlite sessions reach the upload folder" '[ -s "$zd/ai/chat_transcripts/hostz/zcode/sessions/ses_1.jsonl" ]'
   check "ZCode database itself is not uploaded" '[ -z "$(find "$zd" -name "*.sqlite")" ]'
+  # MiMo: same tables, its own database and folder.
+  mkdir -p "$zh/.local/share/mimocode"; cp "$zh/.zcode/cli/db/db.sqlite" "$zh/.local/share/mimocode/mimocode.db"
+  HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null
+  check "MiMo sqlite sessions reach the upload folder" '[ -s "$zd/ai/chat_transcripts/hostz/mimo/sessions/ses_1.jsonl" ]'
+  check "MiMo database itself is not uploaded" '[ -z "$(find "$zd" -name "*.db")" ]'
+  printf 'not a database
+' > "$zh/.local/share/mimocode/mimocode.db"
+  check "a failed MiMo export reports an error" '! HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
+  rm -f "$zh/.local/share/mimocode/mimocode.db"
   printf 'not a database
 ' > "$zh/.zcode/cli/db/db.sqlite"
   check "a failed ZCode export reports an error" '! HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
@@ -123,6 +132,7 @@ else
   skip "ZCode export checks" "python3 not installed"
 fi
 
+check "ps1 exports the MiMo database" 'grep -Fq ".local\share\mimocode\mimocode.db" "$here/../bin/ai-transcript-upload.ps1"'
 check "ps1 names the checkout exporter path" 'grep -Fq "tools\transcript_store\zcode_export.py" "$here/../bin/ai-transcript-upload.ps1"'
 
 # Windows twin, when PowerShell is available (CI Linux runners may lack it).

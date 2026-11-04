@@ -85,7 +85,8 @@ The store must have these properties:
 - Claude Code: `~/.claude/projects/**.jsonl`
 - Codex: `~/.codex/sessions/`, `~/.codex/archived_sessions/`
 - ZCode: `~/.zcode/cli/db/db.sqlite`. The uploader exports each session to `zcode/sessions/<id>.jsonl` with `tools/transcript_store/zcode_export.py`; the database itself is not uploaded.
-- Others under each machine's folder, such as MiMo sqlite. Those are skipped.
+- MiMo: `~/.local/share/mimocode/mimocode.db`, the same tables as ZCode. Only edge-dev has it (checked 2026-11-04; al8960ofc, 916-alien, edge-dev3 and hetz have none). The same exporter writes `mimo/sessions/<id>.jsonl`; the database itself is not uploaded.
+- Others under each machine's folder are skipped.
 
 **Archive:** `~/Dropbox/ai/chat_transcripts/<machine>/` holds raw copies, uncompressed. The total is about 25 GB, going back to April 2026. Copies arrive only when someone runs the `claude-transcript-backup` skill (`skills/claude/claude-transcript-backup/SKILL.md`) by hand. Nothing is automatic today.
 
@@ -117,7 +118,6 @@ Albert then asked for a shared database instead (2026-10-29, quoted in the desig
 - Importing the existing review labels.
 
 **NOT in this plan:**
-- MiMo sqlite transcripts. Add them as a follow-up issue.
 - A web UI or dashboard.
 - Postgres, Supabase or shared-db.
 - Re-labelling with any LLM other than ScaleDown.
@@ -686,7 +686,7 @@ If one fails, change the prompt, decision rules or alias table, bump `prompt_ver
 | Disk | The working DB is expected under 2 GB; edge-dev3 has about 1 TB free. |
 | Dropbox conflicted copies | Avoided by the single writer and new-name publishing. Any conflicted copy is moved to `conflicts/` and reported, never deleted. |
 | Dropbox quota | Checked before step 6 (§11). |
-| A machine's upload fails silently | `--stats` shows the last session time per machine. The skill tells sessions to report a machine more than 2 days stale. |
+| A machine's upload fails silently | The writer records each machine's state from its `.upload-last.txt` and archive files; `--stats` reports `UPLOAD-BROKEN`, `INGEST-LAG`, `IDLE`, `CURRENT`, `ARCHIVE-ONLY` or `UNKNOWN`. |
 
 **Rollback:** disable the timers. To undo a bad build, point `CURRENT.json` at the previous versioned file. To remove the store entirely, move `Dropbox/ai/transcript-store/` to Dropbox's trash (recoverable for its history window). The raw archive is untouched.
 

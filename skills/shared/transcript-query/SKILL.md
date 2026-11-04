@@ -15,7 +15,11 @@ topic-labelled segments, published to Dropbox `ai/transcript-store/`. Plan:
    - `--topic <slug> --repo <repo> --since YYYY-MM-DD --text "<words>"` prints
      matching segment subjects and capped text (`--limit N`, default 20).
    - `--stats` prints counts by topic and repo, and each machine's last session
-     time in New York time; `STALE` marks a machine silent for over 2 days.
+     time in New York time, with its state: `CURRENT`, `IDLE` (upload healthy,
+     nothing new), `UPLOAD-BROKEN` (report old, missing or with errors),
+     `INGEST-LAG` (uploaded files not yet in the store), `ARCHIVE-ONLY` (no live
+     uploader) or `UNKNOWN` (writer has not checked recently). Report only
+     `UPLOAD-BROKEN`, `INGEST-LAG` and `UNKNOWN` as problems.
 2. **Raw transcripts only for drill-down, only through the pointer:**
    `--raw <segment id>` prints the raw file path in your own Dropbox archive
    and the turn range. Run `ai-task-gates start --class private-evidence`
