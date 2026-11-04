@@ -85,7 +85,7 @@ The store must have these properties:
 - Claude Code: `~/.claude/projects/**.jsonl`
 - Codex: `~/.codex/sessions/`, `~/.codex/archived_sessions/`
 - ZCode: `~/.zcode/cli/db/db.sqlite` (also on hetz, through the pull). The uploader exports each session to `zcode/sessions/<id>.jsonl` with `tools/transcript_store/zcode_export.py`; the database itself is not uploaded.
-- MiMo: `~/.local/share/mimocode/mimocode.db`, the same tables as ZCode. Only edge-dev has it (checked 2026-11-04; al8960ofc, 916-alien, edge-dev3 and hetz have none). The same exporter writes `mimo/sessions/<id>.jsonl`; the database itself is not uploaded.
+- MiMo: `~/.local/share/mimocode/mimocode.db`, the same tables as ZCode. Only edge-dev has it (checked 2026-11-04; al8960ofc, 916-alien, edge-dev3 and hetz have none). The same exporter writes `mimo/sessions/<id>.jsonl`; the database itself is not uploaded. Proof: the store published 5:49 PM EST 2026-11-04 lists 711 `edge-dev/mimo/sessions/` sessions, 28 from the live database and 683 exported once from the older copies in `edge-dev/mimo/<date>/` (#2359).
 - Others under each machine's folder are skipped.
 
 **Archive:** `~/Dropbox/ai/chat_transcripts/<machine>/` holds raw copies, uncompressed. The total is about 25 GB, going back to April 2026. Copies arrive only when someone runs the `claude-transcript-backup` skill (`skills/claude/claude-transcript-backup/SKILL.md`) by hand. Nothing is automatic today.
