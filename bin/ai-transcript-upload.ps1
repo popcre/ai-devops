@@ -92,27 +92,30 @@ $Root = Join-Path $DropboxRoot 'ai\chat_transcripts'
 if (-not (Test-Path -LiteralPath $Root)) { Write-Error "ai-transcript-upload: $Root not found (Dropbox missing?)"; exit 1 }
 $scanned = 0; $copied = 0; $hot = 0; $errors = 0
 if ($Map.Count -eq 0) {
-  # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
-  $zdb = Join-Path $env:USERPROFILE '.zcode\cli\db\db.sqlite'
-  $zstage = Join-Path $StateDir 'zcode-export'
-  if (Test-Path -LiteralPath $zdb) {
-    $py = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    $zrc = 1
-    if ($py) {
-      $prior = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-      & $py.Source $Exporter $zdb $zstage 2>$null | Out-Null
-      $zrc = $LASTEXITCODE; $ErrorActionPreference = $prior
+  # ZCode and MiMo keep sessions in sqlite: export them to session files, then copy those like any other.
+  $Map = @()
+  foreach ($z in @(@('ZCode', 'zcode', '.zcode\cli\db\db.sqlite'), @('MiMo', 'mimo', '.local\share\mimocode\mimocode.db'))) {
+    $zdb = Join-Path $env:USERPROFILE $z[2]
+    $zstage = Join-Path $StateDir "$($z[1])-export"
+    if (Test-Path -LiteralPath $zdb) {
+      $py = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+      $zrc = 1
+      if ($py) {
+        $prior = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        & $py.Source $Exporter $zdb $zstage 2>$null | Out-Null
+        $zrc = $LASTEXITCODE; $ErrorActionPreference = $prior
+      }
+      if ($zrc -ne 0) {
+        $errors++
+        New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+        Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} {1} export failed (exit {2})" -f [DateTime]::UtcNow.ToString('s'), $z[0], $zrc)
+      }
     }
-    if ($zrc -ne 0) {
-      $errors++
-      New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-      Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} ZCode export failed (exit {1})" -f [DateTime]::UtcNow.ToString('s'), $zrc)
-    }
+    $Map += "$zstage=$($z[1])/sessions"
   }
-  $Map = @("$zstage=zcode/sessions",
-           "$env:USERPROFILE\.claude\projects=claude\projects",
-           "$env:USERPROFILE\.codex\sessions=codex\sessions",
-           "$env:USERPROFILE\.codex\archived_sessions=codex\archived_sessions")
+  $Map += @("$env:USERPROFILE\.claude\projects=claude\projects",
+            "$env:USERPROFILE\.codex\sessions=codex\sessions",
+            "$env:USERPROFILE\.codex\archived_sessions=codex\archived_sessions")
 }
 $D = Join-Path $Root $HostName
 $now = [DateTime]::UtcNow
