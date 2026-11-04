@@ -338,6 +338,24 @@ Not started (all deliberate, see §6): the ZCode identity gap, the dead
   rule: it still holds decisions and dead ends (its §4, §5, §9) that exist
   nowhere else, and its §6.1 is the authoritative ZCode scope. Do not edit
   it further; carry its obligations forward here or in a plan.
+- **Found during the wrap-up housekeeping run (2026-11-04), not acted on
+  (scope freeze) — carried here so they are not lost:**
+  1. `bin/ai-housekeeping` reported `GitHub: UNKNOWN (GitHub unavailable)`
+     with the "install and authenticate gh" hint when run from this session's
+     Git Bash login shell, so its worktree/branch merged-ness rows are
+     UNKNOWN (334 branches). The predecessor's probe fix (PR #2320) was
+     live-verified through the **installed** launcher and reported
+     `GitHub: available`; this run instead saw `bin/ai-gh`'s
+     "quota unknown; refusal back-off" state throughout the session. Next
+     session: check whether the probe fix holds through the repo copy and
+     under an ai-gh refusal state, or whether this was the shell's PATH.
+     Nothing was changed by the tool.
+  2. That housekeeping run reported **1 UNATTRIBUTED handoff** (a
+     `HANDOFF.d/` file without the required contract block) among 48 OPEN /
+     6 UNPROVABLE. Not this session's file; per the concurrency rule nobody
+     but its author may edit it. Next session's housekeeping sweep should
+     route it to its owner. (This file itself is one of the 6 UNPROVABLE —
+     expected, see above.)
 - Decisions dated so a later session cannot unknowingly contradict them:
   2026-11-03 — Muse's scope guard-rails for this workstream were "one test
   file only, no CI runner/manifest wiring, flag the dead `Maintenance` class
