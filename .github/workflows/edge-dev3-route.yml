@@ -1,0 +1,75 @@
+# Reusable runner router for every popcre and u2giants repository (owner
+# request 2026-11-03: CI runs on edge-dev3 first, free GitHub-hosted runners as
+# fallback, so nothing waits on one machine). Logic and tests:
+# tools/ci/edge-dev3-route.sh, tests/test-ci-edge-dev3-route.sh. The host
+# heartbeat is tools/ci/edge-dev3-heartbeat.sh.
+#
+# Caller pattern (keep the literal fallback and the !cancelled() guard so a
+# failed or skipped router can only send the job to GitHub-hosted, never skip
+# it):
+#
+#   jobs:
+#     route:
+#       uses: popcre/ai-devops/.github/workflows/edge-dev3-route.yml@main
+#       with:
+#         heartbeat: ${{ vars.EDGE_DEV3_RUNNER_HEARTBEAT }}
+#     test:
+#       needs: route
+#       if: ${{ !cancelled() }}
+#       runs-on: ${{ fromJSON(needs.route.outputs.runs_on || '"ubuntu-24.04"') }}
+#
+# Fork pull requests and pull_request_target always get the fallback.
+name: edge-dev3 route
+on:
+  workflow_call:
+    inputs:
+      heartbeat:
+        description: the caller's vars.EDGE_DEV3_RUNNER_HEARTBEAT
+        required: false
+        type: string
+        default: ''
+      fallback:
+        description: hosted runner label used whenever edge-dev3 is not proven idle
+        required: false
+        type: string
+        default: ubuntu-24.04
+      self_hosted:
+        description: JSON array of the caller's edge-dev3 runner labels
+        required: false
+        type: string
+        default: '["self-hosted","Linux","X64","ai-devops-linux"]'
+    outputs:
+      runs_on:
+        description: JSON runs-on value (string label or label array)
+        value: ${{ jobs.pick.outputs.runs_on }}
+permissions:
+  contents: read
+jobs:
+  pick:
+    name: Pick runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      runs_on: ${{ steps.route.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: popcre/ai-devops
+          ref: main
+          sparse-checkout: tools/ci/edge-dev3-route.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          path: .edge-dev3-route
+      - id: route
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          HEARTBEAT: ${{ inputs.heartbeat }}
+          FALLBACK: ${{ inputs.fallback }}
+          SELF_HOSTED: ${{ inputs.self_hosted }}
+        run: |
+          out="$(bash .edge-dev3-route/tools/ci/edge-dev3-route.sh)" || out=""
+          [ -n "$out" ] || out="$(jq -cn --arg l "$FALLBACK" '$l')"
+          echo "runs-on: $out"
+          echo "runs_on=$out" >> "$GITHUB_OUTPUT"
