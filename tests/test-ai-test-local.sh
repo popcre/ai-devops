@@ -123,7 +123,7 @@ check 'the reviewer mode targets exactly the remaining reviewer suite' \
 # Everything here is driven by FIXTURES: a fake .runner tree via
 # AI_TEST_RUNNER_DIRS and a stub gh on PATH. The first version of these tests
 # read the machine's real runner install, which meant they silently skipped on
-# both GitHub-hosted CI lanes -- a green pipeline that proved nothing about the
+# the GitHub-hosted CI lanes -- a green pipeline that proved nothing about the
 # guard. Never gate these on a real runner being present.
 GHBIN="$WORK/ghbin"; mkdir -p "$GHBIN"
 RDIR="$WORK/runners/actions-runner"; mkdir -p "$RDIR"
@@ -163,11 +163,11 @@ remote_out="$(guard_run --check-collision)"; remote_rc=$?
 check 'the collision probe clears a busy independent self-hosted runner' \
   '[ "$remote_rc" -eq 0 ] && printf "%s" "$remote_out" | grep -q "this host.*idle"'
 
-# GitHub-hosted and Blacksmith jobs never appear in the self-hosted runner API.
+# GitHub-hosted jobs never appear in the self-hosted runner API.
 # An empty busy roster must therefore be an explicit clear, not a machine-wide
 # stop inferred from other Actions activity.
 stub_gh ''; hosted_out="$(guard_run --check-collision)"; hosted_rc=$?
-check 'the collision probe clears GitHub-hosted and Blacksmith work' \
+check 'the collision probe clears GitHub-hosted work' \
   '[ "$hosted_rc" -eq 0 ] && printf "%s" "$hosted_out" | grep -q "this host.*idle"'
 
 runtime_lock="$WORK/shared-runtime.lock"

@@ -4,8 +4,8 @@
 [#142](https://github.com/popcre/ai-devops/pull/142).
 **Applies to:** `windows-offline` and `windows-reviewer-safety` in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml).
-`linux-offline` runs on Blacksmith `blacksmith-4vcpu-ubuntu-2404`; every
-"hosted" lane below means Blacksmith (owner 2026-10-02: "use blacksmith to run
+`linux-offline` runs on GitHub-hosted `ubuntu-24.04`; every
+"hosted" lane below means GitHub-hosted (owner 2026-10-02: "use blacksmith to run
 your tests").
 
 ## Why this exists
@@ -50,8 +50,8 @@ aggregate job keeps the stable name `windows-offline` and fails closed on any
 lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning both unchanged suites
 to `windows-reviewer-fallback-codex` and `windows-reviewer-fallback-grok` on
-independent Blacksmith `blacksmith-4vcpu-windows-2025` hosts (P6; owner
-2026-10-02: "use blacksmith to run your tests"). The Codex job (or a
+independent GitHub-hosted `windows-2025` hosts (P6; owner
+2026-10-02: "use blacksmith to run your tests", superseded 2026-11-03: Blacksmith removed). The Codex job (or a
 preferred-host Codex pass) is the required pull-request and scheduled proof. The qualified self-hosted
 lane remains available on an explicit full manual run for host-bound diagnosis,
 but it cannot queue or fail a repository-wide verification run. Its 30-minute
@@ -239,7 +239,7 @@ single-repository override for controlled fixtures or scoped inventories;
 missing or malformed registration/status evidence makes the explicit probe
 unknown. It matches only runner names installed on this physical host.
 A busy independent self-hosted runner does not
-block this host, and GitHub-hosted or Blacksmith work remains available. Treat a
+block this host, and GitHub-hosted or GitHub-hosted work remains available. Treat a
 shared installed runtime as same-host contention even when the job was launched
 elsewhere. Such a runtime must expose one common lock-directory path through
 `AI_TEST_SHARED_RUNTIME_LOCK`; the launcher holds it for the complete run.

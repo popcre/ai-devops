@@ -1,6 +1,6 @@
 # Non-required canary for WarpBuild Azure BYOC Windows runners (issue #961).
 # Manual only. Must NOT become a required check. Required CI stays on
-# Blacksmith. WarpBuild is proven only by this canary (owner 2026-10-02).
+# GitHub-hosted. WarpBuild is proven only by this canary (owner 2026-10-02).
 # One job per BYOC stack so a single dispatch proves all three regions.
 name: warpbuild-win2022-canary
 

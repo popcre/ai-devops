@@ -397,7 +397,7 @@ machine up to take one test piece at a time". Such a host instead gets
 (`tools/ci/runner-router.cjs`, `config/ci-runner-routing.json`) gives each idle
 section-only host at most one pull-request section, in `section_lane_order`,
 after the qualified hosts take theirs. A busy, offline or unknown host leaves
-the section on Blacksmith; nothing else in any workflow targets the label.
+the section on GitHub-hosted; nothing else in any workflow targets the label.
 
 ```powershell
 gh api -X POST repos/popcre/ai-devops/actions/runners/<runner-id>/labels -f "labels[]=ai-devops-windows-section"
@@ -409,7 +409,7 @@ matrix hit the 150-minute ceiling (run 37487753427). Sections-scope runs
 long paths and the GLM symlink-privilege test fix #1492) give its
 `section_lane_order`: sections 3, 4, 9, 10, 11, 6 and 1, each finished in 28
 minutes or less (at least 12 minutes of headroom). Sections 2, 5, 7, 8 and 12
-passed in 33-39 minutes (8 once timed out) and stay on Blacksmith. A section
+passed in 33-39 minutes (8 once timed out) and stay on GitHub-hosted. A section
 joins the order only after a measured pass with that headroom; evidence is
 recorded on #1312.
 
