@@ -123,7 +123,7 @@ else
   skip "ZCode export checks" "python3 not installed"
 fi
 
-check "ps1 names the checkout exporter path" 'grep -Fq "..	ools	ranscript_store\zcode_export.py" "$here/../bin/ai-transcript-upload.ps1"'
+check "ps1 names the checkout exporter path" 'grep -Fq "tools\transcript_store\zcode_export.py" "$here/../bin/ai-transcript-upload.ps1"'
 
 # Windows twin, when PowerShell is available (CI Linux runners may lack it).
 if command -v pwsh >/dev/null 2>&1; then
