@@ -11,25 +11,73 @@
 # the immediate lane proves its own doc safety without a full-repo re-check.
 #
 # Usage:
-#   ai-doc-safety [tree]   (default: the caller's repository root)
+#   ai-doc-safety [--changed BASE] [tree] [-- path...]
+#     (default tree: the caller's repository root)
+#   --changed BASE  check only files changed between BASE and HEAD
+#                   (git diff BASE...HEAD); the immediate prose lane default
+#   -- path...      check only these tracked paths
+#   Each check prints progress and stops after AI_DOC_SAFETY_TIMEOUT seconds
+#   (default 300), failing closed instead of hanging (u2giants/theoracle#345).
 #
 # Exit status:
-#   0  both invariants hold on the tree
-#   1  at least one invariant failed (the failing check's output is printed)
+#   0  both invariants hold on the tree (or on the selected files)
+#   1  at least one invariant failed or a check timed out
 #   2  usage or environment error
 set -uo pipefail
 
 REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 
-case "${1:-}" in
-  -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-  '') tree="$(git rev-parse --show-toplevel 2>/dev/null)" ;;
-  -*) printf 'ai-doc-safety: unknown option %s\n' "$1" >&2; exit 2 ;;
-  *) tree="$1" ;;
-esac
-[ -n "${tree:-}" ] || { printf 'ai-doc-safety: %s is not inside a git worktree\n' "${1:-$(pwd)}" >&2; exit 2; }
+base=''; tree=''; paths_given=0; paths=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    --changed) [ -n "${2:-}" ] || { printf 'ai-doc-safety: --changed needs a base ref\n' >&2; exit 2; }
+               base="$2"; shift 2 ;;
+    --changed=*) base="${1#--changed=}"; shift ;;
+    --) shift; paths_given=1; paths=("$@"); break ;;
+    -*) printf 'ai-doc-safety: unknown option %s\n' "$1" >&2; exit 2 ;;
+    *) [ -z "$tree" ] || { printf 'ai-doc-safety: one tree only; put file paths after --\n' >&2; exit 2; }
+       tree="$1"; shift ;;
+  esac
+done
+arg="${tree:-$(pwd)}"
+[ -n "$tree" ] || tree="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -n "${tree:-}" ] || { printf 'ai-doc-safety: %s is not inside a git worktree\n' "$arg" >&2; exit 2; }
 tree="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)" || {
-  printf 'ai-doc-safety: %s is not a git repository\n' "$1" >&2; exit 2
+  printf 'ai-doc-safety: %s is not a git repository (put file paths after --)\n' "$arg" >&2; exit 2
+}
+if [ -n "$base" ]; then
+  [ "$paths_given" -eq 0 ] || { printf 'ai-doc-safety: use --changed or -- paths, not both\n' >&2; exit 2; }
+  changed="$(git -C "$tree" diff --name-only --diff-filter=d "$base...HEAD" 2>/dev/null)" || {
+    printf 'ai-doc-safety: cannot diff %s...HEAD in %s\n' "$base" "$tree" >&2; exit 2
+  }
+  paths=(); while IFS= read -r line; do [ -n "$line" ] && paths+=("$line"); done <<<"$changed"
+  paths_given=1
+fi
+scope_args=()
+if [ "$paths_given" -eq 1 ]; then
+  scope_args=(-- ${paths[@]+"${paths[@]}"})
+  scope_label="${#paths[@]} selected file(s) in $tree"
+else
+  scope_label="every tracked file in $tree"
+fi
+
+limit="${AI_DOC_SAFETY_TIMEOUT:-300}"
+case "$limit" in ''|*[!0-9]*) printf 'ai-doc-safety: AI_DOC_SAFETY_TIMEOUT must be whole seconds\n' >&2; exit 2 ;; esac
+TIMEOUT_CMD=''
+command -v timeout >/dev/null 2>&1 && TIMEOUT_CMD="$(command -v timeout)"
+
+# run_check NAME CMD... — print progress, enforce the hard limit, report time.
+run_check() {
+  local name="$1" started rc=0; shift
+  started="$(date +%s)"
+  printf 'ai-doc-safety: checking %s on %s ...\n' "$name" "$scope_label" >&2
+  if [ -n "$TIMEOUT_CMD" ]; then "$TIMEOUT_CMD" -k 5 "$limit" "$@" || rc=$?; else "$@" || rc=$?; fi
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    printf 'ai-doc-safety: %s did not finish within %ss and was stopped; treat the tree as unchecked\n' "$name" "$limit" >&2
+  fi
+  printf 'ai-doc-safety: %s finished in %ss\n' "$name" "$(( $(date +%s) - started ))" >&2
+  return "$rc"
 }
 
 PYTHON_RUNNER=''
@@ -43,15 +91,15 @@ done
 
 failed=0
 
-if ! bash "$REAL_DIR/ai-public-boundary-check" "$tree"; then
+if ! run_check 'public boundary' bash "$REAL_DIR/ai-public-boundary-check" "$tree" ${scope_args[@]+"${scope_args[@]}"}; then
   printf 'ai-doc-safety: public-boundary invariant failed on %s\n' "$tree" >&2
   failed=1
 fi
 
-if ! "$PYTHON_RUNNER" "$REAL_DIR/../tools/check-markdown-links.py" "$tree"; then
+if ! run_check 'local Markdown links' "$PYTHON_RUNNER" "$REAL_DIR/../tools/check-markdown-links.py" "$tree" ${scope_args[@]+"${scope_args[@]}"}; then
   printf 'ai-doc-safety: local Markdown-link invariant failed on %s\n' "$tree" >&2
   failed=1
 fi
 
-[ "$failed" -eq 0 ] && printf 'ai-doc-safety: public boundary and local Markdown links hold on %s\n' "$tree"
+[ "$failed" -eq 0 ] && printf 'ai-doc-safety: public boundary and local Markdown links hold on %s\n' "$scope_label"
 exit "$failed"
