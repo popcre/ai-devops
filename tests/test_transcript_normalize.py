@@ -159,6 +159,113 @@ class Parsing(unittest.TestCase):
             self.assertEqual(r["bytes_parsed"], len(claude_line("user", LONG).encode()) + 1)
 
 
+class OtherClients(unittest.TestCase):
+    def grok_dir(self, tmp):
+        d = Path(tmp) / "sessions" / "%2Fhome%2Fu%2Frepos%2Fdemo-app" / "grok-sess-1"
+        d.mkdir(parents=True)
+        return d
+
+    def test_grok_chat_turns_dates_and_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.grok_dir(tmp)
+            p = write(d, "chat_history.jsonl", [
+                json.dumps({"type": "system", "content": "SYSTEM PROMPT TEXT " * 3}),
+                json.dumps({"type": "user", "synthetic_reason": "system_reminder", "content": [{"type": "text", "text": "INJECTED REMINDER " * 3}]}),
+                json.dumps({"type": "user", "prompt_index": 0, "content": [{"type": "text", "text": LONG}]}),
+                json.dumps({"type": "reasoning", "encrypted_content": "ENC" * 20, "summary": []}),
+                json.dumps({"type": "assistant", "content": "I will read the pipeline file now to check it.", "model_id": "m",
+                            "tool_calls": [{"id": "1", "name": "read_file", "arguments": "{}"}]}),
+                json.dumps({"type": "tool_result", "tool_call_id": "1", "content": "TOOL OUTPUT DUMP " * 5}),
+            ])
+            write(d, "events.jsonl", [json.dumps({"type": "phase_changed", "ts": "2026-10-23T17:55:48.155Z"}),
+                                      json.dumps({"type": "first_token", "ts": "2026-10-23T18:00:00.000Z"})])
+            r = normalize.parse_file(p)
+            self.assertTrue(r["conversation"])
+            self.assertEqual([t["role"] for t in r["turns"]], ["user", "assistant"])
+            self.assertEqual(r["turns"][1]["tools"], ["read_file"])
+            all_text = " ".join(t["text"] for t in r["turns"])
+            for leak in ("SYSTEM PROMPT", "INJECTED", "TOOL OUTPUT", "ENCENC"):
+                self.assertNotIn(leak, all_text)
+            self.assertEqual(r["meta"]["session_id"], "grok-sess-1")
+            self.assertEqual(r["meta"]["repo"], "demo-app")
+            self.assertEqual(r["meta"]["first_ts"], "2026-10-23T17:55:48.155Z")
+            self.assertEqual(r["meta"]["last_ts"], "2026-10-23T18:00:00.000Z")
+
+    def test_grok_chat_without_events_falls_back_to_file_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = write(self.grok_dir(tmp), "chat_history.jsonl",
+                      [json.dumps({"type": "user", "content": [{"type": "text", "text": LONG}]})])
+            os.utime(p, (1790000000, 1790000000))
+            self.assertTrue(normalize.parse_file(p)["meta"]["last_ts"].startswith("2026-09-2"))
+
+    def test_grok_logs_are_not_conversation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.grok_dir(tmp)
+            logs = {"events.jsonl": {"type": "phase_changed", "ts": "2026-10-23T17:55:48Z", "phase": "x"},
+                    "updates.jsonl": {"method": "session/update", "params": {}, "timestamp": "2026-10-23T17:55:48Z"},
+                    "prompt_history.jsonl": {"prompt": LONG, "session_id": "s", "is_bash": False, "timestamp": "2026-10-23T17:55:48Z"}}
+            for name, rec in logs.items():
+                r = normalize.parse_file(write(d, name, [json.dumps(rec)]))
+                self.assertFalse(r["conversation"], name)
+                self.assertEqual(r["turns"], [])
+                self.assertIsNone(r["meta"]["last_ts"], name)
+
+    def test_kimi_wire_turns_dates_and_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "wd_x" / "session_k1" / "agents" / "main"
+            d.mkdir(parents=True)
+            ev = lambda t, e: json.dumps({"type": "context.append_loop_event", "time": t, "event": e})
+            p = write(d, "wire.jsonl", [
+                json.dumps({"type": "metadata", "created_at": 1790000000000, "protocol_version": "1"}),
+                json.dumps({"type": "profile.bind", "time": 1790000000000, "systemPrompt": "SYSTEM PROMPT TEXT " * 3,
+                            "environmentDisclosure": {"cwd": "/home/u/repos/demo-app"}}),
+                json.dumps({"type": "turn.prompt", "time": 1790000001000, "origin": {"kind": "user"}, "input": [{"type": "text", "text": LONG}]}),
+                json.dumps({"type": "context.append_message", "time": 1790000001000, "message": {
+                    "role": "user", "origin": {"kind": "injection"}, "content": [{"type": "text", "text": "INJECTED REMINDER " * 3}]}}),
+                json.dumps({"type": "context.append_message", "time": 1790000001000, "message": {
+                    "role": "user", "origin": {"kind": "user"}, "content": [{"type": "text", "text": LONG}]}}),
+                ev(1790000002000, {"type": "content.part", "part": {"type": "think", "think": "THINKING TEXT " * 3}}),
+                ev(1790000003000, {"type": "content.part", "part": {"type": "text", "text": "I will read the pipeline file now to check it."}}),
+                ev(1790000004000, {"type": "tool.call", "name": "ReadFile", "args": {"path": "SECRETPATH"}}),
+                ev(1790000005000, {"type": "tool.result", "result": {"output": "TOOL OUTPUT DUMP " * 5}}),
+            ])
+            r = normalize.parse_file(p)
+            self.assertTrue(r["conversation"])
+            self.assertEqual([t["role"] for t in r["turns"]], ["user", "assistant"])
+            self.assertEqual(r["turns"][1]["tools"], ["ReadFile"])
+            all_text = " ".join(t["text"] for t in r["turns"])
+            for leak in ("SYSTEM PROMPT", "INJECTED", "THINKING", "TOOL OUTPUT", "SECRETPATH"):
+                self.assertNotIn(leak, all_text)
+            self.assertEqual(r["meta"]["session_id"], "session_k1")
+            self.assertEqual(r["meta"]["repo"], "demo-app")
+            self.assertTrue(r["meta"]["first_ts"].startswith("2026-09-21T"))
+            self.assertLess(r["meta"]["first_ts"], r["meta"]["last_ts"])
+
+    def test_audit_timestamp_dates_a_claude_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = write(tmp, "audit.jsonl", [json.dumps({
+                "type": "assistant", "session_id": "s", "_audit_timestamp": "2026-10-01T00:00:00Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": LONG}]}})])
+            self.assertEqual(normalize.parse_file(p)["meta"]["last_ts"], "2026-10-01T00:00:00Z")
+
+    def test_logs_and_indexes_are_not_conversation(self):
+        records = {
+            "zcode rollout": {"type": "model_io", "sessionId": "z", "startedAt": "2026-10-01T00:00:00Z",
+                              "request": {"body": {}}, "response": {"text": LONG}},
+            "codex index": {"id": "c", "thread_name": "name", "updated_at": "2026-10-01T00:00:00Z"},
+            "codex history": {"session_id": "c", "text": LONG, "ts": 1790000000},
+            "kimi index": {"sessionDir": "d", "sessionId": "k", "workDir": "w"},
+            "claude metadata": {"type": "permission-mode", "permissionMode": "x", "sessionId": "s"},
+            "workflow journal": {"type": "started", "agentId": "a", "key": "k"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            for label, rec in records.items():
+                r = normalize.parse_file(write(tmp, "f.jsonl", [json.dumps(rec)]))
+                self.assertFalse(r["conversation"], label)
+                self.assertEqual(r["turns"], [], label)
+            self.assertFalse(normalize.parse_file(write(tmp, "empty.jsonl", [], trailing_newline=False))["conversation"])
+
+
 class Repo(unittest.TestCase):
     def test_rules(self):
         cases = {

@@ -52,6 +52,7 @@ INBOX_KEYS = {"question", "src", "prompt_version", "fields"}
 RETENTION_DAYS = 90
 KEEP_VERSIONS = 3
 CONFLICT = "conflicted copy"
+NO_CONVERSATION = "no-conversation"  # a log or index: nothing to date or label
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -216,6 +217,14 @@ class Runner:
         self.conn.execute(f"DELETE FROM {t['seen']} WHERE lineage_id=?", (lineage_id,))
         self.conn.execute("UPDATE sessions SET mtime=0, size=-1 WHERE lineage_id=?", (lineage_id,))
 
+    def drop_path_chunks(self, rel: str):
+        t = self.t
+        ids = [r[0] for r in self.conn.execute(f"SELECT chunk_id FROM {t['chunks']} WHERE path=?", (rel,))]
+        self._delete_segments_for(ids)
+        for cid in ids:
+            self.conn.execute(f"DELETE FROM {t['seen']} WHERE chunk_id=?", (cid,))
+        self.conn.execute(f"DELETE FROM {t['chunks']} WHERE path=?", (rel,))
+
     def _delete_segments_for(self, chunk_ids):
         seg = self.t["segments"]
         for cid in chunk_ids:
@@ -225,9 +234,11 @@ class Runner:
 
     # one session -----------------------------------------------------------
     def needs_work(self, rel: str, st) -> bool:
-        row = self.conn.execute("SELECT mtime, size, status FROM sessions WHERE path=?", (rel,)).fetchone()
-        if row is None or row[0] != st.st_mtime or row[1] != st.st_size or row[2] != "ok":
+        row = self.conn.execute("SELECT mtime, size, status, last_ts FROM sessions WHERE path=?", (rel,)).fetchone()
+        if row is None or row[0] != st.st_mtime or row[1] != st.st_size or row[2] not in ("ok", NO_CONVERSATION):
             return True
+        if row[2] == "ok" and row[3] is None:
+            return True  # written before its format was understood: read it again
         open_chunks = self.conn.execute(
             f"SELECT 1 FROM {self.t['chunks']} WHERE path=? AND status<>'ok' LIMIT 1", (rel,)).fetchone()
         return open_chunks is not None
@@ -238,7 +249,9 @@ class Runner:
         if not self.needs_work(rel, st):
             self.stats["sessions_skipped"] += 1
             return
-        old = self.conn.execute("SELECT bytes_parsed, lineage_id FROM sessions WHERE path=?", (rel,)).fetchone()
+        old = self.conn.execute("SELECT bytes_parsed, lineage_id, status, last_ts FROM sessions WHERE path=?", (rel,)).fetchone()
+        if old and old[2] == "ok" and old[3] is None:
+            self.drop_path_chunks(rel)  # its old chunks used a wrong lineage
         if old and old[0] is not None and st.st_size < old[0]:
             self.drop_lineage(old[1])  # shrunk or rotated: reprocess from byte 0
             self.conn.commit()
@@ -256,7 +269,7 @@ class Runner:
              parsed["redactions"], status))
         self.stats["sessions_processed"] += 1
         ok = self.segment_session(rel, lineage_id, m["repo"], parsed["turns"], st.st_mtime)
-        final = "partial" if parsed["truncated_tail"] else ("ok" if ok else "failed")
+        final = "partial" if parsed["truncated_tail"] else ("failed" if not ok else "ok" if parsed["conversation"] else NO_CONVERSATION)
         self.conn.execute("UPDATE sessions SET status=? WHERE path=?", (final, rel))
         self.conn.commit()
 
