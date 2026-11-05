@@ -174,12 +174,19 @@ out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
 cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
+# The installer reports one of a few honest probe outcomes depending on what
+# the host actually offers: gh logged out, gh logged in (a self-hosted host can
+# still see a login through a keyring or helper the forced env does not cover),
+# the probe deferred because Git Bash or the shared GitHub gate is unavailable,
+# or gh absent. The guarantee is that the probe's outcome is reported and the
+# install is not aborted. Print the output on failure so the next occurrence is
+# diagnosable rather than a bare assertion.
 if command -v gh >/dev/null 2>&1; then
-  grep -Eq 'GitHub CLI is installed but not logged in|GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable\.' <<<"$out" \
-    || fail "PowerShell cross-installer did not report unauthenticated or bounded-deferred optional GitHub probe"
+  grep -Eq 'GitHub CLI is installed (and logged in|but not logged in)|GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable\.' <<<"$out" \
+    || { printf '%s\n' "$out" >&2; fail "PowerShell cross-installer did not report unauthenticated, logged-in or bounded-deferred optional GitHub probe"; }
 else
   grep -Fq 'GitHub CLI not found' <<<"$out" \
-    || fail "PowerShell cross-installer did not handle a missing optional GitHub CLI"
+    || { printf '%s\n' "$out" >&2; fail "PowerShell cross-installer did not handle a missing optional GitHub CLI"; }
 fi
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
