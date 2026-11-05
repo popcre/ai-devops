@@ -98,8 +98,8 @@ def discriminator(root):
         return ""
 
 
-def run(argv, root, env):
-    completed = subprocess.run(argv, cwd=root, env=env, capture_output=True, timeout=30,
+def run(argv, root, env, timeout_seconds=30):
+    completed = subprocess.run(argv, cwd=root, env=env, capture_output=True, timeout=timeout_seconds,
                                check=False)
     require(completed.returncode == 0, "read-only source-release proof command failed")
     require(len(completed.stdout) <= 262144, "oversized proof response")
@@ -201,9 +201,11 @@ def remote_ref(root, repo, helper, env):
     public_binary("/usr/bin/python3")
     child["PYTHON_RUNNER"] = "/usr/bin/python3"
     public_binary("/bin/bash")
+    # Give this genuine shared-gate read a finite ten-minute queue allowance;
+    # this is not a guarantee about queue duration. Local commands stay short.
     raw = run(["/bin/bash", "--noprofile", "--norc", str(helper),
                "api", "--hostname", "github.com", "--method", "GET",
-               f"repos/{repo}/git/ref/heads/develop"], root, child)
+               f"repos/{repo}/git/ref/heads/develop"], root, child, timeout_seconds=600)
     value = parse(raw)
     require(type(value) is dict and set(value) <= {"ref", "node_id", "url", "object"}
             and {"ref", "object"} <= set(value), "malformed exact-ref response")
