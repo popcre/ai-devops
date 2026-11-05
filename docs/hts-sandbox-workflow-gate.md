@@ -294,3 +294,28 @@ registration is corrected; the focused guard covers75 dependencies and passes.
 Bash syntax, policy schema and whitespace checks pass. The owner-scoped history-detail route is explicit; the admin-only cross-user
 audit route is excluded from ordinary workflow admission. These are source/test results;
 merge, protected installation and DesignFlow #94 live acceptance remain open.
+
+### Post-run diagnostic metadata (schema 9)
+
+This separate closed profile is not another evaluation epoch. Its only HTTP
+route is `POST /api/hts-rag/jobs/diagnostic-tags`, with server-verified admin
+access, one stored owner, and at most 83 exact artifact-proven identities in
+alsand sandbox. It grants no provider, inquiry, answer, retry, Apply, SQL,
+production, schema or cloud authority. Existing profiles 1–8 are unchanged.
+
+Three scenarios are closed: `inspect` permits one read and zero writes, with
+`snapshot_state: not-yet-captured` and a null snapshot binding;
+`evaluation-mark` permits at most one `active:true` write and three reads;
+`synthetic-roundtrip` permits exactly one synthetic identity, sequence
+`true,false,true`, at most three writes and four reads. The final synthetic
+state is marked. Every write uses a fresh server snapshot. An ambiguous write
+is never resent: a later invocation may only observe the same exact set.
+
+The declaration binds the actual served source/revision/digest, a 24-hour
+expiry, exact count, and six opaque SHA-256 values: run, terminal ledger,
+private identity manifest, terminal readiness, observed snapshot, and executor.
+The maintained executor is `scripts/hts-diagnostic-inquiry-tags.js`. Initial
+inspection records an actual private server snapshot; a write declaration
+must subsequently pin it. No fabricated snapshot or authority flags are valid.
+Original evaluation ledgers, reports, status, costs, questions and history stay
+unchanged; only the trusted diagnostic marker controls attention/actions.

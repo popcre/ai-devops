@@ -299,3 +299,10 @@ execution lease or refund is created. Correlation IDs are not credentials and
 no cryptographic control of later same-UID execution is claimed. Existing
 result absence and exclusive output writing still prevent output reuse. A lost
 response requires inspection of actual evidence before execution is decided.
+
+The separate HTS schema-9 diagnostic metadata profile permits only exact,
+admin-owned sandbox tagging after terminal evaluation. Its closed scenarios
+are read-only inspection, one-way evaluation marking, and a single-synthetic
+mark/reverse/mark proof. It has zero provider authority and does not extend
+any frozen-evaluation epoch, budget or expiry. See
+[the HTS gate contract](hts-sandbox-workflow-gate.md#post-run-diagnostic-metadata-schema-9).

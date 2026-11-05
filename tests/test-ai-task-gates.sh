@@ -2184,6 +2184,44 @@ PY
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused earlier repair purpose for identity epoch'
 check 'identity join continuation refuses earlier repair purpose' "rc 3 '$WF' check $WF_ARGS"
+# Separate zero-provider metadata closeout. This never renews an evaluation epoch.
+for scenario in inspect evaluation-mark synthetic-roundtrip; do
+python3 - "$ROOT" "$WF" "$scenario" <<'PY_METADATA'
+import datetime, importlib.util, json, pathlib, subprocess, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+root, scenario = sys.argv[2:]
+head = subprocess.check_output(['git', '-C', root, 'rev-parse', 'HEAD'], text=True).strip()
+value = {**mod.TARGET, 'schema_version': 9,
+    'issue': 'https://github.com/popcre/designflow-backend/issues/278',
+    'scope': 'hts-frozen-r9-diagnostic-metadata-closeout',
+    'routes': ['POST /api/hts-rag/jobs/diagnostic-tags'],
+    'executor': 'scripts/hts-diagnostic-inquiry-tags.js',
+    'authority': 'verified-admin-single-stored-owner-sandbox-only',
+    'scenario': scenario, 'snapshot_state': 'not-yet-captured' if scenario == 'inspect' else 'captured',
+    'limits': {**mod.DIAGNOSTIC_TAG_COMMON_LIMITS, **mod.DIAGNOSTIC_TAG_SCENARIOS[scenario]},
+    'forbidden': mod.TARGET['forbidden'] + ['provider-call', 'new-inquiry', 'answer', 'retry'],
+    'source_head': head, 'served_source': head,
+    'served_revision': 'popcre-albert-core-sandbox-synthetic', 'served_digest': 'sha256:' + 'a'*64,
+    'target_count': 1,
+    'expires_at': (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'bindings': {key: None if key == 'snapshot_sha256' and scenario == 'inspect' else 'b'*64 for key in mod.DIAGNOSTIC_TAG_BINDINGS}}
+pathlib.Path(root + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(value))
+PY_METADATA
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm "declare synthetic diagnostic metadata $scenario"
+check "diagnostic metadata admits closed $scenario" "rc 0 '$WF' check $WF_ARGS"
+check "diagnostic metadata $scenario refuses SQL" "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY_METADATA'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+value = json.loads(path.read_text()); value['routes'] = ['POST /api/hts-rag/jobs']
+path.write_text(json.dumps(value))
+PY_METADATA
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused paid inquiry route'
+check "diagnostic metadata $scenario refuses provider route" "rc 3 '$WF' check $WF_ARGS"
+done
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

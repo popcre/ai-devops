@@ -559,5 +559,96 @@ class FrozenPrepackIdentityContinuationTarget(FrozenJsonLiteralContinuationTarge
         self.assertEqual(self.validate(original), 0)
 
 
+
+class DiagnosticMetadataCloseout(unittest.TestCase):
+    validate = ClosedRecoveryTarget.validate
+
+    def setUp(self):
+        ClosedRecoveryTarget.setUp(self)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test", "-c",
+                        "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"], check=True)
+        head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.value = {**copy.deepcopy(TARGET.TARGET), "schema_version": 9,
+            "issue": "https://github.com/popcre/designflow-backend/issues/278",
+            "scope": "hts-frozen-r9-diagnostic-metadata-closeout",
+            "routes": ["POST /api/hts-rag/jobs/diagnostic-tags"],
+            "executor": "scripts/hts-diagnostic-inquiry-tags.js",
+            "authority": "verified-admin-single-stored-owner-sandbox-only",
+            "scenario": "evaluation-mark", "snapshot_state": "captured",
+            "limits": {**TARGET.DIAGNOSTIC_TAG_COMMON_LIMITS, **TARGET.DIAGNOSTIC_TAG_SCENARIOS["evaluation-mark"]},
+            "forbidden": TARGET.TARGET["forbidden"] + ["provider-call", "new-inquiry", "answer", "retry"],
+            "source_head": head, "served_source": head,
+            "served_revision": "popcre-albert-core-sandbox-synthetic",
+            "served_digest": "sha256:" + "a" * 64,
+            "expires_at": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "target_count": 2,
+            "bindings": {key: "b" * 64 for key in TARGET.DIAGNOSTIC_TAG_BINDINGS}}
+
+    def test_exact_zero_provider_metadata_only_target(self):
+        self.assertEqual(self.validate(self.value), 0)
+
+    def test_scenarios_are_closed_and_honest(self):
+        for scenario, limits in TARGET.DIAGNOSTIC_TAG_SCENARIOS.items():
+            value = copy.deepcopy(self.value)
+            value.update(scenario=scenario, limits={**TARGET.DIAGNOSTIC_TAG_COMMON_LIMITS, **limits})
+            value["target_count"] = 1
+            if scenario == "inspect":
+                value["snapshot_state"] = "not-yet-captured"
+                value["bindings"]["snapshot_sha256"] = None
+            self.assertEqual(self.validate(value), 0)
+            for key in ["maximum_state_changes", "maximum_metadata_reads", "state_sequence"]:
+                bad = copy.deepcopy(value); bad["limits"][key] = None
+                self.assertEqual(self.validate(bad), 1)
+            if scenario == "synthetic-roundtrip":
+                value["target_count"] = 2
+                self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.value); value["scenario"] = "arbitrary"
+        self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.value); value["snapshot_state"] = "not-yet-captured"
+        self.assertEqual(self.validate(value), 1)
+
+    def test_count_is_strict_and_bounded(self):
+        for count in [0, 84, True, 1.0, "2", None]:
+            with self.subTest(count=count):
+                value = copy.deepcopy(self.value); value["target_count"] = count
+                self.assertEqual(self.validate(value), 1)
+        for count in [1, 83]:
+            value = copy.deepcopy(self.value); value["target_count"] = count
+            self.assertEqual(self.validate(value), 0)
+
+    def test_all_bindings_required_exact_and_private_opaque(self):
+        for key in TARGET.DIAGNOSTIC_TAG_BINDINGS:
+            for bad in [None, "a" * 63, "A" * 64, "private-id"]:
+                value = copy.deepcopy(self.value); value["bindings"][key] = bad
+                self.assertEqual(self.validate(value), 1)
+            value = copy.deepcopy(self.value); del value["bindings"][key]
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.value); value["bindings"]["extra"] = "a" * 64
+        self.assertEqual(self.validate(value), 1)
+
+    def test_no_authority_route_or_budget_expansion(self):
+        for key, bad in [("schema_version", 8), ("authority", "owner"),
+                         ("api_origin", "https://api.designflow.app/api/core"),
+                         ("scope", "general-metadata"), ("executor", "other.js"),
+                         ("routes", ["POST /api/hts-rag/jobs"]),
+                         ("forbidden", [])]:
+            value = copy.deepcopy(self.value); value[key] = bad
+            self.assertEqual(self.validate(value), 1)
+        for key in self.value["limits"]:
+            value = copy.deepcopy(self.value); value["limits"][key] = None
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.value); value["provider"] = {"model": "anything"}
+        self.assertEqual(self.validate(value), 1)
+
+    def test_source_digest_and_expiry_fail_closed(self):
+        for key, bad in [("source_head", "f" * 40), ("served_source", "c" * 40),
+                         ("served_digest", "mutable:latest"), ("served_revision", "production"),
+                         ("expires_at", "2020-01-01T00:00:00Z"),
+                         ("expires_at", (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%SZ"))]:
+            value = copy.deepcopy(self.value); value[key] = bad
+            self.assertEqual(self.validate(value), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

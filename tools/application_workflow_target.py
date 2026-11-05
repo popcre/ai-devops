@@ -397,6 +397,71 @@ def frozen_prepack_identity_continuation(value, root):
     return frozen_evaluation(profile, root)
 
 
+
+DIAGNOSTIC_TAG_SCENARIOS = {
+    "inspect": {"maximum_target_count": 83, "maximum_metadata_reads": 1,
+                "maximum_state_changes": 0, "state_sequence": []},
+    "evaluation-mark": {"maximum_target_count": 83, "maximum_metadata_reads": 3,
+                        "maximum_state_changes": 1, "state_sequence": [True]},
+    "synthetic-roundtrip": {"maximum_target_count": 1, "maximum_metadata_reads": 4,
+                            "maximum_state_changes": 3, "state_sequence": [True, False, True]},
+}
+DIAGNOSTIC_TAG_COMMON_LIMITS = {
+    "maximum_provider_calls": 0, "synthetic_only_reversal": True,
+    "stop_on_unknown_write": True, "retry_unknown_write": False,
+    "preserve_original_evaluation": True,
+}
+DIAGNOSTIC_TAG_BINDINGS = (
+    "run_sha256", "terminal_ledger_sha256", "identity_manifest_sha256",
+    "terminal_readiness_sha256", "snapshot_sha256", "client_sha256",
+)
+
+
+def diagnostic_metadata_closeout(value, root):
+    """A separate zero-provider metadata action, never an evaluation epoch."""
+    if not isinstance(value, dict):
+        return False
+    expected = {
+        **TARGET, "schema_version": 9,
+        "issue": "https://github.com/popcre/designflow-backend/issues/278",
+        "scope": "hts-frozen-r9-diagnostic-metadata-closeout",
+        "routes": ["POST /api/hts-rag/jobs/diagnostic-tags"],
+        "executor": "scripts/hts-diagnostic-inquiry-tags.js",
+        "authority": "verified-admin-single-stored-owner-sandbox-only",
+        "limits": {**DIAGNOSTIC_TAG_COMMON_LIMITS, **DIAGNOSTIC_TAG_SCENARIOS.get(value.get("scenario"), {})},
+        "scenario": value.get("scenario"),
+        "snapshot_state": "not-yet-captured" if value.get("scenario") == "inspect" else "captured",
+        "forbidden": TARGET["forbidden"] + ["provider-call", "new-inquiry", "answer", "retry"],
+    }
+    if value.get("scenario") not in DIAGNOSTIC_TAG_SCENARIOS:
+        return False
+    dynamic = {"source_head", "served_source", "served_revision", "served_digest",
+               "expires_at", "target_count", "bindings"}
+    if value.keys() != expected.keys() | dynamic:
+        return False
+    if not all(exact(value[key], item) for key, item in expected.items()):
+        return False
+    if type(value["target_count"]) is not int or not 1 <= value["target_count"] <= DIAGNOSTIC_TAG_SCENARIOS[value["scenario"]]["maximum_target_count"]:
+        return False
+    for key, pattern in (("served_source", r"[a-f0-9]{40}"),
+                         ("served_revision", r"popcre-albert-core-sandbox-[a-z0-9-]+"),
+                         ("served_digest", r"sha256:[a-f0-9]{64}")):
+        if not isinstance(value[key], str) or not re.fullmatch(pattern, value[key]):
+            return False
+    if value["served_source"] != value["source_head"]:
+        return False
+    bindings = value["bindings"]
+    if not isinstance(bindings, dict) or set(bindings) != set(DIAGNOSTIC_TAG_BINDINGS):
+        return False
+    if value["scenario"] == "inspect" and bindings["snapshot_sha256"] is not None:
+        return False
+    if not all((key == "snapshot_sha256" and value["scenario"] == "inspect" and item is None)
+               or (isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item))
+               for key, item in bindings.items()):
+        return False
+    return bounded_metadata(value, root, synthetic=False)
+
+
 def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
@@ -473,7 +538,8 @@ def main():
                      or frozen_evaluation(value, root)
                      or frozen_operational_continuation(value, root)
                      or frozen_json_literal_continuation(value, root)
-                     or frozen_prepack_identity_continuation(value, root)) else 1
+                     or frozen_prepack_identity_continuation(value, root)
+                     or diagnostic_metadata_closeout(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 
