@@ -9,7 +9,7 @@
 #     available suite rather than silently dropping coverage.
 #
 # Convention: bin/<name> and bin/<name>.cmd map to tests/test-<name>.sh.
-# Explicit path_suites entries cover non-obvious names. Shared surfaces
+# Explicit companion_suites globs cover non-obvious names. Shared surfaces
 # (selector itself, harness, workflow runner, fixtures) select everything.
 set -uo pipefail
 
@@ -152,11 +152,25 @@ selection_manifest_rules() {
 # sorted and deduplicated. Prints every available suite when the change is too
 # broad or too unknown to narrow safely. Prints nothing when the change cannot
 # affect any Bash suite.
+# selection_affected_suites <root>
+# Reads newline-delimited changed paths on stdin. The remaining arguments are
+# the available suite file names. Prints the selected suites, one per line,
+# sorted and deduplicated. Prints every available suite when the change is too
+# broad or too unknown to narrow safely. Prints nothing when the change cannot
+# affect any Bash suite.
+#
+# Pattern-based derivation replaces the old hand-maintained path_suites map
+# (plan step 1.3). Three layers, evaluated per path:
+#   1. select_all_globs  — shared surfaces keep every suite (fail-closed).
+#   2. companion_suites  — glob patterns give authoritative narrow mappings.
+#   3. Convention         — bin/<name> -> test-<name>.sh, tests/test-*.sh -> self,
+#                          tools/<dir>/ -> test-<dir>.sh, plus category rules.
+# Anything that matches no layer selects every suite rather than dropping cover.
 selection_affected_suites() {
   local root="$1"; shift
   local -a available=("$@")
   local -A avail_set=()
-  local name path suite base
+  local name path suite base dir
   for name in "${available[@]}"; do
     avail_set["$name"]=1
   done
@@ -200,42 +214,8 @@ selection_affected_suites() {
       continue
     fi
 
-    # Explicit path -> suites map wins over broader globs so a named leaf
-    # (e.g. tools/ci/runner-router.cjs) can stay narrow inside a shared tree.
+    # Shared surfaces whose change must keep every suite.
     if [ -n "$rules" ]; then
-      local mapped=''
-      mapped="$(jq -r --arg p "$path" '.affected_suite_rules.path_suites[$p][]? // empty' <<<"$rules" 2>/dev/null)"
-      if [ -n "$mapped" ]; then
-        # A mapped file that no longer exists (deleted or renamed) may leave
-        # dangling references the mapped suites do not cover (issue #1563).
-        if [ ! -e "$root/$path" ]; then
-          select_all=true
-          continue
-        fi
-        local added=0
-        while IFS= read -r suite; do
-          [ -n "$suite" ] || continue
-          if [ -n "${avail_set[$suite]:-}" ]; then
-            add_suite "$suite"
-            added=$((added + 1))
-          fi
-        done <<<"$mapped"
-        # A declared mapping that names no discovered suite cannot prove cover.
-        [ "$added" -gt 0 ] || select_all=true
-        [ "$select_all" = true ] && continue
-        # Companion suites (e.g. every bin/*.cmd also proves the launcher).
-        while IFS= read -r glob; do
-          [ -n "$glob" ] || continue
-          if selection_glob_match "$glob" "$path"; then
-            while IFS= read -r suite; do
-              [ -n "$suite" ] && add_suite "$suite"
-            done < <(jq -r --arg g "$glob" '.affected_suite_rules.companion_suites[$g][]? // empty' <<<"$rules" 2>/dev/null)
-          fi
-        done < <(jq -r '.affected_suite_rules.companion_suites | keys[]?' <<<"$rules" 2>/dev/null)
-        continue
-      fi
-
-      # Shared surfaces whose change must keep every suite.
       local glob
       while IFS= read -r glob; do
         [ -n "$glob" ] || continue
@@ -247,6 +227,24 @@ selection_affected_suites() {
       [ "$select_all" = true ] && continue
     fi
 
+    # Companion suites give authoritative narrow mappings (plan step 1.3).
+    # When a companion glob matches, those suites replace the convention so
+    # a declared narrow map is not widened to select_all.
+    local companion_hit=false
+    if [ -n "$rules" ]; then
+      local cglob
+      while IFS= read -r cglob; do
+        [ -n "$cglob" ] || continue
+        if selection_glob_match "$cglob" "$path"; then
+          companion_hit=true
+          while IFS= read -r suite; do
+            [ -n "$suite" ] && add_suite "$suite"
+          done < <(jq -r --arg g "$cglob" '.affected_suite_rules.companion_suites[$g][]? // empty' <<<"$rules" 2>/dev/null)
+        fi
+      done < <(jq -r '.affected_suite_rules.companion_suites | keys[]?' <<<"$rules" 2>/dev/null)
+    fi
+    [ "$companion_hit" = true ] && continue
+
     case "$path" in
       skills/*)
         add_skills
@@ -257,21 +255,16 @@ selection_affected_suites() {
         continue
         ;;
       *.ps1)
-        # Windows PowerShell has its own runner, but this Bash suite checks
-        # every tracked .ps1 for the ASCII-only source contract. A narrowed
-        # PR must catch that failure before its full merge-group run.
         add_suite "test-windows-scripts.sh"
         continue
         ;;
       *.psm1|*.psd1)
-        # PowerShell modules/data have their own runner.
         continue
         ;;
       tests/test-*.sh)
         base="${path##*/}"
         if [ -n "${avail_set[$base]:-}" ]; then
           add_suite "$base"
-          # A test of the selector itself pulls the selector contracts.
           case "$base" in
             test-test-selection.sh|test-windows-bash-selection.sh|test-linux-offline-shards.sh)
               add_suite "test-verify-closure.sh"
@@ -280,7 +273,17 @@ selection_affected_suites() {
           esac
           continue
         fi
-        # A removed or renamed suite cannot be assumed covered by nothing.
+        select_all=true
+        continue
+        ;;
+      tools/*/*)
+        # Directory convention: tools/<dir>/<file> -> test-<dir>.sh
+        dir="${path#tools/}"; dir="${dir%%/*}"
+        local dir_norm="${dir//_/-}"
+        if [ -n "${avail_set[test-$dir_norm.sh]:-}" ]; then
+          add_suite "test-$dir_norm.sh"
+          continue
+        fi
         select_all=true
         continue
         ;;
@@ -300,7 +303,6 @@ selection_affected_suites() {
           add_suite "test-$base.sh"
           continue
         fi
-        # Convention miss: do not invent coverage.
         select_all=true
         continue
         ;;
