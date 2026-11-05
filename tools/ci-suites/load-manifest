@@ -82,6 +82,47 @@ entries="$(jq -c '{file: input_filename, body: .}' "${suite_files[@]}")" || {
   die "a suite file failed to read: see the jq error above"
 }
 
+# Suites are discovered by file pattern, so a new test runs on both systems
+# without any manifest edit (plan_ci-process-repair.md step 1.3). The per-suite
+# JSON is then only an exception: section placement, platform or timing. A
+# discovered suite with no JSON is placed in a section here rather than left
+# out of the Windows lane, so a missing entry can never skip sections.
+TEST_DIR="${AI_CI_TEST_DIR:-$SELF_DIR/../../tests}"
+[ -d "$TEST_DIR" ] || die "test directory is missing: $TEST_DIR"
+section_count="$(jq -r '.windows_offline_section_count // 0' "$GLOBAL")"
+ps_shard="$(jq -r '.windows_offline_powershell_shard // 0' "$GLOBAL")"
+declare -A declared=()
+for f in "${suite_files[@]}"; do
+  declared["$(basename "$f" .json)"]=1
+done
+auto=0
+while IFS= read -r path; do
+  name="$(basename "$path")"
+  case "$name" in test-all.sh|test-all.ps1) continue ;; esac
+  [ -n "${declared[$name]:-}" ] && continue
+  case "$name" in
+    *.sh) kind=bash ;;
+    *.ps1) kind=powershell ;;
+    *) continue ;;
+  esac
+  sec=''
+  if [ "$section_count" -gt 0 ]; then
+    if [ "$kind" = powershell ] && [ "$ps_shard" -gt 0 ]; then
+      sec="$ps_shard"
+    else
+      auto=$((auto + 1))
+      sec=$(( (auto - 1) % section_count + 1 ))
+    fi
+  fi
+  if [ -n "$sec" ]; then
+    body="$(jq -cn --arg k "$kind" --argjson s "$sec" '{kind: $k, windows: ["offline"], windows_section: $s}')"
+  else
+    body="$(jq -cn --arg k "$kind" '{kind: $k, windows: ["offline"]}')"
+  fi
+  line="$(jq -cn --arg f "$SUITE_DIR/$name.json" --argjson b "$body" '{file: $f, body: $b}')"
+  entries="${entries:+$entries$'\n'}$line"
+done < <(find "$TEST_DIR" -maxdepth 1 -type f \( -name 'test-*.sh' -o -name 'test-*.ps1' \) | LC_ALL=C sort)
+
 # --slurpfile turns the newline-delimited entries and the global file into
 # arrays the assembly program can validate as a whole.
 entries_file="$(mktemp)"

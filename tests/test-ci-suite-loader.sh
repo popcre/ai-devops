@@ -13,14 +13,14 @@ check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
 # A miniature valid repository: two hosted sections, a reviewer-safety suite,
 # a Linux-only suite, a PowerShell suite, and a suspension.
-mkdir -p "$TMP/ci-suites"
+mkdir -p "$TMP/ci-suites" "$TMP/tests"
 printf '%s\n' '{"windows_offline_section_count":2,"windows_offline_powershell_shard":2,"suspended_bash":["test-slow.sh"],"affected_suite_rules":{"select_all_globs":["shared/**"]}}' >"$TMP/global.json"
 printf '%s\n' '{"kind":"bash","linux_seconds":10,"windows":["offline"],"windows_section":1}' >"$TMP/ci-suites/test-alpha.sh.json"
 printf '%s\n' '{"kind":"bash","windows":["offline","reviewer-safety"]}' >"$TMP/ci-suites/test-beta.sh.json"
 printf '%s\n' '{"kind":"powershell"}' >"$TMP/ci-suites/test-gamma.ps1.json"
 printf '%s\n' '{"kind":"bash"}' >"$TMP/ci-suites/test-delta.sh.json"
 
-load() { AI_CI_SUITE_MANIFEST="$TMP/global.json" AI_CI_SUITE_DIR="$TMP/ci-suites" bash "$LOADER" "$@"; }
+load() { AI_CI_SUITE_MANIFEST="$TMP/global.json" AI_CI_SUITE_DIR="$TMP/ci-suites" AI_CI_TEST_DIR="$TMP/tests" bash "$LOADER" "$@"; }
 load_rc=0; load_out="$(load)" || load_rc=$?
 
 printf '%s\n' '{
@@ -92,15 +92,32 @@ stray_rc=0; printf 'notes\n' >"$TMP/ci-suites/README.md"; load >/dev/null 2>&1 |
 check 'a non-JSON file in the suite directory fails closed' '[ "$stray_rc" -eq 2 ]'
 rm -f "$TMP/ci-suites/README.md"
 
+# Self-registration (plan_ci-process-repair.md step 1.3): a suite file with no
+# per-suite JSON still runs on both systems, and a missing entry can never skip
+# sections.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/tests/test-newsuite.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/tests/test-other.sh"
+new_rc=0; new_out="$(load)" || new_rc=$?
+check 'a suite with no manifest entry is still assembled' '[ "$new_rc" -eq 0 ]'
+check 'an unlisted suite runs on Linux' \
+  "printf '%s' \"\$new_out\" | jq -e '.bash | index(\"test-newsuite.sh\") != null'"
+check 'an unlisted suite runs on Windows by default' \
+  "printf '%s' \"\$new_out\" | jq -e '.windows_offline_bash | index(\"test-newsuite.sh\") != null'"
+check 'an unlisted suite lands in a hosted section, never skipping sections' \
+  "printf '%s' \"\$new_out\" | jq -e '.windows_offline_shards | any(.[]; index(\"test-newsuite.sh\") != null)'"
+check 'every unlisted suite is placed in exactly one section' \
+  "test \"\$(printf '%s' \"\$new_out\" | jq '[.windows_offline_shards[][]] | map(select(. == \"test-newsuite.sh\" or . == \"test-other.sh\")) | length')\" = 2"
+rm -f "$TMP/tests/test-newsuite.sh" "$TMP/tests/test-other.sh"
+
 # The repository's own configuration must load and satisfy the same contract.
 repo_rc=0; repo_out="$(bash "$LOADER")" || repo_rc=$?
 if [ "$repo_rc" -eq 0 ]; then ok 'the repository manifest loads through the loader'; else bad 'the repository manifest loads through the loader'; fi
 repo_inventory="$(printf '%s\n' "$repo_out" | jq -r '(.bash + .powershell)[]' | tr -d '\r' | LC_ALL=C sort)"
-disk_inventory="$(ls "$ROOT/config/ci-suites" | sed 's/\.json$//' | LC_ALL=C sort)"
+disk_inventory="$(find "$ROOT/tests" -maxdepth 1 -type f \( -name 'test-*.sh' -o -name 'test-*.ps1' \) ! -name 'test-all.*' -printf '%f\n' | LC_ALL=C sort)"
 if [ -n "$repo_inventory" ] && [ "$repo_inventory" = "$disk_inventory" ]; then
-  ok 'the repository inventory matches the checked-in per-suite files'
+  ok 'the repository inventory matches the suites discovered by file pattern'
 else
-  bad 'the repository inventory matches the checked-in per-suite files'
+  bad 'the repository inventory matches the suites discovered by file pattern'
 fi
 repo_sections="$(printf '%s\n' "$repo_out" | jq '.windows_offline_shards | length')"
 declared_sections="$(jq -r '.windows_offline_section_count' "$ROOT/config/ci-suite-manifest.json")"
