@@ -25,7 +25,7 @@ check "reporter parses as valid bash" "bash -n '$CMD'"
 : > "$LOG"
 GH_FIXTURE_ISSUE='' bash "$CMD" --run-url 'https://example/run/1' --repo o/r \
   --per-test --results 'linux-offline=failure doc-safety=failure' \
-  --pr-number 7 --head-sha aaaa --event pull_request >"$TMP/out1" 2>&1
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out1" 2>&1
 check "two result failures open two issues" \
   "test \"\$(grep -c 'opened' '$TMP/out1')\" = 2"
 check "issue title is ci-red: <job>" \
@@ -37,7 +37,7 @@ check "issue body includes PR and Head SHA" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='' bash "$CMD" --run-url 'https://example/run/2' --repo o/r \
   --per-test --results 'windows-offline-complete=cancelled' \
-  --pr-number 7 --head-sha aaaa --event pull_request >"$TMP/out2" 2>&1
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out2" 2>&1
 check "capacity failure opens no ci-red issue" \
   "! grep -q 'opened' '$TMP/out2' && ! grep -q 'issue create' '$LOG'"
 check "capacity failure is reported as skipped" \
@@ -47,7 +47,7 @@ check "capacity failure is reported as skipped" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='' bash "$CMD" --run-url 'https://example/run/3' --repo o/r \
   --per-test --results 'linux-offline=failure windows-offline-complete=timed_out' \
-  --pr-number 7 --head-sha aaaa --event pull_request >"$TMP/out3" 2>&1
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out3" 2>&1
 check "mixed run: result gets one issue, capacity none" \
   "test \"\$(grep -c 'opened' '$TMP/out3')\" = 1"
 
@@ -55,7 +55,7 @@ check "mixed run: result gets one issue, capacity none" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='42' bash "$CMD" --run-url 'https://example/run/4' --repo o/r \
   --per-test --results 'linux-offline=failure' \
-  --pr-number 7 --head-sha aaaa --event pull_request >"$TMP/out4" 2>&1
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out4" 2>&1
 check "existing ci-red issue is updated" \
   "grep -q 'updated issue #42' '$TMP/out4'"
 check "update does not create a second issue" \
@@ -65,7 +65,7 @@ check "update does not create a second issue" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='42' GH_FIXTURE_GREEN_COUNT='1' \
   bash "$CMD" --run-url 'https://example/run/5' --repo o/r \
-  --per-test --results 'linux-offline=success' --event pull_request >"$TMP/out5" 2>&1
+  --per-test --results 'linux-offline=success' --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out5" 2>&1
 check "green run comments on the open issue" \
   "grep -q 'issue comment 42' '$LOG' && grep -q 'ci-red-green' '$LOG'"
 
@@ -73,7 +73,7 @@ check "green run comments on the open issue" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='42' GH_FIXTURE_GREEN_COUNT='3' \
   bash "$CMD" --run-url 'https://example/run/6' --repo o/r \
-  --per-test --results 'linux-offline=success' --event pull_request >"$TMP/out6" 2>&1
+  --per-test --results 'linux-offline=success' --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out6" 2>&1
 check "three green runs close the issue" \
   "grep -q 'issue close 42' '$LOG' && grep -q 'closed #42' '$TMP/out6'"
 
@@ -81,7 +81,7 @@ check "three green runs close the issue" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='42' GH_FIXTURE_GREEN_COUNT='2' \
   bash "$CMD" --run-url 'https://example/run/7' --repo o/r \
-  --per-test --results 'linux-offline=success' --event pull_request >"$TMP/out7" 2>&1
+  --per-test --results 'linux-offline=success' --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out7" 2>&1
 check "two green runs do not close" \
   "! grep -q 'issue close' '$LOG'"
 
@@ -90,7 +90,7 @@ check "two green runs do not close" \
 many=""
 for i in $(seq 1 8); do many="$many job$i=failure"; done
 GH_FIXTURE_ISSUE='' CI_RED_CAP=5 bash "$CMD" --run-url 'https://example/run/8' --repo o/r \
-  --per-test --results "$many" --pr-number 7 --head-sha aaaa --event pull_request \
+  --per-test --results "$many" --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request \
   >"$TMP/out8" 2>&1
 check "cap limits issues per run to 5" \
   "test \"\$(grep -c 'opened' '$TMP/out8')\" = 5"
@@ -101,9 +101,61 @@ check "cap message appears for overflow" \
 : > "$LOG"
 GH_FIXTURE_ISSUE='' bash "$CMD" --run-url 'https://example/run/9' --repo o/r \
   --per-test --results 'linux-offline=failure' \
-  --pr-number 7 --head-sha aaaa --event pull_request >"$TMP/out9" 2>&1
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --event pull_request >"$TMP/out9" 2>&1
 check "ci-red label is created before attach" \
   "grep -q 'label create ci-red' '$LOG'"
+
+# PR identity prevents both failure updates and greens crossing PRs.
+: > "$LOG"
+GH_FIXTURE_ISSUE=42 bash "$CMD" --run-url https://example/run/10 --repo o/r \
+  --per-test --results 'linux-offline=success' --pr-number 8 \
+  --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/cross-pr" 2>&1
+check "green for another PR cannot touch the existing issue" "! grep -q 'issue comment' '$LOG'"
+GH_FIXTURE_ISSUE=42 bash "$CMD" --run-url https://example/run/10 --repo o/r \
+  --per-test --results 'linux-offline=failure' --pr-number 8 \
+  --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/cross-failure" 2>&1
+check "failure on another PR creates its own issue" "grep -q opened '$TMP/cross-failure'"
+
+# API job names remain intact, and quoted titles are matched as data.
+: > "$LOG"
+GH_FIXTURE_ISSUE=42 GH_FIXTURE_TITLE='ci-red: Linux offline "quoted"\suite (PR #7)' \
+  bash "$CMD" --run-url https://example/run/10 --repo o/r --per-test \
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/names" 2>&1
+check "API spaces and quoted titles update the exact job" "grep -q 'updated issue #42' '$TMP/names' && test \"\$(grep -c opened '$TMP/names')\" = 1"
+check "updates refresh the fixer source body" "grep -q 'issue edit 42' '$LOG' && grep -q 'Head SHA:' '$LOG'"
+
+# The flood cap counts creates, while existing incidents still get updates.
+: > "$LOG"
+GH_FIXTURE_ISSUE=42 CI_RED_CAP=1 bash "$CMD" --run-url https://example/run/10 --repo o/r \
+  --per-test --results 'new-job=failure linux-offline=failure another-job=failure' \
+  --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/cap-update" 2>&1
+check "cap preserves updates after a create" "grep -q 'updated issue #42' '$TMP/cap-update' && test \"\$(grep -c opened '$TMP/cap-update')\" = 1"
+check "label created once per run" "test \"\$(grep -c 'label create' '$LOG')\" = 1"
+check "failure records a green-streak reset" "grep -q ci-red-failure '$LOG'"
+
+: > "$LOG"
+GH_FIXTURE_ISSUE=42 GH_FIXTURE_COMMENTS='[{"body":"<!-- ci-red-green --> old1"},{"body":"<!-- ci-red-green --> old2"},{"body":"<!-- ci-red-green --> old3"},{"body":"<!-- ci-red-failure -->"},{"body":"<!-- ci-red-green --> new"}]' \
+  bash "$CMD" --run-url https://example/run/10 --repo o/r --per-test \
+  --results linux-offline=success --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/reset" 2>&1
+check "failure resets accumulated greens" "! grep -q 'issue close' '$LOG'"
+
+: > "$LOG"
+GH_FIXTURE_ISSUE=42 GH_FIXTURE_COMMENTS='[{"body":"<!-- ci-red-green --> same"},{"body":"<!-- ci-red-green --> same"},{"body":"<!-- ci-red-green --> same"}]' \
+  bash "$CMD" --run-url https://example/run/10 --repo o/r --per-test \
+  --results linux-offline=success --pr-number 7 --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$TMP/duplicate" 2>&1
+check "reruns of one green report cannot close" "! grep -q 'issue close' '$LOG'"
+
+for identity in '--pr-number unknown --head-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  '--pr-number 7 --head-sha unknown' '--pr-number 7 --head-sha aaaa'; do
+  : > "$LOG"
+  # Deliberately split the fixture option pairs.
+  if bash "$CMD" --run-url https://example/run/10 --repo o/r --per-test \
+    --results job=failure $identity >"$TMP/invalid" 2>&1; then
+    check "invalid identity rejected: $identity" false
+  else
+    check "invalid identity creates no orphan: $identity" "test ! -s '$LOG'"
+  fi
+done
 
 printf 'report-ci-red: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
