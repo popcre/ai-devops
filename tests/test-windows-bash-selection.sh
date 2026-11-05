@@ -15,7 +15,7 @@ check() {
     [ "$#" -lt 3 ] || cat "$3" >&2
   fi
 }
-run() { AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$ROOT/tests/test-all.sh" "$@"; }
+run() { AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" AI_CI_SUITE_DIR="$CONFIGS" AI_CI_TEST_DIR="$SUITES" bash "$ROOT/tests/test-all.sh" "$@"; }
 
 help="$(bash "$ROOT/tests/test-all.sh" --help)"
 check 'help lists the guarded reviewer exclusion and list mode' \
@@ -90,14 +90,17 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-sec-a.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-sec-c.sh"
 chmod +x "$SUITES"/*.sh
 # lane_manifest <count> <owner> [suite:section ...]: declares <count> hosted
-# sections; every listed pair owns its section, and any hosted-eligible suite
-# left unlisted deliberately stays section-less to build a broken fixture.
+# sections; every listed pair owns its section. A suite with no per-suite JSON
+# now self-registers onto both systems (plan step 1.3), so the fixture's
+# Linux-only suite carries an explicit {"kind":"bash"} exception instead of
+# relying on omission to keep it off the Windows lane.
 lane_manifest() {
   local count="$1" owner="$2" pair suite section
   shift 2
   printf '{"windows_offline_section_count":%s,"windows_offline_powershell_shard":%s}\n' "$count" "$owner" >"$MANIFEST"
   printf '%s\n' '{"kind":"bash","windows":["offline","reviewer-safety"]}' >"$CONFIGS/test-windows-defect.sh.json"
-  rm -f "$CONFIGS/test-linux-only.sh.json" "$CONFIGS/test-sec-a.sh.json" "$CONFIGS/test-sec-c.sh.json"
+  printf '%s\n' '{"kind":"bash"}' >"$CONFIGS/test-linux-only.sh.json"
+  rm -f "$CONFIGS/test-sec-a.sh.json" "$CONFIGS/test-sec-c.sh.json"
   for pair in "$@"; do
     suite="${pair%%:*}"; section="${pair##*:}"
     printf '{"kind":"bash","windows":["offline"],"windows_section":%s}\n' "$section" >"$CONFIGS/$suite.json"
@@ -161,10 +164,10 @@ check 'a manifest with no declared sections refuses to run one' '[ "$sec_absent_
 # section owns them and every other section skips them by declaration.
 if command -v pwsh >/dev/null 2>&1; then
   lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
-  owner_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 2/2 2>&1)"
+  owner_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" AI_CI_SUITE_DIR="$CONFIGS" AI_CI_TEST_DIR="$SUITES" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 2/2 2>&1)"
   check 'a section that does not own the PowerShell suites says so and skips them' \
     'printf "%s" "$owner_out" | grep -Fq "POWERSHELL SUITES run in section 1 of 2"'
-  guard_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -Shard 1/2 2>&1)"
+  guard_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" AI_CI_SUITE_DIR="$CONFIGS" AI_CI_TEST_DIR="$SUITES" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -Shard 1/2 2>&1)"
   guard_rc=$?
   check 'PowerShell ordinary Windows sectioning still requires the reviewer split' \
     '[ "$guard_rc" -ne 0 ] && printf "%s" "$guard_out" | grep -Fq -- "Windows -Shard requires -ExcludeReviewerSafety."'
@@ -173,9 +176,12 @@ else
 fi
 
 # Complete sections discover all names independently of the PR manifest.
+# An unlisted suite self-registers onto both systems (plan step 1.3); a suite
+# that must stay off Windows opts out with an explicit {"kind":"bash"}.
 lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
 printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-000-future.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-z-nonwindows.sh"
+printf '%s\n' '{"kind":"bash"}' >"$CONFIGS/test-z-nonwindows.sh.json"
 complete_all="$(run --list | grep '^test-' | LC_ALL=C sort)"
 complete_one="$(run --shard 1/3 --list | grep '^test-')"
 complete_two="$(run --shard 2/3 --list | grep '^test-')"
@@ -206,8 +212,8 @@ check 'complete sectioning rejects --only and duplicate --shard' \
 run --shard 1/3 --changed-since HEAD --list >/dev/null 2>&1; complete_changed_rc=$?
 check 'complete sectioning accepts an affected-suite filter' \
   '[ "$complete_changed_rc" -eq 0 ]'
-check 'complete sections leave ordinary declared PR sections unchanged' \
-  '[ "$(run --windows-offline --exclude-reviewer-safety --shard 1/2 --list | grep "^test-")" = test-sec-a.sh ]'
+check 'an unlisted suite joins the Windows sections instead of skipping them' \
+  '[ "$(run --windows-offline --exclude-reviewer-safety --shard 1/2 --list | grep "^test-" | LC_ALL=C sort | tr "\n" " ")" = "test-000-future.sh test-sec-a.sh " ]'
 
 if command -v pwsh >/dev/null 2>&1; then
   # Copy only the existing entry points into an isolated miniature repository.
@@ -244,7 +250,7 @@ exit 0
 BASH
   export AI_TEST_EXEC_TRACE="$TMP/ps-execution.log"
   if command -v cygpath >/dev/null 2>&1; then AI_TEST_EXEC_TRACE="$(cygpath -m "$AI_TEST_EXEC_TRACE")"; fi
-  ps_run(){ AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ps_fixture/invoke-selection.ps1" "$@"; }
+  ps_run(){ AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" AI_CI_SUITE_DIR="$CONFIGS" AI_CI_TEST_DIR="$ps_fixture" pwsh -NoProfile -File "$ps_fixture/invoke-selection.ps1" "$@"; }
   : > "$AI_TEST_EXEC_TRACE"
   ps_run -Shard 1/3 > "$TMP/ps-complete-1.log" 2>&1; ps_complete1=$?
   ps_run -Shard 2/3 > "$TMP/ps-complete-2.log" 2>&1; ps_complete2=$?
