@@ -103,13 +103,14 @@ alive() {
 }
 
 wait_reaped() {
-  # Observe both native PIDs in one process. The six-second upper bound
-  # covers the guard's 250ms EOF grace, 2s force fallback and Windows
-  # taskkill startup, while staying below the fixture's 15s natural exit.
+  # Observe both native PIDs in one process. The upper bound must stay below
+  # the fixture's 15s natural exit, but outside the loaded-runner variance
+  # that made a 6s bound kill healthy runs (plan_ci-process-repair.md finding
+  # G: timeouts set inside normal variance).
   "$NODE" -e '
     const pids = process.argv.slice(1).map(Number)
     if (!pids.length || pids.some(p => !Number.isInteger(p) || p <= 0)) process.exit(2)
-    const deadline = Date.now() + 6000
+    const deadline = Date.now() + 11000
     const check = () => {
       const live = pids.some(pid => { try { process.kill(pid, 0); return true } catch { return false } })
       if (!live) process.exit(0)
