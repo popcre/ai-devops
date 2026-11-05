@@ -22,7 +22,8 @@ For this server use `hetz`:
   `ai/chat_transcripts/hetz/codex/home/ai/.codex/sessions/`
   plus `~/.codex/session_index.jsonl` →
   `.../codex/home/ai/.codex/session_index.jsonl`
-  (single file: `rclone copyto`, not `copy`).
+  (the nightly job uses an exact filename filter from the parent folder so
+  the standard 15-minute quiet period also applies to the index).
 - ZCode: filtered session exports → `ai/chat_transcripts/hetz/zcode/sessions/`;
   rollout captures with either `model-io-session_` or `model-io-sess_` prefix
   → `ai/chat_transcripts/hetz/zcode/rollout/`.
