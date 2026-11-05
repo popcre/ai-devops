@@ -2045,6 +2045,57 @@ PY
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused false hard-cost claim'
 check 'frozen evaluation refuses false hard ten-dollar ceiling' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['limits']['hard_cost_ceiling'] = False
+target.update(schema_version=6, scope='hts-frozen-r9-operational-continuation')
+target['operational_continuation'] = dict(
+    purpose='pre-provider-immutable-input-repair', receipt_sha256='1'*64,
+    original_ledger_sha256='2'*64, original_admission_sha256='3'*64,
+    original_manifest_sha256='4'*64, original_readiness_sha256='5'*64,
+    original_runner_sha256='6'*64, original_served_source='d'*40,
+    original_served_revision='popcre-albert-core-sandbox-00000-original',
+    original_served_digest='sha256:'+'7'*64,
+    original_expires_at=target['expires_at'], original_schema_version=5)
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare one synthetic original-v5 repair epoch'
+check 'continuation admits only its distinct bounded metadata profile' "rc 0 '$WF' check $WF_ARGS"
+check 'continuation still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY'
+import datetime, json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['expires_at'] = (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused continuation expiry renewal'
+check 'continuation refuses renewal of original expiry' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['expires_at'] = target['operational_continuation']['original_expires_at']
+target['operational_continuation']['original_schema_version'] = 6
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused continuation chaining'
+check 'continuation refuses a second operational transition' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['operational_continuation'].update(original_schema_version=5, purpose='any-failure')
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused arbitrary continuation purpose'
+check 'continuation refuses a general failure exception' "rc 3 '$WF' check $WF_ARGS"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

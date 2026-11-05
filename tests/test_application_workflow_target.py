@@ -415,5 +415,87 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
         self.assertEqual(self.validate(candidate), 1)
 
 
+class FrozenOperationalContinuationTarget(FrozenEvaluationTarget):
+    def setUp(self):
+        super().setUp()
+        self.declaration.update(schema_version=6, scope="hts-frozen-r9-operational-continuation")
+        self.declaration["operational_continuation"] = {
+            "purpose": "pre-provider-immutable-input-repair", "receipt_sha256": "1" * 64,
+            "original_ledger_sha256": "2" * 64, "original_admission_sha256": "3" * 64,
+            "original_manifest_sha256": "4" * 64, "original_readiness_sha256": "5" * 64,
+            "original_runner_sha256": "6" * 64, "original_served_source": "d" * 40,
+            "original_served_revision": "popcre-albert-core-sandbox-00000-original",
+            "original_served_digest": "sha256:" + "7" * 64,
+            "original_expires_at": self.declaration["expires_at"], "original_schema_version": 5,
+        }
+
+    def test_frozen_lifetime_is_bounded_to_72_hours_without_renewal(self):
+        # The existing v5 72-hour boundary tests remain unchanged. V6 additionally
+        # requires the original expiry, rather than granting another lifetime.
+        for key in ("expires_at", "original_expires_at"):
+            candidate = copy.deepcopy(self.declaration)
+            if key == "expires_at":
+                candidate[key] = BoundedAcceptanceTarget.expiry(hours=2)
+            else:
+                candidate["operational_continuation"][key] = BoundedAcceptanceTarget.expiry(hours=2)
+            self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["expires_at"] = candidate["operational_continuation"]["original_expires_at"] = BoundedAcceptanceTarget.expiry(hours=73)
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_every_original_epoch_binding_is_required_and_typed(self):
+        for key in self.declaration["operational_continuation"]:
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["operational_continuation"][key]
+            self.assertEqual(self.validate(candidate), 1)
+            for bad in (None, True, [], {}):
+                candidate = copy.deepcopy(self.declaration)
+                candidate["operational_continuation"][key] = bad
+                self.assertEqual(self.validate(candidate), 1)
+
+    def test_original_hash_source_and_digest_bindings_reject_malformed_values(self):
+        for key in ("receipt_sha256", "original_ledger_sha256", "original_admission_sha256",
+                    "original_manifest_sha256", "original_readiness_sha256", "original_runner_sha256"):
+            for bad in ("A" * 64, "a" * 63, "x" * 64):
+                candidate = copy.deepcopy(self.declaration)
+                candidate["operational_continuation"][key] = bad
+                self.assertEqual(self.validate(candidate), 1)
+        for key, bad in (("original_served_source", "HEAD"), ("original_served_source", "A" * 40),
+                         ("original_served_revision", "production"), ("original_served_digest", "7" * 64)):
+            candidate = copy.deepcopy(self.declaration)
+            candidate["operational_continuation"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_no_chaining_general_failure_exception_or_failed_retry(self):
+        for key, bad in (("original_schema_version", 6), ("original_schema_version", 5.0),
+                         ("purpose", "any-operational-error"), ("maximum_transitions", 2),
+                         ("retry_failed_inquiry", True), ("reset_ledger", True)):
+            candidate = copy.deepcopy(self.declaration)
+            candidate["operational_continuation"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["routes"] += ["POST /api/hts-rag/jobs/:id/retry"]
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_new_runner_and_source_are_required(self):
+        for key, value in (("original_runner_sha256", self.declaration["bindings"]["runner_sha256"]),
+                           ("original_served_source", self.declaration["served_source"])):
+            candidate = copy.deepcopy(self.declaration)
+            candidate["operational_continuation"][key] = value
+            self.assertEqual(self.validate(candidate), 1)
+        for bad in (None, True, [], "not-bindings"):
+            self.assertEqual(self.validate({**self.declaration, "bindings": bad}), 1)
+
+    def test_schema_scope_and_original_v5_are_not_mixed(self):
+        for key, bad in (("schema_version", 6.0), ("schema_version", True),
+                         ("scope", "hts-frozen-r9-diagnostic-evaluation")):
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+        original = copy.deepcopy(self.declaration)
+        original.update(schema_version=5, scope="hts-frozen-r9-diagnostic-evaluation")
+        self.assertEqual(self.validate(original), 1)
+        del original["operational_continuation"]
+        self.assertEqual(self.validate(original), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

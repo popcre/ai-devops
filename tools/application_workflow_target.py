@@ -284,6 +284,49 @@ def frozen_evaluation(value, root):
     return bounded_metadata(value, root, synthetic=False, maximum_hours=72)
 
 
+CONTINUATION_SCOPE = "hts-frozen-r9-operational-continuation"
+CONTINUATION_FIELDS = {
+    "purpose", "receipt_sha256", "original_ledger_sha256", "original_admission_sha256",
+    "original_manifest_sha256", "original_readiness_sha256", "original_runner_sha256",
+    "original_served_source", "original_served_revision", "original_served_digest",
+    "original_expires_at", "original_schema_version",
+}
+
+
+def frozen_operational_continuation(value, root):
+    """Declare one original-v5 repair epoch; the executor verifies private proof."""
+    if (not isinstance(value, dict) or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 6 or value.get("scope") != CONTINUATION_SCOPE):
+        return False
+    continuation, bindings = value.get("operational_continuation"), value.get("bindings")
+    if (not isinstance(bindings, dict) or not isinstance(continuation, dict)
+            or continuation.keys() != CONTINUATION_FIELDS
+            or continuation["purpose"] != "pre-provider-immutable-input-repair"
+            or type(continuation["original_schema_version"]) is not int
+            or continuation["original_schema_version"] != 5
+            or not isinstance(continuation["original_expires_at"], str)
+            or continuation["original_expires_at"] != value.get("expires_at")):
+        return False
+    for field in ("receipt_sha256", "original_ledger_sha256", "original_admission_sha256",
+                  "original_manifest_sha256", "original_readiness_sha256", "original_runner_sha256"):
+        if not isinstance(continuation[field], str) or not re.fullmatch(r"[a-f0-9]{64}", continuation[field]):
+            return False
+    for field, pattern in (
+            ("original_served_source", r"[a-f0-9]{40}"),
+            ("original_served_revision", r"popcre-albert-core-sandbox-[a-z0-9-]+"),
+            ("original_served_digest", r"sha256:[a-f0-9]{64}")):
+        if not isinstance(continuation[field], str) or not re.fullmatch(pattern, continuation[field]):
+            return False
+    # An unchanged runner cannot implement this explicit operational transition.
+    if (continuation["original_runner_sha256"] == bindings.get("runner_sha256")
+            or continuation["original_served_source"] == value.get("served_source")):
+        return False
+    # Reuse every existing v5 constraint without changing its admission behavior.
+    original_profile = {key: item for key, item in value.items() if key != "operational_continuation"}
+    original_profile.update(schema_version=5, scope="hts-frozen-r9-diagnostic-evaluation")
+    return frozen_evaluation(original_profile, root)
+
+
 def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
@@ -357,7 +400,8 @@ def main():
                      or bounded_acceptance(value, root)
                      or bounded_legacy_proof(value, root)
                      or bounded_legacy_envelope(value, root)
-                     or frozen_evaluation(value, root)) else 1
+                     or frozen_evaluation(value, root)
+                     or frozen_operational_continuation(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 
