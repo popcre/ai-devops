@@ -332,7 +332,7 @@ class QueueTimeoutContract(unittest.TestCase):
         self.assertEqual(command.call_args.kwargs["timeout"], 600)
         self.assertEqual(command.call_count, 1)
         self.assertEqual(command.call_args.args[0][-1], "repos/popcre/designflow-frontend/git/ref/heads/develop")
-        self.assertIn("/fixture/helper", command.call_args.args[0])
+        self.assertIn(str(Path("/fixture/helper")), command.call_args.args[0])
 
     def test_remote_deadline_refuses_once_without_retry_or_receipt(self):
         with patch.object(release, "public_binary"), patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("fixture", 600)) as command:
