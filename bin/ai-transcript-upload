@@ -28,6 +28,13 @@
 # On Windows (Git Bash) it hands off to ai-transcript-upload.ps1.
 set -u
 
+CLEANUP_DIRS=()
+cleanup_dirs() {
+  local d
+  for d in ${CLEANUP_DIRS[@]+"${CLEANUP_DIRS[@]}"}; do rm -rf "$d"; done
+}
+trap cleanup_dirs EXIT
+
 self="${BASH_SOURCE[0]}"
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)
@@ -114,6 +121,7 @@ fetch_verified() { # DIR
 update_self() {
   local d changed=0
   d="$(mktemp -d)" || return 1
+  CLEANUP_DIRS+=("$d")
   if ! fetch_verified "$d"; then rm -rf "$d"; return 1; fi
   same_text "$d/zcode_export.py" "$cfg_dir/zcode_export.py" || mv -f "$d/zcode_export.py" "$cfg_dir/zcode_export.py" || changed=2
   if ! same_text "$d/transcript-upload" "$cfg_dir/transcript-upload"; then
@@ -146,6 +154,7 @@ if [ "$mode" = check ]; then
   rc=0
   [ -x "$cfg_dir/transcript-upload" ] || { echo "ERROR $cfg_dir/transcript-upload not installed"; rc=1; }
   main_dir="$(mktemp -d)"
+  CLEANUP_DIRS+=("$main_dir")
   if fetch_verified "$main_dir"; then
     for f in transcript-upload zcode_export.py; do
       same_text "$main_dir/$f" "$cfg_dir/$f" || { echo "ERROR installed $f is stale: differs from merged main"; rc=1; }
