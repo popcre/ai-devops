@@ -20,7 +20,25 @@
 
 **Closed 2026-10-31:** all nine steps done; #2050 and #2059–#2063 closed.
 
-**A fresh session starts with Stage B (steps 2–4) and Stage D (step 8), which need no installs.** Step 1 writes and tests its scripts at once, but installing them on hosts waits while the observation-week freeze window file (#1948) is present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocks B or D. Step 5 is a quality check before step 6.
+**Hetz follow-up closed 2026-11-04 (#2373):** the repo-owned Ubuntu
+`bin/ai-transcripts-to-dropbox-hetz` now runs through the existing nightly
+launcher, exports filtered ZCode sessions and sends them directly through rclone.
+Two installed runs passed with zero errors and zero raw snapshot changes.
+A fresh published store, downloaded and hash-verified, contains 54 distinct
+searchable hetz ZCode conversations with zero missing sessions or newest-message
+date mismatches. Six old snapshot folders were removed recoverably; the newest
+remains, and a real Dropbox restore test passed. Counts-only acceptance:
+[#2373](https://github.com/popcre/ai-devops/issues/2373#issuecomment-6648587461).
+The edge-dev3 pull remains supported; its additional source files do not increase
+the distinct conversation count. Source: PRs #2377, #2378 and #2381.
+Installation and recovery instructions are in the
+[hetz transcript skill](skills/zcode/transcript-to-dropbox/SKILL.md).
+
+**Fresh-session entry:** all nine stages and the hetz follow-up are complete;
+do not repeat implementation or backfill. No next step or blocker remains on
+#2373. The sequence below records the original implementation order.
+
+**Original implementation sequence (historical):** Stage B (steps 2–4) and Stage D (step 8) needed no installs. Step 1 wrote and tested its scripts at once, but installing them on hosts waited while the observation-week freeze window file (#1948) was present on that host; check first with `ai-task-gates start --class installation`. The freeze never blocked B or D. Step 5 was a quality check before step 6.
 
 **Order:** environment check (§12) → B → (D in parallel) → A install when unfrozen → C → E.
 
@@ -342,6 +360,11 @@ Store them in `tools/transcript_store/redact_patterns.tsv`; `normalize.py` and t
   hetz has Dropbox only if `~/Dropbox` exists for the run user. If it does not, the hetz upload instead runs from edge-dev3 as a pull: `rsync -a` over SSH into `<D>`, using the same hot-file and `.partial` rules.
 - **Staying current:** each daily run replaces the installed copy from merged `main` and restarts once, so no host needs hand copying; a failed update never stops the upload and adds `self_update=failed` to the log line. `--check` / `-Check` fails when the copy differs from `main` or `main` cannot be read. `install.sh` and the Windows installer run `--sync` / `-Sync`, which skips hosts without Dropbox and keeps an existing hetz pull and logged-off task.
 - **hetz ZCode:** the edge-dev3 pull copies each account's ZCode database into its cache, exports it there, and uploads to `hetz/<account>/zcode/sessions/`.
+  Since #2373, hetz also exports directly to `hetz/zcode/sessions/` through
+  the repo-owned rclone transport. Its nightly job no longer creates dated raw
+  database copies; it preserves Claude, Codex, the quiet session index, and both
+  rollout filename patterns. This transport is reinstalled from merged source
+  when updated; the standard uploader's independent self-update does not apply.
 - **Install:** schedule it daily: a systemd user timer like `bin/ai-install-session-tmp` on Linux, and `Register-ScheduledTask` like `bin/ai-housekeeping` on Windows (task runs as `ahazan`, only when logged on is not required).
 - **Skill:** update `skills/claude/claude-transcript-backup/SKILL.md` to say it is now automatic and the skill is the manual fallback.
 
