@@ -1,9 +1,11 @@
 """Offline adversarial tests of the closed HTS retry declaration."""
 import copy
+import datetime
 import importlib.util
 import json
 import pathlib
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -86,6 +88,85 @@ class ClosedRecoveryTarget(unittest.TestCase):
     def test_duplicate_nested_keys_are_refused(self):
         self.path.write_text(json.dumps(TARGET.RECOVERY_TARGET).replace(
             '"maximum_requeues": 1', '"maximum_requeues": 1, "maximum_requeues": 1'))
+        with patch("sys.argv", ["validator", str(self.root), "target.json"]):
+            self.assertEqual(TARGET.main(), 1)
+
+
+class BoundedAcceptanceTarget(ClosedRecoveryTarget):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
+        head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.declaration = {
+            **copy.deepcopy(TARGET.TARGET),
+            "schema_version": 2,
+            "scope": "hts-bounded-synthetic-acceptance",
+            "issue": "https://github.com/popcre/designflow-backend/issues/123",
+            "routes": copy.deepcopy(TARGET.ACCEPTANCE_ROUTES),
+            "limits": copy.deepcopy(TARGET.ACCEPTANCE_LIMITS),
+            "fixture_prefix": "AI-QA-20261105-acceptance-",
+            "source_head": head,
+            "expires_at": self.expiry(hours=1),
+        }
+
+    @staticmethod
+    def expiry(**delta):
+        return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_bounded_profile_admits_its_source_and_expiry(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+
+    def test_expired_distant_and_malformed_expiry_refused(self):
+        for expiry in [self.expiry(seconds=-1), self.expiry(hours=25), "never", True,
+                       "2026-02-30T12:00:00Z", self.expiry(hours=1).replace("Z", "+00:00")]:
+            with self.subTest(expiry=expiry):
+                self.assertEqual(self.validate({**self.declaration, "expires_at": expiry}), 1)
+
+    def test_source_must_be_an_existing_ancestor_not_an_argument(self):
+        for head in ["f" * 40, "HEAD", "--help", True, "A" * 40]:
+            with self.subTest(head=head):
+                self.assertEqual(self.validate({**self.declaration, "source_head": head}), 1)
+
+    def test_ambient_git_context_cannot_redirect_source_check(self):
+        with patch.dict("os.environ", {"GIT_DIR": str(self.root / "absent"), "GIT_WORK_TREE": str(self.root / "absent")}):
+            self.assertEqual(self.validate(self.declaration), 0)
+
+    def test_every_limit_and_safety_boolean_is_closed_and_type_strict(self):
+        for name, original in TARGET.ACCEPTANCE_LIMITS.items():
+            changes = [not original, 0] if isinstance(original, bool) else [original + 1, float(original), True, 0]
+            for changed in changes:
+                with self.subTest(name=name, value=changed):
+                    declaration = copy.deepcopy(self.declaration)
+                    declaration["limits"][name] = changed
+                    self.assertEqual(self.validate(declaration), 1)
+
+    def test_profile_cannot_expand_scope_or_write_real_records(self):
+        for field, value in [
+            ("api_origin", "https://api.designflow.app/api/core"),
+            ("service", "popcre-core-prod"),
+            ("repository", "popcre/other"),
+            ("issue", "https://github.com/popcre/other/issues/123"),
+            ("issue", "https://github.com/popcre/designflow-backend/issues/0"),
+            ("fixture_prefix", "real-item-"),
+            ("fixture_prefix", "AI-QA-20261105-../"),
+            ("routes", self.declaration["routes"] + ["POST /api/hts-rag/jobs/:id/apply"]),
+            ("routes", ["POST /arbitrary"]),
+            ("forbidden", []),
+            ("extra", "allow"),
+            ("schema_version", True),
+        ]:
+            with self.subTest(field=field):
+                self.assertEqual(self.validate({**self.declaration, field: value}), 1)
+
+    def test_missing_fields_and_duplicate_limits_refused(self):
+        for field in self.declaration:
+            candidate = copy.deepcopy(self.declaration)
+            del candidate[field]
+            self.assertEqual(self.validate(candidate), 1)
+        self.path.write_text(json.dumps(self.declaration).replace(
+            '"maximum_fixtures": 2', '"maximum_fixtures": 2, "maximum_fixtures": 2'))
         with patch("sys.argv", ["validator", str(self.root), "target.json"]):
             self.assertEqual(TARGET.main(), 1)
 

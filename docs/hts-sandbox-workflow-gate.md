@@ -1,5 +1,50 @@
 # Reviewed HTS sandbox application workflow
 
+## Current status
+
+The two version-1 issue94 declarations remain unchanged. Version 2 adds a
+strict, source-pinned and expiring synthetic acceptance declaration under
+ai-devops #2395. Ubuntu is the reported failure platform; the validator uses
+portable Python and the existing Bash admission path on Ubuntu and Windows.
+Source tests, merge, protected installation and installed pass/fail admission
+are separate deliverables; no application writes are admitted by preparation.
+
+## Bounded synthetic acceptance declaration
+
+Use `schema_version: 2`, the same canonical repository, API origin, project,
+region, service and forbidden-action list as the legacy target, and
+`scope: hts-bounded-synthetic-acceptance`. The issue must belong to that
+repository. The complete route vocabulary is fixed in `ACCEPTANCE_ROUTES`;
+callers cannot add, remove or substitute routes. The exact `ACCEPTANCE_LIMITS`
+allow two synthetic saved fixtures, one optional synthetic container, at most
+three provider turns per fixture and $10 in total. Messages and classification
+Apply remain forbidden, and existing real records are read-only.
+
+The declaration additionally requires a 40-character lowercase `source_head`
+that is an ancestor of its current checkout, an `expires_at` UTC timestamp in
+the next 24 hours, and an `AI-QA-YYYYMMDD-purpose-` fixture prefix. Git routing
+environment overrides and replacement objects cannot redirect the ancestry
+check. Strict types, complete keys, duplicate-key refusal and symlink refusal
+apply to this profile too. The shell still requires the manifest at its exact
+canonical path, clean and committed, and binds its blob to the admission receipt.
+
+This is a declaration and receipt, not an executor or credential: the caller
+must verify the deployed source and target before execution, check every write
+against its synthetic prefix and retain identifiers, before/after evidence,
+actual provider spending and cleanup. An uncertain HTTP outcome is read back
+before any retry. No database, cloud, credential, production, real-record
+mutation, classification Apply, merge or message authority is added.
+
+Codex owns implementation and verification on #2395. Reuse this versioned
+validator for later bounded acceptance rather than adding per-case bypasses;
+retire expired consumer declarations after their acceptance work ends.
+
+Current admission requires reviewer-safety or ui-live-workflow classification;
+AI review is advisory and never grants or blocks this action. The older review
+requirements below are historical and are superseded by owner ruling #2041.
+
+## Historical implementation and verification record
+
 Owner: Codex; application outcome: DesignFlow backend issue #94. Central safety
 delivery belongs to ai-devops #335. PR171 integration remains Uma's responsibility.
 

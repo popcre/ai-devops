@@ -164,14 +164,15 @@ after the declaration is upstream. Generic deploy cannot omit the closed proof;
 other actions and backend's original route remain unchanged.
 
 The separate `application-workflow` action admits only the authenticated HTS
-Alsand sandbox workflow for backend issue94. It requires a clean committed
+Alsand sandbox workflow. The exact issue94 profiles remain; version 2 also
+admits source-pinned, expiring synthetic acceptance with fixed routes, two
+fixtures and strict provider/cost bounds (#2395). It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
-`tools/application_workflow_target.py`, canonical origin, effective reviewer-safety
-or ui-live-workflow class, and independent lifecycle-recorded exact-head final-check
-or security-review APPROVE. All ordinary SQL/database, structural, cloud, production,
+`tools/application_workflow_target.py`, canonical origin and effective reviewer-safety
+or ui-live-workflow class. AI review is advisory (#2041). All ordinary SQL/database, structural, cloud, production,
 manual-promotion, flag-change and operative Apply/Save prohibitions remain binding.
 Use `check --before application-workflow --application-workflow-target
-.ai-devops/application-workflow-target.json --reviewer-approval <report>`; target
+.ai-devops/application-workflow-target.json`; target
 identity must be proved immediately before requests. Admission is an auditable
 receipt, not an HTTP proxy. Repository-specific workflow prohibitions still win.
 See [the scoped implementation and verification contract](hts-sandbox-workflow-gate.md).
