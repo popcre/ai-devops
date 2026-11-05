@@ -293,5 +293,127 @@ class BoundedLegacyEnvelopeTarget(BoundedLegacyProofTarget):
         self.assertEqual(self.validate(candidate), 1)
 
 
+class FrozenEvaluationTarget(ClosedRecoveryTarget):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
+        head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.declaration = {
+            **copy.deepcopy(TARGET.TARGET), "schema_version": 5,
+            "issue": "https://github.com/popcre/designflow-backend/issues/278",
+            "scope": "hts-frozen-r9-diagnostic-evaluation", "routes": TARGET.FROZEN_ROUTES,
+            "frozen": {"membership_sha256": TARGET.FROZEN_HASH, "maximum_items": 83,
+                       "common_ledger": "git-common-dir:hts-r9-frozen-live-eval.json",
+                       "single_run": True, "resume_existing_only": True},
+            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 8237,
+                       "minimum_start_credit_usd": 8.75},
+            "provider": TARGET.FROZEN_PROVIDER,
+            "executor": "scripts/hts-live-holdout-eval.js",
+            "prior_usage": {"reported_provider_calls": 5, "provider_calls_upper_bound": 20,
+                            "accounted_cost_usd": 0.25, "unobserved_cost_reserve_usd": 1,
+                            "budget_baseline_usd": 1.25, "snapshot_sha256": "a" * 64,
+                            "source": "session-provider-exposure-verified"},
+            "bindings": {key: "b" * 64 for key in TARGET.FROZEN_BINDINGS},
+            "source_head": head, "served_source": "c" * 40,
+            "served_revision": "popcre-albert-core-sandbox-00001-test",
+            "expires_at": BoundedAcceptanceTarget.expiry(hours=1),
+        }
+
+    def test_exact_real_cohort_profile_admitted_without_synthetic_relabeling(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+        self.assertNotIn("fixture_prefix", self.declaration)
+        self.assertFalse(self.declaration["limits"]["hard_cost_ceiling"])
+
+    def test_frozen_lifetime_is_bounded_to_72_hours_without_renewal(self):
+        now = datetime.datetime(2026, 11, 5, 12, tzinfo=datetime.timezone.utc)
+        class FixedDatetime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+        with patch.object(TARGET.datetime, "datetime", FixedDatetime):
+            for seconds, expected in [(72 * 3600, 0), (72 * 3600 + 1, 1), (0, 1)]:
+                expiry = (now + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                self.assertEqual(self.validate({**self.declaration, "expires_at": expiry}), expected)
+
+    def test_every_frozen_binding_is_required_and_typed(self):
+        for key in TARGET.FROZEN_BINDINGS:
+            for bad in [None, True, "x" * 64, "A" * 64, "a" * 63]:
+                candidate = copy.deepcopy(self.declaration)
+                candidate["bindings"][key] = bad
+                self.assertEqual(self.validate(candidate), 1)
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["bindings"][key]
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_routes_and_frozen_membership_cannot_be_broadened(self):
+        for field, bad in [("membership_sha256", "a" * 64), ("maximum_items", 84),
+                           ("single_run", False), ("resume_existing_only", False),
+                           ("common_ledger", "/tmp/new-ledger")]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["frozen"][field] = bad
+            self.assertEqual(self.validate(candidate), 1)
+        for route in ["POST /api/hts-rag/jobs/:id/answer", "PUT /api/hts-rag/items/:id/facts", "POST /addRfqItem"]:
+            self.assertEqual(self.validate({**self.declaration, "routes": TARGET.FROZEN_ROUTES + [route]}), 1)
+
+    def test_observed_stop_is_distinct_from_exposure_and_dynamic_credit(self):
+        for field, bad in [("maximum_session_provider_calls", 7470),
+                           ("minimum_start_credit_usd", 42.27), ("minimum_start_credit_usd", 10),
+                           ("maximum_authorized_exposure_usd", 10), ("hard_cost_ceiling", True),
+                           ("maximum_inflight_inquiries", 2), ("owner_answers", True),
+                           ("maximum_provider_calls_per_inquiry", 9), ("maximum_attempts_per_job", 1),
+                           ("cost_basis", "provider-invoice"), ("compression_billing", "included"),
+                           ("item_writes", True), ("learning", True), ("ambiguous_post_retry", True)]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["limits"][field] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_unknown_prior_or_zero_remaining_credit_is_refused(self):
+        for key, bad in [("reported_provider_calls", True), ("reported_provider_calls", -1),
+                         ("reported_provider_calls", 21), ("provider_calls_upper_bound", True),
+                         ("provider_calls_upper_bound", -1), ("provider_calls_upper_bound", 10**1000),
+                         ("accounted_cost_usd", True), ("accounted_cost_usd", -1),
+                         ("accounted_cost_usd", 10**1000),
+                         ("accounted_cost_usd", float("nan")), ("accounted_cost_usd", float("inf")),
+                         ("unobserved_cost_reserve_usd", True), ("unobserved_cost_reserve_usd", -1),
+                         ("unobserved_cost_reserve_usd", float("inf")),
+                         ("budget_baseline_usd", True), ("budget_baseline_usd", 10),
+                         ("budget_baseline_usd", 9.999999999), ("budget_baseline_usd", 0.25),
+                         ("snapshot_sha256", "unverified"), ("source", "estimated")]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["prior_usage"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_exposure_receipt_is_exact_and_never_relabels_reported_usage_as_total(self):
+        for key in self.declaration["prior_usage"]:
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["prior_usage"][key]
+            self.assertEqual(self.validate(candidate), 1)
+        for prior in [
+                {"provider_calls": 5, "actual_cost_usd": 0.25,
+                 "snapshot_sha256": "a" * 64, "source": "session-provider-usage-verified"},
+                {**self.declaration["prior_usage"], "extra": "unreviewed"}]:
+            self.assertEqual(self.validate({**self.declaration, "prior_usage": prior}), 1)
+
+    def test_budget_baseline_binds_sum_and_positive_remaining_credit(self):
+        for accounted, reserve, baseline in [(0.25, 1, 0.25), (9, 1, 10),
+                                               (1e308, 1e308, 1e308), (9.999999999, 0, 10)]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["prior_usage"].update(accounted_cost_usd=accounted,
+                unobserved_cost_reserve_usd=reserve, budget_baseline_usd=baseline)
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_identity_expiry_provider_and_old_profile_guards_remain_closed(self):
+        for key, bad in [("served_source", "HEAD"), ("served_revision", "production"),
+                         ("source_head", "f" * 40), ("expires_at", BoundedAcceptanceTarget.expiry(seconds=-1)),
+                         ("issue", "https://github.com/popcre/designflow-backend/issues/94"),
+                         ("fixture_prefix", "AI-QA-20261105-fake-"), ("schema_version", 4)]:
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["provider"]["model"] = "unapproved-model"
+        self.assertEqual(self.validate(candidate), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

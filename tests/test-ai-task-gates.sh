@@ -2014,6 +2014,37 @@ PY
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused expansion of internal calls'
 check 'synthetic legacy envelope refuses a tenth internal call' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$ROOT" "$WF" <<'PY'
+import datetime, importlib.util, json, pathlib, subprocess, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+target = dict(mod.TARGET, schema_version=5, issue='https://github.com/popcre/designflow-backend/issues/278',
+    scope='hts-frozen-r9-diagnostic-evaluation', routes=mod.FROZEN_ROUTES,
+    frozen=dict(membership_sha256=mod.FROZEN_HASH, maximum_items=83,
+                common_ledger='git-common-dir:hts-r9-frozen-live-eval.json', single_run=True, resume_existing_only=True),
+    limits=dict(mod.FROZEN_LIMITS, maximum_session_provider_calls=8237, minimum_start_credit_usd=8.75),
+    provider=mod.FROZEN_PROVIDER, executor='scripts/hts-live-holdout-eval.js',
+    prior_usage=dict(reported_provider_calls=5, provider_calls_upper_bound=20, accounted_cost_usd=0.25, unobserved_cost_reserve_usd=1, budget_baseline_usd=1.25, snapshot_sha256='a'*64, source='session-provider-exposure-verified'),
+    bindings={key: 'b'*64 for key in mod.FROZEN_BINDINGS},
+    source_head=subprocess.check_output(['git','-C',sys.argv[2],'rev-parse','HEAD'],text=True).strip(),
+    served_source='c'*40, served_revision='popcre-albert-core-sandbox-00001-test',
+    expires_at=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))
+pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare frozen real-cohort diagnostic envelope with synthetic hashes'
+check 'frozen evaluation admits distinct declared risk without synthetic relabeling' "rc 0 '$WF' check $WF_ARGS"
+check 'frozen evaluation still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text()); target['limits']['hard_cost_ceiling'] = True
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused false hard-cost claim'
+check 'frozen evaluation refuses false hard ten-dollar ceiling' "rc 3 '$WF' check $WF_ARGS"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

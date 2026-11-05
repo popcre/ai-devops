@@ -133,6 +133,54 @@ prove the installed command accepts only the declared sandbox workflow. Then ref
 the live backend source, review its exact workflow declaration and execute the
 genuine HTS case. Preserve every previous proof and refusal.
 
+## Frozen R9 diagnostic declaration
+
+Version 5, `hts-frozen-r9-diagnostic-evaluation`, is separate from synthetic
+acceptance and does not create fixtures. It fixes the existing 83-item frozen
+membership hash, the authenticated Alsand sandbox and issue #278. Only
+`POST /api/hts-rag/jobs` and `GET /api/hts-rag/jobs/:id` are admitted. There are
+zero owner answers, one in-flight inquiry and one common-ledger run; resume
+observes existing jobs and never repeats an ambiguous submission. No master-data,
+item-fact, RFQ, Apply/Save, SQL, schema, learning or provider-policy changes follow.
+
+The committed declaration binds private input, readiness, qualification, prior
+exposure, provenance, exact runner, catalog and pricing SHA-256 receipts.
+V5 requires `session-provider-exposure-verified`: reported calls, a conservative
+call upper bound, accounted cost, an explicit unobserved-cost reserve, their
+eight-decimal budget baseline and the private snapshot hash. The upper bound
+cannot be below reported calls; costs are finite and nonnegative and the exact
+rounded baseline must be below $10. An old exact-usage receipt cannot qualify v5. It binds
+the immutable served source and revision separately from `source_head`, whose
+existing meaning remains an ancestor of the committed declaration. The executor
+must verify the files, installed gate receipt, eligibility and immutable ledger
+before opening the cohort; this validator only checks the closed declaration,
+not private evidence or actual execution. Do not run until that executor support
+and the coordinator's readiness decision are verified.
+Only v5 permits an initial expiry up to 72 hours to accommodate serial queue attempts;
+profiles 1–4 keep their 24-hour metadata rule. The claimed manifest is immutable:
+expiry stops the run without a new claim or silent renewal. Classification time
+must be proved at most 170,000 ms on the actual immutable runtime, with the fixed
+three-attempt/two-record-answer source bounds.
+
+The preserved queue can create two record answers and attempt each of three jobs
+three times. At eleven internal Luna calls per attempt, its conservative bound is
+99 calls per inquiry and 8,217 for 83 inquiries, plus the verified prior session call upper bound.
+Provider HTTP retry and billable tools remain absent. Catalog bounds are
+1,050,000 context and 128,000 completion tokens; maximum approved input/output
+rates are $0.00000025/$0.00000075 per token. One inquiry's conservative risk is
+$35.4915. The coordinator explicitly authorizes up to $45.50 session exposure:
+the $10 observed submission stop plus one in-flight overshoot. This is **not a
+hard $10 cap**. These amounts are not an invoice or all third-party costs; they
+concern Luna usage accounted
+at approved application rates only; retained ScaleDown compression billing is
+unquantified and not included. Initial live credit covers `10 - prior budget
+baseline`, not the full exposure. If credit is declined, retain failed/unknown results; never
+top up, change credentials or retry an ambiguous HTTP submission. Old profiles
+1–4 retain their original limits.
+
+Public reports contain aggregates only. Full per-item results, evidence lineage,
+private receipt hashes and qualification context remain protected outside Git.
+
 ## Exact audited retry after provider credit recovery
 
 The original five-route declaration remains accepted unchanged. A second closed
