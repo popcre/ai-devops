@@ -55,12 +55,14 @@ out="$(q --text nosuchword)"
 [ "$out" = "no matching segments" ] || fail "empty search" "$out"
 [ -z "$(find "$store" -name '*-journal' -o -name '*-wal')" ] || fail "sqlite touched a file inside the store folder"
 
-# stats: topics, repos, machine freshness in New York time, stale flag
+# stats: topics, repos, machine state in New York time. #2358 replaced the old
+# per-machine STALE flag with the upload state the writer recorded.
 out="$(q --stats --now 2026-10-29T18:00:00Z)"
 printf '%s\n' "$out" | grep -q '^  reviewer-tooling: 1$' || fail "stats topic count" "$out"
 printf '%s\n' "$out" | grep -q '^  designflow: 1$' || fail "stats repo count" "$out"
-printf '%s\n' "$out" | grep -q '^  edge-dev3: 1 sessions, last 2026-10-29 10:00 AM EDT$' || fail "fresh machine line" "$out"
-printf '%s\n' "$out" | grep -q '^  old-box: 1 sessions, last 2026-10-20 10:00 AM EDT  STALE$' || fail "stale machine flag" "$out"
+printf '%s\n' "$out" | grep -q '^by machine: state UNKNOWN, writer has not recorded upload status$' || fail "machine state head" "$out"
+printf '%s\n' "$out" | grep -q '^  edge-dev3: 1 sessions, last 2026-10-29 10:00 AM EDT  UNKNOWN$' || fail "fresh machine line" "$out"
+printf '%s\n' "$out" | grep -q '^  old-box: 1 sessions, last 2026-10-20 10:00 AM EDT  UNKNOWN$' || fail "machine without recorded upload status is UNKNOWN" "$out"
 
 # raw: a pointer into the reader's own archive, never transcript text
 # MSYS would rewrite /arch to a Windows path for native Python; keep it literal.
