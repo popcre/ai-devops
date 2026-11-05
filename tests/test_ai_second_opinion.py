@@ -29,6 +29,9 @@ FAKE = textwrap.dedent("""\
     if mode == "doctor-secret":
         print(json.dumps({"type": "error", "error": {"message": "status 503 api_key=" + os.environ.get("ZHIPU_API_KEY", "")}}))
         sys.exit(1)
+    if mode == "doctor-answer-secret":
+        print(json.dumps({"type": "text", "part": {"text": os.environ.get("ZHIPU_API_KEY", "")}}))
+        sys.exit(0)
     if mode == "doctor-timeout":
         time.sleep(10)
     if mode == "write":
@@ -211,6 +214,40 @@ class SecondOpinion(unittest.TestCase):
         self.assertIn("[REDACTED]", text)
         self.assertNotIn("k-123456789", text + result.stdout + result.stderr)
         self.assertEqual(len(self.calls()), 3)
+
+    def test_doctor_unexpected_answer_redacts_stdout_and_private_excerpt(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("doctor-answer-secret")
+        result = self.run_tool("glm", "doctor", "--live")
+        self.assertEqual(result.returncode, 3)
+        receipt, text = self.doctor_receipt()
+        self.assertEqual(len(receipt["attempts"]), 3)
+        self.assertTrue(all(row["outcome"] == "unexpected_reply" for row in receipt["attempts"]))
+        self.assertIn("[REDACTED]", result.stdout)
+        self.assertNotIn("k-123456789", result.stdout + result.stderr + text)
+
+    def test_doctor_local_exception_is_redacted_retained_and_fails_without_retry(self):
+        code = """import runpy, sys, os
+ns = runpy.run_path(sys.argv[1])
+def fail(*args):
+    with open(os.path.join(os.environ['AI_REVIEW_SIMPLE_FAKE_STATE'], 'probe-path'), 'w') as fh:
+        fh.write(args[2])
+    raise RuntimeError('local failure k-123456789')
+ns['main'].__globals__['start'] = fail
+sys.exit(ns['main'](['glm', 'doctor', '--live']))
+"""
+        result = subprocess.run([sys.executable, "-c", code, TOOL], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        receipt, text = self.doctor_receipt()
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual([row["outcome"] for row in receipt["attempts"]], ["local_error"])
+        self.assertIn("RuntimeError", text)
+        self.assertIn("[REDACTED]", text)
+        self.assertNotIn("k-123456789", text + result.stdout + result.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "calls.jsonl")))
+        with open(os.path.join(self.state, "probe-path")) as fh:
+            self.assertFalse(os.path.exists(fh.read()))
 
     def test_doctor_timeout_retains_failed_attempts_and_does_not_pass(self):
         self.env["AI_SECOND_OPINION_TIMEOUT"] = "1"

@@ -482,43 +482,51 @@ def main(argv):
             diagnostic_path = doctor_diagnostics(p, STATE)
             attempts = []
             save_doctor_diagnostics(diagnostic_path, p, attempts, "running")
-            with tempfile.TemporaryDirectory() as tmp:
-                subprocess.run(["git", "init", "-q", tmp], check=True)
-                with open(os.path.join(tmp, "README"), "w") as fh:
-                    fh.write("probe\n")
-                subprocess.run(["git", "-C", tmp, "add", "README"], check=True)
-                subprocess.run(["git", "-C", tmp, "-c", "user.name=p", "-c", "user.email=p@l",
-                                "commit", "-qm", "p"], check=True)
-                STATE = os.path.join(tmp, "state")
-                # The provider or OpenCode sometimes answers a single call with a
-                # transient "Unexpected server error" (about one call in five for
-                # GLM on 2026-10-31), which failed whole installs. Retry a failed
-                # probe with a fresh session; a real fault fails all attempts.
-                ans = ""
-                for attempt in range(3):
-                    started = time.monotonic()
-                    errors = io.StringIO()
-                    exit_code = 0
-                    try:
-                        with contextlib.redirect_stderr(errors):
-                            sdir, meta = start(p, f"doctor{attempt}", tmp, False)
-                            ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
-                    except SystemExit as error:
-                        ans = ""
-                        exit_code = error.code if type(error.code) is int else 1
-                    problem = ars.redact(errors.getvalue(), ars.read_key(p))[-4000:]
-                    outcome = "ready" if "READY" in ans.upper() else "timeout" if "no answer within" in problem else "provider_unavailable" if exit_code else "unexpected_reply"
-                    attempts.append({"attempt": attempt + 1, "outcome": outcome, "exit_code": exit_code,
-                                     "elapsed_ms": round((time.monotonic() - started) * 1000),
-                                     "error": problem, "answer_excerpt": ars.redact(ans.strip(), ars.read_key(p))[:160]})
-                    save_doctor_diagnostics(diagnostic_path, p, attempts, "passed" if outcome == "ready" else "running" if attempt < 2 else "failed")
-                    if "READY" in ans.upper():
-                        break
-                    if attempt < 2:
-                        print(f"live: attempt {attempt + 1} failed; retrying", file=sys.stderr)
-                        time.sleep(3)
-                print(f"live: {ans.strip()[:80]}")
-                ok &= "READY" in ans.upper()
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    subprocess.run(["git", "init", "-q", tmp], check=True)
+                    with open(os.path.join(tmp, "README"), "w") as fh:
+                        fh.write("probe\n")
+                    subprocess.run(["git", "-C", tmp, "add", "README"], check=True)
+                    subprocess.run(["git", "-C", tmp, "-c", "user.name=p", "-c", "user.email=p@l",
+                                    "commit", "-qm", "p"], check=True)
+                    STATE = os.path.join(tmp, "state")
+                    # The provider or OpenCode sometimes answers a single call with a
+                    # transient "Unexpected server error" (about one call in five for
+                    # GLM on 2026-10-31), which failed whole installs. Retry a failed
+                    # probe with a fresh session; a real fault fails all attempts.
+                    ans = ""
+                    for attempt in range(3):
+                        started = time.monotonic()
+                        errors = io.StringIO()
+                        exit_code = 0
+                        try:
+                            with contextlib.redirect_stderr(errors):
+                                sdir, meta = start(p, f"doctor{attempt}", tmp, False)
+                                ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
+                        except SystemExit as error:
+                            ans = ""
+                            exit_code = error.code if type(error.code) is int else 1
+                        problem = ars.redact(errors.getvalue(), ars.read_key(p))[-4000:]
+                        outcome = "ready" if "READY" in ans.upper() else "timeout" if "no answer within" in problem else "provider_unavailable" if exit_code else "unexpected_reply"
+                        attempts.append({"attempt": attempt + 1, "outcome": outcome, "exit_code": exit_code,
+                                         "elapsed_ms": round((time.monotonic() - started) * 1000),
+                                         "error": problem, "answer_excerpt": ars.redact(ans.strip(), ars.read_key(p))[:160]})
+                        save_doctor_diagnostics(diagnostic_path, p, attempts, "passed" if outcome == "ready" else "running" if attempt < 2 else "failed")
+                        if "READY" in ans.upper():
+                            break
+                        if attempt < 2:
+                            print(f"live: attempt {attempt + 1} failed; retrying", file=sys.stderr)
+                            time.sleep(3)
+                    print(f"live: {ars.redact(ans.strip(), ars.read_key(p))[:80]}")
+                    ok &= "READY" in ans.upper()
+            except Exception as error:
+                problem = ars.redact(f"{type(error).__name__}: {error}", ars.read_key(p))[-4000:]
+                attempts.append({"attempt": len(attempts) + 1, "outcome": "local_error", "exit_code": 1,
+                                 "elapsed_ms": 0, "error": problem, "answer_excerpt": ""})
+                save_doctor_diagnostics(diagnostic_path, p, attempts, "failed")
+                print(f"live diagnostics: {diagnostic_path}", file=sys.stderr)
+                die(problem, 1)
             print(f"live diagnostics: {diagnostic_path}", file=sys.stderr)
         print("doctor: OK" if ok else "doctor: FAILED")
         return 0 if ok else 3
