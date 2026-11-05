@@ -151,7 +151,10 @@ equal to the unique merge-base with current `origin/develop`, complete ancestry,
 and no structural/infrastructure/production/private contributors. The native
 `tools/application_source_release.py` proof refuses Git context injection before
 discovery. It reads the canonical GitHub develop ref through the installed,
-provenance-verified `ai-gh` helper and `/usr/bin/gh`, twice around admission;
+provenance-verified `ai-gh` helper and `/usr/bin/gh`, twice around admission.
+Each exact-ref request has a finite 600-second shared-queue allowance; local
+Git/configuration/helper checks retain 30 seconds. There are no added retries,
+cached-ref acceptance or queue bypasses. A deadline expiry still refuses;
 network failure, ref drift, source/helper movement or malformed responses refuse
 without a receipt. Existing SSH/proxy/authentication settings remain usable;
 normal fetch is outside the gate. No runtime test override, production target,

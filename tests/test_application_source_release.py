@@ -95,7 +95,7 @@ class ReleaseProof(unittest.TestCase):
                 self.assertEqual(options["env"]["PYTHON_RUNNER"], "/usr/bin/python3")
                 self.assertNotIn("BASH_ENV", options["env"])
                 self.assertNotIn("BASH_FUNC_cat%%", options["env"])
-                self.assertEqual(options["timeout"], 30)
+                self.assertEqual(options["timeout"], 600)
 
     def test_native_additive_contributor_proofs_include_ui_and_code(self):
         source = (Path(__file__).resolve().parents[1] / "bin/ai-task-gates").read_text()
@@ -313,6 +313,36 @@ class PlatformBoundary(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     release.confined_environment({})
             command.assert_not_called()
+
+
+class QueueTimeoutContract(unittest.TestCase):
+    """Portable boundary tests; never invoke GitHub or a provider."""
+    def test_local_commands_retain_thirty_seconds(self):
+        with patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"ok", b"")) as command:
+            self.assertEqual(release.run(["git", "--version"], Path.cwd(), {}), b"ok")
+        self.assertEqual(command.call_args.kwargs["timeout"], 30)
+        self.assertEqual(command.call_count, 1)
+
+    def test_only_exact_gated_remote_ref_get_has_six_hundred_seconds(self):
+        repo = "popcre/designflow-frontend"
+        response = json.dumps({"ref": "refs/heads/develop", "object": {
+            "type": "commit", "sha": "a" * 40}}).encode()
+        with patch.object(release, "public_binary"), patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, response, b"")) as command:
+            self.assertEqual(release.remote_ref(Path.cwd(), repo, Path("/fixture/helper"), {}), "a" * 40)
+        self.assertEqual(command.call_args.kwargs["timeout"], 600)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][-1], "repos/popcre/designflow-frontend/git/ref/heads/develop")
+        self.assertIn(str(Path("/fixture/helper")), command.call_args.args[0])
+
+    def test_remote_deadline_refuses_once_without_retry_or_receipt(self):
+        with patch.object(release, "public_binary"), patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("fixture", 600)) as command:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                release.remote_ref(Path.cwd(), "popcre/designflow-frontend", Path("/fixture/helper"), {})
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.kwargs["timeout"], 600)
+        with patch.object(release, "prove", side_effect=subprocess.TimeoutExpired("fixture", 600)), \
+                patch.object(sys, "argv", ["proof", "prove", str(Path.cwd()), "popcre/designflow-frontend", "a" * 40]):
+            self.assertEqual(release.main(), 3)
 
 
 if __name__ == "__main__":
