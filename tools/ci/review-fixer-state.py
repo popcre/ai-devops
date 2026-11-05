@@ -24,6 +24,7 @@ INVALID = "review-fixer-invalid:v1"
 DEFERRED = "fixer-deferred"
 REDISPATCHED = "fixer-redispatched"
 IDLE_LIMIT = timedelta(hours=48)
+FINDER_LABELS = frozenset({"review-finding", "ci-red"})
 
 
 def now():
@@ -262,7 +263,7 @@ class State:
 
     def check(self, data, work=None):
         issue = self.issue(data["issue"])
-        if issue["state"] != "open" or "review-finding" not in labels(issue) or labels(issue) & {DEFERRED, "fixer-done", "fixer-failed"}:
+        if issue["state"] != "open" or not (labels(issue) & FINDER_LABELS) or labels(issue) & {DEFERRED, "fixer-done", "fixer-failed"}:
             print("SKIPPED: finding already handled")
             return False
         reason = self.current(data)
@@ -377,7 +378,7 @@ class State:
                 else:
                     validate(data, self.repo, pr)
                     finding = self.issue(data["issue"])
-                if finding["state"] == "open" and "review-finding" not in labels(finding):
+                if finding["state"] == "open" and not (labels(finding) & FINDER_LABELS):
                     raise ValueError("associated issue is not a review finding")
                 actual, source = self.source(finding)
                 if (source["head"].get("repo") or {}).get("full_name") != self.repo:
@@ -478,8 +479,11 @@ class State:
                 groups.setdefault(pr["base"]["ref"], [])
         if not cleanup and not number:
             issues = paged(f"{self.prefix}/issues?state=open&labels=review-finding&per_page=100")
+            issues += paged(f"{self.prefix}/issues?state=open&labels=ci-red&per_page=100")
+            seen = set()
+            issues = [i for i in issues if not (i["number"] in seen or seen.add(i["number"]))]
         for issue in issues:
-            if issue["state"] != "open" or "review-finding" not in labels(issue) or labels(issue) & {DEFERRED, "fixer-done", "fixer-failed"}:
+            if issue["state"] != "open" or not (labels(issue) & FINDER_LABELS) or labels(issue) & {DEFERRED, "fixer-done", "fixer-failed"}:
                 continue
             try:
                 data, _ = self.source(issue)

@@ -588,3 +588,55 @@ jobs:
             --run-url "$RUN_URL" \
             --repo "$GITHUB_REPOSITORY" \
             --results "$needs_summary"
+
+  # One ci-red issue per failing test on merge-group and PR runs (step 1.4).
+  # Advisory: blocks nothing. Capacity failures produce none. Auto-closes
+  # after three later green runs of the same test.
+  report-ci-red:
+    needs: [fast-classifier, linux-offline, windows-offline-complete]
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Open or close ci-red issues per failing test
+        shell: bash
+        run: |
+          needs_summary=""
+          for pair in \
+            "fast-classifier=${{ needs.fast-classifier.result }}" \
+            "linux-offline=${{ needs.linux-offline.result }}" \
+            "windows-offline-complete=${{ needs.windows-offline-complete.result }}"; do
+            needs_summary="$needs_summary$pair "
+          done
+          PR_NUMBER=""
+          HEAD_SHA=""
+          EVENT="${{ github.event_name }}"
+          if [ "$EVENT" = "pull_request" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          elif [ "$EVENT" = "merge_group" ]; then
+            # head_ref is gh-readonly-queue/<base>/pr-<N>-<sha>
+            ref="${{ github.event.merge_group.head_ref }}"
+            PR_NUMBER="$(printf '%s' "$ref" | sed -n 's|.*/pr-\([0-9][0-9]*\)-.*|\1|p')"
+            if [ -n "$PR_NUMBER" ]; then
+              HEAD_SHA="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)"
+            fi
+          fi
+          bash tools/ci/report-scheduled-failure.sh \
+            --run-url "$RUN_URL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --results "$needs_summary" \
+            --per-test \
+            --event "$EVENT" \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$HEAD_SHA"
