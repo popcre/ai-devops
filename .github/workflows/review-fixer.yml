@@ -42,7 +42,10 @@ permissions:
 
 jobs:
   prepare:
-    if: github.event_name != 'issues' || github.event.label.name == 'review-finding'
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.label.name == 'review-finding' ||
+      github.event.label.name == 'ci-red'
     runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     permissions:
       contents: read
@@ -118,8 +121,8 @@ jobs:
             labels="$(bash toolkit/bin/ai-gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state,labels \
               --jq '.state + " " + ([.labels[].name] | join(","))')"
             case "$labels" in
-              OPEN\ *review-finding*) ;;
-              *) echo "#$n: not an open review-finding issue; skipped"; continue ;;
+              OPEN\ *review-finding*|OPEN\ *ci-red*) ;;
+              *) echo "#$n: not an open review-finding or ci-red issue; skipped"; continue ;;
             esac
             case "$labels" in *fixer-done*|*fixer-failed*|*fixer-deferred*) echo "#$n: already handled"; continue ;; esac
             echo "::group::issue #$n"

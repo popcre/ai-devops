@@ -23,10 +23,14 @@
 #     -> prints a report-only category (timeout-capacity, killed-interrupt,
 #        rate-limit-capacity, empty-verdict, test-failure, config-drift)
 #
+# A `result` failure gets the `ci-red` issue label (plan_ci-process-repair.md
+# step 1.4). Capacity/infra failures never open a per-test issue.
+#
 # As a script:
 #   tools/ci/action-taxonomy.sh check <conclusion> [name] [summary]
 #   tools/ci/action-taxonomy.sh review <failure_class>
 #   tools/ci/action-taxonomy.sh detail <conclusion> [name] [summary]
+#   tools/ci/action-taxonomy.sh label <action>   # ci-red | (action unchanged)
 
 set -euo pipefail
 
@@ -105,12 +109,23 @@ action_taxonomy_review() {
   esac
 }
 
+# Map an action to its per-test issue label. `result` is the only taxonomy
+# class that opens a per-test ci-red issue; capacity/infra and review-step
+# never do (step 1.4).
+action_taxonomy_label() {
+  case "${1:-}" in
+    result) printf 'ci-red\n' ;;
+    *) printf '%s\n' "${1:-}" ;;
+  esac
+}
+
 action_taxonomy_usage() {
   cat <<'EOF'
 Usage:
   action-taxonomy.sh check <conclusion> [name] [summary]   # capacity/infra | result | review-step
   action-taxonomy.sh review <failure_class>                # review-step | capacity/infra | result
   action-taxonomy.sh detail <conclusion> [name] [summary]  # report-only category
+  action-taxonomy.sh label <action>                       # ci-red | (action unchanged)
 EOF
 }
 
@@ -119,6 +134,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     check) shift; action_taxonomy_check "$@" ;;
     review) shift; action_taxonomy_review "$@" ;;
     detail) shift; action_taxonomy_detail "$@" ;;
+    label) shift; action_taxonomy_label "$@" ;;
     -h|--help|help|'') action_taxonomy_usage ;;
     *) action_taxonomy_usage >&2; exit 2 ;;
   esac

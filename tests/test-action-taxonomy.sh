@@ -85,5 +85,13 @@ check "report-scheduled-failure classifies a cancelled need as capacity/infra" \
 check "report-scheduled-failure classifies a failure need as result" \
   "test \"$(act failure linux-offline)\" = 'result'"
 
+# Step 1.4: action-to-label mapping. result -> ci-red; capacity unchanged.
+check "label maps result to ci-red" \
+  "test \"\$(bash $CMD label result)\" = 'ci-red'"
+check "label leaves capacity/infra unchanged" \
+  "test \"\$(bash $CMD label capacity/infra)\" = 'capacity/infra'"
+check "label leaves review-step unchanged" \
+  "test \"\$(bash $CMD label review-step)\" = 'review-step'"
+
 printf 'action-taxonomy: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
