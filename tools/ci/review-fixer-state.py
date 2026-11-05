@@ -416,7 +416,7 @@ class State:
     def plan(self, number=None):
         groups = {}
         event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
-        cleanup = event in {"push", "pull_request", "pull_request_target", "delete"}
+        cleanup = event in {"pull_request", "pull_request_target"}
         target = None
         if cleanup:
             event_path = os.environ.get("GITHUB_EVENT_PATH")
@@ -425,40 +425,20 @@ class State:
             payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("cleanup event payload is not an object")
-            if event == "push":
-                ref = payload.get("ref")
-                if not isinstance(ref, str):
-                    raise ValueError("push event has no ref")
-                if ref.startswith("refs/tags/"):
-                    if not ref[len("refs/tags/"):]:
-                        raise ValueError("push tag event has no tag name")
-                    return {"include": []}
-                if not ref.startswith("refs/heads/"):
-                    raise ValueError("push event ref is not a branch or tag")
-                target = ref[len("refs/heads/"):]
-            elif event == "delete":
-                if not isinstance(payload.get("ref"), str) or not payload["ref"]:
-                    raise ValueError("delete event has no ref")
-                if payload.get("ref_type") == "tag":
-                    return {"include": []}
-                if payload.get("ref_type") != "branch":
-                    raise ValueError("delete event has no branch/tag ref_type")
-                target = payload.get("ref")
-            else:
-                pr = payload.get("pull_request")
-                if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
-                    raise ValueError("pull request event has no head")
-                head = pr["head"]
-                if "repo" not in head:
-                    raise ValueError("pull request event has no head repository")
-                head_repo = head.get("repo")
-                if head_repo is None:  # Deleted fork repository; no same-repo target.
-                    return {"include": []}
-                if not isinstance(head_repo, dict) or not isinstance(head_repo.get("full_name"), str):
-                    raise ValueError("pull request event has no head repository identity")
-                if head_repo["full_name"] != self.repo:
-                    return {"include": []}
-                target = head.get("ref")
+            pr = payload.get("pull_request")
+            if not isinstance(pr, dict) or not isinstance(pr.get("head"), dict):
+                raise ValueError("pull request event has no head")
+            head = pr["head"]
+            if "repo" not in head:
+                raise ValueError("pull request event has no head repository")
+            head_repo = head.get("repo")
+            if head_repo is None:  # Deleted fork repository; no same-repo target.
+                return {"include": []}
+            if not isinstance(head_repo, dict) or not isinstance(head_repo.get("full_name"), str):
+                raise ValueError("pull request event has no head repository identity")
+            if head_repo["full_name"] != self.repo:
+                return {"include": []}
+            target = head.get("ref")
             if not isinstance(target, str) or not target or target.startswith("refs/"):
                 raise ValueError("cleanup event has no valid branch name")
             if target.startswith("review-fix/"):
@@ -471,7 +451,12 @@ class State:
         issues = []
         if not cleanup and number:
             issue = self.issue(number)
-            data, _ = self.source(issue)
+            try:
+                data, _ = self.source(issue)
+            except ValueError:
+                # Not a finding (or body was edited): no fix PRs to retire
+                # for this issue. The next schedule sweep handles leftovers.
+                return {"include": []}
             target = data["target_branch"]
             issues = [issue]
         for pr in self.pulls(base=target):

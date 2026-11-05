@@ -7,15 +7,15 @@ name: review-fixer
 # (ai-review skips review-fix/* heads), so this cannot loop. Agent credentials
 # stay in the runner user's own login, never here.
 # Source/branch update events only retire stale fix PRs. They never start a
-# model. Each repository/target branch has one publisher across all entrypoints.
+# model. Stale retirement uses pull_request_target, finding-closed events and
+# the two-hourly schedule; push and delete triggers were removed (step 1.5).
+# Each repository/target branch has one publisher across all entrypoints.
 
 on:
   issues:
-    types: [labeled]
+    types: [labeled, closed]
   pull_request_target:
     types: [synchronize, closed]
-  push:
-  delete:
   schedule:
     - cron: '17 */2 * * *'
   workflow_dispatch:
@@ -44,8 +44,9 @@ jobs:
   prepare:
     if: >-
       github.event_name != 'issues' ||
-      github.event.label.name == 'review-finding' ||
-      github.event.label.name == 'ci-red'
+      (github.event.action == 'labeled' &&
+        (github.event.label.name == 'review-finding' || github.event.label.name == 'ci-red')) ||
+      github.event.action == 'closed'
     runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     permissions:
       contents: read

@@ -120,8 +120,8 @@ class StateTests(unittest.TestCase):
     def test_cleanup_plan_uses_event_branch_filter(self):
         with tempfile.TemporaryDirectory() as folder:
             event = Path(folder) / "event.json"
-            event.write_text(json.dumps({"ref": "refs/heads/owner/work"}))
-            with patch.dict(os.environ, GITHUB_EVENT_NAME="push", GITHUB_EVENT_PATH=str(event)), patch.object(m, "paged", return_value=[]) as pages:
+            event.write_text(json.dumps({"pull_request": self.pr}))
+            with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request_target", GITHUB_EVENT_PATH=str(event)), patch.object(m, "paged", return_value=[]) as pages:
                 self.assertEqual(self.state.plan(), {"include": []})
                 pages.assert_called_once_with("repos/o/r/pulls?state=open&per_page=100&base=owner%2Fwork")
 
@@ -517,26 +517,28 @@ class StateTests(unittest.TestCase):
 
     def test_cleanup_events_only_select_exact_affected_target_without_model_work(self):
         self.pulls = [self.fixer_pr(), {"base": {"ref": "other"}, "head": {"ref": "review-fix/9"}}]
-        for event, payload in (("push", {"ref": "refs/heads/owner/work"}),
-                               ("delete", {"ref": "owner/work", "ref_type": "branch"}),
-                               ("pull_request", {"pull_request": self.pr}),
+        for event, payload in (("pull_request", {"pull_request": self.pr}),
                                ("pull_request_target", {"pull_request": self.pr})):
             plan = self.event_plan(event, payload)
             self.assertEqual([(x["target"], x["issues"]) for x in plan["include"]], [("owner/work", [])])
 
+    def test_push_and_delete_events_are_unsupported(self):
+        with self.assertRaises(ValueError):
+            self.event_plan("push", {"ref": "refs/heads/owner/work"})
+        with self.assertRaises(ValueError):
+            self.event_plan("delete", {"ref": "owner/work", "ref_type": "branch"})
+
     def test_unrelated_branch_update_selects_no_existing_fixer(self):
+        pr = copy.deepcopy(self.pr)
+        pr["head"]["ref"] = "unrelated"
         self.pulls = [self.fixer_pr()]
-        self.assertEqual(self.event_plan("push", {"ref": "refs/heads/unrelated"}), {"include": []})
+        self.assertEqual(self.event_plan("pull_request_target", {"pull_request": pr}), {"include": []})
 
-    def test_generated_fixer_branch_push_and_delete_have_no_jobs(self):
+    def test_generated_fixer_branch_has_no_jobs(self):
+        pr = copy.deepcopy(self.pr)
+        pr["head"]["ref"] = "review-fix/7"
         with patch.object(self.state, "pulls", side_effect=AssertionError("unnecessary API query")):
-            self.assertEqual(self.event_plan("push", {"ref": "refs/heads/review-fix/7"}), {"include": []})
-            self.assertEqual(self.event_plan("delete", {"ref": "review-fix/7", "ref_type": "branch"}), {"include": []})
-
-    def test_tag_push_and_delete_have_no_jobs(self):
-        with patch.object(self.state, "pulls", side_effect=AssertionError("unnecessary API query")):
-            self.assertEqual(self.event_plan("push", {"ref": "refs/tags/v1"}), {"include": []})
-            self.assertEqual(self.event_plan("delete", {"ref": "v1", "ref_type": "tag"}), {"include": []})
+            self.assertEqual(self.event_plan("pull_request_target", {"pull_request": pr}), {"include": []})
 
     def test_fork_pr_updates_never_target_same_named_local_branch(self):
         pr = copy.deepcopy(self.pr)
@@ -553,9 +555,7 @@ class StateTests(unittest.TestCase):
             self.assertEqual([(x["target"], x["issues"]) for x in plan["include"]], [("owner/work", [7])])
 
     def test_unknown_and_malformed_events_fail_without_broad_sweep(self):
-        for event, payload in (("unknown", {}), ("push", {}), ("push", {"ref": "bad"}), ("push", {"ref": "refs/tags/"}),
-                               ("delete", {"ref": "branch"}), ("delete", {"ref_type": "branch"}),
-                               ("delete", {"ref_type": "tag"}),
+        for event, payload in (("unknown", {}), ("push", {"ref": "refs/heads/x"}), ("delete", {"ref": "x", "ref_type": "branch"}),
                                ("pull_request_target", {}), ("pull_request_target", {"pull_request": {"head": {"repo": {}}}}),
                                ("pull_request_target", {"pull_request": {"head": {}}}),
                                ("issues", {})):
@@ -584,6 +584,20 @@ class StateTests(unittest.TestCase):
         self.assertIn("python3 toolkit/tools/ci/review-fixer-state.py retire", workflow)
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("caller-trusted", workflow)
+
+    def test_push_and_delete_triggers_are_removed(self):
+        workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
+        self.assertNotIn("\n  push:", workflow)
+        self.assertNotIn("\n  delete:", workflow)
+
+    def test_finding_closed_events_fire(self):
+        workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
+        self.assertIn("types: [labeled, closed]", workflow)
+
+    def test_prepare_accepts_ci_red_and_closed_events(self):
+        workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
+        self.assertIn("github.event.label.name == 'ci-red'", workflow)
+        self.assertIn("github.event.action == 'closed'", workflow)
 
     def test_prepare_and_fix_share_the_existing_caller_runner_contract(self):
         workflow = (ROOT / ".github/workflows/review-fixer.yml").read_text()
