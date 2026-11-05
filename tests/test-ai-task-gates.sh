@@ -2096,6 +2096,50 @@ PY
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused arbitrary continuation purpose'
 check 'continuation refuses a general failure exception' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target.update(schema_version=7, scope='hts-frozen-r9-json-literal-operational-continuation')
+target['operational_continuation'].update(
+    original_schema_version=6, purpose='pre-snapshot-json-literal-bind-repair')
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare synthetic current-v6 JSON literal repair epoch'
+check 'JSON literal continuation admits distinct v6-parent metadata' "rc 0 '$WF' check $WF_ARGS"
+check 'JSON literal continuation still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY'
+import datetime, json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['expires_at'] = (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused JSON repair expiry extension'
+check 'JSON literal continuation refuses renewed expiry' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['expires_at'] = target['operational_continuation']['original_expires_at']
+target['operational_continuation']['original_schema_version'] = 7
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused third operational transition'
+check 'JSON literal continuation refuses third transition' "rc 3 '$WF' check $WF_ARGS"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['operational_continuation'].update(original_schema_version=6, purpose='pre-provider-immutable-input-repair')
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused cross-purpose operational transition'
+check 'JSON literal continuation refuses old repair purpose' "rc 3 '$WF' check $WF_ARGS"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

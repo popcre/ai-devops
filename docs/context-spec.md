@@ -208,6 +208,14 @@ three no-launch failed attempts and unchanged input/key/budget/qualification,
 then appends one epoch and zero-reconciliation overlay. It cannot reset, chain,
 rePOST the failed inquiry or relabel its outcome. Closed native metadata
 admission never substitutes for that private proof.
+Version 7 is a separate closed current-v6-parent transition solely for the
+proved pre-snapshot JSON literal bind repair. The same twelve header fields
+now bind the paused CURRENT v6 ledger/admission/manifest, with integer parent
+schema 6 and unchanged original expiry. A new runner/source and private receipt
+are required. The executor verifies the embedded v5 lineage, one prior epoch,
+preserved failures/costs/current inquiry and synthetic roundtrip proof before
+appending exactly one additional epoch. No third transition, new zero-cost
+overlay, retry/rePOST, reset or input/key change is admitted; v5/v6 are unchanged.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety

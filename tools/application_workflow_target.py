@@ -327,6 +327,41 @@ def frozen_operational_continuation(value, root):
     return frozen_evaluation(original_profile, root)
 
 
+def frozen_json_literal_continuation(value, root):
+    """Declare the one reviewed v6-parent JSON literal repair; never renew it."""
+    if (not isinstance(value, dict) or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 7
+            or value.get("scope") != "hts-frozen-r9-json-literal-operational-continuation"):
+        return False
+    continuation, bindings = value.get("operational_continuation"), value.get("bindings")
+    if (not isinstance(bindings, dict) or not isinstance(continuation, dict)
+            or continuation.keys() != CONTINUATION_FIELDS
+            or continuation["purpose"] != "pre-snapshot-json-literal-bind-repair"
+            or type(continuation["original_schema_version"]) is not int
+            or continuation["original_schema_version"] != 6
+            or not isinstance(continuation["original_expires_at"], str)
+            or continuation["original_expires_at"] != value.get("expires_at")):
+        return False
+    for field in ("receipt_sha256", "original_ledger_sha256", "original_admission_sha256",
+                  "original_manifest_sha256", "original_readiness_sha256", "original_runner_sha256"):
+        if not isinstance(continuation[field], str) or not re.fullmatch(r"[a-f0-9]{64}", continuation[field]):
+            return False
+    for field, pattern in (
+            ("original_served_source", r"[a-f0-9]{40}"),
+            ("original_served_revision", r"popcre-albert-core-sandbox-[a-z0-9-]+"),
+            ("original_served_digest", r"sha256:[a-f0-9]{64}")):
+        if not isinstance(continuation[field], str) or not re.fullmatch(pattern, continuation[field]):
+            return False
+    if (continuation["original_runner_sha256"] == bindings.get("runner_sha256")
+            or continuation["original_served_source"] == value.get("served_source")):
+        return False
+    # The private executor additionally proves the archived v6 parent's embedded
+    # v5 lineage, exactly one prior epoch, paused ledger and preserved failures.
+    profile = {key: item for key, item in value.items() if key != "operational_continuation"}
+    profile.update(schema_version=5, scope="hts-frozen-r9-diagnostic-evaluation")
+    return frozen_evaluation(profile, root)
+
+
 def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
@@ -401,7 +436,8 @@ def main():
                      or bounded_legacy_proof(value, root)
                      or bounded_legacy_envelope(value, root)
                      or frozen_evaluation(value, root)
-                     or frozen_operational_continuation(value, root)) else 1
+                     or frozen_operational_continuation(value, root)
+                     or frozen_json_literal_continuation(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 
