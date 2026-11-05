@@ -217,6 +217,57 @@
       ],
       "tests/test_ai_second_opinion.py": [
         "test-ai-review-simple.sh"
+      ],
+      "tools/lib/grok-paid-keys.sh": [
+        "test-ai-grok-implement.sh",
+        "test-ai-grok-review.sh"
+      ],
+      "tools/lib/provider-wrapper-common.sh": [
+        "test-ai-gemini.sh",
+        "test-ai-kimi.sh",
+        "test-ai-lock-doctor.sh",
+        "test-ai-qwen-part2.sh",
+        "test-ai-qwen.sh",
+        "test-provider-wrapper-common.sh",
+        "test-reviewer-caller-detection.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/lib/review-session-skip.sh": [
+        "test-ai-review-lifecycle.sh"
+      ],
+      "tools/lib/review-capabilities.sh": [
+        "test-ai-review-preflight.sh",
+        "test-ai-preflight-pinbump.sh"
+      ],
+      "tools/reviewer_credit_stream.py": [
+        "test-ai-gemini.sh",
+        "test-reviewer-credit-stream.sh"
+      ],
+      "tools/reviewer_credit_watch.py": [
+        "test-ai-review-preflight.sh"
+      ],
+      "tools/reviewer_maintenance.py": [
+        "test-ai-gemini-request-precheck.sh",
+        "test-ai-gemini.sh",
+        "test-workflow-policy.sh"
+      ],
+      "tools/reviewer_usage.py": [
+        "test-ai-deepseek-agent.sh",
+        "test-ai-lock-doctor.sh"
+      ],
+      "bin/ai-transcript-envcheck*": [
+        "test-transcript-store.sh"
+      ],
+      "bin/ai-transcript-upload.ps1": [
+        "test-ai-transcript-upload.sh"
+      ],
+      "bin/mcp-session-guard*": [
+        "test-mcp-session-guard.sh",
+        "test-mcp-launch-lock.sh"
+      ],
+      "bin/mcp-secret-launch.ps1": [
+        "test-mcp-session-guard.sh",
+        "test-mcp-launch-lock.sh"
       ]
     }
   },

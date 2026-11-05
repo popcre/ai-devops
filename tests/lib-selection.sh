@@ -179,6 +179,26 @@ selection_affected_suites() {
   paths="$(cat)"
   rules="$(selection_manifest_rules "$root" || true)"
 
+  # Read the manifest exactly once. The old implementation called jq once per
+  # glob per path, which ground the offline shards to a halt with 60+ globs.
+  local -a select_all_list=() companion_globs=()
+  local -A companion_map=()
+  if [ -n "$rules" ]; then
+    local raw
+    while IFS= read -r raw; do
+      [ -n "$raw" ] && select_all_list+=("$raw")
+    done < <(jq -r '.affected_suite_rules.select_all_globs[]? // empty' <<<"$rules" 2>/dev/null)
+    while IFS=$'\t' read -r raw suite; do
+      [ -n "$raw" ] || continue
+      if [ -z "${companion_map[$raw]+x}" ]; then
+        companion_globs+=("$raw")
+        companion_map[$raw]="$suite"
+      else
+        companion_map[$raw]+=$'\n'"$suite"
+      fi
+    done < <(jq -r '.affected_suite_rules.companion_suites // {} | to_entries[] | .key as $k | .value[] | "\($k)\t\(.)"' <<<"$rules" 2>/dev/null)
+  fi
+
   local select_all=false
   local -A selected=()
 
@@ -214,36 +234,39 @@ selection_affected_suites() {
       continue
     fi
 
-    # Shared surfaces whose change must keep every suite.
-    if [ -n "$rules" ]; then
-      local glob
-      while IFS= read -r glob; do
-        [ -n "$glob" ] || continue
-        if selection_glob_match "$glob" "$path"; then
-          select_all=true
-          break
-        fi
-      done < <(jq -r '.affected_suite_rules.select_all_globs[]? // empty' <<<"$rules" 2>/dev/null)
-      [ "$select_all" = true ] && continue
+    # Companion suites give authoritative narrow mappings (plan step 1.3).
+    # An explicit companion entry wins over broader select_all globs so a
+    # named leaf (e.g. tools/ci/runner-router.cjs) can stay narrow inside a
+    # shared tree, matching the old path_suites precedence. When a companion
+    # glob matches, those suites replace the convention so a declared narrow
+    # map is not widened to select_all.
+    local companion_hit=false
+    local cglob
+    for cglob in "${companion_globs[@]}"; do
+      if selection_glob_match "$cglob" "$path"; then
+        companion_hit=true
+        while IFS= read -r suite; do
+          [ -n "$suite" ] && add_suite "$suite"
+        done <<<"${companion_map[$cglob]}"
+      fi
+    done
+    if [ "$companion_hit" = true ]; then
+      # A .cmd launcher proves the launcher suite too (same as the convention).
+      case "$path" in
+        *.cmd) add_suite "test-bin-cmd-launchers.sh" ;;
+      esac
+      continue
     fi
 
-    # Companion suites give authoritative narrow mappings (plan step 1.3).
-    # When a companion glob matches, those suites replace the convention so
-    # a declared narrow map is not widened to select_all.
-    local companion_hit=false
-    if [ -n "$rules" ]; then
-      local cglob
-      while IFS= read -r cglob; do
-        [ -n "$cglob" ] || continue
-        if selection_glob_match "$cglob" "$path"; then
-          companion_hit=true
-          while IFS= read -r suite; do
-            [ -n "$suite" ] && add_suite "$suite"
-          done < <(jq -r --arg g "$cglob" '.affected_suite_rules.companion_suites[$g][]? // empty' <<<"$rules" 2>/dev/null)
-        fi
-      done < <(jq -r '.affected_suite_rules.companion_suites | keys[]?' <<<"$rules" 2>/dev/null)
-    fi
-    [ "$companion_hit" = true ] && continue
+    # Shared surfaces whose change must keep every suite.
+    local glob
+    for glob in "${select_all_list[@]}"; do
+      if selection_glob_match "$glob" "$path"; then
+        select_all=true
+        break
+      fi
+    done
+    [ "$select_all" = true ] && continue
 
     case "$path" in
       skills/*)
@@ -255,6 +278,9 @@ selection_affected_suites() {
         continue
         ;;
       *.ps1)
+        # Windows PowerShell has its own runner, but this Bash suite checks
+        # every tracked .ps1 for the ASCII-only source contract. A narrowed
+        # PR must catch that failure before its full merge-group run.
         add_suite "test-windows-scripts.sh"
         continue
         ;;
