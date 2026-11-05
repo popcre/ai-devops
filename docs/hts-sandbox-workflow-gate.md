@@ -240,6 +240,27 @@ is admitted. Existing raw failures and accounting remain untouched. This is
 metadata admission only: private proofs and final execution authority remain
 separate, and no cohort may be opened before the executor verifies them.
 
+## One current-v7 prepack identity-join operational repair
+
+Schema 8 has the distinct closed scope
+`hts-frozen-r9-prepack-identity-operational-continuation` and fixed purpose
+`prepack-item-identity-join-repair`. Its same twelve header fields bind the
+immediate CURRENT v7 parent and paused ledger; `original_schema_version` must
+be integer 7. New runner/source pins are required and the original expiry must
+remain exactly equal. All v5 provider, budget, frozen, route, source/origin and
+clean-tree restrictions are retained. Existing v5/v6/v7 predicates are unchanged.
+
+The private executor verifies the complete embedded v5→v6→v7 lineage, exactly
+two previous operational epochs, and the preserved pre-create refusal proof
+plus the synthetic-proved canonical item-identity join contract. Only the third
+operational epoch is admitted; a v8 parent/fourth epoch is refused. All original
+failures, costs, qualification, budget, expiry, input and key remain preserved.
+The refused slot remains failed with no job retry/rePOST. This does not bypass
+prepack qualification, change product flags or establish that a particular
+product's refusal was a false positive. No new zero-cost overlay or run reset
+is authorized. As with earlier profiles, native metadata acceptance does not
+replace private executor proof or final continuation authority.
+
 ## Exact audited retry after provider credit recovery
 
 The original five-route declaration remains accepted unchanged. A second closed

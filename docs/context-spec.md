@@ -216,6 +216,13 @@ are required. The executor verifies the embedded v5 lineage, one prior epoch,
 preserved failures/costs/current inquiry and synthetic roundtrip proof before
 appending exactly one additional epoch. No third transition, new zero-cost
 overlay, retry/rePOST, reset or input/key change is admitted; v5/v6 are unchanged.
+Version 8 separately binds the immediate current-v7 parent for the fixed
+prepack-item-identity-join repair. Its twelve fields require integer parent
+schema 7, a distinct new runner/source and the identical original expiry.
+The executor verifies the full v5→v6→v7 history, exactly two prior epochs and
+preserved pre-create refusal/canonical identity proof before the third epoch.
+No fourth epoch, retry/rePOST, reset, product-flag change or new zero-cost
+overlay is admitted; all v5 limits and v5/v6/v7 predicates remain unchanged.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety

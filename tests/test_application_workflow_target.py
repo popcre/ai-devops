@@ -527,5 +527,37 @@ class FrozenJsonLiteralContinuationTarget(FrozenOperationalContinuationTarget):
         self.assertEqual(self.validate(original), 0)
 
 
+class FrozenPrepackIdentityContinuationTarget(FrozenJsonLiteralContinuationTarget):
+    def setUp(self):
+        super().setUp()
+        self.declaration.update(schema_version=8, scope="hts-frozen-r9-prepack-identity-operational-continuation")
+        self.declaration["operational_continuation"].update(
+            purpose="prepack-item-identity-join-repair", original_schema_version=7)
+
+    def test_no_chaining_general_failure_exception_or_failed_retry(self):
+        for key, bad in (("original_schema_version", 5), ("original_schema_version", 6),
+                         ("original_schema_version", 8), ("original_schema_version", 7.0),
+                         ("purpose", "pre-snapshot-json-literal-bind-repair"),
+                         ("purpose", "pre-provider-immutable-input-repair"),
+                         ("purpose", "any-operational-error"), ("maximum_transitions", 4),
+                         ("retry_failed_inquiry", True), ("reset_ledger", True)):
+            candidate = copy.deepcopy(self.declaration)
+            candidate["operational_continuation"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["routes"] += ["POST /api/hts-rag/jobs/:id/retry"]
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_schema_scope_and_original_v5_are_not_mixed(self):
+        for key, bad in (("schema_version", 8.0), ("schema_version", True),
+                         ("schema_version", 7), ("scope", "hts-frozen-r9-json-literal-operational-continuation")):
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+        original = copy.deepcopy(self.declaration)
+        original.update(schema_version=5, scope="hts-frozen-r9-diagnostic-evaluation")
+        self.assertEqual(self.validate(original), 1)
+        del original["operational_continuation"]
+        self.assertEqual(self.validate(original), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
