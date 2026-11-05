@@ -340,6 +340,14 @@ wrapper's own `doctor --live`). A reviewer shown no live proof cannot treat
 the fact as evidence and the review comes back unusable; PR #577 burned two
 review cycles learning this.
 
+The shared second-opinion `doctor --live` retains sanitized per-attempt outcomes
+under the private `.doctor-diagnostics/<provider>/` directory in its state root.
+Each probe still uses only the fixed READY prompt in a disposable empty repository;
+its repository and sessions are removed. The outcome file records success, failure
+or timeout, elapsed time and redacted diagnostic excerpts with private permissions.
+Secrets wiring prints the retained file location when the required probe fails;
+the READY qualification and three-attempt limit are unchanged.
+
 `tests/test-session-conduct-policy.sh` protects the bounded CI-waiting and
 shared-infrastructure growth rules. Update that test with any deliberate change
 to those standing rules; do not weaken it simply to shorten guidance.

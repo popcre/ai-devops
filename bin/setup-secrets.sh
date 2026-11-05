@@ -754,7 +754,7 @@ echo
 if [ "$fail" -eq 0 ]; then
   if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
     info "Verifying GLM end-to-end through the shared second-opinion path"
-    if "$REPO_ROOT/bin/ai-glm" doctor --live >/dev/null 2>&1; then
+    if "$REPO_ROOT/bin/ai-glm" doctor --live >/dev/null; then
       ok "GLM-5.3 verified end-to-end through the pinned OpenCode and Z.ai"
     else
       warn "GLM capability check failed. Run: ai-glm doctor --live"
