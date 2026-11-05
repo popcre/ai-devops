@@ -160,8 +160,11 @@ Provider HTTP retry and billable tools remain absent. Catalog bounds are
 rates are $0.00000025/$0.00000075 per token. One inquiry's conservative risk is
 $32.265. The coordinator explicitly authorizes up to $42.27 session exposure:
 the $10 observed submission stop plus one in-flight overshoot. This is **not a
-hard $10 cap**. Initial live credit must cover `10 - prior accounted spend`, not
-the full exposure. If credit is declined, retain failed/unknown results; never
+hard $10 cap**. These amounts are not an invoice or all third-party costs; they
+concern Luna usage accounted
+at approved application rates only; retained ScaleDown compression billing is
+unquantified and not included. Initial live credit covers `10 - prior accounted
+spend`, not the full exposure. If credit is declined, retain failed/unknown results; never
 top up, change credentials or retry an ambiguous HTTP submission. Old profiles
 1–4 retain their original limits.
 

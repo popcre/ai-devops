@@ -214,6 +214,8 @@ FROZEN_LIMITS = {
     "owner_answers": 0, "maximum_person_answers_for_scoring": 3,
     "observed_session_stop_usd": 10, "inflight_overshoot_reserve_usd": 32.265,
     "maximum_authorized_exposure_usd": 42.27, "hard_cost_ceiling": False,
+    "cost_basis": "luna-application-accounted-approved-rates",
+    "compression_billing": "unquantified-not-included",
     "apply_classifications": False, "item_writes": False, "learning": False,
     "ambiguous_post_retry": False, "provider_http_retry": False,
     "send_messages": False,
