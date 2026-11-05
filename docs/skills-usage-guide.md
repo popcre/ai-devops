@@ -140,7 +140,7 @@ Shared/client name collisions fail before anything is copied.
 | "failed to switch branch: main is already used by worktree" / "clean up stale Codex and Claude working folders" | `cleanup-worktree` — audits active and abandoned linked worktrees and temp clones, preserves unique work, then removes only proven-safe copies |
 | "pull develop into sandbox-albert, then pull into local…" + 4 standing rules | `dflow-session-start` — automatic at dflow session start |
 | "push and commit… update the PR for sandbox-albert with develop" | `dflow-ship` — say "ship it" or "push and commit" |
-| "is everything pushed? the live site is still running the old commit" | `deploy-and-verify` (hetz apps) — deploy verification with the Coolify quirks baked in |
+| "is everything pushed? the live site is still running the old commit" | `deploy-and-verify` (hetz apps + theoracle web) — deploy verification that proves the live `/version.json` matches the merged commit, with the Coolify quirks baked in |
 | "pull the repo and re-read the .md files for the proper way to make db changes" | `shared-db-change` — automatic for any shared-backend change |
 | "are there any secrets not in 1password? put them in with good notes" | `secrets-to-1password` — say "secrets sweep" (also runs inside session-docs-update and wrap-up) |
 | "save this key / put these credentials in 1password with notes a future session can use" | `secrets-to-1password` — same skill, single-entry mode |
