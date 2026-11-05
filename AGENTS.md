@@ -175,33 +175,10 @@ Shared-db migration gate trimming (plan, not active): read
 [popcre/shared-db#5150](https://github.com/popcre/shared-db/issues/5150) tracks it.
 No gate or workflow changes until the owner approves.
 
-Entire alongside GitHub (memory, Trails, sessions/search and optional CI): read
-[`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md) STATUS first;
-[#2022](https://github.com/popcre/ai-devops/issues/2022) owns the reversible trial.
-
-For Albert's October 31 authorization to test Entire controlling testing and
-merging while GitHub retains official code, read the plan's **October 31
-controlling amendment** first, then T1–T7 and R1–R8. The older advisory-only
-public-companion workflow below is not a veto on that bounded trial. Preserve
-its privacy, no-billing and original-deadline constraints; no permanent
-protected-main cutover or bypass follows from trial authorization.
-
-Fleet/CI expansion: read that plan's current STATUS and R1–R8 before claiming
-rollout. Codex, Claude, MiMo and ZCode across all four requested machines each
-need live proof; repository instructions/mirror success prove neither fleet
-installation nor CI execution migration. The existing public workflow below
-is narrower than that pending acceptance; preserve its locked constraints.
-
-During the authorized public-companion trial, follow
-[`docs/entire-trial.md` § Session workflow](docs/entire-trial.md#session-workflow)
-for public ai-devops work: keep the owning GitHub issue and normal PR route,
-inspect the corresponding mirrored Trail, compare exact source/check links,
-and retain sanitized continuation context on GitHub. Entire is advisory and
-must not delay GitHub delivery. Never upload private context or enable capture,
-Agents, billing, integrations or required-check changes. This instruction
-expires November 12, 2026, 5:58 AM EST; check the current New York time before
-trial activity. After expiry, record the trial disposition on #2022 and continue
-GitHub-only work without altering shared integrations.
+Entire trial: ended November 4, 2026 by owner decision, not adopted
+([#2022](https://github.com/popcre/ai-devops/issues/2022) closed). GitHub only;
+do not consult or install Entire. [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md)
+and [`docs/entire-trial.md`](docs/entire-trial.md) are historical records.
 
 Low-frequency and specialized tasks live in [`docs/task-router.md`](docs/task-router.md); load only the matching row.
 
