@@ -33,10 +33,11 @@ copy() {
   fi
 }
 # Preserve both existing sources. A failed source must not hide another failure.
-copy copy "$HOME/.claude/projects" "$base/claude"
-copy copy "$HOME/.codex/sessions" "$base/codex/home/ai/.codex/sessions"
+# Match the standard uploader: leave actively written archives for a later run.
+copy copy "$HOME/.claude/projects" "$base/claude" --min-age 15m
+copy copy "$HOME/.codex/sessions" "$base/codex/home/ai/.codex/sessions" --min-age 15m
 if [[ -f "$HOME/.codex/session_index.jsonl" ]]; then
-  copy copyto "$HOME/.codex/session_index.jsonl" "$base/codex/home/ai/.codex/session_index.jsonl"
+  copy copyto "$HOME/.codex/session_index.jsonl" "$base/codex/home/ai/.codex/session_index.jsonl" --min-age 15m
 fi
 # Read-only sqlite connection includes committed WAL data. Export times are
 # message activity times; rclone copy preserves them. Never send raw databases.

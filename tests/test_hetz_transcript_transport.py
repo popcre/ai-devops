@@ -32,6 +32,9 @@ class Transport(unittest.TestCase):
             self.assertIn('hetz/claude', calls)
             self.assertIn('hetz/codex', calls)
             self.assertIn('model-io-sess_', calls)
+            raw_copies = [s for s in calls.splitlines() if '/claude ' in s or '/codex/' in s]
+            self.assertTrue(raw_copies)
+            self.assertTrue(all('--min-age 15m' in s for s in raw_copies))
             self.assertNotIn('db.sqlite', calls)
             self.assertNotIn('--delete', calls)
             self.assertNotEqual(subprocess.run(['bash', str(launcher)], env=dict(env, FAIL='1')).returncode, 0)
