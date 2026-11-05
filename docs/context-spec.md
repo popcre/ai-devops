@@ -179,6 +179,17 @@ that risk inside the unchanged $10 cumulative cap. No retry, billable tools or
 separate paid preprocessing request is admitted. The receipt is not a transport
 counter: the executor verifies the deployed call graph and reconciles actual
 usage against its private hash-bound prior snapshot.
+Version 5 is a distinct frozen R9 real-cohort diagnostic: at most 83 initial
+inquiries, one inquiry in flight, zero owner answers, unchanged frozen membership,
+and only job submission/detail routes. Private hash-bound input, readiness,
+qualification, prior spend, provenance, runner, catalog and pricing evidence must
+be checked by the executor before cohort access and bound immutably to its one
+common ledger. Its observed submission stop is $10 minus prior accounted spend;
+it explicitly authorizes up to $42.27 exposure including one 90-call inquiry's
+$32.265 conservative overshoot. Starting credit need cover the observed remaining
+allowance, not pretend that the full risk is prepaid. This is not a hard provider
+cap or transport enforcer. No item writes, learning, answer submissions, ambiguous
+POST retries, separate HTTP provider retries or classification application are admitted.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety

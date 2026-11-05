@@ -293,5 +293,88 @@ class BoundedLegacyEnvelopeTarget(BoundedLegacyProofTarget):
         self.assertEqual(self.validate(candidate), 1)
 
 
+class FrozenEvaluationTarget(ClosedRecoveryTarget):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
+        head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.declaration = {
+            **copy.deepcopy(TARGET.TARGET), "schema_version": 5,
+            "issue": "https://github.com/popcre/designflow-backend/issues/278",
+            "scope": "hts-frozen-r9-diagnostic-evaluation", "routes": TARGET.FROZEN_ROUTES,
+            "frozen": {"membership_sha256": TARGET.FROZEN_HASH, "maximum_items": 83,
+                       "common_ledger": "git-common-dir:hts-r9-frozen-live-eval.json",
+                       "single_run": True, "resume_existing_only": True},
+            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 7486,
+                       "minimum_start_credit_usd": 9.75},
+            "provider": TARGET.FROZEN_PROVIDER,
+            "executor": "scripts/hts-live-holdout-eval.js",
+            "prior_usage": {"provider_calls": 16, "actual_cost_usd": 0.25,
+                            "snapshot_sha256": "a" * 64, "source": "session-provider-usage-verified"},
+            "bindings": {key: "b" * 64 for key in TARGET.FROZEN_BINDINGS},
+            "source_head": head, "served_source": "c" * 40,
+            "served_revision": "popcre-albert-core-sandbox-00001-test",
+            "expires_at": BoundedAcceptanceTarget.expiry(hours=1),
+        }
+
+    def test_exact_real_cohort_profile_admitted_without_synthetic_relabeling(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+        self.assertNotIn("fixture_prefix", self.declaration)
+        self.assertFalse(self.declaration["limits"]["hard_cost_ceiling"])
+
+    def test_every_frozen_binding_is_required_and_typed(self):
+        for key in TARGET.FROZEN_BINDINGS:
+            for bad in [None, True, "x" * 64, "A" * 64, "a" * 63]:
+                candidate = copy.deepcopy(self.declaration)
+                candidate["bindings"][key] = bad
+                self.assertEqual(self.validate(candidate), 1)
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["bindings"][key]
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_routes_and_frozen_membership_cannot_be_broadened(self):
+        for field, bad in [("membership_sha256", "a" * 64), ("maximum_items", 84),
+                           ("single_run", False), ("resume_existing_only", False),
+                           ("common_ledger", "/tmp/new-ledger")]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["frozen"][field] = bad
+            self.assertEqual(self.validate(candidate), 1)
+        for route in ["POST /api/hts-rag/jobs/:id/answer", "PUT /api/hts-rag/items/:id/facts", "POST /addRfqItem"]:
+            self.assertEqual(self.validate({**self.declaration, "routes": TARGET.FROZEN_ROUTES + [route]}), 1)
+
+    def test_observed_stop_is_distinct_from_exposure_and_dynamic_credit(self):
+        for field, bad in [("maximum_session_provider_calls", 7470),
+                           ("minimum_start_credit_usd", 42.27), ("minimum_start_credit_usd", 10),
+                           ("maximum_authorized_exposure_usd", 10), ("hard_cost_ceiling", True),
+                           ("maximum_inflight_inquiries", 2), ("owner_answers", True),
+                           ("maximum_provider_calls_per_inquiry", 9), ("maximum_attempts_per_job", 1),
+                           ("item_writes", True), ("learning", True), ("ambiguous_post_retry", True)]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["limits"][field] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_unknown_prior_or_zero_remaining_credit_is_refused(self):
+        for key, bad in [("provider_calls", True), ("provider_calls", -1), ("provider_calls", 10**1000),
+                         ("actual_cost_usd", True), ("actual_cost_usd", 10),
+                         ("actual_cost_usd", 9.999999999),
+                         ("actual_cost_usd", float("nan")), ("actual_cost_usd", float("inf")),
+                         ("snapshot_sha256", "unverified"), ("source", "estimated")]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["prior_usage"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_identity_expiry_provider_and_old_profile_guards_remain_closed(self):
+        for key, bad in [("served_source", "HEAD"), ("served_revision", "production"),
+                         ("source_head", "f" * 40), ("expires_at", BoundedAcceptanceTarget.expiry(seconds=-1)),
+                         ("issue", "https://github.com/popcre/designflow-backend/issues/94"),
+                         ("fixture_prefix", "AI-QA-20261105-fake-"), ("schema_version", 4)]:
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["provider"]["model"] = "unapproved-model"
+        self.assertEqual(self.validate(candidate), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -133,6 +133,41 @@ prove the installed command accepts only the declared sandbox workflow. Then ref
 the live backend source, review its exact workflow declaration and execute the
 genuine HTS case. Preserve every previous proof and refusal.
 
+## Frozen R9 diagnostic declaration
+
+Version 5, `hts-frozen-r9-diagnostic-evaluation`, is separate from synthetic
+acceptance and does not create fixtures. It fixes the existing 83-item frozen
+membership hash, the authenticated Alsand sandbox and issue #278. Only
+`POST /api/hts-rag/jobs` and `GET /api/hts-rag/jobs/:id` are admitted. There are
+zero owner answers, one in-flight inquiry and one common-ledger run; resume
+observes existing jobs and never repeats an ambiguous submission. No master-data,
+item-fact, RFQ, Apply/Save, SQL, schema, learning or provider-policy changes follow.
+
+The committed declaration binds private input, readiness, qualification, prior
+spend, provenance, exact runner, catalog and pricing SHA-256 receipts. It binds
+the immutable served source and revision separately from `source_head`, whose
+existing meaning remains an ancestor of the committed declaration. The executor
+must verify the files, installed gate receipt, eligibility and immutable ledger
+before opening the cohort; this validator only checks the closed declaration,
+not private evidence or actual execution. Do not run until that executor support
+and the coordinator's readiness decision are verified.
+
+The preserved queue can create two record answers and attempt each of three jobs
+three times. At ten internal Luna calls per attempt, its conservative bound is
+90 calls per inquiry and 7,470 for 83 inquiries, plus verified prior session calls.
+Provider HTTP retry and billable tools remain absent. Catalog bounds are
+1,050,000 context and 128,000 completion tokens; maximum approved input/output
+rates are $0.00000025/$0.00000075 per token. One inquiry's conservative risk is
+$32.265. The coordinator explicitly authorizes up to $42.27 session exposure:
+the $10 observed submission stop plus one in-flight overshoot. This is **not a
+hard $10 cap**. Initial live credit must cover `10 - prior accounted spend`, not
+the full exposure. If credit is declined, retain failed/unknown results; never
+top up, change credentials or retry an ambiguous HTTP submission. Old profiles
+1–4 retain their original limits.
+
+Public reports contain aggregates only. Full per-item results, evidence lineage,
+private receipt hashes and qualification context remain protected outside Git.
+
 ## Exact audited retry after provider credit recovery
 
 The original five-route declaration remains accepted unchanged. A second closed
