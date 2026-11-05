@@ -169,6 +169,13 @@ admits source-pinned, expiring synthetic acceptance with fixed routes, two
 fixtures and strict provider/cost bounds (#2395). Version 3 separately admits
 one synthetic dedicated legacy HTS call: pinned Luna/OpenRouter, 512 output
 tokens, $0.10, no automatic retry or new records, and an exact request prefix.
+Version 4 separately declares one HTTP request with up to nine internal Luna
+calls, 4096 main output tokens and a $3.23 conservative request risk. It binds
+verified prior usage to an aggregate prior-plus-nine call limit and reserves
+that risk inside the unchanged $10 cumulative cap. No retry, billable tools or
+separate paid preprocessing request is admitted. The receipt is not a transport
+counter: the executor verifies the deployed call graph and reconciles actual
+usage against its private hash-bound prior snapshot.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety

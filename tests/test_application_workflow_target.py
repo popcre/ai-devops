@@ -236,5 +236,62 @@ class BoundedLegacyProofTarget(BoundedAcceptanceTarget):
         self.assertEqual(self.validate(candidate), 1)
 
 
+class BoundedLegacyEnvelopeTarget(BoundedLegacyProofTarget):
+    def setUp(self):
+        super().setUp()
+        self.declaration.update(
+            schema_version=4,
+            scope="hts-bounded-synthetic-legacy-envelope-proof",
+            prior_usage={"provider_calls": 2, "actual_cost_usd": 0.02,
+                         "snapshot_sha256": "a" * 64,
+                         "source": "session-provider-usage-verified"},
+            limits={**copy.deepcopy(TARGET.LEGACY_PROOF_LIMITS),
+                    "maximum_total_provider_turns": 11,
+                    "maximum_provider_turns_per_fixture": 11,
+                    "maximum_total_cost_usd": 10},
+            legacy_proof={**TARGET.LEGACY_ENVELOPE_BOUNDS,
+                          "description_prefix": self.declaration["fixture_prefix"]},
+        )
+
+    def test_aggregate_is_exactly_verified_prior_plus_nine_not_http_count(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+        for field in ["maximum_total_provider_turns", "maximum_provider_turns_per_fixture"]:
+            for value in [1, 3, 9, 10, 12, 11.0, True]:
+                candidate = copy.deepcopy(self.declaration)
+                candidate["limits"][field] = value
+                self.assertEqual(self.validate(candidate), 1)
+
+    def test_prior_usage_requires_complete_typed_hash_bound_receipt_declaration(self):
+        for field, values in {
+            "provider_calls": [-1, True, 2.0, "2", None],
+            "actual_cost_usd": [-0.1, True, "0.02", None, float("nan"), float("inf"), 10 ** 1000],
+            "snapshot_sha256": ["unknown", "A" * 64, True, None],
+            "source": ["estimated", "client-reported", None],
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    candidate = copy.deepcopy(self.declaration)
+                    candidate["prior_usage"][field] = value
+                    self.assertEqual(self.validate(candidate), 1)
+        for field in self.declaration["prior_usage"]:
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["prior_usage"][field]
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_cumulative_ten_dollar_cap_reserves_the_full_request_upper_risk(self):
+        candidate = copy.deepcopy(self.declaration)
+        candidate["prior_usage"]["actual_cost_usd"] = 6.77
+        self.assertEqual(self.validate(candidate), 0)
+        for prior in [6.770001, 9.99, 10]:
+            candidate["prior_usage"]["actual_cost_usd"] = prior
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_old_version_cannot_claim_the_larger_internal_envelope(self):
+        self.assertEqual(self.validate({**self.declaration, "schema_version": 3}), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["prior_usage"]["extra"] = "unreviewed"
+        self.assertEqual(self.validate(candidate), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
