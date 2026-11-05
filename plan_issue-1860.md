@@ -25,7 +25,7 @@ Live re-test on edge-dev (Windows 11), 2026-11-04 3:54 PM EST:
 | 3 Fix in `bin/ai-zcode` | ✅ error + `doctor` | PR #2370 |
 | 4 Re-qualify STEP 0 + evidence folder | ✅ | same evidence |
 | 5 Tests | ✅ | `tests/test-ai-zcode.sh` |
-| 6 PR, merge, live proof, close #1860 | see #1860 | — |
+| 6 PR, merge, live proof, close #1860 | ✅ | #2370 merged, installed on edge-dev, proof on #1860 (closed) 2026-11-04 |
 
 Handoff link: none; the work finished in one session.
 
