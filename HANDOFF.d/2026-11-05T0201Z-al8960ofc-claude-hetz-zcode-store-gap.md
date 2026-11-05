@@ -49,3 +49,6 @@ Raw copies contain unfiltered conversations; deleting too early loses recovery. 
 
 ## Self-audit
 1. Newcomer can continue: yes, sections 1, 3, 5, 6. 2. As well as me: yes, sections 4, 5, 9. 3. All details: yes, with unchecked items named in 3. 4. Owner decisions: swept, none, section 0.
+
+## Related
+The earlier session file [2026-10-29T1842Z-hetz-zcode-transcript-dropbox-pipeline.md](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1842Z-hetz-zcode-transcript-dropbox-pipeline.md) set up the hetz nightly job; read it first.
