@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Ubuntu hetz's rclone transport; owns the former hand-written nightly job.
+# Install from merged source with --install. Exports never include reasoning.
+set -euo pipefail
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+state="${AI_HETZ_TRANSCRIPT_STATE:-$HOME/.local/state/ai-devops/hetz-transcripts}"
+exporter="$here/zcode_export.py"
+[[ -f "$exporter" ]] || exporter="$here/../tools/transcript_store/zcode_export.py"
+if [[ "${1:-}" = --install ]]; then
+  mkdir -p "$state" "$HOME/bin"
+  if [[ -f "$HOME/bin/transcripts-to-dropbox.sh" ]]; then
+    cp -p "$HOME/bin/transcripts-to-dropbox.sh" "$state/previous-job-$(date -u +%Y%m%dT%H%M%SZ).sh"
+  fi
+  install -m 700 "${BASH_SOURCE[0]}" "$state/run"
+  install -m 600 "$exporter" "$state/zcode_export.py"
+  printf '#!/usr/bin/env bash\nexec bash %q\n' "$state/run" > "$HOME/bin/transcripts-to-dropbox.sh"
+  chmod 700 "$HOME/bin/transcripts-to-dropbox.sh"
+  exit 0
+fi
+[[ $# = 0 ]] || exit 2
+mkdir -p "$state" "$HOME/logs"
+exec 9>"$state/run.lock"
+flock -n 9 || exit 0
+exec >>"$HOME/logs/transcripts-to-dropbox.log" 2>&1
+rclone="${AI_HETZ_RCLONE:-$HOME/bin/rclone}"
+base="${AI_HETZ_TRANSCRIPT_REMOTE:-dropbox:ai/chat_transcripts/hetz}"
+errors=0
+copy() {
+  if "$rclone" "$@" --log-level ERROR; then
+    printf 'stage_ok=1\n'
+  else
+    errors=$((errors + 1)); printf 'stage_failed=1\n'
+  fi
+}
+# Preserve both existing sources. A failed source must not hide another failure.
+copy copy "$HOME/.claude/projects" "$base/claude"
+copy copy "$HOME/.codex/sessions" "$base/codex/home/ai/.codex/sessions"
+if [[ -f "$HOME/.codex/session_index.jsonl" ]]; then
+  copy copyto "$HOME/.codex/session_index.jsonl" "$base/codex/home/ai/.codex/session_index.jsonl"
+fi
+# Read-only sqlite connection includes committed WAL data. Export times are
+# message activity times; rclone copy preserves them. Never send raw databases.
+if python3 "$exporter" "$HOME/.zcode/cli/db/db.sqlite" "$state/zcode-export"; then
+  copy copy "$state/zcode-export" "$base/zcode/sessions"
+else
+  errors=$((errors + 1))
+fi
+if [[ -d "$HOME/.zcode/cli/rollout" ]]; then
+  copy copy "$HOME/.zcode/cli/rollout" "$base/zcode/rollout" \
+    --include 'model-io-session_*.jsonl' --include 'model-io-sess_*.jsonl'
+fi
+printf 'errors=%s\n' "$errors"
+(( errors == 0 ))

@@ -23,33 +23,28 @@ For this server use `hetz`:
   plus `~/.codex/session_index.jsonl` →
   `.../codex/home/ai/.codex/session_index.jsonl`
   (single file: `rclone copyto`, not `copy`).
-- ZCode: db trio (`db.sqlite`, `db.sqlite-wal`, `db.sqlite-shm`) **raw, no
-  gzip** (Dropbox has no 100 MB file limit) →
-  `ai/chat_transcripts/hetz/zcode/<YYYY-MM-DD>/` dated snapshot, like
-  edge-dev; rollout captures `model-io-session_*.jsonl` →
-  `ai/chat_transcripts/hetz/zcode/rollout/`.
+- ZCode: filtered session exports → `ai/chat_transcripts/hetz/zcode/sessions/`;
+  rollout captures with either `model-io-session_` or `model-io-sess_` prefix
+  → `ai/chat_transcripts/hetz/zcode/rollout/`.
 
-Copy — never sync with `--delete`; the archive only ever grows. Never open the
-live ZCode database; copy the trio first.
+Copy only; never sync with deletion. The exporter opens SQLite read-only,
+including committed WAL data; reasoning and tool output stay out of exports.
+Never resume dated raw database uploads.
 
-## Tooling on hetz (installed 2026-10-29)
+## Tooling on hetz
 
-- `rclone` at `/home/ai/bin/rclone`; remote `dropbox` in
-  `~/.config/rclone/rclone.conf` (chmod 600). The token never goes in chat,
-  logs, or command arguments.
-- Script: `/home/ai/bin/transcripts-to-dropbox.sh` — mirrors all three sources.
-- Nightly cron: 3:17 AM America/New_York.
+The repo-owned Ubuntu transport is `bin/ai-transcripts-to-dropbox-hetz`.
+Install it from merged main with `bash bin/ai-transcripts-to-dropbox-hetz --install`.
+This saves the old job recoverably and replaces its existing launcher without
+changing the nightly 3:17 AM America/New_York cron. Reinstall after source updates;
+this transport deliberately has no independent updater. It uses the existing
+rclone remote and does not expose its credentials.
 
-## Running an on-demand refresh
-
-```bash
-/home/ai/bin/transcripts-to-dropbox.sh
-grep "rc=" /home/ai/logs/transcripts-to-dropbox.log   # all four stages rc=0
-```
-
-Verify with `rclone size dropbox:ai/chat_transcripts/hetz` against the source
-trees. Dropbox `too_many_write_operations` errors self-heal via rclone retries;
-only a nonzero final rc is a failure.
+Run `/home/ai/bin/transcripts-to-dropbox.sh` for an on-demand refresh.
+The counts-only log ends with `errors=0`; verify remote session count and
+activity times against the source, then trigger the single store writer on
+edge-dev3. Historical raw copies may be removed only after store coverage and
+Dropbox recovery retention are proven; keep the newest snapshot.
 
 ## Never
 
