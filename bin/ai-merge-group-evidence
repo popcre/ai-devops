@@ -24,6 +24,7 @@
 # Usage:
 #   ai-merge-group-evidence --ref <merge-group-ref> --merge-group-sha <sha>
 #     [--repo OWNER/NAME] [--workflow verify.yml] [--require <job-name>]...
+#     [--accept-pending]
 #
 # `--require` may be repeated; each named job must have concluded `success` in
 # the pull-request run on the queued head commit. With no `--require`, the run's
@@ -32,8 +33,15 @@
 # after classifying the real, pinned PR diff with the same classifier as CI.
 # Missing jobs, failed jobs, unknown paths and code changes remain fail-closed.
 #
+# `--accept-pending` reports a pull-request run that has not finished as
+# "evidence pending" instead of a failure: the note goes to the job summary and
+# the command exits 0. A finished run that failed, and a mismatched commit,
+# still fail with the flag set. Without the flag an unfinished run is never
+# evidence, so direct callers keep the fail-closed exit codes.
+#
 # Exit status:
 #   0  the queued commit carries matching, complete, successful evidence
+#      (or, with --accept-pending, matching evidence is still pending)
 #   1  evidence is missing, stale, mismatched, or unsuccessful
 #   2  usage or environment error (never treated as evidence)
 set -uo pipefail
@@ -43,6 +51,7 @@ MERGE_GROUP_SHA=''
 REPO=''
 WORKFLOW='verify.yml'
 REQUIRED_JOBS=()
+ACCEPT_PENDING=false
 
 die() { printf 'ai-merge-group-evidence: %s\n' "$1" >&2; exit 2; }
 reject() { printf 'ai-merge-group-evidence: %s\n' "$1" >&2; exit 1; }
@@ -60,7 +69,8 @@ while [ $# -gt 0 ]; do
         --require) REQUIRED_JOBS+=("$2") ;;
       esac
       shift 2 ;;
-    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --accept-pending) ACCEPT_PENDING=true; shift ;;
+    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -230,6 +240,7 @@ cancelled_advisory_proven() {
   [ "$(read_queue_state)" = "$QUEUE_STATE" ] || return 1
 }
 RUN_ID=''
+PENDING_NOTE=''
 ADVISORY_RUNS=' '
 CANCELLED_ADVISORY_RUNS=' '
 while IFS="$(printf '\t')" read -r id status conclusion; do
@@ -253,14 +264,35 @@ while IFS="$(printf '\t')" read -r id status conclusion; do
       fi ;;
     esac
   fi
-  [ "$status" = 'completed' ] || reject "the $WORKFLOW run $id for head commit $HEAD_SHA has not finished ($status); an unfinished run is not evidence"
+  if [ "$status" != 'completed' ]; then
+    # An unfinished run is not evidence on its own. With --accept-pending it is
+    # also not a failure: record the note and look at the remaining runs first,
+    # because an older run on this same head commit may already be complete.
+    if [ "$ACCEPT_PENDING" = true ]; then
+      PENDING_NOTE="the $WORKFLOW run $id for head commit $HEAD_SHA has not finished ($status); evidence pending"
+      continue
+    fi
+    reject "the $WORKFLOW run $id for head commit $HEAD_SHA has not finished ($status); an unfinished run is not evidence"
+  fi
   [ "$conclusion" = 'success' ] || reject "the $WORKFLOW run $id for head commit $HEAD_SHA concluded $conclusion"
   RUN_ID="$id"
 done <<EOF
 $RUNS
 EOF
 
-[ -n "$RUN_ID" ] || reject "no usable $WORKFLOW run for head commit $HEAD_SHA"
+if [ -z "$RUN_ID" ]; then
+  if [ "$ACCEPT_PENDING" = true ] && [ -n "$PENDING_NOTE" ]; then
+    printf 'ai-merge-group-evidence: %s\n' "$PENDING_NOTE"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      printf '### ai-merge-group-evidence: evidence pending\n\n%s\n' "$PENDING_NOTE" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+      printf 'state=pending\n' >> "$GITHUB_OUTPUT"
+    fi
+    exit 0
+  fi
+  reject "no usable $WORKFLOW run for head commit $HEAD_SHA"
+fi
 
 if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
   JOBS="$(read_jobs "$RUN_ID")"
@@ -289,3 +321,6 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
 fi
 
 printf 'ai-merge-group-evidence: pull request %s head %s verified by %s run %s\n' "$PR_NUMBER" "$HEAD_SHA" "$WORKFLOW" "$RUN_ID"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  printf 'state=verified\n' >> "$GITHUB_OUTPUT"
+fi

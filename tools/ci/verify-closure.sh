@@ -11,8 +11,8 @@
 # no progress, never a pass.
 set -uo pipefail
 
-[ "$#" -eq 8 ] || {
-  echo 'verify-closure: event selection run_long validation evidence linux windows doc are required.' >&2
+[ "$#" -eq 8 ] || [ "$#" -eq 9 ] || {
+  echo 'verify-closure: event selection run_long validation evidence linux windows doc [evidence_state] are required.' >&2
   exit 2
 }
 
@@ -24,10 +24,13 @@ EVIDENCE_RESULT="$5"
 LINUX_RESULT="$6"
 WINDOWS_RESULT="$7"
 DOC_RESULT="$8"
+# "pending" means the merge-group evidence note says the pull-request run had
+# not finished yet (plan_ci-process-repair.md step 1.1); it is not a failure.
+EVIDENCE_STATE="${9:-verified}"
 
-printf 'event=%s selection=%s run_long=%s validation=%s evidence=%s linux=%s windows=%s doc=%s\n' \
+printf 'event=%s selection=%s run_long=%s validation=%s evidence=%s linux=%s windows=%s doc=%s evidence_state=%s\n' \
   "$EVENT" "$SELECTION_RESULT" "$RUN_LONG" "$VALIDATION_RESULT" \
-  "$EVIDENCE_RESULT" "$LINUX_RESULT" "$WINDOWS_RESULT" "$DOC_RESULT"
+  "$EVIDENCE_RESULT" "$LINUX_RESULT" "$WINDOWS_RESULT" "$DOC_RESULT" "$EVIDENCE_STATE"
 
 # Map a job result onto the truth-table vocabulary. Anything outside the known
 # GitHub conclusions is "missing": it is never treated as progress or as proof.
@@ -92,7 +95,7 @@ if [ "$EVENT" = merge_group ]; then
     echo "verify-closure: merge-group Linux verification did not succeed (state=$LINUX_STATE)." >&2
     exit 1
   fi
-  echo 'verify-closure: merge-group evidence and Linux verification succeeded.'
+  echo "verify-closure: merge-group evidence ($EVIDENCE_STATE) and Linux verification succeeded."
   exit 0
 fi
 

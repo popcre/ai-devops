@@ -147,6 +147,32 @@ OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC
 check "an unfinished run is not evidence" \
   "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'not evidence'"
 
+# plan_ci-process-repair.md step 1.1: an unfinished pull-request run is "evidence
+# pending", not a failure, but only when the caller opts in. Direct callers keep
+# the fail-closed exit codes above.
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" ''
+export GITHUB_STEP_SUMMARY="$TMP/step-summary"; : > "$GITHUB_STEP_SUMMARY"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --accept-pending)"; RC=$?
+check "an unfinished run is evidence pending, not a failure, with --accept-pending" \
+  "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'evidence pending'"
+check "the pending note reaches the job summary" \
+  "grep -q 'evidence pending' '$TMP/step-summary'"
+unset GITHUB_STEP_SUMMARY
+
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" ''
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --accept-pending)"; RC=$?
+check "a finished run that failed stays red even with --accept-pending" \
+  "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'concluded failure'"
+
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" ''
+OUT="$(RUN --ref "$REF" --merge-group-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --repo popcre/ai-devops --accept-pending)"; RC=$?
+check "a mismatched commit stays red even with --accept-pending" "test '$RC' -ne 0"
+
+set_world "$GOOD_HEAD" deadbeef "$(printf '9002\tin_progress\t\n9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tsuccess\n')"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --accept-pending)"; RC=$?
+check "a completed run on the same head commit is used instead of a pending rerun" \
+  "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'verified by'"
+
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "a failed run is not evidence" "test '$RC' -eq 1"

@@ -10,7 +10,7 @@
 | Step | Work | State | Evidence |
 |---|---|---|---|
 | 0.1 | Retire stale automatic-fix pull requests, stop new ones going stale | ✅ done | PR #2383; 33 stale fixer PRs closed 2026-11-04 (shared-db 19, ai-devops 14, findings all closed), 4 theoracle conflicted PRs retired and re-dispatched once (#279, #283, #289, #304); 62 fixer-state tests cover finding-closed and idle |
-| 1.1 | `merge-group-evidence` stops reporting an unfinished run as failure | ⬜ open | — |
+| 1.1 | `merge-group-evidence` stops reporting an unfinished run as failure | 🟡 landed, live proof open | PR #2388; `--accept-pending` reports an unfinished run as "evidence pending" (job summary + exit 0), finished-failed and mismatched stay red, direct callers keep the fail-closed exit codes; 67 evidence tests pass (5 new) and 39 closure tests pass. `- [ ] live proof` on #2367 |
 | 1.2 | Repair the tests failing today on Linux | ⬜ open | — |
 | 1.3 | New suites register themselves | ⬜ open | — |
 | 1.4 | A real test failure after merge gets an owner automatically | ⬜ open | — |
