@@ -80,6 +80,32 @@ ACCEPTANCE_LIMITS = {
     "apply_classifications": False,
 }
 
+# A separate, tighter profile for one synthetic legacy-provider proof. It adds
+# no fixture writes, general chat, alternate provider, or arbitrary HTTP route.
+LEGACY_PROOF_ROUTES = [
+    "GET /api/hts-rag/runtime-config",
+    "GET /api/hts-rag/jobs/:id",
+    "GET /getRFQGroup",
+    "POST /getRFQItemById",  # Existing read-only application operation.
+    "POST /api/openrouter/hts-classify",
+]
+LEGACY_PROOF_LIMITS = {
+    **ACCEPTANCE_LIMITS,
+    "maximum_total_provider_turns": 3,
+    "maximum_total_cost_usd": 0.10,
+    "maximum_new_fixtures": 0,
+    "maximum_new_containers": 0,
+}
+LEGACY_PROOF_BOUNDS = {
+    "maximum_calls": 1,
+    "maximum_output_tokens": 512,
+    "maximum_cost_usd": 0.10,
+    "automatic_retry": False,
+    "required_actual_model": "openai/gpt-6-luna-20260922",
+    "required_actual_api": "openrouter",
+    "required_credit_state": "positive-live-binding-verified",
+}
+
 
 def bounded_acceptance(value, root):
     """A clean, expiring source-pinned declaration with no configurable routes."""
@@ -98,6 +124,33 @@ def bounded_acceptance(value, root):
     if not exact({key: value[key] for key in expected if key != "issue"},
                  {key: item for key, item in expected.items() if key != "issue"}):
         return False
+    return bounded_metadata(value, root)
+
+
+def bounded_legacy_proof(value, root):
+    """One fixed legacy route, no new records, and a matching synthetic prefix."""
+    if not isinstance(value, dict):
+        return False
+    dynamic = {"issue", "source_head", "expires_at", "fixture_prefix"}
+    expected = {
+        **TARGET,
+        "schema_version": 3,
+        "scope": "hts-bounded-synthetic-legacy-proof",
+        "routes": LEGACY_PROOF_ROUTES,
+        "limits": LEGACY_PROOF_LIMITS,
+        "legacy_proof": {**LEGACY_PROOF_BOUNDS,
+                         "description_prefix": value.get("fixture_prefix")},
+    }
+    if value.keys() != expected.keys() | dynamic:
+        return False
+    if not exact({key: value[key] for key in expected if key != "issue"},
+                 {key: item for key, item in expected.items() if key != "issue"}):
+        return False
+    return bounded_metadata(value, root)
+
+
+def bounded_metadata(value, root):
+    """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
             r"https://github\.com/popcre/designflow-backend/issues/[1-9][0-9]*", value["issue"]):
         return False
@@ -166,7 +219,8 @@ def main():
         path.resolve(strict=True).relative_to(root)
         value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
         return 0 if (exact(value, TARGET) or exact(value, RECOVERY_TARGET)
-                     or bounded_acceptance(value, root)) else 1
+                     or bounded_acceptance(value, root)
+                     or bounded_legacy_proof(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 

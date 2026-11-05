@@ -43,6 +43,30 @@ Current admission requires reviewer-safety or ui-live-workflow classification;
 AI review is advisory and never grants or blocks this action. The older review
 requirements below are historical and are superseded by owner ruling #2041.
 
+## Single synthetic legacy-provider proof
+
+Version 3 uses `scope: hts-bounded-synthetic-legacy-proof` with the same
+source, expiry, prefix, target identity and forbidden actions. Its exact
+`LEGACY_PROOF_ROUTES` adds only the dedicated HTS legacy POST alongside bounded
+read-only checks. It cannot create records or containers, mutate existing
+fixtures, call generic chat or shadow classification, or change queue settings.
+The two-fixture, one-container and three-total-provider-turn boundaries remain.
+
+`LEGACY_PROOF_BOUNDS` fixes one call, 512 output tokens, $0.10 maximum, no
+automatic retry, the approved pinned Luna model through OpenRouter, and verified
+positive credit from the actual sandbox binding. `description_prefix` must
+exactly equal the declared synthetic fixture prefix. The executor must validate
+that prefix on the actual request, verify immutable deployed policy and runtime
+configuration, count earlier calls, and write its one-use marker before POST.
+Unknown outcomes are observed without reposting. Meter actual cost afterward;
+this admission is not a provider response or a spending guarantee.
+
+Codex owns source tests, ordinary delivery, protected Ubuntu and Windows
+installation, and installed positive/refusal/restored proofs on #2395. The
+application's owning issue retains its separate paid-call authorization and
+live result; preparation never counts as that result. Versions 1 and 2 remain
+unchanged.
+
 ## Historical implementation and verification record
 
 Owner: Codex; application outcome: DesignFlow backend issue #94. Central safety
