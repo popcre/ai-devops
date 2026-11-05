@@ -181,6 +181,38 @@ top up, change credentials or retry an ambiguous HTTP submission. Old profiles
 Public reports contain aggregates only. Full per-item results, evidence lineage,
 private receipt hashes and qualification context remain protected outside Git.
 
+### One original-v5 operational continuation
+
+Version 6, `hts-frozen-r9-operational-continuation`, declares exactly one
+`pre-provider-immutable-input-repair` transition of an already claimed v5 run.
+It retains every v5 route, provider, cohort, budget and initial-lifetime bound.
+It grants no new submission for the first failed inquiry, no retry route, no
+reset, no second transition and no new expiry. The first failed record stays
+failed and untouched; only an append-only, privately proved zero-launch
+accounting overlay is eligible. This does not turn a failure into a success.
+
+The exact `operational_continuation` object contains `purpose`,
+`receipt_sha256`, `original_ledger_sha256`, `original_admission_sha256`,
+`original_manifest_sha256`, `original_readiness_sha256`,
+`original_runner_sha256`, `original_served_source`,
+`original_served_revision`, `original_served_digest`, `original_expires_at`
+and `original_schema_version` (integer 5). New runner and served-source pins
+must differ from their originals. `expires_at` must equal the declared original
+expiry. All eight usual v5 bindings remain required, including the new runner,
+readiness and actual served pricing evidence.
+
+`original_ledger_sha256` hashes the exact protected original-ledger archive
+bytes. `original_admission_sha256` hashes `JSON.stringify` of that archived
+ledger's admission object, preserving its property order; it is distinct from
+the admission object's manifest SHA. The private executor must verify every
+archive and receipt hash against the actual original ledger, run identity,
+created time, input/key, prior reserve, budget, qualification, catalog and expiry.
+It must prove the exact first failed job's three attempts stopped before provider
+registration with zero model launch, verify the narrowly approved immutable-input
+repair and new epoch source, and refuse any existing transition or failed-job
+rePOST. Native admission validates closed metadata, not those private facts.
+No continuation may open the cohort until all actual executor checks pass.
+
 ## Exact audited retry after provider credit recovery
 
 The original five-route declaration remains accepted unchanged. A second closed

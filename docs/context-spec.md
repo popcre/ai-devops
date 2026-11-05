@@ -199,6 +199,15 @@ POST retries, separate HTTP provider retries or classification application are a
 V5 alone has a fixed maximum 72-hour initial lifetime, never renewed after claim;
 older expiring profiles retain 24 hours. Actual runtime timeout evidence must fit
 170,000 ms with the fixed three attempts and two automatic record answers.
+Version 6 permits one declared original-v5 operational continuation solely for
+a proved pre-provider immutable-input repair. It binds exact original ledger,
+admission, manifest, readiness, runner and served-source evidence plus a private
+receipt; the new runner/source must differ and expiry must remain identical.
+All v5 routes and limits remain fixed. The executor verifies the original run,
+three no-launch failed attempts and unchanged input/key/budget/qualification,
+then appends one epoch and zero-reconciliation overlay. It cannot reset, chain,
+rePOST the failed inquiry or relabel its outcome. Closed native metadata
+admission never substitutes for that private proof.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety
