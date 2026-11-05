@@ -40,6 +40,10 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+if [ "${MOCK_LOGIN_FAIL:-}" = 1 ]; then
+  echo "[project-access-token] { family: 'zai', stage: 'resolve', code: 'project_token_login_failed' }" >&2
+  exit 1
+fi
 case "$1" in
   *DEFECT-NOT-JSON*) echo "this is not json"; exit 0 ;;
   *DEFECT-NOT-IDLE*) printf '{"sessionId":"s","response":"partial","usage":{},"projection":{"status":"running"}}\n'; exit 0 ;;
@@ -169,7 +173,35 @@ if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'all checks green'; then
 else
   bad "doctor green on a fully-wired fixture"
 fi
-check "doctor reports login state without reading credentials" "printf '%s' "$out" | grep -q 'signed in (credentials file present)'"
+check "doctor reports login state without reading credentials" "printf '%s' "$out" | grep -q 'credentials file present (not proof of login'"
+
+# A rejected login gets the specific message, and doctor --live reports it
+# as a failed check instead of dying or trusting the credentials file.
+out="$(MOCK_LOGIN_FAIL=1 run_mock ask "hello" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'ZCode login for headless runs is invalid'; then
+  ok "rejected login fails with the login-invalid message"
+else
+  bad "rejected login fails with the login-invalid message"
+fi
+doctor_live() {
+  AI_ZCODE_APP_EXE="$(command -v bash)" AI_ZCODE_CLI_CORE="$MOCK" AI_ZCODE_HOME="$ZHOME" \
+  MOCK_ARGS="$TMP/args" MOCK_ENV="$TMP/env" \
+  AI_ZCODE_BUILTIN_PROVIDER_CONFIG="$TMP/zcode-builtin.json" \
+  AI_ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG="$TMP/bundled.json" \
+  PATH="$TMP/shimdir:$PATH" "$SCRIPT" doctor --live 2>&1
+}
+out="$(MOCK_LOGIN_FAIL=1 doctor_live)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'live probe    : FAILED'; then
+  ok "doctor --live reports FAILED on a rejected login"
+else
+  bad "doctor --live reports FAILED on a rejected login"
+fi
+out="$(doctor_live)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'live probe    : ok'; then
+  ok "doctor --live green when the ask succeeds"
+else
+  bad "doctor --live green when the ask succeeds"
+fi
 
 # Doctor must fail on the un-migrated junction fixture.
 ZHOME2="$TMP/zcode-home-junction"

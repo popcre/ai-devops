@@ -108,6 +108,11 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   proven; two version numbers exist (desktop app + CLI core) and it
   self-updates, so nothing is pinned. Qualification facts:
   `tests/verification/zcode-windows-2026-09-17/README.md`.
+- **Login can go invalid while the credentials file still exists,** failing
+  every unattended run with `project_token_login_failed`. Only
+  `ai-zcode doctor --live` proves login; the repair is `zcode login zai
+  --no-browser` plus browser authorization
+  ([diagnosis and repair proof](../tests/verification/zcode-windows-2026-11-04/README.md)).
 - **Transcripts:** ZCode keeps sessions in SQLite (`~/.zcode/cli/db/`) +
   rollout JSONL; back them up and mine them by SQL with the
   `zcode-transcript-backup` skill (private repo destination only;
