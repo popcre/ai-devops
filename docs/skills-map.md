@@ -37,7 +37,7 @@ the others live where noted.
 
 | Skill | What it does | Say this |
 |---|---|---|
-| ⚙ `deploy-and-verify` | Ships hetz apps (poppim/popcrm/popdam/monitor/hiclaw): Actions → GHCR → Coolify, with both known Coolify quirks baked in; verifies the live build SHA. | "push and commit" (in those repos) / "the live site didn't change" |
+| ⚙ [`deploy-and-verify`](../skills/shared/deploy-and-verify/SKILL.md) | Shared by Claude, Codex, ZCode and MiMo. Ships hetz apps (poppim/popcrm/popdam/monitor/hiclaw) via Actions → GHCR → Coolify and theoracle's web via Vercel, with both known Coolify quirks baked in; proves the live version at the app's known `/version.json` path matches the merged commit. | "push and commit" (in those repos) / "the live site didn't change" |
 | ⚙ `cicd-rules-audit` | Audits a repo's CI/CD against your full operating rules (embedded verbatim); fixes violations. | "audit CI/CD against our rules" |
 | ⚙ `shared-db-change` | The proper way to change the shared supabase backend's STRUCTURE: migration discipline, shared-db authoring, correct project refs, type regeneration. Rule 0 = reading is open; Rule 0.5 = DATA is the app session's own (except bulk outside-sourced loads into curated Master Data). | fires on any shared-backend schema/structure change; "make db changes the proper way" |
 | ⚙ `shared-db-handover` | Ends or hands over existing shared-db work with notes on the same outcome issue. Preserves claims, recoverable source, preview/production state and named successor ownership; creates no marker or separate HANDOVER ticket. `wrap-up` routes here for database sessions. | "hand this database work over" / "wrap up this shared-db session" |
