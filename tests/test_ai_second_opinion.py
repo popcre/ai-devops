@@ -16,16 +16,21 @@ TOOL = os.path.join(ROOT, "bin", "ai-second-opinion")
 
 FAKE = textwrap.dedent("""\
     #!/usr/bin/env python3
-    import json, os, sys
+    import json, os, sys, time
     state = os.environ["AI_REVIEW_SIMPLE_FAKE_STATE"]
     prompt = sys.stdin.read()
     args = sys.argv[1:]
     with open(os.path.join(state, "calls.jsonl"), "a") as fh:
-        fh.write(json.dumps({"args": args, "prompt": prompt, "cwd": os.getcwd()}) + "\\n")
+        fh.write(json.dumps({"args": args, "prompt": prompt, "cwd": os.getcwd(), "files": sorted(os.listdir("."))}) + "\\n")
     mode = open(os.path.join(state, "mode")).read().strip() if os.path.exists(os.path.join(state, "mode")) else "ok"
     if mode == "credit":
         print(json.dumps({"type": "error", "error": {"message": "status 429 rate limit exceeded"}}))
         sys.exit(1)
+    if mode == "doctor-secret":
+        print(json.dumps({"type": "error", "error": {"message": "status 503 api_key=" + os.environ.get("ZHIPU_API_KEY", "")}}))
+        sys.exit(1)
+    if mode == "doctor-timeout":
+        time.sleep(10)
     if mode == "write":
         with open("NEW.txt", "w") as fh:
             fh.write("made by fake\\n")
@@ -167,6 +172,58 @@ class SecondOpinion(unittest.TestCase):
         models = [c["args"][c["args"].index("--model") + 1] for c in self.calls()]
         self.assertEqual(models, ["zai-coding-plan/glm-5.3", "meta-model-api/muse-spark-1.3-contributor",
                                   "stepfun-api/step-5-preview"])
+
+    def doctor_receipt(self):
+        import pathlib
+        paths = list(pathlib.Path(self.env["AI_SECOND_OPINION_HOME"]).glob(".doctor-diagnostics/glm/*/outcomes.json"))
+        self.assertEqual(len(paths), 1)
+        path = paths[0]
+        if os.name != "nt":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        return json.loads(path.read_text()), path.read_text()
+
+    def test_doctor_success_preserves_private_outcome_and_only_sends_ready_in_empty_repo(self):
+        result = self.run_tool("glm", "doctor", "--live")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("live diagnostics:", result.stderr)
+        receipt, text = self.doctor_receipt()
+        self.assertEqual(receipt["status"], "passed")
+        self.assertEqual([row["outcome"] for row in receipt["attempts"]], ["ready"])
+        self.assertNotIn("k-123456789", text + result.stdout + result.stderr)
+        call = self.calls()[0]
+        self.assertEqual(call["prompt"], "Reply with exactly the word READY.")
+        self.assertEqual(call["files"], [".git", "README"])
+        self.assertNotIn("a.txt", call["files"])
+        self.assertNotIn("untracked.txt", call["files"])
+        self.assertFalse(os.path.exists(call["cwd"]))  # probe worktree still cleans up
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_doctor_failure_retains_all_three_redacted_outcomes_without_qualification(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("doctor-secret")
+        result = self.run_tool("glm", "doctor", "--live")
+        self.assertEqual(result.returncode, 3)
+        receipt, text = self.doctor_receipt()
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual(len(receipt["attempts"]), 3)
+        self.assertTrue(all(row["exit_code"] == 3 for row in receipt["attempts"]))
+        self.assertIn("[REDACTED]", text)
+        self.assertNotIn("k-123456789", text + result.stdout + result.stderr)
+        self.assertEqual(len(self.calls()), 3)
+
+    def test_doctor_timeout_retains_failed_attempts_and_does_not_pass(self):
+        self.env["AI_SECOND_OPINION_TIMEOUT"] = "1"
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("doctor-timeout")
+        result = self.run_tool("glm", "doctor", "--live")
+        self.assertEqual(result.returncode, 3)
+        receipt, text = self.doctor_receipt()
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual([row["outcome"] for row in receipt["attempts"]], ["timeout"] * 3)
+        self.assertTrue(all(row["elapsed_ms"] >= 900 for row in receipt["attempts"]))
+        self.assertNotIn("k-123456789", text)
+        self.assertEqual(len(self.calls()), 3)
 
 
 if __name__ == "__main__":

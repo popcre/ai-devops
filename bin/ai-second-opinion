@@ -25,6 +25,8 @@ Exit codes: 0 answered, 1 usage or local error, 3 provider unavailable
 """
 import importlib.machinery
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -102,6 +104,28 @@ VERDICT: REVISE.
 def die(msg, code=1):
     print(f"ai-second-opinion: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def doctor_diagnostics(provider, state):
+    """Retain only redacted probe outcomes, never the disposable repository."""
+    import tempfile
+    parent = os.path.join(state, ".doctor-diagnostics", provider)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    info = os.lstat(parent)
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or (os.name != "nt" and info.st_mode & 0o077):
+        die("doctor diagnostics directory must be private and not a symlink")
+    directory = tempfile.mkdtemp(prefix=time.strftime("%Y%m%dT%H%M%SZ-", time.gmtime()), dir=parent)
+    return os.path.join(directory, "outcomes.json")
+
+
+def save_doctor_diagnostics(path, provider, attempts, status):
+    value = {"schema_version": 1, "provider": provider, "model": ars.PROVIDERS[provider]["model"],
+             "status": status, "attempts": attempts, "prompt_kind": "synthetic-ready-only"}
+    temporary = path + ".tmp"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(value, fh, indent=2)
+    os.replace(temporary, path)
 
 
 def git(repo, *args, check=True):
@@ -455,6 +479,9 @@ def main(argv):
         print(f"model: {ars.PROVIDERS[p]['model']}")
         if ok and args.live:
             import tempfile
+            diagnostic_path = doctor_diagnostics(p, STATE)
+            attempts = []
+            save_doctor_diagnostics(diagnostic_path, p, attempts, "running")
             with tempfile.TemporaryDirectory() as tmp:
                 subprocess.run(["git", "init", "-q", tmp], check=True)
                 with open(os.path.join(tmp, "README"), "w") as fh:
@@ -469,11 +496,22 @@ def main(argv):
                 # probe with a fresh session; a real fault fails all attempts.
                 ans = ""
                 for attempt in range(3):
+                    started = time.monotonic()
+                    errors = io.StringIO()
+                    exit_code = 0
                     try:
-                        sdir, meta = start(p, f"doctor{attempt}", tmp, False)
-                        ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
-                    except SystemExit:
+                        with contextlib.redirect_stderr(errors):
+                            sdir, meta = start(p, f"doctor{attempt}", tmp, False)
+                            ans = run_opencode(p, sdir, meta, "Reply with exactly the word READY.")
+                    except SystemExit as error:
                         ans = ""
+                        exit_code = error.code if type(error.code) is int else 1
+                    problem = ars.redact(errors.getvalue(), ars.read_key(p))[-4000:]
+                    outcome = "ready" if "READY" in ans.upper() else "timeout" if "no answer within" in problem else "provider_unavailable" if exit_code else "unexpected_reply"
+                    attempts.append({"attempt": attempt + 1, "outcome": outcome, "exit_code": exit_code,
+                                     "elapsed_ms": round((time.monotonic() - started) * 1000),
+                                     "error": problem, "answer_excerpt": ars.redact(ans.strip(), ars.read_key(p))[:160]})
+                    save_doctor_diagnostics(diagnostic_path, p, attempts, "passed" if outcome == "ready" else "running" if attempt < 2 else "failed")
                     if "READY" in ans.upper():
                         break
                     if attempt < 2:
@@ -481,6 +519,7 @@ def main(argv):
                         time.sleep(3)
                 print(f"live: {ans.strip()[:80]}")
                 ok &= "READY" in ans.upper()
+            print(f"live diagnostics: {diagnostic_path}", file=sys.stderr)
         print("doctor: OK" if ok else "doctor: FAILED")
         return 0 if ok else 3
 
