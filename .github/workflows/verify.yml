@@ -217,6 +217,8 @@ jobs:
     # says so and passes in seconds, so one stable context covers both.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      state: ${{ steps.evidence.outputs.state }}
     permissions:
       actions: read
       contents: read
@@ -225,7 +227,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Queued commit carries its own full verification
+      - id: evidence
+        name: Queued commit carries its own full verification
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -233,7 +236,7 @@ jobs:
             echo 'Not a merge-queue run: the queued-commit evidence check applies to merge groups only.'
             exit 0
           fi
-          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline
+          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --accept-pending
 
   # The two whole-repo doc invariants — the public boundary and local Markdown
   # links — are the only checks whose input a prose-only change controls, yet
@@ -538,7 +541,8 @@ jobs:
             "${{ needs.merge-group-evidence.result }}" \
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
-            "${{ needs.doc-safety.result }}"
+            "${{ needs.doc-safety.result }}" \
+            "${{ needs.merge-group-evidence.outputs.state || 'verified' }}"
 
   # Keep the existing required context and both event producers. Its only
   # merge-blocking responsibility is the real candidate's privacy boundary;
