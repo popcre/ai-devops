@@ -26,6 +26,7 @@ die() { printf 'report-scheduled-failure: error: %s\n' "$*" >&2; exit 1; }
 RUN_URL=""
 REPO="${GITHUB_REPOSITORY:-}"
 RESULTS=""
+RESULTS_FROM_API=0
 TITLE='Scheduled full verification is failing'
 PER_TEST=0
 PR_NUMBER=""
@@ -54,6 +55,7 @@ done
 # Collect job conclusions from the run when the caller did not pass --results.
 # Each entry is "check-name=CONCLUSION".
 if [ -z "$RESULTS" ] && command -v gh >/dev/null 2>&1; then
+  RESULTS_FROM_API=1
   RESULTS="$(gh api "repos/$REPO/actions/runs/${RUN_URL##*/}/jobs" --jq '.jobs[] | select(.conclusion != null) | "\(.name)=\(.conclusion)"' 2>/dev/null || true)"
 fi
 
@@ -61,29 +63,48 @@ fi
 # One ci-red issue per failing test; capacity produces none; auto-close after
 # three later green runs. Advisory: blocks nothing.
 if [ "$PER_TEST" -eq 1 ]; then
+  # Never publish an incident the fixer cannot attribute to a source.
+  [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || die 'per-test mode requires a numeric PR number'
+  [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'per-test mode requires a 40-hex Head SHA'
+  # API entries are already complete lines. Keep legacy space-separated pairs.
+  if [ "$RESULTS_FROM_API" -eq 0 ]; then
+    RESULTS="$(printf '%s\n' "$RESULTS" | python3 -c 'import re,sys; print(re.sub(r"(=(?:failure|success|cancelled|timed_out|skipped|neutral|action_required|startup_failure|stale|null)) +", r"\1\n", sys.stdin.read()))')"
+  fi
   find_ci_red_issue() {
     # Exact title match on an open ci-red issue. Title is deterministic.
-    local job_name="$1" title="ci-red: $1"
+    local title="ci-red: $1 (PR #${PR_NUMBER})"
     gh issue list --repo "$REPO" --state open --label ci-red \
-      --search "in:title \"${title}\"" --json number,title \
-      --jq ".[] | select(.title == \"${title}\") | .number" 2>/dev/null | head -1
+      --limit 1000 --json number,title | python3 -c '
+import json, sys
+print(next((i["number"] for i in json.load(sys.stdin) if i["title"] == sys.argv[1]), ""))
+' "$title"
   }
 
   green_count() {
     local issue_num="$1"
-    gh issue view "$issue_num" --repo "$REPO" --json comments \
-      --jq "[.comments[].body | select(contains(\"${GREEN_MARK}\"))] | length" 2>/dev/null || echo 0
+    gh issue view "$issue_num" --repo "$REPO" --json comments | python3 -c '
+import json, sys
+greens = set()
+for comment in reversed(json.load(sys.stdin)["comments"]):
+    body = comment["body"]
+    if "<!-- ci-red-failure -->" in body or body.startswith("CI red:"):
+        break
+    if "<!-- ci-red-green -->" in body:
+        greens.add(body)
+print(len(greens))
+'
   }
 
   opened=0
+  label_ready=0
   # Accept space- or newline-separated name=conclusion pairs. Split safely.
   while IFS= read -r entry; do
     case "$entry" in
       *=*) ;;
       *) continue ;;
     esac
-    job="${entry%%=*}"
-    conclusion="${entry#*=}"
+    job="${entry%=*}"
+    conclusion="${entry##*=}"
 
     # Green tracking: a success closes ci-red issues after three greens.
     case "$conclusion" in
@@ -91,7 +112,7 @@ if [ "$PER_TEST" -eq 1 ]; then
         existing_green="$(find_ci_red_issue "$job")"
         if [ -n "$existing_green" ]; then
           gh issue comment "$existing_green" --repo "$REPO" \
-            --body "${GREEN_MARK} Green run: ${RUN_URL}" 2>/dev/null || true
+            --body "${GREEN_MARK} Green run: ${RUN_URL}"
           greens="$(green_count "$existing_green")"
           if [ "${greens:-0}" -ge 3 ]; then
             gh issue close "$existing_green" --repo "$REPO" \
@@ -105,6 +126,11 @@ if [ "$PER_TEST" -eq 1 ]; then
 
     job_action="$(action_taxonomy_check "$conclusion" "$job" "")"
     job_detail="$(action_taxonomy_detail "$conclusion" "$job" "")"
+    existing="$(find_ci_red_issue "$job")"
+    if [ -n "$existing" ]; then
+      gh issue comment "$existing" --repo "$REPO" \
+        --body "<!-- ci-red-failure --> Run: ${RUN_URL}" >/dev/null
+    fi
 
     # Capacity/infra and review-step failures open no per-test issue.
     case "$job_action" in
@@ -114,38 +140,39 @@ if [ "$PER_TEST" -eq 1 ]; then
     esac
 
     # Cap per run: one bad commit must not flood the tracker.
-    if [ "$opened" -ge "$CI_RED_CAP" ]; then
+    if [ -z "$existing" ] && [ "$opened" -ge "$CI_RED_CAP" ]; then
       printf 'report-scheduled-failure: cap %s reached; %s not reported\n' "$CI_RED_CAP" "$job"
       continue
     fi
 
-    title="ci-red: ${job}"
+    title="ci-red: ${job} (PR #${PR_NUMBER})"
     body="CI red: \`${job}\` failed in a ${EVENT_NAME:-CI} run.
 
 Run: ${RUN_URL}
 Action label: \`result\`
 Report-only category: ${job_detail}
 
-PR: https://github.com/${REPO}/pull/${PR_NUMBER:-unknown}
-Head SHA: \`${HEAD_SHA:-unknown}\`
+PR: https://github.com/${REPO}/pull/${PR_NUMBER}
+Head SHA: \`${HEAD_SHA}\`
 
 Guidance: result is a real test outcome. Diagnose the failing suite.
-A test failing on two or more unrelated changes is treated as flaky and gets this same issue.
 This issue is advisory: it blocks nothing."
 
-    existing="$(find_ci_red_issue "$job")"
-    # Labels may not exist yet; create before every attach.
-    gh label create ci-red --repo "$REPO" --color D93F0B --force >/dev/null 2>&1 || true
     if [ -n "$existing" ]; then
+      gh issue edit "$existing" --repo "$REPO" --body "$body" >/dev/null
       gh issue comment "$existing" --repo "$REPO" --body "$body" 2>/dev/null || true
       printf 'report-scheduled-failure: updated issue #%s label=ci-red\n' "$existing"
     else
+      if [ "$label_ready" -eq 0 ]; then
+        gh label create ci-red --repo "$REPO" --color D93F0B --force >/dev/null 2>&1 || true
+        label_ready=1
+      fi
       number="$(gh issue create --repo "$REPO" --title "$title" --body "$body" --label ci-red)"
       printf 'report-scheduled-failure: opened %s label=ci-red\n' "$number"
+      opened=$(( opened + 1 ))
     fi
-    opened=$(( opened + 1 ))
   done <<EOF
-$(printf '%s\n' "$RESULTS" | tr ' ' '\n')
+$RESULTS
 EOF
   exit 0
 fi

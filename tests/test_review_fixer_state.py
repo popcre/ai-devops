@@ -132,6 +132,46 @@ class StateTests(unittest.TestCase):
         self.assertTrue(self.state.check(self.data))
         self.assertFalse(self.commands)
 
+    def test_ci_red_plan_check_and_retire(self):
+        self.issue["labels"] = [{"name": "ci-red"}]
+        self.issue["body"] = f"CI red: `Linux suite` failed.\nPR: https://github.com/o/r/pull/2\nHead SHA: `{HEAD}`\n"
+        data, _ = self.state.source(self.issue)
+        self.assertEqual(data["source_pr"], 2)
+        self.assertEqual(self.state.plan()["include"][0]["issues"], [7])
+        self.assertTrue(self.state.check(data))
+        self.pulls = [self.fixer_pr()]
+        self.pr["head"]["sha"] = NEXT
+        self.state.retire("owner/work")
+        self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
+        self.assertTrue(self.deferred())
+
+    def test_reporter_body_satisfies_fixer_source_contract(self):
+        with tempfile.TemporaryDirectory() as folder:
+            mock = Path(folder) / "gh"
+            shutil.copyfile(ROOT / "tests/fixtures/mock-gh-ci-red.sh", mock)
+            mock.chmod(0o755)
+            body = Path(folder) / "body.json"
+            env = dict(os.environ, PATH=folder + os.pathsep + os.environ["PATH"],
+                       GH_LOG=str(Path(folder) / "gh.log"), GH_BODY_FILE=str(body), GH_FIXTURE_ISSUE="")
+            subprocess.run(["bash", str(ROOT / "tools/ci/report-scheduled-failure.sh"),
+                            "--per-test", "--run-url", "https://example/run/1", "--repo", "o/r",
+                            "--pr-number", "2", "--head-sha", HEAD, "--results", "Linux suite=failure"],
+                           env=env, check=True, capture_output=True, text=True)
+            self.issue.update(json.loads(body.read_text()))
+            self.issue["labels"] = [{"name": "ci-red"}]
+            data, _ = self.state.source(self.issue)
+            self.assertEqual(data["source_pr"], 2)
+            self.assertEqual(data["reviewed_head"], HEAD)
+            self.assertTrue(self.state.check(data))
+
+    def test_ci_red_invalid_source_is_rejected(self):
+        self.issue["labels"] = [{"name": "ci-red"}]
+        for pr, head in (("unknown", HEAD), ("2", "unknown"), ("2", "aaaa")):
+            self.issue["body"] = f"PR: https://github.com/o/r/pull/{pr}\nHead SHA: `{head}`\n"
+            with self.subTest(pr=pr, head=head), self.assertRaises(ValueError):
+                self.state.source(self.issue)
+            self.assertEqual(self.state.plan(), {"include": []})
+
     def test_invalid_branch_receipts_are_rejected(self):
         for branch in ("", "-bad", "@", "a b", "a\nb", "a?b", "a[b", "a\\b",
                        "a..b", "a@{b", "a.", "/a", "a/", "a//b", ".a", "a/.b", "a.lock/b"):
