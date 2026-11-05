@@ -18,10 +18,19 @@
 # ZCode's engine is GLM-5.3).
 #
 # ---------------------------------------------------------------------------
-# STEP 0 VERIFICATION — qualified 2026-09-17 against desktop 3.12.3.7463 /
-# CLI core 0.16.5 on Windows 11 (edge-dev). Re-run and update this block on
-# any version bump; evidence: tests/verification/zcode-windows-2026-09-17/.
+# STEP 0 VERIFICATION — requalified 2026-11-04 against desktop 3.17.2.9661 /
+# CLI core 0.17.1 on Windows 11 (edge-dev) for env assembly, login, the ask
+# flags and the output contract; evidence:
+# tests/verification/zcode-windows-2026-11-04/. Facts not re-probed then (parser
+# rejections, hooks) stand from desktop 3.12.3.7463 / CLI core 0.16.5,
+# tests/verification/zcode-windows-2026-09-17/. Re-run on any version bump.
 #
+#   LOGIN CAN GO INVALID WHILE credentials.json STILL EXISTS. The server then
+#     rejects the saved login, every fresh run fails with
+#     project_token_login_failed, and the desktop app can look healthy. Only a
+#     real ask proves login (doctor --live). Repair: zcode login zai
+#     --no-browser plus browser authorization. --surface desktop does not help;
+#     app-server needs what the desktop host supplies (no models without it).
 #   ENV ASSEMBLY IS MANDATORY. Without ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (the
 #     newest ~/.zcode/v2/runtime/provider/*/*/*/zcode-builtin.json),
 #     ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE, and
