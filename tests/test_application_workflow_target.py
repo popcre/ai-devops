@@ -307,12 +307,14 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
             "frozen": {"membership_sha256": TARGET.FROZEN_HASH, "maximum_items": 83,
                        "common_ledger": "git-common-dir:hts-r9-frozen-live-eval.json",
                        "single_run": True, "resume_existing_only": True},
-            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 8233,
-                       "minimum_start_credit_usd": 9.75},
+            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 8237,
+                       "minimum_start_credit_usd": 8.75},
             "provider": TARGET.FROZEN_PROVIDER,
             "executor": "scripts/hts-live-holdout-eval.js",
-            "prior_usage": {"provider_calls": 16, "actual_cost_usd": 0.25,
-                            "snapshot_sha256": "a" * 64, "source": "session-provider-usage-verified"},
+            "prior_usage": {"reported_provider_calls": 5, "provider_calls_upper_bound": 20,
+                            "accounted_cost_usd": 0.25, "unobserved_cost_reserve_usd": 1,
+                            "budget_baseline_usd": 1.25, "snapshot_sha256": "a" * 64,
+                            "source": "session-provider-exposure-verified"},
             "bindings": {key: "b" * 64 for key in TARGET.FROZEN_BINDINGS},
             "source_head": head, "served_source": "c" * 40,
             "served_revision": "popcre-albert-core-sandbox-00001-test",
@@ -368,13 +370,38 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
             self.assertEqual(self.validate(candidate), 1)
 
     def test_unknown_prior_or_zero_remaining_credit_is_refused(self):
-        for key, bad in [("provider_calls", True), ("provider_calls", -1), ("provider_calls", 10**1000),
-                         ("actual_cost_usd", True), ("actual_cost_usd", 10),
-                         ("actual_cost_usd", 9.999999999),
-                         ("actual_cost_usd", float("nan")), ("actual_cost_usd", float("inf")),
+        for key, bad in [("reported_provider_calls", True), ("reported_provider_calls", -1),
+                         ("reported_provider_calls", 21), ("provider_calls_upper_bound", True),
+                         ("provider_calls_upper_bound", -1), ("provider_calls_upper_bound", 10**1000),
+                         ("accounted_cost_usd", True), ("accounted_cost_usd", -1),
+                         ("accounted_cost_usd", 10**1000),
+                         ("accounted_cost_usd", float("nan")), ("accounted_cost_usd", float("inf")),
+                         ("unobserved_cost_reserve_usd", True), ("unobserved_cost_reserve_usd", -1),
+                         ("unobserved_cost_reserve_usd", float("inf")),
+                         ("budget_baseline_usd", True), ("budget_baseline_usd", 10),
+                         ("budget_baseline_usd", 9.999999999), ("budget_baseline_usd", 0.25),
                          ("snapshot_sha256", "unverified"), ("source", "estimated")]:
             candidate = copy.deepcopy(self.declaration)
             candidate["prior_usage"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_exposure_receipt_is_exact_and_never_relabels_reported_usage_as_total(self):
+        for key in self.declaration["prior_usage"]:
+            candidate = copy.deepcopy(self.declaration)
+            del candidate["prior_usage"][key]
+            self.assertEqual(self.validate(candidate), 1)
+        for prior in [
+                {"provider_calls": 5, "actual_cost_usd": 0.25,
+                 "snapshot_sha256": "a" * 64, "source": "session-provider-usage-verified"},
+                {**self.declaration["prior_usage"], "extra": "unreviewed"}]:
+            self.assertEqual(self.validate({**self.declaration, "prior_usage": prior}), 1)
+
+    def test_budget_baseline_binds_sum_and_positive_remaining_credit(self):
+        for accounted, reserve, baseline in [(0.25, 1, 0.25), (9, 1, 10),
+                                               (1e308, 1e308, 1e308), (9.999999999, 0, 10)]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["prior_usage"].update(accounted_cost_usd=accounted,
+                unobserved_cost_reserve_usd=reserve, budget_baseline_usd=baseline)
             self.assertEqual(self.validate(candidate), 1)
 
     def test_identity_expiry_provider_and_old_profile_guards_remain_closed(self):

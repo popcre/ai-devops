@@ -236,15 +236,27 @@ def frozen_evaluation(value, root):
     if not isinstance(value, dict):
         return False
     prior, bindings = value.get("prior_usage"), value.get("bindings")
-    if (not isinstance(prior, dict) or prior.keys() != {
-            "provider_calls", "actual_cost_usd", "snapshot_sha256", "source"}
-            or not isinstance(bindings, dict) or bindings.keys() != FROZEN_BINDINGS):
+    if (not isinstance(prior, dict) or not isinstance(bindings, dict)
+            or bindings.keys() != FROZEN_BINDINGS):
         return False
-    calls, cost = prior["provider_calls"], prior["actual_cost_usd"]
+    if prior.get("source") == "session-provider-exposure-verified" and prior.keys() == {
+            "reported_provider_calls", "provider_calls_upper_bound", "accounted_cost_usd",
+            "unobserved_cost_reserve_usd", "budget_baseline_usd", "snapshot_sha256", "source"}:
+        reported, calls = prior["reported_provider_calls"], prior["provider_calls_upper_bound"]
+        accounted, reserve, cost = (prior[key] for key in (
+            "accounted_cost_usd", "unobserved_cost_reserve_usd", "budget_baseline_usd"))
+        if (type(reported) is not int or reported < 0 or type(calls) is not int or calls < reported
+                or any(type(number) not in (int, float) or number < 0 or number >= 10
+                       or not math.isfinite(number)
+                       for number in (accounted, reserve, cost))
+                or not math.isfinite(accounted + reserve)
+                or cost != round(accounted + reserve, 8)):
+            return False
+    else:
+        return False
     if (type(calls) is not int or calls < 0 or calls > 9007199254740991 - 8217 or type(cost) not in (int, float)
             or cost < 0 or cost >= 10 or not math.isfinite(cost)
             or round(10 - cost, 8) <= 0
-            or prior["source"] != "session-provider-usage-verified"
             or any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
                    for sha in [prior["snapshot_sha256"], *bindings.values()])):
         return False

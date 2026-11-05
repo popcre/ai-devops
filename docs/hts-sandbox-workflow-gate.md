@@ -144,7 +144,12 @@ observes existing jobs and never repeats an ambiguous submission. No master-data
 item-fact, RFQ, Apply/Save, SQL, schema, learning or provider-policy changes follow.
 
 The committed declaration binds private input, readiness, qualification, prior
-spend, provenance, exact runner, catalog and pricing SHA-256 receipts. It binds
+exposure, provenance, exact runner, catalog and pricing SHA-256 receipts.
+V5 requires `session-provider-exposure-verified`: reported calls, a conservative
+call upper bound, accounted cost, an explicit unobserved-cost reserve, their
+eight-decimal budget baseline and the private snapshot hash. The upper bound
+cannot be below reported calls; costs are finite and nonnegative and the exact
+rounded baseline must be below $10. An old exact-usage receipt cannot qualify v5. It binds
 the immutable served source and revision separately from `source_head`, whose
 existing meaning remains an ancestor of the committed declaration. The executor
 must verify the files, installed gate receipt, eligibility and immutable ledger
@@ -159,7 +164,7 @@ three-attempt/two-record-answer source bounds.
 
 The preserved queue can create two record answers and attempt each of three jobs
 three times. At eleven internal Luna calls per attempt, its conservative bound is
-99 calls per inquiry and 8,217 for 83 inquiries, plus verified prior session calls.
+99 calls per inquiry and 8,217 for 83 inquiries, plus the verified prior session call upper bound.
 Provider HTTP retry and billable tools remain absent. Catalog bounds are
 1,050,000 context and 128,000 completion tokens; maximum approved input/output
 rates are $0.00000025/$0.00000075 per token. One inquiry's conservative risk is
@@ -168,8 +173,8 @@ the $10 observed submission stop plus one in-flight overshoot. This is **not a
 hard $10 cap**. These amounts are not an invoice or all third-party costs; they
 concern Luna usage accounted
 at approved application rates only; retained ScaleDown compression billing is
-unquantified and not included. Initial live credit covers `10 - prior accounted
-spend`, not the full exposure. If credit is declined, retain failed/unknown results; never
+unquantified and not included. Initial live credit covers `10 - prior budget
+baseline`, not the full exposure. If credit is declined, retain failed/unknown results; never
 top up, change credentials or retry an ambiguous HTTP submission. Old profiles
 1–4 retain their original limits.
 

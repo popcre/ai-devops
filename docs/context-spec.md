@@ -184,10 +184,16 @@ inquiries, one inquiry in flight, zero owner answers, unchanged frozen membershi
 and only job submission/detail routes. Private hash-bound input, readiness,
 qualification, prior spend, provenance, runner, catalog and pricing evidence must
 be checked by the executor before cohort access and bound immutably to its one
-common ledger. Its observed submission stop is $10 minus prior accounted spend;
+common ledger. V5 requires a verified conservative exposure receipt: reported
+provider calls remain distinct from their upper bound, and accounted cost remains
+distinct from the reserve for unobserved usage. Its budget baseline is the sum
+rounded to eight decimal places and must be below $10. Its observed submission
+stop is $10 minus that baseline;
 it explicitly authorizes up to $45.50 exposure including one 99-call inquiry's
 $35.4915 conservative overshoot. Starting credit need cover the observed remaining
-allowance, not pretend that the full risk is prepaid. This is not a hard provider
+allowance, not pretend that the full risk is prepaid. The session call limit
+is the verified prior upper bound plus 8,217; old exact-usage receipts cannot
+qualify v5 and existing profiles 1–4 are unchanged. This is not a hard provider
 cap or transport enforcer. No item writes, learning, answer submissions, ambiguous
 POST retries, separate HTTP provider retries or classification application are admitted.
 V5 alone has a fixed maximum 72-hour initial lifetime, never renewed after claim;
