@@ -37,7 +37,8 @@ copy() {
 copy copy "$HOME/.claude/projects" "$base/claude" --min-age 15m
 copy copy "$HOME/.codex/sessions" "$base/codex/home/ai/.codex/sessions" --min-age 15m
 if [[ -f "$HOME/.codex/session_index.jsonl" ]]; then
-  copy copyto "$HOME/.codex/session_index.jsonl" "$base/codex/home/ai/.codex/session_index.jsonl" --min-age 15m
+  copy copy "$HOME/.codex" "$base/codex/home/ai/.codex" \
+    --include /session_index.jsonl --max-depth 1 --min-age 15m
 fi
 # Read-only sqlite connection includes committed WAL data. Export times are
 # message activity times; rclone copy preserves them. Never send raw databases.

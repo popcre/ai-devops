@@ -1,5 +1,6 @@
 """Synthetic Ubuntu transport checks; no private data or network."""
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -11,6 +12,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Transport(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('rclone'), 'rclone not installed')
+    def test_real_rclone_local_transport_copies_the_quiet_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            db = home / '.zcode/cli/db/db.sqlite'
+            db.parent.mkdir(parents=True)
+            make_db(db).close()
+            (home / '.claude/projects').mkdir(parents=True)
+            (home / '.codex/sessions').mkdir(parents=True)
+            index = home / '.codex/session_index.jsonl'
+            index.write_text('{}\n')
+            os.utime(index, (1, 1))
+            env = dict(os.environ, HOME=tmp, AI_HETZ_RCLONE=shutil.which('rclone'),
+                       AI_HETZ_TRANSCRIPT_REMOTE=str(home / 'remote'))
+            subprocess.run(['bash', str(ROOT / 'bin/ai-transcripts-to-dropbox-hetz')], env=env, check=True)
+            self.assertEqual((home / 'remote/codex/home/ai/.codex/session_index.jsonl').read_text(), '{}\n')
+            self.assertTrue((home / 'remote/zcode/sessions/ses_1.jsonl').is_file())
+            self.assertFalse(list((home / 'remote').rglob('db.sqlite*')))
+
     def test_exports_without_database_upload_and_propagates_failures(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
