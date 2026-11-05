@@ -43,6 +43,8 @@ printf '%s\n' 'model: test' > "$fixture/skills/shared/shared-one/agents/openai.y
 : > "$fixture/config/retired-skills.txt"
 printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
 printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
+printf '%s\n' '# test ZCode global' > "$fixture/templates/system/AGENTS-global-zcode.md"
+printf '%s\n' '# test MiMo global' > "$fixture/templates/system/AGENTS-global-mimo.md"
 git -C "$fixture" init -q -b main
 git -C "$fixture" config core.autocrlf false
 git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
@@ -57,26 +59,33 @@ remote_url="$(git -C "$fixture" remote get-url origin)"
 
 echo "1/2 fresh install: Bash and PowerShell agree file for file"
 mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex" "$TMP_ROOT/ps/mimo" "$TMP_ROOT/bash/mimo"
+mkdir -p "$TMP_ROOT/bash/zcode" "$TMP_ROOT/ps/zcode"
 mkdir -p "$TMP_ROOT/profile"
+profile_native="$(cygpath -w "$TMP_ROOT/profile" 2>/dev/null || echo "$TMP_ROOT/profile")"
+locked_installer="$(cygpath -w "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1" 2>/dev/null || echo "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1")"
+"$PS_CROSS_BIN" -NoProfile -File "$locked_installer" -TestLockContract || fail 'parity lock contract failed'
 # The fixture repo holds skills and templates only, not bin/ai-git-identity, so
 # the installer's machine-tools gate must be skipped here — exactly as
 # tests/test-ai-install-skills.sh does. Without it the installer correctly exits
 # 1 with "SYNC INCOMPLETE" and this whole suite dies at its first step.
 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
+USERPROFILE="$profile_native" \
 CLAUDE_HOME="$TMP_ROOT/bash/claude" CODEX_HOME="$TMP_ROOT/bash/codex" \
+ZCODE_HOME="$TMP_ROOT/bash/zcode" MIMO_HOME="$TMP_ROOT/bash/mimo" \
   bash "$fixture/bin/ai-install-skills" >"$TMP_ROOT/bash-install.log" 2>&1 || {
     cat "$TMP_ROOT/bash-install.log" >&2
     fail 'Bash fixture install failed'
   }
-USERPROFILE="$TMP_ROOT/profile" \
+USERPROFILE="$profile_native" \
 AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
-pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+pwsh -NoProfile -File "$locked_installer" \
+  -Installer "$(cygpath -w "$REPO_ROOT/bin/install-ai-devops-windows.ps1" 2>/dev/null || echo "$REPO_ROOT/bin/install-ai-devops-windows.ps1")" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/ps/claude" 2>/dev/null || echo "$TMP_ROOT/ps/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/ps/zcode" 2>/dev/null || echo "$TMP_ROOT/ps/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/ps/mimo" 2>/dev/null || echo "$TMP_ROOT/ps/mimo")" \
-  -SkipGitInstall >"$TMP_ROOT/powershell-install.log" 2>&1 || {
+  >"$TMP_ROOT/powershell-install.log" 2>&1 || {
     cat "$TMP_ROOT/powershell-install.log" >&2
     fail 'PowerShell fixture install failed'
   }
@@ -90,13 +99,19 @@ for client in claude codex; do
        "$TMP_ROOT/ps/$client/skills/shared-one/.ai-devops-managed" \
     || fail "$client: managed markers differ between installers"
 done
+for client in zcode mimo; do
+  diff "$TMP_ROOT/bash/$client/AGENTS.md" "$TMP_ROOT/ps/$client/AGENTS.md" \
+    || fail "$client: installers wrote different global instructions"
+done
 
 echo "2/2 cross-installer refresh reports 'up to date', not local edits"
 # The real failure this guards: install with one, refresh with the other. If the
 # marker formats disagreed at all, the second installer would see local edits,
 # back everything up, and rewrite it.
 out="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
+  USERPROFILE="$profile_native" \
   CLAUDE_HOME="$TMP_ROOT/ps/claude" CODEX_HOME="$TMP_ROOT/ps/codex" \
+  ZCODE_HOME="$TMP_ROOT/ps/zcode" MIMO_HOME="$TMP_ROOT/ps/mimo" \
   bash "$fixture/bin/ai-install-skills" 2>&1)"
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "Bash saw PowerShell's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
@@ -146,15 +161,16 @@ PS
   || fail 'deterministic native optional-probe contract failed'
 set +e
 out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
-  USERPROFILE="$TMP_ROOT/profile" \
+  USERPROFILE="$profile_native" \
   AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
-  "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+  "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$locked_installer" \
+  -Installer "$(cygpath -w "$REPO_ROOT/bin/install-ai-devops-windows.ps1" 2>/dev/null || echo "$REPO_ROOT/bin/install-ai-devops-windows.ps1")" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/bash/zcode" 2>/dev/null || echo "$TMP_ROOT/bash/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/bash/mimo" 2>/dev/null || echo "$TMP_ROOT/bash/mimo")" \
-  -SkipGitInstall 2>&1)"
+  2>&1)"
 cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
