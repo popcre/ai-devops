@@ -63,7 +63,7 @@ mkdir -p "$TMP_ROOT/bash/zcode" "$TMP_ROOT/ps/zcode"
 mkdir -p "$TMP_ROOT/profile"
 profile_native="$(cygpath -w "$TMP_ROOT/profile" 2>/dev/null || echo "$TMP_ROOT/profile")"
 locked_installer="$(cygpath -w "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1" 2>/dev/null || echo "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1")"
-"$PS_CROSS_BIN" -NoProfile -File "$locked_installer" -TestLockContract || fail 'parity lock contract failed'
+"$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$locked_installer" -TestLockContract || fail 'parity lock contract failed'
 # The fixture repo holds skills and templates only, not bin/ai-git-identity, so
 # the installer's machine-tools gate must be skipped here — exactly as
 # tests/test-ai-install-skills.sh does. Without it the installer correctly exits
@@ -78,7 +78,7 @@ ZCODE_HOME="$TMP_ROOT/bash/zcode" MIMO_HOME="$TMP_ROOT/bash/mimo" \
   }
 USERPROFILE="$profile_native" \
 AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
-pwsh -NoProfile -File "$locked_installer" \
+"$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$locked_installer" \
   -Installer "$(cygpath -w "$REPO_ROOT/bin/install-ai-devops-windows.ps1" 2>/dev/null || echo "$REPO_ROOT/bin/install-ai-devops-windows.ps1")" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/ps/claude" 2>/dev/null || echo "$TMP_ROOT/ps/claude")" \
