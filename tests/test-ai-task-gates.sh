@@ -1953,6 +1953,26 @@ check 'workflow needs no reviewer approval (#2041)' "rc 0 '$WF' check $WF_ARGS"
 check 'workflow ignores a non-independent or untested report (review is advisory)' "rc 0 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
 cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"
 python3 - "$ROOT" "$WF" <<'PY'
+import datetime, importlib.util, json, pathlib, subprocess, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+target = dict(mod.TARGET, schema_version=2, scope='hts-bounded-synthetic-acceptance',
+    issue='https://github.com/popcre/designflow-backend/issues/123',
+    routes=mod.ACCEPTANCE_ROUTES, limits=mod.ACCEPTANCE_LIMITS,
+    fixture_prefix='AI-QA-20261105-acceptance-',
+    source_head=subprocess.check_output(['git', '-C', sys.argv[2], 'rev-parse', 'HEAD'], text=True).strip(),
+    expires_at=(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))
+pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare bounded synthetic acceptance'
+check 'source-pinned synthetic acceptance profile succeeds without new real-record authority' "rc 0 '$WF' check $WF_ARGS"
+check 'synthetic acceptance still refuses SQL' "rc 3 '$WF' check --before database"
+cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'
+python3 - "$ROOT" "$WF" <<'PY'
 import importlib.util, json, pathlib, sys
 spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
 mod = importlib.util.module_from_spec(spec)
