@@ -213,6 +213,33 @@ repair and new epoch source, and refuse any existing transition or failed-job
 rePOST. Native admission validates closed metadata, not those private facts.
 No continuation may open the cohort until all actual executor checks pass.
 
+## One current-v6 JSON literal operational repair
+
+Schema 7 has the distinct closed scope
+`hts-frozen-r9-json-literal-operational-continuation` and exact purpose
+`pre-snapshot-json-literal-bind-repair`. It preserves all v5 limits, routes,
+provider, source/origin/clean-tree restrictions and eight binding fields.
+Schemas 5 and 6 retain their existing behavior unchanged.
+
+Its `operational_continuation` uses the same twelve fields documented for v6,
+but `original_schema_version` must be integer 6. Every `original_*` field binds
+the immediate CURRENT v6 parent: the paused ledger's exact archived bytes,
+its admission object's canonical `JSON.stringify` bytes, current manifest,
+readiness, runner, served source/revision/digest and original expiry. The new
+runner and served source must differ; expiry must remain exactly equal.
+Schema 7 cannot cite a v5 or v7 parent, renew expiry, add a retry route or use
+the previous repair purpose.
+
+The private executor must additionally verify the archived v6 parent's embedded
+immutable v5 lineage, exactly one existing operational epoch, and the fixed
+synthetic JSON-literal roundtrip repair/proof. The new receipt binds that prior
+receipt plus the paused ledger, all existing failures, costs and current
+in-flight inquiry. Exactly one additional epoch is allowed; no third epoch,
+second zero-cost reconciliation, reset, retry/rePOST or frozen-input/key change
+is admitted. Existing raw failures and accounting remain untouched. This is
+metadata admission only: private proofs and final execution authority remain
+separate, and no cohort may be opened before the executor verifies them.
+
 ## Exact audited retry after provider credit recovery
 
 The original five-route declaration remains accepted unchanged. A second closed
