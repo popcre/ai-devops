@@ -209,6 +209,9 @@ cmd_ask() {
   fi
   if [ "$rc" -ne 0 ]; then
     cat "$err" >&2 || true
+    if grep -qE 'project_token_login_failed|project_token_scope_invalidated' "$err"; then
+      die "ZCode login for headless runs is invalid (often after a ZCode update; the saved login file can exist and still be rejected). Fix: zcode login zai --no-browser, complete the browser authorization, then check with: ai-zcode doctor --live"
+    fi
     die "zcode CLI exited $rc. First stderr lines above; full stderr was kept out of the answer stream."
   fi
 
@@ -235,7 +238,7 @@ cmd_ask() {
 # doctor — presence, versions, login, config sanity, managed state.
 # ---------------------------------------------------------------------------
 doctor_credentials_state() {
-  [ -f "$ZCODE_HOME/v2/credentials.json" ] && printf 'signed in (credentials file present)' || printf 'NOT signed in (no credentials file)'
+  [ -f "$ZCODE_HOME/v2/credentials.json" ] && printf 'credentials file present (not proof of login; doctor --live proves it)' || printf 'NOT signed in (no credentials file)'
 }
 
 cmd_doctor() {
@@ -302,7 +305,8 @@ cmd_doctor() {
 
   if [ "$live" = 1 ]; then
     echo "  live probe    : running one bounded ask…"
-    if cmd_ask "Reply with the single word OK" >/dev/null; then
+    # Subshell: cmd_ask's die exits, which must fail this probe, not end doctor.
+    if ( cmd_ask "Reply with the single word OK" ) >/dev/null; then
       echo "  live probe    : ok (authenticated, GLM answered)"
     else
       echo "  live probe    : FAILED"
