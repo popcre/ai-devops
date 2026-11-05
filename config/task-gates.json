@@ -806,9 +806,7 @@
           "required": [
             "current-chat-resource-and-action-authorization"
           ],
-          "forbidden_actions": [
-            "production"
-          ]
+          "forbidden_actions": []
         }
       }
     }
