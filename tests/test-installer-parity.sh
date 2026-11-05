@@ -108,6 +108,42 @@ grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not acce
 gh_config_dir="$TMP_ROOT/empty-gh-config"
 mkdir -p "$gh_config_dir"
 gh_config_native="$(cygpath -w "$gh_config_dir" 2>/dev/null || echo "$gh_config_dir")"
+# Prove the real native-probe helper and the real optional-login decision with
+# deterministic native exits. Shared-runner admission can legitimately return
+# 75 without attempting authentication; that is deferral, never login success.
+cat > "$TMP_ROOT/native-probe-contract.ps1" <<'PS'
+param([string]$Installer, [string]$Scratch)
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'installer parse failed' }
+$function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-NativeProbe' }, $true)
+if (-not $function) { throw 'native probe helper absent' }
+Invoke-Expression $function.Extent.Text
+$decision = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ($ghProbe.ExitCode -eq 75)') }, $true)
+if (-not $decision) { throw 'optional probe decision absent' }
+function Write-Note { param([string]$Text) $script:note = $Text }
+$native = (Get-Process -Id $PID).Path
+foreach ($code in @(1, 75)) {
+    $scriptPath = Join-Path $Scratch "probe-$code.ps1"
+    [IO.File]::WriteAllText($scriptPath, "[Console]::Error.WriteLine('fixture native failure'); exit $code")
+    $ghProbe = Invoke-NativeProbe -Command $native -Arguments @('-NoProfile', '-File', $scriptPath)
+    if ($ghProbe.ExitCode -ne $code -or $ghProbe.ExitCode -eq 0) { throw 'native exit was lost' }
+    if ($ErrorActionPreference -ne 'Stop') { throw 'native probe changed caller error handling' }
+    $script:note = $null
+    Invoke-Expression $decision.Extent.Text
+    if ($code -eq 75) {
+        if ($script:note -ne 'GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable.') { throw '75 was not bounded deferral' }
+        if ($script:note -match 'logged in|success') { throw 'deferral became authentication success' }
+    } elseif ($script:note -ne 'GitHub CLI is installed but not logged in. Run: gh auth login') {
+        throw 'unauthenticated exit was not reported'
+    }
+}
+PS
+"$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$TMP_ROOT/native-probe-contract.ps1" 2>/dev/null || echo "$TMP_ROOT/native-probe-contract.ps1")" \
+  -Installer "$(cygpath -w "$REPO_ROOT/bin/install-ai-devops-windows.ps1" 2>/dev/null || echo "$REPO_ROOT/bin/install-ai-devops-windows.ps1")" \
+  -Scratch "$(cygpath -w "$TMP_ROOT" 2>/dev/null || echo "$TMP_ROOT")" \
+  || fail 'deterministic native optional-probe contract failed'
 set +e
 out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
   USERPROFILE="$TMP_ROOT/profile" \
@@ -123,8 +159,8 @@ cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
 if command -v gh >/dev/null 2>&1; then
-  grep -Fq 'GitHub CLI is installed but not logged in' <<<"$out" \
-    || fail "PowerShell cross-installer did not handle an unauthenticated optional GitHub probe"
+  grep -Eq 'GitHub CLI is installed but not logged in|GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable\.' <<<"$out" \
+    || fail "PowerShell cross-installer did not report unauthenticated or bounded-deferred optional GitHub probe"
 else
   grep -Fq 'GitHub CLI not found' <<<"$out" \
     || fail "PowerShell cross-installer did not handle a missing optional GitHub CLI"
