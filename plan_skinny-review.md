@@ -41,6 +41,14 @@ disposition. The shared-db hold may exempt only that verified disposition;
 branch movement, overlap, failures and skipped findings remain unresolved.
 Do not add per-push AI reassessment or another review gate.
 
+Merged-source findings use an analysis-only route (#2390): the trusted fixer
+checks out the exact reviewed PR head, verifies its recorded merge remains
+in the repository's current default branch, and repeats those checks before
+disposition. A clean, unchanged checkout may emit the existing trusted INVALID
+evidence. A real or uncertain finding remains open with its source owner for
+a new corrective PR. This route never publishes a FIXED result, silently
+targets main, or changes any consumer's production hold policy.
+
 Acceptance requires an actual current finding to produce a usable fix, safe
 stale retirement and retained findings, duplicate and overlap prevention,
 invalid-finding hold proof and preserved holds for unresolved findings. Record

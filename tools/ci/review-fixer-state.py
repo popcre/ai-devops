@@ -90,6 +90,8 @@ def encoded_marker(data, kind=MARKER):
 def validate(data, repo, pr=None):
     if not isinstance(data, dict) or data.get("repository") != repo:
         raise ValueError("receipt repository mismatch")
+    if "analysis_only" in data and data["analysis_only"] is not True:
+        raise ValueError("receipt analysis-only mode is invalid")
     if any(type(data.get(key)) is not int or data[key] < 1 for key in ("issue", "source_pr")):
         raise ValueError("receipt issue/source PR is invalid")
     if any(not re.fullmatch(r"[0-9a-f]{40}", data.get(key, "")) for key in ("reviewed_head", "target_head")):
@@ -122,11 +124,15 @@ class State:
             raise ValueError("finding lacks a same-repository source PR and reviewed Head SHA")
         current = api(f"{self.prefix}/pulls/{pr[1]}")
         target = current["head"]["ref"]
-        return {"issue": issue["number"], "source_pr": int(pr[1]),
+        data = {"issue": issue["number"], "source_pr": int(pr[1]),
                 "repository": self.repo,
                 "reviewed_head": head[1], "target_branch": target,
                 "target_head": current["head"]["sha"],
-                "owner": current["user"]["login"]}, current
+                "owner": current["user"]["login"]}
+        if current.get("merged") is True:
+            data.update(analysis_only=True, merge_commit=current.get("merge_commit_sha"),
+                        default_branch=current.get("base", {}).get("ref"))
+        return data, current
 
     def issue(self, number):
         return api(f"{self.prefix}/issues/{number}")
@@ -219,14 +225,31 @@ class State:
         validate(data, self.repo)
         pr = api(f"{self.prefix}/pulls/{data['source_pr']}")
         head = pr.get("head") or {}
-        if pr["state"] != "open":
-            return "source PR is closed"
         if (head.get("repo") or {}).get("full_name") != self.repo:
             return "source branch is not in this repository"
         if pr["user"]["login"] != data["owner"]:
             raise ValueError("receipt owner does not match source PR")
         if head.get("ref") != data["target_branch"] or head.get("sha") != data["reviewed_head"]:
             return "source moved to " + head.get("sha", "unknown")
+        if data.get("analysis_only") is True:
+            if (pr["state"] != "closed" or pr.get("merged") is not True
+                    or data["target_head"] != data["reviewed_head"]
+                    or not re.fullmatch(r"[0-9a-f]{40}", str(data.get("merge_commit", "")))
+                    or pr.get("merge_commit_sha") != data["merge_commit"]):
+                return "merged analysis source identity changed"
+            repository = api(self.prefix)
+            default = repository.get("default_branch")
+            if (repository.get("full_name") != self.repo or not default
+                    or default != data.get("default_branch") or pr.get("base", {}).get("ref") != default):
+                return "merged analysis source is not in the current default branch"
+            comparison = api(f"{self.prefix}/compare/{data['merge_commit']}...{quote(default, safe='')}")
+            if (comparison.get("base_commit", {}).get("sha") != data["merge_commit"]
+                    or comparison.get("merge_base_commit", {}).get("sha") != data["merge_commit"]
+                    or comparison.get("status") not in {"ahead", "identical"}):
+                return "merged analysis source is not an ancestor of the default branch"
+            return None
+        if pr["state"] != "open":
+            return "source PR is closed"
         try:
             ref = api(f"{self.prefix}/git/ref/heads/{quote(data['target_branch'], safe='')}")
         except subprocess.CalledProcessError as error:
@@ -246,6 +269,14 @@ class State:
         if reason:
             self.defer(data, reason)
             return False
+        if data.get("analysis_only") is True:
+            if work:
+                checked = subprocess.check_output(["git", "-C", work, "rev-parse", "HEAD"], text=True).strip()
+                dirty = subprocess.check_output(["git", "-C", work, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"], text=True)
+                if checked != data["reviewed_head"] or dirty:
+                    self.defer(data, "merged analysis checkout changed; no disposition is permitted")
+                    return False
+            return True
         pulls = self.pulls()
         for pr in pulls:
             if pr["base"]["ref"] == data["target_branch"] and pr["head"]["ref"].startswith("review-fix/"):
@@ -475,6 +506,8 @@ def main():
     elif command == "check":
         if not state.check(json.loads(Path(args[0]).read_text()), args[1] if len(args) > 1 else None):
             return 3
+    elif command == "defer":
+        state.defer(json.loads(Path(args[0]).read_text()), args[1])
     elif command == "retire":
         state.retire(args[0])
     elif command == "metadata":
@@ -484,7 +517,9 @@ def main():
         report = Path(args[1]).read_text().strip()
         if not report:
             raise ValueError("invalid disposition needs evidence")
-        if not state.check(data):
+        if data.get("analysis_only") is True and len(args) < 3:
+            raise ValueError("merged analysis disposition requires its clean exact-source checkout")
+        if not state.check(data, args[2] if len(args) > 2 else None):
             return 3
         data["evidence"] = report
         data["run_id"] = os.environ.get("GITHUB_RUN_ID", "")
