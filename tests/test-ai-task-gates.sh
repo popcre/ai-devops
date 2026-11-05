@@ -1969,6 +1969,22 @@ git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare bounded synthetic acceptance'
 check 'source-pinned synthetic acceptance profile succeeds without new real-record authority' "rc 0 '$WF' check $WF_ARGS"
 check 'synthetic acceptance still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$ROOT" "$WF" <<'PY'
+import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+path = pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target.update(schema_version=3, scope='hts-bounded-synthetic-legacy-proof',
+    routes=mod.LEGACY_PROOF_ROUTES, limits=mod.LEGACY_PROOF_LIMITS,
+    legacy_proof=dict(mod.LEGACY_PROOF_BOUNDS, description_prefix=target['fixture_prefix']))
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare single bounded synthetic legacy proof'
+check 'single synthetic legacy proof profile succeeds' "rc 0 '$WF' check $WF_ARGS"
+check 'single synthetic legacy proof still refuses SQL' "rc 3 '$WF' check --before database"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

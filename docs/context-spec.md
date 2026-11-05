@@ -166,7 +166,10 @@ other actions and backend's original route remain unchanged.
 The separate `application-workflow` action admits only the authenticated HTS
 Alsand sandbox workflow. The exact issue94 profiles remain; version 2 also
 admits source-pinned, expiring synthetic acceptance with fixed routes, two
-fixtures and strict provider/cost bounds (#2395). It requires a clean committed
+fixtures and strict provider/cost bounds (#2395). Version 3 separately admits
+one synthetic dedicated legacy HTS call: pinned Luna/OpenRouter, 512 output
+tokens, $0.10, no automatic retry or new records, and an exact request prefix.
+It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety
 or ui-live-workflow class. AI review is advisory (#2041). All ordinary SQL/database, structural, cloud, production,

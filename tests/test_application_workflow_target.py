@@ -183,5 +183,58 @@ class BoundedAcceptanceTarget(ClosedRecoveryTarget):
             self.assertEqual(TARGET.main(), 1)
 
 
+class BoundedLegacyProofTarget(BoundedAcceptanceTarget):
+    def setUp(self):
+        super().setUp()
+        self.declaration.update({
+            "schema_version": 3,
+            "scope": "hts-bounded-synthetic-legacy-proof",
+            "routes": copy.deepcopy(TARGET.LEGACY_PROOF_ROUTES),
+            "limits": copy.deepcopy(TARGET.LEGACY_PROOF_LIMITS),
+            "legacy_proof": {**TARGET.LEGACY_PROOF_BOUNDS,
+                             "description_prefix": self.declaration["fixture_prefix"]},
+        })
+
+    def test_legacy_bounds_are_exact_and_type_strict(self):
+        for name, original in self.declaration["legacy_proof"].items():
+            changes = [True, None, "unreviewed"]
+            if type(original) in (int, float):
+                changes += [original + 1, 0]
+            for changed in changes:
+                if type(changed) is type(original) and changed == original:
+                    continue
+                with self.subTest(name=name, value=changed):
+                    candidate = copy.deepcopy(self.declaration)
+                    candidate["legacy_proof"][name] = changed
+                    self.assertEqual(self.validate(candidate), 1)
+
+    def test_no_generic_chat_shadow_or_fixture_mutation_routes(self):
+        for route in ["POST /api/openrouter/chat", "POST /api/hts-rag/classify",
+                      "POST /createRfqItem", "POST /updateRfqItem", "POST /arbitrary"]:
+            candidate = copy.deepcopy(self.declaration)
+            candidate["routes"].append(route)
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_new_total_bounds_cannot_expand_or_change_type(self):
+        for name in ("maximum_total_provider_turns", "maximum_total_cost_usd",
+                     "maximum_new_fixtures", "maximum_new_containers"):
+            for changed in [True, None, -1, self.declaration["limits"][name] + 1]:
+                candidate = copy.deepcopy(self.declaration)
+                candidate["limits"][name] = changed
+                self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["legacy_proof"]["maximum_output_tokens"] = 512.0
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_profiles_cannot_mix_and_prefix_must_match(self):
+        for field, value in [("schema_version", 2),
+                             ("scope", "hts-bounded-synthetic-acceptance"),
+                             ("routes", TARGET.ACCEPTANCE_ROUTES)]:
+            self.assertEqual(self.validate({**self.declaration, field: value}), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["legacy_proof"]["description_prefix"] = "AI-QA-20261105-other-"
+        self.assertEqual(self.validate(candidate), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
