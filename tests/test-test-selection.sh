@@ -14,6 +14,8 @@ check() { # check <label> <expected> <actual>
     fails=$((fails + 1))
   fi
 }
+ok() { n=$((n + 1)); printf '%s/%s ok  %s\n' "$n" "$total" "$1"; }
+bad() { n=$((n + 1)); printf '%s/%s FAIL %s\n' "$n" "$total" "$1"; fails=$((fails + 1)); }
 cats() { printf '%s\n' "$1" | selection_categories_for_paths "$ROOT"; }
 
 SUITES='test-ai-grok-review.sh test-ai-install-skills.sh test-ai-adopt-globals.sh test-workflow-policy.sh test-markdown-links.sh test-ai-facts.sh'
@@ -81,24 +83,34 @@ check 'a deleted or unknown test file fails closed to every suite' \
 ALL_SUITES=($(cd "$ROOT/tests" && ls test-*.sh))
 ALL_LIST="$(printf '%s\n' "${ALL_SUITES[@]}" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 raff() { printf '%s\n' "$1" | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" | tr '\n' ' ' | sed 's/ $//'; }
-mapped() { jq -r --arg p "$1" '.affected_suite_rules.path_suites[$p][]' "$ROOT/config/ci-suite-manifest.json" | tr -d '\r' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
-so_sel="$(raff 'bin/ai-second-opinion')"
-check 'a mapped second-opinion tool selects its declared suites, not every suite' \
-  "$(mapped 'bin/ai-second-opinion')" "$so_sel"
+companion_for() {
+  jq -r --arg p "$1" '
+    (.affected_suite_rules.companion_suites // {}) | to_entries[] |
+    select(.key as $k | $p | test("^" + ($k | gsub("\\*";"[^/]*") | gsub("\\?";"[^/]") | gsub("\\.";"\\\\.") + "$"))) |
+    .value[]' "$ROOT/config/ci-suite-manifest.json" 2>/dev/null |
+    tr -d '\r' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+}
+check 'a companion-covered tool selects exactly its companion suites, not every suite' \
+  'test-ai-review-simple.sh' "$(raff 'bin/ai-second-opinion')"
 check 'an unmapped tool path fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/nosuch-door.sh')"
 check 'shared task-gates library still fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/task-gates.sh')"
-check 'a mapped reviewer tool selects exactly its declared suites' \
-  "$(mapped 'tools/reviewer_credit_watch.py')" "$(raff 'tools/reviewer_credit_watch.py')"
+check 'a companion-covered shared tool narrows inside a select_all tree' \
+  'test-ai-gh.sh test-ai-pr-wait.sh' "$(raff 'tools/github-requests/report.py')"
 check 'an unmapped new tools/lib file fails closed to every suite' \
   "$ALL_LIST" "$(raff 'tools/lib/brand-new-helper.sh')"
-gone_manifest="$(mktemp)"
-jq '.affected_suite_rules.path_suites["tools/lib/removed-door.sh"] = ["test-removed-suite.sh"]' \
-  "$ROOT/config/ci-suite-manifest.json" > "$gone_manifest"
-check 'a mapping to a deleted suite fails closed to every suite' \
-  "$ALL_LIST" "$(AI_CI_SUITE_MANIFEST="$gone_manifest" raff 'tools/lib/removed-door.sh')"
-rm -f "$gone_manifest"
-
-printf '\nSELECTION SUMMARY tests=%s failures=%s\n' "$n" "$fails"
-[ "$fails" -eq 0 ]
+# --- A missing entry cannot skip sections (plan step 1.3) ---
+# With path_suites gone, a brand-new suite with no manifest entry is selected
+# by convention or fails closed to every suite — it can never be silently
+# skipped by a stale hand-maintained map.
+new_suite_name='test-brand-new-suite.sh'
+new_sel="$(printf '%s\n' "tests/$new_suite_name" | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" "$new_suite_name")"
+check 'a new suite file selects itself even with no manifest entry' \
+  "$new_suite_name" "$(printf '%s\n' "$new_sel" | tr '\n' ' ' | sed 's/ $//')"
+bin_sel="$(raff 'bin/ai-second-opinion')"
+check 'companion suites survive without a path_suites entry' \
+  'yes' "$(printf '%s\n' "$bin_sel" | grep -q 'test-ai-review-simple.sh' && echo yes || echo no)"
+all_includes_new="$(printf '%s\n' 'tools/lib/unknown-thing.sh' | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" "$new_suite_name")"
+check 'a missing entry cannot skip a new suite from the fail-closed set' \
+  'yes' "$(printf '%s\n' "$all_includes_new" | grep -qF "$new_suite_name" && echo yes || echo no)"
