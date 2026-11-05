@@ -209,11 +209,12 @@ FROZEN_BINDINGS = {"input_sha256", "readiness_sha256", "qualification_sha256",
                    "catalog_sha256", "pricing_sha256"}
 FROZEN_LIMITS = {
     "maximum_initial_inquiries": 83, "maximum_inflight_inquiries": 1,
+    "maximum_run_lifetime_hours": 72, "maximum_classification_timeout_ms": 170000,
     "maximum_record_auto_answers": 2, "maximum_attempts_per_job": 3,
-    "maximum_provider_calls_per_inquiry": 90, "maximum_run_provider_calls": 7470,
+    "maximum_provider_calls_per_inquiry": 99, "maximum_run_provider_calls": 8217,
     "owner_answers": 0, "maximum_person_answers_for_scoring": 3,
-    "observed_session_stop_usd": 10, "inflight_overshoot_reserve_usd": 32.265,
-    "maximum_authorized_exposure_usd": 42.27, "hard_cost_ceiling": False,
+    "observed_session_stop_usd": 10, "inflight_overshoot_reserve_usd": 35.4915,
+    "maximum_authorized_exposure_usd": 45.5, "hard_cost_ceiling": False,
     "cost_basis": "luna-application-accounted-approved-rates",
     "compression_billing": "unquantified-not-included",
     "apply_classifications": False, "item_writes": False, "learning": False,
@@ -240,7 +241,7 @@ def frozen_evaluation(value, root):
             or not isinstance(bindings, dict) or bindings.keys() != FROZEN_BINDINGS):
         return False
     calls, cost = prior["provider_calls"], prior["actual_cost_usd"]
-    if (type(calls) is not int or calls < 0 or calls > 9007199254740991 - 7470 or type(cost) not in (int, float)
+    if (type(calls) is not int or calls < 0 or calls > 9007199254740991 - 8217 or type(cost) not in (int, float)
             or cost < 0 or cost >= 10 or not math.isfinite(cost)
             or round(10 - cost, 8) <= 0
             or prior["source"] != "session-provider-usage-verified"
@@ -259,7 +260,7 @@ def frozen_evaluation(value, root):
         "frozen": {"membership_sha256": FROZEN_HASH, "maximum_items": 83,
                    "common_ledger": "git-common-dir:hts-r9-frozen-live-eval.json",
                    "single_run": True, "resume_existing_only": True},
-        "limits": {**FROZEN_LIMITS, "maximum_session_provider_calls": calls + 7470,
+        "limits": {**FROZEN_LIMITS, "maximum_session_provider_calls": calls + 8217,
                    "minimum_start_credit_usd": round(10 - cost, 8)},
         "provider": FROZEN_PROVIDER,
         "executor": "scripts/hts-live-holdout-eval.js",
@@ -268,10 +269,10 @@ def frozen_evaluation(value, root):
     if value.keys() != expected.keys() | dynamic or not exact(
             {key: value[key] for key in expected}, expected):
         return False
-    return bounded_metadata(value, root, synthetic=False)
+    return bounded_metadata(value, root, synthetic=False, maximum_hours=72)
 
 
-def bounded_metadata(value, root, synthetic=True):
+def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
             r"https://github\.com/popcre/designflow-backend/issues/[1-9][0-9]*", value["issue"]):
@@ -290,7 +291,7 @@ def bounded_metadata(value, root, synthetic=True):
         expires = datetime.datetime.strptime(expiry, "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=datetime.timezone.utc)
         now = datetime.datetime.now(datetime.timezone.utc)
-        if not datetime.timedelta(0) < expires - now <= datetime.timedelta(hours=24):
+        if not datetime.timedelta(0) < expires - now <= datetime.timedelta(hours=maximum_hours):
             return False
         # Ignore ambient Git routing and replacement-object configuration.
         env = {key: item for key, item in os.environ.items() if not key.startswith("GIT_")}

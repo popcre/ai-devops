@@ -185,11 +185,14 @@ and only job submission/detail routes. Private hash-bound input, readiness,
 qualification, prior spend, provenance, runner, catalog and pricing evidence must
 be checked by the executor before cohort access and bound immutably to its one
 common ledger. Its observed submission stop is $10 minus prior accounted spend;
-it explicitly authorizes up to $42.27 exposure including one 90-call inquiry's
-$32.265 conservative overshoot. Starting credit need cover the observed remaining
+it explicitly authorizes up to $45.50 exposure including one 99-call inquiry's
+$35.4915 conservative overshoot. Starting credit need cover the observed remaining
 allowance, not pretend that the full risk is prepaid. This is not a hard provider
 cap or transport enforcer. No item writes, learning, answer submissions, ambiguous
 POST retries, separate HTTP provider retries or classification application are admitted.
+V5 alone has a fixed maximum 72-hour initial lifetime, never renewed after claim;
+older expiring profiles retain 24 hours. Actual runtime timeout evidence must fit
+170,000 ms with the fixed three attempts and two automatic record answers.
 It excludes generic chat and shadow routes. It requires a clean committed
 `.ai-devops/application-workflow-target.json` matching the closed target in
 `tools/application_workflow_target.py`, canonical origin and effective reviewer-safety

@@ -151,14 +151,19 @@ must verify the files, installed gate receipt, eligibility and immutable ledger
 before opening the cohort; this validator only checks the closed declaration,
 not private evidence or actual execution. Do not run until that executor support
 and the coordinator's readiness decision are verified.
+Only v5 permits an initial expiry up to 72 hours to accommodate serial queue attempts;
+profiles 1–4 keep their 24-hour metadata rule. The claimed manifest is immutable:
+expiry stops the run without a new claim or silent renewal. Classification time
+must be proved at most 170,000 ms on the actual immutable runtime, with the fixed
+three-attempt/two-record-answer source bounds.
 
 The preserved queue can create two record answers and attempt each of three jobs
-three times. At ten internal Luna calls per attempt, its conservative bound is
-90 calls per inquiry and 7,470 for 83 inquiries, plus verified prior session calls.
+three times. At eleven internal Luna calls per attempt, its conservative bound is
+99 calls per inquiry and 8,217 for 83 inquiries, plus verified prior session calls.
 Provider HTTP retry and billable tools remain absent. Catalog bounds are
 1,050,000 context and 128,000 completion tokens; maximum approved input/output
 rates are $0.00000025/$0.00000075 per token. One inquiry's conservative risk is
-$32.265. The coordinator explicitly authorizes up to $42.27 session exposure:
+$35.4915. The coordinator explicitly authorizes up to $45.50 session exposure:
 the $10 observed submission stop plus one in-flight overshoot. This is **not a
 hard $10 cap**. These amounts are not an invoice or all third-party costs; they
 concern Luna usage accounted

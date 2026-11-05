@@ -307,7 +307,7 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
             "frozen": {"membership_sha256": TARGET.FROZEN_HASH, "maximum_items": 83,
                        "common_ledger": "git-common-dir:hts-r9-frozen-live-eval.json",
                        "single_run": True, "resume_existing_only": True},
-            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 7486,
+            "limits": {**TARGET.FROZEN_LIMITS, "maximum_session_provider_calls": 8233,
                        "minimum_start_credit_usd": 9.75},
             "provider": TARGET.FROZEN_PROVIDER,
             "executor": "scripts/hts-live-holdout-eval.js",
@@ -323,6 +323,17 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
         self.assertEqual(self.validate(self.declaration), 0)
         self.assertNotIn("fixture_prefix", self.declaration)
         self.assertFalse(self.declaration["limits"]["hard_cost_ceiling"])
+
+    def test_frozen_lifetime_is_bounded_to_72_hours_without_renewal(self):
+        now = datetime.datetime(2026, 11, 5, 12, tzinfo=datetime.timezone.utc)
+        class FixedDatetime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+        with patch.object(TARGET.datetime, "datetime", FixedDatetime):
+            for seconds, expected in [(72 * 3600, 0), (72 * 3600 + 1, 1), (0, 1)]:
+                expiry = (now + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                self.assertEqual(self.validate({**self.declaration, "expires_at": expiry}), expected)
 
     def test_every_frozen_binding_is_required_and_typed(self):
         for key in TARGET.FROZEN_BINDINGS:
@@ -350,6 +361,7 @@ class FrozenEvaluationTarget(ClosedRecoveryTarget):
                            ("maximum_authorized_exposure_usd", 10), ("hard_cost_ceiling", True),
                            ("maximum_inflight_inquiries", 2), ("owner_answers", True),
                            ("maximum_provider_calls_per_inquiry", 9), ("maximum_attempts_per_job", 1),
+                           ("cost_basis", "provider-invoice"), ("compression_billing", "included"),
                            ("item_writes", True), ("learning", True), ("ambiguous_post_retry", True)]:
             candidate = copy.deepcopy(self.declaration)
             candidate["limits"][field] = bad
