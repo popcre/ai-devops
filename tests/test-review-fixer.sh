@@ -9,6 +9,7 @@ mkdir -p "$tmp/bin"
 git init -q -b main "$tmp/source"
 git -C "$tmp/source" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 export STUB_HEAD="$(git -C "$tmp/source" rev-parse HEAD)" STUB_SOURCE="$tmp/source"
+git -C "$tmp/source" update-ref refs/pull/2/head "$STUB_HEAD"
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
@@ -18,7 +19,11 @@ case "$1 $2" in
     printf '{"number":7,"state":"open","labels":[{"name":"review-finding"}],"body":"PR: https://github.com/o/r/pull/2\\nHead SHA: `%s`"}\n' "$STUB_HEAD" ;;
   "api repos/o/r/pulls/2")
     sha="$STUB_HEAD"; { [ -f "$STUB_LOG.moved" ] || [ "$STUB_DECISION" = STALE ]; } && sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    printf '{"number":2,"state":"open","user":{"login":"owner"},"head":{"ref":"main","sha":"%s","repo":{"full_name":"o/r"}},"base":{"ref":"main"}}\n' "$sha" ;;
+    state=open; merged=false
+    if [ "${STUB_MERGED:-0}" = 1 ]; then state=closed; merged=true; fi
+    printf '{"number":2,"state":"%s","merged":%s,"merge_commit_sha":"%s","user":{"login":"owner"},"head":{"ref":"main","sha":"%s","repo":{"full_name":"o/r"}},"base":{"ref":"main"}}\n' "$state" "$merged" "$STUB_HEAD" "$sha" ;;
+  "api repos/o/r") echo '{"full_name":"o/r","default_branch":"main"}' ;;
+  "api repos/o/r/compare/"*) printf '{"status":"ahead","base_commit":{"sha":"%s"},"merge_base_commit":{"sha":"%s"}}\n' "$STUB_HEAD" "$STUB_HEAD" ;;
   "api repos/o/r/git/ref/heads/main") printf '{"object":{"sha":"%s"}}\n' "$STUB_HEAD" ;;
   "api --paginate") echo '[[]]' ;;
   "issue view") printf 'PR: https://github.com/o/r/pull/2\nHead SHA: `%s`\n' "$STUB_HEAD" ;;
@@ -43,6 +48,8 @@ case "$STUB_DECISION" in
       printf '#!/bin/sh\ntouch "%s.moved"\n' "$STUB_LOG" > "$STUB_SOURCE/.git/hooks/post-receive"
       chmod +x "$STUB_SOURCE/.git/hooks/post-receive"
     fi ;;
+  INVALID-DIRTY) echo changed > "$dir/hidden.py"; d=INVALID ;;
+  FIXED-CLEAN) d=FIXED ;;
   BAD-EXIT) printf 'summary\nDECISION: INVALID\n' > "$out"; exit 9 ;;
   *) d="$STUB_DECISION" ;;
 esac
@@ -96,5 +103,16 @@ check "retention comment names exact pushed tip owner and deliberate deferral" '
 
 run BAD-EXIT; rc=$?
 check "failed model cannot publish an invalid disposition" '[ $rc = 1 ] && ! grep -q "issue close" "$tmp/log" && ! grep -q "add-label fixer-invalid" "$tmp/log"'
+
+STUB_MERGED=1 run INVALID; rc=$?
+check "merged clean analysis emits trusted invalid evidence without a PR" '[ $rc = 0 ] && grep -q "issue close" "$tmp/log" && grep -q "review-fixer-invalid:v1" "$tmp/log" && ! grep -q "pr create" "$tmp/log"'
+STUB_MERGED=1 run INVALID-DIRTY; rc=$?
+check "merged dirty INVALID stays unresolved without evidence" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "issue close" "$tmp/log" && ! grep -q "review-fixer-invalid:v1" "$tmp/log"'
+STUB_MERGED=1 run FIXED; rc=$?
+check "merged FIXED never publishes or closes" '[ $rc = 0 ] && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
+STUB_MERGED=1 run FIXED-CLEAN; rc=$?
+check "even a clean merged FIXED decision cannot publish" '[ $rc = 0 ] && grep -q "source owner must address" "$tmp/log" && ! grep -q "pr create" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
+STUB_MERGED=1 run PROTECTED; rc=$?
+check "merged real finding retains owner and open issue" '[ $rc = 0 ] && grep -q "source owner must address" "$tmp/log" && grep -q "add-label fixer-deferred" "$tmp/log" && ! grep -q "issue close" "$tmp/log"'
 PYTHONDONTWRITEBYTECODE=1 python3 "$root/tests/test_review_fixer_state.py" || fail=1
 [ "$fail" = 0 ] && echo "PASS: review-fixer decisions" || exit 1

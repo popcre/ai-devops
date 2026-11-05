@@ -53,9 +53,19 @@ else
 fi
 
 base="$(jq -r .target_branch "$receipt")"
+analysis_only="$(jq -r '.analysis_only // false' "$receipt")"
 body="$(gh issue view "$issue" --repo "$repo" --json body --jq .body)" || fail "could not read the issue"
 work="$root/repo"
-pgh repo clone "$repo" "$work" -- --quiet --branch "$base" || fail "could not clone $repo at $base"
+if [ "$analysis_only" = true ]; then
+  # The source branch may have been deleted after merge. Fetch its immutable
+  # reviewed PR head, never fall back to checking out current main.
+  pgh repo clone "$repo" "$work" -- --quiet --no-checkout || fail "could not clone analysis source"
+  source_pr="$(jq -r .source_pr "$receipt")"
+  pgit -C "$work" fetch -q origin "refs/pull/$source_pr/head" || fail "could not fetch reviewed PR head"
+  git -C "$work" checkout -q --detach FETCH_HEAD || fail "could not check out reviewed PR head"
+else
+  pgh repo clone "$repo" "$work" -- --quiet --branch "$base" || fail "could not clone $repo at $base"
+fi
 [ "$(git -C "$work" rev-parse HEAD)" = "$(jq -r .target_head "$receipt")" ] || {
   python3 "$lifecycle" check "$receipt"; rc=$?; [ "$rc" = 3 ] && exit 0; exit 1;
 }
@@ -105,6 +115,20 @@ Above the decision line, write a short plain summary of each finding and what
 you did, suitable for a PR body.
 EOF
 
+if [ "$analysis_only" = true ]; then
+  cat >> "$prompt" <<'EOF'
+
+MERGED SOURCE: ANALYSIS ONLY. This mode supersedes all instructions above to
+edit or fix files. Inspect the exact reviewed source without changing it.
+Do not run commands that write generated files, caches or build output.
+Only DECISION: INVALID may close a finding, and only when every finding is
+wrong with concrete source evidence. If any finding is real or uncertain,
+explain it and use DECISION: PROTECTED. It stays open for the source owner to
+deliver a new corrective PR. This route never publishes changes to main or
+to the original source branch. Any changed/untracked file rejects disposition.
+EOF
+fi
+
 last="$root/last.txt"
 # The agent reads untrusted findings text, so it runs with no GitHub token and
 # no reviewer provider keys in its environment (plan section 8.5). Codex's
@@ -127,6 +151,15 @@ tail -40 "$root/agent.log" || true
 decision="$(grep -oE '^DECISION: (FIXED|INVALID|PROTECTED|FAILED)' "$last" | tail -1 | awk '{print $2}')"
 report="$(grep -vE '^DECISION:' "$last" | head -c 50000)"
 echo "decision: ${decision:-none} (agent exit $rc)"
+
+if [ "$analysis_only" = true ]; then
+  python3 "$lifecycle" check "$receipt" "$work"
+  rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "merged analysis final source check failed"
+  if [ "$decision" != INVALID ]; then
+    python3 "$lifecycle" defer "$receipt" "Merged-source analysis cannot publish a correction; source owner must address the unresolved finding. ${report:0:12000}" || fail "could not preserve unresolved merged finding"
+    exit 0
+  fi
+fi
 
 case "$decision" in
   FIXED)
@@ -188,7 +221,11 @@ case "$decision" in
     label fixer-done; echo "protected: left open" ;;
   INVALID)
     printf '%s\n' "$report" > "$root/report.txt"
-    python3 "$lifecycle" invalid "$receipt" "$root/report.txt"
+    if [ "$analysis_only" = true ]; then
+      python3 "$lifecycle" invalid "$receipt" "$root/report.txt" "$work"
+    else
+      python3 "$lifecycle" invalid "$receipt" "$root/report.txt"
+    fi
     rc=$?; [ "$rc" = 3 ] && exit 0; [ "$rc" = 0 ] || fail "could not record invalid-finding evidence"
     label fixer-done
     gh issue close "$issue" --repo "$repo" --reason "not planned" >/dev/null || true ;;

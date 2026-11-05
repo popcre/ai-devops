@@ -595,5 +595,65 @@ class StateTests(unittest.TestCase):
             self.assertEqual(runners, [expected])
 
 
+class MergedAnalysis(unittest.TestCase):
+    def setUp(self):
+        env = patch.dict(os.environ, GITHUB_REPOSITORY="o/r")
+        env.start(); self.addCleanup(env.stop)
+        self.pr = source()
+        self.pr.update(state="closed", merged=True, merge_commit_sha=NEXT)
+        self.comparison = {"status": "ahead", "base_commit": {"sha": NEXT}, "merge_base_commit": {"sha": NEXT}}
+        self.repository = {"full_name": "o/r", "default_branch": "main"}
+        api = patch.object(m, "api", side_effect=self.api)
+        api.start(); self.addCleanup(api.stop)
+        self.state = m.State()
+        self.data, _ = self.state.source(finding())
+
+    def api(self, endpoint):
+        if endpoint == "repos/o/r/pulls/2": return copy.deepcopy(self.pr)
+        if endpoint == "repos/o/r": return copy.deepcopy(self.repository)
+        if endpoint == f"repos/o/r/compare/{NEXT}...main": return copy.deepcopy(self.comparison)
+        if endpoint == "repos/o/r/issues/7": return finding()
+        raise AssertionError(endpoint)
+
+    def test_verified_merged_source_does_not_need_deleted_branch(self):
+        self.assertTrue(self.data["analysis_only"])
+        self.assertEqual(self.data["target_head"], HEAD)
+        self.assertIsNone(self.state.current(self.data))
+
+    def test_moved_reviewed_head_refuses_analysis(self):
+        self.pr["head"]["sha"] = NEXT
+        self.assertIn("source moved", self.state.current(self.data))
+
+    def test_closed_unmerged_source_remains_refused(self):
+        self.pr["merged"] = False
+        self.assertIn("identity changed", self.state.current(self.data))
+        del self.data["analysis_only"]
+        self.assertEqual(self.state.current(self.data), "source PR is closed")
+
+    def test_changed_merge_and_default_branch_refuse_analysis(self):
+        self.pr["merge_commit_sha"] = HEAD
+        self.assertIn("identity changed", self.state.current(self.data))
+        self.pr["merge_commit_sha"] = NEXT
+        self.repository["default_branch"] = "changed"
+        self.assertIn("current default branch", self.state.current(self.data))
+
+    def test_nonancestor_or_incomplete_comparison_refuses_analysis(self):
+        for value in ({"status": "diverged", "base_commit": {"sha": NEXT}, "merge_base_commit": {"sha": HEAD}},
+                      {"status": "ahead"}, {"status": "behind", "base_commit": {"sha": NEXT}, "merge_base_commit": {"sha": NEXT}}):
+            self.comparison = value
+            self.assertIn("not an ancestor", self.state.current(self.data))
+
+    def test_clean_exact_checkout_may_be_dispositioned(self):
+        with patch.object(m.subprocess, "check_output", side_effect=[HEAD + "\n", ""]), patch.object(
+                self.state, "pulls", side_effect=AssertionError("analysis never reserves a publication target")):
+            self.assertTrue(self.state.check(self.data, "/private/analysis"))
+
+    def test_dirty_or_changed_checkout_cannot_be_dispositioned(self):
+        for checked, dirty in ((HEAD, "?? injected.py\n"), (NEXT, "")):
+            with patch.object(m.subprocess, "check_output", side_effect=[checked + "\n", dirty]), patch.object(self.state, "defer") as defer:
+                self.assertFalse(self.state.check(self.data, "/private/analysis"))
+                defer.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
