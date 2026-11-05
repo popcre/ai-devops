@@ -215,6 +215,17 @@ class BoundedLegacyProofTarget(BoundedAcceptanceTarget):
             candidate["routes"].append(route)
             self.assertEqual(self.validate(candidate), 1)
 
+    def test_new_total_bounds_cannot_expand_or_change_type(self):
+        for name in ("maximum_total_provider_turns", "maximum_total_cost_usd",
+                     "maximum_new_fixtures", "maximum_new_containers"):
+            for changed in [True, None, -1, self.declaration["limits"][name] + 1]:
+                candidate = copy.deepcopy(self.declaration)
+                candidate["limits"][name] = changed
+                self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration)
+        candidate["legacy_proof"]["maximum_output_tokens"] = 512.0
+        self.assertEqual(self.validate(candidate), 1)
+
     def test_profiles_cannot_mix_and_prefix_must_match(self):
         for field, value in [("schema_version", 2),
                              ("scope", "hts-bounded-synthetic-acceptance"),
