@@ -145,8 +145,19 @@ case "$decision" in
       -m "Automatic fix by review-fixer ($agent)." || fail "commit failed"
     # The credential helper must see the runner login, not the read-only
     # workflow token, or the push is refused (popdam3#594).
-    pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
-      push -q -u origin "$branch" || fail "push of $branch failed"
+    # A re-dispatched finding publishes over the retired attempt's branch: that
+    # tip stays reachable through its closed fix PR. --force-with-lease refuses
+    # the push if the tip moved after the fetch.
+    if [ "$(gh issue view "$issue" --repo "$repo" --json labels \
+        --jq '[.labels[].name] | map(select(. == "fixer-redispatched")) | length')" = "1" ]; then
+      pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
+        fetch -q origin "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+      pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
+        push -q -u --force-with-lease origin "$branch" || fail "push of $branch failed"
+    else
+      pgit -C "$work" -c credential.helper= -c credential.helper='!gh auth git-credential' \
+        push -q -u origin "$branch" || fail "push of $branch failed"
+    fi
     metadata="$(python3 "$lifecycle" metadata "$receipt")" || fail "could not encode source receipt"
     # Recheck after the push too: owner changes during network IO must not
     # publish a stale PR. Workflow target concurrency protects other fixers.

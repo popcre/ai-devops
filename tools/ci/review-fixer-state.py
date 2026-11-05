@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 import shutil
@@ -21,6 +22,18 @@ from urllib.parse import quote
 MARKER = "review-fixer:v1"
 INVALID = "review-fixer-invalid:v1"
 DEFERRED = "fixer-deferred"
+REDISPATCHED = "fixer-redispatched"
+IDLE_LIMIT = timedelta(hours=48)
+
+
+def now():
+    return datetime.now(timezone.utc)
+
+
+def timestamp(value):
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise ValueError("fix PR timestamp is invalid")
+    return datetime.fromisoformat(value[:-1] + "+00:00")
 
 
 def gh(*args):
@@ -274,6 +287,44 @@ class State:
                     return False
         return True
 
+    def close_fix_pr(self, pr, issue, comment):
+        trusted = os.environ.get("REVIEW_FIXER_TRUSTED_ROOT")
+        adapter = Path(trusted) / "scripts/review-fixer-lifecycle.mjs" if trusted else None
+        if adapter and adapter.is_file():
+            # Same trusted default-branch adapter; preserve its GitHub auth.
+            subprocess.run(["node", str(adapter), "retire", "--fix-pr", str(pr["number"]),
+                            "--issue", str(issue)], check=True, cwd=trusted)
+        gh("pr", "close", pr["number"], "--repo", self.repo, "--comment", comment + f"\n\n{self.sig}")
+
+    def fix_pr_stale(self, pr):
+        """Return why a current fix PR can no longer land, or None if it may.
+
+        A conflicted PR cannot merge as-is. An idle PR has seen no activity for
+        over 48 hours. Both are retired and the finding is re-dispatched once.
+        """
+        detail = api(f"{self.prefix}/pulls/{pr['number']}")
+        if detail.get("mergeable") is False:
+            return "fix PR conflicts with its base"
+        if now() - timestamp(detail.get("updated_at")) >= IDLE_LIMIT:
+            return "fix PR idle since " + detail["updated_at"]
+        return None
+
+    def redispatch(self, data, pr, stale):
+        # One fresh attempt on the same review-fix/<issue> branch: the sweep
+        # re-runs the fixer once the outcome labels are gone. The retired tip
+        # stays reachable through the closed fix PR.
+        for outcome in ("fixer-done", "fixer-failed", DEFERRED):
+            gh("issue", "edit", data["issue"], "--repo", self.repo, "--remove-label", outcome)
+        gh("label", "create", REDISPATCHED, "--repo", self.repo, "--color", "FBCA04", "--force")
+        gh("issue", "edit", data["issue"], "--repo", self.repo, "--add-label", REDISPATCHED)
+        gh("issue", "comment", data["issue"], "--repo", self.repo, "--body",
+           f"Automatic fix PR #{pr['number']} retired: {stale}. Re-dispatching one fresh fix attempt. "
+           f"If that one goes stale too the finding is deferred to @{data['owner']}.\n\n{self.sig}")
+        self.close_fix_pr(pr, data["issue"],
+                          f"Stale automatic fix: {stale}. Retired for one re-dispatch; the branch is kept for recovery. "
+                          f"Finding https://github.com/{self.repo}/issues/{data['issue']} is re-dispatched.")
+        print(f"REDISPATCHED: PR #{pr['number']} -> finding #{data['issue']}")
+
     def retire(self, target):
         for pr in self.pulls(base=target):
             if pr["base"]["ref"] != target or not pr["head"]["ref"].startswith("review-fix/"):
@@ -295,7 +346,7 @@ class State:
                 else:
                     validate(data, self.repo, pr)
                     finding = self.issue(data["issue"])
-                if "review-finding" not in labels(finding):
+                if finding["state"] == "open" and "review-finding" not in labels(finding):
                     raise ValueError("associated issue is not a review finding")
                 actual, source = self.source(finding)
                 if (source["head"].get("repo") or {}).get("full_name") != self.repo:
@@ -307,19 +358,28 @@ class State:
             except (ValueError, TypeError) as error:
                 print(f"WARNING: PR #{pr['number']} retirement skipped: {error}", file=sys.stderr)
                 continue
-            reason = self.current(data)
-            if not reason:
+            if finding["state"] == "closed":
+                self.close_fix_pr(pr, data["issue"],
+                                  f"Automatic fix retired: finding #{data['issue']} is closed. The branch is kept for recovery.")
+                print(f"RETIRED: PR #{pr['number']} (finding closed)")
                 continue
-            self.defer(data, reason)
-            trusted = os.environ.get("REVIEW_FIXER_TRUSTED_ROOT")
-            adapter = Path(trusted) / "scripts/review-fixer-lifecycle.mjs" if trusted else None
-            if adapter and adapter.is_file():
-                # Same trusted default-branch adapter; preserve its GitHub auth.
-                subprocess.run(["node", str(adapter), "retire", "--fix-pr", str(pr["number"]),
-                                "--issue", str(data["issue"])], check=True, cwd=trusted)
-            gh("pr", "close", pr["number"], "--repo", self.repo, "--comment",
-               f"Stale automatic fix: {reason}. Finding https://github.com/{self.repo}/issues/{data['issue']} remains with @{data['owner']}.\n\n{self.sig}")
-            print(f"RETIRED: PR #{pr['number']}")
+            reason = self.current(data)
+            if reason:
+                self.defer(data, reason)
+                self.close_fix_pr(pr, data["issue"],
+                                  f"Stale automatic fix: {reason}. Finding https://github.com/{self.repo}/issues/{data['issue']} remains with @{data['owner']}.")
+                print(f"RETIRED: PR #{pr['number']}")
+                continue
+            stale = self.fix_pr_stale(pr)
+            if not stale:
+                continue
+            if REDISPATCHED in labels(finding):
+                self.defer(data, f"{stale}, after its one re-dispatch")
+                self.close_fix_pr(pr, data["issue"],
+                                  f"Stale automatic fix: {stale}, after its one re-dispatch. Finding https://github.com/{self.repo}/issues/{data['issue']} remains with @{data['owner']}.")
+                print(f"RETIRED: PR #{pr['number']} (re-dispatch spent)")
+                continue
+            self.redispatch(data, pr, stale)
 
     def plan(self, number=None):
         groups = {}

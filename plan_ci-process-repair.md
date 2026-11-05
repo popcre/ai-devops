@@ -9,7 +9,7 @@
 
 | Step | Work | State | Evidence |
 |---|---|---|---|
-| 0.1 | Retire stale automatic-fix pull requests, stop new ones going stale | ⬜ open | — |
+| 0.1 | Retire stale automatic-fix pull requests, stop new ones going stale | ✅ done | PR #2383; 33 stale fixer PRs closed 2026-11-04 (shared-db 19, ai-devops 14, findings all closed), 4 theoracle conflicted PRs retired and re-dispatched once (#279, #283, #289, #304); 62 fixer-state tests cover finding-closed and idle |
 | 1.1 | `merge-group-evidence` stops reporting an unfinished run as failure | ⬜ open | — |
 | 1.2 | Repair the tests failing today on Linux | ⬜ open | — |
 | 1.3 | New suites register themselves | ⬜ open | — |

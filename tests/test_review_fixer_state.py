@@ -58,6 +58,7 @@ class StateTests(unittest.TestCase):
         self.pr = source()
         self.pulls = []
         self.commands = []
+        self.fix_detail = {}
         self.graphql_paths = {}
         self.api_patch = patch.object(m, "api", side_effect=self.api)
         self.api_patch.start(); self.addCleanup(self.api_patch.stop)
@@ -87,6 +88,12 @@ class StateTests(unittest.TestCase):
     def api(self, endpoint):
         if endpoint.endswith("/pulls/2"):
             return copy.deepcopy(self.pr)
+        fix = re.fullmatch(r"repos/o/r/pulls/(\d+)", endpoint)
+        if fix:
+            detail = {"number": int(fix[1]), "mergeable": True,
+                      "updated_at": m.now().strftime("%Y-%m-%dT%H:%M:%SZ")}
+            detail.update(self.fix_detail)
+            return detail
         if "/issues/" in endpoint:
             return copy.deepcopy(self.issue)
         if "/git/ref/heads/" in endpoint:
@@ -366,6 +373,51 @@ class StateTests(unittest.TestCase):
         self.state.retire("owner/work")
         self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
         self.assertFalse(any(c[:2] == ("issue", "close") for c in self.commands))
+
+    def redispatched(self):
+        return any("--add-label" in c and "fixer-redispatched" in c for c in self.commands)
+
+    def test_closed_finding_closes_fix_pr_and_keeps_branch(self):
+        self.issue["state"] = "closed"
+        self.pulls = [self.fixer_pr()]
+        self.state.retire("owner/work")
+        self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
+        self.assertFalse(self.deferred())
+        self.assertFalse(self.redispatched())
+        self.assertFalse(any(c[:2] == ("issue", "close") for c in self.commands))
+        self.assertFalse(any("branch" in str(c) and "delete" in str(c) for c in self.commands))
+
+    def test_idle_fix_pr_is_retired_and_finding_re_dispatched_once(self):
+        self.fix_detail = {"updated_at": (m.now() - m.timedelta(hours=49)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        self.pulls = [self.fixer_pr()]
+        self.state.retire("owner/work")
+        self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
+        self.assertTrue(self.redispatched())
+        self.assertFalse(self.deferred())
+        self.assertTrue(any(c[:3] == ("issue", "edit", 7) and "--remove-label" in c for c in self.commands))
+        self.assertFalse(any(c[:2] == ("issue", "close") for c in self.commands))
+
+    def test_conflicting_fix_pr_is_retired_and_finding_re_dispatched_once(self):
+        self.fix_detail = {"mergeable": False}
+        self.pulls = [self.fixer_pr()]
+        self.state.retire("owner/work")
+        self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
+        self.assertTrue(self.redispatched())
+        self.assertFalse(self.deferred())
+
+    def test_second_stale_retirement_defers_instead_of_redispatching(self):
+        self.issue["labels"] = [{"name": "review-finding"}, {"name": "fixer-redispatched"}]
+        self.fix_detail = {"mergeable": False}
+        self.pulls = [self.fixer_pr()]
+        self.state.retire("owner/work")
+        self.assertTrue(any(c[:3] == ("pr", "close", 9) for c in self.commands))
+        self.assertTrue(self.deferred())
+        self.assertFalse(self.redispatched())
+
+    def test_fresh_mergeable_fix_pr_is_left_open(self):
+        self.pulls = [self.fixer_pr()]
+        self.state.retire("owner/work")
+        self.assertFalse(self.commands)
 
     def test_current_and_legacy_fix_prs_are_not_guessed_stale(self):
         self.pulls = [self.fixer_pr()]
