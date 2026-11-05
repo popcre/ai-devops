@@ -6,6 +6,7 @@ live target identity immediately before requests and retain actual acceptance.
 import json
 import pathlib
 import datetime
+import math
 import os
 import re
 import stat
@@ -105,6 +106,58 @@ LEGACY_PROOF_BOUNDS = {
     "required_actual_api": "openrouter",
     "required_credit_state": "positive-live-binding-verified",
 }
+
+# One ordinary HTS HTTP request can contain several bounded internal calls.
+# This distinct profile preserves v3 rather than relabeling HTTP as inference.
+LEGACY_ENVELOPE_BOUNDS = {
+    **LEGACY_PROOF_BOUNDS,
+    "maximum_output_tokens": 4096,
+    "maximum_cost_usd": 3.23,
+    "maximum_internal_provider_calls": 9,
+    "model_context_tokens": 1050000,
+    "model_max_completion_tokens": 128000,
+    "provider_retry": False,
+    "billable_tools": False,
+    "separate_preprocessing_requests": False,
+}
+
+
+def bounded_legacy_envelope(value, root):
+    """Verified prior usage plus one fixed inference envelope; no executor."""
+    if not isinstance(value, dict):
+        return False
+    prior = value.get("prior_usage")
+    if not isinstance(prior, dict) or prior.keys() != {
+            "provider_calls", "actual_cost_usd", "snapshot_sha256", "source"}:
+        return False
+    calls, cost = prior["provider_calls"], prior["actual_cost_usd"]
+    if (type(calls) is not int or calls < 0
+            or type(cost) not in (int, float) or cost < 0 or cost > 6.77
+            or not math.isfinite(cost)
+            or prior["source"] != "session-provider-usage-verified"
+            or not isinstance(prior["snapshot_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", prior["snapshot_sha256"])):
+        return False
+    aggregate = calls + LEGACY_ENVELOPE_BOUNDS["maximum_internal_provider_calls"]
+    dynamic = {"issue", "source_head", "expires_at", "fixture_prefix", "prior_usage"}
+    expected = {
+        **TARGET,
+        "schema_version": 4,
+        "scope": "hts-bounded-synthetic-legacy-envelope-proof",
+        "routes": LEGACY_PROOF_ROUTES,
+        "limits": {**LEGACY_PROOF_LIMITS,
+                   "maximum_total_provider_turns": aggregate,
+                   "maximum_provider_turns_per_fixture": aggregate,
+                   "maximum_total_cost_usd": 10},
+        "legacy_proof": {**LEGACY_ENVELOPE_BOUNDS,
+                         "description_prefix": value.get("fixture_prefix")},
+    }
+    if value.keys() != expected.keys() | dynamic:
+        return False
+    if not exact({key: value[key] for key in expected if key != "issue"},
+                 {key: item for key, item in expected.items() if key != "issue"}):
+        return False
+    return bounded_metadata(value, root)
 
 
 def bounded_acceptance(value, root):
@@ -220,7 +273,8 @@ def main():
         value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
         return 0 if (exact(value, TARGET) or exact(value, RECOVERY_TARGET)
                      or bounded_acceptance(value, root)
-                     or bounded_legacy_proof(value, root)) else 1
+                     or bounded_legacy_proof(value, root)
+                     or bounded_legacy_envelope(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 

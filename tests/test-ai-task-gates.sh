@@ -1985,6 +1985,35 @@ git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare single bounded synthetic legacy proof'
 check 'single synthetic legacy proof profile succeeds' "rc 0 '$WF' check $WF_ARGS"
 check 'single synthetic legacy proof still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$ROOT" "$WF" <<'PY'
+import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+path = pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target.update(schema_version=4, scope='hts-bounded-synthetic-legacy-envelope-proof',
+    limits=dict(mod.LEGACY_PROOF_LIMITS, maximum_total_provider_turns=11,
+                maximum_provider_turns_per_fixture=11, maximum_total_cost_usd=10),
+    legacy_proof=dict(mod.LEGACY_ENVELOPE_BOUNDS, description_prefix=target['fixture_prefix']),
+    prior_usage=dict(provider_calls=2, actual_cost_usd=0.02, snapshot_sha256='a'*64,
+                     source='session-provider-usage-verified'))
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare bounded internal legacy inference envelope'
+check 'synthetic legacy envelope counts prior calls plus nine internal calls' "rc 0 '$WF' check $WF_ARGS"
+check 'synthetic legacy envelope still refuses SQL' "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1] + '/.ai-devops/application-workflow-target.json')
+target = json.loads(path.read_text())
+target['legacy_proof']['maximum_internal_provider_calls'] = 10
+path.write_text(json.dumps(target))
+PY
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused expansion of internal calls'
+check 'synthetic legacy envelope refuses a tenth internal call' "rc 3 '$WF' check $WF_ARGS"
 cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'restore legacy declaration after bounded acceptance'

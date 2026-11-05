@@ -67,6 +67,40 @@ application's owning issue retains its separate paid-call authorization and
 live result; preparation never counts as that result. Versions 1 and 2 remain
 unchanged.
 
+## Version 4: one request with an explicit internal-call envelope
+
+Version 4 uses `hts-bounded-synthetic-legacy-envelope-proof`; versions 1–3
+remain unchanged. It retains the exact legacy-proof routes, synthetic prefix,
+source ancestry, expiry, target and forbidden actions. It admits one HTTP POST
+with the approved pinned Luna/OpenRouter policy and at most nine internal Luna
+API invocations, including the existing challenger and validation/follow-up
+calls. Main output is capped at 4096 tokens with high reasoning unchanged.
+Separate paid phrase/evidence requests, HTTP/provider retries and billable tools
+are forbidden. It does not disable any validation or challenger to fit a test.
+
+`prior_usage` contains `provider_calls` (a nonnegative integer),
+`actual_cost_usd` (a finite nonnegative number), `snapshot_sha256` and the exact
+source `session-provider-usage-verified`. The private executor must verify that
+snapshot against all earlier actual session calls/spend, including any earlier
+proof or evaluation. Both aggregate call limits equal that prior count plus
+nine. The cumulative cost cap remains $10; prior actual cost plus the fixed
+$3.23 conservative request risk must fit that cap before admission.
+
+The request envelope pins the verified model catalog bounds of 1,050,000
+context tokens and 128,000 maximum completion tokens. Using the highest approved
+input rate ($0.25 per million, including cache writes) and completion rate
+($0.75 per million), nine full catalog envelopes cost at most $3.2265, rounded
+up to $3.23. This conservative admission calculation is not a provider-side
+spend limiter. The source has no automatic provider retry or billable-tool path.
+
+This remains a declaration/receipt, not a transport interceptor. The executor
+must verify the exact deployed call graph and actual catalog/rates, preserve a
+one-use marker before its one POST, and observe an unknown outcome without
+reposting. Actual calls/spend are reconciled afterward. A changed call graph,
+provider/model, catalog limit, retry behavior or pricing requires a new reviewed
+profile rather than silently reusing this envelope. Source tests and normal
+delivery are separate from protected two-OS installation and live admission.
+
 ## Historical implementation and verification record
 
 Owner: Codex; application outcome: DesignFlow backend issue #94. Central safety
