@@ -723,7 +723,7 @@ cat > "$TMP/bin/gh" <<'EOF'
 # consumes one of the sequence's payloads.
 case "$*" in
   'auth token '*) printf 'test-token\n'; exit 0 ;;
-  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
@@ -752,7 +752,7 @@ cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   'auth token '*) printf 'test-token\n'; exit 0 ;;
-  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"deploy",conclusion:"FAILURE",isRequired:true,title:"The spending limit for this account was exceeded"}]}}}}]}}}}}'
@@ -776,7 +776,7 @@ cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   'auth token '*) printf 'test-token\n'; exit 0 ;;
-  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
