@@ -511,8 +511,8 @@ while :; do
   # on the PR head commit) makes a failure advisory: it is reported, and the
   # wait continues to merge, ejection, close, or timeout. Unknown policy or an
   # unbound commit stays terminal.
-  FAILED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and (.isRequired != false or ((($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid) | not))) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
-  ADVISORY="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and .isRequired == false and (($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid)) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
+  FAILED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and (.isRequired != false or ((($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid) | not))) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE") + "\t" + (((.title // .description // "")) | gsub("[\\n\\t\\r]"; " "))) ] | join("\n")')"
+  ADVISORY="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") and .isRequired == false and (($pr.headRefOid | type) == "string" and $pr.headRefOid != "" and $commit.oid == $pr.headRefOid)) | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE") + "\t" + (((.title // .description // "")) | gsub("[\\n\\t\\r]"; " "))) ] | join("\n")')"
 
   if [ "$STATE" = "MERGED" ]; then
     set_event_evidence MERGED
@@ -578,22 +578,32 @@ while :; do
     any_capacity=0
     any_result=0
     any_review=0
-    while IFS=$'\t' read -r cname cconc; do
+    any_billing=0
+    while IFS=$'\t' read -r cname cconc ctext; do
       [ -n "$cname" ] || continue
       if [ -f "$TAXONOMY" ]; then
-        action="$(bash "$TAXONOMY" check "$cconc" "$cname" 2>/dev/null || printf 'result')"
-        detail="$(bash "$TAXONOMY" detail "$cconc" "$cname" 2>/dev/null || printf 'test-failure')"
+        action="$(bash "$TAXONOMY" check "$cconc" "$cname" "$ctext" 2>/dev/null || printf 'result')"
+        detail="$(bash "$TAXONOMY" detail "$cconc" "$cname" "$ctext" 2>/dev/null || printf 'test-failure')"
       else
         action=result
         detail=test-failure
       fi
       say "  - $cname ($cconc)  action=$action  detail=$detail"
+      case "$detail" in
+        billing-lock) any_billing=1 ;;
+      esac
       case "$action" in
         capacity/infra) any_capacity=1 ;;
         review-step) any_review=1 ;;
         *) any_result=1 ;;
       esac
     done <<<"$FAILED"
+    if [ "$any_billing" -eq 1 ]; then
+      say "  billing lock: the account's Actions billing or spending limit stopped"
+      say "  this run — an outside stop, not a code failure. Read the account's"
+      say "  billing settings (spending limit and payment method) before retrying;"
+      say "  only the account owner can fix the payment side."
+    fi
     if [ "$any_capacity" -eq 1 ]; then
       say "  capacity/infra: timeout/kill/rate-limit. A check reported CANCELLED"
       say "  is usually a job timeout, not a test result. Park the merge and"

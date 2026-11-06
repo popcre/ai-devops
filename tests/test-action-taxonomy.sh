@@ -47,6 +47,27 @@ check "rate-limit detail is report-only rate-limit-capacity" \
 check "ordinary failure detail is test-failure" \
   "test \"$(det FAILURE linux-offline)\" = 'test-failure'"
 
+# Step 3.3: the account billing lock is its own named state — an outside stop
+# on the account, never a code result. Matched on the summary only.
+check "spending-limit summary is billing-lock" \
+  "test \"$(det FAILURE some-check 'account spending limit exceeded')\" = 'billing-lock'"
+check "billing limit message is billing-lock" \
+  "test \"$(det FAILURE some-check 'Error: the billing limit for this account has been exceeded')\" = 'billing-lock'"
+check "billing hold on Actions is billing-lock" \
+  "test \"$(det FAILURE some-check 'GitHub Actions disabled for this repository due to a billing hold')\" = 'billing-lock'"
+check "payment-required message is billing-lock" \
+  "test \"$(det FAILURE x 'HTTP 402 payment required')\" = 'billing-lock'"
+check "billing-lock is capacity/infra, never result" \
+  "test \"$(act FAILURE some-check 'account spending limit exceeded')\" = 'capacity/infra'"
+check "billing-lock review failure is capacity/infra" \
+  "test \"$(rev billing-lock)\" = 'capacity/infra'"
+check "a failing billing test without a lock phrase stays result" \
+  "test \"$(act FAILURE test-billing 'assertion failed: invoice mismatch')\" = 'result'"
+check "billing in the check name alone is not a lock" \
+  "test \"$(act FAILURE billing 'suite failed')\" = 'result'"
+check "rate limit stays rate-limit-capacity, not billing-lock" \
+  "test \"$(det FAILURE x 'secondary rate limit')\" = 'rate-limit-capacity'"
+
 check "empty-report (empty provider report) is review-step" \
   "test \"$(rev empty-report)\" = 'review-step'"
 check "empty-verdict review failure is review-step" \

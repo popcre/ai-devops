@@ -21,7 +21,8 @@
 #     -> prints review-step | capacity/infra | result
 #   action_taxonomy_detail <conclusion> [check_name] [summary]
 #     -> prints a report-only category (timeout-capacity, killed-interrupt,
-#        rate-limit-capacity, empty-verdict, test-failure, config-drift)
+#        rate-limit-capacity, billing-lock, empty-verdict, test-failure,
+#        config-drift)
 #
 # A `result` failure gets the `ci-red` issue label (plan_ci-process-repair.md
 # step 1.4). Capacity/infra failures never open a per-test issue.
@@ -59,6 +60,26 @@ action_taxonomy_detail() {
       printf 'killed-interrupt\n'; return 0 ;;
   esac
 
+  # Account billing lock (plan_ci-process-repair.md step 3.3): an outside stop
+  # on the account, never a code result. Matched on the failure summary only,
+  # like every capacity phrase — a check named "billing" whose test really
+  # failed stays `result`. "quota exceeded" and "rate limit" belong to the
+  # rate-limit family above and never reach this case.
+  case "$summary_blob" in
+    *spending\ limit*|*spending-limit*|*spending.limit*)
+      printf 'billing-lock\n'; return 0 ;;
+    *payment\ required*|*payment-required*|*payment\ failed*|*payment-failed*|*http\ 402*|*status\ 402*)
+      printf 'billing-lock\n'; return 0 ;;
+  esac
+  case "$summary_blob" in
+    *billing*)
+      case "$summary_blob" in
+        *limit*|*exceed*|*lock*|*locked*|*disabled*|*disab*|*hold*|*overdue*)
+          printf 'billing-lock\n'; return 0 ;;
+      esac
+      ;;
+  esac
+
   # Empty reviewer verdict: detect from the check name or summary. This is the
   # carve-out that keeps an empty verdict off the PR test verdict. Only the
   # empty-report family counts here: `invalid-provider-envelope` is NOT an
@@ -84,7 +105,7 @@ action_taxonomy_check() {
   local detail
   detail="$(action_taxonomy_detail "$@")"
   case "$detail" in
-    timeout-capacity|killed-interrupt|rate-limit-capacity)
+    timeout-capacity|killed-interrupt|rate-limit-capacity|billing-lock)
       printf 'capacity/infra\n' ;;
     empty-verdict)
       printf 'review-step\n' ;;
@@ -102,7 +123,7 @@ action_taxonomy_review() {
   case "${1:-}" in
     empty-report|empty-verdict|empty_provider_stream|no-verdict|missing-verdict|malformed-verdict)
       printf 'review-step\n' ;;
-    provider-timeout|timeout|allowance-exhausted|out-of-credit|rate-limit|killed|interrupted)
+    provider-timeout|timeout|allowance-exhausted|out-of-credit|rate-limit|killed|interrupted|billing-lock)
       printf 'capacity/infra\n' ;;
     *)
       printf 'result\n' ;;
