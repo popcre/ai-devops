@@ -62,7 +62,43 @@ for dir in ".ai/reviewer-issues" ".AI/reviewer-issues" ".Ai/reviewer-issues" ".a
   git -C "$TMP/repo" reset -q HEAD "$dir/secret.txt"; rm -rf "$TMP/repo/$dir"
 done
 git -C "$TMP/repo" reset -q HEAD .ai/reviewer-issues/issue.json; rm -rf "$TMP/repo/.ai/reviewer-issues"
+# Case-insensitive Windows checkouts normalize the case-variant adds above into
+# one index entry that a case-sensitive path reset never removes; the ghost
+# entry then fails the next full-repo assertion. Unstage everything; later
+# blocks re-add exactly what they need.
+git -C "$TMP/repo" reset -q
+
+# A repository may declare intentional evidence publishes in
+# tools/public-boundary-path-allowlist.txt (popcre/shared-db#5826): matching
+# paths stop tripping the path-classification rules while every content-level
+# check and the universal secret-type rules still apply. A directory entry
+# ends in "/"; any other entry is an exact path.
+mkdir -p "$TMP/repo/.ai/reviews" "$TMP/repo/tools"
+printf '# Intentional governed-review evidence (popcre/shared-db#5826).\n.ai/reviews/\n.ai/brief-1818-codex.md\n' > "$TMP/repo/tools/public-boundary-path-allowlist.txt"
+git -C "$TMP/repo" add tools/public-boundary-path-allowlist.txt
+printf 'report\n' > "$TMP/repo/.ai/reviews/glm.md"; git -C "$TMP/repo" add -f .ai/reviews/glm.md
+printf 'brief\n' > "$TMP/repo/.ai/brief-1818-codex.md"; git -C "$TMP/repo" add -f .ai/brief-1818-codex.md
+bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1 || { echo 'FAIL: path-allowlisted evidence paths rejected'; exit 1; }
+# An unlisted sibling path is NOT exempt.
+printf 'x\n' > "$TMP/repo/.ai/brief-2-codex.md"; git -C "$TMP/repo" add -f .ai/brief-2-codex.md
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: exact-path allowlist entry exempted an unlisted sibling'; exit 1; fi
+git -C "$TMP/repo" reset -q HEAD .ai/brief-2-codex.md; rm -f "$TMP/repo/.ai/brief-2-codex.md"
+# Content checks still apply under an exempt path: an identifier still fails
+# and the failure still names the file and line.
+printf 'project-ref abcdefghijklmnopqrst\n' > "$TMP/repo/.ai/reviews/leak.md"; git -C "$TMP/repo" add -f .ai/reviews/leak.md
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: path allowlist laundered a project identifier'; exit 1; fi
+DIAG="$(bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" 2>&1 || true)"
+printf '%s' "$DIAG" | grep -q '.ai/reviews/leak.md:1:' || { echo 'FAIL: identifier failure under exempt path does not name file and line'; exit 1; }
+# The word allowlist is still honored inside exempt paths.
+cp "$ROOT/tools/public-boundary-allowlist.txt" "$TMP/repo/tools/public-boundary-allowlist.txt"
+git -C "$TMP/repo" add tools/public-boundary-allowlist.txt
+printf 'the word indistinguishability is ordinary English\n' > "$TMP/repo/.ai/reviews/leak.md"
+bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1 || { echo 'FAIL: word allowlist not honored under path-exempt evidence'; exit 1; }
+# Secret-bearing file types still fail under an exempt path.
+printf 'x\n' > "$TMP/repo/.ai/reviews/leak.key"; git -C "$TMP/repo" add -f .ai/reviews/leak.key
+if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: secret-bearing file type passed under path allowlist'; exit 1; fi
+git -C "$TMP/repo" reset -q HEAD; rm -rf "$TMP/repo/.ai" "$TMP/repo/tools"
 
 python3 "$ROOT/tests/test-public-boundary-versions.py"
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
-echo 'PASS: seeded transcript, AI artifact, credential, topology, tailnet hostname, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers'
+echo 'PASS: seeded transcript, AI artifact, credential, topology, tailnet hostname, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers; path-allowlisted evidence publishes pass without laundering identifiers or secret types'
