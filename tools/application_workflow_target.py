@@ -399,10 +399,9 @@ def frozen_prepack_identity_continuation(value, root):
 
 
 
-# Unbound until the separately governed private resource exists and its actual
-# immutable metadata has been independently read back. No schema-10 admission
-# is possible with this placeholder. Tests may patch only this constant.
-PRIVATE_RUNTIME_ORIGIN = None
+# Actual canonical status.url, independently read from the one governed
+# private service. Predicted aliases and arbitrary hosts are not admitted.
+PRIVATE_RUNTIME_ORIGIN = 'https://popcre-albert-hts-r9-01a1ab99-mi7si7t62a-uk.a.run.app'
 PRIVATE_RUNTIME_SERVICE = "popcre-albert-hts-r9-01a1ab99"
 PRIVATE_RUNTIME_FIELDS = {
     "proof_sha256", "semantic_proof_sha256", "server_source", "server_digest",

@@ -320,7 +320,7 @@ must subsequently pin it. No fabricated snapshot or authority flags are valid.
 Original evaluation ledgers, reports, status, costs, questions and history stay
 unchanged; only the trusted diagnostic marker controls attention/actions.
 
-### Private immutable runtime continuation (schema 10, preparation)
+### Private immutable runtime continuation (schema 10)
 
 This closed routing-only fourth operational epoch requires the immediate v8
 parent, original expiry and all original ledger/input/key/budget bindings.
@@ -330,10 +330,12 @@ original lineage. Schema 9 remains a separate metadata closeout action.
 
 The one resource identity is project `lithe-breaker-323913`, region `us-east4`,
 service `popcre-albert-hts-r9-01a1ab99`, queue `hts-r9-01a1ab99`, lane
-`r9-01a1ab99`, process role `isolated-hts`. The exact private HTTPS origin is
-UNBOUND until separately governed resource creation and actual metadata proof;
-the draft cannot admit any schema-10 declaration while unbound.
-Synthetic shape tests patch a synthetic origin only; they prove no live route.
+`r9-01a1ab99`, process role `isolated-hts`. The only admitted origin is the
+actual canonical service `status.url`:
+`https://popcre-albert-hts-r9-01a1ab99-mi7si7t62a-uk.a.run.app`. It was read
+after separately governed creation; the predicted project-number alias is not
+admitted. Metadata validation alone does not authorize a frozen continuation;
+the executor still requires its exact private proof and owner release.
 
 The private-runtime proof binds current-security server source/digest and the
 approved semantic-closure proof, independently of the honest tool source and

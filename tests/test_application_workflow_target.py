@@ -652,6 +652,7 @@ class DiagnosticMetadataCloseout(unittest.TestCase):
 
 
 class PrivateImmutableRuntimeContinuation(unittest.TestCase):
+    BOUND_ORIGIN = TARGET.PRIVATE_RUNTIME_ORIGIN
     validate = ClosedRecoveryTarget.validate
     ORIGIN = "https://popcre-albert-hts-r9-01a1ab99-synthetic-ue.a.run.app"
 
@@ -682,6 +683,16 @@ class PrivateImmutableRuntimeContinuation(unittest.TestCase):
         self.assertEqual(self.validate(self.declaration), 0)
         with patch.object(TARGET, "PRIVATE_RUNTIME_ORIGIN", None):
             self.assertEqual(self.validate(self.declaration), 1)
+
+    def test_actual_observed_origin_is_fixed_and_predicted_alias_is_not_admitted(self):
+        actual = self.BOUND_ORIGIN
+        self.assertEqual(actual, "https://popcre-albert-hts-r9-01a1ab99-mi7si7t62a-uk.a.run.app")
+        with patch.object(TARGET, "PRIVATE_RUNTIME_ORIGIN", actual):
+            value = copy.deepcopy(self.declaration)
+            value["api_origin"] = value["private_runtime"]["origin"] = actual
+            self.assertEqual(self.validate(value), 0)
+            value["api_origin"] = value["private_runtime"]["origin"] = "https://popcre-albert-hts-r9-01a1ab99-677598988032.us-east4.run.app"
+            self.assertEqual(self.validate(value), 1)
 
     def test_no_fifth_epoch_or_expiry_renewal(self):
         for field, bad in [("original_schema_version", 10), ("original_schema_version", 9),
