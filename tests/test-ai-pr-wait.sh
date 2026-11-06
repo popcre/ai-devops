@@ -686,6 +686,63 @@ done
 rm -f "$TMP/cancel-unbound-called"
 OUT="$(CANCEL_REQUIRED=false CANCEL_OID=h2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-unbound-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-unbound-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 check "a requirement result from a different commit cannot excuse cancellation" "test '$RC' -eq 1"
+
+# #2095: a mixed poll (advisory + required failures on the same head) must quit
+# through the terminal block without first claiming it is still waiting.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:2,pageInfo:{hasPreviousPage:false},nodes:[{name:"advisory lint",conclusion:"FAILURE",isRequired:false},{name:"required build",conclusion:"FAILURE",isRequired:true}]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/mixed-called"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/mixed-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/mixed-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a mixed poll quits on the required failure without printing 'still waiting'" \
+  "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'will not merge' && ! printf '%s' \"$OUT\" | grep -q 'advisory; still waiting' && printf '%s' \"$OUT\" | grep -q 'required build'"
+
+# #2095: a legacy context with only state (no conclusion, no isRequired) is
+# unproved and stays terminal.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"legacy check",state:"FAILURE"}]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/legacy-called"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/legacy-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/legacy-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a legacy state-only failure stays terminal" \
+  "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'legacy check' && printf '%s' \"$OUT\" | grep -q 'will not merge'"
+
+# #2095: a new head's advisory failure is reported again after the previous
+# head's advisory was already deduped. The two heads carry distinct advisory
+# names so the assertion is about WHICH reports appeared, never about how
+# polling happened to interleave.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+# Answer the wrapper's health probes so a quota-unknown back-off never
+# consumes one of the sequence's payloads.
+case "$*" in
+  'auth token '*) printf 'test-token\n'; exit 0 ;;
+  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+esac
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$((count + 1)); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -gt 2 ]; then
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h2","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
+  exit 0
+fi
+oid="h$((count))"
+jq -nc --arg oid "$oid" --arg name "advisory lint $oid" '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:$oid,isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:$oid,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:$name,conclusion:"FAILURE",isRequired:false}]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/rehead-called"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/rehead-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/rehead-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+printf 'rehead fixture diagnostics: rc=%s h1-reported=%s h2-reported=%s\n' "$RC" \
+  "$(printf '%s' "$OUT" | grep -c 'advisory lint h1')" \
+  "$(printf '%s' "$OUT" | grep -c 'advisory lint h2')" >&2
+check "a new head re-reports its advisory failure after dedupe" \
+  "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -q 'advisory lint h1' && printf '%s' \"$OUT\" | grep -q 'advisory lint h2' && printf '%s' \"$OUT\" | grep -q MERGED"
 check "requirement policy is queried on both complete-status pages and cache v1 is retired" \
   "test \"$(grep -c 'isRequired(pullRequestNumber:\$PR)' "$ROOT/tools/github-requests/pr-status-complete.sh")\" -eq 2 && grep -q -- '--key \"v3 ' '$CMD' && ! grep -q -- '--key \"v1 ' '$CMD'"
 
