@@ -247,7 +247,7 @@ exit 127
         self.assertEqual(result.returncode, 2)
         summary = self.summary(result)
         self.assertFalse(summary["ok"])
-        self.assertEqual(summary["error"], "deadline exceeded while waiting for gh admission")
+        self.assertEqual(summary["error"], "deadline exceeded while waiting for ai-gh admission")
 
     def test_invalid_deadline_fails_closed_before_any_github_call(self):
         env = self.env.copy()
@@ -265,9 +265,9 @@ exit 127
         self.assertTrue(summary["ok"])
         self.assertTrue(result.stderr.splitlines()[0].startswith(
             "ai-shared-db-closeout-check: session"), result.stderr)
-        self.assertIn("gh call 1 (auth status) waiting for ai-gh admission", result.stderr)
-        self.assertIn("gh call 1 (auth status) finished in", result.stderr)
-        self.assertIn("includes ai-gh admission wait", result.stderr)
+        self.assertIn("ai-gh call 1 (auth status) waiting for admission", result.stderr)
+        self.assertIn("ai-gh call 1 (auth status) finished in", result.stderr)
+        self.assertIn("includes admission wait", result.stderr)
 
     def mimo_env(self, session=MIMO_SESSION):
         env = self.env.copy()

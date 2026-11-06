@@ -6,10 +6,11 @@
 #     run, default 3600. Healthy runs can queue for many minutes behind the
 #     machine-wide ai-gh admission throttle; the default tolerates that while
 #     still bounding the run. On deadline the tool emits the standard failure
-#     JSON ("deadline exceeded while waiting for gh admission") and exits 2.
+#     JSON ("deadline exceeded while waiting for ai-gh admission") and exits 2.
 #
-# Progress lines go to stderr (one per gh call, with the ai-gh wait included in
-# the elapsed time); stdout stays exactly one line of machine-readable JSON.
+# Progress lines go to stderr (one per ai-gh call, with the admission wait
+# included in the elapsed time); stdout stays exactly one line of
+# machine-readable JSON.
 set -uo pipefail
 
 SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -140,7 +141,7 @@ def gh_call(args):
     label = describe_gh_args(args)
     remaining = deadline_remaining()
     if remaining is not None and remaining <= 0:
-        raise CheckError("deadline exceeded while waiting for gh admission")
+        raise CheckError("deadline exceeded while waiting for ai-gh admission")
     # Admission through the shared ai-gh queue can exceed a minute during
     # fleet CI. Keep that route intact and bounded, without treating queue
     # congestion as evidence that this session still owns work. The total
@@ -153,12 +154,12 @@ def gh_call(args):
         if len(args) >= 1 and args[0] == "api":
             command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
                        "api", "--hostname", "github.com", *args[1:]]
-        progress(f"gh call {serial} ({label}) waiting for ai-gh admission")
+        progress(f"ai-gh call {serial} ({label}) waiting for admission")
         started = time.monotonic()
         result = subprocess.run(command, capture_output=True, check=False, timeout=call_timeout,
                                 env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
         waited = time.monotonic() - started
-        progress(f"gh call {serial} ({label}) finished in {waited:.1f}s (includes ai-gh admission wait)")
+        progress(f"ai-gh call {serial} ({label}) finished in {waited:.1f}s (includes admission wait)")
         try:
             result.stdout = result.stdout.decode("utf-8", errors="strict")
             result.stderr = result.stderr.decode("utf-8", errors="strict")
@@ -167,7 +168,7 @@ def gh_call(args):
         return result
     except subprocess.TimeoutExpired as exc:
         if call_timeout < GH_CALL_TIMEOUT_SECONDS:
-            raise CheckError("deadline exceeded while waiting for gh admission") from exc
+            raise CheckError("deadline exceeded while waiting for ai-gh admission") from exc
         raise CheckError("GitHub request timed out") from exc
     except OSError as exc:
         raise CheckError("could not run GitHub CLI") from exc
