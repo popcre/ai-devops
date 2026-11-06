@@ -680,6 +680,7 @@ class CommonSenseDevelopmentProof(ClosedRecoveryTarget):
             "expires_at": BoundedAcceptanceTarget.expiry(hours=0.5),
             "bindings": {key: "b" * 64 for key in TARGET.COMMON_SENSE_DEV_BINDINGS},
         }
+        self.declaration["bindings"]["fixture_sha256"] = "1abecaf37857b960c55cf9bff5b60205f57ef28f4b245c2b4aac754fbbd6eed4"
 
     def test_exact_independent_development_profile(self):
         self.assertEqual(self.validate(self.declaration), 0)
@@ -708,6 +709,8 @@ class CommonSenseDevelopmentProof(ClosedRecoveryTarget):
                 candidate = copy.deepcopy(self.declaration); candidate["bindings"][key] = bad
                 self.assertEqual(self.validate(candidate), 1)
         candidate = copy.deepcopy(self.declaration); candidate["bindings"]["extra"] = "b" * 64
+        self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration); candidate["bindings"]["fixture_sha256"] = "c" * 64
         self.assertEqual(self.validate(candidate), 1)
 
     def test_provider_actor_case_and_prefix_cannot_change(self):

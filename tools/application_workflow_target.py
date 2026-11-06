@@ -599,6 +599,8 @@ def common_sense_development_proof(value, root):
     if not all(isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item)
                for item in bindings.values()):
         return False
+    if bindings["fixture_sha256"] != "1abecaf37857b960c55cf9bff5b60205f57ef28f4b245c2b4aac754fbbd6eed4":
+        return False
     return bounded_metadata(value, root, maximum_hours=1)
 
 
