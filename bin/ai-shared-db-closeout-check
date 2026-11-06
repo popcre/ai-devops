@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # Read-only final check: the current session must own no open shared-db claim or stage.
+#
+# Environment:
+#   AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS  total wall-clock bound for the whole
+#     run, default 3600. Healthy runs can queue for many minutes behind the
+#     machine-wide ai-gh admission throttle; the default tolerates that while
+#     still bounding the run. On deadline the tool emits the standard failure
+#     JSON ("deadline exceeded while waiting for ai-gh admission") and exits 2.
+#
+# Progress lines go to stderr (one per ai-gh call, with the admission wait
+# included in the elapsed time); stdout stays exactly one line of
+# machine-readable JSON.
 set -uo pipefail
 
 SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -40,9 +51,17 @@ import os
 import re
 import subprocess
 import sys
+import time
 from urllib.parse import quote
 
 REPO = "popcre/shared-db"
+PROGRESS_PREFIX = "ai-shared-db-closeout-check:"
+DEADLINE_ENV = "AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"
+DEFAULT_DEADLINE_SECONDS = 3600.0
+GH_CALL_TIMEOUT_SECONDS = 600
+RUN_STARTED = time.monotonic()
+DEADLINE_SECONDS = None
+GH_CALL_SERIAL = 0
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # MiMo Desktop sessions use ses_<token> identifiers, not UUIDs. Tokens are
 # opaque and case-sensitive; never case-fold them the way UUIDs are folded.
@@ -75,6 +94,39 @@ class CheckError(Exception):
     pass
 
 
+def progress(message):
+    # Liveness for humans: a healthy run can sit in the machine-wide ai-gh
+    # admission queue for minutes per call. stdout must stay one JSON line,
+    # so every progress line goes to stderr.
+    print(f"{PROGRESS_PREFIX} {message}", file=sys.stderr, flush=True)
+
+
+def read_deadline_seconds():
+    raw = os.environ.get(DEADLINE_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_DEADLINE_SECONDS
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise CheckError("deadline must be a positive number of seconds") from exc
+    if value <= 0:
+        raise CheckError("deadline must be a positive number of seconds")
+    return value
+
+
+def deadline_remaining():
+    if DEADLINE_SECONDS is None:
+        return None
+    return DEADLINE_SECONDS - (time.monotonic() - RUN_STARTED)
+
+
+def describe_gh_args(args):
+    if args[:1] == ["auth"]:
+        return "auth status"
+    path = args[-1] if len(args) > 1 else "gh"
+    return path if len(path) <= 60 else path[:57] + "..."
+
+
 def run_gh(args):
     result = gh_call(args)
     if result.returncode != 0:
@@ -83,16 +135,31 @@ def run_gh(args):
 
 
 def gh_call(args):
+    global GH_CALL_SERIAL
+    GH_CALL_SERIAL += 1
+    serial = GH_CALL_SERIAL
+    label = describe_gh_args(args)
+    remaining = deadline_remaining()
+    if remaining is not None and remaining <= 0:
+        raise CheckError("deadline exceeded while waiting for ai-gh admission")
+    # Admission through the shared ai-gh queue can exceed a minute during
+    # fleet CI. Keep that route intact and bounded, without treating queue
+    # congestion as evidence that this session still owns work. The total
+    # deadline caps the per-call timeout so the run can never outlive it.
+    call_timeout = GH_CALL_TIMEOUT_SECONDS
+    if remaining is not None:
+        call_timeout = min(call_timeout, max(remaining, 0.1))
     try:
         command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"], *args]
         if len(args) >= 1 and args[0] == "api":
             command = [os.environ["AI_SHARED_DB_CLOSEOUT_BASH"], os.environ["AI_SHARED_DB_CLOSEOUT_GH_SCRIPT"],
                        "api", "--hostname", "github.com", *args[1:]]
-        # Admission through the shared ai-gh queue can exceed a minute during
-        # fleet CI. Keep that route intact and bounded, without treating queue
-        # congestion as evidence that this session still owns work.
-        result = subprocess.run(command, capture_output=True, check=False, timeout=600,
+        progress(f"ai-gh call {serial} ({label}) waiting for admission")
+        started = time.monotonic()
+        result = subprocess.run(command, capture_output=True, check=False, timeout=call_timeout,
                                 env={**os.environ, "AI_GH_CALLER": "ai-shared-db-closeout-check"})
+        waited = time.monotonic() - started
+        progress(f"ai-gh call {serial} ({label}) finished in {waited:.1f}s (includes admission wait)")
         try:
             result.stdout = result.stdout.decode("utf-8", errors="strict")
             result.stderr = result.stderr.decode("utf-8", errors="strict")
@@ -100,6 +167,8 @@ def gh_call(args):
             raise CheckError("GitHub response was not valid UTF-8") from exc
         return result
     except subprocess.TimeoutExpired as exc:
+        if call_timeout < GH_CALL_TIMEOUT_SECONDS:
+            raise CheckError("deadline exceeded while waiting for ai-gh admission") from exc
         raise CheckError("GitHub request timed out") from exc
     except OSError as exc:
         raise CheckError("could not run GitHub CLI") from exc
@@ -110,6 +179,7 @@ def json_output(value):
 
 
 def resolve_session(explicit):
+    has_explicit = explicit is not None and explicit.strip()
     candidates = [normalize_session(value) for value in (
         explicit,
         os.environ.get("CODEX_THREAD_ID"),
@@ -118,6 +188,14 @@ def resolve_session(explicit):
     ) if value is not None and value.strip()]
     if not candidates:
         raise CheckError("session identity is missing")
+    if has_explicit and candidates[0] is not None:
+        # A --session-id that validates is authoritative. An env identity in an
+        # unrecognized format (e.g. a harness "sess_"-prefixed id) must not veto
+        # it; env ids that do normalize must still agree (#2431).
+        for candidate in candidates[1:]:
+            if candidate is not None and candidate != candidates[0]:
+                raise CheckError("session identity sources disagree")
+        return candidates[0]
     if any(value is None for value in candidates):
         raise CheckError("session identity must be an exact Codex/Claude UUID or MiMo ses_ id")
     if len(set(candidates)) != 1:
@@ -295,14 +373,17 @@ def read_stage(stage, kinds):
 
 
 def main():
+    global DEADLINE_SECONDS
     parser = argparse.ArgumentParser(description="Fail if this session still owns shared-db work.")
     parser.add_argument("--session-id", help="Exact current Codex/Claude session UUID or MiMo ses_ session id.")
     args = parser.parse_args()
     try:
         session = resolve_session(args.session_id)
+        DEADLINE_SECONDS = read_deadline_seconds()
     except CheckError as exc:
         json_output({"ok": False, "error": str(exc), "blocking_claims": [], "blocking_stages": []})
         return 2
+    progress(f"session {session} resolved; deadline {int(DEADLINE_SECONDS)}s total wall clock")
 
     try:
         auth = gh_call(["auth", "status", "--hostname", "github.com"])
