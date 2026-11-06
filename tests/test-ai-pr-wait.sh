@@ -789,7 +789,7 @@ printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid"
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
-OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=6 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qstall-clock" AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 5 --interval 1 2>&1)"; RC=$?
+OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qstall-clock" AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 5 --interval 1 2>&1)"; RC=$?
 printf 'qstall fixture diagnostics: rc=%s warn=%s norunner=%s merged=%s\n' "$RC" \
   "$(printf '%s' "$OUT" | grep -c 'queued too long')" \
   "$(printf '%s' "$OUT" | grep -c 'no runner')" \
@@ -815,7 +815,7 @@ chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
 n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
-n=$((n + 10)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
+n=$((n + 5)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
 printf '%s\n' "$n"
 EOF
 chmod +x "$TMP/bin/date"
