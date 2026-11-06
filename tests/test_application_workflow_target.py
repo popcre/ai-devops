@@ -650,5 +650,96 @@ class DiagnosticMetadataCloseout(unittest.TestCase):
             self.assertEqual(self.validate(value), 1)
 
 
+
+class PrivateImmutableRuntimeContinuation(unittest.TestCase):
+    validate = ClosedRecoveryTarget.validate
+    ORIGIN = "https://popcre-albert-hts-r9-01a1ab99-synthetic-ue.a.run.app"
+
+    def setUp(self):
+        seed = FrozenOperationalContinuationTarget("test_exact_real_cohort_profile_admitted_without_synthetic_relabeling")
+        seed.setUp(); self.addCleanup(seed.doCleanups)
+        self.root, self.path = seed.root, seed.path
+        self.declaration = copy.deepcopy(seed.declaration)
+        value = self.declaration
+        value.update(schema_version=10, scope="hts-frozen-r9-private-immutable-runtime-continuation",
+                     tool_source=value["source_head"], service=TARGET.PRIVATE_RUNTIME_SERVICE,
+                     api_origin=self.ORIGIN,
+                     served_revision=TARGET.PRIVATE_RUNTIME_SERVICE + "-00001-synthetic",
+                     served_digest="sha256:" + "8" * 64,
+                     auth_routes=[{"method": "POST", "path": "/findUserLoginInfo"}],
+                     auth_limits={"max_application_refreshes": 8})
+        value["operational_continuation"].update(original_schema_version=8, purpose="private-immutable-runtime-isolation")
+        value["private_runtime"] = {"proof_sha256": "9" * 64, "semantic_proof_sha256": "a" * 64,
+            "server_source": value["served_source"], "server_digest": value["served_digest"],
+            "project_id": "lithe-breaker-323913", "region": "us-east4",
+            "service_name": TARGET.PRIVATE_RUNTIME_SERVICE, "origin": self.ORIGIN,
+            "queue_name": "hts-r9-01a1ab99", "lane": "r9-01a1ab99",
+            "actor_sha256": "b" * 64, "process_role": "isolated-hts"}
+        bound = patch.object(TARGET, "PRIVATE_RUNTIME_ORIGIN", self.ORIGIN)
+        bound.start(); self.addCleanup(bound.stop)
+
+    def test_synthetic_bound_shape_admits_only_after_origin_is_bound(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+        with patch.object(TARGET, "PRIVATE_RUNTIME_ORIGIN", None):
+            self.assertEqual(self.validate(self.declaration), 1)
+
+    def test_no_fifth_epoch_or_expiry_renewal(self):
+        for field, bad in [("original_schema_version", 10), ("original_schema_version", 9),
+                           ("original_schema_version", 8.0), ("purpose", "any-routing-change"),
+                           ("original_expires_at", BoundedAcceptanceTarget.expiry(hours=2))]:
+            value = copy.deepcopy(self.declaration); value["operational_continuation"][field] = bad
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.declaration); value["expires_at"] = BoundedAcceptanceTarget.expiry(hours=2)
+        self.assertEqual(self.validate(value), 1)
+
+    def test_all_twelve_parent_fields_required_and_new_runner(self):
+        for field in TARGET.CONTINUATION_FIELDS:
+            value = copy.deepcopy(self.declaration); del value["operational_continuation"][field]
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.declaration)
+        value["bindings"]["runner_sha256"] = value["operational_continuation"]["original_runner_sha256"]
+        self.assertEqual(self.validate(value), 1)
+
+    def test_exact_resource_scope_and_actual_source_digest_congruence(self):
+        for field, bad in [("project_id", "other-project"), ("region", "us-central1"),
+                           ("service_name", "public-service"), ("origin", "https://other.run.app"),
+                           ("queue_name", "default"), ("lane", "public"), ("process_role", "api"),
+                           ("server_source", "f" * 40), ("server_digest", "sha256:" + "f" * 64),
+                           ("proof_sha256", "unverified"), ("semantic_proof_sha256", None),
+                           ("actor_sha256", "wrong-actor")]:
+            value = copy.deepcopy(self.declaration); value["private_runtime"][field] = bad
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.declaration); value["private_runtime"]["extra"] = True
+        self.assertEqual(self.validate(value), 1)
+
+    def test_origin_service_and_tool_pins_cannot_drift(self):
+        for field, bad in [("tool_source", "f" * 40), ("service", "public-service"),
+                           ("api_origin", self.ORIGIN + "/api/core"),
+                           ("served_revision", "popcre-albert-core-sandbox-00001-test"),
+                           ("served_digest", "latest"), ("source_head", "f" * 40)]:
+            self.assertEqual(self.validate({**self.declaration, field: bad}), 1)
+
+    def test_auth_refresh_is_zero_model_fixed_route_and_bounded(self):
+        for routes in [[{"method": "GET", "path": "/findUserLoginInfo"}],
+                       [{"method": "POST", "path": "/chat"}], [],
+                       [{"method": "POST", "path": "/findUserLoginInfo", "origin": "other"}]]:
+            self.assertEqual(self.validate({**self.declaration, "auth_routes": routes}), 1)
+        for bad in [9, True, 8.0, 0]:
+            self.assertEqual(self.validate({**self.declaration, "auth_limits": {"max_application_refreshes": bad}}), 1)
+
+    def test_original_provider_budget_membership_and_routes_unchanged(self):
+        for field, bad in [("owner_answers", 1), ("maximum_initial_inquiries", 84),
+                           ("maximum_authorized_exposure_usd", 50), ("ambiguous_post_retry", True)]:
+            value = copy.deepcopy(self.declaration); value["limits"][field] = bad
+            self.assertEqual(self.validate(value), 1)
+        for field, bad in [("model", "other"), ("rulings_only", False), ("billable_tools", True)]:
+            value = copy.deepcopy(self.declaration); value["provider"][field] = bad
+            self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.declaration); value["routes"] += ["POST /api/hts-rag/jobs/:id/retry"]
+        self.assertEqual(self.validate(value), 1)
+        value = copy.deepcopy(self.declaration); value["frozen"]["maximum_items"] = 84
+        self.assertEqual(self.validate(value), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

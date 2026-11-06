@@ -398,6 +398,84 @@ def frozen_prepack_identity_continuation(value, root):
 
 
 
+
+# Unbound until the separately governed private resource exists and its actual
+# immutable metadata has been independently read back. No schema-10 admission
+# is possible with this placeholder. Tests may patch only this constant.
+PRIVATE_RUNTIME_ORIGIN = None
+PRIVATE_RUNTIME_SERVICE = "popcre-albert-hts-r9-01a1ab99"
+PRIVATE_RUNTIME_FIELDS = {
+    "proof_sha256", "semantic_proof_sha256", "server_source", "server_digest",
+    "project_id", "region", "service_name", "origin", "queue_name", "lane",
+    "actor_sha256", "process_role",
+}
+
+
+def frozen_private_runtime_continuation(value, root):
+    """Exactly one v8-parent routing epoch; no labels, reset or renewal."""
+    if (not isinstance(value, dict) or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 10
+            or value.get("scope") != "hts-frozen-r9-private-immutable-runtime-continuation"
+            or not isinstance(PRIVATE_RUNTIME_ORIGIN, str)):
+        return False
+    continuation, bindings, runtime = (value.get(key) for key in (
+        "operational_continuation", "bindings", "private_runtime"))
+    if (not isinstance(continuation, dict) or continuation.keys() != CONTINUATION_FIELDS
+            or type(continuation["original_schema_version"]) is not int
+            or continuation["original_schema_version"] != 8
+            or continuation["purpose"] != "private-immutable-runtime-isolation"
+            or continuation["original_expires_at"] != value.get("expires_at")
+            or not isinstance(bindings, dict) or not isinstance(runtime, dict)
+            or runtime.keys() != PRIVATE_RUNTIME_FIELDS):
+        return False
+    for field in ("receipt_sha256", "original_ledger_sha256", "original_admission_sha256",
+                  "original_manifest_sha256", "original_readiness_sha256", "original_runner_sha256"):
+        if not isinstance(continuation[field], str) or not re.fullmatch(r"[a-f0-9]{64}", continuation[field]):
+            return False
+    for field, pattern in (
+            ("original_served_source", r"[a-f0-9]{40}"),
+            ("original_served_revision", r"popcre-albert-core-sandbox-[a-z0-9-]+"),
+            ("original_served_digest", r"sha256:[a-f0-9]{64}")):
+        if not isinstance(continuation[field], str) or not re.fullmatch(pattern, continuation[field]):
+            return False
+    if (continuation["original_runner_sha256"] == bindings.get("runner_sha256")
+            or continuation["original_served_source"] == value.get("served_source")
+            or value.get("tool_source") != value.get("source_head")):
+        return False
+    expected_runtime = {
+        "project_id": "lithe-breaker-323913", "region": "us-east4",
+        "service_name": PRIVATE_RUNTIME_SERVICE, "origin": PRIVATE_RUNTIME_ORIGIN,
+        "queue_name": "hts-r9-01a1ab99", "lane": "r9-01a1ab99", "process_role": "isolated-hts",
+    }
+    if not all(exact(runtime[key], item) for key, item in expected_runtime.items()):
+        return False
+    for field in ("proof_sha256", "semantic_proof_sha256", "actor_sha256"):
+        if not isinstance(runtime[field], str) or not re.fullmatch(r"[a-f0-9]{64}", runtime[field]):
+            return False
+    if (not isinstance(value.get("served_source"), str)
+            or not re.fullmatch(r"[a-f0-9]{40}", value["served_source"])
+            or runtime["server_source"] != value["served_source"]
+            or not isinstance(value.get("served_digest"), str)
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", value["served_digest"])
+            or runtime["server_digest"] != value["served_digest"]
+            or not isinstance(value.get("served_revision"), str)
+            or not re.fullmatch(re.escape(PRIVATE_RUNTIME_SERVICE) + r"-[a-z0-9-]+", value["served_revision"])
+            or value.get("service") != PRIVATE_RUNTIME_SERVICE
+            or value.get("api_origin") != PRIVATE_RUNTIME_ORIGIN
+            or not exact(value.get("auth_routes"), [{"method": "POST", "path": "/findUserLoginInfo"}])
+            or not exact(value.get("auth_limits"), {"max_application_refreshes": 8})):
+        return False
+    # Validate unchanged original membership/provider/risk/expiry constraints
+    # using the existing pure predicate. This normalized object is never an
+    # execution manifest or a claim about the actual private deployment.
+    extra = {"operational_continuation", "private_runtime", "tool_source", "served_digest", "auth_routes", "auth_limits"}
+    profile = {key: item for key, item in value.items() if key not in extra}
+    profile.update(schema_version=5, scope="hts-frozen-r9-diagnostic-evaluation",
+                   service=TARGET["service"], api_origin=TARGET["api_origin"],
+                   served_revision="popcre-albert-core-sandbox-private-validation-only")
+    return frozen_evaluation(profile, root)
+
+
 DIAGNOSTIC_TAG_SCENARIOS = {
     "inspect": {"maximum_target_count": 83, "maximum_metadata_reads": 1,
                 "maximum_state_changes": 0, "state_sequence": []},
@@ -539,7 +617,8 @@ def main():
                      or frozen_operational_continuation(value, root)
                      or frozen_json_literal_continuation(value, root)
                      or frozen_prepack_identity_continuation(value, root)
-                     or diagnostic_metadata_closeout(value, root)) else 1
+                     or diagnostic_metadata_closeout(value, root)
+                     or frozen_private_runtime_continuation(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 

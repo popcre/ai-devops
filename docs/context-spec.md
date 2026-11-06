@@ -306,3 +306,10 @@ are read-only inspection, one-way evaluation marking, and a single-synthetic
 mark/reverse/mark proof. It has zero provider authority and does not extend
 any frozen-evaluation epoch, budget or expiry. See
 [the HTS gate contract](hts-sandbox-workflow-gate.md#post-run-diagnostic-metadata-schema-9).
+
+The prepared HTS schema-10 profile is a distinct routing-only fourth epoch,
+not diagnostic tagging. It preserves the original v8 lineage and lifetime,
+uses one fixed isolated service/queue/lane, and separates tool provenance from
+the current-security server image and semantic proof. Its private origin stays
+unbound, with admission refused, until actual governed resource metadata is
+proved. Original profile predicates are unchanged.
