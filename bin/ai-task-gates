@@ -462,6 +462,12 @@ classify_paths(){
 # Transcripts/ and CHAT_ARCHIVES/ cannot evade the rule on the
 # case-insensitive filesystems these archives actually live on.
 raw_archive_path(){
+  # One hash-pinned public CBP mapping is not a transcript. No other archive
+  # receives a path/prefix exemption; malformed or changed bytes fail closed.
+  if [ "$1" = 'data/hts-current-codes.jsonl.gz' ] \
+     && python3 "$ROOT/tools/public_cbp_mapping.py" "$PWD" "$1" >/dev/null 2>&1; then
+    return 1
+  fi
   case "${1,,}" in
     *.jsonl|*.jsonl.gz|transcripts/*|*/transcripts/*|chat_archives/*|*/chat_archives/*) return 0 ;;
   esac

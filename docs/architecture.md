@@ -204,3 +204,24 @@ the exact provider, repository, commit, source digest, run/session, and caller.
 - Reviews must never mutate the repo.
 - Host paths are fixed: `/worksp/ai-devops`, `/etc/ai-devops`,
   `/var/log/ai-devops`, `/usr/local/bin`. Never `/opt/ai-devops`.
+
+## Exact public CBP mapping archive classification (#2395)
+
+The raw transcript archive guard remains mandatory. One existing generated public
+CBP current-code mapping in `popcre/designflow-backend`, at exactly
+`data/hts-current-codes.jsonl.gz`, is classified as public reference data only
+when `tools/public_cbp_mapping.py` proves the canonical origin, committed blob,
+unchanged reviewed generator blobs and exact working compressed SHA256 before
+bounded decompression. The strict nine-field mapping schema allows only the
+paired historical `reason`/`confidence` extension. No other repository, path,
+archive, new fingerprint, malformed row or additional field is admitted.
+
+Owner: the existing #2395 application-admission repair. Necessity: preserve both
+public reference-data delivery and rejection of raw chat archives. Provenance:
+public CBP ruling numbers/tariffs/dates/text and public schedule/concordance,
+through the pinned existing generator; no customer filings or chat input.
+Fingerprint refresh requires a new explicit source/schema review and tests;
+there is no automatic refresh or wildcard registry. Consolidation: this helper
+is the single narrow classifier used by the existing shared archive predicate,
+not a second admission route. Ubuntu and Windows installed proof are separate
+from offline source tests.
