@@ -212,7 +212,10 @@ CBP current-code mapping in `popcre/designflow-backend`, at exactly
 `data/hts-current-codes.jsonl.gz`, is classified as public reference data only
 when `tools/public_cbp_mapping.py` proves the canonical origin, committed blob,
 unchanged reviewed generator blobs and exact working compressed SHA256 before
-bounded decompression. The strict nine-field mapping schema allows only the
+bounded decompression. Working generator bytes are bounded to one MiB and hashed
+directly with the Git blob header in Python, normalizing only CRLF to LF; Git
+clean filters are never invoked. The helper and its tests are explicit reviewer
+CI dependencies. The strict nine-field mapping schema allows only the
 paired historical `reason`/`confidence` extension. No other repository, path,
 archive, new fingerprint, malformed row or additional field is admitted.
 

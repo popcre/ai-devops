@@ -20,6 +20,20 @@ GENERATORS = {
 REQUIRED = {'ruling_number', 'held_code', 'state', 'current_code', 'candidate_codes',
             'method', 'mapping_path', 'hts_revision', 'decided_by'}
 OPTIONAL = {'reason', 'confidence'}
+MAX_GENERATOR_BYTES = 1048576
+
+
+def working_blob(file):
+    """Hash bounded source bytes without executing Git clean filters."""
+    if file.is_symlink() or not file.is_file() or file.stat().st_size > MAX_GENERATOR_BYTES:
+        return None
+    with file.open('rb') as source:
+        raw = source.read(MAX_GENERATOR_BYTES + 1)
+    if len(raw) > MAX_GENERATOR_BYTES:
+        return None
+    # Windows checkouts may use CRLF. No other content normalization is allowed.
+    raw = raw.replace(b'\r\n', b'\n')
+    return hashlib.sha1(b'blob ' + str(len(raw)).encode('ascii') + b'\0' + raw).hexdigest()
 
 
 def record(value):
@@ -81,7 +95,7 @@ def prove(root, path):
     if git('rev-parse', f'HEAD:{PATH}') != 'd8b8376939a98137dbe629c45b63b78cfc10669b':
         return False
     for name, blob in GENERATORS.items():
-        if (root / name).is_symlink() or git('rev-parse', f'HEAD:{name}') != blob or git('hash-object', '--', name) != blob:
+        if (root / name).is_symlink() or git('rev-parse', f'HEAD:{name}') != blob or working_blob(root / name) != blob:
             return False
     with file.open('rb') as source:
         raw = source.read(SIZE + 1)

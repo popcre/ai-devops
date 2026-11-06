@@ -108,7 +108,7 @@ for file in "${!seen[@]}"; do
   tg_reviewer_ci_path "$file" || fail "reviewer suite dependency is not a reviewer CI path: $file"
 done
 for file in tools/generated_definition_action.py tests/test_generated_definition_action.py config/review-action-profiles.json \
-  bin/ai-gh tools/application_source_release.py tools/github-requests/telemetry.sh \
+  bin/ai-gh tools/application_source_release.py tools/public_cbp_mapping.py tests/test_public_cbp_mapping.py tools/github-requests/telemetry.sh \
   tools/github-requests/pr-status-context tools/github-requests/pr_status_singleflight.py \
   templates/delegation/debate-turn.md \
   bin/ai-review-preflight bin/ai-review-lifecycle bin/ai-task-gates bin/ai-task-gates.cmd \
