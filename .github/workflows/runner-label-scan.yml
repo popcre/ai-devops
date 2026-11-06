@@ -1,0 +1,33 @@
+name: runner-label-scan
+
+# Step 3.1 (plan_ci-process-repair.md, #2367): flag every runs-on label across
+# all popcre and u2giants workflows that matches no known hosted image, no
+# routing-config label, and no registered runner. This is the check that
+# would have caught the Blacksmith removal leaving dead labels behind: jobs
+# queued on a label with no runner look like waiting, not broken.
+#
+# ADVISORY: nothing requires this check. Findings fail THIS job so the
+# scheduled-failure reporter (step 1.4) opens the owned ci-red issue; a clean
+# scan exits 0. Never add this to a required list.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Tuesday 09:17 UTC, off the crowded boundaries.
+    - cron: '17 9 * * 2'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan every popcre and u2giants workflow for dead runner labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node tools/ci/check-runner-labels.mjs | tee "$GITHUB_STEP_SUMMARY"
