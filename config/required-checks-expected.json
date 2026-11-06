@@ -1,0 +1,18 @@
+{
+  "_comment": "Step 3.5 (plan_ci-process-repair.md, #2367): the ONLY required-check lists the 2026-10-30 ruling allows. A scheduled compare reads each repo's live ruleset; any difference is reported through the ci-red route and a session restores exactly this list -- never anything longer. The 2026-10-30 silent-reversal incident (shared-db's list reverted and reapplied by hand) is the case this pins.",
+  "schema_version": 1,
+  "repos": {
+    "popcre/ai-devops": {
+      "ruleset_name": "main: pull request + merge queue",
+      "required_contexts": ["verification-closure"]
+    },
+    "popcre/shared-db": {
+      "ruleset_name": "main merge queue",
+      "required_contexts": [
+        "Destructive SQL outside migrations",
+        "SQL migration guards",
+        "supabase/tests against an ephemeral database"
+      ]
+    }
+  }
+}
