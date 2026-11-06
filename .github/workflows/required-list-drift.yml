@@ -1,0 +1,34 @@
+name: required-list-drift
+
+# Step 3.5 (plan_ci-process-repair.md, #2367): compare each repo's live
+# required-check list with the one list the 2026-10-30 ruling allows, daily.
+# The 2026-10-30 incident: a session silently reverted shared-db's required
+# list and it had to be reapplied by hand. This check makes a reversal a
+# named alarm within a day: findings fail this advisory job, and the
+# scheduled-failure reporter (step 1.4) opens the owned ci-red issue. A local
+# session or the watchdog duty pool restores exactly the expected list with
+# `node tools/ci/check-required-lists.mjs --apply`.
+#
+# Never a required check. Compare-only here: the job token cannot write
+# rulesets, and restore is deliberately a human/agent action on the alarm.
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily at 11:11 UTC, off the crowded boundaries.
+    - cron: '11 11 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare live required lists with the ruling's lists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node tools/ci/check-required-lists.mjs | tee "$GITHUB_STEP_SUMMARY"
