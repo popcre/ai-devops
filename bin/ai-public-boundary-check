@@ -4,6 +4,16 @@ set -uo pipefail
 # Usage: ai-public-boundary-check [root] [-- path...]
 # With "-- path...", only those tracked paths are checked (a PR's changed
 # files); without it, every tracked file is (u2giants/theoracle#345).
+#
+# A repository may declare intentional evidence publishes in an optional
+# tools/public-boundary-path-allowlist.txt at its root (popcre/shared-db#5826):
+# one entry per line ("#" comments and blanks ignored), matched against the
+# lowercased tracked path. An entry ending in "/" is a directory prefix;
+# any other entry is an exact path. A matching path skips ONLY the path
+# classification rules (generated AI artifact, transcript, operational memory)
+# -- exactly the .ai/reviewer-issues/ carve-out below, but repository-chosen.
+# Secret-bearing file names and types and every content-level check
+# (credentials, topology, project IDs) still apply to every tracked file.
 root="${1:-.}"
 [ "$#" -gt 0 ] && shift
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDARY FAIL: not a git repo' >&2; exit 1; }
@@ -17,12 +27,46 @@ if [ "${1:-}" = '--' ]; then
   fi
 fi
 failed=0
+# Repository-declared intentional evidence publishes (see header comment).
+path_exemptions=()
+path_allowlist="$root/tools/public-boundary-path-allowlist.txt"
+if [ -f "$path_allowlist" ]; then
+  while IFS= read -r entry || [ -n "$entry" ]; do
+    entry="${entry%$'\r'}"
+    case "$entry" in ''|'#'*) continue ;; esac
+    path_exemptions+=("$entry")
+  done < "$path_allowlist"
+fi
+path_is_exempt() {
+  local lowered="$1" entry
+  for entry in ${path_exemptions[@]+"${path_exemptions[@]}"}; do
+    case "$entry" in
+      */) case "$lowered" in "${entry}"*) return 0 ;; esac ;;
+      *)  [ "$lowered" = "$entry" ] && return 0 ;;
+    esac
+  done
+  return 1
+}
 while IFS= read -r -d '' path; do
   lowered="${path,,}"
   # .ai/reviewer-issues/ is an intentional publish (PR #1626). Content-level
   # checks (credentials, topology, project IDs) below still apply to every
   # tracked file; the path rule only rejects non-publish .ai/ artifacts and
   # secret-bearing filenames (case-insensitive) under the publish path.
+  # path_is_exempt extends that same carve-out to repository-declared paths.
+  if ! path_is_exempt "$lowered"; then
+  case "$lowered" in
+    .ai/reviewer-issues/*) ;; # publish path: classified by the case below
+    .ai/*)
+      echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2
+      echo '  Intentional evidence publishes may be declared in tools/public-boundary-path-allowlist.txt.' >&2
+      failed=1 ;;
+    claude_chats/*|codex_chats/*|transcripts/claude_chats/*|transcripts/codex_chats/*)
+      echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
+    memory/*.md|memory/*/*.md)
+      [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
+  esac
+  fi
   case "$lowered" in
     .ai/reviewer-issues/*)
       case "$lowered" in
@@ -33,12 +77,6 @@ while IFS= read -r -d '' path; do
         *.json|*.txt|*.md|*.log|*.csv|*.err|*.out) ;;
         *) echo "BOUNDARY FAIL: non-prose file tracked at $path" >&2; failed=1 ;;
       esac ;;
-    .ai/*)
-      echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
-    claude_chats/*|codex_chats/*|transcripts/claude_chats/*|transcripts/codex_chats/*)
-      echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
-    memory/*.md|memory/*/*.md)
-      [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
   esac
   # Always forbid secret-bearing file types, including under reviewer-issues.
   # Match basenames like .gitignore: .env, *.env, .env.*, *.pem, *.key —
@@ -109,21 +147,40 @@ fi
 #
 # The allowlist is applied per matched WORD, not per line, so an allowlisted
 # word sharing a line with a real identifier still fails.
+#
+# The word extraction and allowlist lookup run in ONE awk pass, not a
+# grep-per-line loop: per-line process substitution cost ~0.2s per hit line on
+# Windows (popcre/shared-db#5826 saw 1,584 hit lines run 19+ minutes and blow
+# ai-doc-safety's hard timeout). awk is POSIX-only here (no interval regex) so
+# mawk on Ubuntu runs it unchanged. Semantics are byte-identical: strip the
+# file:line: prefix, cut every maximal lowercase run into non-overlapping
+# 20-letter chunks (grep -oE '[a-z]{20}' behavior), and fail the line on the
+# first chunk the allowlist does not carry as an exact whole line.
 allowlist="$root/tools/public-boundary-allowlist.txt"
-project_matches=''
-while IFS= read -r hit; do
-  [ -n "$hit" ] || continue
-  line_text="${hit#*:*:}"
-  unexplained=0
-  while IFS= read -r word; do
-    [ -n "$word" ] || continue
-    if [ -f "$allowlist" ] && grep -qxF "$word" "$allowlist" 2>/dev/null; then continue; fi
-    unexplained=1; break
-  done < <(printf '%s
-' "$line_text" | grep -oE '[a-z]{20}' | grep -vE '[a-z]{21}')
-  [ "$unexplained" -eq 1 ] && project_matches="$project_matches$hit
-"
-done < <(git -C "$root" grep -anE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ${scope[@]+"${scope[@]}"} ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' ':!tools/public-boundary-allowlist.txt' 2>/dev/null || true)
+project_matches="$(git -C "$root" grep -anE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ${scope[@]+"${scope[@]}"} ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-ai-doc-safety.sh' ':!tests/test-ai-pr-wait.sh' ':!tools/public-boundary-allowlist.txt' 2>/dev/null | awk -v allow="$allowlist" '
+  BEGIN {
+    if (allow != "") {
+      while ((getline aline < allow) > 0) {
+        sub(/\r$/, "", aline)
+        if (aline != "" && aline !~ /^#/) allowed[aline] = 1
+      }
+      close(allow)
+    }
+  }
+  {
+    hit = $0
+    text = $0
+    sub(/^[^:]*:[^:]*:/, "", text)
+    n = split(text, runs, /[^a-z]+/)
+    for (i = 1; i <= n; i++) {
+      len = length(runs[i])
+      for (off = 1; off + 19 <= len; off += 20) {
+        word = substr(runs[i], off, 20)
+        if (!(word in allowed)) { print hit; next }
+      }
+    }
+  }
+' || true)"
 if [ -n "$project_matches" ]; then
   # Name the file and line. The old message named neither, which cost one
   # session twenty minutes of bisecting a documentation-only change.
