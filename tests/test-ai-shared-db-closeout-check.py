@@ -69,12 +69,13 @@ class CloseoutCheck(unittest.TestCase):
         namespace = {"__name__": "closeout_test"}
         exec(compile(source, str(CHECKER), "exec"), namespace)
         output = io.StringIO()
+        noise = io.StringIO()
         with patch.dict(os.environ, {"CODEX_THREAD_ID": SESSION,
                                     "AI_SHARED_DB_CLOSEOUT_BASH": "bash",
                                     "AI_SHARED_DB_CLOSEOUT_GH_SCRIPT": "ai-gh"}, clear=True), \
                 patch.object(sys, "argv", [str(CHECKER)]), \
                 patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ai-gh", 600)), \
-                contextlib.redirect_stdout(output):
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(noise):
             status = namespace["main"]()
         self.assertEqual(status, 2)
         summary = json.loads(output.getvalue())
@@ -96,13 +97,15 @@ class CloseoutCheck(unittest.TestCase):
         self.assertIsNotNone(self.bash, "Bash is required to run the checker")
         gh_impl = self.root / "fake-ai-gh.py"
         gh_impl.write_text(r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 args = sys.argv[1:]
 with open(os.environ["FAKE_GH_CALLS"], "a", encoding="utf-8") as f:
     f.write(json.dumps(args) + "\n")
 if args[:2] == ["auth", "status"]:
     sys.exit(0)
 data = json.load(open(os.environ["FAKE_GH_DATA"], encoding="utf-8"))
+if data.get("sleep_seconds"):
+    time.sleep(float(data["sleep_seconds"]))
 if args[:1] != ["api"]:
     print("unexpected command", file=sys.stderr); sys.exit(2)
 path = args[-1]
@@ -202,6 +205,69 @@ exit 127
         self.assertEqual(result.returncode, 2)
         self.assertIn("sources disagree", self.summary(result)["error"])
         self.assertEqual(self.calls_made(), [])
+
+    def test_unparseable_env_identity_does_not_veto_valid_explicit_id(self):
+        # #2431: a ZCode harness "sess_"-prefixed CLAUDE_CODE_SESSION_ID is
+        # neither a bare UUID nor a MiMo ses_ token. It must not fail the run
+        # when the explicit --session-id is a valid MiMo id.
+        env = self.env.copy()
+        env.pop("CODEX_THREAD_ID")
+        env["CLAUDE_CODE_SESSION_ID"] = f"sess_{SESSION}"
+        result = self.run_check("--session-id", MIMO_SESSION, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = self.summary(result)
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["session_id"], MIMO_SESSION)
+
+    def test_normalizing_env_identity_disagreeing_with_explicit_id_still_fails(self):
+        # The env-veto fix must not weaken disagreement: CODEX_THREAD_ID
+        # normalizes fine and names a different session than the explicit id.
+        env = self.env.copy()
+        env["CLAUDE_CODE_SESSION_ID"] = f"sess_{SESSION}"
+        result = self.run_check("--session-id", MIMO_SESSION, env=env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("sources disagree", self.summary(result)["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_unparseable_explicit_id_still_fails_despite_valid_env_identity(self):
+        # A malformed explicit id is never silently replaced by the environment.
+        result = self.run_check("--session-id", "sess_short")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("session identity must be", self.summary(result)["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_deadline_exceeded_emits_structured_failure(self):
+        # The total wall-clock bound must turn a stalled ai-gh queue wait into
+        # the standard failure JSON with exit 2 instead of silent waiting.
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {},
+                         "sleep_seconds": 10})
+        env = self.env.copy()
+        env["AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"] = "2"
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 2)
+        summary = self.summary(result)
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["error"], "deadline exceeded while waiting for gh admission")
+
+    def test_invalid_deadline_fails_closed_before_any_github_call(self):
+        env = self.env.copy()
+        env["AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"] = "soon"
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("deadline must be a positive number of seconds", self.summary(result)["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_progress_goes_to_stderr_and_stdout_stays_one_json_line(self):
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        summary = json.loads(result.stdout)
+        self.assertTrue(summary["ok"])
+        self.assertTrue(result.stderr.splitlines()[0].startswith(
+            "ai-shared-db-closeout-check: session"), result.stderr)
+        self.assertIn("gh call 1 (auth status) waiting for ai-gh admission", result.stderr)
+        self.assertIn("gh call 1 (auth status) finished in", result.stderr)
+        self.assertIn("includes ai-gh admission wait", result.stderr)
 
     def mimo_env(self, session=MIMO_SESSION):
         env = self.env.copy()
