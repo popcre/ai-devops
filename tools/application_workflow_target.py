@@ -539,6 +539,69 @@ def diagnostic_metadata_closeout(value, root):
     return bounded_metadata(value, root, synthetic=False)
 
 
+COMMON_SENSE_DEV_LIMITS = {
+    "synthetic_only": True, "maximum_direct_provider_calls": 7,
+    "maximum_app_inquiries": 1, "maximum_app_provider_calls": 117,
+    "maximum_total_provider_calls": 124, "maximum_attempts_per_job": 3,
+    "maximum_auto_answers": 2, "maximum_provider_calls_per_attempt": 13,
+    "observed_session_stop_usd": 10, "maximum_authorized_exposure_usd": 45.5,
+    "prior_exposure_usd": 4.1417533, "planned_maximum_new_exposure_usd": 35.597424,
+    "planned_cumulative_exposure_usd": 39.7391773, "hard_cost_ceiling": False,
+    "cost_basis": "luna-application-accounted-approved-rates",
+    "compression_billing": "unquantified-not-included", "automatic_post_retry": False,
+    "requester_answers": 0, "manual_retries": 0, "apply_classifications": False,
+    "maximum_duration_seconds": 3600,
+}
+COMMON_SENSE_DEV_BINDINGS = {
+    "executor_sha256", "fixture_sha256", "readiness_sha256", "pricing_sha256",
+    "catalog_sha256", "credit_sha256", "prior_exposure_sha256",
+    "runtime_bounds_sha256", "key_attestation_sha256",
+}
+
+
+def common_sense_development_proof(value, root):
+    """Closed independent development metadata, not execution enforcement."""
+    if not isinstance(value, dict):
+        return False
+    expected = {
+        **TARGET, "schema_version": 11,
+        "issue": "https://github.com/popcre/designflow-backend/issues/278",
+        "scope": "hts-common-sense-development-proof",
+        "executor": "scripts/hts-common-sense-dev-proof.js",
+        "fixture_prefix": "AI-QA-20261106-common-sense-", "actor_id": 77,
+        "case_ids": ["CS01", "CS02", "CS03", "CS04", "CS05", "CS06", "CQ01", "CS07"],
+        "routes": ["POST /api/hts-rag/jobs", "GET /api/hts-rag/jobs/:id"],
+        "direct_routes": ["POST https://openrouter.ai/api/v1/chat/completions"],
+        "provider": {"model": "openai/gpt-6-luna-20260922", "api": "openrouter",
+                     "reasoning_effort": "high", "maximum_output_tokens": 32768,
+                     "maximum_context_tokens": 1050000, "provider_retry": False,
+                     "billable_tools": False},
+        "limits": COMMON_SENSE_DEV_LIMITS,
+        "forbidden": TARGET["forbidden"] + ["provider-retry", "billable-tools",
+            "requester-answer", "manual-retry", "real-item-write", "master-data-write",
+            "new-infrastructure"],
+    }
+    dynamic = {"source_head", "served_source", "served_revision", "served_digest",
+               "expires_at", "bindings"}
+    if value.keys() != expected.keys() | dynamic or not all(
+            exact(value[key], item) for key, item in expected.items()):
+        return False
+    for key, pattern in (("served_source", r"[a-f0-9]{40}"),
+                         ("served_revision", r"popcre-albert-core-sandbox-[a-z0-9-]+"),
+                         ("served_digest", r"sha256:[a-f0-9]{64}")):
+        if not isinstance(value[key], str) or not re.fullmatch(pattern, value[key]):
+            return False
+    if value["source_head"] != value["served_source"]:
+        return False
+    bindings = value["bindings"]
+    if not isinstance(bindings, dict) or bindings.keys() != COMMON_SENSE_DEV_BINDINGS:
+        return False
+    if not all(isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item)
+               for item in bindings.values()):
+        return False
+    return bounded_metadata(value, root, maximum_hours=1)
+
+
 def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
@@ -617,7 +680,8 @@ def main():
                      or frozen_json_literal_continuation(value, root)
                      or frozen_prepack_identity_continuation(value, root)
                      or diagnostic_metadata_closeout(value, root)
-                     or frozen_private_runtime_continuation(value, root)) else 1
+                     or frozen_private_runtime_continuation(value, root)
+                     or common_sense_development_proof(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 

@@ -314,3 +314,10 @@ the current-security server image and semantic proof. Its one fixed private
 origin is the canonical URL read from actual governed resource metadata;
 predicted aliases and arbitrary hosts are refused. Original profile predicates
 are unchanged.
+# Independent HTS development admission
+
+The sandbox workflow validator's schema 11 is a separate fixed synthetic common-sense
+proof: seven Luna assessments plus one ordinary application inquiry, with a fresh
+sixty-minute declaration and exact private evidence bindings. It neither changes nor
+renews the frozen evaluation. Admission metadata is not execution enforcement; see
+[the closed development profile](hts-sandbox-workflow-gate.md#independent-common-sense-development-proof-schema-11).

@@ -651,6 +651,103 @@ class DiagnosticMetadataCloseout(unittest.TestCase):
 
 
 
+class CommonSenseDevelopmentProof(ClosedRecoveryTarget):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
+        head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.declaration = {
+            **copy.deepcopy(TARGET.TARGET), "schema_version": 11,
+            "issue": "https://github.com/popcre/designflow-backend/issues/278",
+            "scope": "hts-common-sense-development-proof",
+            "executor": "scripts/hts-common-sense-dev-proof.js",
+            "fixture_prefix": "AI-QA-20261106-common-sense-", "actor_id": 77,
+            "case_ids": ["CS01", "CS02", "CS03", "CS04", "CS05", "CS06", "CQ01", "CS07"],
+            "routes": ["POST /api/hts-rag/jobs", "GET /api/hts-rag/jobs/:id"],
+            "direct_routes": ["POST https://openrouter.ai/api/v1/chat/completions"],
+            "provider": {"model": "openai/gpt-6-luna-20260922", "api": "openrouter",
+                         "reasoning_effort": "high", "maximum_output_tokens": 32768,
+                         "maximum_context_tokens": 1050000, "provider_retry": False,
+                         "billable_tools": False},
+            "limits": copy.deepcopy(TARGET.COMMON_SENSE_DEV_LIMITS),
+            "forbidden": TARGET.TARGET["forbidden"] + ["provider-retry", "billable-tools",
+                "requester-answer", "manual-retry", "real-item-write", "master-data-write", "new-infrastructure"],
+            "source_head": head, "served_source": head,
+            "served_revision": "popcre-albert-core-sandbox-00001-invented",
+            "served_digest": "sha256:" + "a" * 64,
+            "expires_at": BoundedAcceptanceTarget.expiry(hours=0.5),
+            "bindings": {key: "b" * 64 for key in TARGET.COMMON_SENSE_DEV_BINDINGS},
+        }
+
+    def test_exact_independent_development_profile(self):
+        self.assertEqual(self.validate(self.declaration), 0)
+
+    def test_all_top_level_fields_are_closed_and_required(self):
+        for key in self.declaration:
+            candidate = copy.deepcopy(self.declaration); del candidate[key]
+            with self.subTest(key=key):
+                self.assertEqual(self.validate(candidate), 1)
+        self.assertEqual(self.validate({**self.declaration, "extra": True}), 1)
+
+    def test_every_limit_is_exact_typed_and_cannot_expand(self):
+        for key, original in self.declaration["limits"].items():
+            for bad in [None, True, "unbounded", float("inf"), float("nan")]:
+                if type(bad) is type(original) and bad == original:
+                    continue
+                candidate = copy.deepcopy(self.declaration); candidate["limits"][key] = bad
+                with self.subTest(key=key, bad=bad):
+                    self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration); candidate["limits"]["maximum_total_provider_calls"] = 125
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_every_binding_is_required_sha_and_no_extra_key(self):
+        for key in self.declaration["bindings"]:
+            for bad in [None, "", "a" * 63, True, 1]:
+                candidate = copy.deepcopy(self.declaration); candidate["bindings"][key] = bad
+                self.assertEqual(self.validate(candidate), 1)
+        candidate = copy.deepcopy(self.declaration); candidate["bindings"]["extra"] = "b" * 64
+        self.assertEqual(self.validate(candidate), 1)
+
+    def test_provider_actor_case_and_prefix_cannot_change(self):
+        for key, bad in [("actor_id", 74), ("actor_id", True), ("actor_id", 77.0),
+                         ("fixture_prefix", "AI-QA-20261106-other-"),
+                         ("case_ids", ["CS01"]), ("executor", "scripts/other.js")]:
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+        for key, bad in [("model", "other"), ("api", "other"), ("reasoning_effort", "none"),
+                         ("maximum_output_tokens", 512), ("provider_retry", True), ("billable_tools", True)]:
+            candidate = copy.deepcopy(self.declaration); candidate["provider"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
+
+    def test_no_other_origin_route_auth_answer_retry_apply_or_private_service(self):
+        for key, bad in [("api_origin", "https://wrong.invalid"), ("service", "production"),
+                         ("routes", self.declaration["routes"] + ["POST /api/hts-rag/jobs/:id/answer"]),
+                         ("direct_routes", ["POST https://openrouter.ai/api/v1/other"]),
+                         ("forbidden", []), ("auth_routes", ["POST /findUserLoginInfo"])]:
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+
+    def test_source_digest_revision_and_sixty_minute_expiry(self):
+        for key, bad in [("served_source", "c" * 40), ("source_head", "c" * 40),
+                         ("served_digest", "sha256:short"), ("served_revision", "private-00001"),
+                         ("expires_at", BoundedAcceptanceTarget.expiry(hours=1.1)),
+                         ("expires_at", BoundedAcceptanceTarget.expiry(hours=-1))]:
+            self.assertEqual(self.validate({**self.declaration, key: bad}), 1)
+
+    def test_exact_sixty_minute_boundary_and_unrelated_source(self):
+        now = datetime.datetime(2026, 11, 6, 12, tzinfo=datetime.timezone.utc)
+        class FixedDatetime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+        with patch.object(TARGET.datetime, "datetime", FixedDatetime):
+            for seconds, expected in [(3600, 0), (3601, 1), (0, 1), (-1, 1)]:
+                expiry = (now + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                self.assertEqual(self.validate({**self.declaration, "expires_at": expiry}), expected)
+        self.assertEqual(self.validate({**self.declaration, "source_head": "c" * 40,
+                                        "served_source": "c" * 40}), 1)
+
+
 class PrivateImmutableRuntimeContinuation(unittest.TestCase):
     BOUND_ORIGIN = TARGET.PRIVATE_RUNTIME_ORIGIN
     validate = ClosedRecoveryTarget.validate

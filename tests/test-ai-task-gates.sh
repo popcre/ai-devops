@@ -2215,6 +2215,37 @@ PY_PRIVATE
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused fifth routing epoch'
 check 'private immutable routing refuses fifth epoch' "rc 3 '$WF' check $WF_ARGS"
+# Independent development proof is not a frozen continuation or a broad provider route.
+python3 - "$ROOT" "$WF" <<'PY_DEV'
+import importlib.util,json,pathlib,subprocess,sys
+spec=importlib.util.spec_from_file_location('fixture',sys.argv[1]+'/tests/test_application_workflow_target.py')
+mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+fixture=mod.CommonSenseDevelopmentProof();fixture.setUp()
+value=fixture.declaration
+head=subprocess.check_output(['git','-C',sys.argv[2],'rev-parse','HEAD'],text=True).strip()
+value.update(source_head=head,served_source=head)
+pathlib.Path(sys.argv[2]+'/.ai-devops/application-workflow-target.json').write_text(json.dumps(value))
+fixture.doCleanups()
+PY_DEV
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare synthetic independent common-sense development proof'
+check 'common-sense development exact profile admitted' "rc 0 '$WF' check $WF_ARGS"
+check 'common-sense development cannot admit SQL' "rc 3 '$WF' check --before database"
+cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-dev-original"
+for mutation in actor route limit expiry; do
+python3 - "$WF" "$TMP/wf-dev-original" "$mutation" <<'PY_DEV'
+import datetime,json,pathlib,sys
+value=json.loads(pathlib.Path(sys.argv[2]).read_text()); mutation=sys.argv[3]
+if mutation=='actor': value['actor_id']=74
+elif mutation=='route': value['routes'].append('POST /api/hts-rag/jobs/:id/answer')
+elif mutation=='limit': value['limits']['maximum_total_provider_calls']=125
+else: value['expires_at']=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+pathlib.Path(sys.argv[1]+'/.ai-devops/application-workflow-target.json').write_text(json.dumps(value))
+PY_DEV
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm "declare refused development $mutation"
+check "common-sense development refuses $mutation expansion" "rc 3 '$WF' check $WF_ARGS"
+done
 # Separate zero-provider metadata closeout. This never renews an evaluation epoch.
 for scenario in inspect evaluation-mark synthetic-roundtrip; do
 python3 - "$ROOT" "$WF" "$scenario" <<'PY_METADATA'
