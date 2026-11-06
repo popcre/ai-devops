@@ -815,7 +815,7 @@ chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
 n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
-n=$((n + 5)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
+n=$((n + 3)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
 printf '%s\n' "$n"
 EOF
 chmod +x "$TMP/bin/date"
