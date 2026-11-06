@@ -4,6 +4,10 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +17,41 @@ spec.loader.exec_module(m)
 
 
 class Mapping(unittest.TestCase):
+    def test_working_blob_only_normalizes_crlf_and_bounds_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / 'generator.js'
+            file.write_bytes(b'first\nsecond\n')
+            wanted = hashlib.sha1(b'blob 13\0first\nsecond\n').hexdigest()
+            self.assertEqual(m.working_blob(file), wanted)
+            file.write_bytes(b'first\r\nsecond\r\n')
+            self.assertEqual(m.working_blob(file), wanted)
+            for changed in [b'first\rsecond\n', b'first \nsecond\n', b'first\nsecond', b'\xef\xbb\xbffirst\nsecond\n']:
+                file.write_bytes(changed)
+                self.assertNotEqual(m.working_blob(file), wanted)
+            with patch.object(Path, 'is_symlink', return_value=True):
+                self.assertIsNone(m.working_blob(file))
+            with patch.object(m, 'MAX_GENERATOR_BYTES', 4):
+                self.assertIsNone(m.working_blob(file))
+
+    def test_actual_git_clean_filter_canary_is_never_executed_by_working_hash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); file = root / 'generator.js'; marker = root / 'executed'
+            script = root / 'canary.py'
+            script.write_text('import pathlib,sys\npathlib.Path(__file__).with_name("executed").write_text("executed")\nsys.stdout.buffer.write(sys.stdin.buffer.read())\n')
+            file.write_bytes(b'invented\n')
+            (root / '.gitattributes').write_text('*.js filter=canary\n')
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            command = shlex.quote(sys.executable.replace('\\', '/')) + ' ' + shlex.quote(str(script).replace('\\', '/'))
+            subprocess.run(['git', '-C', str(root), 'config', 'filter.canary.clean', command], check=True)
+            # Positive control proves the real filter fixture would execute on the retired call.
+            subprocess.check_output(['git', '-C', str(root), 'hash-object', '--', 'generator.js'])
+            self.assertTrue(marker.exists())
+            marker.unlink()
+            expected = subprocess.check_output(['git', '-C', str(root), 'hash-object', '--no-filters', '--', 'generator.js']).decode().strip()
+            with patch.object(m.subprocess, 'check_output', side_effect=AssertionError('working hash must not spawn Git')):
+                self.assertEqual(m.working_blob(file), expected)
+            self.assertFalse(marker.exists())
+
     def row(self):
         return dict(ruling_number='N000001', held_code='0000.00.0000', state='mapped',
                     current_code='0000.00.0000', candidate_codes=['0000.00.0000'],

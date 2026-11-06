@@ -115,6 +115,8 @@ bin/ai-oracle-native-alternate-v2
 bin/ai-gh
 tools/github-requests/**
 tools/application_source_release.py
+tools/public_cbp_mapping.py
+tests/test_public_cbp_mapping.py
 
 # Closed public generated-definition native gate (no execution).
 tools/generated_definition_action.py
