@@ -10,9 +10,10 @@
 # the pull request sits `OPEN` and no amount of waiting changes it.
 #
 # So do not hand-roll a wait loop. Use this. It exits on EVERY terminal outcome:
-# merged, closed, a failed check, an ejection from the merge queue, or its own
-# deadline. Silence from this command means the pull request is genuinely still
-# moving.
+# merged, closed, a failed REQUIRED check, an ejection from the merge queue, or
+# its own deadline. A non-required (advisory) check failure is reported and the
+# wait continues (#2094). Silence from this command means the pull request is
+# genuinely still moving.
 #
 # Usage:
 #   ai-pr-wait <pr-number> [--timeout-minutes N] [--fit-tool-call] [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
@@ -31,7 +32,7 @@
 #
 # Exit status:
 #   0  merged
-#   1  stopped and will not merge on its own (closed, check failure, ejected)
+#   1  stopped and will not merge on its own (closed, required-check failure, ejected)
 #   2  deadline reached while still in progress
 #   3  usage or environment error
 set -uo pipefail
@@ -503,7 +504,13 @@ while :; do
 
   STATE="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.state')"
   PR_WAIT_OBSERVED_UTC_MS="$(utc_ms)"
-  LAST_HEAD="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
+  NEW_HEAD="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
+  # A new head has fresh check results: re-report its advisory failures instead
+  # of staying deduped against the previous commit's (#2095 finding 3).
+  if [ -n "$LAST_HEAD" ] && [ "$NEW_HEAD" != "$LAST_HEAD" ]; then
+    LAST_ADVISORY=''
+  fi
+  LAST_HEAD="$NEW_HEAD"
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
   ROLLUP="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE"')"
@@ -558,7 +565,10 @@ while :; do
     fi
   fi
 
-  if [ -n "$ADVISORY" ] && [ "$ADVISORY" != "$LAST_ADVISORY" ]; then
+  # A mixed poll quits in the FAILED block right below, which names the required
+  # failures; printing "still waiting" on the poll where the wait ends would lie
+  # (#2095 finding 2), so the advisory report only runs while the wait continues.
+  if [ -n "$ADVISORY" ] && [ -z "$FAILED" ] && [ "$ADVISORY" != "$LAST_ADVISORY" ]; then
     say "PR #$PR non-required checks failed (advisory; still waiting):"
     while IFS=$'\t' read -r aname aconc; do
       [ -n "$aname" ] && say "  - $aname ($aconc)  required=false"
