@@ -17,7 +17,7 @@ node - <<'JS'
 const assert = require('assert');
 const path = require('path');
 const cfg = require(path.resolve('config/ci-runner-routing.json'));
-const { decide, decideLinux, parseEligible, run } = require(path.resolve('tools/ci/runner-router.cjs'));
+const { decide, decideLinux, parseEligible, run, summarizePool } = require(path.resolve('tools/ci/runner-router.cjs'));
 let failures = 0;
 const lanes = m => m.map(x => x.lane).join(',');
 function check(label, fn) {
@@ -105,6 +105,34 @@ check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
   }
 });
 
+// Dead-host fixture (plan step 3.2): a host the watchdog moved to the paused
+// label is reported but never counted, so every section falls back to hosted.
+const poolHost = (busy, names) => ({ status: 'online', busy, labels: names.map(name => ({ name })) });
+check('dead-host fixture: a paused host is never idle capacity', () => {
+  const p = summarizePool([
+    poolHost(false, ['self-hosted', cfg.qualified_label]),
+    poolHost(false, ['self-hosted', cfg.qualified_label, cfg.paused_label]),
+    poolHost(false, ['self-hosted', cfg.section_label]),
+    poolHost(true, ['self-hosted', cfg.qualified_label, cfg.paused_label]),
+  ], cfg);
+  assert.strictEqual(p.qualified, 1);
+  assert.strictEqual(p.section, 1);
+  assert.strictEqual(p.paused, 2);
+});
+check('dead-host fixture: only paused hosts leaves every section on GitHub-hosted', () => {
+  const p = summarizePool([poolHost(false, ['self-hosted', cfg.qualified_label, cfg.paused_label])], cfg);
+  assert.strictEqual(p.qualified, 0);
+  assert.strictEqual(p.paused, 1);
+  const plan = decide(cfg, { event: 'pull_request', idleQualified: p.qualified, idleSection: p.section });
+  assert.strictEqual(lanes(plan.windows_matrix), allHosted);
+  for (const w of plan.windows_matrix) assert.strictEqual(w.runs_on, cfg.hosted_windows);
+});
+check('dead-host fixture: a paused host still carrying the work label is excluded', () => {
+  const p = summarizePool([poolHost(false, ['self-hosted', cfg.qualified_label, cfg.paused_label])], cfg);
+  assert.strictEqual(p.qualified, 0);
+  assert.strictEqual(p.paused, 1);
+});
+
 const allHostedLinux = Array(cfg.linux_shards).fill('github-hosted').join(',');
 check('Linux: no idle host keeps every section on GitHub-hosted', () => {
   const p = decideLinux(cfg, { idleLinux: 0 });
@@ -189,6 +217,10 @@ const sectionOnly = Array.from({ length: cfg.windows_sections }, (_, k) => (k + 
     ['a host with both labels counts only as qualified',
       { github: fakeGithub(), poolGithub: fakePool([envy(false, ['self-hosted', cfg.qualified_label, cfg.section_label])]) }, 'qualified-self-hosted' + allHosted.slice('github-hosted'.length)],
     ['a failed pool lookup never routes to a section-only host', { github: fakeGithub([], true), poolGithub: fakePool([envy(false, ['self-hosted', cfg.section_label])]) }, allHosted],
+    ['a paused host is never routed and every section falls back to GitHub-hosted',
+      { github: fakeGithub(), poolGithub: fakePool([envy(false, ['self-hosted', cfg.qualified_label, cfg.paused_label])]) }, allHosted],
+    ['a paused host is excluded while a healthy host still serves',
+      { github: fakeGithub(), poolGithub: fakePool([envy(false), envy(false, ['self-hosted', cfg.qualified_label, cfg.paused_label])]) }, 'qualified-self-hosted' + allHosted.slice('github-hosted'.length)],
   ];
   for (const [label, deps, expected] of cases) {
     const core = fakeCore();

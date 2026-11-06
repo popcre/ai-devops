@@ -8,6 +8,9 @@ name: windows-queue-watchdog
 # What it does when dispatched: runs one `ai-windows-queue-watch scan` pass and
 # leaves a single marker comment on any pull request whose Windows sections
 # stayed queued past the threshold. Primary cadence is the 2-minute local tick.
+# Host health (a host that accepted a job that never started, or timed out on
+# two section runs) is the runner-pool watchdog's duty:
+# bin/ai-runner-pool-watch health pauses and restores the host.
 on:
   workflow_dispatch:
   schedule:

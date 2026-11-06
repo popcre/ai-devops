@@ -10,9 +10,23 @@
 # duty pool; free GitHub Actions are backup only. Never Blacksmith.
 #
 # Usage:
-#   ai-runner-pool-watch tick      one duty tick (claim, then check)
+#   ai-runner-pool-watch tick      one duty tick (claim, then health + check)
 #   ai-runner-pool-watch check     check without claiming (log only)
+#   ai-runner-pool-watch health    host-health pass without claiming (log only)
 #   ai-runner-pool-watch schedule|unschedule
+#
+# Host health (plan_ci-process-repair.md step 3.2): a host that accepted a job
+# that never started, or timed out on two windows-offline-section runs within
+# the scan window (the last AI_RUNNER_POOL_WATCH_RUNS verify runs, default 20),
+# is moved to the paused label and reported. Its work label is recorded on the
+# roster as was-<label>; the router never counts a paused host, so sections
+# fall back to GitHub-hosted windows-2025. The host returns after a passing
+# windows-host-canary.yml run on its canary-<name> label (one dispatch per
+# AI_RUNNER_POOL_WATCH_CANARY_COOLDOWN seconds, default 21600).
+# --report-only detects and reports without label writes or canary dispatch,
+# so the free Actions backup can run it with GITHUB_TOKEN (label writes and
+# workflow dispatch need the duty host's own gh auth; the classic repo scope
+# has them, a workflow GITHUB_TOKEN does not).
 #
 # Exit codes: 0 ok/warning; 1 alarm (0 online) or tool failure; 3 not leader.
 #
@@ -21,6 +35,13 @@
 #   AI_RUNNER_POOL_WATCH_CONFIG   settings (default <repo>/config/local-watch.json)
 #   AI_RUNNER_POOL_WATCH_HOST     hostname override (tests)
 #   AI_RUNNER_POOL_WATCH_GH       gh/ai-gh override (tests)
+#   AI_RUNNER_POOL_WATCH_RUNS     health scan window in verify runs (default 20)
+#   AI_RUNNER_POOL_WATCH_CANARY_COOLDOWN  seconds between canary dispatches per
+#                                 host (default 21600)
+#   AI_RUNNER_POOL_WATCH_SETTLE   seconds to wait for a dispatched canary run
+#                                 to appear (default 15)
+#   AI_RUNNER_POOL_WATCH_ROUTING  routing config (default
+#                                 <repo>/config/ci-runner-routing.json)
 #   AI_DEVOPS_SECRETS_ENV         host-local secrets env file (default
 #                                 ~/.config/ai-devops/secrets/watchdog.env)
 #   RUNNER_POOL_READ_TOKEN        Administration: Read-only (never logged)
@@ -86,6 +107,194 @@ cmd_check(){
   return 0
 }
 
+# --- host health (step 3.2) ----------------------------------------------
+HEALTH_RUNS="${AI_RUNNER_POOL_WATCH_RUNS:-20}"
+CANARY_WORKFLOW='windows-host-canary.yml'
+CANARY_COOLDOWN_SEC="${AI_RUNNER_POOL_WATCH_CANARY_COOLDOWN:-21600}"
+ROUTING="${AI_RUNNER_POOL_WATCH_ROUTING:-$TOOL_ROOT/config/ci-runner-routing.json}"
+routing(){ jq -er "$1" "$ROUTING" 2>/dev/null; }
+PAUSED_LABEL="$(routing .paused_label || echo 'ai-devops-windows-paused')"
+CANARY_PREFIX="$(routing .canary_label_prefix || echo 'canary-')"
+WORK_LABELS="$(routing '[.qualified_label, .section_label] | map(select(. != null))' || echo '["ai-devops-windows-qualified","ai-devops-windows-section"]')"
+REPORT_ONLY=0
+
+health_roster(){
+  if [ -n "${RUNNER_POOL_READ_TOKEN:-}" ]; then
+    GH_TOKEN="$RUNNER_POOL_READ_TOKEN" "$GH" api "repos/$REPO/actions/runners" --paginate
+  else
+    "$GH" api "repos/$REPO/actions/runners" --paginate
+  fi
+}
+
+# One TSV line per self-hosted job with a health signal:
+#   runner_name <TAB> never-started|section-timeout <TAB> job name <TAB> run id
+health_signals(){
+  local runs id
+  runs="$("$GH" api "repos/$REPO/actions/workflows/verify.yml/runs?per_page=$HEALTH_RUNS" 2>/dev/null \
+    | jq -r '.workflow_runs[]?.id')" || return 1
+  for id in $runs; do
+    "$GH" api "repos/$REPO/actions/runs/$id/jobs?per_page=100" 2>/dev/null | jq -r --arg id "$id" '
+      .jobs[]?
+      | select(.runner_id != null and .runner_name != null)
+      | if (.started_at == null and ((.conclusion // "") == "timed_out" or (.conclusion // "") == "cancelled" or (.conclusion // "") == "failure")) then
+          [.runner_name, "never-started", (.name // ""), $id] | @tsv
+        elif (((.name // "") | startswith("windows-offline-section")) and ((.conclusion // "") == "timed_out")) then
+          [.runner_name, "section-timeout", (.name // ""), $id] | @tsv
+        else empty end' 2>/dev/null || true
+  done
+  return 0
+}
+
+# Custom labels of one host (read-only labels are managed by GitHub).
+health_custom_labels(){
+  printf '%s' "$1" | jq -c --arg n "$2" '
+    [.runners[]? | select(.name == $n) | .labels[]?
+     | select((.type // "custom") != "read-only") | .name]'
+}
+
+health_work_label(){
+  # $1 = custom labels JSON array; prints the work label it carries, or nothing.
+  jq -rn --argjson cur "$1" --argjson work "$WORK_LABELS" '
+    [$cur[] | select(. as $c | $work | index($c))] | first // empty' 2>/dev/null
+}
+
+health_pause_labels(){
+  # $1 custom labels, $2 work label, $3 host name -> JSON array
+  jq -cn --argjson cur "$1" --arg work "$2" --arg host "$3" --arg paused "$PAUSED_LABEL" --arg prefix "$CANARY_PREFIX" '
+    ($cur | map(select(. != $work and . != $paused and (startswith("was-") | not) and (startswith($prefix) | not))))
+    + [$paused, "was-" + $work, $prefix + ($host | ascii_downcase)]'
+}
+
+health_restore_labels(){
+  # $1 custom labels, $2 work label -> JSON array
+  jq -cn --argjson cur "$1" --arg work "$2" --arg paused "$PAUSED_LABEL" --arg prefix "$CANARY_PREFIX" '
+    ($cur | map(select(. != $paused and (startswith("was-") | not) and (startswith($prefix) | not)))) + [$work]'
+}
+
+health_set_labels(){
+  # $1 runner id, $2 labels JSON array
+  if [ "$REPORT_ONLY" = 1 ]; then
+    note "report-only: would set runner $1 labels to $2"
+    printf '%s health: report-only would set runner %s labels to %s\n' "$(stamp)" "$1" "$2" >> "$LOG"
+    return 0
+  fi
+  printf '{"labels":%s}' "$2" | "$GH" api -X PUT "repos/$REPO/actions/runners/$1/labels" --input - >/dev/null
+}
+
+health_canary_state(){ printf '%s/canary-%s.json' "$HOME_DIR" "$(printf '%s' "$1" | lower)"; }
+
+health_canary_dispatch(){
+  # $1 host name, $2 canary label
+  if [ "$REPORT_ONLY" = 1 ]; then
+    note "report-only: would dispatch $CANARY_WORKFLOW for $2"
+    printf '%s health: report-only would dispatch %s for %s\n' "$(stamp)" "$CANARY_WORKFLOW" "$2" >> "$LOG"
+    return 0
+  fi
+  local run_id now
+  "$GH" workflow run "$CANARY_WORKFLOW" --repo "$REPO" -f "host_label=$2" >/dev/null 2>&1 || return 1
+  sleep "${AI_RUNNER_POOL_WATCH_SETTLE:-15}"
+  run_id="$("$GH" run list --repo "$REPO" --workflow "$CANARY_WORKFLOW" --limit 1 --json databaseId 2>/dev/null \
+    | jq -r '.[0].databaseId // empty')"
+  [ -n "$run_id" ] && [ "$run_id" != "null" ] || return 1
+  now="$(date -u +%s)"
+  printf '{"run_id": "%s", "dispatched_at": %s}\n' "$run_id" "$now" > "$(health_canary_state "$1")"
+  note "canary $2 dispatched as run $run_id"
+  printf '%s health: canary dispatched host=%s run=%s\n' "$(stamp)" "$1" "$run_id" >> "$LOG"
+  return 0
+}
+
+cmd_health(){
+  mkdir -p "$HOME_DIR"
+  rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
+  load_secrets_env
+  local roster signals candidates host rid custom work
+  roster="$(health_roster)" || { printf '%s ALARM: health cannot read the runner roster\n' "$(stamp)" >> "$LOG"; note "health cannot read the runner roster"; return 1; }
+  signals="$(health_signals)" || { printf '%s ALARM: health cannot read verify run history\n' "$(stamp)" >> "$LOG"; note "health cannot read verify run history"; return 1; }
+  printf '%s health: scan window last %s verify runs\n' "$(stamp)" "$HEALTH_RUNS" >> "$LOG"
+  if [ -n "$signals" ]; then
+    printf '%s\n' "$signals" >> "$LOG"
+  fi
+  # Pause candidates: one never-started signal, or two section timeouts.
+  candidates="$(printf '%s\n' "$signals" | awk -F'\t' '
+    $2 == "never-started" { ns[$1] = 1 }
+    $2 == "section-timeout" { st[$1]++ }
+    END {
+      for (h in ns) print h
+      for (h in st) if (st[h] >= 2 && !(h in ns)) print h
+    }')"
+  for host in $candidates; do
+    rid="$(printf '%s' "$roster" | jq -r --arg n "$host" '[.runners[]? | select(.name == $n) | .id] | first // empty')"
+    [ -n "$rid" ] || continue
+    custom="$(health_custom_labels "$roster" "$host")"
+    work="$(health_work_label "$custom")"
+    if [ -z "$work" ]; then
+      if printf '%s' "$custom" | jq -e --arg p "$PAUSED_LABEL" 'index($p) != null' >/dev/null 2>&1; then
+        printf '%s health: %s already paused\n' "$(stamp)" "$host" >> "$LOG"
+      else
+        printf '%s health: %s has no work label; nothing to pause\n' "$(stamp)" "$host" >> "$LOG"
+      fi
+      continue
+    fi
+    if health_set_labels "$rid" "$(health_pause_labels "$custom" "$work" "$host")"; then
+      note "PAUSED $host (was $work): dead-host evidence in the last $HEALTH_RUNS verify runs"
+      printf '%s health: PAUSED host=%s runner_id=%s was=%s\n' "$(stamp)" "$host" "$rid" "$work" >> "$LOG"
+    else
+      note "ALARM: could not pause $host (label write failed)"
+      printf '%s ALARM: label write failed pausing %s\n' "$(stamp)" "$host" >> "$LOG"
+    fi
+  done
+  # Paused hosts: dispatch or observe the canary; restore only on a pass.
+  local paused_names state run_id outcome dispatched canary_label restored_work
+  paused_names="$(printf '%s' "$roster" | jq -r --arg p "$PAUSED_LABEL" '
+    [.runners[]? | select(.labels // [] | map(.name) | index($p)) | .name] | .[]')"
+  for host in $paused_names; do
+    rid="$(printf '%s' "$roster" | jq -r --arg n "$host" '[.runners[]? | select(.name == $n) | .id] | first // empty')"
+    [ -n "$rid" ] || continue
+    custom="$(health_custom_labels "$roster" "$host")"
+    restored_work="$(printf '%s' "$custom" | jq -r '[.[] | select(startswith("was-")) | ltrimstr("was-")] | first // empty')"
+    canary_label="$CANARY_PREFIX$(printf '%s' "$host" | lower)"
+    state="$(health_canary_state "$host")"
+    if [ -f "$state" ]; then
+      run_id="$(jq -r '.run_id // empty' "$state" 2>/dev/null)"
+      dispatched="$(jq -r '.dispatched_at // 0' "$state" 2>/dev/null)"
+      outcome=""
+      if [ -n "$run_id" ]; then
+        outcome="$("$GH" run view "$run_id" --repo "$REPO" --json status,conclusion 2>/dev/null \
+          | jq -r '(.status // "") + "|" + (.conclusion // "")' 2>/dev/null || true)"
+      fi
+      case "$outcome" in
+        completed\|success)
+          if [ -n "$restored_work" ] && health_set_labels "$rid" "$(health_restore_labels "$custom" "$restored_work")"; then
+            note "RESTORED $host to $restored_work after canary run $run_id passed"
+            printf '%s health: RESTORED host=%s work=%s canary_run=%s\n' "$(stamp)" "$host" "$restored_work" "$run_id" >> "$LOG"
+            rm -f "$state"
+          else
+            note "ALARM: canary passed but restoring $host failed"
+            printf '%s ALARM: restore failed for %s after canary %s\n' "$(stamp)" "$host" "$run_id" >> "$LOG"
+          fi
+          ;;
+        completed\|*)
+          if [ "$(($(date -u +%s) - ${dispatched:-0}))" -ge "$CANARY_COOLDOWN_SEC" ]; then
+            health_canary_dispatch "$host" "$canary_label" || { note "ALARM: canary dispatch failed for $host"; printf '%s ALARM: canary dispatch failed for %s\n' "$(stamp)" "$host" >> "$LOG"; }
+          else
+            printf '%s health: %s canary run %s concluded %s; waiting out the cooldown\n' "$(stamp)" "$host" "$run_id" "$outcome" >> "$LOG"
+          fi
+          ;;
+        *)
+          printf '%s health: %s canary run %s not finished (%s)\n' "$(stamp)" "$host" "$run_id" "${outcome:-unknown}" >> "$LOG"
+          ;;
+      esac
+    else
+      if [ "$(printf '%s' "$roster" | jq -r --arg n "$host" '[.runners[]? | select(.name == $n) | .status] | first // ""')" != "online" ]; then
+        printf '%s health: %s is paused and offline; no canary until it returns\n' "$(stamp)" "$host" >> "$LOG"
+        continue
+      fi
+      health_canary_dispatch "$host" "$canary_label" || { note "ALARM: canary dispatch failed for $host"; printf '%s ALARM: canary dispatch failed for %s\n' "$(stamp)" "$host" >> "$LOG"; }
+    fi
+  done
+  return 0
+}
+
 cmd_tick(){
   local claim_rc=0
   "$CLAIM" claim || claim_rc=$?
@@ -97,6 +306,7 @@ cmd_tick(){
     note "claim failed; not posting an alarm from a host that cannot hold the lease"
     return 1
   fi
+  cmd_health || note "health pass failed; running the pool check anyway"
   cmd_check
 }
 
@@ -105,11 +315,18 @@ cmd_schedule(){
 }
 cmd_unschedule(){ unregister_timer; }
 
+ARGS=()
+for _arg in "$@"; do
+  if [ "$_arg" = "--report-only" ]; then REPORT_ONLY=1; else ARGS+=("$_arg"); fi
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+
 case "${1:-}" in
   tick) cmd_tick ;;
   check) cmd_check ;;
+  health) cmd_health ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,28p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,42p' "$_self" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command; see ai-runner-pool-watch --help" ;;
 esac

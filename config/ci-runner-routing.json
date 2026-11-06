@@ -12,6 +12,9 @@
     "ai-devops-windows-qualified"
   ],
   "qualified_label": "ai-devops-windows-qualified",
+  "paused_label": "ai-devops-windows-paused",
+  "_paused_comment": "Host health (plan_ci-process-repair.md step 3.2): a host that accepted a job that never started, or timed out on two section runs, is moved to this label by bin/ai-runner-pool-watch health (its work label is recorded as was-<label>). The router never counts a paused host, so sections fall back to GitHub-hosted. The host returns after a passing windows-host-canary.yml run on its canary-<name> label. EDGE-ALIEN has carried this label by hand before (2026-09-03); the watchdog now applies the same convention automatically.",
+  "canary_label_prefix": "canary-",
   "section_windows": [
     "self-hosted",
     "Windows",
