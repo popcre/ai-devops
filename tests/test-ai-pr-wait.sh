@@ -785,16 +785,33 @@ if [ "$count" -gt 3 ]; then
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
   exit 0
 fi
-printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null}}}'
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
 OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=6 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qstall-clock" AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 5 --interval 1 2>&1)"; RC=$?
+printf 'qstall fixture diagnostics: rc=%s warn=%s norunner=%s merged=%s\n' "$RC" \
+  "$(printf '%s' "$OUT" | grep -c 'queued too long')" \
+  "$(printf '%s' "$OUT" | grep -c 'no runner')" \
+  "$(printf '%s' "$OUT" | grep -c MERGED)" >&2
 check "a queue entry past the warn window names the stall and the runner causes" \
   "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -q 'queued too long:' && printf '%s' \"$OUT\" | grep -q 'no runner' && printf '%s' \"$OUT\" | grep -q 'never started it' && printf '%s' \"$OUT\" | grep -q MERGED"
 
 # still queued at the deadline: the two runner-stall reasons are named on the
 # exit-2 report instead of a bare "still in progress".
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  'auth token '*) printf 'test-token
+'; exit 0 ;;
+  'api rate_limit '*) printf '5000
+'; exit 0 ;;
+esac
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+printf '%s
+' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
 n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
@@ -804,6 +821,9 @@ EOF
 chmod +x "$TMP/bin/date"
 rm -f "$TMP/qdead-called" "$TMP/qdead-clock"
 OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qdead-clock" AI_GH_STATE_DIR="$TMP/qdead-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qdead-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+printf 'qdead fixture diagnostics: rc=%s stillqueued=%s norunner=%s\n' "$RC" \
+  "$(printf '%s' "$OUT" | grep -c 'still queued at the deadline')" \
+  "$(printf '%s' "$OUT" | grep -c 'no runner for a required label')" >&2
 check "the deadline report names the queue-stall runner reasons" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'still queued at the deadline' && printf '%s' \"$OUT\" | grep -q 'no runner for a required label'"
 cat > "$TMP/bin/date" <<'EOF'
