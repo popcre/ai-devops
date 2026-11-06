@@ -56,6 +56,15 @@ in the background rather than a `sleep` loop.
 On `STILL-WAITING` rerun the printed command. Prose-only PRs do not wait for
 checks unless `--reviewer-approval` is given.
 
+The waiter names the reason it stopped, each with one what-to-do line:
+`billing lock` (account spending limit — only the owner can fix the payment
+side), `capacity/infra` (timeout/kill/rate-limit — park and retry, not broken
+code), `review-step` (empty reviewer verdict — never reddens the PR verdict),
+`queued too long` and `still queued at the deadline` (usually no runner for a
+required label, or a runner that accepted the job but never started it — look
+at the merge_group run's jobs), and per-check `detail=` lines naming the real
+failing test. Advisory-only failures never end the wait (#2094).
+
 ## ai-doc-safety (`bin/ai-doc-safety`)
 
 ```text
