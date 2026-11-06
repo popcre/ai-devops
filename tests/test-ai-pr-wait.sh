@@ -717,6 +717,12 @@ check "a legacy state-only failure stays terminal" \
 # head's identical advisory was already deduped.
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+# Answer the wrapper's health probes so a quota-unknown back-off never
+# consumes one of the sequence's payloads.
+case "$*" in
+  'auth token '*) printf 'test-token\n'; exit 0 ;;
+  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
 count=$((count + 1)); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
