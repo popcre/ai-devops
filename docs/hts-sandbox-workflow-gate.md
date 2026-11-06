@@ -352,10 +352,15 @@ another frozen-evaluation epoch and cannot renew, reset or alter that evaluation
 The eight fixed case identifiers and fixture prefix are bound to the maintained
 `scripts/hts-common-sense-dev-proof.js` executor and private immutable fixture bytes.
 
-Only the exact OpenRouter completion endpoint and sandbox inquiry POST/returned-ID
-GET routes are declared. There is no login, answer, manual retry, Apply, real-item
-write, infrastructure or production route. Existing protected session authentication
-is read locally. Luna remains dated/pinned, high effort and operative output 32768;
+Only the exact OpenRouter completion endpoint, sandbox inquiry POST/returned-ID GET,
+one existing-account `POST /findUserLoginInfo`, and at most two admin-only
+`GET /api/admin/model-pool/key-attestation` metadata reads are declared. The single
+authentication attempt must be journaled before dispatch, never retried, and prove
+the existing actor 77/admin scope with expiry covering the run. Key metadata proves
+the effective normal-application key and credit before/after the inquiry using at
+most four nonpaid external metadata requests; a key mismatch stops without switching.
+There is no answer, manual retry, Apply, other admin action, real-item write,
+infrastructure or production route. Luna remains dated/pinned, high effort and operative output 32768;
 the established phrase preprocessing setting is unchanged. The limits are seven
 direct launches, one application inquiry, 117 source-bound application launches and
 124 total, with three existing attempts and two automatic recorded-fact answers.

@@ -665,7 +665,8 @@ class CommonSenseDevelopmentProof(ClosedRecoveryTarget):
             "executor": "scripts/hts-common-sense-dev-proof.js",
             "fixture_prefix": "AI-QA-20261106-common-sense-", "actor_id": 77,
             "case_ids": ["CS01", "CS02", "CS03", "CS04", "CS05", "CS06", "CQ01", "CS07"],
-            "routes": ["POST /api/hts-rag/jobs", "GET /api/hts-rag/jobs/:id"],
+            "routes": ["POST /findUserLoginInfo", "POST /api/hts-rag/jobs",
+                       "GET /api/hts-rag/jobs/:id", "GET /api/admin/model-pool/key-attestation"],
             "direct_routes": ["POST https://openrouter.ai/api/v1/chat/completions"],
             "provider": {"model": "openai/gpt-6-luna-20260922", "api": "openrouter",
                          "reasoning_effort": "high", "maximum_output_tokens": 32768,
@@ -749,6 +750,16 @@ class CommonSenseDevelopmentProof(ClosedRecoveryTarget):
                 self.assertEqual(self.validate({**self.declaration, "expires_at": expiry}), expected)
         self.assertEqual(self.validate({**self.declaration, "source_head": "c" * 40,
                                         "served_source": "c" * 40}), 1)
+
+    def test_auth_and_key_metadata_do_not_expand_to_other_admin_actions(self):
+        for route in ["POST /api/admin/model-pool/key-attestation", "GET /api/admin/model-pool",
+                      "GET /api/admin/users", "POST /findUserLoginInfo/retry"]:
+            candidate = copy.deepcopy(self.declaration); candidate["routes"].append(route)
+            self.assertEqual(self.validate(candidate), 1)
+        for key, bad in [("maximum_auth_attempts", 2), ("maximum_key_attestation_reads", 3),
+                         ("maximum_credit_metadata_http_requests", 5)]:
+            candidate = copy.deepcopy(self.declaration); candidate["limits"][key] = bad
+            self.assertEqual(self.validate(candidate), 1)
 
 
 class PrivateImmutableRuntimeContinuation(unittest.TestCase):

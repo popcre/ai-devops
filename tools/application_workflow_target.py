@@ -551,6 +551,8 @@ COMMON_SENSE_DEV_LIMITS = {
     "compression_billing": "unquantified-not-included", "automatic_post_retry": False,
     "requester_answers": 0, "manual_retries": 0, "apply_classifications": False,
     "maximum_duration_seconds": 3600,
+    "maximum_auth_attempts": 1, "maximum_key_attestation_reads": 2,
+    "maximum_credit_metadata_http_requests": 4,
 }
 COMMON_SENSE_DEV_BINDINGS = {
     "executor_sha256", "fixture_sha256", "readiness_sha256", "pricing_sha256",
@@ -570,7 +572,8 @@ def common_sense_development_proof(value, root):
         "executor": "scripts/hts-common-sense-dev-proof.js",
         "fixture_prefix": "AI-QA-20261106-common-sense-", "actor_id": 77,
         "case_ids": ["CS01", "CS02", "CS03", "CS04", "CS05", "CS06", "CQ01", "CS07"],
-        "routes": ["POST /api/hts-rag/jobs", "GET /api/hts-rag/jobs/:id"],
+        "routes": ["POST /findUserLoginInfo", "POST /api/hts-rag/jobs",
+                   "GET /api/hts-rag/jobs/:id", "GET /api/admin/model-pool/key-attestation"],
         "direct_routes": ["POST https://openrouter.ai/api/v1/chat/completions"],
         "provider": {"model": "openai/gpt-6-luna-20260922", "api": "openrouter",
                      "reasoning_effort": "high", "maximum_output_tokens": 32768,
