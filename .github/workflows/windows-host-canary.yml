@@ -1,0 +1,34 @@
+name: windows-host-canary
+
+# Host health canary (plan_ci-process-repair.md step 3.2). The duty-host
+# watchdog (bin/ai-runner-pool-watch health) dispatches this at a paused host
+# and returns it to the pool only after this run passes. It never runs
+# unprompted: the host is reachable only through its canary-<name> label,
+# which the watchdog adds when it pauses the host. It never uses a paid
+# runner and touches no repository contents.
+run-name: canary ${{ inputs.host_label }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      host_label:
+        description: "Per-host canary label (canary-<runner-name-lowercase>)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ${{ fromJSON(format('["self-hosted","Windows","X64","{0}"]', inputs.host_label)) }}
+    timeout-minutes: 10
+    steps:
+      - name: Prove the host can still start and finish a job
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "canary host: $(hostname)"
+          git --version
+          node --version
+          pwsh -NoLogo -NoProfile -Command 'Write-Output canary-ok'

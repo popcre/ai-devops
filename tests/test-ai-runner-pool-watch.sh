@@ -83,6 +83,104 @@ exit 0
 EOF
 check 'tick skips when not leader' "bash $SCRIPT tick; [ \$? -eq 3 ]"
 
+echo 'host health (step 3.2)'
+export CALL_LOG="$TMP/calls.log" PUT_BODY="$TMP/put-body.json" \
+  RUNS_FILE="$TMP/runs.json" JOBS_FILE="$TMP/jobs.json" \
+  RUN_LIST_JSON="$TMP/run-list.json" RUN_VIEW_JSON="$TMP/run-view.json"
+cat > "$TMP/bin/ai-gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CALL_LOG"
+case "$*" in
+  *"api -X PUT repos/popcre/ai-devops/actions/runners/"*)
+    cat > "$PUT_BODY"
+    echo '{"ok":true}' ;;
+  *"workflows/verify.yml/runs"*) cat "$RUNS_FILE" ;;
+  *"actions/runs/"*"/jobs"*) cat "$JOBS_FILE" ;;
+  *"workflow run windows-host-canary.yml"*) echo '' ;;
+  *"run list"*) cat "$RUN_LIST_JSON" ;;
+  *"run view"*) cat "$RUN_VIEW_JSON" ;;
+  *"actions/runners --paginate"*) cat "$ROSTER_FILE" ;;
+  *"actions/runners"*) echo '{"runners":[]}' ;;
+  *) echo '{}' ;;
+esac
+EOF
+chmod +x "$TMP/bin/ai-gh"
+cat > "$RUNS_FILE" <<'EOF'
+{"workflow_runs":[{"id":100}]}
+EOF
+cat > "$RUN_LIST_JSON" <<'EOF'
+[{"databaseId":777}]
+EOF
+cat > "$RUN_VIEW_JSON" <<'EOF'
+{"status":"completed","conclusion":"success"}
+EOF
+
+host_roster(){
+  # $1 host, $2 runner id, $3 json labels array (names; emitted as label objects)
+  printf '{"runners":[{"id":%s,"name":"%s","status":"online","busy":false,"labels":%s}]}\n' \
+    "$2" "$1" "$(printf '%s' "$3" | jq -c 'map({name: .})')" > "$ROSTER_FILE"
+}
+reset_calls(){ : > "$CALL_LOG"; rm -f "$PUT_BODY"; rm -f "$TMP/home"/canary-*.json; }
+
+reset_calls
+host_roster win-bad 5 '["ai-devops-windows","ai-devops-windows-qualified"]'
+cat > "$JOBS_FILE" <<'EOF'
+{"jobs":[{"name":"windows-offline-section (2)","runner_id":5,"runner_name":"win-bad","started_at":null,"conclusion":"timed_out","status":"completed"}]}
+EOF
+check 'never-started evidence pauses the host' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health; [ \$? -eq 0 ]"
+check 'pause writes the paused label and remembers the work label' \
+  "jq -e '.labels == [\"ai-devops-windows\",\"ai-devops-windows-paused\",\"was-ai-devops-windows-qualified\",\"canary-win-bad\"]' '$PUT_BODY'"
+check 'pause is reported' "grep -q 'PAUSED host=win-bad' '$TMP/home/tick.log'"
+
+reset_calls
+host_roster win-slow 7 '["ai-devops-windows","ai-devops-windows-section"]'
+cat > "$JOBS_FILE" <<'EOF'
+{"jobs":[
+  {"name":"windows-offline-section (3)","runner_id":7,"runner_name":"win-slow","started_at":"2026-11-06T10:00:00Z","conclusion":"timed_out","status":"completed"},
+  {"name":"windows-offline-section (9)","runner_id":7,"runner_name":"win-slow","started_at":"2026-11-06T10:20:00Z","conclusion":"timed_out","status":"completed"}
+]}
+EOF
+check 'two section timeouts pause the host' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health; [ \$? -eq 0 ]"
+check 'section host remembers was-ai-devops-windows-section' \
+  "jq -e '.labels == [\"ai-devops-windows\",\"ai-devops-windows-paused\",\"was-ai-devops-windows-section\",\"canary-win-slow\"]' '$PUT_BODY'"
+
+reset_calls
+cat > "$JOBS_FILE" <<'EOF'
+{"jobs":[
+  {"name":"windows-offline-section (3)","runner_id":7,"runner_name":"win-slow","started_at":"2026-11-06T10:00:00Z","conclusion":"timed_out","status":"completed"}
+]}
+EOF
+check 'one section timeout does not pause' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health; [ \$? -eq 0 ]"
+check 'no label write without enough evidence' "[ ! -f '$PUT_BODY' ]"
+
+reset_calls
+host_roster win-restored 9 '["ai-devops-windows","ai-devops-windows-paused","was-ai-devops-windows-qualified","canary-win-restored"]'
+printf '{"run_id": "901", "dispatched_at": 0}\n' > "$TMP/home/canary-win-restored.json"
+cat > "$JOBS_FILE" <<'EOF'
+{"jobs":[]}
+EOF
+check 'a passing canary restores the work label' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health; [ \$? -eq 0 ]"
+check 'restore removes the paused markers' \
+  "jq -e '.labels == [\"ai-devops-windows\",\"ai-devops-windows-qualified\"]' '$PUT_BODY'"
+check 'restore clears the canary state' "[ ! -f '$TMP/home/canary-win-restored.json' ]"
+check 'restore is reported' "grep -q 'RESTORED host=win-restored work=ai-devops-windows-qualified' '$TMP/home/tick.log'"
+
+reset_calls
+host_roster win-new 10 '["ai-devops-windows","ai-devops-windows-paused","was-ai-devops-windows-qualified","canary-win-new"]'
+check 'a paused host with no canary gets one dispatched' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health; [ \$? -eq 0 ]"
+check 'the canary dispatch names the per-host label' \
+  "grep -q 'workflow run windows-host-canary.yml --repo popcre/ai-devops -f host_label=canary-win-new' '$CALL_LOG'"
+check 'the canary run id is recorded' "grep -q '\"run_id\": \"777\"' '$TMP/home/canary-win-new.json'"
+
+reset_calls
+host_roster win-bad 5 '["ai-devops-windows","ai-devops-windows-qualified"]'
+cat > "$JOBS_FILE" <<'EOF'
+{"jobs":[{"name":"windows-offline-section (2)","runner_id":5,"runner_name":"win-bad","started_at":null,"conclusion":"timed_out","status":"completed"}]}
+EOF
+check 'report-only never writes labels' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT --report-only health; [ \$? -eq 0 ]"
+check 'report-only wrote no PUT' "! grep -q 'api -X PUT' '$CALL_LOG'"
+check 'report-only says what it would do' "grep -q 'report-only' '$TMP/home/tick.log'"
+
 echo 'help'
 check 'help mentions never Blacksmith' "bash $SCRIPT --help | grep -qi blacksmith"
 

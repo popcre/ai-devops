@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   pool-online:
@@ -39,3 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           bin/ai-runner-pool-watch check
+      - name: Host-health detection pass (report only; the duty-host tick pauses and restores)
+        env:
+          RUNNER_POOL_READ_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bin/ai-runner-pool-watch --report-only health

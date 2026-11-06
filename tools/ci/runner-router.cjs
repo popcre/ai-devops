@@ -87,15 +87,26 @@ async function queuedPoolJobs(github, context, cfg) {
   return queued;
 }
 
-async function countIdlePool(poolGithub, context, cfg) {
-  const runners = await poolGithub.paginate(poolGithub.rest.actions.listSelfHostedRunnersForRepo, { ...context.repo, per_page: 100 });
-  const idle = runners.filter(r => r.status === 'online' && !r.busy);
+// Pure roster summary. A paused host (cfg.paused_label, moved there by
+// bin/ai-runner-pool-watch health after a dead-host signal) never takes work:
+// the watchdog strips its work label, and this filter is defense in depth for
+// a transitional roster that still carries one. Paused hosts are reported,
+// never counted, so sections fall back to GitHub-hosted.
+function summarizePool(runners, cfg) {
   const has = (r, name) => r.labels.some(l => l.name === name);
+  const notPaused = (cfg.paused_label ? runners.filter(r => !has(r, cfg.paused_label)) : runners);
+  const idle = notPaused.filter(r => r.status === 'online' && !r.busy);
   return {
     qualified: idle.filter(r => has(r, cfg.qualified_label)).length,
     section: cfg.section_label ? idle.filter(r => has(r, cfg.section_label) && !has(r, cfg.qualified_label)).length : 0,
     linux: cfg.linux_label ? idle.filter(r => has(r, cfg.linux_label) && !has(r, cfg.qualified_label) && !has(r, cfg.section_label)).length : 0,
+    paused: cfg.paused_label ? runners.filter(r => has(r, cfg.paused_label)).length : 0,
   };
+}
+
+async function countIdlePool(poolGithub, context, cfg) {
+  const runners = await poolGithub.paginate(poolGithub.rest.actions.listSelfHostedRunnersForRepo, { ...context.repo, per_page: 100 });
+  return summarizePool(runners, cfg);
 }
 
 // Code from another repository (a fork pull request) never runs on our own
@@ -112,6 +123,7 @@ async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
   let idleSection = 0;
   let idleLinux = 0;
+  let paused = 0;
   const foreign = isForeignHead(context);
   if (foreign) {
     core.info('Pull request head is outside this repository; every Windows and Linux section stays on GitHub-hosted.');
@@ -124,13 +136,16 @@ async function run({ github, poolGithub, context, core, cfg }) {
       idle = Math.max(0, pool.qualified - queued.qualified);
       idleSection = Math.max(0, pool.section - queued.section);
       idleLinux = Math.max(0, pool.linux - queued.linux);
+      paused = pool.paused || 0;
     }
   } catch (error) {
     core.warning(`Self-hosted pool unknown (${error.message}); every Windows and Linux section stays on GitHub-hosted.`);
     idle = 0;
     idleSection = 0;
     idleLinux = 0;
+    paused = 0;
   }
+  if (paused > 0) core.info(`paused_hosts=${paused} (excluded from routing; sections fall back to GitHub-hosted)`);
   const plan = decide(cfg, { event: context.eventName, idleQualified: idle, idleSection, foreign });
   core.info(`idle_qualified=${plan.idle_qualified} idle_section=${plan.idle_section}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
@@ -143,7 +158,8 @@ async function run({ github, poolGithub, context, core, cfg }) {
   for (const l of plan.linux_matrix) core.info(`linux section ${l.shard} -> ${l.lane}`);
   core.setOutput('windows_matrix', JSON.stringify(plan.windows_matrix));
   core.setOutput('linux_matrix', JSON.stringify(plan.linux_matrix));
-  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}; idle section-only hosts ${plan.idle_section}.\n\n` +
+  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}; idle section-only hosts ${plan.idle_section}` +
+    (paused > 0 ? `; ${paused} paused host(s) excluded` : '') + '.\n\n' +
     plan.windows_matrix.map(w => `- Windows section ${w.section}: ${w.lane}`).join('\n') + '\n' +
     `\nIdle self-hosted Linux hosts ${plan.idle_linux}.\n\n` +
     plan.linux_matrix.map(l => `- Linux section ${l.shard}: ${l.lane}`).join('\n') + '\n');
@@ -151,4 +167,4 @@ async function run({ github, poolGithub, context, core, cfg }) {
   return plan;
 }
 
-module.exports = { decide, decideLinux, parseEligible, run, isForeignHead };
+module.exports = { decide, decideLinux, parseEligible, run, isForeignHead, summarizePool };
