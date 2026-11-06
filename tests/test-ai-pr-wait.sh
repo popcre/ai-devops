@@ -723,7 +723,8 @@ cat > "$TMP/bin/gh" <<'EOF'
 # consumes one of the sequence's payloads.
 case "$*" in
   'auth token '*) printf 'test-token\n'; exit 0 ;;
-  'api rate_limit '*) printf '5000\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+  'api --include rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
@@ -743,6 +744,97 @@ printf 'rehead fixture diagnostics: rc=%s h1-reported=%s h2-reported=%s\n' "$RC"
   "$(printf '%s' "$OUT" | grep -c 'advisory lint h2')" >&2
 check "a new head re-reports its advisory failure after dedupe" \
   "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -q 'advisory lint h1' && printf '%s' \"$OUT\" | grep -q 'advisory lint h2' && printf '%s' \"$OUT\" | grep -q MERGED"
+
+# Step 5.1 fixtures: one per named reason the waiter itself reports.
+
+# billing lock: a required check whose failure text is the account spending
+# limit names the outside stop and says only the owner can fix payment.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  'auth token '*) printf 'test-token\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+  'api --include rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+esac
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"deploy",conclusion:"FAILURE",isRequired:true,title:"The spending limit for this account was exceeded"}]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/billing-called"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/billing-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/billing-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a billing-lock failure names the outside stop and the owner-only fix" \
+  "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'billing lock:' && printf '%s' \"$OUT\" | grep -q 'spending limit' && printf '%s' \"$OUT\" | grep -q 'only the account owner can fix'"
+
+# queued too long: a clock that advances three seconds per call and a tiny warn
+# window surface the named queue-stall reason while the wait continues.
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
+n=$((n + 1)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
+printf '%s\n' "$n"
+EOF
+chmod +x "$TMP/bin/date"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  'auth token '*) printf 'test-token\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+  'api --include rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+esac
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$((count + 1)); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -gt 3 ]; then
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
+  exit 0
+fi
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
+OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qstall-clock" AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 5 --interval 1 2>&1)"; RC=$?
+printf 'qstall fixture diagnostics: rc=%s warn=%s norunner=%s merged=%s\n' "$RC" \
+  "$(printf '%s' "$OUT" | grep -c 'queued too long')" \
+  "$(printf '%s' "$OUT" | grep -c 'no runner')" \
+  "$(printf '%s' "$OUT" | grep -c MERGED)" >&2
+check "a queue entry past the warn window names the stall and the runner causes" \
+  "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -q 'queued too long:' && printf '%s' \"$OUT\" | grep -q 'no runner' && printf '%s' \"$OUT\" | grep -q 'never started it' && printf '%s' \"$OUT\" | grep -q MERGED"
+
+# still queued at the deadline: the two runner-stall reasons are named on the
+# exit-2 report instead of a bare "still in progress".
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  'auth token '*) printf 'test-token
+'; exit 0 ;;
+  'api rate_limit '*) printf '5000
+  'api --include rate_limit '*) printf '5000
+'; exit 0 ;;
+esac
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+printf '%s
+' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+EOF
+chmod +x "$TMP/bin/gh"
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
+n=$((n + 3)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
+printf '%s\n' "$n"
+EOF
+chmod +x "$TMP/bin/date"
+rm -f "$TMP/qdead-called" "$TMP/qdead-clock"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qdead-clock" AI_GH_STATE_DIR="$TMP/qdead-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qdead-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+printf 'qdead fixture diagnostics: rc=%s stillqueued=%s norunner=%s\n' "$RC" \
+  "$(printf '%s' "$OUT" | grep -c 'still queued at the deadline')" \
+  "$(printf '%s' "$OUT" | grep -c 'no runner for a required label')" >&2
+check "the deadline report names the queue-stall runner reasons" \
+  "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'still queued at the deadline' && printf '%s' \"$OUT\" | grep -q 'no runner for a required label'"
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
+chmod +x "$TMP/bin/date"
 check "requirement policy is queried on both complete-status pages and cache v1 is retired" \
   "test \"$(grep -c 'isRequired(pullRequestNumber:\$PR)' "$ROOT/tools/github-requests/pr-status-complete.sh")\" -eq 2 && grep -q -- '--key \"v3 ' '$CMD' && ! grep -q -- '--key \"v1 ' '$CMD'"
 

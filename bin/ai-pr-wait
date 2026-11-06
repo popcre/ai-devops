@@ -307,6 +307,12 @@ say() {
 
 WAS_QUEUED=0
 QUEUED_HEAD=''
+# Step 5.1: name the queue-stall reasons while polling, not only at exit.
+# Warn once after the PR has sat in the merge queue this long (env-overridable
+# for tests). One hour: the queue normally lands a merge group in minutes.
+QUEUE_STALL_WARN_SECONDS="${AI_PR_WAIT_QUEUE_WARN_SECONDS:-3600}"
+QUEUED_SINCE=''
+QUEUE_STALL_REPORTED=0
 LAST=''
 LAST_ADVISORY=''
 API_STDERR=/dev/null
@@ -547,7 +553,25 @@ while :; do
   if [ "$QUEUED" = "true" ]; then
     WAS_QUEUED=1
     QUEUED_HEAD="$LAST_HEAD"
-  elif [ "$WAS_QUEUED" -eq 1 ]; then
+    # Step 5.1: "queued too long" is its own named reason. A queue entry that
+    # sits past the warn window is usually "no runner for a required label" or
+    # "a runner accepted the job but never started it" — both live in the
+    # merge_group run's job list, which this poll cannot see without an extra
+    # GitHub call, so the what-to-do line points there instead of polling it.
+    if [ -z "$QUEUED_SINCE" ]; then
+      QUEUED_SINCE="$(date +%s)"
+    elif [ "$QUEUE_STALL_REPORTED" -eq 0 ] && [ "$(( $(date +%s) - QUEUED_SINCE ))" -ge "$QUEUE_STALL_WARN_SECONDS" ]; then
+      QUEUE_STALL_REPORTED=1
+      say "PR #$PR queued too long: in the merge queue for $(( $(date +%s) - QUEUED_SINCE ))s."
+      say "  Look at the merge_group run's jobs: a stuck entry means either no runner"
+      say "  for a required label, or a runner that accepted the job but never started it:"
+      say "    gh run list --repo $REPO --event merge_group --limit 5"
+    fi
+  else
+    QUEUED_SINCE=''
+    QUEUE_STALL_REPORTED=0
+  fi
+  if [ "$WAS_QUEUED" -eq 1 ] && [ "$QUEUED" != "true" ]; then
     # A push can remove a PR from the queue while replacing its head. That is
     # not evidence that GitHub ejected the same queued commit.
     if [ "$LAST_HEAD" != "$QUEUED_HEAD" ]; then
@@ -647,6 +671,13 @@ while :; do
     PR_WAIT_OUTCOME=deadline
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
+    if [ "$QUEUED" = "true" ]; then
+      # Step 5.1: name the two queue-stall reasons a deadline can hide.
+      say "  still queued at the deadline: usually no runner for a required label,"
+      say "  or a runner that accepted the job but never started it. Check the"
+      say "  merge_group run's jobs and the runner pool before re-queueing:"
+      say "    gh run list --repo $REPO --event merge_group --limit 5"
+    fi
     capture_local_end
     still_waiting
     exit 2
@@ -655,6 +686,12 @@ while :; do
     PR_WAIT_OUTCOME=deadline
     emit_workflow_evidence
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
+    if [ "$QUEUED" = "true" ]; then
+      say "  still queued at the deadline: usually no runner for a required label,"
+      say "  or a runner that accepted the job but never started it. Check the"
+      say "  merge_group run's jobs and the runner pool before re-queueing:"
+      say "    gh run list --repo $REPO --event merge_group --limit 5"
+    fi
     capture_local_end
     still_waiting
     exit 2
