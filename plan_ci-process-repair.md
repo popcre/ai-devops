@@ -10,28 +10,28 @@
 | Step | Work | State | Evidence |
 |---|---|---|---|
 | 0.1 | Retire stale automatic-fix pull requests, stop new ones going stale | ✅ done | PR #2383; 33 stale fixer PRs closed 2026-11-04 (shared-db 19, ai-devops 14, findings all closed), 4 theoracle conflicted PRs retired and re-dispatched once (#279, #283, #289, #304); 62 fixer-state tests cover finding-closed and idle |
-| 1.1 | `merge-group-evidence` stops reporting an unfinished run as failure | 🟡 landed, live proof open | PR #2388; `--accept-pending` reports an unfinished run as "evidence pending" (job summary + exit 0), finished-failed and mismatched stay red, direct callers keep the fail-closed exit codes; 67 evidence tests pass (5 new) and 39 closure tests pass. `- [ ] live proof` on #2367 |
-| 1.2 | Repair the tests failing today on Linux | 🟡 landed, run streak open | PR #2392; executable bit and .cmd launcher for `bin/ai-transcripts-to-dropbox-hetz`, cleanup trap in `bin/ai-transcript-upload`, and the `test-ai-transcript-query` machine-state assertions updated for #2358 (none deleted). `- [ ] five consecutive green merge-queue Linux shards` on #2367 |
-| 1.3 | New suites register themselves | 🟡 landed | PR #2393; the loader discovers `tests/test-*.{sh,ps1}` and synthesizes an entry for each suite with no JSON (both systems, auto section), so a missing entry cannot skip sections; loader output byte-identical on today's tree; 22 loader tests pass (5 new) |
-| 1.4 | A real test failure after merge gets an owner automatically | ⬜ open | — |
-| 1.5 | `review-fixer` stops running on every push and branch delete | ⬜ open | — |
-| 1.6 | Advisory shared-db gates stop saying REFUSED for things they do not stop | ⬜ open | — |
-| 2.1 | Paperwork refusals removed from post-merge rehearsal and promotion | ⬜ open | — |
-| 2.2 | Promotion trigger reports expected holds as success | ⬜ open | — |
-| 2.3 | A change out of promotion attempts gets an owner | ⬜ open | — |
-| 2.4 | Post-apply catalog check stops marking good applies red | ⬜ open | — |
-| 2.5 | Preview evidence stops expiring for unrelated reasons | ⬜ open | — |
-| 2.6 | Large-table migrations are caught before production | ⬜ open | — |
-| 2.7 | Migration version ordering decided and made true | ⬜ open | — |
-| 2.8 | Fix the temp-folder cleanup flake and the unbounded jobs | ⬜ open | — |
-| 2.9 | Retire dead shared-db workflows | ⬜ open | — |
-| 2.10 | Reconcile open ledger drift alarm #4540 | ⬜ open | — |
-| 3.1 | Runner labels checked against what exists | ⬜ open | — |
-| 3.2 | Slow or dead Windows hosts leave the pool automatically | ⬜ open | — |
+| 1.1 | `merge-group-evidence` stops reporting an unfinished run as failure | ✅ done | PR #2388; `--accept-pending` reports an unfinished run as "evidence pending" (job summary + exit 0), finished-failed and mismatched stay red, direct callers keep the fail-closed exit codes; 67 evidence tests pass (5 new) and 39 closure tests pass. Live proof satisfied 2026-11-05 (tracker comment) |
+| 1.2 | Repair the tests failing today on Linux | ✅ done | PR #2392; executable bit and .cmd launcher for `bin/ai-transcripts-to-dropbox-hetz`, cleanup trap in `bin/ai-transcript-upload`, and the `test-ai-transcript-query` machine-state assertions updated for #2358 (none deleted). Five consecutive green merge-queue Linux shards satisfied 2026-11-05 (tracker comment) |
+| 1.3 | New suites register themselves | ✅ done | PR #2393 + PR #2397 (commits `1d371a1c`, `2f1a7127`); the loader discovers `tests/test-*.{sh,ps1}` and synthesizes an entry for each suite with no JSON; the hand-maintained `path_suites` map is gone; 22 loader tests pass (5 new) |
+| 1.4 | A real test failure after merge gets an owner automatically | ✅ done | PR #2399 (`bad96f82`); merge-group failures with a `result` taxonomy open/update one `ci-red` issue per failing test and close it after later green runs; capacity failures produce none |
+| 1.5 | `review-fixer` stops running on every push and branch delete | ✅ done | PR #2402 (`49061d38`) + callers in shared-db (`9cb5b070`), theoracle (`ae6852d9`), popdam3 (`cc8cef61`); retirement runs on the two-hourly schedule and finding-closed events |
+| 1.6 | Advisory shared-db gates stop saying REFUSED for things they do not stop | ✅ done | shared-db PR #5694 (`4b9da311`); advisory gates say "advisory: would have ..."; the Cross-PR object collision job is retired |
+| 2.1 | Paperwork refusals removed from post-merge rehearsal and promotion | ✅ done | shared-db PR #5738 (`aebec3ba`) + PR #5871 (`74dc1245`); a merged migration whose PR closes no issue promotes on the PR alone |
+| 2.2 | Promotion trigger reports expected holds as success | ✅ done | shared-db PR #5753 (`b61e76ab`); holds, waits, used-up attempts and acknowledged history exit 0 with the reason in the summary |
+| 2.3 | A change out of promotion attempts gets an owner | ✅ done | shared-db PR #5770 (merged 2026-11-05); exhausted attempts open one owned issue with the merged-not-live duration; later independent changes promote past a failed one |
+| 2.4 | Post-apply catalog check stops marking good applies red | ✅ done | shared-db PR #5786; catalog change-type tracking reports "applied, not verifiable by catalog" as success with a note; a wrong object still goes red |
+| 2.5 | Preview evidence stops expiring for unrelated reasons | ✅ done | shared-db PR #5833 (`8f9ea126`); evidence survives unrelated workflow edits; changed migration bytes, apply tool or the apply workflow still void it |
+| 2.6 | Large-table migrations are caught before production | ✅ done | shared-db PR #5840 (`f4f60c70`); large-table preflight in both apply lanes; bounded atomic statement timeout; atomic policy parity on both targets |
+| 2.7 | Migration version ordering decided and made true | ✅ done | shared-db PR #5847 (`90486a1e`); crossed versions land in merge order, duplicate versions refuse; guard, advisory gate and promotion share one rule |
+| 2.8 | Fix the temp-folder cleanup flake and the unbounded jobs | ✅ done | shared-db PR #5853; 149 test cleanups retry the ENOTEMPTY class; every job has a budget |
+| 2.9 | Retire dead shared-db workflows | ✅ done (record-only) | Dependency check proved nothing is deletable from shared-db alone (observation workflows have active designflow-backend consumers; the lane-policy test surface pins author-lane-abandonment-audit). Disposition table: https://github.com/popcre/ai-devops/issues/2367#issuecomment-6679391844 |
+| 2.10 | Reconcile open ledger drift alarm #4540 | 🟡 in flight | Alarm is real: ~10 merged migrations (2026-10-12→10-28) predate the automatic queue's activation and are invisible to the selector. Drain running through the sanctioned lanes; shared-db PR #5884 (`72d8bcf6`) lets the production gate accept the index-maintenance era's 8-job preview evidence. `20261013174336` stays flagged and undrained pending its own reviewed disposition. Alarm closes only on a live clean ledger read |
+| 3.1 | Runner labels checked against what exists | ✅ done | PR #2425; `tools/ci/check-runner-labels.mjs` + weekly `runner-label-scan.yml` + fixture test; live scan of 171 workflows clean |
+| 3.2 | Slow or dead Windows hosts leave the pool automatically | 🟡 PR open | PR #2438; `ai-runner-pool-watch health` pauses a host with a never-started job or two section timeouts (`ai-devops-windows-paused`, work label recorded as `was-<label>`), restores it only after a passing `windows-host-canary.yml` run; the router never counts a paused host so sections fall back to hosted Windows. Dead-host fixtures pass (plan's simulated gate) |
 | 3.3 | Billing lock detected and named; cause established | ⬜ open | — |
-| 3.4 | Registry and API limits stop failing checks | ⬜ open | — |
-| 3.5 | Required-check lists protected from silent reversal | ⬜ open | — |
-| 4.1 | Deploys prove the live version | ⬜ open | — |
+| 3.4 | Registry and API limits stop failing checks | ✅ done (verified, no code change) | Mirror in place since #3451; shared transport already does bounded retry; measured busiest hour 393 runs (vs ~950 incident level). Evidence in the tracker comment linked from 2.9 |
+| 3.5 | Required-check lists protected from silent reversal | ✅ done | PR #2427; `config/required-checks-expected.json` + daily `required-list-drift.yml` + `tools/ci/check-required-lists.mjs` (`--apply` restores exactly the ruling list) |
+| 4.1 | Deploys prove the live version | ✅ done | popdam3 `6d75ec71`, popcrm-web `f9fc0987`, synology-monitor `819ff4f4`, theoracle `113b2361`, shared skill `6249cdd8`, poppim-web PR #24 (`0eb3de6`) + deploy proof fix `648b4e4`; each deploy compares the live version with the merged commit and fails on mismatch |
 | 4.2 | Swallowed failures removed from app workflows | ⬜ open | — |
 | 4.3 | Scheduled workflow failures reach an owner | ⬜ open | — |
 | 5.1 | Waiter names the reason for a stall | ⬜ open | — |
