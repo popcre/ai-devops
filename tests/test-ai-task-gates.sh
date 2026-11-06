@@ -2184,6 +2184,37 @@ PY
 git -C "$WF" add .ai-devops/application-workflow-target.json
 git -C "$WF" commit -qm 'declare refused earlier repair purpose for identity epoch'
 check 'identity join continuation refuses earlier repair purpose' "rc 3 '$WF' check $WF_ARGS"
+# Private routing has no admission before its one actual origin is bound.
+python3 - "$ROOT" "$WF" "$TMP/wf-private-expected" <<'PY_PRIVATE'
+import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+path = pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json')
+value = json.loads(path.read_text()); origin = mod.PRIVATE_RUNTIME_ORIGIN or 'https://unbound-synthetic.run.app'
+value.update(schema_version=10, scope='hts-frozen-r9-private-immutable-runtime-continuation',
+    tool_source=value['source_head'], api_origin=origin, service=mod.PRIVATE_RUNTIME_SERVICE,
+    served_revision=mod.PRIVATE_RUNTIME_SERVICE+'-00001-synthetic', served_digest='sha256:'+'a'*64,
+    auth_routes=[{'method':'POST','path':'/findUserLoginInfo'}], auth_limits={'max_application_refreshes':8})
+value['operational_continuation'].update(original_schema_version=8,purpose='private-immutable-runtime-isolation')
+value['private_runtime']={'proof_sha256':'a'*64,'semantic_proof_sha256':'b'*64,
+    'server_source':value['served_source'],'server_digest':value['served_digest'],
+    'project_id':'lithe-breaker-323913','region':'us-east4','service_name':mod.PRIVATE_RUNTIME_SERVICE,
+    'origin':origin,'queue_name':'hts-r9-01a1ab99','lane':'r9-01a1ab99',
+    'actor_sha256':'c'*64,'process_role':'isolated-hts'}
+path.write_text(json.dumps(value));pathlib.Path(sys.argv[3]).write_text('0' if mod.PRIVATE_RUNTIME_ORIGIN else '3')
+PY_PRIVATE
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare synthetic closed private runtime shape'
+check 'private immutable routing honors exact origin binding availability' "rc $(cat "$TMP/wf-private-expected") '$WF' check $WF_ARGS"
+check 'private immutable routing never admits SQL' "rc 3 '$WF' check --before database"
+python3 - "$WF" <<'PY_PRIVATE'
+import json,pathlib,sys
+path=pathlib.Path(sys.argv[1]+'/.ai-devops/application-workflow-target.json'); value=json.loads(path.read_text())
+value['operational_continuation']['original_schema_version']=10;path.write_text(json.dumps(value))
+PY_PRIVATE
+git -C "$WF" add .ai-devops/application-workflow-target.json
+git -C "$WF" commit -qm 'declare refused fifth routing epoch'
+check 'private immutable routing refuses fifth epoch' "rc 3 '$WF' check $WF_ARGS"
 # Separate zero-provider metadata closeout. This never renews an evaluation epoch.
 for scenario in inspect evaluation-mark synthetic-roundtrip; do
 python3 - "$ROOT" "$WF" "$scenario" <<'PY_METADATA'
