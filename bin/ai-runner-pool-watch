@@ -190,13 +190,20 @@ health_canary_dispatch(){
     printf '%s health: report-only would dispatch %s for %s\n' "$(stamp)" "$CANARY_WORKFLOW" "$2" >> "$LOG"
     return 0
   fi
-  local run_id now
-  "$GH" workflow run "$CANARY_WORKFLOW" --repo "$REPO" -f "host_label=$2" >/dev/null 2>&1 || return 1
-  sleep "${AI_RUNNER_POOL_WATCH_SETTLE:-15}"
-  run_id="$("$GH" run list --repo "$REPO" --workflow "$CANARY_WORKFLOW" --limit 1 --json databaseId 2>/dev/null \
-    | jq -r '.[0].databaseId // empty')"
-  [ -n "$run_id" ] && [ "$run_id" != "null" ] || return 1
+  local run_id now dispatched_at attempt
+  dispatched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   now="$(date -u +%s)"
+  "$GH" workflow run "$CANARY_WORKFLOW" --repo "$REPO" -f "host_label=$2" >/dev/null 2>&1 || return 1
+  run_id=""
+  for attempt in 1 2 3 4; do
+    sleep "${AI_RUNNER_POOL_WATCH_SETTLE:-15}"
+    run_id="$("$GH" run list --repo "$REPO" --workflow "$CANARY_WORKFLOW" --event workflow_dispatch --limit 100 --json databaseId,displayTitle,createdAt 2>/dev/null \
+      | jq -r --arg title "canary $2" --arg since "$dispatched_at" '
+        [.[] | select(.displayTitle == $title and .createdAt >= $since)]
+        | sort_by(.createdAt, .databaseId) | first | .databaseId // empty')" || run_id=""
+    [ -z "$run_id" ] || break
+  done
+  [ -n "$run_id" ] && [ "$run_id" != "null" ] || return 1
   printf '{"run_id": "%s", "dispatched_at": %s}\n' "$run_id" "$now" > "$(health_canary_state "$1")"
   note "canary $2 dispatched as run $run_id"
   printf '%s health: canary dispatched host=%s run=%s\n' "$(stamp)" "$1" "$run_id" >> "$LOG"
@@ -253,6 +260,16 @@ cmd_health(){
     custom="$(health_custom_labels "$roster" "$host")"
     restored_work="$(printf '%s' "$custom" | jq -r '[.[] | select(startswith("was-")) | ltrimstr("was-")] | first // empty')"
     canary_label="$CANARY_PREFIX$(printf '%s' "$host" | lower)"
+    if [ -z "$restored_work" ] || ! printf '%s' "$custom" | jq -e --arg c "$canary_label" 'index($c) != null' >/dev/null; then
+      work="$(health_work_label "$custom")"
+      [ -n "$restored_work" ] || restored_work="$work"
+      if [ -z "$restored_work" ]; then
+        printf '%s health: %s paused without a known work label; cannot adopt or dispatch canary\n' "$(stamp)" "$host" >> "$LOG"
+        continue
+      fi
+      custom="$(health_pause_labels "$custom" "$restored_work" "$host")"
+      health_set_labels "$rid" "$custom" || continue
+    fi
     state="$(health_canary_state "$host")"
     if [ -f "$state" ]; then
       run_id="$(jq -r '.run_id // empty' "$state" 2>/dev/null)"

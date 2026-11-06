@@ -96,8 +96,16 @@ case "$*" in
     echo '{"ok":true}' ;;
   *"workflows/verify.yml/runs"*) cat "$RUNS_FILE" ;;
   *"actions/runs/"*"/jobs"*) cat "$JOBS_FILE" ;;
-  *"workflow run windows-host-canary.yml"*) echo '' ;;
-  *"run list"*) cat "$RUN_LIST_JSON" ;;
+  *"workflow run windows-host-canary.yml"*)
+    if [ "${CANARY_AUTO_FIXTURE:-1}" = 1 ]; then
+      jq -n --arg title "canary ${*: -1}" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '[{databaseId:777,displayTitle:($title | sub("host_label="; "")),createdAt:$created}]' > "$RUN_LIST_JSON"
+    fi ;;
+  *"run list"*)
+    cat "$RUN_LIST_JSON"
+    if [ -n "${CANARY_NEXT_FIXTURE:-}" ]; then
+      cp "$CANARY_NEXT_FIXTURE" "$RUN_LIST_JSON"
+    fi ;;
   *"run view"*) cat "$RUN_VIEW_JSON" ;;
   *"actions/runners --paginate"*) cat "$ROSTER_FILE" ;;
   *"actions/runners"*) echo '{"runners":[]}' ;;
@@ -171,6 +179,42 @@ check 'a paused host with no canary gets one dispatched' "AI_RUNNER_POOL_WATCH_S
 check 'the canary dispatch names the per-host label' \
   "grep -q 'workflow run windows-host-canary.yml --repo popcre/ai-devops -f host_label=canary-win-new' '$CALL_LOG'"
 check 'the canary run id is recorded' "grep -q '\"run_id\": \"777\"' '$TMP/home/canary-win-new.json'"
+
+reset_calls
+export CANARY_AUTO_FIXTURE=0
+cat > "$RUN_LIST_JSON" <<'EOF'
+[{"databaseId":666,"displayTitle":"canary canary-win-new","createdAt":"2020-01-01T00:00:00Z"},
+ {"databaseId":888,"displayTitle":"canary canary-other","createdAt":"2099-01-01T00:00:00Z"}]
+EOF
+check 'stale and foreign runs are rejected' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health"
+check 'no unrelated run is saved' "[ ! -f '$TMP/home/canary-win-new.json' ]"
+check 'discovery retries are bounded' "[ \$(grep -c 'run list' '$CALL_LOG') -eq 4 ]"
+reset_calls
+jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '[{databaseId:888,displayTitle:"canary canary-other",createdAt:$created},
+    {databaseId:999,displayTitle:"canary canary-win-new",createdAt:$created},
+    {databaseId:666,displayTitle:"canary canary-win-new",createdAt:"2020-01-01T00:00:00Z"}]' > "$TMP/next-list.json"
+export CANARY_NEXT_FIXTURE="$TMP/next-list.json"
+check 'delayed matching run is discovered' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health"
+check 'only the fresh matching run is saved' "jq -e '.run_id == \"999\"' '$TMP/home/canary-win-new.json'"
+check 'discovery stops after finding the match' "[ \$(grep -c 'run list' '$CALL_LOG') -eq 2 ]"
+unset CANARY_NEXT_FIXTURE
+export CANARY_AUTO_FIXTURE=1
+
+reset_calls
+host_roster win-manual 11 '["ai-devops-windows-paused","ai-devops-windows-section"]'
+check 'manual pause is adopted before dispatch' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health"
+check 'adoption records work and canary labels' \
+  "jq -e '.labels == [\"ai-devops-windows-paused\",\"was-ai-devops-windows-section\",\"canary-win-manual\"]' '$PUT_BODY'"
+check 'adopted host gets a canary' "[ -f '$TMP/home/canary-win-manual.json' ]"
+host_roster win-manual 11 '["ai-devops-windows-paused","was-ai-devops-windows-section","canary-win-manual"]'
+check 'adopted host restores after passing' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health"
+check 'adopted host restores original work' "jq -e '.labels == [\"ai-devops-windows-section\"]' '$PUT_BODY'"
+
+reset_calls
+host_roster win-unknown 12 '["ai-devops-windows-paused"]'
+check 'unknown manual pause is safely left alone' "AI_RUNNER_POOL_WATCH_SETTLE=0 bash $SCRIPT health"
+check 'unknown work label causes no dispatch or write' "! grep -Eq 'workflow run|api -X PUT' '$CALL_LOG'"
 
 reset_calls
 host_roster win-bad 5 '["ai-devops-windows","ai-devops-windows-qualified"]'
