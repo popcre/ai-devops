@@ -49,7 +49,7 @@ Resume the repair per the [2026-11-06 MiMo handoff](https://github.com/popcre/ai
 ## 5. Root causes and key findings
 
 - The pre-activation backlog is fully dispositioned; the drain pattern (driver v11/v12 shape, `C:\Users\ahazan\AppData\Local\Temp\drain-backlog*.py`) remains reusable: serial lane, re-dispatch on main-moved, poll the ledger not the run.
-- Production pooler read: `aws-1-us-east-1.pooler.supabase.com:6543`, user `postgres.qsllyeztdwjgirsysgai` (tenant-qualified user is REQUIRED — bare `postgres` gives ENOIDENTIFIER); preview is `aws-0...:6543`. Secret: 1Password `vibe_coding` item `246sf23gymd64yudpmhswcnyle` (`password` field).
+- Production pooler read: host `aws-1-us-east-1.pooler.supabase.com:6543` with the tenant-qualified user (`postgres.<production-ref>` — the ref is the production project id named in the shared-db runbook; bare `postgres` gives ENOIDENTIFIER); preview is the `aws-0` pooler on the same port. Secret: 1Password vault `vibe_coding`, the production shared-DB item (its title names the project; use the `password` field).
 - False "billing lock" labels came from the v5 prompt's example header (67 segments, findings_00 warning 1); v6 stops minting them.
 - edge-dev-win's never-started signals trace to SYSTEM PATH lacking `Git\bin` — likely the root cause 3.2's watchdog was built to detect.
 
