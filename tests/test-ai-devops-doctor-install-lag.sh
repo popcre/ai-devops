@@ -7,7 +7,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # A tiny repo whose origin/main advances three commits past the install point.
+# CI runners have no global git identity; the fixture must carry its own.
 git init -q "$TMP/repo"
+git -C "$TMP/repo" config user.email fixture@example.invalid
+git -C "$TMP/repo" config user.name fixture
 git -C "$TMP/repo" commit -q --allow-empty -m one
 installed_sha="$(git -C "$TMP/repo" rev-parse HEAD)"
 git -C "$TMP/repo" commit -q --allow-empty -m two
