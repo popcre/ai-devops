@@ -66,7 +66,7 @@ class ScaleDownError(Exception):
         self.status = status
 
 
-DEFAULT_PROMPT = "v5"
+DEFAULT_PROMPT = "v6"
 
 
 def load_prompt(version: str = DEFAULT_PROMPT) -> str:
