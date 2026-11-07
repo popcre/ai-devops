@@ -8,6 +8,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # A tiny repo whose origin/main advances three commits past the install point.
 git init -q "$TMP/repo"
+git -C "$TMP/repo" config user.name 'Test User'
+git -C "$TMP/repo" config user.email 'test@example.com'
 git -C "$TMP/repo" commit -q --allow-empty -m one
 installed_sha="$(git -C "$TMP/repo" rev-parse HEAD)"
 git -C "$TMP/repo" commit -q --allow-empty -m two
@@ -35,7 +37,15 @@ case "$out" in
   *FAIL*) echo 'FAIL: lag report must never fail' >&2; exit 1 ;;
 esac
 
-# Up-to-date case: shims at main.
+# Windows has only CRLF shims, without an Ubuntu manifest.
+rm "$TMP/manifest.tsv"
+out="$(report_install_lag "$TMP/repo" "$TMP/bin" "$TMP/manifest.tsv" 2>&1)"
+case "$out" in
+  *"are 2 commits behind origin/main ${main_sha:0:10}"*) ;;
+  *) echo 'FAIL: expected lag from CRLF shims alone' >&2; exit 1 ;;
+esac
+
+# Up-to-date case: shims at main, still without a manifest.
 printf '@echo off\r\nrem source-sha=%s\r\n' "$main_sha" > "$TMP/bin/ai-task-gates.cmd"
 printf '@echo off\r\nrem source-sha=%s\r\n' "$main_sha" > "$TMP/bin/ai-pr-wait.cmd"
 out="$(report_install_lag "$TMP/repo" "$TMP/bin" "$TMP/manifest.tsv" 2>&1)"
@@ -52,8 +62,33 @@ printf '@echo off\r\nrem source-sha=%s\r\n' "$other_sha" > "$TMP/bin/ai-pr-wait.
 printf 'meta\tsource_sha\t%s\t-\n' "$other_sha" > "$TMP/manifest.tsv"
 out="$(report_install_lag "$TMP/repo" "$TMP/bin" "$TMP/manifest.tsv" 2>&1)"
 case "$out" in
-  *"ahead of or off origin/main history"*) ;;
-  *) echo 'FAIL: expected the ahead-or-off-main warning' >&2; exit 1 ;;
+  *"are 1 commits ahead of origin/main"*) ;;
+  *) echo 'FAIL: expected the ahead-of-main warning' >&2; exit 1 ;;
 esac
 
-echo 'PASS: install lag reported for behind, current and diverged installs'
+# Diverged install: one unique commit branching from the install point.
+other_sha="$(git -C "$TMP/repo" commit-tree "$(git -C "$TMP/repo" rev-parse main^{tree})" -p "$installed_sha" -m diverged)"
+mkdir -p "$TMP/empty-bin"
+printf 'meta\tsource_sha\t%s\t-\n' "$other_sha" > "$TMP/manifest.tsv"
+out="$(report_install_lag "$TMP/repo" "$TMP/empty-bin" "$TMP/manifest.tsv" 2>&1)"
+case "$out" in
+  *"have diverged from origin/main (2 commits behind, 1 commits ahead)"*) ;;
+  *) echo 'FAIL: expected divergence from manifest alone' >&2; exit 1 ;;
+esac
+
+printf 'meta\tsource_sha\t%s\t-\n' '1111111111111111111111111111111111111111' > "$TMP/manifest.tsv"
+out="$(report_install_lag "$TMP/repo" "$TMP/empty-bin" "$TMP/manifest.tsv" 2>&1)"
+case "$out" in
+  *"install lag unknown: installed SHA 1111111111 is unavailable"*) ;;
+  *) echo 'FAIL: expected unknown lag for an unavailable SHA' >&2; exit 1 ;;
+esac
+
+out="$(report_install_lag "$TMP/missing-repo" "$TMP/bin" "$TMP/manifest.tsv" 2>&1)"
+case "$out" in
+  *fatal:*) echo 'FAIL: missing repository must not print Git errors' >&2; exit 1 ;;
+  *"install lag unknown: no origin/main"*) ;;
+  *) echo 'FAIL: expected missing-repository warning' >&2; exit 1 ;;
+esac
+[ "$FAILED" -eq 0 ] || { echo 'FAIL: lag must remain report-only' >&2; exit 1; }
+
+echo 'PASS: install lag reported for CRLF shims, manifests, behind, current, ahead, diverged and unknown installs'

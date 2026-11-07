@@ -81,7 +81,7 @@ installed_shas() {
   {
     for shim in "${shim_dir:-$HOME/.local/bin}"/*.cmd; do
       [ -f "$shim" ] || continue
-      sed -n 's/^rem source-sha=\([0-9a-f]\{40\}\)$/\1/p' "$shim"
+      tr -d '\r' < "$shim" | sed -n 's/^rem source-sha=\([0-9a-f]\{40\}\)$/\1/p'
     done
     [ -n "$manifest" ] || manifest="${AI_DEVOPS_ETC:-/etc/ai-devops}/install-manifest.tsv"
     [ -f "$manifest" ] && awk -F '\t' '$1=="meta"&&$2=="source_sha"{print $3}' "$manifest"
@@ -90,8 +90,8 @@ installed_shas() {
 
 # $1 repo (default $AI_DEVOPS_HOME); pass-through $2/$3 to installed_shas.
 report_install_lag() {
-  local repo="${1:-$AI_DEVOPS_HOME}" sha main behind
-  main="$(git -C "$repo" rev-parse --verify -q origin/main^{commit} || echo unknown)"
+  local repo="${1:-$AI_DEVOPS_HOME}" sha main behind ahead
+  main="$(git -C "$repo" rev-parse --verify -q origin/main^{commit} 2>/dev/null || echo unknown)"
   if [ "$main" = unknown ]; then
     c_warn "install lag unknown: no origin/main in $repo (fetch it or set AI_DEVOPS_HOME)"
     return 0
@@ -102,11 +102,18 @@ report_install_lag() {
       c_ok "installed tools at ${sha:0:10} = origin/main (up to date)"
       continue
     fi
+    if ! git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null; then
+      c_warn "install lag unknown: installed SHA ${sha:0:10} is unavailable in the local repository"
+      continue
+    fi
     behind="$(git -C "$repo" rev-list --count "$sha..$main" 2>/dev/null || echo '?')"
-    if [ "$behind" = '?' ] || [ "$behind" -eq 0 ]; then
-      # 0 or unknown means main is not ahead of this SHA: ahead of main or off
-      # its history (branch install). Name that instead of "current".
-      c_warn "installed tools at ${sha:0:10} are ahead of or off origin/main history"
+    ahead="$(git -C "$repo" rev-list --count "$main..$sha" 2>/dev/null || echo '?')"
+    if [ "$behind" = '?' ] || [ "$ahead" = '?' ]; then
+      c_warn "install lag unknown: cannot compare installed SHA ${sha:0:10} with origin/main"
+    elif [ "$behind" -eq 0 ]; then
+      c_warn "installed tools at ${sha:0:10} are $ahead commits ahead of origin/main"
+    elif [ "$ahead" -gt 0 ]; then
+      c_warn "installed tools at ${sha:0:10} have diverged from origin/main ($behind commits behind, $ahead commits ahead)"
     else
       c_warn "installed tools at ${sha:0:10} are $behind commits behind origin/main ${main:0:10}"
     fi
