@@ -81,6 +81,7 @@
       ],
       "bin/ai-devops*": [
         "test-ai-devops-doctor-codex-probe.sh",
+        "test-ai-devops-doctor-install-lag.sh",
         "test-ai-devops-doctor-install-state.sh"
       ],
       "bin/ai-machine-tools-doctor*": [
