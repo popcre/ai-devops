@@ -45,6 +45,8 @@ POSITIVES = {
     "op-ref": "op" + "://vault/item/field",
     "bearer": "Bearer " + "t" * 20,
     "key-value": "password=" + "p" * 14,
+    "authorization-header": "-H \"Authorization: " + "a" * 20 + "\"",
+    "vendor-key": "erp_key: " + "k" * 16,
 }
 NEAR_MISSES = {
     "anthropic": "sk-" + "ant-short",
@@ -59,6 +61,8 @@ NEAR_MISSES = {
     "op-ref": "op" + ":/not-a-ref",
     "bearer": "bearer tok",
     "key-value": "password=" + "short",
+    "authorization-header": "Authorization: short",
+    "vendor-key": "erp-key: short",
 }
 
 
