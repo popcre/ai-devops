@@ -72,6 +72,47 @@ check_file() {
   fi
 }
 
+# Step 5.2 (plan_ci-process-repair.md): report how far the INSTALLED tools lag
+# behind main. Report only — this never installs, updates or fails the doctor;
+# lag between installs is expected and the number is the whole point.
+# $1 shim dir (default ~/.local/bin), $2 manifest file (default $AI_DEVOPS_ETC/install-manifest.tsv).
+installed_shas() {
+  local shim_dir="${1:-}" manifest="${2:-}" shim
+  {
+    for shim in "${shim_dir:-$HOME/.local/bin}"/*.cmd; do
+      [ -f "$shim" ] || continue
+      sed -n 's/^rem source-sha=\([0-9a-f]\{40\}\)$/\1/p' "$shim"
+    done
+    [ -n "$manifest" ] || manifest="${AI_DEVOPS_ETC:-/etc/ai-devops}/install-manifest.tsv"
+    [ -f "$manifest" ] && awk -F '\t' '$1=="meta"&&$2=="source_sha"{print $3}' "$manifest"
+  } | LC_ALL=C sort -u
+}
+
+# $1 repo (default $AI_DEVOPS_HOME); pass-through $2/$3 to installed_shas.
+report_install_lag() {
+  local repo="${1:-$AI_DEVOPS_HOME}" sha main behind
+  main="$(git -C "$repo" rev-parse --verify -q origin/main^{commit} || echo unknown)"
+  if [ "$main" = unknown ]; then
+    c_warn "install lag unknown: no origin/main in $repo (fetch it or set AI_DEVOPS_HOME)"
+    return 0
+  fi
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    if [ "$sha" = "$main" ]; then
+      c_ok "installed tools at ${sha:0:10} = origin/main (up to date)"
+      continue
+    fi
+    behind="$(git -C "$repo" rev-list --count "$sha..$main" 2>/dev/null || echo '?')"
+    if [ "$behind" = '?' ] || [ "$behind" -eq 0 ]; then
+      # 0 or unknown means main is not ahead of this SHA: ahead of main or off
+      # its history (branch install). Name that instead of "current".
+      c_warn "installed tools at ${sha:0:10} are ahead of or off origin/main history"
+    else
+      c_warn "installed tools at ${sha:0:10} are $behind commits behind origin/main ${main:0:10}"
+    fi
+  done < <(installed_shas "${2:-}" "${3:-}")
+}
+
 check_install_state() {
   local current installed schema="" manifest_schema expected_schema="" type path source expected actual drift=0
   current="$(git -C "$AI_DEVOPS_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -410,6 +451,9 @@ cmd_doctor() {
   check_file "$MODELS_ENV" "models.env" req
   check_file "$SERVER_ENV" "server.env" req
   check_install_state
+
+  c_head "Install lag (report only)"
+  report_install_lag
 
   c_head "Claude closeout hook"
   # Without the Stop hook, ending a session on waiting language never forces an
