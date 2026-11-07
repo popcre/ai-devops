@@ -187,7 +187,11 @@ cd /worksp/ai-devops
    `uninstall.sh` and a failed install's rollback remove the timer.
 10. Records exact source, config, owned symlinks, config files, managed
     skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
-11. Runs `ai-devops doctor`.
+11. Runs `ai-devops doctor`. Its **Install lag** section reports how far the
+    installed tools sit behind `origin/main` (from the manifest on Ubuntu and
+    the `source-sha` receipts in the Windows `.cmd` shims). It reports only —
+    installing stays a deliberate act; a closeout reads this before calling a
+    toolkit change live (#2367 step 5.2).
 
 Recovery-critical WinGet, npm/MCP, and model versions are governed by
 `config/tool-versions.json`. The install and Windows bootstrap paths use those

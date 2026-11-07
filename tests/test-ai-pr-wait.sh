@@ -769,9 +769,9 @@ check "a billing-lock failure names the outside stop and the owner-only fix" \
 # window surface the named queue-stall reason while the wait continues.
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
-n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
-n=$((n + 1)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
-printf '%s\n' "$n"
+# Deterministic: time advances 100s per STATUS call, whatever the call rate.
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+printf '%s\n' "$((1000 + count * 100))"
 EOF
 chmod +x "$TMP/bin/date"
 cat > "$TMP/bin/gh" <<'EOF'
@@ -792,7 +792,7 @@ printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid"
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
-OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qstall-clock" AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 5 --interval 1 2>&1)"; RC=$?
+OUT="$(AI_PR_WAIT_QUEUE_WARN_SECONDS=2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/qstall-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qstall-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 10 --interval 1 2>&1)"; RC=$?
 printf 'qstall fixture diagnostics: rc=%s warn=%s norunner=%s merged=%s\n' "$RC" \
   "$(printf '%s' "$OUT" | grep -c 'queued too long')" \
   "$(printf '%s' "$OUT" | grep -c 'no runner')" \
@@ -818,13 +818,14 @@ EOF
 chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
-n="$(cat "${AI_PR_WAIT_TEST_CLOCK:?}" 2>/dev/null || printf 1000)"
-n=$((n + 3)); printf '%s\n' "$n" > "$AI_PR_WAIT_TEST_CLOCK"
-printf '%s\n' "$n"
+# Deterministic: 100s per STATUS call; the first poll already passes the
+# 1-minute deadline, so the in-loop deadline report names the queue stall.
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+printf '%s\n' "$((1000 + count * 100))"
 EOF
 chmod +x "$TMP/bin/date"
 rm -f "$TMP/qdead-called" "$TMP/qdead-clock"
-OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_PR_WAIT_TEST_CLOCK="$TMP/qdead-clock" AI_GH_STATE_DIR="$TMP/qdead-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qdead-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/qdead-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/qdead-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 printf 'qdead fixture diagnostics: rc=%s stillqueued=%s norunner=%s\n' "$RC" \
   "$(printf '%s' "$OUT" | grep -c 'still queued at the deadline')" \
   "$(printf '%s' "$OUT" | grep -c 'no runner for a required label')" >&2
