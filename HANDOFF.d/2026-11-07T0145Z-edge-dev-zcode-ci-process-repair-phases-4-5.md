@@ -10,7 +10,7 @@ owner: zcode/ci-process-repair (edge-dev)
 
 **Blocking (one UAC click, platform-limited — Windows will not show an AI session's elevation prompt):**
 - DONE 2026-11-07 6:26 PM EST: Albert ran the desktop repair; PATH updated, runner restarted, canary run 42425615521 passed, labels restored — 3.2 fully closed (PR #2460, tracker comment 6714544504). Original item was: + UAC "Yes" on edge-dev. It adds `C:\Program Files\Git\bin` to the SYSTEM PATH (the runner service runs as NETWORK SERVICE and cannot find bash — the real cause of edge-dev-win's never-started signals) and restarts the runner service. Without it step 3.2's live canary round-trip cannot pass and edge-dev-win stays parked. Safe: idempotent, logs to `C:\Users\ahazan\AppData\Local\Temp\fix-runner-path.log`. Recommendation: click it any time; nothing else changes.
-- The October billing-lock cause read needs `gh auth refresh -h github.com -s admin:org` completed in a browser as u2giants (carried unchanged from the 2026-11-06 MiMo handoff §7). Recommendation: do it when convenient; it unblocks the 3.3 cause report only.
+- DONE 2026-11-08: Albert granted the scope; the cause is recorded (a $70/month Actions budget with prevent_further_usage on popcre — tracker comment 6725146141; STATUS ticked via PR #2463). The original item was completed in a browser as u2giants (carried unchanged from the 2026-11-06 MiMo handoff §7). Recommendation: do it when convenient; it unblocks the 3.3 cause report only.
 
 **Not part of this work and nobody is on it:** none new. The two claim-title fixes (shared-db #5662, #5652) are other sessions' claims; they were notified 2026-11-06 (~6:20 PM EST) and the abandonment audit stays red until they act or the claims close — by design, not a defect.
 
@@ -59,7 +59,7 @@ Resume the repair per the [2026-11-06 MiMo handoff](https://github.com/popcre/ai
 2. DONE 2026-11-07 — canary round-trip complete; skip this step. Original text was: (`fix-runner-path.log` exists and ends `done`): re-run `AI_RUNNER_POOL_WATCH_GH=gh AI_RUNNER_POOL_WATCH_SETTLE=5 bash bin/ai-runner-pool-watch health` from an ai-devops checkout; expect a green canary run and runner 26 labels back to `["edge-dev","ai-devops-windows"]`. That completes 3.2's live proof — tick the STATUS row.
 3. **Rebuild the transcript store with the new redaction** (5.3 verification): `python tools/transcript_store/build.py` from an ai-devops checkout on main (store root `~/Dropbox/ai/transcript-store`, ~10 min class). Verify: query the two segment ids from `reports/ci-findings-2026-11-04/findings_00.md` (f8c6c327…, 30d7b0f7…) — the shapes must now show `[REDACTED:*]`; never record the values. Add the false-label query note (flagging the 67 bogus "billing lock" subjects) in `reports/` while there. Done when a fresh read of those segments contains no token-shaped text.
 4. **6.1 acceptance**: phases 0–5 finish with 5.2; start the 7-day baseline window now (from 2026-11-07) per plan §Phase 6 and write `tests/verification/ci-process/acceptance-<date>.md` against §13's targets. Done when the 7-day re-measure passes or reopens its step.
-5. **3.3 second half** once the `admin:org` scope exists: read spending-limit/payment settings, record the October cause on #2367 (plan step 3.3 has the exact done-when).
+5. DONE 2026-11-08 — 3.3 closed; skip. Original text was: read spending-limit/payment settings, record the October cause on #2367 (plan step 3.3 has the exact done-when).
 
 ## 7. Constraints and gotchas
 
