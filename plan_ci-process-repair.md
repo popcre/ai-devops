@@ -36,7 +36,7 @@
 | 4.3 | Scheduled workflow failures reach an owner | 🟡 list done | Inventory of 29 scheduled workflows across six repos with reporting paths on #2367 (comment 6696252846). Today's two failing ones dispositioned: queue-hygiene was a correct alarm on a genuinely stuck queue (green since); author-lane-abandonment-audit fails closed BY DESIGN on claims #5662/#5652 (no work-issue reference in title — owners notified). Follow-up: wire red-run-only monitors through the 1.4 route |
 | 5.1 | Waiter names the reason for a stall | ✅ done | Prerequisite plan_issue-2095 landed (#2447). #2449 merged: `queued too long` warn window, `still queued at the deadline` names the two runner-stall causes, billing/capacity/review-step/failing-test named from #2444/#2447, cheat-sheet documents them all. One fixture per reason |
 | 5.2 | Merged-but-not-installed is visible | ⬜ open | — |
-| 5.3 | Transcript store: remove the false label, close redaction gaps | ⬜ open | — |
+| 5.3 | Transcript store: remove the false label, close redaction gaps | ✅ done | PR #2456 (two redaction patterns + v6 generic-example prompt, with tests); PR #2465 (reredact.py — re-applies patterns to PUBLISHED stored text; run 2026-11-08: 4 residual segments scrubbed into store-20261108T212129Z, whole-store residual scan 0); false-label note in the store's reports folder; verification on the tracker (comment 6727319257) |
 | 6.1 | 7-day live acceptance against the targets in section 13 | ⬜ open | — |
 
 **A fresh session starts at step 0.1.** Phases 1 to 5 can run in parallel after that, one session per phase. Re-read later phases before starting each one, because the existing owners below keep landing work.
