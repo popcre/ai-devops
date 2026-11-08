@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
-for t in test_transcript_normalize.py test_transcript_segment.py test_transcript_build.py test_transcript_mine.py test_transcript_zcode_export.py; do
+for t in test_transcript_normalize.py test_transcript_segment.py test_transcript_build.py test_transcript_reredact.py test_transcript_mine.py test_transcript_zcode_export.py; do
   python3 "$ROOT/tests/$t"
 done
 empty="$(mktemp -d)"
