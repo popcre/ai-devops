@@ -57,7 +57,7 @@ Resume the repair per the [2026-11-06 MiMo handoff](https://github.com/popcre/ai
 
 1. **Land 5.2**: PR #2453 is in the queue; verify `MERGED` (you'll know: `gh pr view 2453 --repo popcre/ai-devops --json state` = MERGED). If ejected again, requeue with `gh pr merge 2453 --merge`.
 2. DONE 2026-11-07 — canary round-trip complete; skip this step. Original text was: (`fix-runner-path.log` exists and ends `done`): re-run `AI_RUNNER_POOL_WATCH_GH=gh AI_RUNNER_POOL_WATCH_SETTLE=5 bash bin/ai-runner-pool-watch health` from an ai-devops checkout; expect a green canary run and runner 26 labels back to `["edge-dev","ai-devops-windows"]`. That completes 3.2's live proof — tick the STATUS row.
-3. **Rebuild the transcript store with the new redaction** (5.3 verification): `python tools/transcript_store/build.py` from an ai-devops checkout on main (store root `~/Dropbox/ai/transcript-store`, ~10 min class). Verify: query the two segment ids from `reports/ci-findings-2026-11-04/findings_00.md` (f8c6c327…, 30d7b0f7…) — the shapes must now show `[REDACTED:*]`; never record the values. Add the false-label query note (flagging the 67 bogus "billing lock" subjects) in `reports/` while there. Done when a fresh read of those segments contains no token-shaped text.
+3. DONE 2026-11-08 — store scrubbed and verified via reredact.py (PR #2465; whole-store residual scan 0; false-label note written; STATUS ticked #2467; tracker comment 6727319257). Skip. Original text was (5.3 verification): `python tools/transcript_store/build.py` from an ai-devops checkout on main (store root `~/Dropbox/ai/transcript-store`, ~10 min class). Verify: query the two segment ids from `reports/ci-findings-2026-11-04/findings_00.md` (f8c6c327…, 30d7b0f7…) — the shapes must now show `[REDACTED:*]`; never record the values. Add the false-label query note (flagging the 67 bogus "billing lock" subjects) in `reports/` while there. Done when a fresh read of those segments contains no token-shaped text.
 4. **6.1 acceptance**: phases 0–5 finish with 5.2; start the 7-day baseline window now (from 2026-11-07) per plan §Phase 6 and write `tests/verification/ci-process/acceptance-<date>.md` against §13's targets. Done when the 7-day re-measure passes or reopens its step.
 5. DONE 2026-11-08 — 3.3 closed; skip. Original text was: read spending-limit/payment settings, record the October cause on #2367 (plan step 3.3 has the exact done-when).
 
@@ -84,3 +84,9 @@ gh authenticated (u2giants). 1Password CLI `op` works (vault `vibe_coding`; prod
 All four questions pass: a newcomer continues from §6's numbered steps with §4's dead ends and §5's pooler/quota-probe traps; §0 consolidates the two owner items (UAC click, admin:org) and the settled rulings; every artifact is a GitHub URL or an explicitly-local operational file (desktop script, logs) the successor on this machine needs.
 
 Posted by ZCode chat sess_892c98b3-eccc-4876-bf88-1a9f7a328321 on edge-dev
+
+## Closeout addendum 2026-11-08 (~6:10 PM EST)
+
+- The transcript-store subagent ran out of its weekly model quota mid-job (resets 2026-11-13); the session finished the work by hand (tool landed as #2465, run and verified). No subagent work remains outstanding.
+- A Nov 15 backstop automation to double-check the Nov 14 acceptance run could NOT be created: this chat already owns one scheduled task (platform limit, one per chat). If the Nov 14 run reports nothing, run the acceptance manually from this handoff's step 4.
+- The only remaining item is step 4 (6.1 acceptance, scheduled Nov 14 9:00 AM local). When it lands, retire this handoff file in the same PR that ticks 6.1.
