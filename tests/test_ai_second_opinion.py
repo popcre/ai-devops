@@ -4,6 +4,7 @@
 A fake OpenCode records its arguments and answers; no provider is contacted."""
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,13 @@ FAKE = textwrap.dedent("""\
         sys.exit(0)
     if mode == "doctor-timeout":
         time.sleep(10)
+    if mode == "need-models":
+        # Real OpenCode 1.18 with an empty cache uses its bundled catalogue and dies.
+        mp = os.environ.get("OPENCODE_MODELS_PATH", "")
+        cat = json.load(open(mp)) if mp and os.path.isfile(mp) else {}
+        if "glm-5.3" not in cat.get("zai-coding-plan", {}).get("models", {}):
+            print(json.dumps({"type": "error", "error": {"message": "ProviderModelNotFoundError: Model not found: zai-coding-plan/glm-5.3"}}))
+            sys.exit(1)
     if mode == "write":
         with open("NEW.txt", "w") as fh:
             fh.write("made by fake\\n")
@@ -78,7 +86,11 @@ class SecondOpinion(unittest.TestCase):
             fh.write("u\n")
         self.env = dict(os.environ, AI_REVIEW_SIMPLE_OPENCODE=fake, AI_REVIEW_SIMPLE_SECRETS_DIR=secrets,
                         AI_REVIEW_SIMPLE_FAKE_STATE=self.state, PYTHONDONTWRITEBYTECODE="1",
-                        AI_SECOND_OPINION_HOME=os.path.join(t, "so"))
+                        AI_SECOND_OPINION_HOME=os.path.join(t, "so"),
+                        AI_OPENCODE_MODELS_CACHE=os.path.join(t, "models-cache", "models.json"),
+                        AI_OPENCODE_MODELS_URL=pathlib.Path(t, "catalogue.json").as_uri())
+        with open(os.path.join(t, "catalogue.json"), "w") as fh:
+            json.dump({"zai-coding-plan": {"models": {"glm-5.3": {}}}}, fh)
         for k in ("AI_MUSE_KEY", "AI_STEPFUN_KEY", "ZAI_API_KEY"):
             self.env.pop(k, None)
 
@@ -112,6 +124,18 @@ class SecondOpinion(unittest.TestCase):
             self.assertEqual(fh.read(), "one\ntwo\n")  # uncommitted edit carried over
         self.assertTrue(os.path.exists(os.path.join(call["cwd"], "untracked.txt")))
         self.assertFalse(os.access(os.path.join(call["cwd"], "a.txt"), os.W_OK))
+
+    def test_fresh_tree_gets_current_model_catalogue(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("need-models")
+        r = self.run_tool("glm", "ask", "first run?")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.isfile(self.env["AI_OPENCODE_MODELS_CACHE"]))
+        # Offline afterwards: the shared copy still seeds the next fresh tree.
+        os.remove(os.path.join(self.tmp, "catalogue.json"))
+        os.utime(self.env["AI_OPENCODE_MODELS_CACHE"], (0, 0))
+        r = self.run_tool("glm", "ask", "offline run?")
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_named_session_continues(self):
         self.assertEqual(self.run_tool("muse", "new", "s1", "first").returncode, 0)

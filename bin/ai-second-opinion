@@ -242,6 +242,7 @@ def run_opencode(provider, sdir, meta, prompt):
               "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE"):
         if os.environ.get(n):
             env[n] = os.environ[n]
+    ars.seed_models(xdg, env)
     work = meta["work"]
     cmd = [oc, "run", "--agent", meta["agent"], "--auto", "--format", "json",
            "--model", spec["model"], "--dir", work]
