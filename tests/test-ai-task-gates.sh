@@ -1184,6 +1184,15 @@ check 'the protected stop does not claim an owner resource unlock' \
 check 'the protected stop says there is no reviewer-approval path' \
   "out '$TMP/lsd' check --before review --reviewer-approval \"\$(appr '$TMP/lsd' review)\" | grep -Fq 'no reviewer-approval'"
 rm -f "$TMP/lsd/warner-bros/assets.csv"
+# Declared private-evidence, tooling plus licensed rows: the refusal must name the
+# class that outranked the declaration (private-tooling), not the pinned one.
+( cd "$TMP/lsd" && "$GATES" start --class private-evidence ) >/dev/null
+printf 'id,name\n1,secret\n' > "$TMP/lsd/warner-bros/assets.csv"
+check 'a tooling escalation over private-evidence names private-tooling to re-declare' \
+  "out '$TMP/lsd' check --before ship | grep -Fq 'start --class private-tooling'"
+check 'and lists only the tooling file as the escalation' \
+  "! out '$TMP/lsd' check --before ship | grep -Fq 'assets.csv'"
+rm -f "$TMP/lsd/warner-bros/assets.csv" "$TMP/lsd/warner-bros/scripts/check-weekly-capture.mjs"
 
 printf 'reviewed private data writer release (#1239)\n'
 newrepo "$TMP/writer" u2giants/licensor-source-data

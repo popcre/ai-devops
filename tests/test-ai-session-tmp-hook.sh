@@ -14,8 +14,9 @@ root="$AI_SESSION_TMP_BASE/claude-$sid"; envf="$work/env"
 printf '%s' "$in" | CLAUDE_ENV_FILE="$envf" bash "$hook" start
 check "start creates the root" '[ -f "$root/owner.json" ]'
 check "start exports TMPDIR" 'grep -q "export TMPDIR=$root" "$envf"'
+check "start exports the session signature" '( . "$envf"; [ "$AI_GH_SIGNATURE" = "Posted by Claude chat $sid on $(hostname)" ] )'
 printf '%s' "$in" | CLAUDE_ENV_FILE="$envf" bash "$hook" start
-check "repeated start does not grow the env file" '[ "$(grep -c AI_SESSION_TMP_ROOT "$envf")" = 1 ]'
+check "repeated start does not grow the env file" '[ "$(grep -c AI_SESSION_TMP_ROOT "$envf")" = 1 ] && [ "$(grep -c AI_GH_SIGNATURE "$envf")" = 1 ]'
 
 # Crash then resume > 2 h later: owner.json names a dead pid with an old start.
 dead=999999; while [ -d "/proc/$dead" ]; do dead=$((dead - 1)); done

@@ -7,6 +7,21 @@
 # Never fails the session: every error exits 0.
 set -u
 
+mode="${1:-}"
+input="$(cat 2>/dev/null || true)"
+sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$sid" ] || exit 0
+
+# GitHub post signature (docs/standing-rules-details.md "GitHub signature").
+# The shell snippet computes it when the login shell is sourced, which can be
+# before Claude Code sets CLAUDE_CODE_SESSION_ID; export the real id here.
+if [ "$mode" = start ] && [ -n "${CLAUDE_ENV_FILE:-}" ] \
+   && ! grep -qF "AI_GH_SIGNATURE=" "$CLAUDE_ENV_FILE" 2>/dev/null; then
+  printf 'export CLAUDE_CODE_SESSION_ID=%q AI_GH_SIGNATURE=%q\n' "$sid" \
+    "Posted by Claude chat $sid on $(hostname 2>/dev/null || echo unknown)" \
+    >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+fi
+
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 lib="${AI_SESSION_TMP_LIB:-$here/../tools/lib/session-tmp.sh}"
 [ -f "$lib" ] || lib="$HOME/.config/ai-devops/session-tmp.sh"
@@ -14,11 +29,6 @@ lib="${AI_SESSION_TMP_LIB:-$here/../tools/lib/session-tmp.sh}"
 # shellcheck source=../tools/lib/session-tmp.sh
 . "$lib"
 ai_session_tmp_enabled || exit 0
-
-mode="${1:-}"
-input="$(cat 2>/dev/null || true)"
-sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-[ -n "$sid" ] || exit 0
 raw_sid="$sid"
 sid="$(ai_session_tmp_slug "$sid")"
 root="$(ai_session_tmp_base)/claude-$sid"
