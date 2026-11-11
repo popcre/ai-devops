@@ -45,11 +45,13 @@ designflow-bff, designflow-item-master, designflow-tracking, designflow-data-syn
 - Add unit tests for every function/feature you create.
 - Commit author: `Albert Hazan <u2giants@users.noreply.github.com>` (other
   emails fail GitHub's email-privacy check).
-- Read `AGENTS.md` (router) and the OPEN handoffs — list `HANDOFF.d/` and read
-  newest-first (each file = one open workstream); `HANDOFF.md` itself is just a
-  pointer in migrated repos, but read it as a full handoff if it is still the
-  legacy form (line 1 lacks `handoff-pointer: v1`). Do not bulk-load every
-  .md file.
+- Read `AGENTS.md` (router), then search or read `docs/INDEX.md` (generated from
+  document headers; open a document only when its summary matches the task),
+  then only the `HANDOFF.d/` files from the last 30 days plus any the index or
+  your issue points you to (each file = one open workstream). `HANDOFF.md`
+  itself is just a pointer in migrated repos, but read it as a full handoff if
+  it is still the legacy form (line 1 lacks `handoff-pointer: v1`). Do not
+  bulk-load every .md file, and search `shared-db/` only for database tasks.
 - dflow uses GCP Cloud SQL today (Supabase migration is planned, architecture
   stays Angular→BFF→Express→Sequelize). It is NOT on Supabase — don't assume.
 - Pushing the user branch auto-deploys via Google Cloud Build (GCP project
