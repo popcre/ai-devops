@@ -65,7 +65,7 @@ class Repo:
         if isinstance(content, bytes):
             path.write_bytes(content)
         else:
-            path.write_text(content, encoding="utf-8")
+            path.write_bytes(content.encode("utf-8"))  # exact bytes on every platform
 
     def commit(self, message: str = "change") -> None:
         self.git("add", "-A")
@@ -211,6 +211,7 @@ class DocHealthTests(unittest.TestCase):
         pointer = header(summary="Pointer: see the canonical copy.") + "[canonical](https://example.com)\n"
         for repo in (self.repo, sibling):
             repo.write("docs/shared.md", shared)
+            repo.write("HANDOFF.md", "handoff-pointer: v1\n" + "static pointer text " * 60)
             repo.write("docs/pointer.md", pointer)
             repo.fix_and_commit()
         self.assertEqual(self.faults(), [])

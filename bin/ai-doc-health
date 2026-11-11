@@ -413,7 +413,8 @@ def run(repo: Path, args: argparse.Namespace) -> tuple[list[tuple[str, str, str]
     if args.siblings:
         other = sibling_hashes(repo, args.siblings, config["exclude"])
         for path in files:
-            if len(contents[path]) < POINTER_MAX_BYTES or path.startswith(handoff_prefix):
+            # Header-exempt files (the static HANDOFF.md pointer, for one) are identical by design.
+            if len(contents[path]) < POINTER_MAX_BYTES or path.startswith(handoff_prefix) or matches(path, exempt):
                 continue
             if hashes[path] in other:
                 faults.append(("dup-across", path, f"identical to {other[hashes[path]]}"))

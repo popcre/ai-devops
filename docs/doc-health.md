@@ -72,7 +72,7 @@ document. Never edit the index by hand; edit the header and run `--fix-index`.
 | `root-stray` | a root Markdown file that `root_markdown_allow` does not name |
 | `handoff-old` | a handoff whose file-name date is older than `handoff_max_age_days`, or has no date |
 | `dup-in-repo` | two tracked documents with identical bytes |
-| `dup-across` | with `--siblings`, a document identical to one in a sibling repository; files under 600 bytes are pointers and are skipped |
+| `dup-across` | with `--siblings`, a document identical to one in a sibling repository; files under 600 bytes are pointers and are skipped, as are header-exempt files |
 | `status-stale` | status is open or current but no commit touched the file in `status_stale_days`; skipped in a shallow clone |
 
 ## Tests
