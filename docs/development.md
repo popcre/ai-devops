@@ -489,6 +489,7 @@ Installer behavior has lightweight, dependency-free tests:
 
 ```bash
 python3 tests/test-ai-doc-reachability.py
+python3 tests/test-ai-doc-health.py
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
 AI_TEST_PART=all bash tests/test-ai-qwen.sh

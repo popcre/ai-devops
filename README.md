@@ -320,6 +320,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-merge-queue-drift` | Compare the live merge-queue ruleset and required checks with `config/merge-queue-expected.json` |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
 | `ai-doc-reachability --repo . --base <ref>` | Block new or moved Markdown that no living root can reach |
+| `ai-doc-health --repo . [--fix-index]` | Advisory documentation upkeep: sizes, headers, generated index, strays, old handoffs, duplicates (see [docs/doc-health.md](docs/doc-health.md)) |
 
 Before enabling or changing that gate, read the
 [Markdown reachability contract](docs/doc-reachability.md) for its roots,
